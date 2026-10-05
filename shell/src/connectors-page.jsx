@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
-import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, RaftConnectButton, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
+import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
 
 // Where this account's comments go when someone presses Send to agent or
@@ -29,6 +29,8 @@ async function copy(text) { try { await navigator.clipboard.writeText(text); ret
 
 export function ConnectorsBody() {
   const [targets, setTargets] = useState(null);
+  const [accountDefault, setAccountDefault] = useState(null);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [connectors, setConnectors] = useState([]);
   const [available, setAvailable] = useState([]);
   const [results, setResults] = useState({});
@@ -41,13 +43,14 @@ export function ConnectorsBody() {
   const [copied, setCopied] = useState('');
   useEffect(() => {
     const q = new URLSearchParams(location.search);
-    if (q.get('connected') === 'raft') setNotice('Raft server connected. Agents on it now get comments on the docs they write.');
+    if (q.get('connected') === 'raft') { setNotice('Raft server connected. Agents on it now get comments on the docs they write.'); setSetupOpen(true); }
     else if (q.get('error')) setNotice(`Could not connect: ${q.get('error').replace(/_/g, ' ')}.`);
   }, []);
   const load = useCallback(async () => {
     try {
       const b = await call('/api/me/connectors');
       setTargets(b.targets || []);
+      setAccountDefault(b.default || null);
       setConnectors(b.connectors || []);
       setAvailable(b.available || []);
     } catch (err) { setNotice(err.message); setTargets([]); }
@@ -87,6 +90,16 @@ export function ConnectorsBody() {
   };
 
   const raftReady = (available.find((a) => a.id === 'raft') || {}).ready;
+  const raftConnectors = connectors.filter((x) => x.kind === 'raft');
+  const defaultOn = (c) => (accountDefault && accountDefault.provider === 'raft' && accountDefault.server_id === c.server_id ? accountDefault : null);
+  const savedDefault = async (t) => {
+    setNotice(`${readableHandle(t) || 'That agent'} is your default agent: it gets comments on docs no agent has worked on yet.`);
+    setSetupOpen(false);
+    await load();
+  };
+  // Right after Connect with Raft, choosing the default agent is the last
+  // step of connecting: without one, Send to agent has nobody to send to.
+  const needsDefault = targets !== null && !accountDefault && raftConnectors.length > 0;
   const doCopy = async (what, text) => { if (await copy(text)) { setCopied(what); setTimeout(() => setCopied(''), 1800); } };
 
   return (
@@ -105,7 +118,6 @@ export function ConnectorsBody() {
               const isRaft = c.kind === 'raft';
               const sample = isRaft ? (c.agents || [])[0] : c.target;
               const title = isRaft ? `Raft · ${c.server_slug || 'server'}` : (readableHandle(c.target) || 'Webhook');
-              const names = isRaft ? (c.agents || []).map((a) => readableHandle(a) || a.agent_sub) : [];
               return (
                 <section key={c.id} className="tdoc-connector tdoc-conn-card">
                   <div className="tdoc-conn-card-head">
@@ -122,7 +134,7 @@ export function ConnectorsBody() {
                   <dl className="tdoc-conn-facts">
                     {isRaft ? (
                       <>
-                        <div><dt>Fallback</dt><dd>{names.length ? names[0] : 'Automatic after an agent first publishes or replies'}</dd></div>
+                        <div><dt>Default agent</dt><dd>{defaultOn(c) ? (readableHandle(defaultOn(c)) || defaultOn(c).agent_sub) : (accountDefault ? 'On another connector' : 'Not set yet — choose one below; Send to agent needs it')}</dd></div>
                         <div><dt>Routing</dt><dd>Any agent on this server gets the comments on docs it wrote.</dd></div>
                         <div><dt>Delivery</dt><dd>tdoc shows when Raft accepts a handoff, then when the agent replies.</dd></div>
                       </>
@@ -131,6 +143,9 @@ export function ConnectorsBody() {
                     )}
                     {sample && results[idOf(sample)] ? <div><dt>Last test</dt><dd>{results[idOf(sample)]}</dd></div> : null}
                   </dl>
+                  {isRaft ? (
+                    <RaftFallbackForm key={`${c.server_id}:${(defaultOn(c) || {}).agent_sub || ''}`} server={c} known={c.agents || []} current={defaultOn(c)} onSaved={savedDefault} />
+                  ) : null}
                 </section>
               );
             })}
@@ -152,7 +167,7 @@ export function ConnectorsBody() {
                     </p>
                   ) : null}
                   <RaftConnectButton label={connectors.some((x) => x.kind === 'raft') ? 'Connect another Raft server' : 'Connect with Raft'} />
-                  <details className="tdoc-conn-alt">
+                  <details className="tdoc-conn-alt" open>
                     <summary>Or let an agent connect itself</summary>
                     <code>{CONNECT_AGENT_PROMPT}</code>
                     <button type="button" className="tdoc-fbspace-btn" onClick={() => doCopy('raft', CONNECT_AGENT_PROMPT)}>{copied === 'raft' ? 'Copied' : 'Copy prompt'}</button>
@@ -204,6 +219,20 @@ X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
           </>)}
         >
           <p><b>{confirm.title}</b> will stop receiving comments from tdoc{confirm.kind === 'raft' ? ' — every agent on this server, including on docs they wrote' : ''}. You can connect it again any time.</p>
+        </AppDialog>
+      ) : null}
+
+      {setupOpen && needsDefault ? (
+        <AppDialog
+          open
+          onOpenChange={() => {}}
+          title="Choose your default agent"
+          description="Last step of connecting Raft. Comments on a doc go to the agent that last worked on it; docs no agent has touched yet go to this one. You can change it here any time."
+          actions={<button type="button" onClick={() => setSetupOpen(false)}>Later</button>}
+        >
+          {raftConnectors.map((c) => (
+            <RaftFallbackForm key={c.server_id} server={c} known={c.agents || []} onSaved={savedDefault} />
+          ))}
         </AppDialog>
       ) : null}
 
