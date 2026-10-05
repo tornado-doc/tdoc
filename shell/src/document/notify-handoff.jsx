@@ -8,10 +8,13 @@ import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import {
+  hasAccountSession,
   listNotifyHandoffs,
   listNotifyTargets,
   postNotifyHandoff,
   resendNotifyHandoff,
+  setRaftFallbackAgent,
+  tdocUrl,
 } from './api.js';
 
 function opaqueAgentId(s) {
@@ -164,6 +167,61 @@ export function ConnectorHead({ connector }) {
   );
 }
 
+// A Raft server is connected but tdoc knows no agent on it yet (none has
+// published or replied with this account). Raft delivers by handle, so ask
+// for one instead of offering Connect with Raft again.
+export function RaftFallbackForm({ server, onSaved }) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const body = await setRaftFallbackAgent({ server_id: server.server_id, agent_name: name.trim() });
+      setName('');
+      if (onSaved) await onSaved(body.target);
+    } catch (err) {
+      setError(err.status === 400 ? 'Use the agent\'s Raft handle, one word, like @my-agent.' : (err.message || 'Could not save'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="tdoc-conn-form" onSubmit={save}>
+      <label>
+        <span>Agent on {server.server_slug || 'this server'} that gets comments</span>
+        <input type="text" required placeholder="@agent-handle" value={name} onChange={(e) => setName(e.target.value)} maxLength={81} />
+      </label>
+      <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save'}</button>
+      {error ? <p className="status" role="status">{error}</p> : null}
+    </form>
+  );
+}
+
+function RaftConnectedNoAgentView({ servers, onClose, onSaved }) {
+  const slugs = servers.map((sv) => sv.server_slug || 'a server').join(', ');
+  const canEdit = hasAccountSession();
+  return (
+    <AppDialog
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title="Which agent should get these?"
+      description={`Raft is connected (${slugs}), but no agent on it has worked with tdoc yet, so there is nobody to send to. Name the agent that should get comments; agents that publish or reply later take over their own docs automatically.`}
+      actions={<button type="button" onClick={onClose}>Close</button>}
+    >
+      <div className="tdoc-connectors">
+        {canEdit
+          ? servers.map((sv) => <RaftFallbackForm key={sv.server_id} server={sv} onSaved={onSaved} />)
+          : <a className="tdoc-connector-action" href={tdocUrl('/me/agents?tab=send')} target="_blank" rel="noreferrer">Choose an agent on the Agents page</a>}
+        <p className="manage-hint">Or have the agent run the connect prompt itself:</p>
+        <code>{CONNECT_AGENT_PROMPT}</code>
+      </div>
+    </AppDialog>
+  );
+}
+
 function ConnectAgentView({ onClose }) {
   const [copied, setCopied] = useState(null);
   const copy = async (c) => {
@@ -185,7 +243,7 @@ function ConnectAgentView({ onClose }) {
               ? <RaftConnectButton />
               : <a className="tdoc-connector-action" href={c.action.href}>{c.action.label}</a>}
             {c.prompt ? (
-              <details>
+              <details open>
                 <summary className="manage-hint">Or paste this into your agent</summary>
                 <code>{c.prompt}</code>
                 <button type="button" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
@@ -207,6 +265,7 @@ export function useNotifyTargets(slug, enabled) {
     candidates: [],
     fallback: null,
     reason: null,
+    raftServers: [],
   });
 
   const refresh = useCallback(async () => {
@@ -223,6 +282,7 @@ export function useNotifyTargets(slug, enabled) {
         candidates: Array.isArray(body.candidates) ? body.candidates : [],
         fallback: body.fallback || null,
         reason: body.reason || null,
+        raftServers: Array.isArray(body.raft_servers) ? body.raft_servers : [],
       });
     } catch (err) {
       // 404 = worker stub not shipped yet; hide the panel rather than alarm.
@@ -233,6 +293,7 @@ export function useNotifyTargets(slug, enabled) {
         candidates: [],
         fallback: null,
         reason: null,
+        raftServers: [],
       });
     }
   }, [slug, enabled]);
@@ -262,6 +323,7 @@ export function NotifyHandoffPanel({
   onClose,
   commentIds,
   onSent,
+  onTargetsChanged,
 }) {
   const targets = useNotifyTargets(slug, open);
   const [selected, setSelected] = useState(null);
@@ -355,6 +417,15 @@ export function NotifyHandoffPanel({
   // Nobody connected: the panel's job becomes getting one connected, instead
   // of a Send button that cannot go anywhere.
   if (open && targets.ready && targets.available && (targets.reason === 'no_agent_bound' || !choices.length)) {
+    if (targets.raftServers.length) {
+      return (
+        <RaftConnectedNoAgentView
+          servers={targets.raftServers}
+          onClose={onClose}
+          onSaved={async () => { await targets.refresh(); if (onTargetsChanged) await onTargetsChanged(); }}
+        />
+      );
+    }
     return <ConnectAgentView onClose={onClose} />;
   }
 

@@ -4,6 +4,10 @@
 // it reuse panels written for the doc page (Send to agent) unchanged.
 let transport = null;
 export function setApiTransport(next) { transport = next || null; }
+// Account settings (/api/me/*) need the tdoc browser session, which the
+// overlay's feedback token is not.
+export function hasAccountSession() { return !transport; }
+export function tdocUrl(path) { return transport ? `${transport.base}${path}` : path; }
 
 async function request(path, options) {
   const response = transport
@@ -223,6 +227,16 @@ export function postNotifyHandoff({ slug, comment_ids, instruction, recipient })
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+// Which agent on a connected Raft server gets comments on docs no agent has
+// worked on yet. Delivery is by handle.
+export function setRaftFallbackAgent({ server_id, agent_name }) {
+  return request('/api/me/connectors/raft/default', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server_id, agent_name }),
   });
 }
 

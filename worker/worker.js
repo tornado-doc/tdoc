@@ -7291,11 +7291,18 @@ async function resolveNotifyTargets(env, slug) {
   // bound — and a delivery that was attempted and failed speaks for itself
   // through its own recorded error, which is the case that must NOT disable
   // the button: that would remove the only way to retry.
+  //
+  // A connected Raft server with no agent on it yet is still "nobody bound":
+  // Raft delivers by handle, and a server is not one. It is reported so the
+  // panel can ask which agent instead of offering Connect with Raft again to
+  // someone who already did.
+  const raftServers = fallback ? [] : await accountRaftServers(env, ownerAccount);
   return {
     default: fallback ? { ...fallback, source: 'account' } : null,
     candidates: fallbackList.slice(1).map(t => ({ ...t, source: 'account' })),
     fallback,
     reason: fallback ? null : 'no_agent_bound',
+    ...(raftServers.length ? { raft_servers: raftServers } : {}),
   };
 }
 

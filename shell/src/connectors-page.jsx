@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
-import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, RaftConnectButton, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
+import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
 
 // Where this account's comments go when someone presses Send to agent or
@@ -122,7 +122,7 @@ export function ConnectorsBody() {
                   <dl className="tdoc-conn-facts">
                     {isRaft ? (
                       <>
-                        <div><dt>Fallback</dt><dd>{names.length ? names[0] : 'Automatic after an agent first publishes or replies'}</dd></div>
+                        <div><dt>Fallback</dt><dd>{names.length ? names[0] : 'None yet — name one below, or it is set when an agent first publishes or replies'}</dd></div>
                         <div><dt>Routing</dt><dd>Any agent on this server gets the comments on docs it wrote.</dd></div>
                         <div><dt>Delivery</dt><dd>tdoc shows when Raft accepts a handoff, then when the agent replies.</dd></div>
                       </>
@@ -131,6 +131,9 @@ export function ConnectorsBody() {
                     )}
                     {sample && results[idOf(sample)] ? <div><dt>Last test</dt><dd>{results[idOf(sample)]}</dd></div> : null}
                   </dl>
+                  {isRaft && !names.length ? (
+                    <RaftFallbackForm server={c} onSaved={async (t) => { setNotice(`${readableHandle(t) || 'That agent'} now gets comments on docs no agent has worked on yet.`); await load(); }} />
+                  ) : null}
                 </section>
               );
             })}
@@ -152,7 +155,7 @@ export function ConnectorsBody() {
                     </p>
                   ) : null}
                   <RaftConnectButton label={connectors.some((x) => x.kind === 'raft') ? 'Connect another Raft server' : 'Connect with Raft'} />
-                  <details className="tdoc-conn-alt">
+                  <details className="tdoc-conn-alt" open>
                     <summary>Or let an agent connect itself</summary>
                     <code>{CONNECT_AGENT_PROMPT}</code>
                     <button type="button" className="tdoc-fbspace-btn" onClick={() => doCopy('raft', CONNECT_AGENT_PROMPT)}>{copied === 'raft' ? 'Copied' : 'Copy prompt'}</button>

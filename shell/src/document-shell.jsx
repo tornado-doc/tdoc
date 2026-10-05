@@ -1391,6 +1391,7 @@ export function DocumentShell({ boot, config }) {
           commentIds={notifyCommentIds || []}
           onClose={() => setNotifyOpen(false)}
           onSent={async () => { await comments.refresh(); }}
+          onTargetsChanged={notifyTargets.refresh}
         />
       ) : null}
 

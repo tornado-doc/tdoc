@@ -225,6 +225,22 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     assert(r.default && r.default.agent_name === '小c', JSON.stringify(r.default));
   });
 
+  await t('a connected Raft server with no agent yet says so, instead of looking unconnected', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT);
+    const owner = await issue(worker, env, 'owner');
+    await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'ndoc', version: 1, html: '<p>x</p>' } }), env, {});
+    const before = await (await worker.fetch(req('/api/notify/targets?slug=ndoc', { cookie: owner.cookie }), env, {})).json();
+    assert(before.reason === 'no_agent_bound' && !before.raft_servers, `nothing connected yet: ${JSON.stringify(before)}`);
+    await connectRaft(env, owner.cookie);
+    const connected = await (await worker.fetch(req('/api/notify/targets?slug=ndoc', { cookie: owner.cookie }), env, {})).json();
+    assert(!connected.default && connected.reason === 'no_agent_bound', `a server is not a recipient: ${JSON.stringify(connected)}`);
+    assert(Array.isArray(connected.raft_servers) && connected.raft_servers.length === 1
+      && connected.raft_servers[0].server_id === 'S9' && connected.raft_servers[0].server_slug === 'julies-server', JSON.stringify(connected.raft_servers));
+    await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_name: 'serena-bot' }), env, {});
+    const named = await (await worker.fetch(req('/api/notify/targets?slug=ndoc', { cookie: owner.cookie }), env, {})).json();
+    assert(named.default && named.default.agent_name === 'serena-bot' && !named.reason && !named.raft_servers, JSON.stringify(named));
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
