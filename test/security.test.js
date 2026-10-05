@@ -49,6 +49,7 @@ vm.runInContext([
   sliceFn(workerSrc, 'sessionAccountIds'),
   sliceFn(workerSrc, 'sessionOwnsAccount'),
   sliceFn(workerSrc, 'actorKey'),
+  sliceFn(workerSrc, 'actorKeys'),
   sliceFn(workerSrc, 'hostedGithubLogin'),
   sliceFn(workerSrc, 'isOwnerSession'),
   sliceFn(workerSrc, 'isDocOwnerSession'),

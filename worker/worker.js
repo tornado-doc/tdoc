@@ -150,6 +150,14 @@ async function getSession(env, req) {
       if (id) session.account_id = id;
     } catch {}
   }
+  if (session.account_id) {
+    try {
+      const group = await accountGroup(env, session.account_id);
+      session.account_id = group.canonical;
+      session.linked_account_ids = group.ids.filter((id) => id !== group.canonical);
+      session.linked_actor_keys = group.actor_keys;
+    } catch {}
+  }
   if (session.account_id) session.team_ids = await loadAccountTeamIds(env, session.account_id);
   if (session.account_id) session.team_admin_ids = await loadAdminTeamIds(env, session.account_id, session.team_ids);
   if (feedback) session.feedback = feedback;
@@ -170,12 +178,15 @@ async function sessionFromHostedBearer(env, req) {
   }
   const actor = await hostedTokenActor(env, token);
   if (!actor) return null;
-  const teamIds = await loadAccountTeamIds(env, actor.account_id);
+  const group = await accountGroup(env, actor.account_id);
+  const teamIds = await loadAccountTeamIds(env, group.canonical);
   return {
     id: null,
     login: actor.github_login || '',
     email: actor.email || '',
-    account_id: actor.account_id,
+    account_id: group.canonical,
+    linked_account_ids: group.ids.filter((id) => id !== group.canonical),
+    linked_actor_keys: group.actor_keys,
     team_ids: teamIds,
     team_admin_ids: await loadAdminTeamIds(env, actor.account_id, teamIds),
     bearer: true,
@@ -210,9 +221,8 @@ function canMutate(record, session, env, meta) {
   // email half — so normalize both sides rather than trusting the stored
   // casing, which is how the old raw === comparison quietly disagreed with
   // sessionLogin everywhere else.
-  const me = actorKey(session);
-  if (!who || !me) return false;
-  return String(who).toLowerCase() === String(me).toLowerCase();
+  if (!who) return false;
+  return actorKeys(session).includes(String(who).toLowerCase());
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -282,6 +292,49 @@ function sessionAccountIds(session) {
   return ids.slice(0, 8);
 }
 
+function normalizeAccountIds(ids) {
+  const out = [];
+  for (const id of (Array.isArray(ids) ? ids : [])) {
+    if (typeof id === 'string' && /^[A-Za-z0-9_-]{1,96}$/.test(id) && !out.includes(id)) out.push(id);
+  }
+  return out.slice(0, 8);
+}
+
+async function accountGroup(env, accountId) {
+  const fallback = normalizeAccountIds([accountId]);
+  if (!fallback.length || !env || !env.META) return { canonical: fallback[0] || null, ids: fallback, actor_keys: [] };
+  try {
+    const rec = JSON.parse(await env.META.get(`account-group:${accountId}`));
+    const ids = normalizeAccountIds([...(rec && rec.ids || []), accountId]);
+    const canonical = ids.includes(rec && rec.canonical) ? rec.canonical : accountId;
+    const actor_keys = [...new Set((Array.isArray(rec && rec.actor_keys) ? rec.actor_keys : [])
+      .map(normalizeActorKey).filter(Boolean))].slice(0, 8);
+    return { canonical, ids, actor_keys };
+  } catch {
+    return { canonical: accountId, ids: [accountId], actor_keys: [] };
+  }
+}
+
+// Persist a provider-proven equivalence class symmetrically. Every member can
+// discover the same canonical account, including old CLI tokens that only
+// carry the account id minted before the identities were linked.
+async function linkAccountGroup(env, accountIds, canonical, actorKeys = []) {
+  const seed = normalizeAccountIds(accountIds);
+  if (!seed.length || !seed.includes(canonical)) return { canonical: seed[0] || null, ids: seed, actor_keys: [] };
+  const expanded = [];
+  const expandedActorKeys = actorKeys.slice();
+  for (const id of seed) {
+    const group = await accountGroup(env, id);
+    expanded.push(...group.ids);
+    expandedActorKeys.push(...group.actor_keys);
+  }
+  const ids = normalizeAccountIds(expanded);
+  const normalizedActorKeys = [...new Set(expandedActorKeys.map(normalizeActorKey).filter(Boolean))].slice(0, 8);
+  const record = JSON.stringify({ canonical, ids, actor_keys: normalizedActorKeys, linked_at: new Date().toISOString() });
+  await Promise.all(ids.map((id) => env.META.put(`account-group:${id}`, record)));
+  return { canonical, ids, actor_keys: normalizedActorKeys };
+}
+
 function sessionOwnsAccount(session, accountId) {
   return typeof accountId === 'string' && accountId && sessionAccountIds(session).includes(accountId);
 }
@@ -297,8 +350,28 @@ function sessionOwnsAccount(session, accountId) {
 function actorKey(session) {
   const login = sessionLogin(session);
   if (login) return login;
+  for (const key of (session && Array.isArray(session.linked_actor_keys) ? session.linked_actor_keys : [])) {
+    const linked = normalizeGithubLogin(key);
+    if (linked) return linked;
+  }
   const email = normalizeEmail(session && session.email);
   return email ? `email:${email}` : '';
+}
+
+function actorKeys(session) {
+  const keys = [];
+  const add = (key) => {
+    const raw = String(key || '').trim().toLowerCase();
+    const normalized = raw.startsWith('email:')
+      ? (normalizeEmail(raw.slice('email:'.length)) ? `email:${normalizeEmail(raw.slice('email:'.length))}` : null)
+      : normalizeGithubLogin(raw);
+    if (normalized && !keys.includes(normalized)) keys.push(normalized);
+  };
+  add(sessionLogin(session));
+  for (const key of (session && Array.isArray(session.linked_actor_keys) ? session.linked_actor_keys : [])) add(key);
+  const email = normalizeEmail(session && session.email);
+  if (email) add(`email:${email}`);
+  return keys;
 }
 
 // Render an actor key for humans: an email-keyed identity shows its local
@@ -616,7 +689,7 @@ async function docOwnerToken(env, req, meta) {
   const actor = await hostedTokenActor(env, token);
   if (!actor) return null;
   const ownerId = meta && meta.hosted && meta.hosted.account_id;
-  if (!ownerId || ownerId !== actor.account_id) return null;
+  if (!ownerId || !sessionOwnsAccount(actor, ownerId)) return null;
   return actor;
 }
 
@@ -2195,6 +2268,8 @@ function tokenClientInfo(body) {
 }
 
 async function accountTokenList(env, accountId) {
+  const group = await accountGroup(env, accountId);
+  const owners = new Set(group.ids);
   const out = [];
   let cursor;
   do {
@@ -2202,11 +2277,11 @@ async function accountTokenList(env, accountId) {
     for (const k of r.keys) {
       let owner = k.metadata && k.metadata.account_id;
       let rec = null;
-      if (!owner || owner === accountId) {
+      if (!owner || owners.has(owner)) {
         try { rec = JSON.parse(await env.META.get(k.name)) || null; } catch {}
         owner = owner || (rec && rec.account_id);
       }
-      if (owner !== accountId || !rec) continue;
+      if (!owners.has(owner) || !rec) continue;
       const label = typeof rec.label === 'string' ? rec.label : '';
       // The label is the slug being published when the terminal paired.
       // Show its title, but only for a doc this account owns -- a label is
@@ -2216,7 +2291,7 @@ async function accountTokenList(env, accountId) {
       if (label && isValidSlug(label)) {
         try {
           const meta = await loadDocMeta(env, label);
-          if (meta && meta.hosted && meta.hosted.account_id === accountId) {
+          if (meta && meta.hosted && owners.has(meta.hosted.account_id)) {
             doc = { slug: label, title: meta.title || label };
           }
         } catch {}
@@ -2465,7 +2540,7 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
         // identity inside the same Clerk user. It is proof of one human, not
         // a display-name/email guess: let this browser session own both old
         // account records instead of silently stranding one set of docs.
-        if (githubAccountId && githubAccountId !== account_id) {
+        if (githubAccountId && githubAccountId !== account_id && idpRec && idpRec.account_id === account_id) {
           const named = await lookupHostedAccount(env, gh.handle);
           const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
           if (named && named.account_id === githubAccountId
@@ -2481,6 +2556,14 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
               await env.META.put(idpKey('oidc', sub), JSON.stringify(idpRec));
             }
           }
+        } else if (githubAccountId && githubAccountId !== account_id && !idpRec) {
+          // A verified email is only a first-use hint and can be reassigned.
+          // If the same provider user proves a different, already-known
+          // GitHub numeric id while this OIDC sub has never owned the hinted
+          // account, prefer the stable GitHub identity and do not merge.
+          account_id = githubAccountId;
+          linkedAccountIds = [];
+          ghHandle = gh.handle;
         }
         // An account resolved by email or by a link that predates the
         // bridge (or was written by a mint) carries no handle. Restore
@@ -2505,6 +2588,43 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
       }
     }
   }
+  // PR #690 made the browser session recognize both records. Finish the job:
+  // once that same provider proof is present (or was durably recorded by
+  // #690), make the GitHub-backed account canonical and publish the account
+  // group for old browser sessions and both generations of CLI tokens.
+  if (account_id && ghHandle) {
+    const named = await lookupHostedAccount(env, ghHandle);
+    const githubAccountId = named && named.account_id;
+    if (githubAccountId && (githubAccountId === account_id || linkedAccountIds.includes(githubAccountId))) {
+      const previousAccountId = account_id;
+      const group = await linkAccountGroup(
+        env,
+        [account_id, ...linkedAccountIds, githubAccountId],
+        githubAccountId,
+        [ghHandle, `email:${email}`],
+      );
+      account_id = group.canonical;
+      linkedAccountIds = group.ids.filter((id) => id !== group.canonical);
+      await mergeVerifiedAccountState(env, group);
+      if (sub) {
+        await env.META.put(idpKey('oidc', sub), JSON.stringify({
+          ...(idpRec || {}),
+          account_id,
+          created: (idpRec && idpRec.created) || new Date().toISOString(),
+          handle: ghHandle,
+          linked_account_ids: linkedAccountIds,
+        }));
+      }
+      // This address was just attested on the same provider user that proved
+      // the GitHub numeric id, so repointing its old split-account hint is not
+      // an email-only merge.
+      await env.META.put(`account-email:${email}`, JSON.stringify({
+        account_id,
+        created: (idpRec && idpRec.created) || new Date().toISOString(),
+        merged_from: previousAccountId !== account_id ? previousAccountId : undefined,
+      }));
+    }
+  }
   const sid = rand(24);
   const session = {
     name: (user.name || user.given_name || email.split('@')[0]),
@@ -2514,6 +2634,7 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
     created: new Date().toISOString(),
     ...(account_id ? { account_id } : {}),
     ...(linkedAccountIds.length ? { linked_account_ids: linkedAccountIds } : {}),
+    ...(ghHandle ? { linked_actor_keys: [ghHandle, `email:${email}`] } : {}),
     ...(sub ? { idp: { provider: 'oidc', sub } } : {}),
     // The verified handle becomes the session login, so the actor key
     // stays handle-shaped: old comments stay editable, handle invites
@@ -2826,6 +2947,102 @@ async function saveFolderState(env, login, state) {
   const key = personalKey('folders', login);
   if (!key) return;
   await env.META.put(key, JSON.stringify(normalizeFolderState(state)));
+}
+
+// Provider-proof is the only entry point to this migration. It copies
+// user-facing state into the canonical GitHub account/key without deleting
+// the old records, so rollback and old audit references remain possible.
+async function mergeVerifiedAccountState(env, group) {
+  if (!env || !env.META || !group || !group.canonical) return;
+  const accountIds = normalizeAccountIds(group.ids);
+  const actorKeys = [...new Set((group.actor_keys || []).map(normalizeActorKey).filter(Boolean))];
+  const canonicalActor = actorKeys.find((key) => normalizeGithubLogin(key)) || actorKeys[0] || '';
+
+  if (canonicalActor) {
+    for (const [prefix, max] of [['stars', STARS_MAX], ['recents', RECENTS_MAX]]) {
+      const all = [];
+      for (const key of actorKeys) all.push(...personalItems(await loadPersonal(env, personalKey(prefix, key))));
+      const bySlug = new Map();
+      for (const item of all) {
+        const old = bySlug.get(item.slug);
+        if (!old || String(item.at || '').localeCompare(String(old.at || '')) > 0) bySlug.set(item.slug, item);
+      }
+      const items = [...bySlug.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, max);
+      if (items.length) await env.META.put(personalKey(prefix, canonicalActor), JSON.stringify({ items }));
+    }
+
+    const states = await Promise.all(actorKeys.map((key) => loadFolderState(env, key)));
+    const merged = { folders: [], docs: {} };
+    const folderIds = new Set();
+    for (const state of states) {
+      for (const folder of state.folders) {
+        if (!folderIds.has(folder.id) && merged.folders.length < FOLDERS_MAX) {
+          folderIds.add(folder.id);
+          merged.folders.push(folder);
+        }
+      }
+    }
+    for (const state of states) {
+      for (const [slug, folderId] of Object.entries(state.docs)) {
+        if (!(slug in merged.docs) && folderIds.has(folderId)) merged.docs[slug] = folderId;
+      }
+    }
+    if (merged.folders.length || Object.keys(merged.docs).length) await saveFolderState(env, canonicalActor, merged);
+
+    const inboxItems = [];
+    for (const key of actorKeys) {
+      try {
+        const raw = await env.META.get(inboxKey(key));
+        if (raw) inboxItems.push(...(JSON.parse(raw).items || []));
+      } catch {}
+    }
+    const seen = new Set();
+    const items = inboxItems
+      .sort((a, b) => String(b && b.at || '').localeCompare(String(a && a.at || '')))
+      .filter((item) => {
+        if (!item) return false;
+        const id = item.id || `${item.group_key || ''}:${item.at || ''}`;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .slice(0, INBOX_MAX);
+    if (items.length) await env.META.put(inboxKey(canonicalActor), JSON.stringify({ items }));
+  }
+
+  const profiles = await Promise.all(accountIds.map((id) => accountProfile(env, id)));
+  const canonicalProfile = profiles[accountIds.indexOf(group.canonical)] || {};
+  const pins = [];
+  for (const profile of profiles) {
+    for (const slug of normalizeProfilePins(profile)) if (!pins.includes(slug)) pins.push(slug);
+  }
+  const fallbackProfile = profiles.find(Boolean) || {};
+  await putAccountProfile(env, group.canonical, {
+    ...fallbackProfile,
+    ...canonicalProfile,
+    bio: canonicalProfile.bio || fallbackProfile.bio || '',
+    pins,
+  });
+
+  const teamIds = new Set();
+  for (const id of accountIds) {
+    try {
+      const ids = JSON.parse((await env.META.get(`account-teams:${id}`)) || '[]');
+      for (const teamId of ids) if (validTeamId(teamId)) teamIds.add(teamId);
+    } catch {}
+  }
+  for (const teamId of teamIds) {
+    const team = await loadTeam(env, teamId);
+    if (!team) continue;
+    const aliases = team.members.filter((member) => accountIds.includes(member.account_id));
+    if (!aliases.length) continue;
+    const canonical = aliases.find((member) => member.account_id === group.canonical) || aliases[0];
+    canonical.account_id = group.canonical;
+    if (aliases.some((member) => member.role === 'admin')) canonical.role = 'admin';
+    team.members = [canonical, ...team.members.filter((member) => !accountIds.includes(member.account_id))];
+    await saveTeam(env, team);
+  }
+  if (teamIds.size) await env.META.put(`account-teams:${group.canonical}`, JSON.stringify([...teamIds]));
 }
 
 // Folder link sharing (catalog only). Docs keep their own access; the share
@@ -3337,8 +3554,10 @@ async function profileData(env, account, { includePrivate = false } = {}) {
   const login = normalizeGithubLogin(account && account.github_login);
   if (!accountId && !login) return [];
 
+  const group = accountId ? await accountGroup(env, accountId) : { canonical: '', ids: [] };
+  const ownerIds = new Set(group.ids);
   const pins = accountId
-    ? normalizeProfilePins(await accountProfile(env, accountId))
+    ? normalizeProfilePins(await accountProfile(env, group.canonical || accountId))
     : [];
   if (!pins.length) return [];
 
@@ -3348,7 +3567,7 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { continue; }
     if (!meta || typeof meta !== 'object') continue;
     const hosted = meta.hosted;
-    const owns = (accountId && hosted && hosted.account_id === accountId)
+    const owns = (accountId && hosted && ownerIds.has(hosted.account_id))
       || (login && hostedGithubLogin(meta) === login);
     // Owner boot (includePrivate): pin membership is enough — account_id on
     // older meta can drift from the claim/mint account and used to empty the
@@ -4159,8 +4378,9 @@ async function loadAccountQuota(env, accountId) {
 // Env default, or this account's recorded override — whichever is higher.
 async function hostedMaxDocsFor(env, accountId) {
   const base = hostedMaxDocs(env);
-  const rec = await loadAccountQuota(env, accountId);
-  const custom = Number(rec && rec.max_docs) || 0;
+  const group = await accountGroup(env, accountId);
+  const records = await Promise.all(group.ids.map((id) => loadAccountQuota(env, id)));
+  const custom = records.reduce((max, rec) => Math.max(max, Number(rec && rec.max_docs) || 0), 0);
   return Math.max(base, custom > 0 ? Math.floor(custom) : 0);
 }
 
@@ -4249,6 +4469,8 @@ function utf8ByteLength(s) {
 
 async function countHostedDocs(env, accountId, stopAt) {
   if (!accountId || !env.META) return 0;
+  const group = await accountGroup(env, accountId);
+  const owners = new Set(group.ids);
   let n = 0;
   let cursor;
   do {
@@ -4259,7 +4481,7 @@ async function countHostedDocs(env, accountId, stopAt) {
         const raw = await env.META.get(k.name);
         if (raw) meta = JSON.parse(raw);
       } catch {}
-      if (meta && meta.hosted && meta.hosted.account_id === accountId) {
+      if (meta && meta.hosted && owners.has(meta.hosted.account_id)) {
         n++;
         if (stopAt && n >= stopAt) return n;
       }
@@ -4277,6 +4499,8 @@ async function countHostedDocs(env, accountId, stopAt) {
 // while you were watching" is exactly what it is waiting for.
 async function newestDocFor(env, accountId) {
   if (!accountId || !env || !env.META) return null;
+  const group = await accountGroup(env, accountId);
+  const owners = new Set(group.ids);
   let best = null;
   let cursor;
   do {
@@ -4287,7 +4511,7 @@ async function newestDocFor(env, accountId) {
         const raw = await env.META.get(k.name);
         if (raw) meta = JSON.parse(raw);
       } catch {}
-      if (!meta || !meta.hosted || meta.hosted.account_id !== accountId) continue;
+      if (!meta || !meta.hosted || !owners.has(meta.hosted.account_id)) continue;
       // The newest version's stamp, not `meta.created` -- nothing writes that.
       // Ranking on a field that is always '' made this "whichever KV listed
       // first", so the debug states rebuilt the journey on a doc that could be
@@ -5401,14 +5625,6 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
 
   const access = accessFromMeta(meta);
   let nextMeta = { ...meta };
-  const hosted = nextMeta.hosted && typeof nextMeta.hosted === 'object' ? nextMeta.hosted : {};
-  if (hosted.account_id !== accountId) {
-    nextMeta.hosted = {
-      ...hosted,
-      account_id: accountId,
-      ...(sessionLogin(session) ? { github_login: sessionLogin(session) } : {}),
-    };
-  }
 
   if (pinned) {
     const prior = (nextMeta.profile && nextMeta.profile.restore_visibility)
@@ -5786,7 +6002,16 @@ async function hostedTokenActor(env, token) {
     } catch {}
   }
   const github_login = normalizeGithubLogin(record.github_login);
-  return { kind: 'hosted', account_id: record.account_id, token_hash: tokenHash, github_login, email: normalizeEmail(record.email) };
+  const group = await accountGroup(env, record.account_id);
+  return {
+    kind: 'hosted',
+    account_id: group.canonical,
+    linked_account_ids: group.ids.filter((id) => id !== group.canonical),
+    linked_actor_keys: group.actor_keys,
+    token_hash: tokenHash,
+    github_login,
+    email: normalizeEmail(record.email),
+  };
 }
 
 async function hostedOwnerOp(env, slug, op) {
@@ -5849,7 +6074,9 @@ async function requireUploadAuth(req, env) {
 // A team doc is written by any current member, the author included or not.
 // teamAdmin says whether this actor also owns it (see isDocOwnerSession).
 async function teamWriteAccess(env, actor, meta) {
-  const role = teamRole(await loadTeam(env, meta.workspace_id), actor.account_id);
+  const team = await loadTeam(env, meta.workspace_id);
+  const member = sessionAccountIds(actor).map((id) => teamMember(team, id)).find(Boolean);
+  const role = member && member.role;
   if (!role) return { ok: false, response: json({ error: 'not_team_member' }, { status: 403 }) };
   return { ok: true, meta, teamDoc: true, teamAdmin: role === 'admin' };
 }
@@ -5886,28 +6113,27 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
     }
     if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
     if (meta.workspace_id) return teamWriteAccess(env, actor, meta);
-    if (accountId !== actor.account_id) {
+    if (!sessionOwnsAccount(actor, accountId)) {
       return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
     }
-    const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+    const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: accountId });
     if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
     return { ok: true, meta };
   }
   if (!meta) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
   if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
   if (meta.workspace_id) return teamWriteAccess(env, actor, meta);
-  if (accountId !== actor.account_id) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
-  const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
+  if (!sessionOwnsAccount(actor, accountId)) return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: accountId });
   if (!verified.ok) return { ok: false, response: json({ error: verified.error || 'not_doc_owner' }, { status: verified.status || 403 }) };
   return { ok: true, meta };
 }
 
 function stampHostedOwnership(meta, actor) {
   if (!actor || actor.kind !== 'hosted') return meta;
-  const hosted = {
-    ...((meta && meta.hosted && typeof meta.hosted === 'object') ? meta.hosted : {}),
-    account_id: actor.account_id,
-  };
+  const previous = (meta && meta.hosted && typeof meta.hosted === 'object') ? meta.hosted : {};
+  const accountId = sessionOwnsAccount(actor, previous.account_id) ? previous.account_id : actor.account_id;
+  const hosted = { ...previous, account_id: accountId };
   if (actor.github_login) hosted.github_login = actor.github_login;
   // The owner's actor key, whatever shape their identity is. Without this an
   // email-born account's doc had no owner anyone could route to, and every
@@ -6146,9 +6372,8 @@ function recordAuthor(list, id) {
 // too: nobody rewrites what the agent said, including the person it ran for.
 function isRecordAuthor(record, session) {
   const who = record && record.author && record.author.login;
-  const me = actorKey(session);
-  if (!who || !me) return false;
-  return String(who).toLowerCase() === String(me).toLowerCase();
+  if (!who) return false;
+  return actorKeys(session).includes(String(who).toLowerCase());
 }
 
 function isAgentRecord(record) {
@@ -6980,16 +7205,37 @@ async function actingAgent(env, req, actor) {
 const notifyKey = (t) => `${t.provider}:${t.server_id}:${t.agent_sub}`;
 async function accountRemovedTargets(env, accountId) {
   if (!accountId) return new Set();
-  try { return new Set(JSON.parse((await env.META.get(`account-notify-removed:${accountId}`)) || '[]')); } catch { return new Set(); }
+  const group = await accountGroup(env, accountId);
+  const removed = new Set();
+  for (const id of group.ids) {
+    try {
+      for (const key of JSON.parse((await env.META.get(`account-notify-removed:${id}`)) || '[]')) removed.add(key);
+    } catch {}
+  }
+  return removed;
 }
 
 async function accountNotifyTargets(env, accountId) {
   if (!accountId) return [];
-  try {
-    const raw = await env.META.get(`account-notify:${accountId}`);
-    const list = raw ? JSON.parse(raw) : [];
-    return (Array.isArray(list) ? list : []).map(normalizeNotifyTarget).filter(Boolean);
-  } catch { return []; }
+  const group = await accountGroup(env, accountId);
+  const lists = [];
+  const byKey = new Map();
+  for (const id of group.ids) {
+    try {
+      const raw = await env.META.get(`account-notify:${id}`);
+      const list = raw ? JSON.parse(raw) : [];
+      const normalized = (Array.isArray(list) ? list : []).map(normalizeNotifyTarget).filter(Boolean);
+      if (normalized.length) lists.push(normalized);
+    } catch {}
+  }
+  // Each account list's order is intentional (connector creation can append,
+  // real agent work moves to the front). Across formerly split lists, compare
+  // their heads, then retain each list's own order.
+  lists.sort((a, b) => String(b[0].last_touched || '').localeCompare(String(a[0].last_touched || '')));
+  for (const list of lists) {
+    for (const target of list) if (!byKey.has(notifyKey(target))) byKey.set(notifyKey(target), target);
+  }
+  return [...byKey.values()];
 }
 
 // Raft servers this account has connected. The trust boundary for Raft is the
@@ -7001,11 +7247,14 @@ async function accountNotifyTargets(env, accountId) {
 async function accountRaftServers(env, accountId) {
   if (!accountId) return [];
   const byId = new Map();
-  try {
-    for (const sv of JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]')) {
-      if (sv && sv.server_id) byId.set(sv.server_id, { server_id: sv.server_id, server_slug: sv.server_slug || '' });
-    }
-  } catch {}
+  const group = await accountGroup(env, accountId);
+  for (const id of group.ids) {
+    try {
+      for (const sv of JSON.parse((await env.META.get(`account-raft-servers:${id}`)) || '[]')) {
+        if (sv && sv.server_id) byId.set(sv.server_id, { server_id: sv.server_id, server_slug: sv.server_slug || '' });
+      }
+    } catch {}
+  }
   for (const t of await accountNotifyTargets(env, accountId)) {
     if (t.provider === 'raft' && !byId.has(t.server_id)) byId.set(t.server_id, { server_id: t.server_id, server_slug: t.server_slug || '' });
   }
@@ -8055,7 +8304,7 @@ export default {
       const key = `hosted-token:${id}`;
       let rec = null;
       try { rec = JSON.parse(await env.META.get(key)); } catch {}
-      if (!rec || rec.account_id !== who.accountId) return json({ error: 'not_found' }, { status: 404 });
+      if (!rec || !sessionOwnsAccount(who.session, rec.account_id)) return json({ error: 'not_found' }, { status: 404 });
       await env.META.delete(key);
       return json({ ok: true });
     }
@@ -10818,7 +11067,11 @@ export default {
         }
       }
       if (auth.actor && auth.actor.kind === 'hosted' && !writeGate.teamDoc) {
-        const claimed = await hostedOwnerOp(env, slug, { kind: 'claim_owner', account_id: auth.actor.account_id });
+        const storedOwner = writeGate.meta && writeGate.meta.hosted && writeGate.meta.hosted.account_id;
+        const claimed = await hostedOwnerOp(env, slug, {
+          kind: 'claim_owner',
+          account_id: sessionOwnsAccount(auth.actor, storedOwner) ? storedOwner : auth.actor.account_id,
+        });
         if (!claimed.ok) return json({ error: claimed.error || 'owner_claim_failed' }, { status: claimed.status || 409 });
       }
       // Identity-stamp every commentable artifact with a content-hashed

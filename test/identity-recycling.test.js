@@ -160,6 +160,34 @@ async function claimAccount(worker, env, cookie) {
       'a recycled address inherited the previous holder’s account');
   });
 
+  await t('a new OIDC subject with a different stable GitHub id does not merge through a recycled email', async () => {
+    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+
+    stubProviders({ oidcSub: 'user_victim', oidcEmail: 'reassigned@corp.com' });
+    const victimSession = await oidcSignIn(worker, env);
+    const victim = await claimAccount(worker, env, `tdoc_sid=${victimSession.sid}`);
+
+    stubProviders({ ghLogin: 'attacker', ghId: 999, ghEmail: null });
+    const attackerSession = await githubSignIn(worker, env);
+    const attacker = await claimAccount(worker, env, `tdoc_sid=${attackerSession.sid}`);
+    assert(attacker.account_id !== victim.account_id, 'test did not create separate accounts');
+
+    // The mailbox is reassigned, but this is a brand-new OIDC subject and it
+    // proves the already-known attacker GitHub numeric id. The stale email
+    // hint must lose to the two stable identifiers; it must not merge them.
+    stubProviders({
+      oidcSub: 'user_attacker', oidcEmail: 'reassigned@corp.com',
+      clerkExternal: { id: 999, username: 'attacker' },
+    });
+    const signedIn = await oidcSignIn(worker, env);
+    assert(signedIn.account_id === attacker.account_id,
+      `stable GitHub identity lost to recycled email: ${JSON.stringify(signedIn)}`);
+    assert(!(signedIn.linked_account_ids || []).includes(victim.account_id),
+      'recycled email merged the victim account');
+    assert(!env.META.map.has(`account-group:${victim.account_id}`),
+      'victim was placed into an attacker account group');
+  });
+
   await t('changing your address at the provider keeps your account', async () => {
     const env = makeEnv(mod.CommentsStore, OIDC_ENV);
     stubProviders({ oidcSub: 'user_carol', oidcEmail: 'carol@old.com' });
@@ -275,13 +303,20 @@ async function claimAccount(worker, env, cookie) {
   });
 
   await t('a Clerk user who linked two existing accounts owns both sets of docs', async () => {
-    const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
+    const env = makeEnv(mod.CommentsStore, {
+      ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub', TDOC_HOSTED_MAX_DOCS: '2',
+    });
 
     // Claire first used email, which already minted its own account and OIDC
     // link before she chose GitHub inside the same Clerk user.
     stubProviders({ oidcSub: 'user_claire', oidcEmail: 'claire@example.com' });
     const emailSession = await oidcSignIn(worker, env);
     const emailClaim = await claimAccount(worker, env, `tdoc_sid=${emailSession.sid}`);
+    const emailUpload = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: emailClaim.token,
+      body: { slug: 'claire-email-doc', version: 1, html: '<h1>email doc</h1>' },
+    }), env, {});
+    assert(emailUpload.status === 200, `email upload: ${emailUpload.status}`);
 
     // Separately, her private-email GitHub identity published the old doc.
     // No email hint can join these records; only the two stable provider ids
@@ -296,16 +331,63 @@ async function claimAccount(worker, env, cookie) {
     }), env, {});
     assert(upload.status === 200, `upload: ${upload.status} ${await upload.clone().text()}`);
 
+    env.META.map.set(`account-notify:${emailClaim.account_id}`, JSON.stringify([{
+      provider: 'webhook', server_id: 'webhook', agent_sub: 'wh_1234567890abcdef',
+      agent_name: 'Claire bot', url: 'https://hooks.example/claire',
+      last_touched: '2026-01-03T00:00:00Z',
+    }]));
+    env.META.map.set('stars:email:claire@example.com', JSON.stringify({
+      items: [{ slug: 'claire-email-doc', at: '2026-01-03T00:00:00Z' }],
+    }));
+    env.META.map.set('recents:email:claire@example.com', JSON.stringify({
+      items: [{ slug: 'claire-email-doc', at: '2026-01-03T00:00:00Z' }],
+    }));
+    env.META.map.set('folders:email:claire@example.com', JSON.stringify({
+      folders: [{ id: 'f_claire', name: 'Ideas', visibility: 'private' }],
+      docs: { 'claire-email-doc': 'f_claire' },
+    }));
+    env.META.map.set('inbox:email:claire@example.com', JSON.stringify({
+      items: [{ id: 'n_claire', group_key: 'comment:claire-email-doc', at: '2026-01-03T00:00:00Z', read: false }],
+    }));
+    env.META.map.set(`account-profile:${emailClaim.account_id}`, JSON.stringify({
+      account_id: emailClaim.account_id, bio: 'Claire bio', pins: ['claire-email-doc'],
+    }));
+    const teamId = 't_1234567890abcdef';
+    env.META.map.set(`team:${teamId}`, JSON.stringify({
+      id: teamId, name: 'Tinyfish', members: [{ account_id: emailClaim.account_id, role: 'admin', name: 'Claire' }],
+    }));
+    env.META.map.set(`account-teams:${emailClaim.account_id}`, JSON.stringify([teamId]));
+
     const calls = {};
     stubProviders({
       oidcSub: 'user_claire', oidcEmail: 'claire@example.com',
       clerkExternal: { id: 203355018, username: 'unknowncici' }, calls,
     });
     const linked = await oidcSignIn(worker, env);
-    assert(linked.account_id === emailClaim.account_id, 'primary email account changed');
-    assert((linked.linked_account_ids || []).includes(githubClaim.account_id),
-      `GitHub account was not attached: ${JSON.stringify(linked)}`);
+    assert(linked.account_id === githubClaim.account_id, 'GitHub account did not become canonical');
+    assert((linked.linked_account_ids || []).includes(emailClaim.account_id),
+      `email account was not attached: ${JSON.stringify(linked)}`);
     assert(linked.login === 'unknowncici', `GitHub handle was not restored: ${JSON.stringify(linked)}`);
+    const group = JSON.parse(env.META.map.get(`account-group:${githubClaim.account_id}`) || 'null');
+    assert(group && group.ids.includes(emailClaim.account_id), `account group missing: ${JSON.stringify(group)}`);
+
+    const connectors = await (await worker.fetch(req('/api/me/connectors', {
+      cookie: `tdoc_sid=${linked.sid}`,
+    }), env, {})).json();
+    assert(connectors.connectors && connectors.connectors.some((item) => item.target && item.target.agent_name === 'Claire bot'),
+      `connector did not follow the account: ${JSON.stringify(connectors)}`);
+    const migratedStars = JSON.parse(env.META.map.get('stars:unknowncici') || 'null');
+    const migratedFolders = JSON.parse(env.META.map.get('folders:unknowncici') || 'null');
+    const migratedInbox = JSON.parse(env.META.map.get('inbox:unknowncici') || 'null');
+    const migratedProfile = JSON.parse(env.META.map.get(`account-profile:${githubClaim.account_id}`) || 'null');
+    const migratedTeam = JSON.parse(env.META.map.get(`team:${teamId}`) || 'null');
+    assert(migratedStars && migratedStars.items.some((item) => item.slug === 'claire-email-doc'), 'stars did not migrate');
+    assert(migratedFolders && migratedFolders.docs['claire-email-doc'] === 'f_claire', 'folders did not migrate');
+    assert(migratedInbox && migratedInbox.items.some((item) => item.id === 'n_claire'), 'inbox did not migrate');
+    assert(migratedProfile && migratedProfile.bio === 'Claire bio'
+      && migratedProfile.pins.includes('claire-email-doc'), 'profile did not migrate');
+    assert(migratedTeam && migratedTeam.members.some((member) => member.account_id === githubClaim.account_id
+      && member.role === 'admin'), 'team membership did not migrate');
 
     const page = await worker.fetch(req('/d/claire-old-doc/v/1', {
       cookie: `tdoc_sid=${linked.sid}`,
@@ -314,10 +396,40 @@ async function claimAccount(worker, env, cookie) {
     assert(page.status === 200 && /"isOwner":true/.test(html),
       `linked session still was not doc owner: ${page.status}`);
 
-    // The durable OIDC link carries the verified alias, so future sign-ins
-    // neither call Clerk again nor lose ownership.
+    // Both generations of account-scoped CLI token now have authority over
+    // either side, without rewriting either document's stored owner.
+    const oldEmailToGithub = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: emailClaim.token,
+      body: { slug: 'claire-old-doc', version: 2, html: '<h1>old doc v2</h1>' },
+    }), env, {});
+    assert(oldEmailToGithub.status === 200, `email token cannot update GitHub doc: ${oldEmailToGithub.status}`);
+    const oldGithubToEmail = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: githubClaim.token,
+      body: { slug: 'claire-email-doc', version: 2, html: '<h1>email doc v2</h1>' },
+    }), env, {});
+    assert(oldGithubToEmail.status === 200,
+      `GitHub token cannot update email doc: ${oldGithubToEmail.status} ${await oldGithubToEmail.clone().text()}`);
+
+    const devices = await (await worker.fetch(req('/api/me/tokens', {
+      cookie: `tdoc_sid=${linked.sid}`,
+    }), env, {})).json();
+    assert(devices.tokens && devices.tokens.length === 2,
+      `device inventory did not merge: ${JSON.stringify(devices)}`);
+
+    // Quota counts the equivalence class, so splitting an identity cannot
+    // double the allowance.
+    const third = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: githubClaim.token,
+      body: { slug: 'claire-third-doc', version: 1, html: '<h1>third</h1>' },
+    }), env, {});
+    assert(third.status === 403, `split quota was not unified: ${third.status}`);
+    assert((await third.json()).error === 'quota_docs', 'third publish failed for the wrong reason');
+
+    // The durable OIDC link and symmetric group mean future sign-ins neither
+    // call Clerk again nor lose ownership.
     const again = await oidcSignIn(worker, env);
-    assert((again.linked_account_ids || []).includes(githubClaim.account_id),
+    assert(again.account_id === githubClaim.account_id
+      && (again.linked_account_ids || []).includes(emailClaim.account_id),
       `linked account did not survive: ${JSON.stringify(again)}`);
     assert(calls.clerkApi === 1, `provider was queried again: ${calls.clerkApi}`);
   });
@@ -409,7 +521,7 @@ async function claimAccount(worker, env, cookie) {
     assert(!env.META.map.has('hosted-account:casey'), 'sign-in minted an account for a commenter');
   });
 
-  await t('an email-resolved account gets its handle without minting a link', async () => {
+  await t('stable provider proof makes an email-resolved account link durable', async () => {
     const env = makeEnv(mod.CommentsStore, { ...OIDC_ENV, CLERK_SECRET_KEY: 'sk_test_stub' });
     // Backfilled account reachable by the email hint; the oidc sub has no
     // link yet — the prod-instance-switch shape.
@@ -424,9 +536,12 @@ async function claimAccount(worker, env, cookie) {
     const s = await oidcSignIn(worker, env);
     assert(s.account_id === 'acct_gina00000', `email hint missed: ${JSON.stringify(s)}`);
     assert(s.login === 'gina', `email-resolved session lost the handle: ${JSON.stringify(s)}`);
-    // Resolve-don't-mint holds: the durable link is written at mint, and a
-    // sign-in that resolved through the hint must not smuggle one in.
-    assert(!env.META.map.has('account-idp:oidc:user_gina2'), 'sign-in minted the idp link');
+    // The address was only a hint, but Clerk also proved the stable OIDC sub
+    // and the GitHub numeric id already recorded by this same account. Keep
+    // that stronger association so later sign-ins never depend on email.
+    const link = JSON.parse(env.META.map.get('account-idp:oidc:user_gina2') || 'null');
+    assert(link && link.account_id === 'acct_gina00000' && link.handle === 'gina',
+      `stable proof was not persisted: ${JSON.stringify(link)}`);
   });
 
   await t('the bridge cannot hand over a handle that a stable id already owns', async () => {
