@@ -182,8 +182,8 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
   });
 
   const RAFT = { RAFT_CLIENT_ID: 'tdoc-x', RAFT_CLIENT_SECRET: 's', RAFT_OIDC_ISSUER: 'https://raft.test', RAFT_API_BASE: 'https://raft.test' };
-  async function connectRaft(env, cookie, otherCookie) {
-    const start = await worker.fetch(req('/api/me/connectors/raft/start', { cookie }), env, {});
+  async function connectRaft(env, cookie, otherCookie, popup = false) {
+    const start = await worker.fetch(req(`/api/me/connectors/raft/start${popup ? '?popup=1' : ''}`, { cookie }), env, {});
     const loc = new URL(start.headers.get('Location'));
     const state = loc.searchParams.get('state');
     const stateCookie = (start.headers.get('Set-Cookie') || '').split(';')[0];
@@ -200,6 +200,18 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
     const raft = list.connectors.find((c) => c.kind === 'raft');
     assert(raft && raft.server_id === 'S9' && raft.server_slug === 'julies-server', JSON.stringify(list.connectors));
+  });
+
+  await t('document popup connect reports success without navigating to Agents', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT);
+    const owner = await issue(worker, env, 'owner');
+    const { back } = await connectRaft(env, owner.cookie, null, true);
+    const page = await back.text();
+    assert(back.status === 200 && /tdoc:raft-connected/.test(page), `popup callback ${back.status}`);
+    assert(!/\/me\/agents\?tab=send/.test(page), 'popup callback sent the document away to Agents');
+    assert((back.headers.get('Set-Cookie') || '').includes('Max-Age=0'), 'OAuth state cookie was not cleared');
+    const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+    assert(list.connectors.some((c) => c.kind === 'raft' && c.server_id === 'S9'), JSON.stringify(list));
   });
 
   await t('a connect started by one tdoc session cannot finish on another', async () => {

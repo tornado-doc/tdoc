@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MentionField } from './mention-field.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
 // The shell's chrome does not scroll — the frame does — so the composer's
 // coordinates are viewport coordinates.
@@ -72,10 +73,6 @@ export function CommentComposer({
 }) {
   const [text, setText] = useState('');
   const [connectOpen, setConnectOpen] = useState(false);
-  const [promptCopied, setPromptCopied] = useState(false);
-  const copyPrompt = async () => {
-    try { await navigator.clipboard.writeText(connectAgentPrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 1800); } catch (_) {}
-  };
   const [viewport, setViewport] = useState(readViewport);
 
   useEffect(() => {
@@ -140,7 +137,7 @@ export function CommentComposer({
           <details>
             <summary>Or paste this into your agent</summary>
             <code>{connectAgentPrompt}</code>
-            <button type="button" onClick={copyPrompt}>{promptCopied ? 'Copied' : 'Copy prompt'}</button>
+            <CopyPromptButton text={connectAgentPrompt} />
           </details>
         </div>
       ) : null}

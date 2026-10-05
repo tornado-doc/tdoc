@@ -2666,6 +2666,23 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
 const RAFT_LINK_TTL = 600;
 const AGENT_SESSION_TTL = 60 * 60 * 24 * 30;
 
+function raftConnectPopupResponse(clearState) {
+  const nonce = rand(16);
+  return html(`<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raft connected · tdoc</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;color:#111;background:#fafafa}.box{max-width:360px;margin:24px;padding:28px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;text-align:center}h1{font-size:19px;margin:0 0 8px}p{margin:0;color:#555}</style>
+</head><body><div class="box"><h1>Raft connected</h1><p>Returning to your document…</p></div>
+<script nonce="${nonce}">if(window.opener){window.opener.postMessage({type:'tdoc:raft-connected'},'*');setTimeout(function(){window.close()},120)};</script>
+</body></html>`, {
+    headers: {
+      'Content-Security-Policy': cspHeader(nonce),
+      'Cache-Control': 'no-store',
+      ...(clearState ? { 'Set-Cookie': clearState } : {}),
+    },
+  });
+}
+
 // The end of Connect with Raft. The account comes from the nonce minted for
 // the signed-in tdoc session that started it, and must still be that
 // session's account — a connect someone else started cannot land on yours.
@@ -2676,7 +2693,7 @@ async function completeRaftConnect(env, req, { pending, tok, ret, clearState }) 
   const session = await getSession(env, req);
   const accountId = session && !session.feedback ? await sessionAccountId(env, session) : null;
   if (!started || !accountId || started.account_id !== accountId) {
-    return authStatusResponse('This Raft connection was started from a different tdoc session. Start it again from Agents.', { error: true, status: 403 });
+    return authStatusResponse('This Raft connection was started from a different tdoc session. Return to tdoc and start it again.', { error: true, status: 403 });
   }
   const server = await raftServerInfo(env, tok && tok.access_token);
   if (!server || !server.id) {
@@ -2691,6 +2708,7 @@ async function completeRaftConnect(env, req, { pending, tok, ret, clearState }) 
   if (removed.delete(`raft-server:${server.id}`)) {
     await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed]));
   }
+  if (started.popup) return raftConnectPopupResponse(clearState);
   return redirectTo(`${ret && ret.startsWith('/me/agents') ? ret : '/me/agents?tab=send'}&connected=raft`, [clearState]);
 }
 
@@ -10567,7 +10585,10 @@ export default {
         if (!cfg) return redirectTo('/me/agents?tab=send&error=raft_not_configured');
         const nonce = rand(16);
         await env.META.put(`oauthstate:${cfg.id}:${nonce}`, '/me/agents?tab=send', { expirationTtl: 600 });
-        await env.META.put(`raft-connect:${nonce}`, JSON.stringify({ account_id: accountId }), { expirationTtl: 600 });
+        await env.META.put(`raft-connect:${nonce}`, JSON.stringify({
+          account_id: accountId,
+          popup: url.searchParams.get('popup') === '1',
+        }), { expirationTtl: 600 });
         let auth;
         try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
         catch (e) { return redirectTo('/me/agents?tab=send&error=raft_unreachable'); }
