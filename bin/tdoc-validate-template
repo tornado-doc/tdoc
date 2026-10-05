@@ -150,6 +150,22 @@ def selector_is_global(selector: str) -> bool:
     return re.match(rf"^(?:{tag_pattern})(?:$|[\s:>+~.#\[])", selector) is not None
 
 
+CELL_RESET_PROPERTIES = {"background", "background-color", "border-radius"}
+
+
+def is_cell_reset(selector: str, declarations) -> bool:
+    """True for a `th`/`td` rule that only undoes the reader's cell chip.
+
+    Kept narrow on purpose: the moment such a rule sets anything else it is
+    restyling prose again and the override note is correct.
+    """
+    parts = {p.strip() for p in selector.split(",") if p.strip()}
+    if not parts or not parts <= {"th", "td", "th,td", "td,th"}:
+        return False
+    props = {prop for prop, _ in declarations}
+    return bool(props) and props <= CELL_RESET_PROPERTIES
+
+
 def compact_css_value(value: str) -> str:
     return re.sub(r"\s+", "", value.strip().lower())
 
@@ -192,8 +208,15 @@ def _css_rules(blocks):
     return out
 
 
+_HEX3 = re.compile(r"#([0-9a-f])([0-9a-f])([0-9a-f])\b")
+
+
 def _norm(v):
-    return (v or "").replace(" ", "").replace('"', "'").lower()
+    v = (v or "").replace(" ", "").replace('"', "'").lower()
+    # #fff and #ffffff are the same colour. Comparing the literal text made a
+    # document that wrote white in longhand fail "background does not match the
+    # house style", which is a spelling difference reported as a design one.
+    return _HEX3.sub(lambda m: "#" + "".join(c * 2 for c in m.groups()), v)
 
 
 _NAMED_GROUNDS = {
@@ -837,7 +860,15 @@ def validate(path: Path, *, style: str, custom_template: bool) -> tuple[list[str
                             + '; use data-tdoc-width="wide" on the root for a wide house-style document'
                         )
                 elif selector_is_global(normalized):
-                    notes.append(f"global selector '{selector.strip()}' overrides the default template")
+                    # check_table_cells REQUIRES a document with a table to name
+                    # background and border-radius on th/td, or the reader's chip
+                    # survives. Flagging that same rule as a global override left
+                    # no way to write a table that passes: reset it and this
+                    # fired, omit it and the cell check fired. A th/td rule that
+                    # sets only the reset properties is the house style being
+                    # followed, not overridden.
+                    if not is_cell_reset(normalized, declarations):
+                        notes.append(f"global selector '{selector.strip()}' overrides the default template")
 
     if not body_background:
         # An explicit ground is structural: without it the page composites over
