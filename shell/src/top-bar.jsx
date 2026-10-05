@@ -33,6 +33,7 @@ export function TopBar({
   overflowActions,
   theme,
   onThemeChange,
+  supportsTheme = true,
   onNotificationNavigate,
   // Every page has a way in. A page that does not say otherwise signs in
   // through the provider and comes back here; the doc page passes its own.
@@ -177,9 +178,9 @@ export function TopBar({
             </AppMenuItem>
           ) : null}
         </AppMenu>
-        <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
+        {supportsTheme ? <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
           {dark ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
+        </button> : null}
         {identity ? (
           <AppMenu trigger={(
             <button className="tdoc-chip tdoc-account-trigger" type="button">
