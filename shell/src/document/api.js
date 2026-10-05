@@ -232,11 +232,11 @@ export function postNotifyHandoff({ slug, comment_ids, instruction, recipient })
 
 // Which agent on a connected Raft server gets comments on docs no agent has
 // worked on yet. Delivery is by handle.
-export function setRaftFallbackAgent({ server_id, agent_name }) {
+export function setRaftFallbackAgent({ server_id, agent_name, agent_sub }) {
   return request('/api/me/connectors/raft/default', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ server_id, agent_name }),
+    body: JSON.stringify({ server_id, agent_name, agent_sub }),
   });
 }
 

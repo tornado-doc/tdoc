@@ -241,6 +241,37 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     assert(named.default && named.default.agent_name === 'serena-bot' && !named.reason && !named.raft_servers, JSON.stringify(named));
   });
 
+  await t('Send to agent offers every account agent, with the doc\'s last-touched one preselected', async () => {
+    const ctx = await seedRaft();
+    await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-b', 'X-Tdoc-Raft-Agent-Name': 'beta' });
+    const r = await targetsOf(ctx);
+    assert(r.default && r.default.agent_sub === 'agent-b' && r.default.source === 'doc', `default: ${JSON.stringify(r.default)}`);
+    const alpha = (r.candidates || []).find((c) => c.agent_sub === 'agent-a');
+    assert(alpha && alpha.source === 'account', `account agent not offered: ${JSON.stringify(r.candidates)}`);
+    assert(!(r.candidates || []).some((c) => c.agent_sub === 'agent-b'), 'the preselected agent is listed twice');
+    // A fresh comment: the one the agent answered is the person's turn now.
+    const fresh = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: ctx.owner.cookie, body: { slug: 'cdoc', version: 1, text: 'and this', anchor: { kind: 'text', text: 'world' } } }), ctx.env, {})).json();
+    const sent = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: ctx.owner.cookie, body: { slug: 'cdoc', comment_ids: [fresh.id], recipient: alpha } }), ctx.env, {})).json();
+    assert(sent.ok && sent.sent === 1, JSON.stringify(sent));
+    const handoffs = await (await worker.fetch(req('/api/notify/handoffs?slug=cdoc', { cookie: ctx.owner.cookie }), ctx.env, {})).json();
+    const to = handoffs.handoffs[0] && handoffs.handoffs[0].recipient;
+    assert(to && to.agent_sub === 'agent-a', `sent to ${JSON.stringify(to)}`);
+  });
+
+  await t('choosing a known agent as default keeps its identity instead of minting a handle-only one', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT);
+    const owner = await issue(worker, env, 'owner');
+    await connectRaft(env, owner.cookie);
+    await env.META.put(`account-notify:${owner.account_id}`, JSON.stringify([
+      { provider: 'raft', server_id: 'S9', server_slug: 'julies-server', agent_sub: 'uuid-a', agent_name: 'alpha' },
+      { provider: 'raft', server_id: 'S9', server_slug: 'julies-server', agent_sub: 'uuid-b', agent_name: 'beta' },
+    ]));
+    const set = await (await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_sub: 'uuid-b' }), env, {})).json();
+    assert(set.ok && set.target.agent_sub === 'uuid-b', JSON.stringify(set));
+    const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+    assert(list.default.agent_sub === 'uuid-b' && list.targets.length === 2, JSON.stringify(list.targets));
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

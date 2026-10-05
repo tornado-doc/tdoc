@@ -7276,9 +7276,15 @@ async function resolveNotifyTargets(env, slug) {
   const fallbackList = await accountNotifyTargets(env, ownerAccount);
   const fallback = fallbackList[0] || null;
   if (docTargets.length) {
+    // The doc's last-touched agent is preselected, but the person may send
+    // to any of their agents: the doc's others first, then the account's.
+    const accountOnly = fallbackList.filter((t) => !docTargets.some((d) => sameNotifyTarget(d, t)));
     return {
       default: { ...docTargets[0], source: 'doc' },
-      candidates: docTargets.slice(1).map(t => ({ ...t, source: 'doc' })),
+      candidates: [
+        ...docTargets.slice(1).map(t => ({ ...t, source: 'doc' })),
+        ...accountOnly.map(t => ({ ...t, source: 'account' })),
+      ],
       fallback,
       reason: null,
     };
@@ -10577,6 +10583,16 @@ export default {
         // has claimed. Delivery is by handle, so the handle is the identity.
         const server = (await accountRaftServers(env, accountId)).find((sv) => sv.server_id === body.server_id);
         if (!server) return json({ error: 'not_found' }, { status: 404 });
+        // Picking an agent tdoc already knows keeps its stored identity; only
+        // a typed handle mints a handle-only record.
+        const known = body.agent_sub
+          ? current.find((t) => t.provider === 'raft' && t.server_id === server.server_id && t.agent_sub === body.agent_sub)
+          : null;
+        if (known) {
+          const rest = current.filter((t) => !sameNotifyTarget(t, known));
+          await env.META.put(listKey, JSON.stringify([{ ...known, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX)));
+          return json({ ok: true, target: known });
+        }
         const name = String(body.agent_name || '').trim().replace(/^@/, '');
         if (!name || name.length > 80 || /[\u0000-\u001f\u007f\s]/.test(name)) return json({ error: 'invalid_agent_name' }, { status: 400 });
         const target = normalizeNotifyTarget({ provider: 'raft', server_id: server.server_id, server_slug: server.server_slug, agent_sub: `@${name}`, agent_name: name });

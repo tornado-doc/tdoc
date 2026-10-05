@@ -6,7 +6,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Webhook } from 'lucide-react';
 import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
-import { SegmentedControl } from '../ui/segmented-control.jsx';
 import {
   hasAccountSession,
   listNotifyHandoffs,
@@ -60,6 +59,18 @@ function recipientPrimary(t) {
   return readableHandle(t)
     ? `Send to ${label}`
     : `Send to your ${label} agent`;
+}
+
+// One line per agent in the recipient dropdown: who, where, and why it is the
+// preselected one (last worked on this doc, or the account default).
+function recipientOptionLabel(t, preselected) {
+  const { label } = providerMeta(t);
+  const who = readableHandle(t) || `${label} agent`;
+  const where = t.provider === 'raft' && t.server_slug ? ` · ${t.server_slug}` : (t.provider === 'raft' ? '' : ` · ${label}`);
+  const why = sameTarget(t, preselected)
+    ? (t.source === 'doc' ? ' (last worked on this doc)' : ' (default)')
+    : '';
+  return `${who}${where}${why}`;
 }
 
 function targetKey(t) {
@@ -170,16 +181,25 @@ export function ConnectorHead({ connector }) {
 // A Raft server is connected but tdoc knows no agent on it yet (none has
 // published or replied with this account). Raft delivers by handle, so ask
 // for one instead of offering Connect with Raft again.
-export function RaftFallbackForm({ server, onSaved }) {
+//
+// `known` are the agents tdoc has seen on this server (they published or
+// replied with this account): picked from a dropdown. Raft has no roster API
+// tdoc can read, so anyone else is typed by handle.
+const OTHER_AGENT = '__other__';
+export function RaftFallbackForm({ server, known = [], current = null, onSaved }) {
+  const [pick, setPick] = useState(() => (current && current.agent_sub) || (known[0] && known[0].agent_sub) || OTHER_AGENT);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const typing = pick === OTHER_AGENT || !known.length;
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const body = await setRaftFallbackAgent({ server_id: server.server_id, agent_name: name.trim() });
+      const body = await setRaftFallbackAgent(typing
+        ? { server_id: server.server_id, agent_name: name.trim() }
+        : { server_id: server.server_id, agent_sub: pick });
       setName('');
       if (onSaved) await onSaved(body.target);
     } catch (err) {
@@ -190,11 +210,22 @@ export function RaftFallbackForm({ server, onSaved }) {
   };
   return (
     <form className="tdoc-conn-form" onSubmit={save}>
-      <label>
-        <span>Agent on {server.server_slug || 'this server'} that gets comments</span>
-        <input type="text" required placeholder="@agent-handle" value={name} onChange={(e) => setName(e.target.value)} maxLength={81} />
-      </label>
-      <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save'}</button>
+      {known.length ? (
+        <label>
+          <span>Default agent on {server.server_slug || 'this server'}</span>
+          <select value={pick} onChange={(e) => setPick(e.target.value)}>
+            {known.map((a) => <option key={a.agent_sub} value={a.agent_sub}>{readableHandle(a) || a.agent_sub}</option>)}
+            <option value={OTHER_AGENT}>Another agent…</option>
+          </select>
+        </label>
+      ) : null}
+      {typing ? (
+        <label>
+          <span>{known.length ? 'Its Raft handle' : `Default agent on ${server.server_slug || 'this server'} (its Raft handle)`}</span>
+          <input type="text" required placeholder="@agent-handle" value={name} onChange={(e) => setName(e.target.value)} maxLength={81} />
+        </label>
+      ) : null}
+      <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || (typing && !name.trim()) || (!typing && current && current.agent_sub === pick)}>{busy ? 'Saving…' : 'Save'}</button>
       {error ? <p className="status" role="status">{error}</p> : null}
     </form>
   );
@@ -479,28 +510,20 @@ export function NotifyHandoffPanel({
             </section>
           ) : choices.length > 1 ? (
             <section className="manage-section">
-              <label className="field">Send via</label>
-              <SegmentedControl
-                ariaLabel="Recipient"
+              <RecipientLine target={selected || targets.default} />
+              <label className="field" htmlFor="tdoc-notify-recipient">Send to</label>
+              <select
+                id="tdoc-notify-recipient"
                 value={selectedKey}
-                options={choices.map((t) => {
-                  const handle = readableHandle(t);
-                  const meta = providerMeta(t);
-                  return {
-                    value: targetKey(t),
-                    label: (
-                      <span className="tdoc-notify-recipient-opt" title={handle || undefined}>
-                        <ProviderMark target={t} size={16} />
-                        {handle || meta.label}
-                      </span>
-                    ),
-                  };
-                })}
-                onChange={(key) => {
-                  const next = choices.find((t) => targetKey(t) === key);
+                onChange={(e) => {
+                  const next = choices.find((t) => targetKey(t) === e.target.value);
                   if (next) setSelected(next);
                 }}
-              />
+              >
+                {choices.map((t) => (
+                  <option key={targetKey(t)} value={targetKey(t)}>{recipientOptionLabel(t, targets.default)}</option>
+                ))}
+              </select>
             </section>
           ) : (
             <p className="manage-hint" title={boundHint || undefined}>
