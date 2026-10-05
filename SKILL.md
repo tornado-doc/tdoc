@@ -149,6 +149,7 @@ Three files are required reading before you write doc HTML, on every
 | `$SKILL_DIR/authoring/voice.md` | how the prose reads | No. A floor — no switch, no doc exempt. |
 | `$SKILL_DIR/authoring/visuals.md` | how much of the doc is a picture | No. A floor — be visual-first, many visuals, varied types. |
 | `$SKILL_DIR/authoring/structure/components.md` | what the parts are | No. The parts are the same in every style. |
+| `$SKILL_DIR/authoring/structure/diagrams.md` | **SVG you can paste** — sized to the column, plus the four rules that keep a figure from rendering wrong | No. Read it before hand-building any figure. |
 | `$SKILL_DIR/authoring/style/<picked>.md` | what those parts look like | Yes — you pick the entry that fits the content. |
 
 `$SKILL_DIR` is the installed skill directory resolved in "Setup check"
@@ -261,7 +262,7 @@ typed on github.com. Tell the user in one line what opened and that the code
 is in the terminal; then keep working. Skip Step 0 entirely for the local-only and self-host destinations.
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, `$SKILL_DIR/authoring/structure/components.md`, and the `$SKILL_DIR/authoring/style/` entry you picked.**
+2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, `$SKILL_DIR/authoring/structure/components.md`, `$SKILL_DIR/authoring/structure/diagrams.md`, and the `$SKILL_DIR/authoring/style/` entry you picked.**
    Voice constrains the prose as you generate it, not as a later cleanup
    pass. The style tells you which components to reach for and its palette —
    apply it unless the user named another entry in `$SKILL_DIR/authoring/style/`.
@@ -470,7 +471,7 @@ silently is the #1 source of regression complaints.
    - **Unreachable** → use the local copy, and say so in your reply: the edit
      is based on a possibly-stale cache.
 
-   Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
+   Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`, `$SKILL_DIR/authoring/structure/diagrams.md`.
    Review the new version using the same content and responsive-style checks
    as `/tdoc new`, including image review for changed SVG charts.
    A regeneration writes new prose, so the contract applies here exactly as
