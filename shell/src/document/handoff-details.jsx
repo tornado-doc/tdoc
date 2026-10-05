@@ -142,6 +142,17 @@ export function HandoffDetailsPanel({
                       {busy ? 'Sending…' : 'Send'}
                     </button>
                   ) : null}
+                  {state === 'waiting' ? (
+                    <button
+                      type="button"
+                      className="text-btn"
+                      disabled={busy}
+                      title="Create a new handoff and notify the agent again"
+                      onClick={() => sendOne(comment)}
+                    >
+                      {busy ? 'Sending…' : 'Send again'}
+                    </button>
+                  ) : null}
                 </span>
               </li>
             );

@@ -19,7 +19,10 @@ if (window.top === window && !window.__TDOC_FEEDBACK__) {
   style.id = 'tdoc-feedback-styles';
   style.textContent = `${chromeCss}
 ${uiCss}
-    #tdoc-feedback-root { position: fixed; inset: 0; z-index: 2147483645; pointer-events: none; }
+    /* The feedback layer is injected into arbitrary products. Put its single
+       stacking context at the browser maximum and append it last, so even a
+       host nav using an extreme z-index cannot cover comments or the drawer. */
+    #tdoc-feedback-root { position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; isolation: isolate; }
     #tdoc-feedback-root * { box-sizing: border-box; }
     #tdoc-feedback-root .tdoc-hover-outline { position: fixed; }
     #tdoc-feedback-root .tdoc-pin { position: fixed; z-index: 2147483642; }
@@ -81,7 +84,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-toast.bad { background: #b42318; }
     #tdoc-feedback-root .tdoc-pin.is-active { outline: 2px solid #1652f0; outline-offset: 2px; }
     #tdoc-feedback-root .tdoc-fb-panel {
-      position: fixed; top: 0; right: 0; bottom: 0; width: 340px; z-index: 2147483641; pointer-events: auto;
+      position: fixed; top: 0; right: 0 !important; bottom: 0; width: min(340px, 100vw); max-width: 100vw; z-index: 2147483641; pointer-events: auto;
       display: flex; flex-direction: column; background: #fff; color: #1a1a1a;
       border-left: 1px solid #e8e7e3; box-shadow: -8px 0 28px rgba(0,0,0,.08);
       font: 13px/1.45 system-ui, -apple-system, sans-serif;
@@ -126,7 +129,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-agent p { margin: 0 0 8px; }
     #tdoc-feedback-root .tdoc-fb-agent code { display: block; margin: 0 0 8px; padding: 8px; border-radius: 6px; background: #fff; border: 1px solid #e8e7e3; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
     #tdoc-feedback-root .tdoc-fb-agent button { appearance: none; border: 0; border-radius: 8px; padding: 6px 12px; background: #1652f0; color: #fff; font: 600 12px system-ui, sans-serif; cursor: pointer; }
-    .ui-dialog-backdrop, .ui-dialog-viewport { z-index: 2147483646 !important; }
+    .ui-dialog-backdrop, .ui-dialog-viewport { z-index: 2147483647 !important; }
     /* Dialogs render outside our root, where the host app's own button and
        text rules reach them. Pin the few that matter. */
     .ui-dialog-popup.tdoc-modal { color: #1a1a1a; font: 14px/1.45 system-ui, -apple-system, sans-serif; text-align: left; }
@@ -894,7 +897,7 @@ ${uiCss}
     }
 
     const hoverRect = (picking || reanchorId) ? hovered?.getBoundingClientRect() : null;
-    const rightInset = panelOpen ? PANEL_WIDTH : 0;
+    const rightInset = panelOpen ? Math.min(PANEL_WIDTH, innerWidth) : 0;
     const placeCard = (element) => {
       const rect = element?.getBoundingClientRect();
       const width = innerWidth - rightInset;

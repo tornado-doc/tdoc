@@ -38,6 +38,24 @@
   margin-top: 10px;
 }
 
+.tdoc-copy-prompt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--td-line, #d9d8d4);
+  border-radius: 7px;
+  background: var(--td-bg, #fff);
+  color: var(--td-ink, #1a1a1a);
+  font: 600 13px/1.2 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.tdoc-copy-prompt:hover { border-color: var(--td-accent, #1652f0); color: var(--td-accent, #1652f0); }
+.tdoc-copy-prompt.is-copied { color: #137044; border-color: #9bc9b3; background: #f2faf6; }
+
 /* Buttons inside the reader chrome that read as text (the legacy markup used
    spans): keep the semantics, drop the UA button box. */
 .tdoc-margin-comment button.del,

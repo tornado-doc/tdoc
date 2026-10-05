@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Webhook } from 'lucide-react';
 import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import {
   hasAccountSession,
   listNotifyHandoffs,
@@ -156,12 +157,51 @@ export const AGENT_CONNECTORS = [
 // one. Shared by the dialog and the Agents page, so both browse the same list.
 // The one way to start a Raft connection, wherever it is offered: Raft's
 // mark on Raft's black, so it reads as "sign in with Raft" at a glance.
-export function RaftConnectButton({ label = 'Connect with Raft' }) {
+export function RaftConnectButton({ label = 'Connect with Raft', onConnected = null }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const connect = (event) => {
+    if (!onConnected) return;
+    event.preventDefault();
+    if (busy) return;
+    setError('');
+    const popup = window.open(
+      tdocUrl('/api/me/connectors/raft/start?popup=1'),
+      'tdoc-raft-connect',
+      'popup,width=560,height=720,resizable=yes,scrollbars=yes',
+    );
+    if (!popup) {
+      setError('Allow the Raft sign-in popup, then try again.');
+      return;
+    }
+    setBusy(true);
+    let settled = false;
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('message', receive);
+      window.clearInterval(closedTimer);
+      setBusy(false);
+      try { await onConnected(); } catch { setError('Connected, but this document could not refresh. Close and reopen Send to agent.'); }
+    };
+    const receive = (message) => {
+      if (message.source !== popup || message.data?.type !== 'tdoc:raft-connected') return;
+      finish();
+    };
+    window.addEventListener('message', receive);
+    const closedTimer = window.setInterval(() => {
+      if (!popup.closed) return;
+      finish();
+    }, 500);
+  };
   return (
-    <a className="tdoc-raft-btn" href="/api/me/connectors/raft/start">
-      <RaftMark size={18} />
-      <span>{label}</span>
-    </a>
+    <>
+      <a className="tdoc-raft-btn" href="/api/me/connectors/raft/start" onClick={connect} aria-disabled={busy || undefined}>
+        <RaftMark size={18} />
+        <span>{busy ? 'Connecting…' : label}</span>
+      </a>
+      {error ? <p className="status" role="status">{error}</p> : null}
+    </>
   );
 }
 
@@ -253,11 +293,7 @@ function RaftConnectedNoAgentView({ servers, onClose, onSaved }) {
   );
 }
 
-function ConnectAgentView({ onClose }) {
-  const [copied, setCopied] = useState(null);
-  const copy = async (c) => {
-    try { await navigator.clipboard.writeText(c.prompt); setCopied(c.id); setTimeout(() => setCopied(null), 1800); } catch { /* ignore */ }
-  };
+function ConnectAgentView({ onClose, onConnected }) {
   return (
     <AppDialog
       open
@@ -271,13 +307,13 @@ function ConnectAgentView({ onClose }) {
           <section key={c.id} className="tdoc-connector">
             <ConnectorHead connector={c} />
             {c.id === 'raft'
-              ? <RaftConnectButton />
+              ? <RaftConnectButton onConnected={onConnected} />
               : <a className="tdoc-connector-action" href={c.action.href}>{c.action.label}</a>}
             {c.prompt ? (
               <details open>
                 <summary className="manage-hint">Or paste this into your agent</summary>
                 <code>{c.prompt}</code>
-                <button type="button" onClick={() => copy(c)}>{copied === c.id ? 'Copied' : 'Copy prompt'}</button>
+                <CopyPromptButton text={c.prompt} />
               </details>
             ) : null}
           </section>
@@ -457,7 +493,12 @@ export function NotifyHandoffPanel({
         />
       );
     }
-    return <ConnectAgentView onClose={onClose} />;
+    return (
+      <ConnectAgentView
+        onClose={onClose}
+        onConnected={async () => { await targets.refresh(); if (onTargetsChanged) await onTargetsChanged(); }}
+      />
+    );
   }
 
   return (

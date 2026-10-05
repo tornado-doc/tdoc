@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
+import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
 
@@ -127,7 +128,15 @@ export function ConnectorsBody() {
                       <span className="tdoc-connector-badge">Connected</span>
                     </div>
                     <div className="tdoc-conn-card-actions">
-                      {sample ? <button type="button" className="tdoc-fbspace-btn" onClick={() => test(sample)}>Send test</button> : null}
+                      <button
+                        type="button"
+                        className="tdoc-fbspace-btn"
+                        disabled={!sample}
+                        title={sample ? 'Send a test notification' : 'Choose an agent below before sending a test'}
+                        onClick={() => { if (sample) test(sample); }}
+                      >
+                        Send test
+                      </button>
                       <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirm({ ...c, title })}>Disconnect</button>
                     </div>
                   </div>
@@ -170,7 +179,7 @@ export function ConnectorsBody() {
                   <details className="tdoc-conn-alt" open>
                     <summary>Or let an agent connect itself</summary>
                     <code>{CONNECT_AGENT_PROMPT}</code>
-                    <button type="button" className="tdoc-fbspace-btn" onClick={() => doCopy('raft', CONNECT_AGENT_PROMPT)}>{copied === 'raft' ? 'Copied' : 'Copy prompt'}</button>
+                    <CopyPromptButton text={CONNECT_AGENT_PROMPT} />
                   </details>
                 </>
               ) : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>) : null}
