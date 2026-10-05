@@ -30,8 +30,11 @@
     if (explicit === 'tdoc') return true;
     var roots = [document.documentElement, document.body];
     Array.prototype.forEach.call(document.querySelectorAll('body > main, body > article, body > section, body > div'), function (content) { roots.push(content); });
-    var palette = { background: false, color: false };
-    function foundation(style) {
+    // Keep ownership per element: house presets put the page background on
+    // body and inherited text color on .wrap. Combining those is not evidence
+    // that one author surface supplies its own complete palette.
+    var palettes = roots.map(function () { return { background: false, color: false }; });
+    function foundation(style, palette) {
       if (!style) return false;
       // Token-based adjustments still use the reader design. Typography,
       // layout and individual accents do not opt out: require an author
@@ -47,21 +50,21 @@
     function rulesHaveDesign(rules) {
       for (var i = 0; i < rules.length; i++) {
         var rule = rules[i];
-        if (rule.selectorText && roots.some(function (root) {
-          try { return root && root.matches(rule.selectorText); } catch (_) { return false; }
-        }) && foundation(rule.style)) return true;
+        if (rule.selectorText && roots.some(function (root, index) {
+          try { return root && root.matches(rule.selectorText) && foundation(rule.style, palettes[index]); } catch (_) { return false; }
+        })) return true;
         // Include conditional styles: the design must not switch ownership
         // when a viewport breakpoint or OS color preference changes.
         if (rule.cssRules && rulesHaveDesign(rule.cssRules)) return true;
       }
       return false;
     }
-    for (var i = 0; i < roots.length; i++) if (roots[i] && foundation(roots[i].style)) return false;
+    for (var i = 0; i < roots.length; i++) if (roots[i] && foundation(roots[i].style, palettes[i])) return false;
     for (var j = 0; j < document.styleSheets.length; j++) {
       var sheet = document.styleSheets[j], owner = sheet.ownerNode;
       if (sheet.disabled || (owner && (owner.id === 'tdoc-reader' || owner.id === 'tdoc-reader-patch' || owner.hasAttribute('data-tdoc-provider')))) continue;
       try { if (rulesHaveDesign(sheet.cssRules)) return false; }
-      catch (_) { return false; } // An opaque author stylesheet owns its design.
+      catch (_) {} // Opaque stylesheets (including web fonts) do not prove a custom palette.
     }
     return true;
   }
