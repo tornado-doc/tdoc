@@ -7635,6 +7635,23 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
   });
 }
 
+// Live reply activity, separate from the document version snapshot.
+function commentThreadActivity(comment) {
+  const activity = { agent_at: null, human_at: null };
+  const replies = [...(Array.isArray(comment.replies) ? comment.replies : []), ...(Array.isArray(comment.events)
+    ? comment.events.filter(e => e && e.kind === 'reply_added' && e.reply).map(e => ({ ...e.reply, created: e.at }))
+    : [])];
+  for (const item of [comment, ...replies]) {
+    if (!item) continue;
+    const agent = item.author?.kind === 'agent' || item.author?.kind === 'system' || (item !== comment && item.agent_status);
+    if (agent && item === comment) continue;
+    const key = agent ? 'agent_at' : 'human_at';
+    const at = Date.parse(item.created || '');
+    if (Number.isFinite(at) && at > (Date.parse(activity[key] || '') || 0)) activity[key] = item.created;
+  }
+  return activity;
+}
+
 // Decorate a folded comment list with handoff state. `note` is the default:
 // a comment nobody handed over is a note for a human, not work queued for an
 // agent. Resolution is per comment id, so a partially-resolved handoff shows
@@ -10453,10 +10470,14 @@ export default {
       // used by tdoc-pull). A numeric/absent version returns that version's
       // snapshot (used by the overlay viewing a specific /v/<n>).
       const folded = V === 'all' ? historyList(list) : snapshotList(list, V);
+      // Conversation activity is live even on an older document. Keep its
+      // timestamps separate from the historical text, anchors and resolution.
+      const activity = new Map(list.map(c => [c.id, commentThreadActivity(c)]));
+      const live = folded.map(c => ({ ...c, thread_activity: activity.get(c.id) }));
       // Handoff state is derived from the handoff records, not stored on the
       // comment: the comment log stays a log of what people said, and "has
       // this been handed over" is a fact about the handoff, not the comment.
-      const decorated = withHandoffStatus(folded, await loadHandoffs(env, slug));
+      const decorated = withHandoffStatus(live, await loadHandoffs(env, slug));
       return json(V !== 'all' && hostedRegistrationEnabled(env, url.origin)
         ? await withCommentProfileLinks(env, decorated) : decorated);
     }

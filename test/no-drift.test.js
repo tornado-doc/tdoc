@@ -52,6 +52,10 @@ const githubOauth = require(path.join(root, 'shared/github-oauth.js'));
 
 console.log('no-drift (duplicated helper guard)');
 
+t('live thread activity agrees across local and published readers', () => {
+  assert(norm(fnBody(worker, 'commentThreadActivity')) === norm(fnBody(server, 'commentThreadActivity')), 'comment activity helpers drifted');
+});
+
 t('GITHUB_CLIENT_ID has a single SoT (shared/github-oauth.js)', () => {
   const id = githubOauth.GITHUB_CLIENT_ID;
   assert(typeof id === 'string' && /^Ov[\w]+$/.test(id), `bad SoT client id: ${id}`);

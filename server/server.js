@@ -1126,6 +1126,23 @@ function readCommentFile(file) {
   return Array.isArray(v) ? v : [];
 }
 
+// Live reply activity, separate from the document version snapshot.
+function commentThreadActivity(comment) {
+  const activity = { agent_at: null, human_at: null };
+  const replies = [...(Array.isArray(comment.replies) ? comment.replies : []), ...(Array.isArray(comment.events)
+    ? comment.events.filter(e => e && e.kind === 'reply_added' && e.reply).map(e => ({ ...e.reply, created: e.at }))
+    : [])];
+  for (const item of [comment, ...replies]) {
+    if (!item) continue;
+    const agent = item.author?.kind === 'agent' || item.author?.kind === 'system' || (item !== comment && item.agent_status);
+    if (agent && item === comment) continue;
+    const key = agent ? 'agent_at' : 'human_at';
+    const at = Date.parse(item.created || '');
+    if (Number.isFinite(at) && at > (Date.parse(activity[key] || '') || 0)) activity[key] = item.created;
+  }
+  return activity;
+}
+
 // Fold the flat comment list to a per-version SNAPSHOT, matching the worker's
 // event-fold semantics (worker.js snapshotAt): reading a doc "as of version N"
 // shows each comment exactly as it existed then. The local store is a flat
@@ -1932,7 +1949,9 @@ const server = http.createServer(async (req, res) => {
     // serving a row nobody can see or remove (#532). readCommentFile parses
     // fresh, so collapsing in place touches nothing on disk.
     const served = all.filter((c) => collapseLocalTombstones(c));
-    return json(res, 200, ver != null ? foldCommentsAtVersion(served, ver) : served);
+    const activity = new Map(served.map(c => [c.id, commentThreadActivity(c)]));
+    const folded = ver != null ? foldCommentsAtVersion(served, ver) : served;
+    return json(res, 200, folded.map(c => ({ ...c, thread_activity: activity.get(c.id) })));
   }
 
   if (p === '/api/comments' && req.method === 'POST') {
