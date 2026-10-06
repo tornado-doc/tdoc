@@ -58,10 +58,12 @@ const [fixture] = require('./fixtures/tdocs/reply-activity/comments.json');
         await page.screenshot({ path: path.join(shots, `replied-${width}.png`) });
       }
     }
+    await page.setViewportSize({ width: 1440, height: 960 });
     await page.reload();
     await page.getByText('Replied · 1 comment', { exact: true }).waitFor();
     assert(!/is-waiting-handoff/.test(await pin.getAttribute('class')), 'reload cannot revive waiting');
     await page.goto(new URL('/d/reply-activity/v/3?comment=delivery', target.url).href);
+    await page.getByRole('button', { name: '1 reply', exact: true }).click();
     await page.getByText(fixture.replies[0].text, { exact: true }).waitFor();
     assert.equal(await page.frameLocator('iframe[aria-label="Document content"]').locator('[data-tdoc-aid="delivery"]').innerText(), 'Delivery is planned for Monday.');
     assert.deepEqual(errors, []);
