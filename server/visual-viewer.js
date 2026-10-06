@@ -30,6 +30,8 @@
     '.tdoc-visual-toolbar button{font:500 14px/1 system-ui;min-width:36px;height:36px;padding:0 10px;border:1px solid #8886;border-radius:8px;background:transparent;color:inherit;cursor:pointer;}' +
     '.tdoc-visual-toolbar button:focus-visible,.tdoc-visual-open:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
     'html[data-tdoc-visual-open]{overflow:hidden!important;}' +
+    'html[data-tdoc-visual-open] body,html[data-tdoc-visual-open] body *{cursor:auto!important;}' +
+    'html[data-tdoc-visual-open] .tdoc-visual-toolbar button{cursor:pointer!important;}' +
     'html[data-tdoc-theme="dark"][data-tdoc-visual-open]{filter:none!important;}' +
     'html[data-tdoc-visual-open] .tdoc-visual-open{display:none!important;}';
   document.head.appendChild(style);
