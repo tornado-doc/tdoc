@@ -74,6 +74,35 @@ t('the page may report only the actions the funnel knows, and each maps to at mo
   assert(stepOf('') === undefined && stepOf('drop table') === undefined, 'unknown actions are rejected');
 });
 
+t('a person can tick a row themselves, beside the stamps and never as one', () => {
+  const check = lift(worker, 'checkOnboardingStep');
+  const stepOf = lift(worker, 'onboardingActionStep');
+  assert(stepOf('step_checked') === null && stepOf('step_unchecked') === null, 'a tick is logged but stamps no funnel step');
+  const base = { started: 'A', agent_connected: 'A' };
+  const ticked = check(base, 'comment', true, 'T1');
+  assert(ticked.checked.comment === 'T1' && !ticked.commented, 'the tick is the person\'s word, not the server stamp');
+  assert(base.checked === undefined, 'the record is copied, not mutated');
+  assert(check(ticked, 'comment', true, 'T2').checked.comment === 'T1', 'ticking twice keeps the first time');
+  const unticked = check(ticked, 'comment', false, 'T3');
+  assert(!('comment' in unticked.checked) && unticked.agent_connected === 'A', 'unticking takes back only the tick');
+  assert(check(base, 'commented', true, 'T') === null && check(base, '__proto__', true, 'T') === null, 'only the four rows can be ticked');
+  assert(check({ checked: ['x'] }, 'create', true, 'T').checked.create === 'T', 'a malformed map is replaced');
+  for (const host of [worker, read('server/server.js')]) {
+    assert(/action === 'step_checked' \|\| action === 'step_unchecked'/.test(host), 'both hosts write the tick');
+  }
+  const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
+  const src = list.slice(list.indexOf('export function onboardingSteps'), list.indexOf("// Notion's rows carry a thumbnail"));
+  // eslint-disable-next-line no-new-func
+  const steps = new Function(`${src.replace('export ', '')}; return onboardingSteps;`)();
+  const rows = steps({ agent_connected: 'A', checked: { create: 'T', revise: 'T' } }, '/d/x');
+  const by = Object.fromEntries(rows.map((r) => [r.id, r]));
+  assert(by.connect.done && by.connect.auto, 'a stamped row is done by the server');
+  assert(by.create.done && !by.create.auto, 'a ticked row is done by the person');
+  assert(!by.comment.done && !by.comment.locked, 'and the next row opens after it');
+  assert(by.revise.done && !by.revise.auto, 'a row can be ticked out of order');
+  assert(list.includes('disabled={step.auto}'), 'a stamp cannot be unticked from the page');
+});
+
 t('the seed comment anchors to the first paragraph the reader can see', () => {
   const anchorFor = lift(worker, 'seedCommentAnchor');
   const a = anchorFor('<h1>Title</h1><p class="meta">A &amp; B &mdash; <b>bold</b> claim here</p><p>second</p>');

@@ -56,6 +56,16 @@ export function postOnboardingEvent(action, doc) {
   });
 }
 
+// The person's own tick on a checklist row. Kept beside the stamps, not as
+// one: the funnel still reads only what the server saw.
+export function postOnboardingCheck(step, checked) {
+  return request('/api/onboarding/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: checked ? 'step_checked' : 'step_unchecked', step }),
+  });
+}
+
 // What the owner's agent has done to this doc lately: when it last read the
 // comments, and the latest version it published. The bridge-2 card polls this
 // while it waits.

@@ -1857,6 +1857,20 @@ async function isDebugAccount(env, session) {
   return named(raw);
 }
 
+// A person's own word that a checklist row is finished. Detection misses
+// real completions (a skill set up on another machine, a doc made before the
+// journey began), and a row that stays open after the person has done it reads
+// as the product being broken. So the row's tick is theirs to set, kept apart
+// from the step stamps: the funnel is still read off what the server saw, and
+// unticking only takes back the person's word, never a stamp.
+function checkOnboardingStep(record, step, checked, at) {
+  if (!['connect', 'create', 'comment', 'revise'].includes(step)) return null;
+  const out = record && typeof record === 'object' ? { ...record } : {};
+  const marks = out.checked && typeof out.checked === 'object' && !Array.isArray(out.checked) ? { ...out.checked } : {};
+  if (checked) { if (!marks[step]) marks[step] = at; } else delete marks[step];
+  out.checked = marks;
+  return out;
+}
 // Which actions the page may report, and which step (if any) each one stamps.
 // Anything else is rejected: the log is what the funnel is read from, so a
 // page cannot invent a step.
@@ -1870,6 +1884,10 @@ function onboardingActionStep(action) {
     case 'copy_clicked':
     case 'fix_copy_clicked':
     case 'timeout_shown':
+    // Logged like any other action; the tick itself is written by
+    // checkOnboardingStep, beside the stamps rather than as one.
+    case 'step_checked':
+    case 'step_unchecked':
       return null;
     default:
       return undefined;
@@ -10308,6 +10326,15 @@ export default {
       // journey that belongs to somebody.
       if (!accountId && action !== 'waitlist' && action !== 'example_opened') {
         return json({ error: 'sign_in_required' }, { status: 401 });
+      }
+      if (action === 'step_checked' || action === 'step_unchecked') {
+        if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+        const at = new Date().toISOString();
+        const next = checkOnboardingStep(await loadOnboarding(env, accountId), body.step, action === 'step_checked', at);
+        if (!next) return json({ error: 'unknown_step' }, { status: 400 });
+        await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+        await logOnboardingEvent(env, accountId, action, { step: body.step });
+        return json({ ok: true, record: next });
       }
       await logOnboardingEvent(env, accountId, action, doc ? { doc } : null);
       let record = null;
