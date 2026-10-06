@@ -503,8 +503,9 @@
 .onb-card ol { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; }
 .onb-card ol:has(li:only-child) { margin-top: -2px; }
 
+.onb-card li { display: grid; grid-template-columns: 18px 1fr; gap: 12px; align-items: center; }
 .onb-card li a, .onb-card li .onb-row {
-  display: grid; grid-template-columns: 18px 1fr 100px; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: 1fr 100px; gap: 12px; align-items: center;
   /* 4, not 8. One line of text beside a picture four times its height reads as
      a list with holes in it: the air between the labels is the thumbnail's,
      not the row's, so the row should not add more of its own. */
@@ -514,7 +515,7 @@
 .onb-label { font-size: 14px; line-height: 1.5; }
 @media (max-width: 480px) {
   .onb-card { padding: 16px; }
-  .onb-card li a, .onb-card li .onb-row { gap: 8px; }
+  .onb-card li, .onb-card li a, .onb-card li .onb-row { gap: 8px; }
 }
 .onb-card li a .onb-label { color: var(--td-accent, #1652f0); }
 .onb-card li.done .onb-label { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
@@ -523,10 +524,23 @@
    itself. Both lines, together. */
 .onb-card li.done a:hover .onb-label { text-decoration: line-through underline; }
 .onb-tick {
-  width: 18px; height: 18px; border-radius: 50%;
+  width: 18px; height: 18px; border-radius: 50%; padding: 0; box-sizing: border-box;
   border: 1px solid var(--td-line, #e8e7e3); background: #fff;
-  display: flex; align-items: center; justify-content: center; color: #fff;
+  display: flex; align-items: center; justify-content: center; color: transparent;
+  cursor: pointer; transition: border-color .12s, color .12s, background .12s;
 }
+/* The tick is the person's to set: an open one answers the pointer with a
+   ghost of the check it would become, so it reads as a box, not a bullet. */
+.onb-tick:not(:disabled):hover { border-color: var(--td-accent, #1652f0); color: var(--td-accent, #1652f0); }
+/* An 18px circle is a fine mark and a poor target; the hit area reaches
+   12px past it on every side, 42px in all, without moving the row. */
+.onb-tick { position: relative; }
+.onb-tick::after { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
+.onb-tick:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
+/* One the server saw finished has nothing of theirs to take back. */
+.onb-tick:disabled { cursor: default; }
+.onb-card li.done .onb-tick { color: #fff; }
+.onb-card li.done .onb-tick:not(:disabled):hover { background: var(--td-accent-hover, #1245d0); border-color: var(--td-accent-hover, #1245d0); color: #fff; }
 .onb-card li.done .onb-tick { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); }
 /* A row whose turn has not come is shown and not offered. Nothing is hidden —
    the whole shape should be legible on the first arrival — but nothing about

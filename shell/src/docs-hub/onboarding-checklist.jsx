@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, ChevronDown, X } from 'lucide-react';
 import { AgentMarks } from '../agent-marks.jsx';
+import { postOnboardingCheck } from '../document/api.js';
 
 // The onboarding, after setup. Four things, rendered from the record's own
 // timestamps rather than a second set of counters.
@@ -60,10 +61,17 @@ export function onboardingSteps(record, firstDocHref) {
     { id: 'comment', label: 'Comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref && `${firstDocHref}?step=comment` },
     { id: 'revise', label: 'Ask your agent to fix comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
   ];
+  // The stamps above are what the server saw. Detection misses real
+  // completions -- a skill set up on another machine, a doc made before the
+  // journey began -- so the person can tick a row themselves, and their word
+  // counts as done. `auto` says which kind: only their own tick can be undone.
+  const marks = r.checked && typeof r.checked === 'object' ? r.checked : {};
   // Locked until everything above it is done. The first unfinished row is the
   // only one anybody can act on.
   let reached = true;
-  return steps.map((step) => {
+  return steps.map((raw) => {
+    const auto = raw.done;
+    const step = { ...raw, auto, done: auto || Boolean(marks[raw.id]) };
     // A row is out of reach either because its turn has not come, or because
     // the doc it stands on is gone. Deleting the journey's doc used to leave
     // row 4 in full ink with no href: it read as the next thing to do and did
@@ -136,7 +144,11 @@ function Thumb({ id, title }) {
   );
 }
 
-export function OnboardingChecklist({ record, docs }) {
+export function OnboardingChecklist({ record: initial, docs }) {
+  // The record is the page's until the person ticks a row; then it is the
+  // server's answer to that tick.
+  const [record, setRecord] = useState(initial);
+  useEffect(() => { setRecord(initial); }, [initial]);
   const [collapsed, setCollapsed] = useState(stored);
   const [open, setOpen] = useState(storedOpen);
   // Only link to the doc while it is still in their list: a seeded doc they
@@ -170,6 +182,16 @@ export function OnboardingChecklist({ record, docs }) {
   if (!walking || done === steps.length) return null;
 
   const toggle = (next) => { setCollapsed(next); remember(next); };
+  // Optimistic: the tick lands at once, and goes back if the server refuses.
+  const check = (step, checked) => {
+    const prior = record;
+    const marks = { ...((prior && prior.checked) || {}) };
+    if (checked) marks[step.id] = new Date().toISOString(); else delete marks[step.id];
+    setRecord({ ...(prior || {}), checked: marks });
+    postOnboardingCheck(step.id, checked)
+      .then((res) => { if (res && res.record) setRecord(res.record); })
+      .catch(() => setRecord(prior));
+  };
   const setOpenState = (next) => { setOpen(next); rememberOpen(next); };
   // There is only ever one thing to do. Finished steps need no room and
   // unreached ones need none yet, so at rest the card carries the next step
@@ -219,13 +241,27 @@ export function OnboardingChecklist({ record, docs }) {
         {(open ? steps : [next]).map((step) => {
           const body = (
             <>
-              <span className="onb-tick">{step.done ? <Check size={12} strokeWidth={3} /> : null}</span>
               <span className="onb-label">{step.label}</span>
               <Thumb id={step.id} title={firstDoc?.title} />
             </>
           );
+          // The tick is the person's, outside the link so ticking never
+          // navigates. A row the server saw finished stays finished: there is
+          // nothing of theirs to take back.
           return (
             <li key={step.id} className={step.done ? 'done' : step.locked ? 'locked' : ''}>
+              <button
+                type="button"
+                role="checkbox"
+                className="onb-tick"
+                aria-checked={step.done}
+                aria-label={step.auto ? `${step.label}: done` : step.done ? `Mark "${step.label}" not done` : `Mark "${step.label}" done`}
+                title={step.auto ? 'Done' : step.done ? 'Mark not done' : 'Mark done'}
+                disabled={step.auto}
+                onClick={() => check(step, !step.done)}
+              >
+                <Check size={12} strokeWidth={3} />
+              </button>
               {/* A finished row still goes somewhere, and where it goes is still
                   worth going: row 1 is how you connect a second machine, row 2
                   is how you make another doc -- the page it opens was built

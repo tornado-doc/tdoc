@@ -46,6 +46,20 @@ function stampOnboarding(record, step, at, extra) {
   }
   return out;
 }
+// A person's own word that a checklist row is finished. Detection misses
+// real completions (a skill set up on another machine, a doc made before the
+// journey began), and a row that stays open after the person has done it reads
+// as the product being broken. So the row's tick is theirs to set, kept apart
+// from the step stamps: the funnel is still read off what the server saw, and
+// unticking only takes back the person's word, never a stamp.
+function checkOnboardingStep(record, step, checked, at) {
+  if (!['connect', 'create', 'comment', 'revise'].includes(step)) return null;
+  const out = record && typeof record === 'object' ? { ...record } : {};
+  const marks = out.checked && typeof out.checked === 'object' && !Array.isArray(out.checked) ? { ...out.checked } : {};
+  if (checked) { if (!marks[step]) marks[step] = at; } else delete marks[step];
+  out.checked = marks;
+  return out;
+}
 // Which actions the page may report, and which step (if any) each one stamps.
 // Anything else is rejected: the log is what the funnel is read from, so a
 // page cannot invent a step.
@@ -59,6 +73,10 @@ function onboardingActionStep(action) {
     case 'copy_clicked':
     case 'fix_copy_clicked':
     case 'timeout_shown':
+    // Logged like any other action; the tick itself is written by
+    // checkOnboardingStep, beside the stamps rather than as one.
+    case 'step_checked':
+    case 'step_unchecked':
       return null;
     default:
       return undefined;
@@ -1874,6 +1892,15 @@ const server = http.createServer(async (req, res) => {
     const action = typeof body.action === 'string' ? body.action : '';
     const step = onboardingActionStep(action);
     if (step === undefined) return json(res, 400, { error: 'unknown_action' });
+    if (action === 'step_checked' || action === 'step_unchecked') {
+      const all = loadOnboardingLocal();
+      const next = checkOnboardingStep(all.record || {}, body.step, action === 'step_checked', new Date().toISOString());
+      if (!next) return json(res, 400, { error: 'unknown_step' });
+      all.record = next;
+      writeJson(ONBOARDING_FILE, all);
+      logOnboardingEventLocal(action, { step: body.step });
+      return json(res, 200, { ok: true, record: next });
+    }
     const doc = safeSlug(body.doc);
     logOnboardingEventLocal(action, doc ? { doc } : null);
     const record = step
