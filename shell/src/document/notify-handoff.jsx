@@ -65,13 +65,13 @@ function recipientPrimary(t) {
 }
 
 // One line per agent in the recipient dropdown: who, where, and why it is the
-// preselected one (last worked on this doc, or the account default).
+// preselected one (this doc's agent, or the account default).
 function recipientOptionLabel(t, preselected) {
   const { label } = providerMeta(t);
   const who = readableHandle(t) || `${label} agent`;
   const where = t.provider === 'raft' && t.server_slug ? ` · ${t.server_slug}` : (t.provider === 'raft' ? '' : ` · ${label}`);
   const why = sameTarget(t, preselected)
-    ? (t.source === 'doc' ? ' (last worked on this doc)' : ' (default)')
+    ? (t.source === 'doc' ? " (this doc's agent)" : ' (default)')
     : '';
   return `${who}${where}${why}`;
 }
