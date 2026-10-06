@@ -316,6 +316,8 @@ button.tdoc-pin {
 .ui-select-item { overflow: hidden; text-overflow: ellipsis; }
 .ui-select-item[data-selected] { color: var(--td-accent); font-weight: 600; }
 
+.tdoc-modal .status.tdoc-notify-error, .tdoc-notify-error { color: var(--td-danger); }
+
 /* Choosing an agent (RaftFallbackForm). Here, not docs-hub.css, because the
    form also renders in the document's Send to agent dialog and the feedback
    overlay, which load only chrome.css and ui.css. */
@@ -325,7 +327,7 @@ button.tdoc-pin {
 .tdoc-conn-pick { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
 .tdoc-conn-pick > label { flex: 1 1 160px; min-width: 0; display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--td-muted); }
 .tdoc-conn-pick > button { flex: none; height: 34px; }
-.tdoc-conn-pick > .status { flex-basis: 100%; margin: 0; }
+.tdoc-conn-pick > .status, .tdoc-conn-pick > .tdoc-conn-pick-note { flex-basis: 100%; margin: 0; }
 .tdoc-conn-pick input { font: 400 14px/1.2 inherit; height: 34px; padding: 0 10px; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
 .tdoc-conn-pick .tdoc-select { height: 34px; padding-top: 0; padding-bottom: 0; font-size: 14px; font-weight: 400; color: var(--td-ink); border-color: var(--td-line); }
 .tdoc-conn-pick--card { padding-left: 52px; max-width: 572px; box-sizing: border-box; }

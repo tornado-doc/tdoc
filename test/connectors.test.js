@@ -288,6 +288,11 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     const handoffs = await (await worker.fetch(req('/api/notify/handoffs?slug=cdoc', { cookie: ctx.owner.cookie }), ctx.env, {})).json();
     const to = handoffs.handoffs[0] && handoffs.handoffs[0].recipient;
     assert(to && to.agent_sub === 'agent-a', `sent to ${JSON.stringify(to)}`);
+    // Picking alpha for this doc makes alpha the doc's agent: the next
+    // @agent and Send to agent go to alpha, not back to beta.
+    const after = await targetsOf(ctx);
+    assert(after.default && after.default.agent_sub === 'agent-a' && after.default.source === 'doc', `the pick did not stick: ${JSON.stringify(after.default)}`);
+    assert(after.candidates.some((c) => c.agent_sub === 'agent-b'), 'beta is still offered');
   });
 
   await t('choosing a known agent as default keeps its identity instead of minting a handle-only one', async () => {
@@ -392,7 +397,9 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
       const asked = raftCalls.filter((x) => x.path === '/api/oauth/requests/agent').pop();
       assert(asked && JSON.parse(asked.body).agentName === 'beta', `delivered by handle: ${asked && asked.body}`);
       const after = await (await worker.fetch(req('/api/notify/targets?slug=fdoc', { cookie: owner.cookie }), env, {})).json();
-      assert(after.default && after.default.agent_sub === 'id-beta' && after.default.source === 'account', JSON.stringify(after.default));
+      assert(after.default && after.default.agent_sub === 'id-beta', JSON.stringify(after.default));
+      const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+      assert(list.default && list.default.agent_sub === 'id-beta', `not the account default: ${JSON.stringify(list.default)}`);
       assert(after.candidates.some((t) => t.agent_sub === 'id-alpha') && !after.candidates.some((t) => t.agent_sub === 'id-beta'), JSON.stringify(after.candidates));
     } finally { directory = null; }
   });
