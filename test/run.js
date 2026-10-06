@@ -124,6 +124,7 @@ const BROWSER = [
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
+  'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
 ];
 
 // Existing opt-in UI suites; --all retains their broader coverage.

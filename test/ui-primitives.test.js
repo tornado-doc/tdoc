@@ -52,6 +52,15 @@ t('AppSelect draws its open list with the menu popup, above dialogs', () => {
   assert(z && Number(z[1]) > 1000001, 'the select list must stack above dialogs (z-index > 1000001)');
 });
 
+t('no `font: <size>/<lh> inherit` shorthand in shared sheets (it is invalid, so the whole rule is dropped)', () => {
+  // `inherit` cannot stand in for the family inside the shorthand; browsers
+  // discard the declaration and the control falls back to the UA font.
+  for (const file of ['shell/src/ui/ui.css', 'shell/src/docs-hub.css']) {
+    const bad = fs.readFileSync(path.join(ROOT, file), 'utf8').match(/font:\s*[^;]*\/[^;]*\binherit\s*;/g);
+    assert(!bad, `${file}: ${bad && bad.join(' | ')} — write font-family: inherit plus size/weight/line-height`);
+  }
+});
+
 t('shared form styles live where every surface loads them', () => {
   // The feedback overlay loads only chrome.css and ui.css.
   const ui = fs.readFileSync(path.join(ROOT, 'shell/src/ui/ui.css'), 'utf8');
