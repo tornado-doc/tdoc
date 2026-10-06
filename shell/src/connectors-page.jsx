@@ -117,7 +117,7 @@ export function ConnectorsBody() {
           <div className="tdoc-connectors">
             {connectors.map((c) => {
               const isRaft = c.kind === 'raft';
-              const sample = isRaft ? (c.agents || [])[0] : c.target;
+              const sample = isRaft ? (defaultOn(c) || (c.agents || [])[0]) : c.target;
               const title = isRaft ? `Raft · ${c.server_slug || 'server'}` : (readableHandle(c.target) || 'Webhook');
               return (
                 <section key={c.id} className="tdoc-connector tdoc-conn-card">

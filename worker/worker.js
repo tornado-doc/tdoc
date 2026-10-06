@@ -2666,14 +2666,33 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
 const RAFT_LINK_TTL = 600;
 const AGENT_SESSION_TTL = 60 * 60 * 24 * 30;
 
+// The document that opened the Connect popup cannot rely on the popup to
+// report back: Raft's authorize page sends Cross-Origin-Opener-Policy:
+// same-origin, so once the popup visits Raft the opener link is severed
+// (window.opener is null in the popup, and popup.closed reads true in the
+// document within a second, long before the person has signed in).
+// The document therefore polls this record, keyed by an id it chose, and the
+// popup's own message is only a hint to poll sooner.
+const RAFT_CONNECT_ATTEMPT_RE = /^[a-f0-9]{16,64}$/;
+async function setRaftConnectAttempt(env, attempt, accountId, status, extra = {}) {
+  if (!attempt || !accountId || !RAFT_CONNECT_ATTEMPT_RE.test(attempt)) return;
+  await env.META.put(`raft-connect-attempt:${attempt}`, JSON.stringify({ account_id: accountId, status, ...extra, at: new Date().toISOString() }), { expirationTtl: 900 });
+}
+async function failRaftConnect(env, state, message) {
+  if (!state) return;
+  let started = null;
+  try { started = JSON.parse((await env.META.get(`raft-connect:${state}`)) || 'null'); } catch {}
+  if (started && started.attempt) await setRaftConnectAttempt(env, started.attempt, started.account_id, 'failed', { message });
+}
+
 function raftConnectPopupResponse(clearState) {
   const nonce = rand(16);
   return html(`<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Raft connected · tdoc</title>
 <style>body{font:15px/1.5 system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;color:#111;background:#fafafa}.box{max-width:360px;margin:24px;padding:28px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;text-align:center}h1{font-size:19px;margin:0 0 8px}p{margin:0;color:#555}</style>
-</head><body><div class="box"><h1>Raft connected</h1><p>Returning to your document…</p></div>
-<script nonce="${nonce}">if(window.opener){window.opener.postMessage({type:'tdoc:raft-connected'},'*');setTimeout(function(){window.close()},120)};</script>
+</head><body><div class="box"><h1>Raft connected</h1><p>Your document has been updated. You can close this window.</p></div>
+<script nonce="${nonce}">try{window.opener&&window.opener.postMessage({type:'tdoc:raft-connected'},'*')}catch(e){}try{new BroadcastChannel('tdoc-raft-connect').postMessage({type:'tdoc:raft-connected'})}catch(e){}setTimeout(function(){window.close()},400);</script>
 </body></html>`, {
     headers: {
       'Content-Security-Policy': cspHeader(nonce),
@@ -2692,22 +2711,34 @@ async function completeRaftConnect(env, req, { pending, tok, ret, clearState }) 
   try { started = JSON.parse(pending); } catch {}
   const session = await getSession(env, req);
   const accountId = session && !session.feedback ? await sessionAccountId(env, session) : null;
+  const attempt = started && started.attempt;
   if (!started || !accountId || started.account_id !== accountId) {
-    return authStatusResponse('This Raft connection was started from a different tdoc session. Return to tdoc and start it again.', { error: true, status: 403 });
+    const message = 'This Raft connection was started from a different tdoc session. Return to tdoc and start it again.';
+    if (started) await setRaftConnectAttempt(env, attempt, started.account_id, 'failed', { message });
+    return authStatusResponse(message, { error: true, status: 403 });
   }
   const server = await raftServerInfo(env, tok && tok.access_token);
   if (!server || !server.id) {
-    return authStatusResponse('Raft did not say which server you are on, so nothing was connected.', { error: true, status: 502 });
+    const message = 'Raft did not say which server you are on, so nothing was connected.';
+    await setRaftConnectAttempt(env, attempt, accountId, 'failed', { message });
+    return authStatusResponse(message, { error: true, status: 502 });
   }
+  // Which installation of the tdoc App this server has, when Raft says so:
+  // it is what unlocks the server's agent directory (raftDirectoryAgents).
+  const installationId = String((tok && tok.installation_id) || server.installation_id || '');
   let list = [];
   try { list = JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]'); } catch {}
-  list = [{ server_id: String(server.id), server_slug: String(server.slug || ''), name: String(server.name || ''), connected_at: new Date().toISOString() },
-    ...list.filter((sv) => sv && sv.server_id !== String(server.id))].slice(0, 20);
+  const prevServer = list.find((sv) => sv && sv.server_id === String(server.id));
+  list = [{
+    server_id: String(server.id), server_slug: String(server.slug || ''), name: String(server.name || ''), connected_at: new Date().toISOString(),
+    ...((installationId || (prevServer && prevServer.installation_id)) ? { installation_id: installationId || prevServer.installation_id } : {}),
+  }, ...list.filter((sv) => sv && sv.server_id !== String(server.id))].slice(0, 20);
   await env.META.put(`account-raft-servers:${accountId}`, JSON.stringify(list));
   const removed = await accountRemovedTargets(env, accountId);
   if (removed.delete(`raft-server:${server.id}`)) {
     await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed]));
   }
+  await setRaftConnectAttempt(env, attempt, accountId, 'connected', { server_slug: String(server.slug || '') });
   if (started.popup) return raftConnectPopupResponse(clearState);
   return redirectTo(`${ret && ret.startsWith('/me/agents') ? ret : '/me/agents?tab=send'}&connected=raft`, [clearState]);
 }
@@ -7123,6 +7154,107 @@ function raftAuthHeaders(env) {
   return { 'Content-Type': 'application/json', Authorization: `Basic ${basic}` };
 }
 
+// ─────────────────────── a server's agent directory ───────────────────────
+//
+// Which agents a connected Raft server has, so a person picks from a list
+// instead of typing a handle. This is the tdoc App's own read ("Agent"
+// permission, approved by the server's installation of the App): the backend
+// trades its client credentials for an installation token and lists
+// /api/app-installation/agents. No person's or agent's login is involved.
+//
+// The server is the trust boundary (accountRaftServers): its owner connected
+// it, so every agent on it is already one this account may hand work to.
+// Until the permission is approved — or for a server whose installation tdoc
+// does not know — the list is empty and the panel falls back to the agents
+// tdoc has seen plus a typed handle. Never an error a person has to read.
+const RAFT_DIRECTORY_TTL = 300;
+function raftInstallationId(env, server) {
+  if (server && server.installation_id) return String(server.installation_id);
+  // Installations Raft has not reported per connect (the App owner's own
+  // server, before Raft hands the id over): { "<server id or slug>": "<installation id>" }.
+  try {
+    const map = JSON.parse(env.RAFT_INSTALLATION_IDS || '{}');
+    return String(map[server.server_id] || map[server.server_slug] || '');
+  } catch { return ''; }
+}
+async function raftInstallationToken(env, installationId) {
+  const key = `raft-installation-token:${installationId}`;
+  const cached = await env.META.get(key);
+  if (cached) return cached;
+  const base = env.RAFT_API_BASE || 'https://api.raft.build';
+  const r = await fetch(`${base}/api/oauth/installation-token`, {
+    method: 'POST',
+    headers: raftAuthHeaders(env),
+    body: JSON.stringify({ installation_id: installationId, groups: ['agent'] }),
+  });
+  if (!r.ok) return null;
+  const b = await r.json().catch(() => null);
+  if (!b || !b.access_token) return null;
+  const ttl = Math.max(60, Math.min(Number(b.expires_in) || 600, 3600) - 60);
+  await env.META.put(key, b.access_token, { expirationTtl: ttl });
+  return b.access_token;
+}
+async function raftDirectoryAgents(env, server) {
+  if (!env.RAFT_CLIENT_ID || !env.RAFT_CLIENT_SECRET || !server || !server.server_id) return [];
+  const installationId = raftInstallationId(env, server);
+  if (!installationId) return [];
+  const cacheKey = `raft-directory:${server.server_id}`;
+  try {
+    const cached = await env.META.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch {}
+  let agents = [];
+  try {
+    const token = await raftInstallationToken(env, installationId);
+    if (token) {
+      const base = env.RAFT_API_BASE || 'https://api.raft.build';
+      const r = await fetch(`${base}/api/app-installation/agents`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'tdoc-worker' },
+      });
+      const b = r.ok ? await r.json().catch(() => null) : null;
+      agents = (Array.isArray(b && b.agents) ? b.agents : [])
+        .map((a) => normalizeNotifyTarget({
+          provider: 'raft',
+          server_id: server.server_id,
+          server_slug: server.server_slug || '',
+          // Delivery addresses an agent by handle; the id is the stable key.
+          agent_sub: typeof a.id === 'string' ? a.id : '',
+          agent_name: typeof a.handle === 'string' ? a.handle.replace(/^@/, '') : '',
+        }))
+        .filter((t) => t && t.agent_name)
+        .slice(0, 200);
+    }
+  } catch {}
+  // A short negative cache too: a server whose permission is still in review
+  // should not cost a token exchange on every panel open.
+  await env.META.put(cacheKey, JSON.stringify(agents), { expirationTtl: agents.length ? RAFT_DIRECTORY_TTL : 60 });
+  return agents;
+}
+// Same agent, whichever way tdoc learned of it: by its stable id, or by
+// handle (a typed default is stored handle-only).
+function sameRaftAgent(a, b) {
+  if (!a || !b || a.provider !== 'raft' || b.provider !== 'raft' || a.server_id !== b.server_id) return false;
+  if (a.agent_sub === b.agent_sub) return true;
+  const an = String(a.agent_name || '').toLowerCase();
+  return !!an && an === String(b.agent_name || '').toLowerCase();
+}
+// Directory agents on the account's connected servers that are not already
+// in `known`, tagged so the UI can tell them from agents that did work.
+async function accountDirectoryAgents(env, accountId, known = [], servers = null) {
+  if (!accountId) return [];
+  const list = servers || await accountRaftServers(env, accountId);
+  const removed = await accountRemovedTargets(env, accountId);
+  const out = [];
+  for (const sv of list) {
+    for (const t of await raftDirectoryAgents(env, sv)) {
+      if (removed.has(notifyKey(t))) continue;
+      if ([...known, ...out].some((k) => sameRaftAgent(k, t))) continue;
+      out.push({ ...t, source: 'directory' });
+    }
+  }
+  return out;
+}
+
 // ─────────────────────── who follows this doc ───────────────────────
 //
 // The list is not hand-maintained. An agent writes itself in whenever it
@@ -7269,7 +7401,7 @@ async function accountRaftServers(env, accountId) {
   for (const id of group.ids) {
     try {
       for (const sv of JSON.parse((await env.META.get(`account-raft-servers:${id}`)) || '[]')) {
-        if (sv && sv.server_id) byId.set(sv.server_id, { server_id: sv.server_id, server_slug: sv.server_slug || '' });
+        if (sv && sv.server_id) byId.set(sv.server_id, { server_id: sv.server_id, server_slug: sv.server_slug || '', ...(sv.installation_id ? { installation_id: sv.installation_id } : {}) });
       }
     } catch {}
   }
@@ -7293,6 +7425,11 @@ async function resolveNotifyTargets(env, slug) {
     .sort(byRecency);
   const fallbackList = await accountNotifyTargets(env, ownerAccount);
   const fallback = fallbackList[0] || null;
+  const servers = await accountRaftServers(env, ownerAccount);
+  // Then every other agent on the account's connected servers, from Raft's
+  // directory, so the dropdown is the whole server and not only the agents
+  // that happened to work with tdoc already.
+  const directory = await accountDirectoryAgents(env, ownerAccount, [...docTargets, ...fallbackList], servers);
   if (docTargets.length) {
     // The doc's last-touched agent is preselected, but the person may send
     // to any of their agents: the doc's others first, then the account's.
@@ -7302,6 +7439,7 @@ async function resolveNotifyTargets(env, slug) {
       candidates: [
         ...docTargets.slice(1).map(t => ({ ...t, source: 'doc' })),
         ...accountOnly.map(t => ({ ...t, source: 'account' })),
+        ...directory,
       ],
       fallback,
       reason: null,
@@ -7320,10 +7458,14 @@ async function resolveNotifyTargets(env, slug) {
   // Raft delivers by handle, and a server is not one. It is reported so the
   // panel can ask which agent instead of offering Connect with Raft again to
   // someone who already did.
-  const raftServers = fallback ? [] : await accountRaftServers(env, ownerAccount);
+  //
+  // With no default yet, directory agents are still offered: nothing is
+  // preselected for @agent, but Send to agent can pick one, and that pick
+  // becomes the account default (see /api/notify/handoff).
+  const raftServers = fallback ? [] : servers.map((sv) => ({ server_id: sv.server_id, server_slug: sv.server_slug }));
   return {
     default: fallback ? { ...fallback, source: 'account' } : null,
-    candidates: fallbackList.slice(1).map(t => ({ ...t, source: 'account' })),
+    candidates: [...fallbackList.slice(1).map(t => ({ ...t, source: 'account' })), ...directory],
     fallback,
     reason: fallback ? null : 'no_agent_bound',
     ...(raftServers.length ? { raft_servers: raftServers } : {}),
@@ -9412,7 +9554,11 @@ export default {
       // userinfo check below then insists the identity really is an agent —
       // otherwise this would be a CSRF-able login for humans.
       const stateless = !state && !cookieState && cfg.statelessAgents;
+      // A Connect with Raft popup the person cancelled or that failed here
+      // has to say so to the document waiting on it, or it waits forever.
+      const raftConnectFailed = (message) => (cfg.id === 'raft' ? failRaftConnect(env, state, message) : null);
       if (!code || (!stateless && (!state || !cookieState || cookieState[1] !== state))) {
+        await raftConnectFailed(url.searchParams.get('error') === 'access_denied' ? 'Raft sign-in was cancelled.' : 'Raft sign-in could not be verified. Try again.');
         return authStatusResponse('Sign-in could not be verified (state mismatch). Please try again.', { error: true, status: 400 });
       }
       let ret = '/';
@@ -9435,6 +9581,7 @@ export default {
         });
         const tok = await tr.json().catch(() => null);
         if (!tr.ok || !tok || !tok.access_token) {
+          await raftConnectFailed('Raft did not complete the sign-in. Try again.');
           return authStatusResponse('Sign-in failed: ' + ((tok && (tok.error_description || tok.error)) || `token exchange ${tr.status}`), { error: true, status: 400 });
         }
         // userinfo over TLS from the issuer we were configured with — the
@@ -9459,6 +9606,7 @@ export default {
         }
         return await cfg.complete(env, { user, tok, disc, ret, stateless, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
       } catch (e) {
+        await raftConnectFailed('Could not reach Raft. Try again.');
         return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
       }
     }
@@ -10585,10 +10733,13 @@ export default {
         if (!cfg) return redirectTo('/me/agents?tab=send&error=raft_not_configured');
         const nonce = rand(16);
         await env.META.put(`oauthstate:${cfg.id}:${nonce}`, '/me/agents?tab=send', { expirationTtl: 600 });
+        const attempt = String(url.searchParams.get('attempt') || '');
         await env.META.put(`raft-connect:${nonce}`, JSON.stringify({
           account_id: accountId,
           popup: url.searchParams.get('popup') === '1',
+          ...(RAFT_CONNECT_ATTEMPT_RE.test(attempt) ? { attempt } : {}),
         }), { expirationTtl: 600 });
+        await setRaftConnectAttempt(env, attempt, accountId, 'waiting');
         let auth;
         try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
         catch (e) { return redirectTo('/me/agents?tab=send&error=raft_unreachable'); }
@@ -10598,6 +10749,17 @@ export default {
         auth.searchParams.set('scope', cfg.scope);
         auth.searchParams.set('state', nonce);
         return redirectTo(auth.toString(), [`${cfg.stateCookie}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`]);
+      }
+      if (p === '/api/me/connectors/raft/attempt' && method === 'GET') {
+        // How a Connect with Raft popup is going, for the document that
+        // opened it. Only the account that started it can read it.
+        const id = String(url.searchParams.get('id') || '');
+        let rec = null;
+        if (RAFT_CONNECT_ATTEMPT_RE.test(id)) {
+          try { rec = JSON.parse((await env.META.get(`raft-connect-attempt:${id}`)) || 'null'); } catch {}
+        }
+        if (!rec || rec.account_id !== accountId) return json({ status: 'unknown' }, { headers: { 'Cache-Control': 'no-store' } });
+        return json({ status: rec.status, message: rec.message || '', server_slug: rec.server_slug || '' }, { headers: { 'Cache-Control': 'no-store' } });
       }
       if (p === '/api/me/connectors/raft/default' && method === 'POST') {
         // Which agent on a connected server gets comments on docs no agent
@@ -10614,6 +10776,18 @@ export default {
           await env.META.put(listKey, JSON.stringify([{ ...known, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX)));
           return json({ ok: true, target: known });
         }
+        // An agent from the server's Raft directory: stored with its id, and
+        // it replaces a handle-only record for the same handle.
+        const listed = body.agent_sub
+          ? (await raftDirectoryAgents(env, server)).find((t) => t.agent_sub === body.agent_sub)
+          : null;
+        if (listed) {
+          const rest = current.filter((t) => !sameRaftAgent(t, listed));
+          await env.META.put(listKey, JSON.stringify([{ ...listed, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX)));
+          const removed = await accountRemovedTargets(env, accountId);
+          if (removed.delete(notifyKey(listed))) await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed]));
+          return json({ ok: true, target: listed });
+        }
         const name = String(body.agent_name || '').trim().replace(/^@/, '');
         if (!name || name.length > 80 || /[\u0000-\u001f\u007f\s]/.test(name)) return json({ error: 'invalid_agent_name' }, { status: 400 });
         const target = normalizeNotifyTarget({ provider: 'raft', server_id: server.server_id, server_slug: server.server_slug, agent_sub: `@${name}`, agent_name: name });
@@ -10625,10 +10799,15 @@ export default {
         // One row per connector: a Raft server (with the agents tdoc knows on
         // it) or a webhook. The first agent overall is the account default.
         const servers = await accountRaftServers(env, accountId);
+        const directory = await accountDirectoryAgents(env, accountId, current, servers);
         const connectors = [
           ...servers.map((sv) => ({
             kind: 'raft', id: `raft:${sv.server_id}`, server_id: sv.server_id, server_slug: sv.server_slug,
-            agents: current.filter((t) => t.provider === 'raft' && t.server_id === sv.server_id),
+            // Agents that worked with tdoc first, then the rest of the server.
+            agents: [
+              ...current.filter((t) => t.provider === 'raft' && t.server_id === sv.server_id),
+              ...directory.filter((t) => t.server_id === sv.server_id),
+            ],
           })),
           ...current.filter((t) => t.provider === 'webhook').map((t) => ({ kind: 'webhook', id: `webhook:${t.agent_sub}`, target: t })),
         ];
@@ -10659,7 +10838,9 @@ export default {
         return json({ ok: true, target, secret });
       }
       if (p === '/api/me/connectors/test' && method === 'POST') {
-        const target = find();
+        const target = find() || (body.provider === 'raft'
+          ? (await accountDirectoryAgents(env, accountId, current)).find((t) => t.server_id === body.server_id && t.agent_sub === body.agent_sub)
+          : null);
         if (!target) return json({ error: 'not_found' }, { status: 404 });
         const event = {
           kind: 'notification',
@@ -10806,6 +10987,13 @@ export default {
         recipient: target, publicHost: env.PUBLIC_HOST,
         by: gate.meta && gate.meta.workspace_id && gate.session ? gate.session.account_id : null,
       });
+      // The first agent a person picks, when they had no default yet, is
+      // their default from now on — so @agent has somewhere to go next time.
+      const ownerAccount = gate.meta && gate.meta.hosted && gate.meta.hosted.account_id;
+      if (!resolved.default && target && ownerAccount && rec.delivery && rec.delivery.status !== 'failed'
+        && offered.some((t) => sameNotifyTarget(t, target))) {
+        await touchAccountAgent(env, ownerAccount, target);
+      }
       return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(skipped.length ? { skipped } : {}) });
     }
 

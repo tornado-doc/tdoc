@@ -8,6 +8,7 @@ import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import {
+  getRaftConnectAttempt,
   hasAccountSession,
   listNotifyHandoffs,
   listNotifyTargets,
@@ -157,50 +158,121 @@ export const AGENT_CONNECTORS = [
 // one. Shared by the dialog and the Agents page, so both browse the same list.
 // The one way to start a Raft connection, wherever it is offered: Raft's
 // mark on Raft's black, so it reads as "sign in with Raft" at a glance.
-export function RaftConnectButton({ label = 'Connect with Raft', onConnected = null }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+//
+// With `onConnected` it runs in a popup and keeps this dialog's state live:
+// waiting while the popup is open, then connected or failed, with no reload.
+// The popup cannot be trusted to report back — Raft's sign-in page severs the
+// opener (Cross-Origin-Opener-Policy), which also makes popup.closed read true
+// at once — so the dialog polls the attempt it started (worker
+// /api/me/connectors/raft/attempt) and, where that is out of reach (the
+// feedback overlay has no account session), the caller's `isConnected`.
+const RAFT_CONNECT_POLL_MS = 1500;
+const RAFT_CONNECT_TIMEOUT_MS = 10 * 60 * 1000;
+function newAttemptId() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+export function RaftConnectButton({ label = 'Connect with Raft', onConnected = null, isConnected = null }) {
+  const [phase, setPhase] = useState('idle');
+  const [message, setMessage] = useState('');
+  const stopRef = React.useRef(null);
+  useEffect(() => () => { if (stopRef.current) stopRef.current(); }, []);
   const connect = (event) => {
     if (!onConnected) return;
     event.preventDefault();
-    if (busy) return;
-    setError('');
+    if (phase === 'waiting') return;
+    const attempt = newAttemptId();
     const popup = window.open(
-      tdocUrl('/api/me/connectors/raft/start?popup=1'),
+      tdocUrl(`/api/me/connectors/raft/start?popup=1&attempt=${attempt}`),
       'tdoc-raft-connect',
       'popup,width=560,height=720,resizable=yes,scrollbars=yes',
     );
     if (!popup) {
-      setError('Allow the Raft sign-in popup, then try again.');
+      setPhase('failed');
+      setMessage('Your browser blocked the Raft sign-in window. Allow popups for tdoc, then try again.');
       return;
     }
-    setBusy(true);
-    let settled = false;
-    const finish = async () => {
-      if (settled) return;
-      settled = true;
-      window.removeEventListener('message', receive);
-      window.clearInterval(closedTimer);
-      setBusy(false);
-      try { await onConnected(); } catch { setError('Connected, but this document could not refresh. Close and reopen Send to agent.'); }
+    setPhase('waiting');
+    setMessage('');
+    const started = Date.now();
+    let timer = null;
+    let done = false;
+    let channel = null;
+    const stop = () => {
+      done = true;
+      window.clearTimeout(timer);
+      window.removeEventListener('message', hint);
+      try { if (channel) channel.close(); } catch { /* ignore */ }
+      stopRef.current = null;
     };
-    const receive = (message) => {
-      if (message.source !== popup || message.data?.type !== 'tdoc:raft-connected') return;
-      finish();
+    const check = async () => {
+      if (done) return;
+      let status = 'unknown';
+      let why = '';
+      try {
+        const body = await getRaftConnectAttempt(attempt);
+        status = body.status;
+        why = body.message || '';
+      } catch { /* no account session here: fall back to isConnected */ }
+      if (status !== 'connected' && status !== 'failed' && isConnected) {
+        try { if (await isConnected()) status = 'connected'; } catch { /* keep waiting */ }
+      }
+      if (done) return;
+      if (status === 'connected') {
+        stop();
+        setPhase('connected');
+        try { await onConnected(); } catch { setMessage('Raft is connected, but this window could not refresh. Close and reopen Send to agent.'); }
+        return;
+      }
+      if (status === 'failed') {
+        stop();
+        setPhase('failed');
+        setMessage(why || 'Raft did not connect.');
+        return;
+      }
+      if (Date.now() - started > RAFT_CONNECT_TIMEOUT_MS) {
+        stop();
+        setPhase('failed');
+        setMessage('Raft sign-in timed out.');
+        return;
+      }
+      timer = window.setTimeout(check, RAFT_CONNECT_POLL_MS);
     };
-    window.addEventListener('message', receive);
-    const closedTimer = window.setInterval(() => {
-      if (!popup.closed) return;
-      finish();
-    }, 500);
+    // The popup's own word, when it gets through, only means "check now".
+    const hint = (msg) => {
+      if (msg.data?.type !== 'tdoc:raft-connected') return;
+      window.clearTimeout(timer);
+      check();
+    };
+    window.addEventListener('message', hint);
+    try {
+      channel = new BroadcastChannel('tdoc-raft-connect');
+      channel.onmessage = hint;
+    } catch { /* not supported: polling alone */ }
+    stopRef.current = stop;
+    timer = window.setTimeout(check, RAFT_CONNECT_POLL_MS);
   };
+  const cancel = () => {
+    if (stopRef.current) stopRef.current();
+    setPhase('idle');
+    setMessage('');
+  };
+  const waiting = phase === 'waiting';
   return (
     <>
-      <a className="tdoc-raft-btn" href="/api/me/connectors/raft/start" onClick={connect} aria-disabled={busy || undefined}>
+      <a className="tdoc-raft-btn" href="/api/me/connectors/raft/start" onClick={connect} aria-disabled={waiting || undefined}>
         <RaftMark size={18} />
-        <span>{busy ? 'Connecting…' : label}</span>
+        <span>{waiting ? 'Waiting for Raft…' : phase === 'failed' ? 'Try again' : phase === 'connected' ? 'Connected' : label}</span>
       </a>
-      {error ? <p className="status" role="status">{error}</p> : null}
+      {waiting ? (
+        <p className="manage-hint" role="status">
+          Finish signing in in the Raft window. This updates by itself.
+          {' '}<button type="button" className="text-btn" onClick={cancel}>Cancel</button>
+        </p>
+      ) : null}
+      {phase === 'failed' ? <p className="status" role="status">Not connected: {message}</p> : null}
+      {phase === 'connected' ? <p className="manage-hint" role="status">{message || 'Raft connected.'}</p> : null}
     </>
   );
 }
@@ -222,9 +294,9 @@ export function ConnectorHead({ connector }) {
 // published or replied with this account). Raft delivers by handle, so ask
 // for one instead of offering Connect with Raft again.
 //
-// `known` are the agents tdoc has seen on this server (they published or
-// replied with this account): picked from a dropdown. Raft has no roster API
-// tdoc can read, so anyone else is typed by handle.
+// `known` are the agents on this server: the ones that worked with tdoc, then
+// the rest of Raft's directory for it (once the server's tdoc App installation
+// grants the Agent permission). Anyone not listed is typed by handle.
 const OTHER_AGENT = '__other__';
 export function RaftFallbackForm({ server, known = [], current = null, onSaved }) {
   const [pick, setPick] = useState(() => (current && current.agent_sub) || (known[0] && known[0].agent_sub) || OTHER_AGENT);
@@ -293,7 +365,7 @@ function RaftConnectedNoAgentView({ servers, onClose, onSaved }) {
   );
 }
 
-function ConnectAgentView({ onClose, onConnected }) {
+function ConnectAgentView({ onClose, onConnected, isConnected }) {
   return (
     <AppDialog
       open
@@ -307,7 +379,7 @@ function ConnectAgentView({ onClose, onConnected }) {
           <section key={c.id} className="tdoc-connector">
             <ConnectorHead connector={c} />
             {c.id === 'raft'
-              ? <RaftConnectButton onConnected={onConnected} />
+              ? <RaftConnectButton onConnected={onConnected} isConnected={isConnected} />
               : <a className="tdoc-connector-action" href={c.action.href}>{c.action.label}</a>}
             {c.prompt ? (
               <details open>
@@ -399,10 +471,12 @@ export function NotifyHandoffPanel({
   const [status, setStatus] = useState('');
   const [recent, setRecent] = useState([]);
 
+  // With no default yet (a server just connected), the first agent on offer
+  // is preselected; sending to it makes it the default.
   useEffect(() => {
     if (!open) return;
-    setSelected(targets.default);
-  }, [open, targets.default]);
+    setSelected(targets.default || targets.candidates[0] || null);
+  }, [open, targets.default, targets.candidates]);
 
   useEffect(() => {
     if (!open) return;
@@ -481,22 +555,22 @@ export function NotifyHandoffPanel({
   const lastFailed = last?.delivery?.status === 'failed';
   const unavailable = targets.ready && !targets.available;
 
-  // Nobody connected: the panel's job becomes getting one connected, instead
-  // of a Send button that cannot go anywhere.
-  if (open && targets.ready && targets.available && (targets.reason === 'no_agent_bound' || !choices.length)) {
+  // Nobody to send to: the panel's job becomes getting one connected, instead
+  // of a Send button that cannot go anywhere. A connected server whose Raft
+  // directory lists agents is not this case: those are offered below.
+  const refreshAll = async () => { await targets.refresh(); if (onTargetsChanged) await onTargetsChanged(); };
+  if (open && targets.ready && targets.available && !choices.length) {
     if (targets.raftServers.length) {
-      return (
-        <RaftConnectedNoAgentView
-          servers={targets.raftServers}
-          onClose={onClose}
-          onSaved={async () => { await targets.refresh(); if (onTargetsChanged) await onTargetsChanged(); }}
-        />
-      );
+      return <RaftConnectedNoAgentView servers={targets.raftServers} onClose={onClose} onSaved={refreshAll} />;
     }
     return (
       <ConnectAgentView
         onClose={onClose}
-        onConnected={async () => { await targets.refresh(); if (onTargetsChanged) await onTargetsChanged(); }}
+        onConnected={refreshAll}
+        isConnected={async () => {
+          const body = await listNotifyTargets(slug);
+          return Boolean(body.default || (body.candidates || []).length || (body.raft_servers || []).length);
+        }}
       />
     );
   }
@@ -545,6 +619,9 @@ export function NotifyHandoffPanel({
             </p>
           ) : null}
 
+          {choices.length > 0 && !targets.default ? (
+            <p className="manage-hint">No default agent yet. The agent you send to becomes your default, for @agent and for docs no agent has worked on.</p>
+          ) : null}
           {choices.length === 1 ? (
             <section className="manage-section">
               <RecipientLine target={choices[0]} />
