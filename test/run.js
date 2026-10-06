@@ -31,6 +31,7 @@ const OFFLINE = [
   'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
+  'ui-primitives.test.js',    // product UI uses shell/src/ui primitives; no native <select>
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
@@ -122,6 +123,7 @@ const BROWSER = [
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
+  'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
 ];
 
 // Existing opt-in UI suites; --all retains their broader coverage.

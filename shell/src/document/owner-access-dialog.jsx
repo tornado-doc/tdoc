@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
+import { AppSelect } from '../ui/select.jsx';
 import { deleteDocument, updateDocumentAccess } from './api.js';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
 
@@ -181,21 +182,20 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
 
       <section className="manage-section">
         <label className="field" htmlFor="tdoc-access-select">Who has access</label>
-        <select
+        <AppSelect
           id="tdoc-access-select"
-          className="tdoc-select"
           value={general}
-          onChange={(event) => {
-            const value = event.target.value;
+          onChange={(value) => {
             if (!team) save({ visibility: value });
             else if (value === 'unlisted') save({ visibility: 'unlisted' });
             else save({ visibility: 'private', team: value === 'team' });
           }}
-        >
-          <option value="private">{team ? 'Only people with access' : 'Only people I invite'}</option>
-          {team ? <option value="team">Everyone in {team.name}</option> : null}
-          <option value="unlisted">Anyone with the link</option>
-        </select>
+          options={[
+            { value: 'private', label: team ? 'Only people with access' : 'Only people I invite' },
+            ...(team ? [{ value: 'team', label: `Everyone in ${team.name}` }] : []),
+            { value: 'unlisted', label: 'Anyone with the link' },
+          ]}
+        />
         <p className="manage-hint">{accessDescription}</p>
 
         {inviteRelevant ? (

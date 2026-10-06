@@ -7,6 +7,7 @@ import { Webhook } from 'lucide-react';
 import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
+import { AppSelect } from '../ui/select.jsx';
 import {
   getRaftConnectAttempt,
   hasAccountSession,
@@ -298,7 +299,10 @@ export function ConnectorHead({ connector }) {
 // the rest of Raft's directory for it (once the server's tdoc App installation
 // grants the Agent permission). Anyone not listed is typed by handle.
 const OTHER_AGENT = '__other__';
-export function RaftFallbackForm({ server, known = [], current = null, onSaved }) {
+// `inCard`: an edit inside a connected card on /me/agents, indented under the
+// card's title like its facts; the card already states the current default,
+// so the field is labelled as the change it is.
+export function RaftFallbackForm({ server, known = [], current = null, onSaved, inCard = false }) {
   const [pick, setPick] = useState(() => (current && current.agent_sub) || (known[0] && known[0].agent_sub) || OTHER_AGENT);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -321,14 +325,19 @@ export function RaftFallbackForm({ server, known = [], current = null, onSaved }
     }
   };
   return (
-    <form className="tdoc-conn-form" onSubmit={save}>
+    <form className={`tdoc-conn-pick${inCard ? ' tdoc-conn-pick--card' : ''}`} onSubmit={save}>
       {known.length ? (
         <label>
-          <span>Default agent on {server.server_slug || 'this server'}</span>
-          <select className="tdoc-select" value={pick} onChange={(e) => setPick(e.target.value)}>
-            {known.map((a) => <option key={a.agent_sub} value={a.agent_sub}>{readableHandle(a) || a.agent_sub}</option>)}
-            <option value={OTHER_AGENT}>Another agent…</option>
-          </select>
+          <span>{inCard ? 'Change default agent' : `Default agent on ${server.server_slug || 'this server'}`}</span>
+          <AppSelect
+            ariaLabel={`Default agent on ${server.server_slug || 'this server'}`}
+            value={pick}
+            onChange={setPick}
+            options={[
+              ...known.map((a) => ({ value: a.agent_sub, label: readableHandle(a) || a.agent_sub })),
+              { value: OTHER_AGENT, label: 'Another agent…' },
+            ]}
+          />
         </label>
       ) : null}
       {typing ? (
@@ -630,19 +639,15 @@ export function NotifyHandoffPanel({
             <section className="manage-section">
               <RecipientLine target={selected || targets.default} />
               <label className="field" htmlFor="tdoc-notify-recipient">Send to</label>
-              <select
+              <AppSelect
                 id="tdoc-notify-recipient"
-                className="tdoc-select"
                 value={selectedKey}
-                onChange={(e) => {
-                  const next = choices.find((t) => targetKey(t) === e.target.value);
+                onChange={(key) => {
+                  const next = choices.find((t) => targetKey(t) === key);
                   if (next) setSelected(next);
                 }}
-              >
-                {choices.map((t) => (
-                  <option key={targetKey(t)} value={targetKey(t)}>{recipientOptionLabel(t, targets.default)}</option>
-                ))}
-              </select>
+                options={choices.map((t) => ({ value: targetKey(t), label: recipientOptionLabel(t, targets.default) }))}
+              />
             </section>
           ) : (
             <p className="manage-hint" title={boundHint || undefined}>
