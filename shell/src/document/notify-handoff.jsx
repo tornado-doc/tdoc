@@ -7,7 +7,7 @@ import { Webhook } from 'lucide-react';
 import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
-import { AppSelect } from '../ui/select.jsx';
+import { AppCombobox } from '../ui/combobox.jsx';
 import {
   getRaftConnectAttempt,
   hasAccountSession,
@@ -66,14 +66,17 @@ function recipientPrimary(t) {
 
 // One line per agent in the recipient dropdown: who, where, and why it is the
 // preselected one (this doc's agent, or the account default).
-function recipientOptionLabel(t, preselected) {
+// One row of an agent picker: the name to search by, and on the right why it
+// is near the top -- it is this doc's agent, the default, or it was used
+// recently. Directory agents that never worked with tdoc carry no note.
+function recipientOption(t, preselected) {
   const { label } = providerMeta(t);
   const who = readableHandle(t) || `${label} agent`;
   const where = t.provider === 'raft' && t.server_slug ? ` · ${t.server_slug}` : (t.provider === 'raft' ? '' : ` · ${label}`);
   const why = sameTarget(t, preselected)
-    ? (t.source === 'doc' ? " (this doc's agent)" : ' (default)')
-    : '';
-  return `${who}${where}${why}`;
+    ? (t.source === 'doc' ? "this doc's agent" : 'default')
+    : (t.last_touched ? `used ${sinceText(t.last_touched)}` : '');
+  return { value: targetKey(t), label: `${who}${where}`, hint: why };
 }
 
 // "smarter-tdoc-claw", or "your Raft agent" when the handle is unreadable.
@@ -313,25 +316,39 @@ export function ConnectorHead({ connector }) {
 // `known` are the agents on this server: the ones that worked with tdoc, then
 // the rest of Raft's directory for it (once the server's tdoc App installation
 // grants the Agent permission). Anyone not listed is typed by handle.
-const OTHER_AGENT = '__other__';
+// A handle typed into the search that matches nobody listed is offered as its
+// own row (only then: a partial match is a search, not a new name), so an agent the directory does not show can still be named.
+const TYPED_AGENT = '__typed__:';
+const HANDLE_RE = /^@?[^\s@]{1,80}$/;
 // `inCard`: an edit inside a connected card on /me/agents, indented under the
 // card's title like its facts; the card already states the current default,
 // so the field is labelled as the change it is.
 export function RaftFallbackForm({ server, known = [], current = null, onSaved, inCard = false }) {
-  const [pick, setPick] = useState(() => (current && current.agent_sub) || (known[0] && known[0].agent_sub) || OTHER_AGENT);
-  const [name, setName] = useState('');
+  const [pick, setPick] = useState(() => (current && current.agent_sub) || (known[0] && known[0].agent_sub) || '');
+  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const typing = pick === OTHER_AGENT || !known.length;
+  const listed = known.map((a) => ({
+    value: a.agent_sub,
+    label: readableHandle(a) || a.agent_sub,
+    hint: current && current.agent_sub === a.agent_sub ? 'default' : (a.last_touched ? `used ${sinceText(a.last_touched)}` : ''),
+  }));
+  const typed = query.trim().replace(/^@/, '');
+  const typedRow = typed && HANDLE_RE.test(typed) && !listed.some((o) => o.label.toLowerCase().includes(typed.toLowerCase()))
+    ? [{ value: `${TYPED_AGENT}${typed}`, label: `@${typed}`, hint: 'not in the list; use this handle' }]
+    : [];
+  const pickedTyped = pick.startsWith(TYPED_AGENT) ? pick.slice(TYPED_AGENT.length) : '';
+  // Typing a new handle and pressing Save, without picking its row first,
+  // saves that handle: what is in the box is what gets saved.
+  const handle = pickedTyped || (typedRow.length ? typed : '');
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const body = await setRaftFallbackAgent(typing
-        ? { server_id: server.server_id, agent_name: name.trim() }
+      const body = await setRaftFallbackAgent(handle
+        ? { server_id: server.server_id, agent_name: handle }
         : { server_id: server.server_id, agent_sub: pick });
-      setName('');
       if (onSaved) await onSaved(body.target);
     } catch (err) {
       setError(err.status === 400 ? 'Use the agent\'s Raft handle, one word, like @my-agent.' : (err.message || 'Could not save'));
@@ -339,32 +356,29 @@ export function RaftFallbackForm({ server, known = [], current = null, onSaved, 
       setBusy(false);
     }
   };
+  const label = inCard ? 'Change default agent' : `Default agent on ${server.server_slug || 'this server'}`;
   return (
     <form className={`tdoc-conn-pick${inCard ? ' tdoc-conn-pick--card' : ''}`} onSubmit={save}>
-      {known.length ? (
-        <label>
-          <span>{inCard ? 'Change default agent' : `Default agent on ${server.server_slug || 'this server'}`}</span>
-          <AppSelect
-            ariaLabel={`Default agent on ${server.server_slug || 'this server'}`}
-            value={pick}
-            onChange={setPick}
-            options={[
-              ...known.map((a) => ({ value: a.agent_sub, label: readableHandle(a) || a.agent_sub })),
-              { value: OTHER_AGENT, label: 'Another agent…' },
-            ]}
-          />
-        </label>
-      ) : null}
-      {typing ? (
-        <label>
-          <span>{known.length ? 'Its Raft handle' : `Default agent on ${server.server_slug || 'this server'} (its Raft handle)`}</span>
-          <input type="text" required placeholder="@agent-handle" value={name} onChange={(e) => setName(e.target.value)} maxLength={81} />
-        </label>
-      ) : null}
-      <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || (typing && !name.trim()) || (!typing && current && current.agent_sub === pick)}>{busy ? 'Saving…' : 'Save'}</button>
+      {/* One picker whether or not Raft shared the server's list: without
+          one it is the same box, and what is typed is offered as the handle. */}
+      <label>
+        <span>{label}</span>
+        <AppCombobox
+          ariaLabel={`Default agent on ${server.server_slug || 'this server'}`}
+          placeholder={known.length ? 'Search or type a handle' : 'Type the agent\'s Raft handle'}
+          empty={known.length ? 'No agent by that name' : 'Type the agent\'s handle, as it appears in Raft'}
+          value={pick}
+          onChange={setPick}
+          onQuery={setQuery}
+          options={pickedTyped && !typedRow.length
+            ? [...listed, { value: pick, label: `@${pickedTyped}`, hint: 'not in the list; use this handle' }]
+            : [...listed, ...typedRow]}
+        />
+      </label>
+      <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || (!pick && !handle) || (!handle && current && current.agent_sub === pick)}>{busy ? 'Saving…' : 'Save'}</button>
       {!known.length ? (
         // Not a dropdown with nothing in it: say why there is no list.
-        <p className="manage-hint tdoc-conn-pick-note">Raft hasn&apos;t shared the agent list for {server.server_slug || 'this server'} with tdoc yet, so type the agent&apos;s handle, as it appears in Raft.</p>
+        <p className="manage-hint tdoc-conn-pick-note">Raft hasn&apos;t shared the agent list for {server.server_slug || 'this server'} with tdoc yet, so type the agent&apos;s handle.</p>
       ) : null}
       {error ? <p className="status" role="status">{error}</p> : null}
     </form>
@@ -679,14 +693,17 @@ export function NotifyHandoffPanel({
           ) : choices.length > 1 ? (
             <section className="manage-section">
               <label className="field" htmlFor="tdoc-notify-recipient">Send to</label>
-              <AppSelect
+              <AppCombobox
                 id="tdoc-notify-recipient"
+                ariaLabel="Send to"
+                placeholder="Search agents"
+                empty="No agent by that name"
                 value={selectedKey}
                 onChange={(key) => {
                   const next = choices.find((t) => targetKey(t) === key);
                   if (next) setSelected(next);
                 }}
-                options={choices.map((t) => ({ value: targetKey(t), label: recipientOptionLabel(t, targets.default) }))}
+                options={choices.map((t) => recipientOption(t, targets.default))}
               />
             </section>
           ) : (

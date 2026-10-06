@@ -38,10 +38,15 @@ t('no native <select> in product UI (use AppSelect from shell/src/ui/select.jsx)
   assert(!offenders.length, `native <select> in: ${offenders.join(', ')}`);
 });
 
-t('agent pickers use AppSelect', () => {
+t('agent pickers are searchable (AppCombobox)', () => {
+  // A Raft server lists dozens of agents; Julie (2026-10-06): the picker is a
+  // search box you can type in, not a list to scroll.
   const src = fs.readFileSync(path.join(ROOT, 'shell/src/document/notify-handoff.jsx'), 'utf8');
-  assert(/import \{ AppSelect \} from '\.\.\/ui\/select\.jsx'/.test(src), 'notify-handoff.jsx does not import AppSelect');
-  assert((src.match(/<AppSelect\b/g) || []).length >= 2, 'the default-agent form and the Send to agent recipient must both be AppSelect');
+  assert(/import \{ AppCombobox \} from '\.\.\/ui\/combobox\.jsx'/.test(src), 'notify-handoff.jsx does not import AppCombobox');
+  assert((src.match(/<AppCombobox\b/g) || []).length >= 2, 'the default-agent form and the Send to agent recipient must both be AppCombobox');
+  const combo = fs.readFileSync(path.join(ROOT, 'shell/src/ui/combobox.jsx'), 'utf8');
+  assert(/ui-menu-popup/.test(combo) && /ui-select-positioner/.test(combo) && /tdoc-select/.test(combo),
+    'AppCombobox must look like AppSelect closed and open the same menu popup above dialogs');
 });
 
 t('AppSelect draws its open list with the menu popup, above dialogs', () => {

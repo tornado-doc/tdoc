@@ -71,13 +71,13 @@ async function t(name, fn) {
         await page.goto(`${base}/me/agents?tab=send${withDefault ? '' : '&connected=raft'}`);
         const label = withDefault ? 'connected server with a default' : 'right after Connect with Raft';
 
-        await t(`${width}px, ${label}: no native select, pickers are AppSelect`, async () => {
-          await page.locator('.ui-select-trigger').first().waitFor();
+        await t(`${width}px, ${label}: no native select, agent pickers are searchable AppCombobox`, async () => {
+          await page.locator('.ui-combo-input').first().waitFor();
           assert.equal(await page.locator('select').count(), 0, 'a native <select> is back; use AppSelect (shell/src/ui/select.jsx)');
-          const triggers = page.locator('.ui-select-trigger');
+          const triggers = page.locator('.ui-combo-input');
           for (let i = 0; i < await triggers.count(); i++) {
             const box = await controlBox(triggers.nth(i));
-            assert.equal(box.tag, 'BUTTON', `picker ${i} is ${box.tag}`);
+            assert.equal(box.tag, 'INPUT', `picker ${i} is ${box.tag}, not a field you can type in`);
             assert.match(box.cls, /\btdoc-select\b/, `picker ${i} lost the shared .tdoc-select look`);
           }
         });
@@ -85,31 +85,44 @@ async function t(name, fn) {
         if (withDefault) {
           await t(`${width}px: the connector form lines up (34px picker and Save, one row on desktop)`, async () => {
             const form = page.locator('.tdoc-conn-card .tdoc-conn-pick').first();
-            const picker = await controlBox(form.locator('.ui-select-trigger'));
+            const picker = await controlBox(form.locator('.ui-combo-input'));
             const save = await controlBox(form.getByRole('button', { name: 'Save' }));
             assert.equal(picker.height, 34, `picker is ${picker.height}px`);
             assert.equal(save.height, 34, `Save is ${save.height}px`);
             if (width > 640) assert.equal(picker.top, save.top, 'picker and Save are not on one row');
           });
           await t(`${width}px: the open list is tdoc's menu, not the OS list`, async () => {
-            await page.locator('.tdoc-conn-card .ui-select-trigger').first().click();
+            const input = page.locator('.tdoc-conn-card .ui-combo-input').first();
+            await input.click();
             const popup = page.locator('.ui-select-popup');
             await popup.waitFor();
             assert.match(await popup.getAttribute('class'), /\bui-menu-popup\b/);
-            const names = await popup.locator('.ui-select-item').allTextContents();
-            assert.deepEqual(names, ['earn-with-ai-claw', 'smarter-tdoc-claw', 'research-claw', 'Another agent…']);
+            // Opening shows everyone, even with the current default in the box.
+            const names = await popup.locator('.ui-combo-label').allTextContents();
+            assert.deepEqual(names, ['earn-with-ai-claw', 'smarter-tdoc-claw', 'research-claw']);
             if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `agents-${width}-open.png`) });
             const item = await controlBox(popup.locator('.ui-select-item').first());
             assert.equal(item.size, '13px', `menu rows are ${item.size}`);
+            // Typing narrows it.
+            await input.fill('rese');
+            await page.waitForFunction(() => document.querySelectorAll('.ui-select-popup .ui-combo-label').length === 1, null, { timeout: 3000 }).catch(() => {});
+            assert.deepEqual(await popup.locator('.ui-combo-label').allTextContents(), ['research-claw']);
             await popup.getByText('research-claw', { exact: true }).click();
             await popup.waitFor({ state: 'hidden' });
-            assert.equal((await page.locator('.tdoc-conn-card .ui-select-trigger').first().textContent()).trim(), 'research-claw');
+            assert.equal(await input.inputValue(), 'research-claw');
+            // A handle the list does not have is offered as itself.
+            await input.click();
+            await input.fill('@new-helper');
+            await popup.waitFor();
+            assert.deepEqual(await popup.locator('.ui-combo-label').allTextContents(), ['@new-helper']);
+            if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `agents-${width}-typed.png`) });
+            await page.keyboard.press('Escape');
           });
         } else {
           await t(`${width}px: the default-agent modal uses the same picker, and its list opens above the modal`, async () => {
             const dialog = page.getByRole('dialog', { name: 'Choose your default agent' });
             await dialog.waitFor();
-            const trigger = dialog.locator('.ui-select-trigger');
+            const trigger = dialog.locator('.ui-combo-input');
             const box = await controlBox(trigger);
             const save = await controlBox(dialog.getByRole('button', { name: 'Save' }));
             // 34px, or the modal's 44px touch target on a phone — but always

@@ -316,6 +316,23 @@ button.tdoc-pin {
 .ui-select-item { overflow: hidden; text-overflow: ellipsis; }
 .ui-select-item[data-selected] { color: var(--td-accent); font-weight: 600; }
 
+/* AppCombobox (ui/combobox.jsx): the same box as AppSelect, but a text field
+   you can type in; the arrow is a real button over the box's own chevron. */
+.ui-combo { position: relative; display: block; min-width: 0; }
+.ui-combo-input.tdoc-select { cursor: text; text-overflow: ellipsis; }
+/* Doubled class and the modal prefix so dialog button rules (border, fill,
+   44px minimums) never turn the invisible arrow target into a white box. */
+.ui-combo-trigger.ui-combo-trigger, .tdoc-modal button.ui-combo-trigger {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 32px; height: auto;
+  min-width: 0; min-height: 0; margin: 0; padding: 0;
+  border: 0; border-radius: 0 6px 6px 0; background: transparent; box-shadow: none; cursor: pointer;
+}
+.ui-combo-item { display: flex; align-items: baseline; gap: 12px; }
+.ui-combo-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ui-combo-hint { margin-left: auto; flex: none; font-size: 12px; font-weight: 400; color: var(--td-muted); }
+.ui-combo-empty:empty { display: none; }
+.ui-combo-empty { padding: 7px 10px; font: 13px system-ui, sans-serif; color: var(--td-muted); }
+
 .tdoc-modal .status.tdoc-notify-error, .tdoc-notify-error { color: var(--td-danger); }
 
 /* A secondary way out that must not compete with the primary button: muted
@@ -597,6 +614,10 @@ button.tdoc-pin {
     min-width: 44px;
     min-height: 44px;
   }
+  /* The searchable picker is a field, not a button, but sits beside one: the
+     same touch height, and its arrow button fills the field instead. */
+  .tdoc-modal .ui-combo-input { min-height: 44px; }
+  .tdoc-modal button.ui-combo-trigger { min-width: 0; min-height: 0; }
 
   .tdoc-onboarding-details summary,
   .tdoc-onboarding-link {

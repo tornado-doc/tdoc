@@ -2752,10 +2752,9 @@ async function completeRaftConnect(env, req, { pending, tok, ret, clearState }) 
     ...((installationId || (prevServer && prevServer.installation_id)) ? { installation_id: installationId || prevServer.installation_id } : {}),
   }, ...list.filter((sv) => sv && sv.server_id !== String(server.id))].slice(0, 20);
   await env.META.put(`account-raft-servers:${accountId}`, JSON.stringify(list));
-  const removed = await accountRemovedTargets(env, accountId);
-  if (removed.delete(`raft-server:${server.id}`)) {
-    await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed]));
-  }
+  // Connecting a server again brings back every agent on it, including those
+  // an older disconnect stamped one by one.
+  await unremoveTargets(env, accountId, (k) => k === `raft-server:${server.id}` || k.startsWith(`raft:${server.id}:`));
   await setRaftConnectAttempt(env, attempt, accountId, 'connected', { server_slug: String(server.slug || '') });
   if (started.popup) return raftConnectPopupResponse(clearState);
   return redirectTo(`${ret && ret.startsWith('/me/agents') ? ret : '/me/agents?tab=send'}&connected=raft`, [clearState]);
@@ -6132,7 +6131,13 @@ async function requireUploadAuth(req, env) {
   if (env.TDOC_UPLOAD_TOKEN && await timingSafeEqual(token, env.TDOC_UPLOAD_TOKEN)) return { ok: true, actor: { kind: 'admin' } };
   const hostedActor = await hostedTokenActor(env, token);
   if (hostedActor) return { ok: true, actor: hostedActor };
-  return { ok: false, response: json({ error: 'unauthorized' }, { status: 401 }) };
+  // A token was sent and is not valid: revoked from the Access tab, or
+  // replaced by a newer sign-in. A bare "unauthorized" left an agent unable to
+  // tell that apart from a bug (小c, 2026-10-06); say what fixes it.
+  return { ok: false, response: json({
+    error: 'unauthorized',
+    message: 'This tdoc sign-in is no longer valid (it was revoked or replaced). Sign in again with `tdoc-publish --signin-only`, then retry.',
+  }, { status: 401 }) };
 }
 
 // Slug-scoped write ACL for a hosted account token. Admin actors skip it.
@@ -7258,19 +7263,24 @@ function sameRaftAgent(a, b) {
 }
 // Directory agents on the account's connected servers that are not already
 // in `known`, tagged so the UI can tell them from agents that did work.
+//
+// Every agent on the server is listed, including one the person disconnected:
+// disconnecting stops tdoc sending to it on its own, it does not make the
+// agent unpickable. Hiding them is how smarter-tdoc-claw vanished from
+// Julie's picker after a server disconnect and reconnect (2026-10-06); picking
+// one again is the person reconnecting it. Sorted by name, because a list of
+// dozens is searched, not read.
 async function accountDirectoryAgents(env, accountId, known = [], servers = null) {
   if (!accountId) return [];
   const list = servers || await accountRaftServers(env, accountId);
-  const removed = await accountRemovedTargets(env, accountId);
   const out = [];
   for (const sv of list) {
     for (const t of await raftDirectoryAgents(env, sv)) {
-      if (removed.has(notifyKey(t))) continue;
       if ([...known, ...out].some((k) => sameRaftAgent(k, t))) continue;
       out.push({ ...t, source: 'directory' });
     }
   }
-  return out;
+  return out.sort((a, b) => String(a.agent_name || '').localeCompare(String(b.agent_name || ''), undefined, { sensitivity: 'base' }));
 }
 
 // ─────────────────────── who follows this doc ───────────────────────
@@ -7377,10 +7387,37 @@ async function accountRemovedTargets(env, accountId) {
   const removed = new Set();
   for (const id of group.ids) {
     try {
-      for (const key of JSON.parse((await env.META.get(`account-notify-removed:${id}`)) || '[]')) removed.add(key);
+      for (const key of JSON.parse((await env.META.get(`account-notify-removed:${id}`)) || '[]')) {
+        // A Raft agent is connected exactly when its server is (Julie,
+        // 2026-10-06): only `raft-server:` keys count. Per-agent `raft:` keys
+        // were left by an older server disconnect and outlived the reconnect.
+        if (/^raft:/.test(key)) continue;
+        removed.add(key);
+      }
     } catch {}
   }
   return removed;
+}
+
+// Takes keys off the removed list everywhere it is stored. A merged account
+// reads the union of every member's list, so deleting from one member's key
+// alone leaves the agent removed through another's.
+async function unremoveTargets(env, accountId, match) {
+  if (!accountId || !env || !env.META) return 0;
+  const group = await accountGroup(env, accountId);
+  let n = 0;
+  for (const id of group.ids) {
+    const key = `account-notify-removed:${id}`;
+    let list = [];
+    try { list = JSON.parse((await env.META.get(key)) || '[]'); } catch { continue; }
+    if (!Array.isArray(list)) continue;
+    const keep = list.filter((k) => !match(k));
+    if (keep.length !== list.length) {
+      n += list.length - keep.length;
+      await env.META.put(key, JSON.stringify(keep));
+    }
+  }
+  return n;
 }
 
 async function accountNotifyTargets(env, accountId) {
@@ -10820,6 +10857,7 @@ export default {
         if (known) {
           const rest = current.filter((t) => !sameNotifyTarget(t, known));
           await env.META.put(listKey, JSON.stringify([{ ...known, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX)));
+          await unremoveTargets(env, accountId, (k) => k === notifyKey(known));
           return json({ ok: true, target: known });
         }
         // An agent from the server's Raft directory: stored with its id, and
@@ -10830,8 +10868,7 @@ export default {
         if (listed) {
           const rest = current.filter((t) => !sameRaftAgent(t, listed));
           await env.META.put(listKey, JSON.stringify([{ ...listed, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX)));
-          const removed = await accountRemovedTargets(env, accountId);
-          if (removed.delete(notifyKey(listed))) await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed]));
+          await unremoveTargets(env, accountId, (k) => k === notifyKey(listed));
           return json({ ok: true, target: listed });
         }
         const name = String(body.agent_name || '').trim().replace(/^@/, '');
@@ -10903,9 +10940,11 @@ export default {
         // linked or self-identified, until it is connected again.
         const gone = current.filter((t) => t.provider === 'raft' && t.server_id === body.server_id);
         await env.META.put(listKey, JSON.stringify(current.filter((t) => !gone.includes(t))));
+        // The server key alone stops every agent on it. Stamping each agent
+        // as well outlived the reconnect, which clears only the server key,
+        // and left them hidden for good.
         const removed = await accountRemovedTargets(env, accountId);
         removed.add(`raft-server:${body.server_id}`);
-        for (const t of gone) removed.add(notifyKey(t));
         await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
         try {
           const explicit = JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]').filter((sv) => sv && sv.server_id !== body.server_id);
@@ -11037,9 +11076,14 @@ export default {
       // their default from now on — so @agent has somewhere to go next time.
       const ownerAccount = gate.meta && gate.meta.hosted && gate.meta.hosted.account_id;
       const delivered = rec.delivery && rec.delivery.status !== 'failed';
-      if (!resolved.default && target && ownerAccount && delivered
-        && offered.some((t) => sameNotifyTarget(t, target))) {
+      //
+      // Any agent a person sends to is also their most recently used one,
+      // which is what the next doc with no agent of its own falls back to and
+      // what the picker lists first. Choosing one they once disconnected is
+      // connecting it again.
+      if (target && ownerAccount && delivered && offered.some((t) => sameNotifyTarget(t, target))) {
         await touchAccountAgent(env, ownerAccount, target);
+        await unremoveTargets(env, ownerAccount, (k) => k === notifyKey(target));
       }
       // A person who picks a different agent for this doc has chosen who
       // follows it: that agent gets the doc's later comments and @agent too,

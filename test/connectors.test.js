@@ -404,6 +404,68 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     } finally { directory = null; }
   });
 
+  await t('an agent hidden by an old server disconnect is pickable again, and sending to it brings it back', async () => {
+    // Julie, 2026-10-06: smarter-tdoc-claw vanished from every picker. An old
+    // server disconnect stamped each agent removed; reconnecting cleared only
+    // the server, so the agent stayed hidden even from Raft's directory.
+    directory = DIRECTORY;
+    try {
+      const env = makeEnv(mod.CommentsStore, RAFT_DIR);
+      const owner = await issue(worker, env, 'owner');
+      await connectRaft(env, owner.cookie);
+      await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_sub: 'id-beta' }), env, {});
+      await env.META.put(`account-notify-removed:${owner.account_id}`, JSON.stringify(['raft:S9:id-alpha']));
+      await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'hdoc', version: 1, html: '<p>hello</p>' } }), env, {});
+      const r = await (await worker.fetch(req('/api/notify/targets?slug=hdoc', { cookie: owner.cookie }), env, {})).json();
+      const alpha = r.candidates.find((t) => t.agent_sub === 'id-alpha');
+      assert(alpha, `a disconnected agent is missing from the picker: ${JSON.stringify(r.candidates)}`);
+      assert(r.default && r.default.agent_sub === 'id-beta', 'and it is not chosen automatically');
+      const c = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: owner.cookie, body: { slug: 'hdoc', version: 1, text: 'fix', anchor: { kind: 'text', text: 'hello' } } }), env, {})).json();
+      const sent = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug: 'hdoc', comment_ids: [c.id], recipient: alpha } }), env, {})).json();
+      assert(sent.ok && sent.delivery.status === 'delivered', JSON.stringify(sent));
+      const removed = JSON.parse(await env.META.get(`account-notify-removed:${owner.account_id}`));
+      assert(!removed.includes('raft:S9:id-alpha'), `picking it did not reconnect it: ${removed}`);
+      const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+      assert(list.default && list.default.agent_sub === 'id-alpha', `the agent just used is not the most recent: ${JSON.stringify(list.default)}`);
+    } finally { directory = null; }
+  });
+
+  await t('disconnecting a server marks the server only, and connecting it again restores every agent', async () => {
+    directory = DIRECTORY;
+    try {
+      const env = makeEnv(mod.CommentsStore, RAFT_DIR);
+      const owner = await issue(worker, env, 'owner');
+      await connectRaft(env, owner.cookie);
+      await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_sub: 'id-beta' }), env, {});
+      await worker.fetch(post('/api/me/connectors/remove', owner.cookie, { provider: 'raft', server_id: 'S9' }), env, {});
+      const removed = JSON.parse(await env.META.get(`account-notify-removed:${owner.account_id}`));
+      assert(removed.join(',') === 'raft-server:S9', `agents stamped one by one: ${removed}`);
+      // An older disconnect's per-agent stamp, as live accounts still carry.
+      await env.META.put(`account-notify-removed:${owner.account_id}`, JSON.stringify([...removed, 'raft:S9:id-beta', 'raft:S7:id-x']));
+      await connectRaft(env, owner.cookie);
+      const after = JSON.parse(await env.META.get(`account-notify-removed:${owner.account_id}`));
+      assert(after.join(',') === 'raft:S7:id-x', `reconnect left this server's agents hidden: ${after}`);
+    } finally { directory = null; }
+  });
+
+  await t('an agent stamped removed by an old server disconnect is still recorded when it works on a doc', async () => {
+    // 小c, 2026-10-06: earn-with-ai-claw wrote befreed-skill-audit, yet its
+    // comments went to the account fallback, because its old per-agent stamp
+    // made tdoc refuse to record it as the doc's agent.
+    const ctx = await seedRaft();
+    await ctx.env.META.put(`account-notify-removed:${ctx.owner.account_id}`, JSON.stringify(['raft:S1:agent-b']));
+    await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-b', 'X-Tdoc-Raft-Agent-Name': 'beta' });
+    const r = await targetsOf(ctx);
+    assert(r.default && r.default.agent_sub === 'agent-b' && r.default.source === 'doc', `the agent that worked on it does not follow the doc: ${JSON.stringify(r.default)}`);
+  });
+
+  await t('a rejected upload token says how to sign in again', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_DIR);
+    const r = await worker.fetch(req('/api/agent/reply', { method: 'POST', token: 'not-a-real-token', body: {} }), env, {});
+    const b = await r.json();
+    assert(r.status === 401 && b.error === 'unauthorized' && /tdoc-publish --signin-only/.test(b.message || ''), JSON.stringify(b));
+  });
+
   await t('while the Agent permission is in review, nothing changes and nothing errors', async () => {
     const env = makeEnv(mod.CommentsStore, RAFT_DIR);
     const owner = await issue(worker, env, 'owner');
