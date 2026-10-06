@@ -643,59 +643,47 @@ export function NotifyHandoffPanel({
       description={unavailable
         ? 'Notify is not available on this host yet.'
         : ids.length
-          ? (ids.length === 1 ? 'Sending 1 comment. One recipient per handoff.' : `Sending ${ids.length} open comments. One recipient per handoff.`)
+          ? `${ids.length === 1 ? '1 comment' : `${ids.length} comments`} for your agent to fix. It replies on each one here.`
           : lastIds.length
             ? `No new comments. The last ${lastIds.length === 1 ? 'one' : `${lastIds.length}`} went to ${agentLabel(last.recipient)}${sinceText(last.at) ? ` ${sinceText(last.at)}` : ''}.`
             : 'No new comments to send.'}
       actions={(
         <>
-          <button type="button" onClick={onClose}>Close</button>
+          <button type="button" onClick={onClose}>{batch.length > 0 ? 'Cancel' : 'Close'}</button>
           {!unavailable && batch.length > 0 ? (
             <button type="button" className="primary" disabled={!canSubmit} onClick={submit}>
-              {busy ? 'Sending…' : result && !result.ok ? 'Retry' : reassign ? `Send ${lastIds.length === 1 ? 'it' : 'them'} to ${agentLabel(chosen)} instead` : 'Send'}
+              {busy ? `Sending to ${agentLabel(chosen)}…` : result && !result.ok ? 'Retry' : reassign ? `Send ${lastIds.length === 1 ? 'it' : 'them'} to ${agentLabel(chosen)}` : `Send to ${agentLabel(chosen)}`}
             </button>
           ) : null}
         </>
       )}
     >
       {unavailable ? null : (
-        <>
-          {!ids.length && lastIds.length > 0 && !reassign ? (
-            <p className="manage-hint">
-              {lastFailed ? 'It was not delivered. ' : `To hand ${lastIds.length === 1 ? 'it' : 'them'} to a different agent, pick one below.`}
-              {lastFailed && last.handoff_id ? (
+        <div className="tdoc-send">
+          {/* Only a failed last send earns a line of its own: a delivered one
+              is already in the description, and a count of it said nothing. */}
+          {lastFailed ? (
+            <p className="tdoc-send-notice tdoc-notify-error">
+              The last send to {agentLabel(last.recipient)} was not delivered.
+              {last.handoff_id ? (
                 <button type="button" className="text-btn" disabled={busy} onClick={() => resend(last.handoff_id)}>Resend</button>
               ) : null}
             </p>
           ) : null}
-          {ids.length > 0 && last ? (
-            <p className="manage-hint">
-              Last handoff: {(last.comment_ids || []).length} comment{(last.comment_ids || []).length === 1 ? '' : 's'}
-              {lastFailed ? ' · not delivered' : ''}
-              {lastFailed && last.handoff_id ? (
-                <>
-                  {' · '}
-                  <button type="button" className="text-btn" disabled={busy} onClick={() => resend(last.handoff_id)}>
-                    Resend
-                  </button>
-                </>
-              ) : null}
-            </p>
-          ) : null}
 
-          {choices.length > 0 && !targets.default ? (
-            <p className="manage-hint">No default agent yet. The agent you send to becomes your default, for @agent and for docs no agent has worked on.</p>
-          ) : null}
           {choices.length === 1 ? (
-            <section className="manage-section">
+            <div className="tdoc-send-field">
+              <span className="tdoc-send-label">Agent</span>
               <RecipientLine target={choices[0]} />
-            </section>
+            </div>
           ) : choices.length > 1 ? (
-            <section className="manage-section">
-              <label className="field" htmlFor="tdoc-notify-recipient">Send to</label>
+            <div className="tdoc-send-field">
+              <label className="tdoc-send-label" htmlFor="tdoc-notify-recipient">
+                {!ids.length && lastIds.length > 0 ? 'Hand it to another agent' : 'Agent'}
+              </label>
               <AppCombobox
                 id="tdoc-notify-recipient"
-                ariaLabel="Send to"
+                ariaLabel="Agent"
                 placeholder="Search agents"
                 empty="No agent by that name"
                 value={selectedKey}
@@ -705,35 +693,44 @@ export function NotifyHandoffPanel({
                 }}
                 options={choices.map((t) => recipientOption(t, targets.default))}
               />
-            </section>
+              {!targets.default ? (
+                <p className="tdoc-send-hint">The agent you pick becomes your default for docs no agent has worked on.</p>
+              ) : null}
+            </div>
           ) : (
-            <p className="manage-hint" title={boundHint || undefined}>
+            <p className="tdoc-send-hint" title={boundHint || undefined}>
               {boundHint || 'No agent has touched this doc yet. Pick one after an agent publishes or replies.'}
             </p>
           )}
 
-          {batch.length > 0 ? (<>
-          <label className="field" htmlFor="tdoc-notify-instruction">Instruction</label>
-          <textarea
-            id="tdoc-notify-instruction"
-            className="tdoc-notify-instruction"
-            rows={2}
-            maxLength={500}
-            placeholder="A line for the agent…"
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-            onFocus={(e) => {
-              // Default is a starter, not locked copy — select it so the first
-              // key replaces instead of forcing a delete-then-type.
-              if (isDefaultInstruction(instruction)) e.target.select();
-            }}
-          />
-          </>) : null}
+          {batch.length > 0 ? (
+            <div className="tdoc-send-field">
+              <label className="tdoc-send-label" htmlFor="tdoc-notify-instruction">Note for the agent <span>optional</span></label>
+              <textarea
+                id="tdoc-notify-instruction"
+                className="tdoc-notify-instruction"
+                rows={2}
+                maxLength={500}
+                placeholder="Anything it should know…"
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                onFocus={(e) => {
+                  // Default is a starter, not locked copy — select it so the first
+                  // key replaces instead of forcing a delete-then-type.
+                  if (isDefaultInstruction(instruction)) e.target.select();
+                }}
+              />
+            </div>
+          ) : null}
 
-          <p className={`status${result && !result.ok ? ' tdoc-notify-error' : ''}`} role="status">
-            {busy ? `Sending to ${agentLabel(chosen)}…` : result ? result.text : (status || '\u00a0')}
-          </p>
-        </>
+          {/* Said only when there is something to say: an empty line held
+              open for it left a hole above the buttons. */}
+          {result || status ? (
+            <p className={`tdoc-send-result${result && !result.ok ? ' tdoc-notify-error' : result && result.ok ? ' is-ok' : ''}`} role="status">
+              {result ? result.text : status}
+            </p>
+          ) : null}
+        </div>
       )}
     </AppDialog>
   );
