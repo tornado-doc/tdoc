@@ -90,17 +90,16 @@ t('resolved visibility governs selection without deleting stored comments', () =
     'hiding must not discard the stored comment');
 });
 
-t('the way back is a switch in the bar, off by default', () => {
+t('resolved visibility is a switch in the bar, on by default', () => {
   const sw = read('shell/src/ui/switch.jsx');
   assert(sw.includes('Switch.Root') && sw.includes('Switch.Thumb'),
     'the switch should lean on the primitive for its semantics, not fake them');
   assert(/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar has no switch');
   assert(/label=\{`Resolved \(\$\{resolvedCount\}\)`\}/.test(shell), 'the switch should say how many are hidden');
   assert(/\{resolvedCount \? \(/.test(shell), 'a control that can only do nothing is worse than no control');
-  // Off by default: the margin starts quiet, and a reader who wants it noisy
-  // says so once.
-  assert(/try \{ return localStorage\.getItem\(RESOLVED_KEY\) === '1'; \} catch \{ return false; \}/.test(shell),
-    'default off, and storage that throws still means off rather than a crash');
+  // Show all threads by default; only an explicitly saved OFF hides them.
+  assert(/try \{ return localStorage\.getItem\(RESOLVED_KEY\) !== '0'; \} catch \{ return true; \}/.test(shell),
+    'default on, including when storage is unavailable');
   assert(/localStorage\.setItem\(RESOLVED_KEY/.test(shell), 'the choice should survive a reload');
 });
 

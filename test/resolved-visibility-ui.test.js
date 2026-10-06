@@ -55,6 +55,9 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
         await page.locator('[data-action="show-resolved"]').click();
       }
     };
+    assert.equal(await page.getByRole('switch', { name: /Resolved/ }).getAttribute('aria-checked'), 'true', 'fresh document defaults to showing all comments');
+    await settled(true);
+    await toggle();
     await settled(false);
     await toggle();
     await settled(true);

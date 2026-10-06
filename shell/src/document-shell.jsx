@@ -221,12 +221,11 @@ export function DocumentShell({ boot, config }) {
     }
     return kind;
   });
-  // Resolved threads leave the margin. The choice is the reader's and is
-  // remembered per browser; storage that throws (private mode) simply means
-  // the margin starts quiet again next visit.
+  // Show all comments on first open, including resolved threads. Remember an
+  // explicit choice per browser; unavailable storage keeps the default ON.
   const [showResolved, setShowResolved] = useState(() => {
     if (new URLSearchParams(location.search).get('revised')) return true;
-    try { return localStorage.getItem(RESOLVED_KEY) === '1'; } catch { return false; }
+    try { return localStorage.getItem(RESOLVED_KEY) !== '0'; } catch { return true; }
   });
 
   // `returnTo` lets a caller land the person somewhere specific after the
@@ -1116,7 +1115,7 @@ export function DocumentShell({ boot, config }) {
         supportsTheme={supportsTheme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
           !comparing && <>
-            {/* Resolved threads are out of the margin by default. The switch is
+            {/* Resolved threads are shown by default. The switch is
                 the way back, in the bar where it can be seen — it folds into
                 the ⋯ menu with everything else when the bar runs out of room.
                 Absent entirely when nothing is resolved: a control that can
