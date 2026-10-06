@@ -35,6 +35,7 @@ export function DevicesBody({ tokens: given }) {
     .sort((a, b) => String(b.last_used || b.created || '').localeCompare(String(a.last_used || a.created || '')));
   const [tokens, setTokens] = useState(initial);
   const [confirm, setConfirm] = useState(null);
+  const [confirmAll, setConfirmAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
 
@@ -59,11 +60,35 @@ export function DevicesBody({ tokens: given }) {
     }
   };
 
+  const revokeAll = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/me/tokens/revoke-all', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      const body = await r.json();
+      setTokens([]);
+      setNotice(`Removed ${body.revoked || 0} approved device${body.revoked === 1 ? '' : 's'}. They can no longer act on your account.`);
+    } catch {
+      setNotice('Could not remove all access. Reload and try again.');
+    } finally {
+      setBusy(false);
+      setConfirmAll(false);
+    }
+  };
+
   return (
     <>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Every computer or agent you approved can publish, edit and delete your docs. Remove any you don’t recognise; it will need your approval to come back.
-        </p>
+        <div className="tdoc-access-intro">
+          <p className="muted">
+            Every computer or agent you approved can publish, edit and delete your docs. Remove any you don’t recognise; it will need your approval to come back.
+          </p>
+          {tokens.length ? <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirmAll(true)}>Remove all access</button> : null}
+        </div>
         {notice ? <p className="muted" role="status">{notice}</p> : null}
         {tokens.length === 0 ? (
           <p className="empty">Nothing approved yet. Devices and agents appear here when you approve them.</p>
@@ -105,6 +130,22 @@ export function DevicesBody({ tokens: given }) {
             {confirm.doc ? <>, which first published “{confirm.doc.title}”,</> : null} will stop working immediately.
             Nothing it already published is removed.
           </p>
+        </AppDialog>
+      ) : null}
+
+      {confirmAll ? (
+        <AppDialog
+          open
+          onOpenChange={(open) => { if (!open && !busy) setConfirmAll(false); }}
+          title="Remove all device access?"
+          actions={(
+            <>
+              <button type="button" disabled={busy} onClick={() => setConfirmAll(false)}>Cancel</button>
+              <button type="button" className="danger" disabled={busy} onClick={revokeAll}>Remove all</button>
+            </>
+          )}
+        >
+          <p>All {tokens.length} approved computers and agents will stop working immediately. Nothing already published will be removed. Each device will need your approval before it can act on your account again.</p>
         </AppDialog>
       ) : null}
     </>
