@@ -129,6 +129,23 @@ async function t(name, fn) {
             });
             assert.ok(onTop, 'the open list is hidden behind the dialog');
             await page.keyboard.press('Escape');
+            await popup.waitFor({ state: 'hidden' });
+            if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `agents-${width}-modal.png`) });
+            // Save is the only button; skipping is quiet text under the form,
+            // not a second button of the same weight on its own row.
+            assert.equal(await dialog.locator('.actions').count(), 0, 'the modal grew an actions row again');
+            const later = dialog.getByRole('button', { name: 'Choose later' });
+            const look = await later.evaluate((el) => {
+              const s = getComputedStyle(el);
+              return { size: s.fontSize, border: s.borderTopWidth, bg: s.backgroundColor, weight: s.fontWeight };
+            });
+            assert.equal(look.size, '13px', `Choose later is ${look.size}`);
+            assert.equal(look.border, '0px', 'Choose later has a button border');
+            assert.ok(['rgba(0, 0, 0, 0)', 'transparent'].includes(look.bg), `Choose later has a fill: ${look.bg}`);
+            const laterBox = await controlBox(later);
+            assert.ok(laterBox.top > box.top && laterBox.top - (box.top + box.height) < 40, 'Choose later is not right under the form');
+            await later.click();
+            await dialog.waitFor({ state: 'hidden' });
           });
         }
 
