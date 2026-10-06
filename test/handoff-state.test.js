@@ -73,6 +73,18 @@ function comment(partial) {
   })), 'replied');
   ok('agent reply after handoff is replied');
 
+  const olderVersion = comment({
+    handoff_status: 'sent', handoff_at: '2026-01-01T01:00:00Z',
+    handoff_acked_at: '2026-01-01T01:05:00Z',
+    thread_activity: { agent_at: '2026-01-01T02:00:00Z', human_at: '2026-01-01T00:00:00Z' },
+    replies: [],
+  });
+  assert.strictEqual(handoffSurfaceState(olderVersion), 'replied');
+  assert.strictEqual(handoffSurfaceState({ ...olderVersion, thread_activity: {
+    ...olderVersion.thread_activity, human_at: '2026-01-01T03:00:00Z',
+  } }), 'ready');
+  ok('a later-version reply stops an older version waiting; a later human turn stays independent');
+
   assert.strictEqual(handoffSurfaceState(comment({
     handoff_status: 'resolved',
     handoff_at: '2026-01-01T01:00:00Z',

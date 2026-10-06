@@ -90,6 +90,7 @@ const OFFLINE = [
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'agent-reply-once.test.js', // #349 the agent answers once per human turn
+  'reply-activity.test.js', // old versions see live reply status without rewriting their snapshot
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
   'rich-text.test.js',        // comment markdown subset (bold/code/list/link)
@@ -113,6 +114,7 @@ const OFFLINE = [
 
 // These run against local fixtures and require the development browser.
 const BROWSER = [
+  'reply-activity-ui.test.js', // v2 receives v3 reply status without navigation or pulsing
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments

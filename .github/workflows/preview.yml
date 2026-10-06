@@ -269,6 +269,19 @@ jobs:
             -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
             --data-binary @/tmp/tdoc-preview-visual.json | jq -e '.ok == true'
 
+          REPLY_SLUG="reply-activity-pr-${{ github.event.pull_request.number }}"
+          reset_preview_slug "$REPLY_SLUG"
+          for version in 2 3; do
+            jq -n --arg slug "$REPLY_SLUG" --argjson version "$version" \
+              --rawfile html "test/fixtures/tdocs/reply-activity/v$version/index.html" \
+              --slurpfile comments test/fixtures/tdocs/reply-activity/comments.json \
+              '{slug:$slug,version:$version,html:$html,comments:$comments[0],meta:{title:"Release plan",slug:$slug,versions:[{n:2},{n:3}],access:{visibility:"public",commenting:"signed_in",history_visibility:"public",allowed_users:[]}}}' \
+              > /tmp/tdoc-preview-reply.json
+            curl -sf --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \
+              -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
+              --data-binary @/tmp/tdoc-preview-reply.json | jq -e '.ok == true'
+          done
+
           # Per-PR diagram fixture: shared preview storage must not mix scenes
           # from two concurrently reviewed branches.
           DIAGRAM_SLUG="excalidraw-pr-${{ github.event.pull_request.number }}"
@@ -319,6 +332,7 @@ jobs:
           carrying the landing version in this PR's checkout.
           **Onboarding UI:** https://${PREVIEW_HOST}/__preview/onboarding
           **Resolved toggle:** https://${PREVIEW_HOST}/d/resolved-pr-${PR}/v/2
+          **Reply status on v2 after v3:** https://${PREVIEW_HOST}/d/reply-activity-pr-${PR}/v/2?comment=delivery
           **Version diff:** https://${PREVIEW_HOST}/d/version-diff-pr-${PR}/v/2?compare=1
           **Custom design (no theme switch):** https://${PREVIEW_HOST}/d/custom-design-pr-${PR}/v/1
           **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1

@@ -9,7 +9,7 @@ function storageKey(slug) {
 
 /** Latest agent reply / agent_status stamp on the thread, ms since epoch. */
 export function latestAgentActivityAt(comment) {
-  let latest = 0;
+  let latest = Date.parse(comment?.thread_activity?.agent_at || '') || 0;
   for (const r of comment?.replies || []) {
     if (!r) continue;
     if (!(r.author?.kind === 'agent' || r.agent_status)) continue;

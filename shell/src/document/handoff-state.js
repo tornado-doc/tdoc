@@ -14,7 +14,7 @@ function ts(iso) {
 /** Latest human-authored stamp on the thread (root or reply). */
 export function lastHumanAt(comment) {
   if (!comment) return 0;
-  let latest = 0;
+  let latest = ts(comment.thread_activity?.human_at);
   if (!isAgentAuthor(comment.author)) latest = Math.max(latest, ts(comment.created));
   for (const r of comment.replies || []) {
     if (!r || isAgentAuthor(r.author)) continue;
@@ -26,7 +26,7 @@ export function lastHumanAt(comment) {
 /** Latest agent reply / agent_status stamp on the thread. */
 export function lastAgentAt(comment) {
   if (!comment) return 0;
-  let latest = 0;
+  let latest = ts(comment.thread_activity?.agent_at);
   for (const r of comment.replies || []) {
     if (!r || !(isAgentAuthor(r.author) || r.agent_status)) continue;
     const at = ts(r.created);
