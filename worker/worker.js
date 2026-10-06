@@ -7200,6 +7200,35 @@ function raftInstallationId(env, server) {
     return String(map[server.server_id] || map[server.server_slug] || '');
   } catch { return ''; }
 }
+// Every other server: ask Raft which installation of the tdoc App it has, by
+// the server id tdoc already holds from Connect with Raft, with the App's own
+// client credentials. Before this the id came only from a connect response or
+// hand configuration, so a friend's server -- same App, its own installation
+// -- had no id and its picker no list (Julie, 2026-10-06). A found id is kept;
+// a hit is kept a day (a reinstall gets a new id), a miss (App not installed
+// there) is retried after a minute.
+async function raftLookupInstallationId(env, server) {
+  const known = raftInstallationId(env, server);
+  if (known || !server || !server.server_id) return known;
+  const key = `raft-installation:${server.server_id}`;
+  try {
+    const cached = await env.META.get(key);
+    if (cached !== null && cached !== undefined) return cached;
+  } catch {}
+  let id = '';
+  try {
+    const base = env.RAFT_API_BASE || 'https://api.raft.build';
+    const r = await fetch(`${base}/api/oauth/installations/lookup`, {
+      method: 'POST',
+      headers: raftAuthHeaders(env),
+      body: JSON.stringify({ server_id: server.server_id }),
+    });
+    const b = r.ok ? await r.json().catch(() => null) : null;
+    id = b && typeof b.installation_id === 'string' ? b.installation_id : '';
+  } catch {}
+  try { await env.META.put(key, id, { expirationTtl: id ? 86400 : 60 }); } catch {}
+  return id;
+}
 async function raftInstallationToken(env, installationId) {
   const key = `raft-installation-token:${installationId}`;
   const cached = await env.META.get(key);
@@ -7219,7 +7248,7 @@ async function raftInstallationToken(env, installationId) {
 }
 async function raftDirectoryAgents(env, server) {
   if (!env.RAFT_CLIENT_ID || !env.RAFT_CLIENT_SECRET || !server || !server.server_id) return [];
-  const installationId = raftInstallationId(env, server);
+  const installationId = await raftLookupInstallationId(env, server);
   if (!installationId) return [];
   const cacheKey = `raft-directory:${server.server_id}`;
   try {
