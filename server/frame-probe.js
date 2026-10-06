@@ -493,7 +493,7 @@
   //     overlay COMMENTABLE set + hover affordance; the marquee sub-region
   //     gesture is a follow-on slice. ---
   var COMMENTABLE = 'img, svg, canvas, video, pre, figure, iframe[src], section, aside, blockquote, table, details, [data-tdoc-artifact], [class*="tdoc-artifact"]';
-  var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill';
+  var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill, [data-tdoc-provider]';
   function isProbeUI(el) { return !!(el && el.closest && el.closest(UI_SEL)); }
   function artifactFor(node) {
     if (!node || isProbeUI(node)) return null;
