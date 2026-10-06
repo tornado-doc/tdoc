@@ -237,11 +237,12 @@ X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
           onOpenChange={() => {}}
           title="Choose your default agent"
           description="Last step of connecting Raft. Comments on a doc go to the agent that last worked on it; docs no agent has touched yet go to this one. You can change it here any time."
-          actions={<button type="button" onClick={() => setSetupOpen(false)}>Later</button>}
         >
           {raftConnectors.map((c) => (
             <RaftFallbackForm key={c.server_id} server={c} known={c.agents || []} onSaved={savedDefault} />
           ))}
+          {/* Not a second button beside Save: skipping is the quiet way out. */}
+          <button type="button" className="tdoc-quiet-link" onClick={() => setSetupOpen(false)}>Choose later</button>
         </AppDialog>
       ) : null}
 
