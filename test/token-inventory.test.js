@@ -23,6 +23,19 @@ function revokeReq(id, { cookie = '', token = '', origin = 'https://tdoc.dev' } 
   });
 }
 
+function revokeAllReq({ cookie = '', token = '', origin = 'https://tdoc.dev' } = {}) {
+  return new Request('https://tdoc.dev/api/me/tokens/revoke-all', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(origin ? { Origin: origin } : {}),
+      ...(cookie ? { Cookie: cookie } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: '{}',
+  });
+}
+
 async function listOf(worker, env, cookie) {
   const r = await worker.fetch(req('/api/me/tokens', { cookie }), env, {});
   assert(r.status === 200, `list ${r.status}`);
@@ -126,6 +139,19 @@ async function works(worker, env, token) {
     assert(await works(worker, env, other.token), 'another account was affected');
   });
 
+  await t('remove all kills every credential on this account and no other account', async () => {
+    const { env, mine, shared, other } = await seed();
+    assert(await env.META.get(`account-terminal:${mine.account_id}`), 'seed did not mark a paired terminal');
+    const r = await worker.fetch(revokeAllReq({ cookie: mine.cookie }), env, {});
+    const body = await r.json();
+    assert(r.status === 200 && body.revoked === 2, `response ${r.status} ${JSON.stringify(body)}`);
+    assert(!(await works(worker, env, mine.token)), 'first account token still publishes');
+    assert(!(await works(worker, env, shared.token)), 'second account token still publishes');
+    assert(await works(worker, env, other.token), 'another account was affected');
+    assert((await listOf(worker, env, mine.cookie)).length === 0, 'revoked credentials remain listed');
+    assert(!(await env.META.get(`account-terminal:${mine.account_id}`)), 'paired marker survived full revoke');
+  });
+
   await t('a credential cannot list or revoke its siblings', async () => {
     const { env, mine, shared } = await seed();
     const list = await worker.fetch(req('/api/me/tokens', { token: shared.token }), env, {});
@@ -133,6 +159,8 @@ async function works(worker, env, token) {
     const id = await idOf(env, mine.token);
     const r = await worker.fetch(revokeReq(id, { token: shared.token }), env, {});
     assert(r.status === 401, `bearer revoke should be refused, got ${r.status}`);
+    const all = await worker.fetch(revokeAllReq({ token: shared.token }), env, {});
+    assert(all.status === 401, `bearer revoke-all should be refused, got ${all.status}`);
     assert(await works(worker, env, mine.token), 'token was revoked by a sibling');
   });
 
@@ -150,6 +178,8 @@ async function works(worker, env, token) {
     for (const origin of ['https://evil.example', '']) {
       const r = await worker.fetch(revokeReq(id, { cookie: mine.cookie, origin }), env, {});
       assert(r.status === 403, `origin ${origin || '(none)'} got ${r.status}`);
+      const all = await worker.fetch(revokeAllReq({ cookie: mine.cookie, origin }), env, {});
+      assert(all.status === 403, `revoke-all origin ${origin || '(none)'} got ${all.status}`);
     }
     assert(await works(worker, env, shared.token), 'token revoked by a forged post');
   });

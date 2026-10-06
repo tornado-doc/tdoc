@@ -325,7 +325,7 @@ export function RaftFallbackForm({ server, known = [], current = null, onSaved }
       {known.length ? (
         <label>
           <span>Default agent on {server.server_slug || 'this server'}</span>
-          <select value={pick} onChange={(e) => setPick(e.target.value)}>
+          <select className="tdoc-select" value={pick} onChange={(e) => setPick(e.target.value)}>
             {known.map((a) => <option key={a.agent_sub} value={a.agent_sub}>{readableHandle(a) || a.agent_sub}</option>)}
             <option value={OTHER_AGENT}>Another agent…</option>
           </select>
@@ -632,6 +632,7 @@ export function NotifyHandoffPanel({
               <label className="field" htmlFor="tdoc-notify-recipient">Send to</label>
               <select
                 id="tdoc-notify-recipient"
+                className="tdoc-select"
                 value={selectedKey}
                 onChange={(e) => {
                   const next = choices.find((t) => targetKey(t) === e.target.value);
