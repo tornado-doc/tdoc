@@ -982,3 +982,21 @@ button.tdoc-pin {
 @media (max-width: 380px) {
   .tdoc-modal .tds-codewrap { margin-left: 0; }
 }
+
+/* Send to agent: one column of fields, 16px apart, labelled like the Agents
+   page form (12px, muted, 600). Here, not chrome.css-only, so the feedback
+   overlay gets the same dialog. */
+.tdoc-send { display: grid; gap: 16px; margin-top: 4px; }
+.tdoc-send-field { display: grid; gap: 6px; min-width: 0; }
+.tdoc-modal .tdoc-send-label { display: block; margin: 0; font-size: 12px; font-weight: 600; color: var(--td-muted); }
+.tdoc-send-label span { margin-left: 4px; font-weight: 400; }
+.tdoc-modal .tdoc-send-hint { margin: 0; font-size: 12px; line-height: 1.45; color: var(--td-muted); }
+.tdoc-modal .tdoc-send-notice, .tdoc-modal .tdoc-send-result { margin: 0; font-size: 13px; line-height: 1.45; color: var(--td-muted); }
+.tdoc-modal .tdoc-send-notice.tdoc-notify-error, .tdoc-modal .tdoc-send-result.tdoc-notify-error { color: var(--td-danger); }
+.tdoc-modal .tdoc-send-result.is-ok { color: #1a7340; font-weight: 600; }
+.tdoc-send-notice .text-btn { margin-left: 6px; }
+.tdoc-modal .tdoc-send textarea.tdoc-notify-instruction {
+  resize: none; min-height: 0; font-size: 14px; line-height: 1.45;
+  border-color: var(--td-line); font-family: inherit;
+}
+.tdoc-modal .tdoc-send .tdoc-notify-recipient { padding: 2px 0; }

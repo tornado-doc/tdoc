@@ -75,7 +75,7 @@ async function t(name, fn) {
     const dialog = page.getByRole('dialog', { name: 'Send to agent' });
     await dialog.waitFor();
     await page.locator('#tdoc-notify-recipient').waitFor();
-    await page.waitForFunction(() => /went to|Sending/.test(document.querySelector('.ui-dialog-description')?.textContent || ''));
+    await page.waitForFunction(() => /went to|for your agent/.test(document.querySelector('.ui-dialog-description')?.textContent || ''));
     const pick = async (name) => {
       await page.locator('#tdoc-notify-recipient').click();
       if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'send-to-agent-open.png') }); }
@@ -99,7 +99,7 @@ async function t(name, fn) {
     await t('0 new comments, another agent picked: "Send it to X instead" hands the last batch over, with feedback', async () => {
       const { page, dialog, primary, posts, pick, shot } = await open({ ids: [] });
       await pick('tdoc-claw-devin');
-      assert.equal((await primary.textContent()).trim(), 'Send it to tdoc-claw-devin instead');
+      assert.equal((await primary.textContent()).trim(), 'Send it to tdoc-claw-devin');
       await shot('reassign');
       await primary.click();
       await page.getByText('Sending to tdoc-claw-devin…').waitFor();
@@ -115,9 +115,9 @@ async function t(name, fn) {
     await t('a failed send says who and why, in the error colour, and the button becomes Retry', async () => {
       const { page, dialog, primary, posts, pick, shot } = await open({ ids: ['c1', 'c2'], deliver: 'failed' });
       await pick('tdoc-claw-devin');
-      assert.equal((await primary.textContent()).trim(), 'Send');
+      assert.equal((await primary.textContent()).trim(), 'Send to tdoc-claw-devin');
       await primary.click();
-      const status = dialog.locator('.status');
+      const status = dialog.locator('.tdoc-send-result');
       await page.getByText(/Not delivered to tdoc-claw-devin: Raft refused/).waitFor();
       assert.match(await status.getAttribute('class'), /tdoc-notify-error/);
       const color = await status.evaluate((el) => getComputedStyle(el).color);
@@ -125,7 +125,6 @@ async function t(name, fn) {
       assert.equal((await primary.textContent()).trim(), 'Retry');
       await shot('failed');
       await primary.click();
-      await page.waitForFunction(() => document.querySelectorAll('.status').length && true);
       await page.getByText(/Not delivered to tdoc-claw-devin/).waitFor();
       assert.equal(posts.length, 2, 'Retry did not send again');
       await page.close();
