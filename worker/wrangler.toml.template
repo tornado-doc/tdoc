@@ -80,6 +80,13 @@ TDOC_OWNER = "PLACEHOLDER_OWNER"
 # without waiting for a deploy.
 TDOC_DEBUG_ACCOUNTS = "PLACEHOLDER_DEBUG_ACCOUNTS"
 
+# Raft App installations tdoc cannot learn from Connect with Raft yet, as
+# { "<Raft server id or slug>": "<installation id>" }. An installation id is
+# shown on the App's settings page and is not a credential: listing a
+# server's agents still needs RAFT_CLIENT_ID/SECRET and the Agent permission
+# that server approved. Today: the App owner's own server ("julie").
+RAFT_INSTALLATION_IDS = '{"1ed923e0-27a4-47ff-b09a-ea27efe06877":"b3177b35-c920-4960-b459-b7de83086812"}'
+
 # Secret: TDOC_UPLOAD_TOKEN — set via `wrangler secret put TDOC_UPLOAD_TOKEN`
 # Secret: GITHUB_CLIENT_SECRET — set via `wrangler secret put GITHUB_CLIENT_SECRET`.
 #   The web OAuth redirect flow (browsers) needs it to exchange the code for a
