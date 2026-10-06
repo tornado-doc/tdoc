@@ -12,16 +12,32 @@ async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const posts = [];
+const raftCalls = [];
+// The server's agent directory as Raft's App API would list it; null makes
+// the installation token exchange fail (Agent permission still in review).
+let directory = null;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init = {}) => {
   const u = String(input && input.url || input);
   if (u.startsWith('https://raft.test/')) {
     const path = new URL(u).pathname;
+    raftCalls.push({ path, headers: init.headers || {}, body: init.body });
+    if (path === '/api/oauth/installation-token') {
+      const asked = JSON.parse(init.body || '{}');
+      if (!directory || asked.installation_id !== 'inst-1' || !(asked.groups || []).includes('agent')) return new Response('{"error":"forbidden"}', { status: 403 });
+      return new Response(JSON.stringify({ access_token: 'inst-tok', expires_in: 3600 }), { status: 200 });
+    }
+    if (path === '/api/app-installation/agents') {
+      const auth = (init.headers || {}).Authorization;
+      if (auth !== 'Bearer inst-tok') return new Response('{}', { status: 401 });
+      return new Response(JSON.stringify({ agents: directory }), { status: 200 });
+    }
     const body = path.endsWith('openid-configuration')
       ? { issuer: 'https://raft.test', authorization_endpoint: 'https://raft.test/oauth/authorize', token_endpoint: 'https://raft.test/api/oauth/token', userinfo_endpoint: 'https://raft.test/api/oauth/userinfo' }
       : path.endsWith('/token') ? { access_token: 'at-human', token_type: 'Bearer' }
       : path.endsWith('/userinfo') ? { sub: 'human-1', type: 'human', preferred_username: 'julie' }
       : path.endsWith('/serverinfo') ? { id: 'S9', slug: 'julies-server', name: 'Julie' }
+      : path === '/api/oauth/requests/agent' ? { requestId: 'req-1', agent: { serverId: 'S9' } }
       : {};
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
@@ -182,14 +198,18 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
   });
 
   const RAFT = { RAFT_CLIENT_ID: 'tdoc-x', RAFT_CLIENT_SECRET: 's', RAFT_OIDC_ISSUER: 'https://raft.test', RAFT_API_BASE: 'https://raft.test' };
-  async function connectRaft(env, cookie, otherCookie, popup = false) {
-    const start = await worker.fetch(req(`/api/me/connectors/raft/start${popup ? '?popup=1' : ''}`, { cookie }), env, {});
+  async function connectRaft(env, cookie, otherCookie, popup = false, { attempt = '', callback = 'code=c1' } = {}) {
+    const q = new URLSearchParams();
+    if (popup) q.set('popup', '1');
+    if (attempt) q.set('attempt', attempt);
+    const start = await worker.fetch(req(`/api/me/connectors/raft/start${q.toString() ? `?${q}` : ''}`, { cookie }), env, {});
     const loc = new URL(start.headers.get('Location'));
     const state = loc.searchParams.get('state');
     const stateCookie = (start.headers.get('Set-Cookie') || '').split(';')[0];
-    const back = await worker.fetch(req(`/auth/raft/callback?code=c1&state=${state}`, { cookie: `${otherCookie || cookie}; ${stateCookie}` }), env, {});
+    const back = await worker.fetch(req(`/auth/raft/callback?${callback}&state=${state}`, { cookie: `${otherCookie || cookie}; ${stateCookie}` }), env, {});
     return { start, back };
   }
+  const attemptOf = async (env, cookie, id) => (await worker.fetch(req(`/api/me/connectors/raft/attempt?id=${id}`, { cookie }), env, {})).json();
 
   await t('Connect with Raft: one sign-in connects the person\'s server', async () => {
     const env = makeEnv(mod.CommentsStore, RAFT);
@@ -282,6 +302,108 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     assert(set.ok && set.target.agent_sub === 'uuid-b', JSON.stringify(set));
     const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
     assert(list.default.agent_sub === 'uuid-b' && list.targets.length === 2, JSON.stringify(list.targets));
+  });
+
+  await t('a popup connect reports waiting, then connected, to the document that started it', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT);
+    const owner = await issue(worker, env, 'owner');
+    const other = await issue(worker, env, 'stranger');
+    const attempt = 'a'.repeat(32);
+    // The document asks before the popup has come back.
+    const start = await worker.fetch(req(`/api/me/connectors/raft/start?popup=1&attempt=${attempt}`, { cookie: owner.cookie }), env, {});
+    assert(start.status === 302, `start ${start.status}`);
+    const waiting = await attemptOf(env, owner.cookie, attempt);
+    assert(waiting.status === 'waiting', JSON.stringify(waiting));
+    const state = new URL(start.headers.get('Location')).searchParams.get('state');
+    const stateCookie = (start.headers.get('Set-Cookie') || '').split(';')[0];
+    await worker.fetch(req(`/auth/raft/callback?code=c1&state=${state}`, { cookie: `${owner.cookie}; ${stateCookie}` }), env, {});
+    const done = await attemptOf(env, owner.cookie, attempt);
+    assert(done.status === 'connected' && done.server_slug === 'julies-server', JSON.stringify(done));
+    const peek = await attemptOf(env, other.cookie, attempt);
+    assert(peek.status === 'unknown', `another account read the attempt: ${JSON.stringify(peek)}`);
+  });
+
+  await t('a cancelled popup connect reports failed instead of waiting forever', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT);
+    const owner = await issue(worker, env, 'owner');
+    const attempt = 'b'.repeat(32);
+    const { back } = await connectRaft(env, owner.cookie, null, true, { attempt, callback: 'error=access_denied' });
+    assert(back.status === 400, `callback ${back.status}`);
+    const r = await attemptOf(env, owner.cookie, attempt);
+    assert(r.status === 'failed' && /cancelled/.test(r.message), JSON.stringify(r));
+    const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+    assert(!list.connectors.length, 'a cancelled connect connected a server');
+  });
+
+  const DIRECTORY = [
+    { id: 'id-alpha', handle: 'alpha', display_name: 'Alpha' },
+    { id: 'id-beta', handle: 'beta', display_name: 'Beta' },
+  ];
+  const RAFT_DIR = { ...RAFT, RAFT_INSTALLATION_IDS: JSON.stringify({ S9: 'inst-1' }) };
+
+  await t('Raft\'s agent directory fills the dropdown on a freshly connected server', async () => {
+    directory = DIRECTORY;
+    try {
+      const env = makeEnv(mod.CommentsStore, RAFT_DIR);
+      const owner = await issue(worker, env, 'owner');
+      await connectRaft(env, owner.cookie);
+      await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'ddoc', version: 1, html: '<p>x</p>' } }), env, {});
+      const r = await (await worker.fetch(req('/api/notify/targets?slug=ddoc', { cookie: owner.cookie }), env, {})).json();
+      assert(!r.default, `nothing is preselected for @agent before a default exists: ${JSON.stringify(r.default)}`);
+      const names = (r.candidates || []).map((c) => `${c.agent_name}:${c.agent_sub}:${c.source}:${c.server_slug}`).join(',');
+      assert(names === 'alpha:id-alpha:directory:julies-server,beta:id-beta:directory:julies-server', names);
+      const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+      const raft = list.connectors.find((c) => c.kind === 'raft');
+      assert(raft.agents.map((a) => a.agent_name).join(',') === 'alpha,beta', JSON.stringify(raft.agents));
+      assert(!JSON.stringify(list).includes('inst-tok'), 'installation token leaked to the browser');
+    } finally { directory = null; }
+  });
+
+  await t('choosing a directory agent as default stores its id and replaces a typed handle', async () => {
+    directory = DIRECTORY;
+    try {
+      const env = makeEnv(mod.CommentsStore, RAFT_DIR);
+      const owner = await issue(worker, env, 'owner');
+      await connectRaft(env, owner.cookie);
+      await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_name: 'Beta' }), env, {});
+      const set = await (await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_sub: 'id-beta' }), env, {})).json();
+      assert(set.ok && set.target.agent_sub === 'id-beta' && set.target.agent_name === 'beta', JSON.stringify(set));
+      const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+      assert(list.default.agent_sub === 'id-beta' && list.targets.length === 1, JSON.stringify(list.targets));
+      const raft = list.connectors.find((c) => c.kind === 'raft');
+      assert(raft.agents.map((a) => a.agent_sub).join(',') === 'id-beta,id-alpha', `listed twice or missing: ${JSON.stringify(raft.agents)}`);
+      const stranger = await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_sub: 'id-nobody' }), env, {});
+      assert(stranger.status === 400, `an id not in the directory was accepted: ${stranger.status}`);
+    } finally { directory = null; }
+  });
+
+  await t('the first agent sent to, with no default yet, becomes the default', async () => {
+    directory = DIRECTORY;
+    try {
+      const env = makeEnv(mod.CommentsStore, RAFT_DIR);
+      const owner = await issue(worker, env, 'owner');
+      await connectRaft(env, owner.cookie);
+      await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'fdoc', version: 1, html: '<p>hello</p>' } }), env, {});
+      const c = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: owner.cookie, body: { slug: 'fdoc', version: 1, text: 'fix', anchor: { kind: 'text', text: 'hello' } } }), env, {})).json();
+      const r = await (await worker.fetch(req('/api/notify/targets?slug=fdoc', { cookie: owner.cookie }), env, {})).json();
+      const beta = r.candidates.find((t) => t.agent_name === 'beta');
+      const sent = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug: 'fdoc', comment_ids: [c.id], recipient: beta } }), env, {})).json();
+      assert(sent.ok && sent.delivery.status === 'delivered', JSON.stringify(sent));
+      const asked = raftCalls.filter((x) => x.path === '/api/oauth/requests/agent').pop();
+      assert(asked && JSON.parse(asked.body).agentName === 'beta', `delivered by handle: ${asked && asked.body}`);
+      const after = await (await worker.fetch(req('/api/notify/targets?slug=fdoc', { cookie: owner.cookie }), env, {})).json();
+      assert(after.default && after.default.agent_sub === 'id-beta' && after.default.source === 'account', JSON.stringify(after.default));
+      assert(after.candidates.some((t) => t.agent_sub === 'id-alpha') && !after.candidates.some((t) => t.agent_sub === 'id-beta'), JSON.stringify(after.candidates));
+    } finally { directory = null; }
+  });
+
+  await t('while the Agent permission is in review, nothing changes and nothing errors', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_DIR);
+    const owner = await issue(worker, env, 'owner');
+    await connectRaft(env, owner.cookie);
+    await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'pdoc', version: 1, html: '<p>x</p>' } }), env, {});
+    const r = await (await worker.fetch(req('/api/notify/targets?slug=pdoc', { cookie: owner.cookie }), env, {})).json();
+    assert(r.reason === 'no_agent_bound' && !(r.candidates || []).length && r.raft_servers.length === 1, JSON.stringify(r));
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

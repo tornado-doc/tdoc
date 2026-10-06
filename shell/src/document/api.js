@@ -240,6 +240,10 @@ export function setRaftFallbackAgent({ server_id, agent_name, agent_sub }) {
   });
 }
 
+export function getRaftConnectAttempt(id) {
+  return request(`/api/me/connectors/raft/attempt?id=${encodeURIComponent(id)}`);
+}
+
 export function resendNotifyHandoff({ slug, handoff_id }) {
   return request('/api/notify/handoff/resend', {
     method: 'POST',
