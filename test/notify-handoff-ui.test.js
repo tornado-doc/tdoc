@@ -78,6 +78,7 @@ async function t(name, fn) {
     await page.waitForFunction(() => /went to|Sending/.test(document.querySelector('.ui-dialog-description')?.textContent || ''));
     const pick = async (name) => {
       await page.locator('#tdoc-notify-recipient').click();
+      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'send-to-agent-open.png') }); }
       await page.getByRole('option', { name: new RegExp(name) }).click();
     };
     const shot = async (name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, `send-to-agent-${name}.png`) }); } };
