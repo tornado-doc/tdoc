@@ -11009,9 +11009,19 @@ export default {
       // The first agent a person picks, when they had no default yet, is
       // their default from now on — so @agent has somewhere to go next time.
       const ownerAccount = gate.meta && gate.meta.hosted && gate.meta.hosted.account_id;
-      if (!resolved.default && target && ownerAccount && rec.delivery && rec.delivery.status !== 'failed'
+      const delivered = rec.delivery && rec.delivery.status !== 'failed';
+      if (!resolved.default && target && ownerAccount && delivered
         && offered.some((t) => sameNotifyTarget(t, target))) {
         await touchAccountAgent(env, ownerAccount, target);
+      }
+      // A person who picks a different agent for this doc has chosen who
+      // follows it: that agent gets the doc's later comments and @agent too,
+      // until someone else is picked or another agent does work on it. Without
+      // this the next @agent went back to whoever touched the doc last
+      // (Julie, 2026-10-06).
+      if (asked && target === asked && !sameNotifyTarget(asked, resolved.default)
+        && offered.some((t) => sameNotifyTarget(t, asked))) {
+        await touchDocAgent(env, slug, target);
       }
       return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(skipped.length ? { skipped } : {}) });
     }

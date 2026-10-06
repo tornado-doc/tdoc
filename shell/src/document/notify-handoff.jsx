@@ -76,6 +76,21 @@ function recipientOptionLabel(t, preselected) {
   return `${who}${where}${why}`;
 }
 
+// "smarter-tdoc-claw", or "your Raft agent" when the handle is unreadable.
+function agentLabel(t) {
+  return readableHandle(t) || `your ${providerMeta(t).label} agent`;
+}
+
+function sinceText(iso) {
+  const ms = Date.now() - Date.parse(iso || '');
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const min = Math.round(ms / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+}
+
 function targetKey(t) {
   if (!t) return '';
   return `${t.provider}:${t.server_id}:${t.agent_sub}`;
@@ -347,6 +362,10 @@ export function RaftFallbackForm({ server, known = [], current = null, onSaved, 
         </label>
       ) : null}
       <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || (typing && !name.trim()) || (!typing && current && current.agent_sub === pick)}>{busy ? 'Saving…' : 'Save'}</button>
+      {!known.length ? (
+        // Not a dropdown with nothing in it: say why there is no list.
+        <p className="manage-hint tdoc-conn-pick-note">Raft hasn&apos;t shared the agent list for {server.server_slug || 'this server'} with tdoc yet, so type the agent&apos;s handle, as it appears in Raft.</p>
+      ) : null}
       {error ? <p className="status" role="status">{error}</p> : null}
     </form>
   );
@@ -478,6 +497,9 @@ export function NotifyHandoffPanel({
   const [instruction, setInstruction] = useState(() => defaultInstruction(commentIds));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
+  // The outcome of the last Send: { ok, text }. After a failure the primary
+  // button reads Retry.
+  const [result, setResult] = useState(null);
   const [recent, setRecent] = useState([]);
 
   // With no default yet (a server just connected), the first agent on offer
@@ -491,6 +513,7 @@ export function NotifyHandoffPanel({
     if (!open) return;
     setInstruction(defaultInstruction(commentIds));
     setStatus('');
+    setResult(null);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- only reset when the dialog opens
 
   useEffect(() => {
@@ -515,31 +538,47 @@ export function NotifyHandoffPanel({
 
   const ids = Array.isArray(commentIds) ? commentIds.filter(Boolean) : [];
   const boundHint = noAgentBoundReason(targets.reason);
-  const canSubmit = !busy && ids.length > 0 && choices.length > 0 && (selected || targets.default);
-  const selectedKey = targetKey(selected || targets.default);
+  const chosen = selected || targets.default;
+  const selectedKey = targetKey(chosen);
+  const last = recent[0];
+  const lastFailed = last?.delivery?.status === 'failed';
+  // Nothing new: the button never sits there doing nothing. If the last batch
+  // went to someone else, the action is to hand that batch to the agent picked
+  // here instead; if it already went to this one, there is no action.
+  const lastIds = Array.isArray(last?.comment_ids) ? last.comment_ids.filter(Boolean) : [];
+  const reassign = !ids.length && lastIds.length > 0 && !!chosen && !sameTarget(last.recipient, chosen);
+  const batch = ids.length ? ids : (reassign ? lastIds : []);
+  const canSubmit = !busy && batch.length > 0 && choices.length > 0 && !!chosen;
 
   const submit = async () => {
     if (!canSubmit) return;
     setBusy(true);
     setStatus('');
+    setResult(null);
+    const to = agentLabel(chosen);
     try {
       const body = await postNotifyHandoff({
         slug,
-        comment_ids: ids,
+        comment_ids: batch,
         instruction: instruction.trim(),
-        recipient: selected || undefined,
+        recipient: chosen || undefined,
       });
       const failed = body?.delivery?.status === 'failed';
-      setStatus(failed
-        ? `Sent ${body.sent || ids.length} — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
-        : `Sent ${body.sent || ids.length} to agent`);
+      if (body?.reason === 'agent_has_last_word') {
+        setResult({ ok: true, text: `Nothing sent: an agent already replied to ${batch.length === 1 ? 'this comment' : 'these comments'}.` });
+      } else if (failed) {
+        setResult({ ok: false, text: `Not delivered to ${to}${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}.` });
+      } else {
+        const n = body.sent || batch.length;
+        setResult({ ok: true, text: `Sent ${n} comment${n === 1 ? '' : 's'} to ${to} ✓` });
+      }
       if (onSent) onSent(body);
       try {
         const next = await listNotifyHandoffs(slug, 5);
         setRecent(Array.isArray(next.handoffs) ? next.handoffs : []);
       } catch { /* ignore */ }
     } catch (err) {
-      setStatus(err.message || 'Could not send');
+      setResult({ ok: false, text: `Not sent to ${to}: ${err.message || 'something went wrong'}.` });
     } finally {
       setBusy(false);
     }
@@ -560,8 +599,6 @@ export function NotifyHandoffPanel({
     }
   };
 
-  const last = recent[0];
-  const lastFailed = last?.delivery?.status === 'failed';
   const unavailable = targets.ready && !targets.available;
 
   // Nobody to send to: the panel's job becomes getting one connected, instead
@@ -591,21 +628,17 @@ export function NotifyHandoffPanel({
       title="Send to agent"
       description={unavailable
         ? 'Notify is not available on this host yet.'
-        : (ids.length === 1
-          ? 'Sending 1 comment. One recipient per handoff.'
-          : `Sending ${ids.length || 0} open comments. One recipient per handoff.`)}
+        : ids.length
+          ? (ids.length === 1 ? 'Sending 1 comment. One recipient per handoff.' : `Sending ${ids.length} open comments. One recipient per handoff.`)
+          : lastIds.length
+            ? `No new comments. The last ${lastIds.length === 1 ? 'one' : `${lastIds.length}`} went to ${agentLabel(last.recipient)}${sinceText(last.at) ? ` ${sinceText(last.at)}` : ''}.`
+            : 'No new comments to send.'}
       actions={(
         <>
           <button type="button" onClick={onClose}>Close</button>
-          {!unavailable ? (
-            <button
-              type="button"
-              className="primary"
-              disabled={!canSubmit}
-              title={!choices.length ? (boundHint || 'No agent to send to') : undefined}
-              onClick={submit}
-            >
-              {busy ? 'Sending…' : 'Send'}
+          {!unavailable && batch.length > 0 ? (
+            <button type="button" className="primary" disabled={!canSubmit} onClick={submit}>
+              {busy ? 'Sending…' : result && !result.ok ? 'Retry' : reassign ? `Send ${lastIds.length === 1 ? 'it' : 'them'} to ${agentLabel(chosen)} instead` : 'Send'}
             </button>
           ) : null}
         </>
@@ -613,7 +646,15 @@ export function NotifyHandoffPanel({
     >
       {unavailable ? null : (
         <>
-          {last ? (
+          {!ids.length && lastIds.length > 0 && !reassign ? (
+            <p className="manage-hint">
+              {lastFailed ? 'It was not delivered. ' : `To hand ${lastIds.length === 1 ? 'it' : 'them'} to a different agent, pick one below.`}
+              {lastFailed && last.handoff_id ? (
+                <button type="button" className="text-btn" disabled={busy} onClick={() => resend(last.handoff_id)}>Resend</button>
+              ) : null}
+            </p>
+          ) : null}
+          {ids.length > 0 && last ? (
             <p className="manage-hint">
               Last handoff: {(last.comment_ids || []).length} comment{(last.comment_ids || []).length === 1 ? '' : 's'}
               {lastFailed ? ' · not delivered' : ''}
@@ -637,7 +678,6 @@ export function NotifyHandoffPanel({
             </section>
           ) : choices.length > 1 ? (
             <section className="manage-section">
-              <RecipientLine target={selected || targets.default} />
               <label className="field" htmlFor="tdoc-notify-recipient">Send to</label>
               <AppSelect
                 id="tdoc-notify-recipient"
@@ -655,6 +695,7 @@ export function NotifyHandoffPanel({
             </p>
           )}
 
+          {batch.length > 0 ? (<>
           <label className="field" htmlFor="tdoc-notify-instruction">Instruction</label>
           <textarea
             id="tdoc-notify-instruction"
@@ -670,8 +711,11 @@ export function NotifyHandoffPanel({
               if (isDefaultInstruction(instruction)) e.target.select();
             }}
           />
+          </>) : null}
 
-          <p className="status" role="status">{status || '\u00a0'}</p>
+          <p className={`status${result && !result.ok ? ' tdoc-notify-error' : ''}`} role="status">
+            {busy ? `Sending to ${agentLabel(chosen)}…` : result ? result.text : (status || '\u00a0')}
+          </p>
         </>
       )}
     </AppDialog>
