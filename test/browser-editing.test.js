@@ -665,11 +665,11 @@ async function chooseMode(page, label) {
       await chooseMode(page, 'Comment');
       const entries = page.locator('#tdoc-comment-layer .tdoc-margin-comment');
 
-      // Resolved threads are hidden by default, so the drawer opens with one.
+      // All threads are shown by default, including the resolved one.
       await page.locator('.tdoc-fab').first().click();
       await entries.first().waitFor();
       const hidden = await entries.count();
-      assert(hidden === 1, `the drawer showed ${hidden} threads with resolved hidden, expected 1`);
+      assert(hidden === 2, `the drawer showed ${hidden} threads by default, expected 2`);
 
       // The control is a ⋯ menu item on a phone, not the bar switch — that one
       // is display:none below 700px.
@@ -680,7 +680,7 @@ async function chooseMode(page, label) {
       await page.locator('.tdoc-fab').first().click();
       await page.waitForTimeout(400);
       const shown = await entries.count();
-      assert(shown === 2, `asking for resolved left ${shown} threads in the drawer, expected 2`);
+      assert(shown === 1, `hiding resolved left ${shown} threads in the drawer, expected 1`);
     });
 
     // Last on purpose: it navigates away from the doc every test above shares.
