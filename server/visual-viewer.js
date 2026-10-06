@@ -25,7 +25,7 @@
   var style = provider(document.createElement('style'));
   style.textContent =
     '.tdoc-visual-open{position:absolute;z-index:100;padding:7px;width:32px;height:32px;box-sizing:border-box;border:1px solid #dedee3;border-radius:8px;background:#fff;color:#333;cursor:zoom-in;box-shadow:0 1px 4px #0001;line-height:1;}' +
-    '.tdoc-visual-open svg{display:block;width:16px;height:16px;}' +
+    '.tdoc-visual-open svg{display:block;width:16px;height:16px;margin:0!important;}' +
     '.tdoc-visual-viewer{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;margin:0!important;padding:0!important;border:0!important;box-sizing:border-box!important;}' +
     '.tdoc-visual-viewer::backdrop{background:transparent;}' +
     '.tdoc-visual-toolbar{position:fixed!important;inset:0 0 auto!important;width:100vw;max-width:none;box-sizing:border-box;margin:0;border:0;display:flex;align-items:center;gap:8px;padding:12px max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left));font:14px/1.4 system-ui;color:inherit;}' +

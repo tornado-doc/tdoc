@@ -15,6 +15,11 @@ const { resolveTarget } = require('./helpers/fixture-server');
       await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({source:'tdoc-shell',type:'tdoc:mode',mode:'read'},'*'));
       await frame.locator('html[data-tdoc-interaction-mode="read"]').waitFor();
       await frame.getByRole('button',{name:'View Landscape illustration fullscreen'}).waitFor();
+      const iconOffsets = await frame.locator('.tdoc-visual-open').evaluateAll(buttons => buttons.map(button => {
+        const b = button.getBoundingClientRect(), icon = button.querySelector('svg').getBoundingClientRect();
+        return { x: icon.x + icon.width / 2 - b.x - b.width / 2, y: icon.y + icon.height / 2 - b.y - b.height / 2 };
+      }));
+      assert(iconOffsets.every(({x,y}) => Math.abs(x) < 1 && Math.abs(y) < 1), 'expand icons stay centered despite reader SVG margins');
       assert(await frame.locator('main').evaluate(el => el.getBoundingClientRect().width <= 720), 'standard stays narrow despite legacy wide attribute');
       for (const selector of ['#photo','#flow','#vector','#composed']) {
         const before = await frame.locator(selector).getAttribute('style');
