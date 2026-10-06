@@ -153,7 +153,7 @@ export function ConnectorsBody() {
                     {sample && results[idOf(sample)] ? <div><dt>Last test</dt><dd>{results[idOf(sample)]}</dd></div> : null}
                   </dl>
                   {isRaft ? (
-                    <RaftFallbackForm key={`${c.server_id}:${(defaultOn(c) || {}).agent_sub || ''}`} server={c} known={c.agents || []} current={defaultOn(c)} onSaved={savedDefault} />
+                    <RaftFallbackForm key={`${c.server_id}:${(defaultOn(c) || {}).agent_sub || ''}`} server={c} known={c.agents || []} current={defaultOn(c)} onSaved={savedDefault} inCard />
                   ) : null}
                 </section>
               );
