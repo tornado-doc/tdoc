@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check, ChevronDown, Link2, Plus, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppMenu, AppMenuItem, AppMenuSeparator } from '../ui/menu.jsx';
+import { AppSelect } from '../ui/select.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
 import { copyText } from '../document/model.js';
 import {
@@ -213,21 +214,22 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
                 name={`${m.name}${m.me ? ' (you)' : ''}`}
                 sub={m.key && !m.key.startsWith('email:') ? `@${m.key}` : null}
                 right={admin && !(m.role === 'admin' && admins === 1) ? (
-                  <select
+                  <AppSelect
+                    plain
                     className="tm-role"
-                    aria-label={`Role for ${m.name}`}
+                    ariaLabel={`Role for ${m.name}`}
                     value={m.role}
-                    onChange={(event) => {
-                      const value = event.target.value;
+                    onChange={(value) => {
                       apply(() => (value === 'remove'
                         ? removeTeamMember(team.id, m.account_id)
                         : setTeamRole(team.id, m.account_id, value)));
                     }}
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="member">Member</option>
-                    {!m.me ? <option value="remove">Remove</option> : null}
-                  </select>
+                    options={[
+                      { value: 'admin', label: 'Admin' },
+                      { value: 'member', label: 'Member' },
+                      ...(!m.me ? [{ value: 'remove', label: 'Remove' }] : []),
+                    ]}
+                  />
                 ) : <span className="tm-role-label">{m.role === 'admin' ? 'Admin' : 'Member'}</span>}
               />
             ))}

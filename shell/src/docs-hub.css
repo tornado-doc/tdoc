@@ -349,12 +349,12 @@
   .tab:hover { color: var(--td-ink); }
   .tab.is-active { color: var(--td-accent); border-bottom-color: var(--td-accent); }
   .pane[hidden] { display: none !important; }
-  .toolbar select { -webkit-appearance: none; appearance: none; font: inherit; padding: 8px 30px 8px 12px;
+  .toolbar select, .toolbar .toolbar-select { -webkit-appearance: none; appearance: none; font: inherit; padding: 8px 30px 8px 12px;
     border: 1px solid var(--td-line); border-radius: 8px; color: var(--td-ink); cursor: pointer;
     background: #fff url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23666' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
     background-size: 11px; }
-  .toolbar select:hover { border-color: #ccc; }
-  .toolbar select:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
+  .toolbar select:hover, .toolbar .toolbar-select:hover { border-color: #ccc; }
+  .toolbar select:focus, .toolbar .toolbar-select:focus-visible { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
   .folder-row { cursor: pointer; }
   .folder-row:hover { background: var(--td-surface); }
   .folder-ico { display: flex; align-items: center; color: var(--td-muted); flex-shrink: 0; padding: 0 2px; }
@@ -411,6 +411,7 @@
   .tab,
   .toolbar input[type="search"],
   .toolbar select,
+  .toolbar .toolbar-select,
   .new-folder-btn,
   .select-all,
   .row-menu-btn,
@@ -433,6 +434,7 @@
   }
 
   .toolbar select,
+  .toolbar .toolbar-select,
   .new-folder-btn {
     border-color: transparent;
     background-color: var(--td-surface);
@@ -698,7 +700,6 @@
 .tdoc-conn-form label em { font-style: normal; font-weight: 400; }
 .tdoc-conn-form .tdoc-fbspace-btn { height: 34px; }
 .tdoc-conn-pre { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--td-surface, #f5f5f3); font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre; overflow-x: auto; color: var(--td-ink); }
-.tdoc-conn-form .tdoc-select { height: 34px; padding-top: 0; padding-bottom: 0; font-size: 14px; font-weight: 400; color: var(--td-ink); border-color: var(--td-line); }
 .tdoc-conn-form input { font: 400 14px/1.2 inherit; height: 34px; padding: 0 10px; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
 @media (max-width: 640px) { .tdoc-conn-form { grid-template-columns: 1fr; } }
 
@@ -757,9 +758,16 @@
 .tdoc-conn-inline-form input { flex: 1; height: 34px; padding: 0 10px; font: 400 14px/1.2 inherit; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
 .tdoc-link-btn { justify-self: start; margin-left: 52px; padding: 0; border: 0; background: none; color: var(--td-accent); font: 600 13px/1.2 inherit; cursor: pointer; }
 .tdoc-link-btn:hover { text-decoration: underline; }
+.tdoc-conn-card-title strong { white-space: nowrap; }
 @media (max-width: 640px) {
   .tdoc-conn-card-head { flex-wrap: wrap; }
-  .tdoc-conn-facts, .tdoc-conn-inline-form { padding-left: 0; }
+  /* On a phone the actions take their own row instead of squeezing the
+     name into one word per line. */
+  .tdoc-conn-card-actions { order: 3; width: 100%; }
+  .tdoc-conn-facts, .tdoc-conn-inline-form, .tdoc-conn-pick--card { padding-left: 0; }
   .tdoc-link-btn { margin-left: 0; }
-  .tdoc-conn-facts div { grid-template-columns: 1fr; }
+  /* Stacked label over value: tight inside a pair, room between pairs, or
+     the facts read as one run-on list. */
+  .tdoc-conn-facts { gap: 10px; }
+  .tdoc-conn-facts div { grid-template-columns: 1fr; gap: 2px; }
 }

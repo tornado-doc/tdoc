@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
+import { AppSelect } from './ui/select.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
@@ -159,16 +160,16 @@ function FolderShareDialog({ folder, onClose, onAccess }) {
 
       <section className="manage-section">
         <label className="field" htmlFor="tdoc-folder-access">Who has access</label>
-        <select
+        <AppSelect
           id="tdoc-folder-access"
-          className="tdoc-select"
           value={visibility}
           disabled={busy}
-          onChange={(event) => save({ visibility: event.target.value })}
-        >
-          <option value="private">Only people I invite</option>
-          <option value="unlisted">Anyone with the link</option>
-        </select>
+          onChange={(next) => save({ visibility: next })}
+          options={[
+            { value: 'private', label: 'Only people I invite' },
+            { value: 'unlisted', label: 'Anyone with the link' },
+          ]}
+        />
         <p className="manage-hint">{accessDescription}</p>
 
         {visibility === 'private' ? (
@@ -549,11 +550,18 @@ export function DocsHub({ boot }) {
                   aria-label="Search docs"
                 />
               </label>
-              <select value={hub.sort} onChange={(event) => hub.setSort(event.target.value)} aria-label="Sort docs">
-                <option value="updated">Last updated</option>
-                <option value="created">Created</option>
-                <option value="title">Title</option>
-              </select>
+              <AppSelect
+                plain
+                className="toolbar-select"
+                ariaLabel="Sort docs"
+                value={hub.sort}
+                onChange={hub.setSort}
+                options={[
+                  { value: 'updated', label: 'Last updated' },
+                  { value: 'created', label: 'Created' },
+                  { value: 'title', label: 'Title' },
+                ]}
+              />
               {capabilities.folders ? (
                 <button type="button" className="new-folder-btn" onClick={() => setModal({ type: 'new-folder' })}>
                   <FolderPlus size={15} /> New folder

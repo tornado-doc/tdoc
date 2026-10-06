@@ -9,7 +9,8 @@
 .tm-person-text > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tm-person-sub { color: var(--td-muted); font-size: 12px; }
 .tm-person-right { flex: none; }
-.tm-role { border: 0; background: none; color: var(--td-muted); font: inherit; font-size: 13px; cursor: pointer; }
+.tm-role { border: 0; color: var(--td-muted); font: inherit; font-size: 13px; cursor: pointer; padding: 4px 18px 4px 6px; border-radius: 6px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 4px center / 10px; }
+.tm-role:hover { background-color: var(--td-surface); color: var(--td-ink); }
 .tm-role-label { color: var(--td-muted); font-size: 13px; }
 .tm-text-btn { border: 0 !important; background: none !important; color: var(--td-muted); font-size: 13px; padding: 4px !important; }
 .tm-link-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }
