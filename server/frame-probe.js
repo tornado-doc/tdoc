@@ -30,8 +30,11 @@
     if (explicit === 'tdoc') return true;
     var roots = [document.documentElement, document.body];
     Array.prototype.forEach.call(document.querySelectorAll('body > main, body > article, body > section, body > div'), function (content) { roots.push(content); });
-    var palette = { background: false, color: false };
-    function foundation(style) {
+    // Keep ownership per element: house presets put the page background on
+    // body and inherited text color on .wrap. Combining those is not evidence
+    // that one author surface supplies its own complete palette.
+    var palettes = roots.map(function () { return { background: false, color: false }; });
+    function foundation(style, palette) {
       if (!style) return false;
       // Token-based adjustments still use the reader design. Typography,
       // layout and individual accents do not opt out: require an author
@@ -47,25 +50,33 @@
     function rulesHaveDesign(rules) {
       for (var i = 0; i < rules.length; i++) {
         var rule = rules[i];
-        if (rule.selectorText && roots.some(function (root) {
-          try { return root && root.matches(rule.selectorText); } catch (_) { return false; }
-        }) && foundation(rule.style)) return true;
+        if (rule.selectorText && roots.some(function (root, index) {
+          try { return root && root.matches(rule.selectorText) && foundation(rule.style, palettes[index]); } catch (_) { return false; }
+        })) return true;
         // Include conditional styles: the design must not switch ownership
         // when a viewport breakpoint or OS color preference changes.
         if (rule.cssRules && rulesHaveDesign(rule.cssRules)) return true;
       }
       return false;
     }
-    for (var i = 0; i < roots.length; i++) if (roots[i] && foundation(roots[i].style)) return false;
+    for (var i = 0; i < roots.length; i++) if (roots[i] && foundation(roots[i].style, palettes[i])) return false;
     for (var j = 0; j < document.styleSheets.length; j++) {
       var sheet = document.styleSheets[j], owner = sheet.ownerNode;
       if (sheet.disabled || (owner && (owner.id === 'tdoc-reader' || owner.id === 'tdoc-reader-patch' || owner.hasAttribute('data-tdoc-provider')))) continue;
       try { if (rulesHaveDesign(sheet.cssRules)) return false; }
-      catch (_) { return false; } // An opaque author stylesheet owns its design.
+      catch (_) {} // Opaque stylesheets (including web fonts) do not prove a custom palette.
     }
     return true;
   }
   var supportsTheme = usesReaderDesign();
+  if (supportsTheme) {
+    // Serve-time enforcement also covers older documents carrying a baked
+    // wide-column rule. Custom designs never receive this constraint.
+    var designStyle = document.createElement('style');
+    designStyle.setAttribute('data-tdoc-provider', '');
+    designStyle.textContent = 'body > :is(.wrap,main,article,.content,.container):not(:popover-open){width:100%!important;max-width:720px!important;box-sizing:border-box!important;margin-left:auto!important;margin-right:auto!important;}';
+    (document.head || document.documentElement).appendChild(designStyle);
+  }
   if (!supportsTheme) {
     // Disable only the house design, not the provider's table/overflow patch,
     // comments or author styles. CSSOM state is not serialized into storage.
@@ -74,6 +85,7 @@
     });
   }
   var interactionMode = 'read';
+  function visualViewerOpen() { return document.documentElement.hasAttribute('data-tdoc-visual-open'); }
   // Block/artifact hover outline. Off on the homepage — landing sections are
   // huge commentable boxes and the dashed chrome gets in the way. Text
   // selection commenting still works. Shell sets this via tdoc:mode.
@@ -277,7 +289,7 @@
            rect: selectionRect(range) });
   }
   function reportSelection() {
-    if (interactionMode !== 'comment') return;
+    if (interactionMode !== 'comment' || visualViewerOpen()) return;
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     var text = sel.toString().trim();
@@ -360,6 +372,7 @@
   // shell / 404), not the page. Intercept and hand navigation to the shell,
   // which navigates the top document (or opens a tab for target=_blank).
   document.addEventListener('click', function (e) {
+    if (visualViewerOpen() || e.target.closest?.('.tdoc-visual-open')) return;
     if (e.target.closest && e.target.closest('[data-tdoc-diagram-open]')) return;
     // The mousedown of this same gesture dismissed something. Let it end there.
     if (swallowClick) {
@@ -391,6 +404,7 @@
 
   function clearSelectingCursor() { document.documentElement.removeAttribute('data-tdoc-selecting'); }
   document.addEventListener('mouseup', function (e) {
+    if (visualViewerOpen()) return;
     clearSelectingCursor();
     // A dismissing click must not report a selection either. Content styled
     // `user-select: all` selects its whole block on a single click, which came
@@ -435,6 +449,7 @@
     } catch (x) {}
   }, true);
   document.addEventListener('mousedown', function (e) {
+    if (visualViewerOpen()) return;
     // Edit mode opts out of comment behaviour, but not out of dismissal: a card
     // opened from a pin stayed open there while every other mode closed it on
     // a click outside. Everything below is already mode-agnostic, so letting
@@ -478,7 +493,7 @@
   //     overlay COMMENTABLE set + hover affordance; the marquee sub-region
   //     gesture is a follow-on slice. ---
   var COMMENTABLE = 'img, svg, canvas, video, pre, figure, iframe[src], section, aside, blockquote, table, details, [data-tdoc-artifact], [class*="tdoc-artifact"]';
-  var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill';
+  var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill, [data-tdoc-provider]';
   function isProbeUI(el) { return !!(el && el.closest && el.closest(UI_SEL)); }
   function artifactFor(node) {
     if (!node || isProbeUI(node)) return null;
@@ -562,7 +577,7 @@
     hideHover();
   }
   document.addEventListener('mousemove', function (e) {
-    if (interactionMode !== 'comment' || !elementComment) { if (hoverEl) hideHover(); return; }
+    if (interactionMode !== 'comment' || !elementComment || visualViewerOpen()) { if (hoverEl) hideHover(); return; }
     var t = e.target;
     if (isProbeUI(t)) return; // keep the pill/outline up while the cursor is on them
     var art = artifactFor(t);

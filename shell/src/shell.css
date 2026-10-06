@@ -38,6 +38,24 @@ body,
   display: block;
 }
 
+/* Keep the original sandbox mounted: expanding an interactive visual must
+   not reload its iframe or discard its current state. */
+.tdoc-document-app[data-visual-open] > :not(.tdoc-reader-surface),
+.tdoc-document-app[data-visual-open] .tdoc-reader-surface > :not(.tdoc-doc-frame) {
+  display: none !important;
+}
+.tdoc-document-app[data-visual-open] .tdoc-doc-frame {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  z-index: 1000;
+  filter: none !important;
+}
+/* The viewer applies its own theme inside the sandbox. An invert/counter-
+   invert pair in the shell clips saturated image colors even when it cancels. */
+html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
+
 .tdoc-bar button.tdoc-mode-trigger {
   box-sizing: border-box;
   height: 32px;

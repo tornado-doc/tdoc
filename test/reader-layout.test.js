@@ -1,5 +1,5 @@
 // Real layout regression: a grid's long inline code widened a 375px Raft doc
-// to 490px. Also exercise explicit wide documents with old, already-baked CSS.
+// to 490px. Old width attributes must not stretch standard documents.
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert/strict');
@@ -41,7 +41,7 @@ const fixture = (css, wide) => `<!doctype html><meta name="viewport" content="wi
               preScroll: document.querySelector('pre').scrollWidth > document.querySelector('pre').clientWidth };
           });
           assert(m.page <= m.viewport + 1, `page ${m.page}px exceeds viewport ${m.viewport}px`);
-          if (width === 1440) assert(wide ? m.root > 1200 : m.root === 720, `wrong column width ${m.root}`);
+          if (width === 1440) assert(m.root === 720, `wrong column width ${m.root}`);
           if (width === 375) assert(m.tableScroll > 0, 'wide table must remain reachable by local scrolling');
           if (width === 375) assert(m.naturalTableScroll, 'natural table columns must not be squeezed by prose wrapping');
           assert(m.preScroll, 'preformatted commands must retain local scrolling');
