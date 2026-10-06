@@ -69,6 +69,7 @@
     if (a.target.matches(':popover-open')) a.target.hidePopover();
     restoreAttr(a.target, 'style', a.style); restoreAttr(a.target, 'popover', a.popover); restoreAttr(a.target, 'id', a.id);
     a.inert.forEach(function (node) { node.removeAttribute('inert'); });
+    a.hidden.forEach(function (item) { restoreAttr(item.node, 'aria-hidden', item.value); });
     if (a.wrapper) { a.wrapper.replaceWith(a.el); }
     a.panel.remove();
     document.documentElement.removeAttribute('data-tdoc-visual-open');
@@ -97,7 +98,9 @@
     }
     var panel = provider(document.createElement('div'));
     panel.className = 'tdoc-visual-viewer'; panel.setAttribute('popover', 'auto');
-    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', label(el));
+    // Background siblings are inert below. aria-modal would hide the original
+    // visual from some accessibility trees because it retains its DOM parent.
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', label(el));
     var bg = getComputedStyle(el).backgroundColor;
     for (var p = el.parentElement; (!bg || bg === 'rgba(0, 0, 0, 0)') && p; p = p.parentElement) bg = getComputedStyle(p).backgroundColor;
     panel.style.background = bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#fff';
@@ -120,13 +123,16 @@
     panel.appendChild(toolbar); document.body.appendChild(panel);
     active = { el: el, target: target, wrapper: wrapper, panel: panel, trigger: trigger,
       style: target.getAttribute('style'), popover: target.getAttribute('popover'), id: target.getAttribute('id'),
-      width: width, height: height, x: 0, y: 0, scrollX: scrollX, scrollY: scrollY, inert: [] };
+      width: width, height: height, x: 0, y: 0, scrollX: scrollX, scrollY: scrollY, inert: [], hidden: [] };
     // Keep the original visual's ancestry active while excluding the rest of
     // the document from focus and the accessibility tree.
     for (var branch = target; branch && branch !== document.body; branch = branch.parentElement) {
       Array.from(branch.parentElement.children).forEach(function (sibling) {
         if (sibling !== branch && sibling !== panel && !sibling.hasAttribute('inert')) {
           sibling.setAttribute('inert', ''); active.inert.push(sibling);
+          if (!(sibling instanceof HTMLElement)) {
+            active.hidden.push({ node: sibling, value: sibling.getAttribute('aria-hidden') }); sibling.setAttribute('aria-hidden', 'true');
+          }
         }
       });
     }
