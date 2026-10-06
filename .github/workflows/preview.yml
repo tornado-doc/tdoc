@@ -259,6 +259,16 @@ jobs:
             -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
             --data-binary @/tmp/tdoc-preview-theme.json | jq -e '.ok == true'
 
+          VISUAL_SLUG="visual-viewer-pr-${{ github.event.pull_request.number }}"
+          reset_preview_slug "$VISUAL_SLUG"
+          jq -n --arg slug "$VISUAL_SLUG" --rawfile html test/fixtures/tdocs/visual-viewer/v1/index.html \
+            --rawfile counter test/fixtures/tdocs/visual-viewer/v1/widgets/counter.html \
+            '{slug:$slug,version:1,html:$html,widgets:{counter:$counter},meta:{title:"Visual fullscreen preview",slug:$slug,versions:[{n:1}],access:{visibility:"public",commenting:"signed_in",history_visibility:"public",allowed_users:[]}}}' \
+            > /tmp/tdoc-preview-visual.json
+          curl -sf --connect-timeout 10 --max-time 60 -X POST "$BASE/api/upload" \
+            -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" -H "Content-Type: application/json" \
+            --data-binary @/tmp/tdoc-preview-visual.json | jq -e '.ok == true'
+
           # Per-PR diagram fixture: shared preview storage must not mix scenes
           # from two concurrently reviewed branches.
           DIAGRAM_SLUG="excalidraw-pr-${{ github.event.pull_request.number }}"

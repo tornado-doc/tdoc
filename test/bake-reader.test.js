@@ -20,11 +20,11 @@ const FIXTURE = `<!doctype html><html><head><meta name="viewport" content="width
 <style>body { background:#fff; } .note { border-left:3px solid #888; }</style>
 </head><body><div class="wrap"><h1>Bake</h1><p>Prose relying on the reader template.</p></div></body></html>`;
 
-function runNew(tmp, slug, html) {
+function runNew(tmp, slug, html, args = []) {
   const f = path.join(tmp, `${slug}.html`);
   fs.writeFileSync(f, html);
   // --no-server: scaffold-only (CI has no installed skill dir and no server).
-  cp.execFileSync('bash', [path.join(ROOT, 'bin', 'tdoc-new'), '--slug', slug, '--title', slug, '--html-file', f, '--no-server'], {
+  cp.execFileSync('bash', [path.join(ROOT, 'bin', 'tdoc-new'), '--slug', slug, '--title', slug, '--html-file', f, '--no-server', ...args], {
     env: { ...process.env, TDOC_DIR: path.join(tmp, 'tdocs') }, stdio: ['ignore', 'ignore', 'pipe'],
   });
   return fs.readFileSync(path.join(tmp, 'tdocs', slug, 'v1', 'index.html'), 'utf8');
@@ -55,10 +55,16 @@ try {
     if (n !== 1) throw new Error(`expected 1 tdoc-reader block after re-bake guard, got ${n}`);
   });
 
-  t('wide is a supported house-template choice without custom-template', () => {
+  t('standard design is explicit and no longer bakes a wide-column override', () => {
     const out = runNew(tmp, 'bake-wide', FIXTURE.replace('class="wrap"', 'class="wrap" data-tdoc-width="wide"'));
     if (!out.includes('class="wrap" data-tdoc-width="wide"')) throw new Error('wide choice was lost');
-    if (!out.includes('[data-tdoc-width="wide"]')) throw new Error('wide template rule was not baked');
+    if (out.includes('[data-tdoc-width="wide"]')) throw new Error('standard template still contains a wide rule');
+    if (!out.includes('data-tdoc-design="tdoc"')) throw new Error('standard design was not declared');
+  });
+
+  t('custom-template explicitly owns design, overriding stale markup', () => {
+    const out = runNew(tmp, 'bake-custom', FIXTURE.replace('<html>', '<html data-tdoc-design="tdoc">'), ['--custom-template']);
+    if (!out.includes('data-tdoc-design="custom"')) throw new Error('custom design was not declared');
   });
 
   t('the baked doc still passes tdoc-validate-template', () => {

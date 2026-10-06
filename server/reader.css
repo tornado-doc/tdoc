@@ -8,9 +8,9 @@
    (extracted from overlay.js). Consumed by: tdoc-bake (creation-time bake),
    /frame fallback, /export.
 
-   The wrapper, explicit width choice, and print rules are deliberately not
+   The wrapper and print rules are deliberately not
    zero-specificity: `.tdoc-table-scroll` names tdoc's
-   own wrapper class, [data-tdoc-width="wide"] opts into the wide column, and
+   own wrapper class, and
    the `@media print` block below only applies to printing. Other defaults
    remain inside :where(). */
 :where(:root) {
@@ -100,8 +100,7 @@
      AND margin:auto (previously margin was missing, so wrapped docs without
      their own margin rule sat left-aligned); (b) docs with no wrapper at all
      get the same column applied to body itself via :has(). :where() keeps both
-     at zero specificity. The explicit wide option below keeps the template's
-     padding and typography while using the available width. */
+     at zero specificity. Wider pages use an explicit custom design. */
   :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
     max-width: 720px;
     margin-left: auto;
@@ -117,13 +116,6 @@
     box-sizing: border-box;
   }
   /* End default template. ====================================================== */
-
-  /* An author chooses width independently of the house style. Keep the
-     attribute outside :where() so it also beats an older baked column when
-     supplied by the serve-time patch before the old template. */
-  :where(body > .wrap, body > main, body > article, body > .content, body > .container)[data-tdoc-width="wide"] {
-    max-width: none;
-  }
 
   /* Defensive responsive defaults for artifacts. Docs sometimes hardcode pixel
      widths (e.g. <canvas width="640">) that overflow on phones. These rules

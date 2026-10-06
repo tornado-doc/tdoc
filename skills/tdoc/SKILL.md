@@ -990,16 +990,24 @@ The template is modeled after the `conway-life` doc ("What if a doc could think?
 entry's CSS as written. Add only the
 house style's components and tightly scoped CSS for content-specific charts,
 diagrams, and controls. Do not invent additional bare-element rules or change
-root layout with arbitrary CSS. Width is a separate template choice:
+root layout with arbitrary CSS.
 
-- **Default:** `<div class="wrap">` keeps the centered 720px reading column.
-- **Wide:** `<div class="wrap" data-tdoc-width="wide">` uses the available
-  page width with the same padding, typography, and chosen house style. Use
-  it for diagram-heavy designs or wide comparisons that cannot fit the normal
-  column comfortably, or when the user asks for a full-width document. It does
-  **not** require `--custom-template` or a different aesthetic.
+- **Standard design:** a centered 720px reading column with tdoc light/dark controls.
+- **Custom design:** `--custom-template` gives the author ownership of width,
+  typography and colors. It does not receive tdoc theme controls or reader styling.
 
-The document uses the author's layout; readers do not choose a width mode.
+`tdoc-write` records this choice as `data-tdoc-design="tdoc"` or `"custom"`
+on `<html>`. A font or local spacing change alone does not change design ownership.
+Wide layouts belong to custom designs; do not stretch the standard reading column.
+Readers do not choose a page-width mode.
+
+Images, SVG diagrams, figures and `data-tdoc-artifact` blocks can be clicked to
+view fullscreen. Interactive embeds keep their own controls; use the provider's
+expand button. Closing restores the reading position and the original widget state.
+Use a `figure` or `data-tdoc-artifact` wrapper for composed HTML/CSS visualizations.
+Do not add your own fullscreen controls or convert a diagram to Excalidraw solely
+to make it expandable. Choose the visualization tool that fits the content.
+
 At the standard 720px root, 24px padding per side leaves **672px for content**;
 on a 375px phone there are about **311px**. Design for the content box, not the
 browser window. Use container queries for layout changes inside that root.
@@ -1054,8 +1062,7 @@ What to write:
 ```
 
 The baked template's `:where()` rules handle:
-- Centered article column (`max-width: 720px`, padded) by default; opt into
-  the available full width with `data-tdoc-width="wide"` on the root.
+- Centered article column (`max-width: 720px`, padded) for standard designs.
   Do not restate root sizing in CSS: the template owns spacing, and
   `frame-probe.js` measures the result to place comments
 - All heading sizes, weights, spacing
@@ -1073,13 +1080,13 @@ Wrap the doc content in a single container element with one of these selectors: 
 - Anchor the article to the LEFT when there are comments (so growing/shrinking the window preserves the right-side comment column)
 - Calculate where comment cards land
 
-Note: select the column with `data-tdoc-width="wide"` when needed; do not set arbitrary root width, margin or padding. The template supplies spacing, and the probe measures the resulting column for comment placement.
+Note: standard designs retain the reading column; custom designs own their width. Do not override standard root width, margin or padding. The template supplies spacing, and the probe measures the resulting column for comment placement.
 
 ### Required: explicit body background
 
 Always set `body { background: #fff; }` (or your chosen color) so the page doesn't render as transparent over the reader's own ground.
 
-**Author in light only — dark mode is a whole-page invert**, applied inside the frame by `frame-probe.js` (`filter: invert(1) hue-rotate(180deg)`, the Dark Reader trick). A hand-written dark palette gets inverted back to light, so a `@media (prefers-color-scheme: dark)` block that sets dark colors renders *light*. Style the light look well and the dark one is its clean inverse, for free. See `$SKILL_DIR/authoring/style/technical.md` for the full rule.
+**Standard designs: author in light only — dark mode is a whole-page invert**, applied inside the frame by `frame-probe.js` (`filter: invert(1) hue-rotate(180deg)`, the Dark Reader trick). A hand-written dark palette gets inverted back to light, so a `@media (prefers-color-scheme: dark)` block that sets dark colors renders *light*. Style the light look well and the dark one is its clean inverse, for free. See `$SKILL_DIR/authoring/style/technical.md` for the full rule. Custom designs retain their own palette and receive no tdoc theme inversion.
 
 ### Responsive defaults (REQUIRED)
 
@@ -1087,8 +1094,8 @@ Every doc must work on mobile out of the box. The baked template carries defensi
 
 - **Always include** `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`. Nothing adds it for you — the frame serves your HTML as written — and the validator rejects a document without it.
 - **Use fluid widths**, not hardcoded pixels. The default 720px column has a
-  **672px** usable canvas; select `data-tdoc-width="wide"` on the root when
-  the content needs more room. Keep root spacing in the template. On phones
+  **672px** usable canvas. Readers can expand individual visuals fullscreen;
+  a wider page requires a custom design. Keep root spacing in the template. On phones
   both layouts shrink to the viewport. Use `minmax(0, 1fr)` for grid text tracks,
   `min-width: 0` on their children and `overflow-wrap: anywhere` for long identifiers;
   stack text-heavy columns on small screens.
@@ -1124,8 +1131,9 @@ that a file opened without the provider will have the same layout.
 Agents generate arbitrary HTML. The baked template is **`:where()` zero-specificity** so **author CSS always wins** — property by property: what you name is yours, what you leave alone keeps the default. That also means a bad author rule silently breaks layout (e.g. `padding: 0 24px` on the content root wiped the top reading space — #96). Contract:
 
 - One primary content container: `.wrap` (preferred), `main`, `article`, `.content`, or `.container`.
-- Select default or `data-tdoc-width="wide"` on the primary root. **No arbitrary**
-  root width / `margin` / `padding` overrides — the template owns column spacing.
+- Standard design keeps the narrow primary root. **No arbitrary** root width /
+  `margin` / `padding` overrides — the template owns column spacing. Custom design
+  owns its layout and must remain responsive.
 - Treat `tdoc-*` classes/ids as reserved.
 - Scope document UI rules to the document (never global `button:hover`).
 - Prefer fluid/`max-width` layouts over fixed pixel shells.

@@ -169,6 +169,7 @@ export function DocumentShell({ boot, config }) {
   const editorRef = useRef(null);
   const diagramApplyRef = useRef(null);
   const [diagram, setDiagram] = useState(null);
+  const [visualOpen, setVisualOpen] = useState(false);
   const [composer, setComposer] = useState(null);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
@@ -378,6 +379,7 @@ export function DocumentShell({ boot, config }) {
   }, [comments.moveAnchor]);
 
   const bridge = useFrameBridge({
+    'tdoc:visualState': (message) => setVisualOpen(message.open === true),
     'tdoc:selection': selectFromFrame,
     'tdoc:diagramApplied': (message) => {
       const pending = diagramApplyRef.current;
@@ -400,6 +402,7 @@ export function DocumentShell({ boot, config }) {
       setOpenClusterKey(null);
     },
     'tdoc:ready': (message) => {
+      setVisualOpen(false);
       setSupportsTheme(message.supportsTheme === true);
       const storedTheme = readStored('tdoc-theme');
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
@@ -1099,6 +1102,7 @@ export function DocumentShell({ boot, config }) {
   return (
     <div
       className="tdoc-document-app"
+      data-visual-open={visualOpen || undefined}
       onPointerDown={() => {
         // Legacy behavior: a click anywhere outside a card, pin, or composer
         // closes the open card and cluster popover (they stop propagation).

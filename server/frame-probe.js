@@ -69,6 +69,14 @@
     return true;
   }
   var supportsTheme = usesReaderDesign();
+  if (supportsTheme) {
+    // Serve-time enforcement also covers older documents carrying a baked
+    // wide-column rule. Custom designs never receive this constraint.
+    var designStyle = document.createElement('style');
+    designStyle.setAttribute('data-tdoc-provider', '');
+    designStyle.textContent = 'body > :is(.wrap,main,article,.content,.container):not(:popover-open){width:100%!important;max-width:720px!important;box-sizing:border-box!important;margin-left:auto!important;margin-right:auto!important;}';
+    (document.head || document.documentElement).appendChild(designStyle);
+  }
   if (!supportsTheme) {
     // Disable only the house design, not the provider's table/overflow patch,
     // comments or author styles. CSSOM state is not serialized into storage.
@@ -77,6 +85,7 @@
     });
   }
   var interactionMode = 'read';
+  function visualViewerOpen() { return document.documentElement.hasAttribute('data-tdoc-visual-open'); }
   // Block/artifact hover outline. Off on the homepage — landing sections are
   // huge commentable boxes and the dashed chrome gets in the way. Text
   // selection commenting still works. Shell sets this via tdoc:mode.
@@ -280,7 +289,7 @@
            rect: selectionRect(range) });
   }
   function reportSelection() {
-    if (interactionMode !== 'comment') return;
+    if (interactionMode !== 'comment' || visualViewerOpen()) return;
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     var text = sel.toString().trim();
@@ -363,6 +372,7 @@
   // shell / 404), not the page. Intercept and hand navigation to the shell,
   // which navigates the top document (or opens a tab for target=_blank).
   document.addEventListener('click', function (e) {
+    if (visualViewerOpen() || e.target.closest?.('.tdoc-visual-open')) return;
     if (e.target.closest && e.target.closest('[data-tdoc-diagram-open]')) return;
     // The mousedown of this same gesture dismissed something. Let it end there.
     if (swallowClick) {
@@ -394,6 +404,7 @@
 
   function clearSelectingCursor() { document.documentElement.removeAttribute('data-tdoc-selecting'); }
   document.addEventListener('mouseup', function (e) {
+    if (visualViewerOpen()) return;
     clearSelectingCursor();
     // A dismissing click must not report a selection either. Content styled
     // `user-select: all` selects its whole block on a single click, which came
@@ -438,6 +449,7 @@
     } catch (x) {}
   }, true);
   document.addEventListener('mousedown', function (e) {
+    if (visualViewerOpen()) return;
     // Edit mode opts out of comment behaviour, but not out of dismissal: a card
     // opened from a pin stayed open there while every other mode closed it on
     // a click outside. Everything below is already mode-agnostic, so letting
@@ -565,7 +577,7 @@
     hideHover();
   }
   document.addEventListener('mousemove', function (e) {
-    if (interactionMode !== 'comment' || !elementComment) { if (hoverEl) hideHover(); return; }
+    if (interactionMode !== 'comment' || !elementComment || visualViewerOpen()) { if (hoverEl) hideHover(); return; }
     var t = e.target;
     if (isProbeUI(t)) return; // keep the pill/outline up while the cursor is on them
     var art = artifactFor(t);

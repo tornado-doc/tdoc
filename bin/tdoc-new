@@ -251,6 +251,30 @@ fi
 # origin shell serves author HTML in an isolated frame and injects nothing
 # into storage). bin/tdoc-bake owns the operation and is idempotent, so every
 # path that writes a version can call it without checking first.
+# The explicit creation mode owns design. Do not infer it later from fonts,
+# colors, or the presence of a baked reader block.
+python3 - "$STAGE_HTML" "$CUSTOM_TEMPLATE" <<'PY'
+import sys, re
+from html import escape
+from html.parser import HTMLParser
+from pathlib import Path
+p = Path(sys.argv[1]); source = p.read_text()
+class Root(HTMLParser):
+    span = None
+    def handle_starttag(self, tag, attrs):
+        if tag != 'html' or self.span is not None: return
+        line, col = self.getpos()
+        start = sum(len(s) for s in source.splitlines(keepends=True)[:line-1]) + col
+        attrs = [(k, v) for k, v in attrs if k != 'data-tdoc-design']
+        attrs.append(('data-tdoc-design', 'custom' if sys.argv[2] == '1' else 'tdoc'))
+        self.span = (start, start + len(self.get_starttag_text()), '<html' + ''.join(' ' + k + ('' if v is None else '="' + escape(v, quote=True) + '"') for k, v in attrs) + '>')
+r = Root(); r.feed(source)
+if r.span:
+    start, end, tag = r.span; source = source[:start] + tag + source[end:]
+else:
+    source = re.sub(r'(?i)(<!doctype[^>]*>)?', lambda m: (m[0] or '') + '<html data-tdoc-design="' + ('custom' if sys.argv[2] == '1' else 'tdoc') + '">', source, count=1) + '</html>'
+p.write_text(source)
+PY
 node "$(cd "$(dirname "$0")" && pwd)/tdoc-bake" "$STAGE_HTML" >/dev/null \
   || die "reader-template bake failed (existing doc, if any, left untouched)"
 

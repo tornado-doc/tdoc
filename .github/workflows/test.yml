@@ -95,6 +95,7 @@ jobs:
       - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
       - run: TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
       - run: TDOC_TEST_BROWSER=webkit node test/custom-design-theme.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/visual-viewer.test.js
 
   shell-runtime:
     name: shell runtime
