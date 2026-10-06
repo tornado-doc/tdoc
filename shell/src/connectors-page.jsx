@@ -106,7 +106,7 @@ export function ConnectorsBody() {
   return (
     <>
         <p className="muted" style={{ marginTop: 0 }}>
-          The agent working on a doc gets its comments. If no agent has worked on it yet, tdoc automatically uses your most recently active connected agent.
+          Each doc's comments go to the agent you last picked for it in Send to agent, or else the agent that last worked on it. Docs with neither go to your default agent.
         </p>
         {notice ? <p className="muted" role="status">{notice}</p> : null}
 
@@ -236,7 +236,7 @@ X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
           open
           onOpenChange={() => {}}
           title="Choose your default agent"
-          description="Last step of connecting Raft. Comments on a doc go to the agent that last worked on it; docs no agent has touched yet go to this one. You can change it here any time."
+          description="Last step of connecting Raft. Each doc's comments go to the agent you last picked for it, or the agent that last worked on it; docs with neither go to this one. You can change it here any time."
         >
           {raftConnectors.map((c) => (
             <RaftFallbackForm key={c.server_id} server={c} known={c.agents || []} onSaved={savedDefault} />
