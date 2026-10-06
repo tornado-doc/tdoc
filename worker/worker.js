@@ -8464,6 +8464,25 @@ export default {
       if (!who) return json({ error: 'sign_in_required' }, { status: 401 });
       return json({ ok: true, tokens: await accountTokenList(env, who.accountId) }, { headers: { 'Cache-Control': 'no-store' } });
     }
+    if (p === '/api/me/tokens/revoke-all' && method === 'POST') {
+      // This is deliberately stronger than the one-row action below and just
+      // as deliberately browser-session-only. A leaked terminal credential
+      // must never be able to erase the owner's other credentials and lock
+      // them out. The human account session is the authority that can say
+      // "none of these machines may act as me any more".
+      if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+      const who = await tokenPageSession(env, req);
+      if (!who) return json({ error: 'sign_in_required' }, { status: 401 });
+      const tokens = await accountTokenList(env, who.accountId);
+      for (const token of tokens) await env.META.delete(`hosted-token:${token.id}`);
+      // The fast "has a terminal" marker is not a credential, but leaving it
+      // behind after the last credential is removed makes setup claim that a
+      // terminal is still connected. Account aliases may each carry an old
+      // marker, so clear the whole verified group.
+      const group = await accountGroup(env, who.accountId);
+      for (const accountId of group.ids) await env.META.delete(`account-terminal:${accountId}`);
+      return json({ ok: true, revoked: tokens.length });
+    }
     if (p === '/api/me/tokens/revoke' && method === 'POST') {
       // Browsers always send Origin on a POST, so a missing one is not
       // "same origin" here.
