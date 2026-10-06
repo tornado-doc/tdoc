@@ -1112,7 +1112,7 @@ export function DocumentShell({ boot, config }) {
     >
       <TopBar
         identity={config.identity}
-        theme={theme}
+        theme={supportsTheme ? theme : 'light'}
         supportsTheme={supportsTheme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
           !comparing && <>

@@ -16,6 +16,7 @@ const { resolveTarget } = require('./helpers/fixture-server');
       const frame = page.frameLocator('iframe[aria-label="Document content"]');
       await frame.locator('html[data-tdoc-interaction-mode]').waitFor();
       assert.equal(await page.locator('#tdoc-theme-btn').count(), 0, 'custom design must have no light/dark toggle');
+      assert.equal(await page.locator('html').evaluate(el => getComputedStyle(el).filter), 'none', 'custom colors must not pass through shell inversion either');
       // Even a stale/mistaken theme message cannot recolor a custom document.
       await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({source:'tdoc-shell',type:'tdoc:theme',theme:'dark'}, '*'));
       const colors = await frame.locator('html').evaluate(el => {

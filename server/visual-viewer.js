@@ -39,7 +39,7 @@
     entries.forEach(function (entry) {
       var r = entry.el.getBoundingClientRect();
       entry.button.hidden = !canExpand() || !!active || !entry.el.isConnected || r.width < 64 || r.height < 48;
-      entry.button.style.left = Math.max(0, r.right + window.scrollX - 38) + 'px';
+      entry.button.style.left = 'clamp(0px,' + Math.max(0, r.right + window.scrollX - 38) + 'px,calc(100% - 38px))';
       entry.button.style.top = r.top + window.scrollY + 6 + 'px';
     });
   }
