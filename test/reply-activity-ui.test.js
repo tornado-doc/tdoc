@@ -51,7 +51,7 @@ const [fixture] = require('./fixtures/tdocs/reply-activity/comments.json');
     const shots = process.env.TDOC_REPLY_SHOTS;
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 960 });
-      if (width === 390) await pin.click();
+      if (width === 390) await page.locator('.tdoc-fab').click();
       await page.locator('.tdoc-handoff-chip.is-replied:visible').waitFor();
       if (shots) {
         fs.mkdirSync(shots, { recursive: true });
