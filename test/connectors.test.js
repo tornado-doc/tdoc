@@ -16,12 +16,20 @@ const raftCalls = [];
 // The server's agent directory as Raft's App API would list it; null makes
 // the installation token exchange fail (Agent permission still in review).
 let directory = null;
+// Servers Raft's installation lookup knows: server id -> installation id.
+let installs = {};
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init = {}) => {
   const u = String(input && input.url || input);
   if (u.startsWith('https://raft.test/')) {
     const path = new URL(u).pathname;
     raftCalls.push({ path, headers: init.headers || {}, body: init.body });
+    if (path === '/api/oauth/installations/lookup') {
+      const auth = (init.headers || {}).Authorization || '';
+      if (auth !== `Basic ${Buffer.from('tdoc-x:s').toString('base64')}`) return new Response('{}', { status: 401 });
+      const id = installs[JSON.parse(init.body || '{}').server_id];
+      return id ? new Response(JSON.stringify({ installation_id: id }), { status: 200 }) : new Response('{"error":"not_found"}', { status: 404 });
+    }
     if (path === '/api/oauth/installation-token') {
       const asked = JSON.parse(init.body || '{}');
       if (!directory || asked.installation_id !== 'inst-1' || !(asked.groups || []).includes('agent')) return new Response('{"error":"forbidden"}', { status: 403 });
@@ -362,6 +370,32 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
       assert(raft.agents.map((a) => a.agent_name).join(',') === 'alpha,beta', JSON.stringify(raft.agents));
       assert(!JSON.stringify(list).includes('inst-tok'), 'installation token leaked to the browser');
     } finally { directory = null; }
+  });
+
+  await t('a server with no configured installation id gets its list by asking Raft for the id', async () => {
+    // Julie's friend: same tdoc App, her own server, so her own installation.
+    directory = DIRECTORY;
+    installs = { S9: 'inst-1' };
+    try {
+      const env = makeEnv(mod.CommentsStore, RAFT);
+      const owner = await issue(worker, env, 'owner');
+      await connectRaft(env, owner.cookie);
+      const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).json();
+      const raft = list.connectors.find((c) => c.kind === 'raft');
+      assert(raft.agents.map((a) => a.agent_name).join(',') === 'alpha,beta', `no list for a looked-up installation: ${JSON.stringify(raft.agents)}`);
+      const lookups = raftCalls.filter((c) => c.path === '/api/oauth/installations/lookup');
+      assert(lookups.length >= 1 && JSON.parse(lookups[0].body).server_id === 'S9', 'Raft was not asked by server id');
+      // Not installed there: no list, no error, and not asked again at once.
+      installs = {};
+      const env2 = makeEnv(mod.CommentsStore, RAFT);
+      const other = await issue(worker, env2, 'owner');
+      await connectRaft(env2, other.cookie);
+      const before = raftCalls.length;
+      const l2 = await (await worker.fetch(req('/api/me/connectors', { cookie: other.cookie }), env2, {})).json();
+      await worker.fetch(req('/api/me/connectors', { cookie: other.cookie }), env2, {});
+      assert(!l2.connectors.find((c) => c.kind === 'raft').agents.length, 'a list appeared without an installation');
+      assert(raftCalls.slice(before).filter((c) => c.path === '/api/oauth/installations/lookup').length === 1, 'a miss is not cached');
+    } finally { directory = null; installs = {}; }
   });
 
   await t('choosing a directory agent as default stores its id and replaces a typed handle', async () => {
