@@ -597,7 +597,7 @@ async function loadDocMeta(env, slug) {
 // the brand onto a bare browser-styled card, and the boot JSON is the entire
 // contract: title, message, optional link-shaped actions, optional
 // request-access affordance.
-function statusPageResponse({ docTitle, title, message, error = false, status = 200, actions = null, requestAccess = null, retry = null }) {
+function statusPageResponse({ docTitle, title, message, error = false, status = 200, actions = null, requestAccess = null, acceptInvite = null, retry = null }) {
   // A worker with no shell runtime (Vercel shim, stripped test builds) still
   // owes the visitor a working page: same content, plain HTML, the actions
   // as links. Request-access needs the shell's fetch and is simply absent.
@@ -626,6 +626,7 @@ h1{font-size:18px;margin:0 0 8px}p{margin:0 0 12px;color:#444}a{color:#1652f0}</
       error,
       ...(actions ? { actions } : {}),
       ...(requestAccess ? { requestAccess } : {}),
+      ...(acceptInvite ? { acceptInvite } : {}),
       ...(retry ? { retry } : {}),
     }),
   }), {
@@ -634,7 +635,7 @@ h1{font-size:18px;margin:0 0 8px}p{margin:0 0 12px;color:#444}a{color:#1652f0}</
   });
 }
 
-function accessDeniedHtml({ status, title, body, slug, version, signin }) {
+function accessDeniedHtml({ status, title, body, slug, version, signin, invite = null }) {
   // The retry link points back at what was requested: a versioned URL when
   // the caller was asked for one, the doc's head URL (which resolves to the
   // latest version only after this same gate passes) when it wasn't. The
@@ -648,6 +649,21 @@ function accessDeniedHtml({ status, title, body, slug, version, signin }) {
   // round-trips straight back to this URL. `switch` is the 403 flavor:
   // signed in as the wrong person, so force the account chooser — and a 403
   // can also ASK: request access drops a notification in the owner's inbox.
+  // Invited to the team that owns this doc, not yet joined: the page is the
+  // invitation, one Accept away from the doc (#711, Julie chose this over a
+  // silent auto-join). The account switch stays, second, for a wrong login.
+  if (invite) {
+    return statusPageResponse({
+      docTitle: `${invite.team_name} · tdoc`,
+      title: `You’re invited to ${invite.team_name}`,
+      message: `This document belongs to the ${invite.team_name} team. Accept the invite to join the team and open it.`,
+      // An invitation, not an error: no red title.
+      error: false,
+      status,
+      actions: [{ label: 'Sign in with another account', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}` }],
+      acceptInvite: { slug, team_name: invite.team_name, next },
+    });
+  }
   const actions = signin === 'signin'
     ? [{ label: 'Sign in', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
     : signin === 'switch'
@@ -726,6 +742,17 @@ async function enforceDocAccess(env, req, slug, version) {
         signin: oidcConfig(env) ? 'signin' : null,
       }),
     };
+  }
+  // A team doc, and this person has a pending invite to that team: offer it.
+  if (access.team && meta && meta.workspace_id) {
+    let team = null;
+    try { team = await loadTeam(env, meta.workspace_id); } catch {}
+    if (team && pendingTeamInvite(team, session)) {
+      return {
+        ok: false,
+        response: accessDeniedHtml({ status: 403, title: '', body: '', slug, version, invite: { team_name: team.name || 'a team' } }),
+      };
+    }
   }
   return {
     ok: false,
@@ -3335,6 +3362,29 @@ function teamAdminCount(team) {
 async function isTeamMemberSession(env, session, teamId) {
   if (!sessionInTeam(session, teamId)) return false;
   return !!teamMember(await loadTeam(env, teamId), session.account_id);
+}
+
+// Invited by handle or address and not yet joined. Same normalization as the
+// invite list itself (normalizeInvitee), so an address typed with capitals
+// still matches the signed-in email.
+function pendingTeamInvite(team, session) {
+  if (!team || !session) return false;
+  const mine = [sessionLogin(session), normalizeEmail(session.email)].filter(Boolean);
+  return (Array.isArray(team.invites) ? team.invites : []).some((x) => mine.includes(x));
+}
+
+// Joining, wherever it is asked for: the emailed link (/api/team/join) or the
+// invitation shown on a team doc's gate (/api/team/accept).
+async function joinTeamFromSession(env, team, s) {
+  if (teamMember(team, s.account_id)) return { ok: true };
+  if (team.members.length >= TEAM_MEMBERS_MAX) return { error: 'team_full', limit: TEAM_MEMBERS_MAX };
+  if ((s.team_ids || []).length >= TEAMS_PER_ACCOUNT_MAX) return { error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX };
+  team.members.push(teamMemberFromSession(s, 'member'));
+  const mine = [sessionLogin(s), normalizeEmail(s.email)].filter(Boolean);
+  team.invites = (Array.isArray(team.invites) ? team.invites : []).filter((x) => !mine.includes(x));
+  await saveTeam(env, team);
+  await setAccountTeam(env, s.account_id, team.id, true);
+  return { ok: true };
 }
 
 function teamSummary(team, accountId) {
@@ -10160,20 +10210,30 @@ export default {
       try { body = await req.json(); } catch {}
       const team = await teamForInviteToken(env, body.token);
       if (!team) return json({ error: 'invite_invalid' }, { status: 404 });
-      if (!teamMember(team, s.account_id)) {
-        if (team.members.length >= TEAM_MEMBERS_MAX) {
-          return json({ error: 'team_full', limit: TEAM_MEMBERS_MAX }, { status: 400 });
-        }
-        if ((s.team_ids || []).length >= TEAMS_PER_ACCOUNT_MAX) {
-          return json({ error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX }, { status: 400 });
-        }
-        team.members.push(teamMemberFromSession(s, 'member'));
-        const mine = [sessionLogin(s), normalizeEmail(s.email)].filter(Boolean);
-        team.invites = (Array.isArray(team.invites) ? team.invites : []).filter((x) => !mine.includes(x));
-        await saveTeam(env, team);
-        await setAccountTeam(env, s.account_id, team.id, true);
-      }
+      const joined = await joinTeamFromSession(env, team, s);
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit }, { status: 400 });
       return json({ ok: true, team: teamSummary(team, s.account_id) });
+    }
+
+    // Accept from a team doc's gate. No token: the invite list is the proof,
+    // matched against the signed-in handle or address, and only for the team
+    // that owns this doc — a slug cannot reach any other team.
+    if (p === '/api/team/accept' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = typeof body.slug === 'string' && isValidSlug(body.slug) ? body.slug : '';
+      const meta = slug ? await loadDocMeta(env, slug) : null;
+      const access = meta ? accessFromMeta(meta) : null;
+      const team = meta && meta.workspace_id && access && access.team ? await loadTeam(env, meta.workspace_id) : null;
+      if (!team) return json({ error: 'not_found' }, { status: 404 });
+      if (!teamMember(team, s.account_id) && !pendingTeamInvite(team, s)) return json({ error: 'no_invite' }, { status: 403 });
+      const joined = await joinTeamFromSession(env, team, s);
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit }, { status: 400 });
+      return json({ ok: true, team: teamSummary(team, s.account_id), next: `/d/${encodeURIComponent(slug)}` });
     }
 
     // Moving is the author's call alone: into a team they belong to, or back

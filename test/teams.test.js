@@ -243,6 +243,42 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(me.body.docs.some((d) => d.slug === 'bob-notes'), 'back in My docs');
   });
 
+  await t('an invitee who opens a team doc before joining is offered the invite, and Accept lets them in (#711)', async () => {
+    const created = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'BeFreed', invites: ['Erin@Example.com'] } });
+    assert(created.status === 200, `create ${created.status}`);
+    const bf = created.body.team;
+    await seedDoc(env, 'ads-report', 'alice');
+    const moved = await call('/api/team/move', { method: 'POST', cookie: alice, body: { slugs: ['ads-report'], team: bf.id } });
+    assert(moved.status === 200, `move ${moved.status}`);
+    const sid = async (email, acct) => {
+      const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      await env.META.put(`session:${id}`, JSON.stringify({ email, name: email, account_id: acct, created: new Date().toISOString() }));
+      return `tdoc_sid=${id}`;
+    };
+    const erin = await sid('erin@example.com', 'acct-erin');
+    const gina = await sid('gina@example.com', 'acct-gina');
+    const gate = await call('/d/ads-report', { cookie: erin });
+    const html = await gate.r.text();
+    assert(gate.status === 403 && html.includes('BeFreed') && html.includes('acceptInvite'), `invitee did not get the invite: ${gate.status}`);
+    const stranger = await call('/d/ads-report', { cookie: gina });
+    const strangerHtml = await stranger.r.text();
+    assert(stranger.status === 403 && !strangerHtml.includes('acceptInvite'), 'someone without an invite was offered one');
+    const refused = await call('/api/team/accept', { method: 'POST', cookie: gina, body: { slug: 'ads-report' }, headers: { Origin: 'https://tdoc.dev' } });
+    assert(refused.status === 403 && refused.body.error === 'no_invite', `no invite accepted: ${refused.status}`);
+    const crossSite = await call('/api/team/accept', { method: 'POST', cookie: erin, body: { slug: 'ads-report' }, headers: { Origin: 'https://evil.example' } });
+    assert(crossSite.status === 403, `cross-site accept ${crossSite.status}`);
+    const personal = await call('/api/team/accept', { method: 'POST', cookie: erin, body: { slug: 'solo' }, headers: { Origin: 'https://tdoc.dev' } });
+    assert(personal.status === 404, `a personal doc's slug reached a team: ${personal.status}`);
+    const ok = await call('/api/team/accept', { method: 'POST', cookie: erin, body: { slug: 'ads-report' }, headers: { Origin: 'https://tdoc.dev' } });
+    assert(ok.status === 200 && ok.body.next === '/d/ads-report' && ok.body.team.role === 'member', `accept ${ok.status} ${JSON.stringify(ok.body)}`);
+    const t2 = JSON.parse(await env.META.get(`team:${bf.id}`) || 'null') || (await call(`/api/team?id=${bf.id}`, { cookie: alice })).body.team;
+    assert(!(t2.invites || []).includes('erin@example.com'), 'the invite was not cleared');
+    const open = await call('/d/ads-report', { cookie: erin });
+    // The bare doc URL redirects to its latest version once readable.
+    assert(open.status === 200 || (open.status === 302 && /\/d\/ads-report\/v\/1/.test(open.r.headers.get('Location') || '')),
+      `after accepting, the doc is still gated: ${open.status} ${open.r.headers.get('Location')}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
