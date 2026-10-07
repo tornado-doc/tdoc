@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# tdoc-move — move your docs into a team workspace, or back to My docs.
+#
+# Same rules as Move on the web: the doc's author can move a personal doc
+# into a team they belong to; a team doc is moved by the team's admins.
+# Uses the hosted Bearer in ~/.tdoc/published.json.
+#
+# Usage:
+#   tdoc-move --team <name|id> <slug>...   # into a team (no-op if already there)
+#   tdoc-move --personal <slug>...         # back to My docs
+#   tdoc-move --teams                      # list the teams you are in
+#   tdoc-move --help
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+
+TEAM=""; PERSONAL=0; LIST=0; SLUGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --team) TEAM="${2:-}"; [ -n "$TEAM" ] || { echo "--team needs a name or id" >&2; exit 2; }; shift 2 ;;
+    --team=*) TEAM="${1#--team=}"; shift ;;
+    --personal) PERSONAL=1; shift ;;
+    --teams) LIST=1; shift ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "unknown arg: $1" >&2; exit 2 ;;
+    *) SLUGS+=("$1"); shift ;;
+  esac
+done
+
+CONFIG_FILE="$HOME/.tdoc/published.json"
+TOKEN="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" upload_token || true)"
+BASE="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" base || true)"
+if [ -z "$TOKEN" ] || [ -z "$BASE" ]; then
+  echo "[tdoc] not signed in to hosted tdoc — run 'tdoc-publish --signin-only' first." >&2
+  exit 1
+fi
+BASE="${BASE%/}"
+
+teams_json() {
+  curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/teams" -H "Authorization: Bearer $TOKEN"
+}
+
+if [ "$LIST" = "1" ]; then
+  teams_json | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      let b = {}; try { b = JSON.parse(s); } catch {}
+      if (!b.ok) { process.stderr.write(`[tdoc] could not list teams: ${s}\n`); process.exit(1); }
+      for (const t of b.teams || []) console.log(`${t.id}\t${t.name}\t${t.role}`);
+    });'
+  exit 0
+fi
+
+if [ "${#SLUGS[@]}" -eq 0 ] || { [ -z "$TEAM" ] && [ "$PERSONAL" != "1" ]; } || { [ -n "$TEAM" ] && [ "$PERSONAL" = "1" ]; }; then
+  sed -n '9,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2
+fi
+
+TEAM_ID="null"
+if [ -n "$TEAM" ]; then
+  id="$(teams_json | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      let teams = []; try { teams = JSON.parse(s).teams || []; } catch {}
+      const want = process.argv[1].trim().toLowerCase();
+      const hit = teams.filter((t) => String(t.id).toLowerCase() === want || String(t.name || "").trim().toLowerCase() === want);
+      if (hit.length === 1) { process.stdout.write(String(hit[0].id)); return; }
+      process.stderr.write(hit.length
+        ? `[tdoc] more than one team is called "${process.argv[1]}"; pass its id (tdoc-move --teams).\n`
+        : `[tdoc] you are not in a team called "${process.argv[1]}". Your teams: ${teams.map((t) => t.name).join(", ") || "(none)"}\n`);
+      process.exit(1);
+    });' "$TEAM")" || exit 1
+  TEAM_ID="$(json_str "$id")"
+fi
+
+SLUGS_JSON="$(printf '%s\n' "${SLUGS[@]}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))')"
+resp="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "$BASE/api/team/move" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"team\":$TEAM_ID,\"slugs\":$SLUGS_JSON}")" || { echo "[tdoc] move failed: no response" >&2; exit 1; }
+if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
+  case "$(printf '%s' "$resp" | json_get error)" in
+    not_owner) echo "[tdoc] cannot move $(printf '%s' "$resp" | json_get slug): only its author (personal doc) or a team admin (team doc) can move it." >&2 ;;
+    team_not_found) echo "[tdoc] you are not a member of that team." >&2 ;;
+    *) echo "[tdoc] move failed: $resp" >&2 ;;
+  esac
+  exit 1
+fi
+if [ -n "$TEAM" ]; then echo "[tdoc] in team $TEAM: ${SLUGS[*]}"; else echo "[tdoc] back in My docs: ${SLUGS[*]}"; fi

@@ -47,6 +47,7 @@ Options:
   --history owner|invited|public         (default for new access block: owner)
   --commenting owner|invited|signed_in|off  (default: signed_in)
   --allow-user <github-login>            (repeatable; private/shared allowlist)
+  --team <name|id>                       (hosted: put the doc in this team's workspace)
 EOF
   exit 1
 }
@@ -101,6 +102,7 @@ VISIBILITY_FLAG=""
 HISTORY_FLAG=""
 COMMENTING_FLAG=""
 ALLOW_USERS=()
+TEAM_FLAG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)   PLATFORM_FLAG="${2:-}"; [ -n "$PLATFORM_FLAG" ] || usage; shift 2 ;;
@@ -113,6 +115,12 @@ while [ $# -gt 0 ]; do
     --commenting=*) COMMENTING_FLAG="${1#--commenting=}"; [ -n "$COMMENTING_FLAG" ] || usage; shift ;;
     --allow-user) [ -n "${2:-}" ] || usage; ALLOW_USERS+=("$2"); shift 2 ;;
     --allow-user=*) ALLOW_USERS+=("${1#--allow-user=}"); shift ;;
+    # A team the account belongs to, by name (case-insensitive) or id. Every
+    # publish lands in the account first; this moves it into the team right
+    # after, and is a no-op once it is there, so a daily doc can pass it on
+    # every run.
+    --team) TEAM_FLAG="${2:-}"; [ -n "$TEAM_FLAG" ] || usage; shift 2 ;;
+    --team=*) TEAM_FLAG="${1#--team=}"; [ -n "$TEAM_FLAG" ] || usage; shift ;;
     # Sign in and mint the upload token, then stop — no doc required. Lets the
     # skill start the device flow BEFORE it spends 30-60s generating HTML, so
     # the human approves in the browser while the doc is being written instead
@@ -1716,6 +1724,13 @@ upload_version "$VERSION" || {
 }
 if [ -n "$OLDER_FAILED" ]; then
   echo "[tdoc] WARNING: older version(s) failed to upload:$OLDER_FAILED — latest is live; re-run /tdoc publish to retry them." >&2
+fi
+if [ -n "$TEAM_FLAG" ]; then
+  # Same call as `tdoc-move --team`, so the rules and messages are one copy.
+  "$(cd "$(dirname "$0")" && pwd)/tdoc-move" --team "$TEAM_FLAG" "$SLUG" || {
+    echo "[tdoc] Published, but it is still in My docs (see above)." >&2
+    exit 1
+  }
 fi
 echo
 echo "Published: $PUBLIC_BASE/d/$SLUG/v/$VERSION"
