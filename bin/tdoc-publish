@@ -48,6 +48,7 @@ Options:
   --commenting owner|invited|signed_in|off  (default: signed_in)
   --allow-user <github-login>            (repeatable; private/shared allowlist)
   --team <name|id>                       (hosted: put the doc in this team's workspace)
+  --create-team                          (with --team: make the team if you have none by that name)
 EOF
   exit 1
 }
@@ -103,6 +104,7 @@ HISTORY_FLAG=""
 COMMENTING_FLAG=""
 ALLOW_USERS=()
 TEAM_FLAG=""
+CREATE_TEAM=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)   PLATFORM_FLAG="${2:-}"; [ -n "$PLATFORM_FLAG" ] || usage; shift 2 ;;
@@ -121,6 +123,7 @@ while [ $# -gt 0 ]; do
     # every run.
     --team) TEAM_FLAG="${2:-}"; [ -n "$TEAM_FLAG" ] || usage; shift 2 ;;
     --team=*) TEAM_FLAG="${1#--team=}"; [ -n "$TEAM_FLAG" ] || usage; shift ;;
+    --create-team) CREATE_TEAM=(--create); shift ;;
     # Sign in and mint the upload token, then stop — no doc required. Lets the
     # skill start the device flow BEFORE it spends 30-60s generating HTML, so
     # the human approves in the browser while the doc is being written instead
@@ -1727,7 +1730,7 @@ if [ -n "$OLDER_FAILED" ]; then
 fi
 if [ -n "$TEAM_FLAG" ]; then
   # Same call as `tdoc-move --team`, so the rules and messages are one copy.
-  "$(cd "$(dirname "$0")" && pwd)/tdoc-move" --team "$TEAM_FLAG" "$SLUG" || {
+  "$(cd "$(dirname "$0")" && pwd)/tdoc-move" --team "$TEAM_FLAG" ${CREATE_TEAM[@]+"${CREATE_TEAM[@]}"} "$SLUG" || {
     echo "[tdoc] Published, but it is still in My docs (see above)." >&2
     exit 1
   }

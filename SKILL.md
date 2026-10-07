@@ -1162,7 +1162,7 @@ Remote storage holds optional `meta.access`:
   FIRST-DOC.md names the policy instead of publishing flagless.
 - Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
 - `tdoc-publish --team <name|id>` puts the doc in a team workspace the account belongs to (hosted). Safe to pass on every publish; once the doc is there it is a no-op. Use it for recurring docs that belong to a team (daily reports), so they never land in My docs.
-- `tdoc-move --team <name|id> <slug>...` / `tdoc-move --personal <slug>...` moves existing docs in or out of a team; `tdoc-move --teams` lists yours. Same rules as the web: the author moves a personal doc in; a team doc is moved by the team's admins.
+- `tdoc-move --team <name|id> <slug>...` / `tdoc-move --personal <slug>...` moves existing docs in or out of a team; `tdoc-move --teams` lists yours; `tdoc-move --create-team <name>` (or `--create` / publish `--create-team` alongside `--team`) makes one with you as admin. Inviting people stays on the web. Same rules as the web: the author moves a personal doc in; a team doc is moved by the team's admins.
 - After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
 - `/me` on hosted tdoc.dev lists the signed-in account's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
 
