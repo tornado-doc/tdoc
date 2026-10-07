@@ -915,7 +915,7 @@ t('tdoc-agent-reply gates on HTTP status and on 200-with-error bodies', () => {
   assert(raw.length === 0, `raw curl to /api/agent/reply outside post_reply:\n      ${raw.join('\n      ')}`);
 });
 
-t('tdoc-move resolves a team by name and moves; unknown team fails without moving', () => {
+t('tdoc-move resolves a team by name and moves; unknown team fails without moving unless --create', () => {
   const bin = path.join(BIN, 'tdoc-move');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-move-home-'));
   const log = path.join(home, 'calls.log');
@@ -923,6 +923,7 @@ t('tdoc-move resolves a team by name and moves; unknown team fails without movin
     `(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
     `require('fs').appendFileSync(${JSON.stringify(log)},q.method+' '+q.url+' '+(q.headers.authorization||'')+' '+b+'\\n');` +
     `s.writeHead(200,{'content-type':'application/json'});` +
+    `if(q.url==='/api/teams'&&q.method==='POST')return s.end(JSON.stringify({ok:true,team:{id:'t_new',name:JSON.parse(b).name,role:'admin'}}));` +
     `if(q.url==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_bf',name:'BeFreed',role:'member'}]}));` +
     `s.end(JSON.stringify({ok:true,moved:1}));});}`);
   try {
@@ -939,6 +940,9 @@ t('tdoc-move resolves a team by name and moves; unknown team fails without movin
     const bad = spawnSync(bin, ['--team', 'nope', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
     assert(bad.status !== 0 && /not in a team called "nope".*BeFreed/.test(bad.stderr), `unknown team: ${bad.status} ${bad.stderr}`);
     assert(!/team\/move/.test(fs.readFileSync(log, 'utf8')), 'moved despite an unknown team');
+    const made = spawnSync(bin, ['--team', 'Agents', '--create', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
+    const after = fs.readFileSync(log, 'utf8');
+    assert(made.status === 0 && /POST \/api\/teams Bearer tok-1 \{"name":"Agents"\}/.test(after) && /"team":"t_new"/.test(after), `--create: ${made.status} ${made.stderr}\n${after}`);
   } finally {
     stub.stop();
     fs.rmSync(home, { recursive: true, force: true });

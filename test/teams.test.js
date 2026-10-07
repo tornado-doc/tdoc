@@ -279,7 +279,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
       `after accepting, the doc is still gated: ${open.status} ${open.r.headers.get('Location')}`);
   });
 
-  await t('the CLI token can list its teams and move its own doc into one; nothing more (tdoc-publish --team)', async () => {
+  await t('the CLI token can list its teams and move its own doc into one, and create a team without invites (tdoc-publish --team)', async () => {
     const zed = await issue(worker, env, 'zed');
     const made = await call('/api/teams', { method: 'POST', cookie: zed.cookie, body: { name: 'Daily' } });
     assert(made.status === 200, `create ${made.status}`);
@@ -298,8 +298,12 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(foreign.status === 404, `moved into a team it is not in: ${foreign.status}`);
     const notMine = await call('/api/team/move', { method: 'POST', token: zed.token, body: { team: daily.id, slugs: ['solo'] } });
     assert(notMine.status === 403, `moved someone else's doc: ${notMine.status}`);
-    const create = await call('/api/teams', { method: 'POST', token: zed.token, body: { name: 'Nope' } });
-    assert(create.status === 401, `the token created a team: ${create.status}`);
+    const invite = await call('/api/teams', { method: 'POST', token: zed.token, body: { name: 'Mail', invites: ['x@example.com'] } });
+    assert(invite.status === 403 && invite.body.error === 'invites_browser_only', `the token sent invites: ${invite.status}`);
+    const create = await call('/api/teams', { method: 'POST', token: zed.token, body: { name: 'Agents' } });
+    assert(create.status === 200 && create.body.team.role === 'admin' && !create.body.team.invite_url, `token create: ${create.status} ${JSON.stringify(create.body)}`);
+    const mine = await call('/api/teams', { token: zed.token });
+    assert(mine.body.teams.some((x) => x.name === 'Agents'), 'the new team is not listed');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

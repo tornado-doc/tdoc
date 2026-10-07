@@ -9,19 +9,24 @@
 #   tdoc-move --team <name|id> <slug>...   # into a team (no-op if already there)
 #   tdoc-move --personal <slug>...         # back to My docs
 #   tdoc-move --teams                      # list the teams you are in
+#   tdoc-move --create-team <name>         # make a team (you are its admin)
+#   tdoc-move --team <name> --create <slug>  # move, making the team if missing
+#   (Inviting people stays on the web: it sends email.)
 #   tdoc-move --help
 set -euo pipefail
 TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TDOC_BIN_DIR/lib/json.sh"
 
-TEAM=""; PERSONAL=0; LIST=0; SLUGS=()
+TEAM=""; PERSONAL=0; LIST=0; CREATE=0; NEW_TEAM=""; SLUGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --team) TEAM="${2:-}"; [ -n "$TEAM" ] || { echo "--team needs a name or id" >&2; exit 2; }; shift 2 ;;
     --team=*) TEAM="${1#--team=}"; shift ;;
     --personal) PERSONAL=1; shift ;;
     --teams) LIST=1; shift ;;
-    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --create) CREATE=1; shift ;;
+    --create-team) NEW_TEAM="${2:-}"; [ -n "$NEW_TEAM" ] || { echo "--create-team needs a name" >&2; exit 2; }; shift 2 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown arg: $1" >&2; exit 2 ;;
     *) SLUGS+=("$1"); shift ;;
   esac
@@ -40,6 +45,23 @@ teams_json() {
   curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/teams" -H "Authorization: Bearer $TOKEN"
 }
 
+create_team() {
+  local resp
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "$BASE/api/teams" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d "{\"name\":$(json_str "$1")}")" || { echo "[tdoc] could not create team: no response" >&2; return 1; }
+  if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
+    echo "[tdoc] could not create team \"$1\": $resp" >&2; return 1
+  fi
+  echo "[tdoc] created team $1 ($(printf '%s' "$resp" | json_get team.id)); invite people from the web." >&2
+  printf '%s' "$resp" | json_get team.id
+}
+
+if [ -n "$NEW_TEAM" ] && [ -z "$TEAM" ] && [ "${#SLUGS[@]}" -eq 0 ]; then
+  create_team "$NEW_TEAM" >/dev/null || exit 1
+  exit 0
+fi
+
 if [ "$LIST" = "1" ]; then
   teams_json | node -e '
     let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
@@ -51,22 +73,24 @@ if [ "$LIST" = "1" ]; then
 fi
 
 if [ "${#SLUGS[@]}" -eq 0 ] || { [ -z "$TEAM" ] && [ "$PERSONAL" != "1" ]; } || { [ -n "$TEAM" ] && [ "$PERSONAL" = "1" ]; }; then
-  sed -n '9,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2
+  sed -n '9,16p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2
 fi
 
 TEAM_ID="null"
 if [ -n "$TEAM" ]; then
-  id="$(teams_json | node -e '
+  id="$(teams_json | MISSING_OK="$CREATE" node -e '
     let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
       let teams = []; try { teams = JSON.parse(s).teams || []; } catch {}
       const want = process.argv[1].trim().toLowerCase();
       const hit = teams.filter((t) => String(t.id).toLowerCase() === want || String(t.name || "").trim().toLowerCase() === want);
       if (hit.length === 1) { process.stdout.write(String(hit[0].id)); return; }
+      if (!hit.length && process.env.MISSING_OK === "1") return;
       process.stderr.write(hit.length
         ? `[tdoc] more than one team is called "${process.argv[1]}"; pass its id (tdoc-move --teams).\n`
         : `[tdoc] you are not in a team called "${process.argv[1]}". Your teams: ${teams.map((t) => t.name).join(", ") || "(none)"}\n`);
       process.exit(1);
     });' "$TEAM")" || exit 1
+  if [ -z "$id" ]; then id="$(create_team "$TEAM")" || exit 1; fi
   TEAM_ID="$(json_str "$id")"
 fi
 

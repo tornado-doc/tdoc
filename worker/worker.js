@@ -10106,7 +10106,11 @@ export default {
     }
 
     if (p === '/api/teams' && method === 'POST') {
-      const gate = await teamSession(env, req, url.origin);
+      // The CLI may create a team too (Julie, 2026-10-07): it starts with the
+      // account alone as admin, so it reaches nobody else. Inviting does —
+      // it emails people — so a token creates without invites, and gets no
+      // join link back.
+      const gate = await teamSession(env, req, url.origin, { bearer: true });
       if (!gate.ok) return gate.response;
       const s = gate.session;
       let body = {};
@@ -10115,6 +10119,7 @@ export default {
       if (!name) return json({ error: 'invalid_name', limit: TEAM_NAME_MAX }, { status: 400 });
       const invites = normalizeTeamInvites(body.invites == null ? [] : body.invites);
       if (!invites) return json({ error: 'invalid_invites' }, { status: 400 });
+      if (s.bearer && invites.length) return json({ error: 'invites_browser_only' }, { status: 403 });
       if ((s.team_ids || []).length >= TEAMS_PER_ACCOUNT_MAX) {
         return json({ error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX }, { status: 400 });
       }
@@ -10135,6 +10140,7 @@ export default {
           added: invites, inviterName: actorDisplayName(s), inviterId: actorKey(s), team, origin: url.origin,
         });
       } catch {}
+      if (s.bearer) return json({ ok: true, team: teamSummary(team, s.account_id), emailed });
       return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
     }
 
