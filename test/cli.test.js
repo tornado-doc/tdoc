@@ -30,7 +30,7 @@ console.log('cli (Batch D resilience)');
 
 // ---- static checks across all CLIs ----
 t('every curl call carries --max-time (no unbounded hang)', () => {
-  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply', 'tdoc-me']) {
+  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply', 'tdoc-me', 'tdoc-move']) {
     const src = readBin(f);
     // Actual invocations only: `curl` in COMMAND position — at the start of a
     // line or right after |, ;, &, ( or $( — and followed by a flag, quote or
@@ -913,6 +913,36 @@ t('tdoc-agent-reply gates on HTTP status and on 200-with-error bodies', () => {
   const raw = src.split('\n').filter(l =>
     /\bcurl\b/.test(l) && /api\/agent\/reply/.test(l) && !l.trim().startsWith('#'));
   assert(raw.length === 0, `raw curl to /api/agent/reply outside post_reply:\n      ${raw.join('\n      ')}`);
+});
+
+t('tdoc-move resolves a team by name and moves; unknown team fails without moving', () => {
+  const bin = path.join(BIN, 'tdoc-move');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-move-home-'));
+  const log = path.join(home, 'calls.log');
+  const stub = startStub(
+    `(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
+    `require('fs').appendFileSync(${JSON.stringify(log)},q.method+' '+q.url+' '+(q.headers.authorization||'')+' '+b+'\\n');` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `if(q.url==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_bf',name:'BeFreed',role:'member'}]}));` +
+    `s.end(JSON.stringify({ok:true,moved:1}));});}`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${stub.port}`, upload_token: 'tok-1' }));
+    const env = { ...process.env, HOME: home };
+    const ok = spawnSync(bin, ['--team', 'befreed', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(ok.status === 0, `move exited ${ok.status}: ${ok.stderr}`);
+    const calls = fs.readFileSync(log, 'utf8');
+    assert(/POST \/api\/team\/move Bearer tok-1 \{"team":"t_bf","slugs":\["daily-2026-10-07"\]\}/.test(calls), `wrong move call:\n${calls}`);
+    const back = spawnSync(bin, ['--personal', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(back.status === 0 && /"team":null/.test(fs.readFileSync(log, 'utf8')), `move back failed: ${back.stderr}`);
+    fs.writeFileSync(log, '');
+    const bad = spawnSync(bin, ['--team', 'nope', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(bad.status !== 0 && /not in a team called "nope".*BeFreed/.test(bad.stderr), `unknown team: ${bad.status} ${bad.stderr}`);
+    assert(!/team\/move/.test(fs.readFileSync(log, 'utf8')), 'moved despite an unknown team');
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 t('tdoc-agent-reply exits non-zero when the server rejects the reply', () => {

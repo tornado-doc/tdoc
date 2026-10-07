@@ -2,7 +2,7 @@
 // team-owned docs that keep their human author, and team-wide doc access.
 // Runs worker.js in-process with fake bindings (helpers/worker-harness.js).
 
-const { loadWorker, makeEnv, req } = require('./helpers/worker-harness.js');
+const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js');
 
 let pass = 0, fail = 0;
 async function t(n, fn) {
@@ -277,6 +277,29 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     // The bare doc URL redirects to its latest version once readable.
     assert(open.status === 200 || (open.status === 302 && /\/d\/ads-report\/v\/1/.test(open.r.headers.get('Location') || '')),
       `after accepting, the doc is still gated: ${open.status} ${open.r.headers.get('Location')}`);
+  });
+
+  await t('the CLI token can list its teams and move its own doc into one; nothing more (tdoc-publish --team)', async () => {
+    const zed = await issue(worker, env, 'zed');
+    const made = await call('/api/teams', { method: 'POST', cookie: zed.cookie, body: { name: 'Daily' } });
+    assert(made.status === 200, `create ${made.status}`);
+    const daily = made.body.team;
+    const up = await call('/api/upload', { method: 'POST', token: zed.token, body: { slug: 'daily-report', version: 1, html: '<p>x</p>' } });
+    assert(up.status === 200, `upload ${up.status}`);
+    const list = await call('/api/teams', { token: zed.token });
+    assert(list.status === 200 && list.body.teams.some((x) => x.id === daily.id), `token cannot list teams: ${list.status}`);
+    const moved = await call('/api/team/move', { method: 'POST', token: zed.token, body: { team: daily.id, slugs: ['daily-report'] } });
+    assert(moved.status === 200, `token move ${moved.status} ${JSON.stringify(moved.body)}`);
+    const meta = JSON.parse(await env.META.get('meta:daily-report'));
+    assert(meta.workspace_id === daily.id && meta.access.team === true, 'not in the team');
+    const again = await call('/api/team/move', { method: 'POST', token: zed.token, body: { team: daily.id, slugs: ['daily-report'] } });
+    assert(again.status === 200, `re-sending --team on the next version failed: ${again.status}`);
+    const foreign = await call('/api/team/move', { method: 'POST', token: zed.token, body: { team: team.id, slugs: ['daily-report'] } });
+    assert(foreign.status === 404, `moved into a team it is not in: ${foreign.status}`);
+    const notMine = await call('/api/team/move', { method: 'POST', token: zed.token, body: { team: daily.id, slugs: ['solo'] } });
+    assert(notMine.status === 403, `moved someone else's doc: ${notMine.status}`);
+    const create = await call('/api/teams', { method: 'POST', token: zed.token, body: { name: 'Nope' } });
+    assert(create.status === 401, `the token created a team: ${create.status}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

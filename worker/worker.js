@@ -3443,8 +3443,12 @@ async function teamForInviteToken(env, token) {
 // Team routes need an account, not just a sign-in: membership is keyed on
 // account_id. Like claiming a handle, joining or forming a team is something
 // worth minting one for on a hosted deployment.
-async function teamSession(env, req, origin) {
-  const session = await getSession(env, req);
+// `bearer`: also accept the CLI's hosted upload token, for the two calls a
+// publishing agent needs (list my teams, move my docs into one). It is the
+// same account authority the token already has to overwrite those docs;
+// creating teams, inviting and roles stay browser-only.
+async function teamSession(env, req, origin, { bearer = false } = {}) {
+  const session = (await getSession(env, req)) || (bearer ? await sessionFromHostedBearer(env, req) : null);
   if (!sessionPrincipal(session)) return { ok: false, response: json({ error: 'sign_in_required' }, { status: 401 }) };
   if (session.feedback) return { ok: false, response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
   if (!session.account_id && hostedRegistrationEnabled(env, origin)) {
@@ -10093,7 +10097,7 @@ export default {
     // Membership is server truth: every route re-reads the team record and
     // answers a non-member exactly like a missing team (no public team page).
     if (p === '/api/teams' && method === 'GET') {
-      const gate = await teamSession(env, req, url.origin);
+      const gate = await teamSession(env, req, url.origin, { bearer: true });
       if (!gate.ok) return gate.response;
       const s = gate.session;
       const teams = (await Promise.all((s.team_ids || []).map((id) => loadTeam(env, id))))
@@ -10239,7 +10243,7 @@ export default {
     // Moving is the author's call alone: into a team they belong to, or back
     // to their own docs. The doc keeps its author; only the owner changes.
     if (p === '/api/team/move' && method === 'POST') {
-      const gate = await teamSession(env, req, url.origin);
+      const gate = await teamSession(env, req, url.origin, { bearer: true });
       if (!gate.ok) return gate.response;
       const s = gate.session;
       let body = {};
@@ -10257,6 +10261,10 @@ export default {
       const metas = [];
       for (const slug of slugs) {
         const meta = await loadDocMeta(env, slug);
+        // Already where it is being sent: nothing changes, so nothing to
+        // authorize. A publishing agent re-sends --team on every version,
+        // and a member who is not the team's admin must not fail on that.
+        if (meta && team && meta.workspace_id === team.id) continue;
         if (!meta || !isDocOwnerSession(env, s, meta)) return json({ error: 'not_owner', slug }, { status: 403 });
         metas.push([slug, meta]);
       }
