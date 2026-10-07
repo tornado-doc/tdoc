@@ -23,7 +23,27 @@ export function StatusPage({ boot }) {
     }
   };
 
-  const hasActions = Boolean(boot.actions?.length || boot.requestAccess);
+  // A pending team invite on a team doc's gate: one click joins the team and
+  // opens the doc it was opened from.
+  const [accepting, setAccepting] = useState('');
+  const acceptInvite = async () => {
+    setAccepting('sending');
+    try {
+      const response = await fetch('/api/team/accept', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: boot.acceptInvite.slug }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((body && body.error) || `HTTP ${response.status}`);
+      window.location.assign(boot.acceptInvite.next || (body && body.next) || '/me');
+    } catch (err) {
+      setAccepting(err && err.message === 'team_full' ? 'full' : 'failed');
+    }
+  };
+
+  const hasActions = Boolean(boot.actions?.length || boot.requestAccess || boot.acceptInvite);
 
   return (
     <main className={`tdoc-status-page${boot.error ? ' error' : ''}`}>
@@ -32,6 +52,11 @@ export function StatusPage({ boot }) {
       <p>{boot.message}</p>
       {hasActions ? (
         <div className="tdoc-status-actions">
+          {boot.acceptInvite ? (
+            <button type="button" className="primary" onClick={acceptInvite} disabled={accepting === 'sending'}>
+              {accepting === 'sending' ? 'Joining…' : accepting === 'failed' ? 'Accept and open (retry)' : 'Accept and open'}
+            </button>
+          ) : null}
           {(boot.actions || []).map((action) => (
             <a key={action.href} className={action.primary ? 'primary' : 'secondary'} href={action.href}>
               {action.label}
@@ -48,6 +73,7 @@ export function StatusPage({ boot }) {
           ) : null}
         </div>
       ) : null}
+      {accepting === 'full' ? <p className="tdoc-status-note" role="status">{boot.acceptInvite.team_name} is full. Ask an admin to make room.</p> : null}
       {boot.retry ? (
         <p className="tdoc-status-note"><a href={boot.retry}>Retry this link</a> once you have access.</p>
       ) : boot.error && !hasActions ? <a href="/">Return to tdoc</a> : null}

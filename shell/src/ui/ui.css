@@ -739,7 +739,11 @@ button.tdoc-pin {
   align-items: center;
   justify-content: center;
   min-height: 40px;
-  padding: 8px 20px;
+  /* A link and a button side by side must be the same box. */
+  box-sizing: border-box;
+  height: 40px;
+  line-height: 1.2;
+  padding: 0 20px;
   border-radius: 8px;
   font: inherit;
   font-weight: 600;
