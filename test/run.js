@@ -37,6 +37,7 @@ const OFFLINE = [
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
+  'shell-scan-cap.test.js',     // big docs: the page scans only the head (Cloudflare 1102)
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
   'profile.test.js',            // /@handle public profiles
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()

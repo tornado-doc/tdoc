@@ -1694,6 +1694,7 @@ function injectReaderCss(html, css) {
 // Render one published doc version as the cross-origin SHELL: chrome (bar,
 // footer, composer, pins, cards) in this outer document; the author content
 // stays isolated in the same-origin, sandboxed /frame iframe.
+const SHELL_SCAN_BYTES = 96 * 1024;
 function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta, oidc, pageUrl) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
@@ -1748,7 +1749,15 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     viewerStar: viewerStar || null,
     runtime: runtimeInfo(),
   };
-  const hasCta = /<a[^>]+href="\/start"/.test(rawHtml || '');
+  // What the shell reads from the document -- the onboarding CTA, the share
+  // excerpt and the share image -- all sit near the top. Scanning a whole 1MB
+  // doc several times on every view cost tens of ms of CPU and tripped
+  // Cloudflare's per-request limit (error 1102) for readers in China whose
+  // nearest edge was cold (Julie, 2026-10-08). The head of the doc is enough.
+  const scanHtml = typeof rawHtml === 'string' && rawHtml.length > SHELL_SCAN_BYTES
+    ? rawHtml.slice(0, SHELL_SCAN_BYTES)
+    : (rawHtml || '');
+  const hasCta = /<a[^>]+href="\/start"/.test(scanHtml);
   cfg.onboarding = slug === LANDING_SLUG || slug === START_SLUG || hasCta;
   // The doc takes comments and this visitor has none of the sessions that may
   // leave one. The Comment option still shows and opens the sign-in: the door
@@ -1772,11 +1781,11 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     try { return pageUrl ? new URL(pageUrl).origin : ''; } catch (_) { return ''; }
   })();
   const access = accessFromMeta(docMeta || {});
-  const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(rawHtml, 180)) || '';
+  const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180)) || '';
   const cachedImage = docMeta && docMeta.preview && typeof docMeta.preview.image === 'string'
     ? docMeta.preview.image
     : '';
-  const fromHtml = (SHELL.previewFromHtml && SHELL.previewFromHtml(rawHtml, {
+  const fromHtml = (SHELL.previewFromHtml && SHELL.previewFromHtml(scanHtml, {
     slug, version, maxLen: 180,
   }).image) || '';
   let shareImage = cachedImage || fromHtml || '';
