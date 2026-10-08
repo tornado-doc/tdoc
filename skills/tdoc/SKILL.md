@@ -1102,6 +1102,12 @@ Every doc must work on mobile out of the box. The baked template carries defensi
 - **SVG / images**: use fluid sizing (`width: 100%; height: auto`) and an SVG
   `viewBox`. Follow the figure rules in `$SKILL_DIR/authoring/structure/components.md`
   for readable labels, HTML captions and intentional local scrolling.
+- **Video / audio**: never paste it into the HTML as base64 (publish refuses more than
+  200KB of it). Put the file on storage the reader can reach and link it:
+  `<video src="https://…" poster="https://…/cover.jpg" preload="none" controls
+  style="width:100%;height:auto"></video>`. `preload="none"` + a poster means the page
+  loads only the cover until someone presses play. Readers in China cannot open
+  YouTube; use a host they can reach (Bilibili, OSS/R2 with a public URL).
 - **Tables**: wrap in `<div class="tdoc-table-scroll">`. Preserve semantic
   `<table>` / `<th>` / `<td>` relationships; mark atomic cells with
   `data-tdoc-cell="value"`. Do not use page clipping or shrinking text to fit.

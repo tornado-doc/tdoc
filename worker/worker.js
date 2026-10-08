@@ -4582,6 +4582,43 @@ function quotaDocsPayload(env, limit, used) {
   };
 }
 
+// Video and audio pasted into the HTML as base64. A doc is read on every
+// view, so a few MB of inline media makes every open slow and, on a cold
+// Cloudflare edge, can exceed the per-request limit (Julie, 2026-10-08).
+// Media belongs at a link (<video src="https://…" preload="none" poster=…>):
+// the browser then fetches only the poster until someone presses play.
+// Images stay allowed inline; they are what diagrams and screenshots are.
+const INLINE_MEDIA_MAX_BYTES = 200 * 1024;
+function inlineMediaBytes(html) {
+  if (typeof html !== 'string') return 0;
+  let total = 0;
+  const re = /data:(?:video|audio)\/[a-z0-9.+-]+;base64,/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    let i = re.lastIndex;
+    // Base64 runs until the closing quote / paren / whitespace.
+    while (i < html.length) {
+      const c = html.charCodeAt(i);
+      // A-Z a-z 0-9 + / =
+      if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c === 43 || c === 47 || c === 61) i += 1;
+      else break;
+    }
+    total += i - re.lastIndex;
+    re.lastIndex = i;
+  }
+  return total;
+}
+function inlineMediaRejection(html) {
+  const bytes = inlineMediaBytes(html);
+  if (bytes <= INLINE_MEDIA_MAX_BYTES) return null;
+  return json({
+    error: 'inline_media_too_large',
+    limit: INLINE_MEDIA_MAX_BYTES,
+    size: bytes,
+    message: `This document embeds ${Math.round(bytes / 1024)}KB of video/audio as base64. Upload the file to your own storage (R2, S3, OSS, Bilibili…) and link it instead: <video src="https://…" preload="none" poster="…" controls></video>. Readers then load only the poster until they press play.`,
+  }, { status: 413 });
+}
+
 function hostedMaxUploadBytes(env) {
   const n = Number(env && env.TDOC_HOSTED_MAX_UPLOAD_BYTES);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2 * 1024 * 1024;
@@ -11440,6 +11477,8 @@ export default {
       if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(doc)) {
         return json({ error: 'provider_markup_forbidden' }, { status: 400 });
       }
+      const mediaRefusal = inlineMediaRejection(doc);
+      if (mediaRefusal) return mediaRefusal;
       const auth = await authorizeDocEdit(req, env, slug);
       if (!auth.ok) return auth.response;
       const result = await createBrowserVersion(env, slug, {
@@ -11467,6 +11506,8 @@ export default {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      const mediaRefusal = inlineMediaRejection(doc);
+      if (mediaRefusal) return mediaRefusal;
       // `replace: true` asks to rewrite the doc's LATEST version in place
       // instead of appending one. It is the landing-doc contract (#458): the
       // homepage, /start and /templates are each a single v1 that
