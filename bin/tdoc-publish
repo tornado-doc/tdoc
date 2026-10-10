@@ -50,8 +50,9 @@ Options:
   --team <name|id>                       (hosted: put the doc in this team's workspace)
   --create-team                          (with --team: make the team if you have none by that name)
   --personal                             (keep a new doc in My docs even if a default team is set)
-  A new doc goes to the default team when one is set: TDOC_TEAM, or
-  `tdoc-move --set-default <team>`. Existing docs stay where they are.
+  A new doc goes to the default team when one is set, nearest first:
+  TDOC_TEAM, a .tdoc.json {"team": "<name|id>"} in this directory or a parent,
+  or `tdoc-move --set-default <team>`. Existing docs stay where they are.
 EOF
   exit 1
 }
@@ -1743,7 +1744,8 @@ TDOC_MOVE="$(cd "$(dirname "$0")" && pwd)/tdoc-move"
 # The default team applies to a doc's FIRST publish only: an existing doc is
 # wherever someone put it, and a default must never move it.
 if [ -z "$TEAM_FLAG" ] && [ "$UP_NEW_DOC" = "1" ] && [ "$PERSONAL_FLAG" != "1" ] && [ "$PLATFORM" = "hosted" ]; then
-  TEAM_FLAG="${TDOC_TEAM:-$(json_get default_team.id < "$CONFIG_FILE" 2>/dev/null || true)}"
+  # Nearest first: this agent, this project, this machine (tdoc-move --default).
+  TEAM_FLAG="$("$TDOC_MOVE" --default-id 2>/dev/null || true)"
 fi
 if [ -n "$TEAM_FLAG" ]; then
   # Same call as `tdoc-move --team`, so the rules and messages are one copy.

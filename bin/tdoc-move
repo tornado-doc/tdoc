@@ -13,7 +13,9 @@
 #   tdoc-move --team <name> --create <slug>  # move, making the team if missing
 #   tdoc-move --set-default <name|id>      # new docs from this machine go to this team
 #   tdoc-move --set-default personal       # new docs go to My docs (the default)
-#   tdoc-move --default                    # show the default
+#   tdoc-move --default                    # where a new doc would go, and why
+#   (nearest wins: TDOC_TEAM, then a .tdoc.json {"team": "..."} in this
+#    directory or a parent, then --set-default)
 #   (Inviting people stays on the web: it sends email.)
 #   tdoc-move --help
 set -euo pipefail
@@ -30,8 +32,9 @@ while [ $# -gt 0 ]; do
     --create) CREATE=1; shift ;;
     --set-default) SET_DEFAULT="${2:-}"; [ -n "$SET_DEFAULT" ] || { echo "--set-default needs a team or 'personal'" >&2; exit 2; }; shift 2 ;;
     --default) SHOW_DEFAULT=1; shift ;;
+    --default-id) SHOW_DEFAULT=2; shift ;;
     --create-team) NEW_TEAM="${2:-}"; [ -n "$NEW_TEAM" ] || { echo "--create-team needs a name" >&2; exit 2; }; shift 2 ;;
-    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown arg: $1" >&2; exit 2 ;;
     *) SLUGS+=("$1"); shift ;;
   esac
@@ -72,10 +75,32 @@ write_default() {
   ' "$CONFIG_FILE" "$1" "${2:-}"
 }
 
+# Where a NEW doc goes, nearest first: this agent (TDOC_TEAM), this project
+# (a .tdoc.json {"team": "<name|id>"} in the working directory or a parent),
+# this machine (--set-default). Prints "<team>\t<source>"; empty = My docs.
+effective_default() {
+  if [ -n "${TDOC_TEAM:-}" ]; then printf '%s\tTDOC_TEAM' "$TDOC_TEAM"; return; fi
+  local d="$PWD" t
+  while [ -n "$d" ]; do
+    if [ -f "$d/.tdoc.json" ]; then
+      t="$(json_get team < "$d/.tdoc.json" 2>/dev/null || true)"
+      if [ -n "$t" ]; then printf '%s\t%s' "$t" "$d/.tdoc.json"; return; fi
+    fi
+    [ "$d" = "/" ] && break
+    d="$(dirname "$d")"
+  done
+  t="$(json_get default_team.id < "$CONFIG_FILE")"
+  [ -n "$t" ] && printf '%s\tthis machine (%s)' "$t" "$(json_get default_team.name < "$CONFIG_FILE")"
+  return 0
+}
+
 if [ "$SHOW_DEFAULT" = "1" ]; then
-  if [ -n "${TDOC_TEAM:-}" ]; then echo "default: team $TDOC_TEAM (from TDOC_TEAM)";
-  else n="$(json_get default_team.name < "$CONFIG_FILE")"; echo "default: ${n:+team $n}${n:-My docs}"; fi
+  e="$(effective_default)"
+  if [ -n "$e" ]; then echo "new docs go to team ${e%%$'\t'*} (from ${e#*$'\t'})"; else echo "new docs go to My docs"; fi
   exit 0
+fi
+if [ "$SHOW_DEFAULT" = "2" ]; then
+  e="$(effective_default)"; printf '%s' "${e%%$'\t'*}"; exit 0
 fi
 
 if [ -n "$SET_DEFAULT" ]; then
@@ -113,7 +138,7 @@ if [ "$LIST" = "1" ]; then
 fi
 
 if [ "${#SLUGS[@]}" -eq 0 ] || { [ -z "$TEAM" ] && [ "$PERSONAL" != "1" ]; } || { [ -n "$TEAM" ] && [ "$PERSONAL" = "1" ]; }; then
-  sed -n '9,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2
+  sed -n '9,21p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2
 fi
 
 TEAM_ID="null"
