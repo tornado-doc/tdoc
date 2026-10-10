@@ -1,7 +1,3 @@
-.tm-switch { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; margin-left: -6px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; cursor: pointer; }
-.tm-switch:hover, .tm-switch[data-popup-open] { background: var(--td-surface); }
-.tm-switch svg { color: var(--td-muted); }
-.tm-menu-check { display: inline-flex; width: 18px; }
 .tm-loc { margin: -4px 0 12px; font-size: 13px; }
 .tm-person { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
 .tm-person img { width: 26px; height: 26px; border-radius: 50%; }
@@ -15,3 +11,32 @@
 .tm-text-btn { border: 0 !important; background: none !important; color: var(--td-muted); font-size: 13px; padding: 4px !important; }
 .tm-link-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }
 .tdoc-modal .actions .tm-push-left { margin: 0 auto 0 0; }
+
+/* SpaceBar: the spaces in view, above the page title. */
+.tm-spaces { margin: 0 0 14px; }
+.tm-spaces-row {
+  display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+  padding: 2px 0; margin: 0 -2px; padding-inline: 2px;
+}
+.tm-spaces-row::-webkit-scrollbar { display: none; }
+.tm-space {
+  flex: none; display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 12px; box-sizing: border-box;
+  border: 1px solid var(--td-line, #e8e7e3); border-radius: 999px;
+  background: var(--td-ground, #fff); color: var(--td-ink, #1a1a1a);
+  font-family: inherit; font-size: 13.5px; font-weight: 550; line-height: 1; cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.tm-space:hover { background: var(--td-surface, #f4f4f2); }
+.tm-space:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
+.tm-space.is-active { background: var(--td-ink, #1a1a1a); border-color: var(--td-ink, #1a1a1a); color: var(--td-ground, #fff); }
+.tm-space svg { color: currentColor; opacity: .75; }
+.tm-space-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-space-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 5px; color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 1;
+}
+.tm-space-new { border-style: dashed; color: var(--td-muted, #6b6a66); font-weight: 500; }
+.tm-space-new:hover { color: var(--td-ink, #1a1a1a); }
+@media (max-width: 480px) { .tm-space { height: 36px; } }

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Check, ChevronDown, Link2, Plus, UsersRound } from 'lucide-react';
+import { Link2, Plus, UserRound, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
-import { AppMenu, AppMenuItem, AppMenuSeparator } from '../ui/menu.jsx';
 import { AppSelect } from '../ui/select.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
 import { copyText } from '../document/model.js';
@@ -43,31 +42,45 @@ function PersonRow({ member, name, sub, right }) {
   );
 }
 
-export function SpaceSwitcher({ teams, space, onSpace, onNewTeam }) {
-  const current = teams.find((team) => team.id === space);
-  return (
-    <AppMenu
-      align="start"
-      trigger={(
-        <button type="button" className="tm-switch" aria-label="Switch space">
-          {current ? current.name : 'My docs'}
-          <ChevronDown size={18} />
-        </button>
-      )}
+// The spaces, side by side and always in view (Julie, 2026-10-10: a title
+// that is secretly a dropdown is not where a first-time person looks for
+// their team). One pill per space, the current one filled; New team at the
+// end, so a person with no team yet learns that teams exist. On a phone the
+// row scrolls sideways instead of wrapping into a block.
+function teamHue(id) {
+  let h = 0;
+  for (const ch of String(id || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+export function SpaceBar({ teams, space, onSpace, onNewTeam }) {
+  const pill = (id, label, icon) => (
+    <button
+      key={id || 'me'}
+      type="button"
+      role="tab"
+      aria-selected={space === id}
+      className={`tm-space${space === id ? ' is-active' : ''}`}
+      onClick={() => onSpace(id)}
     >
-      <AppMenuItem onClick={() => onSpace('')}>
-        <span className="tm-menu-check">{!current ? <Check size={14} /> : null}</span>My docs
-      </AppMenuItem>
-      {teams.map((team) => (
-        <AppMenuItem key={team.id} onClick={() => onSpace(team.id)}>
-          <span className="tm-menu-check">{current?.id === team.id ? <Check size={14} /> : null}</span>{team.name}
-        </AppMenuItem>
-      ))}
-      <AppMenuSeparator />
-      <AppMenuItem className="tm-new-team" onClick={onNewTeam}>
-        <span className="tm-menu-check"><Plus size={14} /></span>New team
-      </AppMenuItem>
-    </AppMenu>
+      {icon}
+      <span className="tm-space-name">{label}</span>
+    </button>
+  );
+  return (
+    <nav className="tm-spaces" aria-label="Spaces">
+      <div className="tm-spaces-row" role="tablist">
+        {pill('', 'My docs', <UserRound size={14} aria-hidden="true" />)}
+        {teams.map((team) => pill(team.id, team.name, (
+          <span className="tm-space-mark" aria-hidden="true" style={{ background: `hsl(${teamHue(team.id)} 55% 46%)` }}>
+            {String(team.name || '?').trim().slice(0, 1).toUpperCase()}
+          </span>
+        )))}
+        <button type="button" className="tm-space tm-space-new" onClick={onNewTeam}>
+          <Plus size={14} aria-hidden="true" />
+          <span className="tm-space-name">New team</span>
+        </button>
+      </div>
+    </nav>
   );
 }
 

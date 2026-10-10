@@ -16,7 +16,7 @@ import {
   MembersDialog,
   MoveToTeamDialog,
   NewTeamDialog,
-  SpaceSwitcher,
+  SpaceBar,
   TeamPane,
 } from './docs-hub/teams.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
@@ -485,15 +485,14 @@ export function DocsHub({ boot }) {
         onClaimProfile={boot.profile ? () => setModal({ type: 'claim-handle' }) : null}
       />
       <main className="wrap">
+        <SpaceBar
+          teams={teams}
+          space={space}
+          onSpace={setSpace}
+          onNewTeam={() => setModal({ type: 'new-team' })}
+        />
         <div className="page-hd">
-          <h1>
-            <SpaceSwitcher
-              teams={teams}
-              space={space}
-              onSpace={setSpace}
-              onNewTeam={() => setModal({ type: 'new-team' })}
-            />
-          </h1>
+          <h1>{team ? team.name : 'My docs'}</h1>
           {team ? (
             <button type="button" className="new-folder-btn tm-members-btn" onClick={() => setModal({ type: 'members' })}>
               <UsersRound size={15} /> {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
