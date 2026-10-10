@@ -940,6 +940,26 @@ t('tdoc-move resolves a team by name and moves; unknown team fails without movin
     const bad = spawnSync(bin, ['--team', 'nope', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
     assert(bad.status !== 0 && /not in a team called "nope".*BeFreed/.test(bad.stderr), `unknown team: ${bad.status} ${bad.stderr}`);
     assert(!/team\/move/.test(fs.readFileSync(log, 'utf8')), 'moved despite an unknown team');
+    const setDef = spawnSync(bin, ['--set-default', 'befreed'], { env, encoding: 'utf8', timeout: 20000 });
+    const cfg = JSON.parse(fs.readFileSync(path.join(home, '.tdoc', 'published.json'), 'utf8'));
+    assert(setDef.status === 0 && cfg.default_team && cfg.default_team.id === 't_bf' && cfg.default_team.name === 'BeFreed', `set-default: ${setDef.stderr} ${JSON.stringify(cfg)}`);
+    assert(cfg.upload_token === 'tok-1', 'set-default lost the token');
+    const show = spawnSync(bin, ['--default'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(/team t_bf \(from this machine \(BeFreed\)\)/.test(show.stdout), `--default: ${show.stdout}`);
+    // Nearest wins: a project's .tdoc.json beats the machine; TDOC_TEAM beats both.
+    const proj = path.join(home, 'proj', 'sub');
+    fs.mkdirSync(proj, { recursive: true });
+    fs.writeFileSync(path.join(home, 'proj', '.tdoc.json'), JSON.stringify({ team: 'Growth' }));
+    const fromProject = spawnSync(bin, ['--default-id'], { env, cwd: proj, encoding: 'utf8', timeout: 20000 });
+    assert(fromProject.stdout === 'Growth', `project default: ${JSON.stringify(fromProject.stdout)}`);
+    const fromEnv = spawnSync(bin, ['--default-id'], { env: { ...env, TDOC_TEAM: 'Ops' }, cwd: proj, encoding: 'utf8', timeout: 20000 });
+    assert(fromEnv.stdout === 'Ops', `env default: ${JSON.stringify(fromEnv.stdout)}`);
+    const fromMachine = spawnSync(bin, ['--default-id'], { env, cwd: home, encoding: 'utf8', timeout: 20000 });
+    assert(fromMachine.stdout === 't_bf', `machine default: ${JSON.stringify(fromMachine.stdout)}`);
+    const clear = spawnSync(bin, ['--set-default', 'personal'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(clear.status === 0 && !JSON.parse(fs.readFileSync(path.join(home, '.tdoc', 'published.json'), 'utf8')).default_team, 'personal did not clear it');
+    const none = spawnSync(bin, ['--default-id'], { env, cwd: home, encoding: 'utf8', timeout: 20000 });
+    assert(none.status === 0 && none.stdout === '', `cleared default still resolves: ${JSON.stringify(none.stdout)}`);
     const made = spawnSync(bin, ['--team', 'Agents', '--create', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
     const after = fs.readFileSync(log, 'utf8');
     assert(made.status === 0 && /POST \/api\/teams Bearer tok-1 \{"name":"Agents"\}/.test(after) && /"team":"t_new"/.test(after), `--create: ${made.status} ${made.stderr}\n${after}`);

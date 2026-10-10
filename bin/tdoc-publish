@@ -49,6 +49,10 @@ Options:
   --allow-user <github-login>            (repeatable; private/shared allowlist)
   --team <name|id>                       (hosted: put the doc in this team's workspace)
   --create-team                          (with --team: make the team if you have none by that name)
+  --personal                             (keep a new doc in My docs even if a default team is set)
+  A new doc goes to the default team when one is set, nearest first:
+  TDOC_TEAM, a .tdoc.json {"team": "<name|id>"} in this directory or a parent,
+  or `tdoc-move --set-default <team>`. Existing docs stay where they are.
 EOF
   exit 1
 }
@@ -105,6 +109,9 @@ COMMENTING_FLAG=""
 ALLOW_USERS=()
 TEAM_FLAG=""
 CREATE_TEAM=()
+PERSONAL_FLAG=0
+UP_NEW_DOC=0
+UP_TEAM=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)   PLATFORM_FLAG="${2:-}"; [ -n "$PLATFORM_FLAG" ] || usage; shift 2 ;;
@@ -124,6 +131,7 @@ while [ $# -gt 0 ]; do
     --team) TEAM_FLAG="${2:-}"; [ -n "$TEAM_FLAG" ] || usage; shift 2 ;;
     --team=*) TEAM_FLAG="${1#--team=}"; [ -n "$TEAM_FLAG" ] || usage; shift ;;
     --create-team) CREATE_TEAM=(--create); shift ;;
+    --personal) PERSONAL_FLAG=1; shift ;;
     # Sign in and mint the upload token, then stop — no doc required. Lets the
     # skill start the device flow BEFORE it spends 30-60s generating HTML, so
     # the human approves in the browser while the doc is being written instead
@@ -1643,6 +1651,10 @@ upload_version() {
         } catch {}
       ' "$META_FILE" "$v" "$up_sha" 2>/dev/null || true
     fi
+    # Where the doc is: a first publish may be placed in the default team
+    # below, and every publish ends by saying where it landed.
+    [ "$(printf '%s' "$resp" | json_get new_doc)" = "true" ] && UP_NEW_DOC=1
+    UP_TEAM="$(printf '%s' "$resp" | json_get team)"
     merged="$(printf '%s' "$resp" | json_get mergedComments)"; merged="${merged:-0}"
     if [ "$merged" != "0" ] && [ "$merged" != "null" ]; then
       echo "[tdoc] v$v uploaded (${_sz:-?} bytes, +$merged local comment(s) merged)"
@@ -1728,12 +1740,26 @@ upload_version "$VERSION" || {
 if [ -n "$OLDER_FAILED" ]; then
   echo "[tdoc] WARNING: older version(s) failed to upload:$OLDER_FAILED — latest is live; re-run /tdoc publish to retry them." >&2
 fi
+TDOC_MOVE="$(cd "$(dirname "$0")" && pwd)/tdoc-move"
+# The default team applies to a doc's FIRST publish only: an existing doc is
+# wherever someone put it, and a default must never move it.
+if [ -z "$TEAM_FLAG" ] && [ "$UP_NEW_DOC" = "1" ] && [ "$PERSONAL_FLAG" != "1" ] && [ "$PLATFORM" = "hosted" ]; then
+  # Nearest first: this agent, this project, this machine (tdoc-move --default).
+  TEAM_FLAG="$("$TDOC_MOVE" --default-id 2>/dev/null || true)"
+fi
 if [ -n "$TEAM_FLAG" ]; then
   # Same call as `tdoc-move --team`, so the rules and messages are one copy.
-  "$(cd "$(dirname "$0")" && pwd)/tdoc-move" --team "$TEAM_FLAG" ${CREATE_TEAM[@]+"${CREATE_TEAM[@]}"} "$SLUG" || {
+  "$TDOC_MOVE" --team "$TEAM_FLAG" ${CREATE_TEAM[@]+"${CREATE_TEAM[@]}"} "$SLUG" || {
     echo "[tdoc] Published, but it is still in My docs (see above)." >&2
     exit 1
   }
+elif [ "$PLATFORM" = "hosted" ]; then
+  if [ -n "$UP_TEAM" ] && [ "$UP_TEAM" != "null" ]; then
+    _tname="$("$TDOC_MOVE" --teams 2>/dev/null | awk -F'\t' -v id="$UP_TEAM" '$1==id {print $2}')"
+    echo "[tdoc] location: team ${_tname:-$UP_TEAM}"
+  else
+    echo "[tdoc] location: My docs"
+  fi
 fi
 echo
 echo "Published: $PUBLIC_BASE/d/$SLUG/v/$VERSION"

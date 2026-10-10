@@ -11851,7 +11851,14 @@ export default {
           console.error('[onboarding] publish stamp failed (non-fatal):', e && e.message ? e.message : String(e));
         }
       }
-      return json({ ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal });
+      // `new_doc` and `team` let the CLI place a first publish (its default
+      // team) and say where every publish landed, so a doc in the wrong
+      // place is seen at once (Julie, 2026-10-10).
+      return json({
+        ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal,
+        new_doc: !writeGate.meta,
+        team: (writeGate.meta && writeGate.meta.workspace_id) || null,
+      });
     }
 
     // ---- admin access mutation ----
