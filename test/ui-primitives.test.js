@@ -49,6 +49,16 @@ t('agent pickers are searchable (AppCombobox)', () => {
     'AppCombobox must look like AppSelect closed and open the same menu popup above dialogs');
 });
 
+t('spaces are visible pills above the title, not a dropdown hidden in it', () => {
+  // Julie, 2026-10-10: a first-time person does not find their team behind a
+  // title that is secretly a menu.
+  const hub = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub.jsx'), 'utf8');
+  assert(/<SpaceBar\b/.test(hub) && !/SpaceSwitcher/.test(hub), 'My docs must render SpaceBar');
+  assert(/<h1>\{team \? team\.name : 'My docs'\}<\/h1>/.test(hub), 'the title is plain text again');
+  const teams = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub/teams.jsx'), 'utf8');
+  assert(/role="tablist"/.test(teams) && /New team/.test(teams), 'every space and New team are in view');
+});
+
 t('AppSelect draws its open list with the menu popup, above dialogs', () => {
   const src = fs.readFileSync(path.join(ROOT, 'shell/src/ui/select.jsx'), 'utf8');
   assert(/ui-menu-popup/.test(src) && /ui-menu-item/.test(src), 'AppSelect must reuse the AppMenu popup and rows');
