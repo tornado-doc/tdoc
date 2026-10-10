@@ -285,13 +285,15 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(made.status === 200, `create ${made.status}`);
     const daily = made.body.team;
     const up = await call('/api/upload', { method: 'POST', token: zed.token, body: { slug: 'daily-report', version: 1, html: '<p>x</p>' } });
-    assert(up.status === 200, `upload ${up.status}`);
+    assert(up.status === 200 && up.body.new_doc === true && up.body.team === null, `upload ${up.status} ${JSON.stringify(up.body)}`);
     const list = await call('/api/teams', { token: zed.token });
     assert(list.status === 200 && list.body.teams.some((x) => x.id === daily.id), `token cannot list teams: ${list.status}`);
     const moved = await call('/api/team/move', { method: 'POST', token: zed.token, body: { team: daily.id, slugs: ['daily-report'] } });
     assert(moved.status === 200, `token move ${moved.status} ${JSON.stringify(moved.body)}`);
     const meta = JSON.parse(await env.META.get('meta:daily-report'));
     assert(meta.workspace_id === daily.id && meta.access.team === true, 'not in the team');
+    const v2 = await call('/api/upload', { method: 'POST', token: zed.token, body: { slug: 'daily-report', version: 2, html: '<p>y</p>' } });
+    assert(v2.status === 200 && v2.body.new_doc === false && v2.body.team === daily.id, `a later version must report where the doc is: ${JSON.stringify(v2.body)}`);
     const again = await call('/api/team/move', { method: 'POST', token: zed.token, body: { team: daily.id, slugs: ['daily-report'] } });
     assert(again.status === 200, `re-sending --team on the next version failed: ${again.status}`);
     const foreign = await call('/api/team/move', { method: 'POST', token: zed.token, body: { team: team.id, slugs: ['daily-report'] } });
