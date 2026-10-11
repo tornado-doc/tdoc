@@ -3563,6 +3563,41 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
   return out.filter(Boolean).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 }
 
+// ─────────────────────── the doc catalog index ───────────────────────
+//
+// My docs used to read and parse EVERY doc's meta on the platform on every
+// load, then keep the viewer's few: cost grew with all of tdoc, and the page
+// started failing with Cloudflare 1102 (resource limit) for everyone
+// (Julie, 2026-10-11). Each meta key now carries a small KV metadata record
+// -- owner account, team, title, dates -- so the catalog is one cheap list
+// call, and only the viewer's own rows are fetched in full.
+const META_INDEX_VERSION = 1;
+function docMetaIndex(meta) {
+  const m = meta && typeof meta === 'object' ? meta : {};
+  const versions = Array.isArray(m.versions) ? m.versions : [];
+  const hosted = m.hosted && typeof m.hosted === 'object' ? m.hosted : {};
+  const idx = {
+    v: META_INDEX_VERSION,
+    a: String(hosted.account_id || ''),
+    o: String(hostedGithubLogin(m) || ''),
+    k: String(hosted.owner_key || ''),
+    w: String(m.workspace_id || ''),
+    f: m.created_from === 'feedback' ? 1 : 0,
+    l: Number(versions[versions.length - 1]?.n) || 1,
+    c: String(m.created || versions[0]?.created || ''),
+    u: String(versions[versions.length - 1]?.created || m.created || versions[0]?.created || ''),
+    t: String(m.title || '').slice(0, 300),
+  };
+  // KV metadata is capped at 1024 bytes; the title is the only free text.
+  while (JSON.stringify(idx).length > 1000 && idx.t.length) idx.t = idx.t.slice(0, Math.floor(idx.t.length / 2));
+  return idx;
+}
+async function putDocMetaJson(env, slug, json) {
+  let parsed = null;
+  try { parsed = JSON.parse(json); } catch {}
+  return env.META.put(`meta:${slug}`, json, parsed ? { metadata: docMetaIndex(parsed) } : undefined);
+}
+
 async function indexData(env, session, origin) {
   let keys = [];
   let cursor;
@@ -3573,10 +3608,45 @@ async function indexData(env, session, origin) {
     if (page.list_complete) break;
   } while (cursor);
 
-  const catalog = await Promise.all(keys.map(async (key) => {
+  // Which rows this viewer could possibly see, decided from the index alone:
+  // their own (by account, handle or owner key), their teams', and the ones
+  // they starred or opened. Only those are read in full; the final checks
+  // below still run on the full meta, so the index only narrows, never grants.
+  const viewerKeyEarly = actorKey(session);
+  const accountIds = new Set(sessionAccountIds(session));
+  const operator = isOwnerSession(env, session);
+  const actorKeys = new Set([viewerKeyEarly, ...((session && session.linked_actor_keys) || [])].filter(Boolean).map(String));
+  const login = sessionLogin(session);
+  const teamIds = new Set((session && session.team_ids) || []);
+  const [starItemsEarly, recentItemsEarly] = viewerKeyEarly
+    ? await Promise.all([loadStars(env, viewerKeyEarly), loadRecents(env, viewerKeyEarly)])
+    : [[], []];
+  const savedSlugs = new Set([...starItemsEarly, ...recentItemsEarly].map((item) => item && item.slug).filter(Boolean));
+  const hostedEarly = hostedRegistrationEnabled(env, origin);
+  const wanted = (slug, idx) => !hostedEarly
+    || savedSlugs.has(slug)
+    || (idx.a && accountIds.has(idx.a))
+    || (idx.o && login && idx.o === login)
+    || (idx.k && actorKeys.has(idx.k))
+    || (idx.w && teamIds.has(idx.w))
+    || idx.f === 1
+    // The deploy operator owns legacy docs that name no owner at all.
+    || (operator && !idx.a && !idx.o);
+  let backfills = 0;
+  const loaded = await Promise.all(keys.map(async (key) => {
     const slug = key.name.slice('meta:'.length);
+    const idx = key.metadata && key.metadata.v === META_INDEX_VERSION ? key.metadata : null;
+    if (idx && !wanted(slug, idx)) return null;
+    let raw = null;
     let meta = {};
-    try { meta = JSON.parse(await env.META.get(key.name) || '{}'); } catch {}
+    try { raw = await env.META.get(key.name); meta = JSON.parse(raw || '{}'); } catch {}
+    // A key written before the index existed: give it one now, a few per
+    // request, so the full reads fade out without a migration step.
+    if (!idx && raw && backfills < 25) {
+      backfills += 1;
+      try { await env.META.put(key.name, raw, { metadata: docMetaIndex(meta) }); } catch {}
+    }
+    if (!idx && !wanted(slug, docMetaIndex(meta))) return null;
     const versions = Array.isArray(meta.versions) ? meta.versions : [];
     return {
       slug,
@@ -3588,6 +3658,7 @@ async function indexData(env, session, origin) {
       meta,
     };
   }));
+  const catalog = loaded.filter(Boolean);
 
   const hosted = hostedRegistrationEnabled(env, origin);
   const viewer = sessionLogin(session);
@@ -3607,7 +3678,7 @@ async function indexData(env, session, origin) {
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 
   const [starItems, recentItems, folderState] = viewerKey
-    ? await Promise.all([loadStars(env, viewerKey), loadRecents(env, viewerKey), loadFolderState(env, viewerKey)])
+    ? [starItemsEarly, recentItemsEarly, await loadFolderState(env, viewerKey)]
     : [[], [], { folders: [], docs: {} }];
   const starred = new Set(starItems.map((item) => item.slug));
   const bySlug = new Map(catalog.map((row) => [row.slug, row]));
@@ -3729,7 +3800,7 @@ async function profileData(env, account, { includePrivate = false } = {}) {
         image = nextImageUse;
         if (changed) {
           try {
-            await env.META.put(`meta:${slug}`, JSON.stringify({
+            await putDocMetaJson(env, slug, JSON.stringify({
               ...refreshed,
               preview: { excerpt, image },
             }));
@@ -4642,6 +4713,15 @@ async function countHostedDocs(env, accountId, stopAt) {
   do {
     const r = await env.META.list({ prefix: 'meta:', cursor });
     for (const k of r.keys || []) {
+      // The index answers "whose is it" without reading the doc's meta.
+      const idx = k.metadata && k.metadata.v === META_INDEX_VERSION ? k.metadata : null;
+      if (idx) {
+        if (idx.a && owners.has(idx.a)) {
+          n++;
+          if (stopAt && n >= stopAt) return n;
+        }
+        continue;
+      }
       let meta = null;
       try {
         const raw = await env.META.get(k.name);
@@ -4672,6 +4752,11 @@ async function newestDocFor(env, accountId) {
   do {
     const r = await env.META.list({ prefix: 'meta:', cursor });
     for (const k of r.keys || []) {
+      const idx = k.metadata && k.metadata.v === META_INDEX_VERSION ? k.metadata : null;
+      if (idx) {
+        if (idx.a && owners.has(idx.a) && (!best || idx.u > best.created)) best = { slug: k.name.slice('meta:'.length), created: idx.u };
+        continue;
+      }
       let meta = null;
       try {
         const raw = await env.META.get(k.name);
@@ -4848,7 +4933,7 @@ async function createDocForSession(env, req, session, { html, meta, version, tea
   }
   const verify = await env.DOCS.head(r2Key);
   if (!verify) return { ok: false, response: json({ error: 'r2_write_lost' }, { status: 500 }) };
-  await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
+  await putDocMetaJson(env, newSlug, JSON.stringify(incoming));
   return { ok: true, slug: newSlug, actor, meta: incoming };
 }
 
@@ -5812,7 +5897,7 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
       visibility: ACCESS_VISIBILITIES.has(restore) ? restore : access.visibility,
     };
   }
-  await env.META.put(`meta:${slug}`, JSON.stringify(nextMeta));
+  await putDocMetaJson(env, slug, JSON.stringify(nextMeta));
 
   const prev = await accountProfile(env, accountId);
   let pins = normalizeProfilePins(prev);
@@ -7429,7 +7514,7 @@ async function touchDocAgent(env, slug, target) {
   const prev = Array.isArray(meta.notify_agents) ? meta.notify_agents : [];
   const rest = prev.map(normalizeNotifyTarget).filter(x => x && !sameNotifyTarget(x, t));
   const next = [{ ...t, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX);
-  await env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, notify_agents: next }));
+  await putDocMetaJson(env, slug, JSON.stringify({ ...meta, notify_agents: next }));
   return true;
 }
 
@@ -8006,7 +8091,7 @@ export class CommentsStore {
         ...(op.actorLogin ? { author: op.actorLogin } : {}),
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
-      await this.env.META.put(`meta:${slug}`, JSON.stringify({
+      await putDocMetaJson(this.env, slug, JSON.stringify({
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions,
@@ -9571,7 +9656,7 @@ export default {
       }
       const verify = await env.DOCS.head(r2Key);
       if (!verify) return json({ error: 'r2_write_lost' }, { status: 500 });
-      await env.META.put(`meta:${newSlug}`, JSON.stringify(incoming));
+      await putDocMetaJson(env, newSlug, JSON.stringify(incoming));
       return json({ ok: true, slug: newSlug, version: 1, url: `/d/${newSlug}/v/1` });
     }
 
@@ -10331,7 +10416,7 @@ export default {
           delete policy.team;
         }
         next.access = policy;
-        await env.META.put(`meta:${slug}`, JSON.stringify(next));
+        await putDocMetaJson(env, slug, JSON.stringify(next));
       }
       return json({ ok: true, moved: slugs.length, team: team ? team.id : null });
     }
@@ -10693,7 +10778,7 @@ export default {
             String(k).startsWith('email:') ? String(k).slice(6) : k)),
         });
         if (patched.error) return json(patched, { status: 400 });
-        await env.META.put(`meta:${slug}`, JSON.stringify(patched.meta));
+        await putDocMetaJson(env, slug, JSON.stringify(patched.meta));
       }
       // The same words twice within seconds is one comment: answer with the
       // one already there instead of writing a twin.
@@ -11704,7 +11789,7 @@ export default {
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
             .sort((a, b) => Number(a.n) - Number(b.n));
-          await env.META.put(`meta:${slug}`, JSON.stringify({
+          await putDocMetaJson(env, slug, JSON.stringify({
             ...(currentMeta || {}),
             ...incoming,
             versions: mergedVersions,
@@ -11754,7 +11839,7 @@ export default {
           if (entry && (entry.sha !== uploadSha || (clientVersion && entry.client !== clientVersion))) {
             entry.sha = uploadSha;
             if (clientVersion) entry.client = clientVersion;
-            await env.META.put(`meta:${slug}`, JSON.stringify(currentMeta));
+            await putDocMetaJson(env, slug, JSON.stringify(currentMeta));
           }
         } catch (e) {
           // The bytes are stored and correct; a stale recorded sha costs at
@@ -11963,7 +12048,7 @@ export default {
       if (next.error) {
         return json({ error: next.error, ...(next.field ? { field: next.field } : {}), ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
       }
-      await env.META.put(`meta:${slug}`, JSON.stringify(next.meta));
+      await putDocMetaJson(env, slug, JSON.stringify(next.meta));
       // The one moment an invitation exists as an event rather than a list
       // entry: mail the people the owner just added, never the ones who were
       // already there.
@@ -12016,7 +12101,7 @@ export default {
       if (!auth.ok) return auth.response;
       const meta = auth.meta || await loadDocMeta(env, slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
-      await env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, title: clean }));
+      await putDocMetaJson(env, slug, JSON.stringify({ ...meta, title: clean }));
       return json({ ok: true, slug, title: clean });
     }
 

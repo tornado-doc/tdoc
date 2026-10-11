@@ -22,20 +22,28 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 class FakeKV {
   constructor() {
     this.map = new Map();
+    // Per-key metadata, as Workers KV keeps it: replaced on every put, and
+    // returned by list() without reading the value.
+    this.metadata = new Map();
     this.failPutOnce = new Set();
+    this.gets = [];
   }
-  async get(k) { return this.map.has(k) ? this.map.get(k) : null; }
-  async put(k, v) {
+  async get(k) { this.gets.push(k); return this.map.has(k) ? this.map.get(k) : null; }
+  async put(k, v, opts) {
     if (this.failPutOnce.has(k)) {
       this.failPutOnce.delete(k);
       throw new Error(`forced KV put failure: ${k}`);
     }
     this.map.set(k, String(v));
+    if (opts && opts.metadata !== undefined) this.metadata.set(k, JSON.parse(JSON.stringify(opts.metadata)));
+    else this.metadata.delete(k);
   }
-  async delete(k) { this.map.delete(k); }
+  async delete(k) { this.map.delete(k); this.metadata.delete(k); }
   async list({ prefix = '' } = {}) {
     return {
-      keys: [...this.map.keys()].filter(k => k.startsWith(prefix)).map(name => ({ name })),
+      keys: [...this.map.keys()].filter(k => k.startsWith(prefix)).map(name => (
+        this.metadata.has(name) ? { name, metadata: this.metadata.get(name) } : { name }
+      )),
       list_complete: true,
     };
   }
