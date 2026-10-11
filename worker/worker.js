@@ -3642,7 +3642,9 @@ async function indexData(env, session, origin) {
     try { raw = await env.META.get(key.name); meta = JSON.parse(raw || '{}'); } catch {}
     // A key written before the index existed: give it one now, a few per
     // request, so the full reads fade out without a migration step.
-    if (!idx && raw && backfills < 25) {
+    // Gently: the free Workers plan allows 1,000 KV writes a day, and a
+    // publish needs a few of them.
+    if (!idx && raw && backfills < 5) {
       backfills += 1;
       try { await env.META.put(key.name, raw, { metadata: docMetaIndex(meta) }); } catch {}
     }
