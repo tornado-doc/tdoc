@@ -475,7 +475,11 @@ export function DocsHub({ boot }) {
   ].filter(Boolean);
 
   const allSelected = hub.shownDocs.length > 0 && hub.shownDocs.every((doc) => hub.selected.has(doc.slug));
-  const batchActions = capabilities.folders || capabilities.delete;
+  const batchActions = capabilities.folders || capabilities.delete || teams.length > 0;
+  // Only the author moves a personal doc into a team, so a mixed selection
+  // moves the author's own and says how many it left behind.
+  const selectedDocs = hub.docs.filter((doc) => hub.selected.has(doc.slug));
+  const movableToTeam = selectedDocs.filter((doc) => doc.mine).map((doc) => doc.slug);
 
   return (
     <div className="tdoc-app docs-hub">
@@ -588,8 +592,17 @@ export function DocsHub({ boot }) {
               </label>
               {hub.selected.size && batchActions ? (
                 <span className="batch-actions">
+                  {teams.length && movableToTeam.length ? (
+                    <button
+                      type="button"
+                      className="batch-move batch-move-team is-visible"
+                      onClick={() => setModal({ type: 'move-team', slugs: movableToTeam, skipped: hub.selected.size - movableToTeam.length })}
+                    >
+                      Move to team
+                    </button>
+                  ) : null}
                   {capabilities.folders ? (
-                    <button type="button" className="batch-move is-visible" onClick={() => setModal({ type: 'move', slugs: [...hub.selected] })}>Move</button>
+                    <button type="button" className="batch-move is-visible" onClick={() => setModal({ type: 'move', slugs: [...hub.selected] })}>Move to folder</button>
                   ) : null}
                   {capabilities.delete ? (
                     <button type="button" className="batch-delete is-visible" onClick={() => setModal({ type: 'delete-docs', slugs: [...hub.selected] })}>Delete selected</button>
@@ -686,6 +699,7 @@ export function DocsHub({ boot }) {
         <MoveToTeamDialog
           teams={teams}
           count={modal.slugs.length}
+          skipped={modal.skipped || 0}
           onClose={closeModal}
           onMove={(target) => moveDocsToTeam(modal.slugs, target.id)
             .then(() => { location.href = `/me?team=${encodeURIComponent(target.id)}`; })

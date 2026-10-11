@@ -276,7 +276,7 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
   );
 }
 
-export function MoveToTeamDialog({ teams, count, onMove, onClose }) {
+export function MoveToTeamDialog({ teams, count, skipped = 0, onMove, onClose }) {
   return (
     <AppDialog
       open
@@ -287,11 +287,17 @@ export function MoveToTeamDialog({ teams, count, onMove, onClose }) {
       <div className="move-list">
         {teams.map((team) => (
           <button key={team.id} type="button" onClick={() => onMove(team)}>
-            <UsersRound size={15} /> {team.name}
+            <span className="tm-space-mark" aria-hidden="true" style={{ background: `hsl(${teamHue(team.id)} 55% 46%)` }}>
+              {String(team.name || '?').trim().slice(0, 1).toUpperCase()}
+            </span>
+            {team.name}
           </button>
         ))}
       </div>
       <p className="manage-hint">The team becomes the owner and every member can open and comment. You stay the author.</p>
+      {skipped ? (
+        <p className="manage-hint">{skipped === 1 ? '1 selected doc is' : `${skipped} selected docs are`} not yours, so {skipped === 1 ? 'it stays' : 'they stay'} where {skipped === 1 ? 'it is' : 'they are'}. Only a doc&apos;s author can move it into a team.</p>
+      ) : null}
     </AppDialog>
   );
 }
