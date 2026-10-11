@@ -114,7 +114,7 @@ t('Hosted upload stamps remote meta ownership before writing', () => {
   const validate = uploadRoute.indexOf('validateAccessWrite');
   const claim = uploadRoute.indexOf("kind: 'claim_owner'");
   const r2 = uploadRoute.indexOf('env.DOCS.put');
-  const meta = uploadRoute.indexOf('env.META.put(`meta:${slug}`');
+  const meta = uploadRoute.indexOf('putDocMetaJson(env, slug, ');
   assert(gate >= 0 && gate < r2, 'upload must enforce owner before R2 write');
   assert(gate < meta, 'upload must enforce owner before META write');
   assert(validate >= 0 && claim >= 0 && validate < claim,

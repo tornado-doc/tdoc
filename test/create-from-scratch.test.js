@@ -152,7 +152,7 @@ t('the worker create route claims a slug, charges quota, and writes v1', () => {
     "kind: 'claim_owner'",
     'blankDocSlug(crypto.getRandomValues(new Uint8Array(8)))',
     'prepareDocVersion(html)',
-    'env.META.put(`meta:${newSlug}`',
+    'putDocMetaJson(env, newSlug, ',
   ]) assert(helper.includes(needle), `createDocForSession missing: ${needle}`);
 });
 

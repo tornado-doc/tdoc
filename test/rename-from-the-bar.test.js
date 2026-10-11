@@ -41,7 +41,7 @@ t('renaming is a metadata edit, not a publish', () => {
   assert(start >= 0, 'the worker has no rename route');
   const route = worker.slice(start, worker.indexOf('// ---- admin delete ----', start));
   assert(route.includes('authorizeOwnerMutation(req, env, slug)'), 'renaming must use the shared owner gate');
-  assert(/env\.META\.put\(`meta:\$\{slug\}`, JSON\.stringify\(\{ \.\.\.meta, title: clean \}\)\)/.test(route),
+  assert(/putDocMetaJson\(env, slug, JSON\.stringify\(\{ \.\.\.meta, title: clean \}\)\)/.test(route),
     'the rename must write the title and nothing else');
   assert(!/DOCS\.put|versions|prepareDocVersion/.test(route),
     'renaming must not touch the body or the version list');
