@@ -59,6 +59,13 @@ t('spaces are visible pills above the title, not a dropdown hidden in it', () =>
   assert(/role="tablist"/.test(teams) && /New team/.test(teams), 'every space and New team are in view');
 });
 
+t('a multi-selection can move to a team, only the author\'s own docs, saying what it skipped', () => {
+  // Julie, 2026-10-11: Move to team existed only per row.
+  const hub = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub.jsx'), 'utf8');
+  assert(/batch-move-team/.test(hub) && /movableToTeam = selectedDocs\.filter\(\(doc\) => doc\.mine\)/.test(hub), 'batch Move to team missing or not limited to own docs');
+  assert(/skipped=\{modal\.skipped \|\| 0\}/.test(hub), 'skipped docs are not reported');
+});
+
 t('AppSelect draws its open list with the menu popup, above dialogs', () => {
   const src = fs.readFileSync(path.join(ROOT, 'shell/src/ui/select.jsx'), 'utf8');
   assert(/ui-menu-popup/.test(src) && /ui-menu-item/.test(src), 'AppSelect must reuse the AppMenu popup and rows');
