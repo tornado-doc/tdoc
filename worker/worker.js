@@ -412,6 +412,14 @@ function isDocOwnerSession(env, session, meta) {
   if (!login) return false;
   const hostedLogin = hostedGithubLogin(meta);
   if (hostedLogin) return hostedLogin === login;
+  // The deploy operator (TDOC_OWNER) owns only docs that name NO hosted owner
+  // at all -- legacy/BYOK uploads. A doc that names an account or an owner
+  // key but no GitHub handle (every email-born account's doc) belongs to that
+  // account. Treating "no handle" as "no owner" put every email user's docs
+  // in the operator's My docs, readable and deletable by her (Julie,
+  // 2026-10-12; found by the Fable audit).
+  const hosted = meta && meta.hosted;
+  if (docAcct || (hosted && hosted.owner_key)) return false;
   return isOwnerSession(env, session);
 }
 
@@ -3631,7 +3639,7 @@ async function indexData(env, session, origin) {
     || (idx.w && teamIds.has(idx.w))
     || idx.f === 1
     // The deploy operator owns legacy docs that name no owner at all.
-    || (operator && !idx.a && !idx.o);
+    || (operator && !idx.a && !idx.o && !idx.k);
   let backfills = 0;
   const loaded = await Promise.all(keys.map(async (key) => {
     const slug = key.name.slice('meta:'.length);
