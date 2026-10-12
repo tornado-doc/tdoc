@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGithubUserSearch } from './github-user-search.js';
-import { insertMention, matchMentionable, mentionQueryAt, splitMentions } from './mentions.js';
+import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
 import { parseRichText } from './rich-text.js';
 
 // A textarea that offers people after `@`. Both composers use it, so mentioning
@@ -177,7 +177,8 @@ export function MentionField({
               {person.name && person.name.toLowerCase() !== person.login ? (
                 <span className="tdoc-mention-name">{person.name}</span>
               ) : null}
-              {person.remote ? <span className="tdoc-mention-source">GitHub</span> : null}
+              {person.remote ? <span className="tdoc-mention-source">GitHub</span>
+                : mentionReason(person) ? <span className="tdoc-mention-source">{mentionReason(person)}</span> : null}
             </button>
           ))}
         </div>
