@@ -6393,7 +6393,12 @@ function stampHostedOwnership(meta, actor) {
   const previous = (meta && meta.hosted && typeof meta.hosted === 'object') ? meta.hosted : {};
   const accountId = sessionOwnsAccount(actor, previous.account_id) ? previous.account_id : actor.account_id;
   const hosted = { ...previous, account_id: accountId };
+  // The name shown as the doc's author comes from the credential, never from
+  // the request: a client-sent meta.hosted.github_login used to survive a
+  // token that carried no handle, so docs could wear someone else's name
+  // (Julie, 2026-10-12).
   if (actor.github_login) hosted.github_login = actor.github_login;
+  else delete hosted.github_login;
   // The owner's actor key, whatever shape their identity is. Without this an
   // email-born account's doc had no owner anyone could route to, and every
   // comment notification fell through to the worker operator.
@@ -11844,7 +11849,10 @@ export default {
           }
           for (const item of (Array.isArray(incoming.versions) ? incoming.versions : [])) {
             const number = Number(item.n);
-            if (!versionByNumber.has(number) || number === verNum) versionByNumber.set(number, item);
+            // `token` is the server's record of who published; a client
+            // cannot write it.
+            const { token: _clientToken, ...clean } = item || {};
+            if (!versionByNumber.has(number) || number === verNum) versionByNumber.set(number, clean);
           }
           if (!versionByNumber.has(verNum)) {
             versionByNumber.set(verNum, { n: verNum, created: new Date().toISOString() });
@@ -11853,6 +11861,11 @@ export default {
           // records the hash of those bytes and the client that sent them.
           const storedEntry = { ...versionByNumber.get(verNum), sha: uploadSha };
           if (clientVersion) storedEntry.client = clientVersion;
+          // Which credential published this version (the first 12 hex of its
+          // hash, the same id the Access tab lists), so a doc that shows up
+          // under the wrong account can be traced to the token that sent it.
+          if (auth.actor && auth.actor.kind === 'hosted' && auth.actor.token_hash) storedEntry.token = auth.actor.token_hash.slice(0, 12);
+          else delete storedEntry.token;
           versionByNumber.set(verNum, storedEntry);
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
