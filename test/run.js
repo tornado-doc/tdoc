@@ -41,6 +41,7 @@ const OFFLINE = [
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
   'mention-directory.test.js',  // @ offers doc people, teammates, recent contacts first
+  'publish-attribution.test.js', // author name + per-version publisher come from the credential
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
   'profile.test.js',            // /@handle public profiles
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()
