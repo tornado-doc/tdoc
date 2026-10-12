@@ -6909,6 +6909,69 @@ function mentionableUsers({ ownerLogin, allowedUsers, participants, includeAllow
   return [...byLogin.values()];
 }
 
+// Who to offer after "@", most relevant first (Julie, 2026-10-12: teammates
+// were not offered at all, and nothing reflected who you actually work with).
+// Tags say why a person is listed; the client shows the first one.
+//   doc       — the owner and anyone in this doc's threads
+//   invited   — on this doc's invite list (insiders only see it)
+//   teammate  — in the team that owns this doc, or in one of yours
+//   recent    — you tagged or answered them, or they tagged or answered you
+const CONTACTS_MAX = 40;
+function contactsKey(actor) { return actor ? `contacts:${actor}` : null; }
+async function loadContacts(env, actor) {
+  const key = contactsKey(actor);
+  if (!key) return [];
+  try { const list = JSON.parse((await env.META.get(key)) || '[]'); return Array.isArray(list) ? list : []; } catch { return []; }
+}
+// One write per post that named or answered someone; nothing for a plain note.
+async function recordContacts(env, actor, people, at) {
+  const key = contactsKey(actor);
+  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor);
+  if (!key || !fresh.length) return;
+  const prev = await loadContacts(env, actor);
+  const byLogin = new Map(prev.map((p) => [p.login, p]));
+  for (const p of fresh) byLogin.set(p.login, { login: p.login, name: p.name || (byLogin.get(p.login) || {}).name || '', avatar_url: p.avatar_url || (byLogin.get(p.login) || {}).avatar_url || '', at });
+  const next = [...byLogin.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, CONTACTS_MAX);
+  try { await env.META.put(key, JSON.stringify(next)); } catch {}
+}
+function memberAvatar(key) {
+  const k = String(key || '');
+  return k && !k.startsWith('email:') && !k.includes('@') ? `https://github.com/${encodeURIComponent(k)}.png?size=52` : '';
+}
+async function mentionDirectory(env, s, meta, access, list) {
+  const me = actorKey(s);
+  const byLogin = new Map();
+  let order = 0;
+  const add = (entry, tag, at) => {
+    const login = normalizeActorKey(entry && entry.login);
+    if (!login || login === me) return;
+    const prev = byLogin.get(login) || { login, name: '', avatar_url: '', tags: [], at: '', order: order++ };
+    if (!prev.name && entry.name) prev.name = entry.name;
+    if (!prev.avatar_url && entry.avatar_url) prev.avatar_url = entry.avatar_url;
+    if (!prev.tags.includes(tag)) prev.tags.push(tag);
+    if (at && String(at) > String(prev.at || '')) prev.at = at;
+    byLogin.set(login, prev);
+  };
+  const insider = isAllowlisted(access, s, env, meta);
+  add({ login: ownerActorKey(meta, env) }, 'doc');
+  for (const p of commentParticipants(list)) add(p, 'doc');
+  if (insider) for (const u of access.allowed_users || []) add({ login: u }, 'invited');
+  const teamIds = new Set([meta && meta.workspace_id, ...((s && s.team_ids) || [])].filter(Boolean));
+  const teams = await Promise.all([...teamIds].slice(0, 5).map((id) => loadTeam(env, id).catch(() => null)));
+  for (const team of teams) {
+    if (!team || !teamMember(team, s.account_id)) continue;
+    for (const m of team.members || []) add({ login: m.key, name: m.name, avatar_url: memberAvatar(m.key) }, 'teammate');
+  }
+  const [contacts, inbox] = await Promise.all([loadContacts(env, me), loadInbox(env, me).then((r) => r.inbox.items || []).catch(() => [])]);
+  for (const c of contacts) add(c, 'recent', c.at);
+  for (const item of inbox) if (item && item.actor) add(item.actor, 'recent', item.at);
+  const weight = (p) => (p.tags.includes('doc') ? 0 : p.tags.includes('teammate') ? 1 : p.tags.includes('recent') ? 2 : 3);
+  return [...byLogin.values()]
+    .sort((a, b) => (weight(a) - weight(b)) || String(b.at || '').localeCompare(String(a.at || '')) || (a.order - b.order))
+    .slice(0, 60)
+    .map(({ order: _o, ...p }) => p);
+}
+
 // Being named outranks sitting in the thread. Returns the login that should
 // still get the positional notification (owner of the doc, author of the
 // parent), or null when the mention already reached them — one row, not two.
@@ -10703,12 +10766,7 @@ export default {
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
       const list = await readComments(env, slug);
       const me = actorKey(s);
-      const users = mentionableUsers({
-        ownerLogin: ownerActorKey(meta, env),
-        allowedUsers: access.allowed_users,
-        participants: commentParticipants(list),
-        includeAllowed: isAllowlisted(access, s, env, meta),
-      }).filter((u) => u.login !== me);
+      const users = await mentionDirectory(env, s, meta, access, list);
       return json({
         users,
         identity: { login: me, name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
@@ -10797,6 +10855,14 @@ export default {
         const title = (meta && meta.title) || slug;
         const commentId = parent_id ? op.reply_id : op.id;
         const threadId = parent_id ? (res.body && res.body.thread_id) : op.id;
+        // Whom this person tagged or answered: the next "@" offers them early.
+        try {
+          const parentA = parent_id ? recordAuthor(priorList, parent_id) : null;
+          await recordContacts(env, actorKey(s), [
+            ...mentions.map((login) => ({ login })),
+            ...(parentA && parentA.login ? [parentA] : []),
+          ], created);
+        } catch {}
         if (mentions.length) {
           await deliverInbox(env, null, {
             kind: 'mention', slug, version: V, comment_id: commentId,
