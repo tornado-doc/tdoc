@@ -1,4 +1,9 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const landingDir = path.join(__dirname, '../landing/tornado-doc');
+const latestLanding = JSON.parse(fs.readFileSync(path.join(landingDir, 'meta.json'))).versions.at(-1).n;
+const landingBrand = fs.readFileSync(path.join(landingDir, `v${latestLanding}/index.html`), 'utf8').match(/<div class="brand">[\s\S]*?<\/div>/)[0];
 const { chromium, webkit } = require('playwright');
 const { resolveTarget } = require('./helpers/fixture-server');
 (async () => {
@@ -15,6 +20,22 @@ const { resolveTarget } = require('./helpers/fixture-server');
       await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({source:'tdoc-shell',type:'tdoc:mode',mode:'read'},'*'));
       await frame.locator('html[data-tdoc-interaction-mode="read"]').waitFor();
       await frame.getByRole('button',{name:'View Landscape illustration fullscreen'}).waitFor();
+      const visualControls = await frame.locator('.tdoc-visual-open').count();
+      // Exercise the actual landing mark through the shared visual viewer.
+      await frame.locator('main').evaluate((main, markup) => {
+        main.insertAdjacentHTML('afterbegin', markup);
+        const mark = main.querySelector('.brand-mark');
+        mark.style.width = '76px'; mark.style.height = '76px';
+      }, landingBrand);
+      await frame.locator('.brand-mark').click();
+      assert.equal(await frame.locator('.tdoc-visual-open').count(), visualControls, 'logo gets no expansion control');
+      assert.equal(await page.locator('[data-visual-open]').count(), 0, 'landing logo does not expand on click');
+      assert.equal(await frame.locator('.brand-name').innerText(), 'tdoc', 'visible wordmark still identifies the brand');
+      if (process.env.TDOC_TEST_SCREENSHOTS) {
+        fs.mkdirSync(process.env.TDOC_TEST_SCREENSHOTS, {recursive:true});
+        await page.screenshot({path:path.join(process.env.TDOC_TEST_SCREENSHOTS, `logo-${process.env.TDOC_TEST_BROWSER || 'chromium'}-${width}.png`)});
+      }
+
       const iconOffsets = await frame.locator('.tdoc-visual-open').evaluateAll(buttons => buttons.map(button => {
         const b = button.getBoundingClientRect(), icon = button.querySelector('svg').getBoundingClientRect();
         return { x: icon.x + icon.width / 2 - b.x - b.width / 2, y: icon.y + icon.height / 2 - b.y - b.height / 2 };

@@ -101,6 +101,8 @@ t('names tdoc and tornado-doc', () => {
   // Hero mark is Julie's square stroke, not the old filled tornado path.
   assert(/class="brand-mark"[^>]*viewBox="0 0 436 436"/.test(html), 'brand-mark is not the square stroke');
   assert(!/viewBox="201\.2 205\.2 597\.6 597\.6"/.test(html), 'old filled tornado mark still in landing');
+  assert(/<svg class="brand-mark"[^>]*aria-hidden="true"/.test(html),
+    'the decorative logo beside the wordmark must not offer visual expansion');
 });
 
 t('links to the GitHub repo and install path', () => {
