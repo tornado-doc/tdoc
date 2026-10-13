@@ -197,11 +197,23 @@ export function MobileCommentDrawer({
 }) {
   const drawerRef = useRef(null);
 
+  // Tapping a highlight opens the drawer at THAT comment. The drawer mounts
+  // and animates in after this effect first runs, so look for the card for a
+  // few frames instead of once (it was often not there yet, and the list
+  // opened at the top).
   useEffect(() => {
-    if (!open || !openCommentId || !drawerRef.current) return;
-    const card = [...drawerRef.current.querySelectorAll('[data-comment-id]')]
-      .find((element) => element.dataset.commentId === openCommentId);
-    card?.scrollIntoView({ block: 'center' });
+    if (!open || !openCommentId) return undefined;
+    let frames = 0;
+    let raf = 0;
+    const find = () => {
+      const root = drawerRef.current;
+      const card = root && [...root.querySelectorAll('[data-comment-id]')]
+        .find((element) => element.dataset.commentId === openCommentId);
+      if (card) { card.scrollIntoView({ block: 'center' }); return; }
+      if (frames++ < 30) raf = requestAnimationFrame(find);
+    };
+    raf = requestAnimationFrame(find);
+    return () => cancelAnimationFrame(raf);
   }, [open, openCommentId]);
 
   if (!comments.length) return null;

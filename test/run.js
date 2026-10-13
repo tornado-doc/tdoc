@@ -146,6 +146,7 @@ const EXTENDED_BROWSER = [
   'anchor-scenarios.test.js', // #387 everything selectable can carry a comment
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
   'feedback-browser.test.js', // playwright: #564 bookmarklet on a localhost app → connect popup → pin → doc
+  'mobile-comment-nav.test.js', // playwright phone: highlight ↔ comment, iOS bare tap
 ];
 
 const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];

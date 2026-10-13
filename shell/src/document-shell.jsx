@@ -464,9 +464,15 @@ export function DocumentShell({ boot, config }) {
   useEffect(() => {
     // Re-anchoring is the exception: the card stays open precisely so the author
     // can click the new spot, and treating that click as a dismissal ate it.
-    const open = Boolean((openCommentId || openClusterKey || composer) && !reanchorId);
+    //
+    // On a phone the open card lives in the drawer: once the drawer is shut,
+    // nothing is open on screen, so the next tap on a highlight must open its
+    // comment rather than be spent "closing" a card nobody can see. That was
+    // every other tap failing (Julie, 2026-10-13).
+    const cardOpen = narrow ? (drawerOpen && openCommentId) : (openCommentId || openClusterKey);
+    const open = Boolean((cardOpen || composer) && !reanchorId);
     bridge.send({ type: 'tdoc:uiOpen', open });
-  }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId]);
+  }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId, narrow, drawerOpen]);
 
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
