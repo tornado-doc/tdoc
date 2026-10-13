@@ -248,7 +248,7 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes('const HANDOFF_POLL_MS = 3000'), '3s while waiting');
   assert(shell.includes("postOnboardingEvent('fix_copy_clicked', config.slug)"), 'copy is an event');
   assert(/setHandoff\(\(current\) => \(current\.state === 'waiting' \? \{ \.\.\.current, state: 'reading' \} : current\)\)/.test(shell), 'the read stamp flips waiting → reading');
-  assert(/latest > Number\(config\.version\)[\s\S]*location\.href = `\/d\/\$\{encodeURIComponent\(config\.slug\)\}\/v\/\$\{latest\}\?revised=1`/.test(shell), 'a new version moves the page, and says why it arrived');
+  assert(/latest > Number\(config\.version\)[\s\S]*location\.href = [\s\S]{0,120}`\/d\/\$\{encodeURIComponent\(config\.slug\)\}\/v\/\$\{latest\}\?revised=1`[\s\S]{0,80}`\/d\/\$\{encodeURIComponent\(config\.slug\)\}\?revised=1`/.test(shell), 'a new version moves the page (to the bare address when on it), and says why it arrived');
   assert(shell.includes("postOnboardingEvent('timeout_shown', config.slug)"), 'the timeout is logged');
   assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion)'), "only on the owner's own doc, and only its latest version");
   assert(card.includes("handoff = null,") && card.includes("className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}"), 'the card renders it, open or closed');

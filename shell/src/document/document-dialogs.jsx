@@ -3,7 +3,21 @@ import { AppDialog } from '../ui/dialog.jsx';
 import { getPublishSignin, publishDocument, requestQuotaBump } from './api.js';
 import { copyText } from './model.js';
 
-export function ShareDialog({ open, url, team, onOpenChange, onCopied }) {
+// The second choice under every Share link: this exact version, for the
+// reader who must see what you saw. Quiet text, not a second button.
+export function VersionLinkChoice({ versionUrl, version, onCopied }) {
+  if (!versionUrl) return null;
+  return (
+    <p className="tdoc-share-version">
+      This link always opens the newest version.{' '}
+      <button type="button" className="tdoc-quiet-link" onClick={() => copyText(versionUrl).then(() => onCopied && onCopied())}>
+        Copy a link to v{version} instead
+      </button>
+    </p>
+  );
+}
+
+export function ShareDialog({ open, url, versionUrl, version, team, onOpenChange, onCopied }) {
   const copy = async () => {
     await copyText(url);
     onCopied();
@@ -27,6 +41,7 @@ export function ShareDialog({ open, url, team, onOpenChange, onCopied }) {
       )}
     >
       <div className="code url" id="tdoc-share-url">{url}</div>
+      <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
     </AppDialog>
   );
 }

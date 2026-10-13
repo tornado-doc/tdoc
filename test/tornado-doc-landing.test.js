@@ -305,7 +305,7 @@ t('homepage fails safe to the neutral page', () => {
 t('doc view and homepage share one render path', () => {
   // Regression guard: the /d/ route used to inline the whole render. If it
   // grows a second copy, the homepage and doc pages drift on access/CSP.
-  assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?\)/.test(worker), 'missing serveDocVersion');
+  assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?(, \{[^)]*\})?\)/.test(worker), 'missing serveDocVersion');
   // One shared render call site: EVERYTHING (homepage included) renders as the
   // cross-origin shell — the overlay path is deleted. Access/CSP/version wiring
   // cannot drift because there is exactly one render.

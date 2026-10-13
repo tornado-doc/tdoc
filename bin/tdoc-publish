@@ -1762,7 +1762,10 @@ elif [ "$PLATFORM" = "hosted" ]; then
   fi
 fi
 echo
-echo "Published: $PUBLIC_BASE/d/$SLUG/v/$VERSION"
+# The doc's own address always opens its newest version, so it is the link to
+# hand people; the versioned one is only for "exactly this version".
+echo "Published: $PUBLIC_BASE/d/$SLUG"
+echo "(Share the link above: it always opens the newest version. This exact version: $PUBLIC_BASE/d/$SLUG/v/$VERSION)"
 if [ -n "$CUSTOM_DOMAIN" ] && [ "$PUBLIC_HOST" = "$CUSTOM_DOMAIN" ]; then
-  echo "(If $CUSTOM_DOMAIN isn't bound yet, the same doc is at $UPLOAD_BASE/d/$SLUG/v/$VERSION)"
+  echo "(If $CUSTOM_DOMAIN isn't bound yet, the same doc is at $UPLOAD_BASE/d/$SLUG)"
 fi
