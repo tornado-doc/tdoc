@@ -433,7 +433,37 @@
     }
     setTimeout(reportSelection, 0);
   }, true);
-  document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
+  // A tap on highlighted text. iOS Safari sends no click (and no mouse
+  // events) for a tap on plain, non-interactive text, and a highlight is a
+  // painted range, not an element -- so on an iPhone the click handler above
+  // never ran and tapping a highlight did nothing (Julie, 2026-10-13). Read
+  // the tap itself: one finger, short, barely moved.
+  var _tap = null;
+  document.addEventListener('touchstart', function (e) {
+    var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+    _tap = t ? { x: t.clientX, y: t.clientY, at: Date.now() } : null;
+  }, { capture: true, passive: true });
+  document.addEventListener('touchend', function (e) {
+    var start = _tap;
+    _tap = null;
+    if (start && !shellUiOpen && interactionMode !== 'edit' && !visualViewerOpen()) {
+      var t = e.changedTouches && e.changedTouches[0];
+      var sel = window.getSelection();
+      var still = t && Math.abs(t.clientX - start.x) < 10 && Math.abs(t.clientY - start.y) < 10 && Date.now() - start.at < 600;
+      if (still && (!sel || sel.isCollapsed)) {
+        var hit = anchorIdAtPoint(t.clientX, t.clientY);
+        if (hit) {
+          // The synthetic mouse events and click that may follow would run the
+          // handlers above a second time.
+          if (e.cancelable) e.preventDefault();
+          setActiveAnchor(hit, false);
+          post({ type: 'tdoc:anchorClick', id: hit });
+          return;
+        }
+      }
+    }
+    setTimeout(reportSelection, 0);
+  }, true);
   window.addEventListener('blur', clearSelectingCursor);
   document.addEventListener('copy', function (e) {
     var sel = window.getSelection();
@@ -934,7 +964,36 @@
     if (!scroll) return;
     var rect = target.range ? target.range.getBoundingClientRect() : target.element.getBoundingClientRect();
     var top = rect.top + (window.scrollY || 0) - Math.max(80, window.innerHeight / 3);
+    var before = window.scrollY || 0;
     try { window.scrollTo(0, Math.max(0, top)); } catch (e) {}
+    // Where the frame does not scroll itself (a phone browser that sizes the
+    // frame to its content and scrolls the page instead), scrollTo is a no-op;
+    // scrollIntoView reaches whichever box actually scrolls.
+    var after = window.scrollY || 0;
+    var r2 = target.range ? target.range.getBoundingClientRect() : target.element.getBoundingClientRect();
+    if (Math.abs(after - before) < 1 && (r2.top < 0 || r2.bottom > window.innerHeight)) {
+      var node = target.element || (target.range.startContainer.nodeType === 1 ? target.range.startContainer : target.range.startContainer.parentElement);
+      try { node.scrollIntoView({ block: 'center' }); } catch (e) {}
+    }
+    flashActiveAnchor(id);
+  }
+  // Arriving at a comment's text from its card: blink the highlight twice so
+  // the eye lands on it (Julie, 2026-10-13: on a phone the card just closed
+  // and nothing said where to look).
+  var _flashTimers = [];
+  function flashActiveAnchor(id) {
+    for (var i = 0; i < _flashTimers.length; i++) clearTimeout(_flashTimers[i]);
+    _flashTimers = [];
+    if (!HL) return;
+    var target = _anchorTargets[id];
+    if (!target || !target.range) return;
+    [160, 320, 480, 640].forEach(function (ms, n) {
+      _flashTimers.push(setTimeout(function () {
+        if (_activeAnchorId !== id) return;
+        if (n % 2 === 0) CSS.highlights.delete('tdoc-anchor-active');
+        else CSS.highlights.set('tdoc-anchor-active', new Highlight(target.range));
+      }, ms));
+    });
   }
   function reportPins(comments) {
     _lastComments = comments || [];

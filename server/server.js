@@ -935,7 +935,7 @@ function wrapBareTables(html) {
   return out;
 }
 
-const READER_PATCH_CSS = ':where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {

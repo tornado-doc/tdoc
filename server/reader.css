@@ -14,6 +14,9 @@
    the `@media print` block below only applies to printing. Other defaults
    remain inside :where(). */
 :where(:root) {
+    /* iOS Safari: no text autosizing, so table columns keep one size. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     --td-accent: #1652f0;
     --td-accent-hover: #1245d0;
     --td-accent-ring: rgba(22,82,240,0.35);

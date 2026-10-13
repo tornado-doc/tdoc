@@ -1652,7 +1652,10 @@ function wrapBareTables(html) {
   return out;
 }
 
-const READER_PATCH_CSS = ':where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+// text-size-adjust: iOS Safari otherwise "autosizes" long text blocks, so
+// on a phone some table columns rendered huge next to short ones (Julie,
+// 2026-10-13; diagnosed by research-claw). Applied to every doc at serve time.
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
 }
