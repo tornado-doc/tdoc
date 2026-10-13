@@ -84,7 +84,7 @@ export function SpaceBar({ teams, space, onSpace, onNewTeam }) {
   );
 }
 
-export function TeamPane({ team, docs, viewer, menuFor }) {
+export function TeamPane({ team, docs, viewer, menuFor, inFolder = false }) {
   return (
     <section className="pane" id="pane-team">
       <div className="doc-list">
@@ -102,7 +102,7 @@ export function TeamPane({ team, docs, viewer, menuFor }) {
           />
         ))}
       </div>
-      {!docs.length ? (
+      {!docs.length && !inFolder ? (
         <p className="empty">No docs in {team.name} yet. Create one, or move one here from My docs.</p>
       ) : null}
     </section>

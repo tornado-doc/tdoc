@@ -50,6 +50,8 @@ Options:
   --team <name|id>                       (hosted: put the doc in this team's workspace)
   --create-team                          (with --team: make the team if you have none by that name)
   --personal                             (keep a new doc in My docs even if a default team is set)
+  --folder <name|path|id>                (hosted: file the doc in this folder of wherever it lands;
+                                          made if missing, a no-op once it is there)
   A new doc goes to the default team when one is set, nearest first:
   TDOC_TEAM, a .tdoc.json {"team": "<name|id>"} in this directory or a parent,
   or `tdoc-move --set-default <team>`. Existing docs stay where they are.
@@ -110,6 +112,7 @@ ALLOW_USERS=()
 TEAM_FLAG=""
 CREATE_TEAM=()
 PERSONAL_FLAG=0
+FOLDER_FLAG=""
 UP_NEW_DOC=0
 UP_TEAM=""
 while [ $# -gt 0 ]; do
@@ -132,6 +135,10 @@ while [ $# -gt 0 ]; do
     --team=*) TEAM_FLAG="${1#--team=}"; [ -n "$TEAM_FLAG" ] || usage; shift ;;
     --create-team) CREATE_TEAM=(--create); shift ;;
     --personal) PERSONAL_FLAG=1; shift ;;
+    # A folder in the doc's space (the team's with --team, else My docs).
+    # Safe on every publish, like --team: a daily report lands in "Daily".
+    --folder) FOLDER_FLAG="${2:-}"; [ -n "$FOLDER_FLAG" ] || usage; shift 2 ;;
+    --folder=*) FOLDER_FLAG="${1#--folder=}"; [ -n "$FOLDER_FLAG" ] || usage; shift ;;
     # Sign in and mint the upload token, then stop — no doc required. Lets the
     # skill start the device flow BEFORE it spends 30-60s generating HTML, so
     # the human approves in the browser while the doc is being written instead
@@ -1753,7 +1760,24 @@ if [ -n "$TEAM_FLAG" ]; then
     echo "[tdoc] Published, but it is still in My docs (see above)." >&2
     exit 1
   }
+  if [ -n "$FOLDER_FLAG" ]; then
+    "$(dirname "$TDOC_MOVE")/tdoc-folder" add --team "$TEAM_FLAG" --folder "$FOLDER_FLAG" --create "$SLUG" || {
+      echo "[tdoc] Published to the team, but not filed in folder $FOLDER_FLAG (see above)." >&2
+      exit 1
+    }
+  fi
 elif [ "$PLATFORM" = "hosted" ]; then
+  if [ -n "$FOLDER_FLAG" ] && { [ -z "$UP_TEAM" ] || [ "$UP_TEAM" = "null" ]; }; then
+    "$(dirname "$TDOC_MOVE")/tdoc-folder" add --folder "$FOLDER_FLAG" --create "$SLUG" || {
+      echo "[tdoc] Published, but not filed in folder $FOLDER_FLAG (see above)." >&2
+      exit 1
+    }
+  elif [ -n "$FOLDER_FLAG" ]; then
+    "$(dirname "$TDOC_MOVE")/tdoc-folder" add --team "$UP_TEAM" --folder "$FOLDER_FLAG" --create "$SLUG" || {
+      echo "[tdoc] Published, but not filed in folder $FOLDER_FLAG (see above)." >&2
+      exit 1
+    }
+  fi
   if [ -n "$UP_TEAM" ] && [ "$UP_TEAM" != "null" ]; then
     _tname="$("$TDOC_MOVE" --teams 2>/dev/null | awk -F'\t' -v id="$UP_TEAM" '$1==id {print $2}')"
     echo "[tdoc] location: team ${_tname:-$UP_TEAM}"

@@ -1205,6 +1205,30 @@ private doc only to that invitee (cookie or their hosted Bearer).
 Underlying APIs (CLI wraps these; prefer the CLI): `GET /api/me`,
 `GET /api/folders/shared?id=<share_id>`.
 
+### Folders: file docs in My docs or a team (`tdoc-folder`)
+
+Agents organize with the same folders people see on `/me` (hosted Bearer,
+same rules as the web). Add `--team <name|id>` to work in a team's folders
+instead of My docs.
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-folder" list [--team BeFreed]                 # id, path (, doc count)
+bash "$SKILL_DIR/bin/tdoc-folder" create "Daily reports" [--parent Reports] [--team BeFreed]
+bash "$SKILL_DIR/bin/tdoc-folder" add <slug>... --folder "Daily reports" --create [--team BeFreed]
+bash "$SKILL_DIR/bin/tdoc-folder" remove <slug>... [--team BeFreed]     # back to the top level
+bash "$SKILL_DIR/bin/tdoc-folder" rename <folder> <new name> | delete <folder>  [--team ...]
+```
+
+- Recurring docs (daily reports): publish with `--team <t> --folder <f>`
+  (`tdoc-publish` or `tdoc-move`). Both are idempotent — the folder is made on
+  first use and every later run is a no-op — so pass them on every publish.
+- `<folder>` is an id (`f_…`), a path (`Reports/Daily`), or a name unique in
+  that space. `create` on an existing name returns the existing folder.
+- My docs folders hold your own docs. Team folders: any member makes one; its
+  maker or a team admin renames/deletes it; a team doc is filed by its author
+  or an admin, and must already be in the team (`tdoc-move --team` first).
+- Deleting a folder never deletes docs; they move up one level.
+
 
 ### Comment anchor stability (important for `/tdoc edit`)
 

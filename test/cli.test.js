@@ -30,7 +30,7 @@ console.log('cli (Batch D resilience)');
 
 // ---- static checks across all CLIs ----
 t('every curl call carries --max-time (no unbounded hang)', () => {
-  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply', 'tdoc-me', 'tdoc-move']) {
+  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply', 'tdoc-me', 'tdoc-move', 'tdoc-folder']) {
     const src = readBin(f);
     // Actual invocations only: `curl` in COMMAND position — at the start of a
     // line or right after |, ;, &, ( or $( — and followed by a flag, quote or
@@ -963,6 +963,67 @@ t('tdoc-move resolves a team by name and moves; unknown team fails without movin
     const made = spawnSync(bin, ['--team', 'Agents', '--create', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
     const after = fs.readFileSync(log, 'utf8');
     assert(made.status === 0 && /POST \/api\/teams Bearer tok-1 \{"name":"Agents"\}/.test(after) && /"team":"t_new"/.test(after), `--create: ${made.status} ${made.stderr}\n${after}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-folder resolves team + folder names, creates idempotently, files docs; tdoc-move --folder files after moving', () => {
+  const bin = path.join(BIN, 'tdoc-folder');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-folder-home-'));
+  const log = path.join(home, 'calls.log');
+  // A tiny stateful folder store: one personal space, one team space.
+  const stub = startStub(
+    `((st)=>(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
+    `require('fs').appendFileSync(${JSON.stringify(log)},q.method+' '+q.url+' '+(q.headers.authorization||'')+' '+b+'\\n');` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `const u=new URL(q.url,'http://x');const body=b?JSON.parse(b):{};` +
+    `if(u.pathname==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_0123456789abcdef',name:'BeFreed',role:'member'}]}));` +
+    `if(u.pathname==='/api/team/move')return s.end(JSON.stringify({ok:true,moved:1}));` +
+    `const sp=(u.searchParams.get('team')||body.team||'me');st[sp]=st[sp]||[];` +
+    `if(u.pathname==='/api/folders'&&q.method==='GET')return s.end(JSON.stringify({ok:true,folders:st[sp],docs:sp==='me'?{}:undefined}));` +
+    `if(u.pathname==='/api/folders'&&q.method==='POST'){const hit=st[sp].find(f=>f.name.toLowerCase()===body.name.toLowerCase()&&(f.parent||'')===(body.parent||''));` +
+    `if(hit)return s.end(JSON.stringify({ok:true,existed:true,folder:hit}));const f={id:'f_'+(st[sp].length+1),name:body.name,parent:body.parent||''};st[sp].push(f);return s.end(JSON.stringify({ok:true,folder:f}));}` +
+    `if(u.pathname==='/api/folders/move'){if(body.slugs.includes('not-mine'))return s.end(JSON.stringify({error:'not_owner',slug:'not-mine'}));return s.end(JSON.stringify({ok:true,moved:body.slugs.length}));}` +
+    `s.end('{}');});})({})`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${stub.port}`, upload_token: 'tok-1' }));
+    const env = { ...process.env, HOME: home };
+    const run = (args, b = bin) => spawnSync(b, args, { env, encoding: 'utf8', timeout: 20000 });
+    const calls = () => fs.readFileSync(log, 'utf8');
+    const missing = run(['add', 'daily-1', '--folder', 'Daily reports']);
+    assert(missing.status !== 0 && /no folder "Daily reports" in My docs; pass --create/.test(missing.stderr), `missing folder: ${missing.status} ${missing.stderr}`);
+    assert(!/folders\/move/.test(calls()), 'filed into a folder that does not exist');
+    const made = run(['add', 'daily-1', '--folder', 'Daily reports', '--create']);
+    assert(made.status === 0, `add --create: ${made.stderr}`);
+    assert(/POST \/api\/folders Bearer tok-1 \{"name":"Daily reports","parent":null,"team":null,"existing_ok":true\}/.test(calls()), `create call:\n${calls()}`);
+    assert(/POST \/api\/folders\/move Bearer tok-1 \{"slugs":\["daily-1"\],"folder":"f_1","team":null\}/.test(calls()), `move call:\n${calls()}`);
+    fs.writeFileSync(log, '');
+    const again = run(['add', 'daily-2', 'daily-3', '--folder', 'daily REPORTS', '--create']);
+    assert(again.status === 0 && !/POST \/api\/folders /.test(calls()) && /"slugs":\["daily-2","daily-3"\],"folder":"f_1"/.test(calls()), `existing folder by name:\n${calls()}`);
+    const created = run(['create', 'Daily reports']);
+    assert(created.status === 0 && /already in My docs/.test(created.stderr), `idempotent create: ${created.stderr}`);
+    const nested = run(['create', '2026', '--parent', 'Daily reports']);
+    assert(nested.status === 0 && /"name":"2026","parent":"f_1"/.test(calls()), `nested create:\n${calls()}`);
+    const byPath = run(['add', 'daily-4', '--folder', 'Daily reports/2026']);
+    assert(byPath.status === 0 && /"slugs":\["daily-4"\],"folder":"f_2"/.test(calls()), `path resolve:\n${calls()}`);
+    const list = run(['list']);
+    assert(list.status === 0 && /^f_1\tDaily reports\t0 docs$/m.test(list.stdout) && /^f_2\tDaily reports\/2026\t/m.test(list.stdout), `list: ${list.stdout}`);
+    fs.writeFileSync(log, '');
+    const team = run(['add', 'team-daily', '--team', 'befreed', '--folder', '日报', '--create']);
+    assert(team.status === 0, `team add: ${team.stderr}`);
+    assert(/GET \/api\/folders\?team=t_0123456789abcdef /.test(calls()) && /"name":"日报","parent":null,"team":"t_0123456789abcdef","existing_ok":true/.test(calls())
+      && /"slugs":\["team-daily"\],"folder":"f_1","team":"t_0123456789abcdef"/.test(calls()), `team calls:\n${calls()}`);
+    const refused = run(['add', 'not-mine', '--folder', 'Daily reports']);
+    assert(refused.status !== 0 && /cannot file not-mine/.test(refused.stderr), `refusal: ${refused.status} ${refused.stderr}`);
+    const unknownTeam = run(['list', '--team', 'nope']);
+    assert(unknownTeam.status !== 0 && /not in a team called "nope"/.test(unknownTeam.stderr), 'unknown team');
+    fs.writeFileSync(log, '');
+    const moved = run(['--team', 'BeFreed', '--folder', '日报', 'team-daily-2'], path.join(BIN, 'tdoc-move'));
+    assert(moved.status === 0, `tdoc-move --folder: ${moved.stderr}`);
+    assert(/POST \/api\/team\/move [^\n]*"team":"t_0123456789abcdef"/.test(calls()) && /"slugs":\["team-daily-2"\],"folder":"f_1","team":"t_0123456789abcdef"/.test(calls()), `move + file:\n${calls()}`);
   } finally {
     stub.stop();
     fs.rmSync(home, { recursive: true, force: true });

@@ -12,7 +12,15 @@ import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
 import { QuotaBumpDialog } from './document/document-dialogs.jsx';
-import { deleteDocument, moveDocsToTeam, removeTeamMember } from './document/api.js';
+import {
+  createFolder,
+  deleteDocument,
+  deleteFolder as deleteFolderRequest,
+  moveDocsToFolder,
+  moveDocsToTeam,
+  removeTeamMember,
+  renameFolder,
+} from './document/api.js';
 import {
   LeaveTeamDialog,
   MembersDialog,
@@ -493,12 +501,61 @@ export function DocsHub({ boot }) {
     return (boot.teams || []).some((team) => team.id === initial) ? initial : '';
   });
   const team = teams.find((item) => item.id === space) || null;
-  const shownTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id) : [];
+  // A team's folders: shared by its members, filed into by the doc's author
+  // or an admin (agents do the same through tdoc-folder).
+  const [teamFolders, setTeamFolders] = useState(() => boot.team_folders || {});
+  const [teamFolder, setTeamFolder] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    const initial = params.get('folder') || '';
+    return ((boot.team_folders || {})[params.get('team') || ''] || []).some((item) => item.id === initial) ? initial : '';
+  });
+  const spaceFolders = team ? teamFolders[team.id] || [] : [];
+  const teamFolderById = new Map(spaceFolders.map((item) => [item.id, item]));
+  const teamPath = [];
+  for (let cur = teamFolderById.get(teamFolder); cur && teamPath.length < 8; cur = teamFolderById.get(cur.parent)) teamPath.unshift(cur);
+  const allTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id) : [];
+  const shownTeamDocs = allTeamDocs.filter((doc) => (doc.folder || '') === teamFolder);
+  const shownTeamFolders = spaceFolders
+    .filter((item) => (item.parent || '') === teamFolder)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  const teamFolderCounts = {};
+  for (const doc of allTeamDocs) teamFolderCounts[doc.folder || ''] = (teamFolderCounts[doc.folder || ''] || 0) + 1;
+  const pickSpace = (id) => { setTeamFolder(''); setSpace(id); };
 
   useEffect(() => {
-    if (space) history.replaceState(null, '', `?team=${encodeURIComponent(space)}`);
-    else if (new URLSearchParams(location.search).has('team')) history.replaceState(null, '', location.pathname);
-  }, [space]);
+    if (space) {
+      const folderPart = teamFolder ? `&folder=${encodeURIComponent(teamFolder)}` : '';
+      history.replaceState(null, '', `?team=${encodeURIComponent(space)}${folderPart}`);
+    } else if (new URLSearchParams(location.search).has('team')) history.replaceState(null, '', location.pathname);
+  }, [space, teamFolder]);
+
+  const setSpaceFolders = (update) => setTeamFolders((all) => ({ ...all, [team.id]: update(all[team.id] || []) }));
+  const teamRun = (operation, success) => operation
+    .then((result) => { if (success) hub.notify(success); return result || true; })
+    .catch((error) => { teamFailed(error); return false; });
+  const saveTeamFolder = ({ id, name }) => {
+    const trimmed = String(name || '').trim();
+    if (!trimmed || !team) return Promise.resolve(false);
+    if (id) {
+      return teamRun(renameFolder(id, trimmed, team.id).then(({ folder }) => {
+        setSpaceFolders((list) => list.map((item) => (item.id === folder.id ? { ...item, ...folder } : item)));
+      }));
+    }
+    return teamRun(createFolder(trimmed, teamFolder, team.id).then(({ folder }) => {
+      setSpaceFolders((list) => [...list, { ...folder, parent: folder.parent || '' }]);
+    }));
+  };
+  const deleteTeamFolder = (item) => teamRun(deleteFolderRequest(item.id, team.id).then(() => {
+    const up = item.parent || '';
+    setSpaceFolders((list) => list
+      .filter((candidate) => candidate.id !== item.id)
+      .map((candidate) => (candidate.parent === item.id ? { ...candidate, parent: up } : candidate)));
+    setTeamDocs((list) => list.map((doc) => (doc.team === team.id && doc.folder === item.id ? { ...doc, folder: up } : doc)));
+    if (teamFolder === item.id) setTeamFolder(up);
+  }));
+  const moveTeamDocs = (slugs, destination) => teamRun(moveDocsToFolder(slugs, destination, team.id).then(() => {
+    setTeamDocs((list) => list.map((doc) => (slugs.includes(doc.slug) ? { ...doc, folder: destination } : doc)));
+  }), `Moved ${slugs.length === 1 ? '1 doc' : `${slugs.length} docs`}`);
 
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
@@ -578,6 +635,16 @@ export function DocsHub({ boot }) {
     },
   ];
 
+  const teamFolderMenu = (item) => (item.can_manage ? [
+    { label: 'Rename', onSelect: () => setModal({ type: 'rename-team-folder', folder: item }) },
+    {
+      label: 'Delete folder',
+      tone: 'danger',
+      className: 'folder-delete',
+      onSelect: () => setModal({ type: 'delete-team-folder', folder: item }),
+    },
+  ] : []);
+
   const teamFailed = (error) => {
     if (error.status === 401) location.href = '/?notice=signin';
     else hub.notify(error.message || 'Request failed', true);
@@ -585,6 +652,11 @@ export function DocsHub({ boot }) {
 
   const teamDocMenu = (doc) => [
     { label: 'Open', onSelect: () => { location.href = `/d/${encodeURIComponent(doc.slug)}`; } },
+    doc.can_file ? {
+      label: 'Move to folder',
+      className: 'row-move',
+      onSelect: () => setModal({ type: 'team-move', slugs: [doc.slug] }),
+    } : null,
     doc.can_manage ? {
       label: doc.mine ? 'Move to My docs' : "Move to author's My docs",
       className: 'row-move-personal',
@@ -621,7 +693,7 @@ export function DocsHub({ boot }) {
         <SpaceBar
           teams={teams}
           space={space}
-          onSpace={setSpace}
+          onSpace={pickSpace}
           onNewTeam={() => setModal({ type: 'new-team' })}
         />
         <div className="page-hd">
@@ -643,7 +715,34 @@ export function DocsHub({ boot }) {
         {team ? (
           <>
             <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
-            <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} />
+            <div className="toolbar">
+              <button type="button" className="new-folder-btn" onClick={() => setModal({ type: 'new-team-folder' })}>
+                <FolderPlus size={15} /> New folder
+              </button>
+            </div>
+            {teamPath.length ? (
+              <nav className="crumbs" aria-label="Folder path">
+                <button className="crumb-root" type="button" onClick={() => setTeamFolder('')}>{team.name}</button>
+                {teamPath.map((item) => (
+                  <React.Fragment key={item.id}>
+                    <ChevronRight className="sep" size={14} />
+                    <button className="crumb-root cur" type="button" onClick={() => setTeamFolder(item.id)}>{item.name}</button>
+                  </React.Fragment>
+                ))}
+              </nav>
+            ) : null}
+            <div id="folder-rows">
+              {shownTeamFolders.map((item) => (
+                <FolderRow
+                  key={item.id}
+                  folder={item}
+                  count={teamFolderCounts[item.id] || 0}
+                  onOpen={() => setTeamFolder(item.id)}
+                  menuItems={teamFolderMenu(item)}
+                />
+              ))}
+            </div>
+            <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} inFolder={!!teamFolder || shownTeamFolders.length > 0} />
           </>
         ) : (
         <>
@@ -908,6 +1007,37 @@ export function DocsHub({ boot }) {
             <button type="button" onClick={() => closeIf(hub.moveDocs(modal.slugs, ''))}>My docs</button>
             {hub.folders.map((item) => (
               <button key={item.id} type="button" onClick={() => closeIf(hub.moveDocs(modal.slugs, item.id))}>
+                <Folder size={15} /> {item.name}
+              </button>
+            ))}
+          </div>
+        </HubDialog>
+      ) : null}
+      {modal?.type === 'new-team-folder' ? (
+        <NameDialog title="New folder" confirmLabel="Create" initialName="" onClose={closeModal}
+          onSave={(name) => closeIf(saveTeamFolder({ name }))} />
+      ) : null}
+      {modal?.type === 'rename-team-folder' ? (
+        <NameDialog title="Rename folder" confirmLabel="Save" initialName={modal.folder.name} onClose={closeModal}
+          onSave={(name) => closeIf(saveTeamFolder({ id: modal.folder.id, name }))} />
+      ) : null}
+      {modal?.type === 'delete-team-folder' ? (
+        <HubDialog
+          title={`Delete ${modal.folder.name}?`}
+          confirmLabel="Delete folder"
+          danger
+          onConfirm={() => closeIf(deleteTeamFolder(modal.folder))}
+          onClose={closeModal}
+        >
+          <p>Its contents move up one level. Documents are not deleted.</p>
+        </HubDialog>
+      ) : null}
+      {modal?.type === 'team-move' && team ? (
+        <HubDialog title="Move to folder" onClose={closeModal}>
+          <div className="move-list">
+            <button type="button" onClick={() => closeIf(moveTeamDocs(modal.slugs, ''))}>{team.name}</button>
+            {spaceFolders.map((item) => (
+              <button key={item.id} type="button" onClick={() => closeIf(moveTeamDocs(modal.slugs, item.id))}>
                 <Folder size={15} /> {item.name}
               </button>
             ))}

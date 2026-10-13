@@ -47,6 +47,7 @@ const OFFLINE = [
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
+  'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
   'profile.test.js',            // /@handle public profiles
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
