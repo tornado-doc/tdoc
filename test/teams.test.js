@@ -2,7 +2,7 @@
 // team-owned docs that keep their human author, and team-wide doc access.
 // Runs worker.js in-process with fake bindings (helpers/worker-harness.js).
 
-const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js');
+const { loadWorker, makeEnv, req, issue, bootData } = require('./helpers/worker-harness.js');
 
 let pass = 0, fail = 0;
 async function t(n, fn) {
@@ -306,6 +306,26 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(create.status === 200 && create.body.team.role === 'admin' && !create.body.team.invite_url, `token create: ${create.status} ${JSON.stringify(create.body)}`);
     const mine = await call('/api/teams', { token: zed.token });
     assert(mine.body.teams.some((x) => x.name === 'Agents'), 'the new team is not listed');
+  });
+
+  await t('someone invited by handle sees the invite on My docs and joins with one click', async () => {
+    const made = await call('/api/teams', { method: 'POST', cookie: alice, headers: { Origin: 'https://tdoc.dev' }, body: { name: 'Handles', invites: ['dave'] } });
+    assert(made.status === 200, `create ${made.status}`);
+    const id = made.body.team.id;
+    // A team written before the invite index existed: no KV metadata.
+    const legacy = { id: 't_0123456789abcdef', name: 'Legacy crew', created: '2026-01-01T00:00:00Z', created_by: 'acct-alice', members: [{ account_id: 'acct-alice', key: 'alice', name: 'alice', role: 'admin', joined: '2026-01-01T00:00:00Z' }], invites: ['dave'] };
+    await env.META.put('team:t_0123456789abcdef', JSON.stringify(legacy));
+    const boot = async () => bootData(await (await call('/me', { cookie: dave })).r.text(), '__TDOC_APP_BOOT__');
+    const before = await boot();
+    const ids = (before.team_invites || []).map((x) => x.id).sort();
+    assert(ids.includes(id) && ids.includes('t_0123456789abcdef'), `invites on My docs: ${JSON.stringify(before.team_invites)}`);
+    const stranger = await call('/api/team/accept-invite', { method: 'POST', cookie: carol, headers: { Origin: 'https://tdoc.dev' }, body: { id } });
+    assert(stranger.status === 403, `someone not invited joined: ${stranger.status}`);
+    const ok = await call('/api/team/accept-invite', { method: 'POST', cookie: dave, headers: { Origin: 'https://tdoc.dev' }, body: { id } });
+    assert(ok.status === 200 && ok.body.team.role === 'member', `${ok.status} ${JSON.stringify(ok.body)}`);
+    const after = await boot();
+    assert(!(after.team_invites || []).some((x) => x.id === id), 'the joined team is still offered');
+    assert((after.teams || []).some((x) => x.id === id), 'the joined team is not in the spaces');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

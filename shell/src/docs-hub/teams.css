@@ -40,3 +40,15 @@
 .tm-space-new { border-style: dashed; color: var(--td-muted, #6b6a66); font-weight: 500; }
 .tm-space-new:hover { color: var(--td-ink, #1a1a1a); }
 @media (max-width: 480px) { .tm-space { height: 36px; } }
+
+/* Pending team invitations on My docs. */
+.tm-invites { display: grid; gap: 8px; margin: 0 0 14px; }
+.tm-invite {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--td-accent-ring-soft, rgba(22,82,240,.18)); border-radius: 10px;
+  background: var(--td-accent-tint, #e8eeff); color: var(--td-ink, #1a1a1a); font-size: 14px;
+}
+.tm-invite > svg { flex: none; color: var(--td-accent, #1652f0); }
+.tm-invite-text { flex: 1; min-width: 0; }
+.tm-invite button { flex: none; }
+.tm-invite-error { margin: 0; font-size: 13px; color: var(--td-danger, #b42318); }
