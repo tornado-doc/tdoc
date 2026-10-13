@@ -5060,7 +5060,9 @@ function normalizeSiteBinding(raw) {
   const b = raw && typeof raw === 'object' ? raw : {};
   const origins = [];
   for (const o of Array.isArray(b.origins) ? b.origins : []) {
-    const clean = feedbackOrigin(String(o || '').trim().replace(/\/+$/, ''));
+    let raw = String(o || '').trim();
+    while (raw.endsWith('/')) raw = raw.slice(0, -1);
+    const clean = feedbackOrigin(raw);
     if (!clean) return { error: 'invalid_origin', origin: String(o) };
     if (!origins.includes(clean)) origins.push(clean);
   }

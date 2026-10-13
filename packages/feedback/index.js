@@ -18,7 +18,9 @@ export function loadTdocFeedback({ space, base = DEFAULT_BASE, open = false } = 
   if (loading) return loading;
   loading = new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = `${String(base).replace(/\/+$/, '')}/feedback.js`;
+    let origin;
+    try { origin = new URL(String(base)).origin; } catch (_) { loading = null; reject(new Error(`Not a URL: ${base}`)); return; }
+    script.src = `${origin}/feedback.js`;
     script.async = true;
     script.setAttribute('data-tdoc-space', space);
     if (open) script.setAttribute('data-tdoc-open', '1');
