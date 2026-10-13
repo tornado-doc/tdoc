@@ -284,6 +284,29 @@ const APP_HTML = `<!doctype html>
     await test('no console errors on the app page', async () => {
       assert(consoleErrors.length === 0, consoleErrors.join('\n'));
     });
+    await test('a site embed (data-tdoc-space) exposes window.tdoc with its space and events', async () => {
+      const site = await context.newPage();
+      await site.goto(`${appBase}/pricing`);
+      await site.evaluate((src) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.setAttribute('data-tdoc-space', 'acme-site-space');
+        document.documentElement.appendChild(s);
+      }, `${tdocBase}/feedback.js`);
+      await site.waitForFunction(() => window.tdoc && window.tdoc.space === 'acme-site-space');
+      const api = await site.evaluate(() => ['open', 'close', 'toggle', 'comment', 'on'].every((k) => typeof window.tdoc[k] === 'function'));
+      assert(api, 'window.tdoc API incomplete');
+      const opened = await site.evaluate(() => new Promise((resolve) => {
+        const off = window.tdoc.on('open', () => { off(); resolve(true); });
+        window.tdoc.open();
+        setTimeout(() => resolve(false), 3000);
+      }));
+      assert(opened, "tdoc.on('open') did not fire");
+      // The local twin signs everyone in as the e2e user, so the connect
+      // popup (and its &space=) is covered by the worker suite site-space.
+      await site.close();
+    });
+
   } finally {
     await browser.close();
     server.kill();

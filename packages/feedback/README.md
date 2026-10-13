@@ -1,0 +1,48 @@
+# @tdoc/feedback
+
+Let visitors comment on any page of your site. Comments are pinned to the
+element they are about, land in one tdoc space you own, and can be handed to
+your AI agent to fix.
+
+## 1. Get a space id
+
+On [tdoc.dev](https://tdoc.dev): **My docs → Feedback → Add to your site**.
+Enter your site's address and choose who can comment:
+
+- **People you invite** — only people you add in Share (default).
+- **Anyone signed in** — any visitor who signs in to tdoc.
+
+## 2. Add it to your site
+
+One line, no build step:
+
+```html
+<script src="https://tdoc.dev/feedback.js" data-tdoc-space="YOUR_SPACE_ID" async></script>
+```
+
+Or with npm:
+
+```js
+import { loadTdocFeedback } from '@tdoc/feedback';
+
+const tdoc = await loadTdocFeedback({ space: 'YOUR_SPACE_ID' });
+tdoc.on('comment', (c) => console.log('new comment', c));
+document.querySelector('#feedback').onclick = () => tdoc.comment();
+```
+
+React:
+
+```jsx
+import { TdocFeedback } from '@tdoc/feedback/react';
+
+<TdocFeedback space="YOUR_SPACE_ID" onReady={(tdoc) => {/* tdoc.open() … */}} />
+```
+
+## API
+
+`open()`, `close()`, `toggle()`, `comment()` (start picking an element),
+`disconnect()`, and `on('open' | 'close' | 'comment', fn)` which returns an
+unsubscribe. The same object is available as `window.tdoc`.
+
+The comment UI is served by tdoc, so it updates without a new package
+release. This package only loads it.

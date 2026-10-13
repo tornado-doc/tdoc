@@ -125,7 +125,7 @@ async function getSession(env, req) {
     const rec = await feedbackTokenRecord(env, feedbackTokenFrom(req));
     if (!rec) return null;
     sid = rec.sid;
-    feedback = { slug: rec.slug, origin: typeof rec.origin === 'string' ? rec.origin : null };
+    feedback = { slug: rec.slug, origin: typeof rec.origin === 'string' ? rec.origin : null, site: rec.site === true };
   }
   const raw = await env.META.get(`session:${sid}`);
   if (!raw) return null;
@@ -3554,7 +3554,7 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
     }
     if (!owned && !joined) return null;
     if (!docReadableBy(env, session, row.meta)) return null;
-    const item = { ...toPublic(row), origin, mine: owned };
+    const item = { ...toPublic(row), origin, mine: owned, ...(owned && row.meta && row.meta.site ? { site: row.meta.site } : {}) };
     if (withCounts) {
       let open = 0, replied = 0;
       try {
@@ -5041,12 +5041,45 @@ async function feedbackSpaceFor(env, req, session, origin) {
   return { ok: true, slug: made.slug, meta: made.meta };
 }
 
-async function mintFeedbackToken(env, session, slug, origin) {
+async function mintFeedbackToken(env, session, slug, origin, { site = false } = {}) {
   const token = `fb_${rand(24)}`;
   await env.META.put(`feedback:token:${token}`, JSON.stringify({
-    sid: session.id, slug, origin, created: new Date().toISOString(),
+    sid: session.id, slug, origin, created: new Date().toISOString(), ...(site ? { site: true } : {}),
   }), { expirationTtl: FEEDBACK_TOKEN_TTL_SECONDS });
   return token;
+}
+
+// ── A site's own comment space (the SDK) ─────────────────────────────────
+// A site owner binds one space to their site: every visitor's comments land
+// in it, instead of each visitor getting a space of their own. The binding
+// names the origins it serves (another site cannot borrow the id) and who
+// may comment: anyone signed in ('public') or only people the owner invited
+// ('invited'). Julie, 2026-10-13: "any web page natively commentable".
+const SITE_ORIGINS_MAX = 10;
+function normalizeSiteBinding(raw) {
+  const b = raw && typeof raw === 'object' ? raw : {};
+  const origins = [];
+  for (const o of Array.isArray(b.origins) ? b.origins : []) {
+    const clean = feedbackOrigin(String(o || '').trim().replace(/\/+$/, ''));
+    if (!clean) return { error: 'invalid_origin', origin: String(o) };
+    if (!origins.includes(clean)) origins.push(clean);
+  }
+  if (!origins.length) return { error: 'origins_required' };
+  if (origins.length > SITE_ORIGINS_MAX) return { error: 'too_many_origins', limit: SITE_ORIGINS_MAX };
+  const mode = b.mode === 'public' ? 'public' : 'invited';
+  return { site: { origins, mode } };
+}
+function siteServesOrigin(meta, origin) {
+  const site = meta && meta.site;
+  return Boolean(site && Array.isArray(site.origins) && site.origins.includes(origin));
+}
+// Who may comment follows the mode: public reads and comments with any
+// sign-in; invited is private to the owner's invite list.
+function siteAccess(prev, mode) {
+  const base = normalizeAccess(prev || {}, { legacy: false });
+  return mode === 'public'
+    ? { ...base, visibility: base.visibility === 'public' ? 'public' : 'unlisted', commenting: 'signed_in' }
+    : { ...base, visibility: 'private', commenting: 'invited' };
 }
 
 function feedbackSessionPayload(env, base, session, slug, meta) {
@@ -5416,9 +5449,9 @@ ${feedbackTopBar(identity, '/feedback')}
 // /feedback/connect?origin=… — the popup the client opens the first time it
 // runs on an app. Runs on our origin with the cookie: sign in if needed, make
 // or reuse the space, mint a token, hand it back to the opener and close.
-function feedbackConnectPage({ base, origin, nonce, identity, doors, error }) {
+function feedbackConnectPage({ base, origin, nonce, identity, doors, error, space = null }) {
   const host = origin ? new URL(origin).host : '';
-  const returnTo = `/feedback/connect?origin=${encodeURIComponent(origin || '')}`;
+  const returnTo = `/feedback/connect?origin=${encodeURIComponent(origin || '')}${space ? `&space=${encodeURIComponent(space)}` : ''}`;
   let body;
   if (error) {
     body = `<p class="err">${escapeHtml(error)}</p><p><a href="${escapeHtml(returnTo)}">Try again</a></p>`;
@@ -5428,6 +5461,13 @@ function feedbackConnectPage({ base, origin, nonce, identity, doors, error }) {
     if (doors.web) links.push(`<a href="/api/auth/web/login?return=${encodeURIComponent(returnTo)}"><button type="button" class="${doors.oidc ? 'secondary' : ''}">Sign in with GitHub</button></a>`);
     if (!links.length) links.push(`<a href="/?notice=signin" target="_blank" rel="opener"><button type="button">Sign in on ${escapeHtml(new URL(base).host)}</button></a> <a href="${escapeHtml(returnTo)}"><button type="button" class="secondary">I've signed in</button></a>`);
     body = `<p>Sign in so your feedback on <strong>${escapeHtml(host)}</strong> carries your name.</p><div class="row">${links.join(' ')}</div>`;
+  } else if (space) {
+    // A site's own comment space: nothing to choose, the site chose it.
+    body = `<p>Signed in as <strong>${escapeHtml(identity.name || identity.login)}</strong>.</p>
+<div class="card">
+  <p>Your comments on <strong>${escapeHtml(host)}</strong> go to the site's comment space, under your name.</p>
+  <div class="row"><button type="button" id="connect">Continue</button><span id="status" class="muted"></span></div>
+</div>`;
   } else {
     body = `<p>Signed in as <strong>${escapeHtml(identity.name || identity.login)}</strong>.</p>
 <div class="card">
@@ -5457,6 +5497,7 @@ function feedbackConnectPage({ base, origin, nonce, identity, doors, error }) {
 <script nonce="${nonce}">
 (function () {
   var origin = ${JSON.stringify(origin)};
+  var space = ${JSON.stringify(space)};
   var status = document.getElementById('status');
   function say(text, bad) { if (status) { status.textContent = text; status.className = bad ? 'err' : 'muted'; } }
   function deliver(payload) {
@@ -5473,7 +5514,7 @@ function feedbackConnectPage({ base, origin, nonce, identity, doors, error }) {
     fetch('/api/feedback/connect', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(Object.assign({ origin: origin }, body || {})),
+      body: JSON.stringify(Object.assign({ origin: origin }, space ? { space: space } : {}, body || {})),
     }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
       .then(function (r) {
         if (!r.ok) { say((r.body && (r.body.message || r.body.error)) || 'Could not connect', true); return; }
@@ -9522,6 +9563,34 @@ export default {
       return json({ ok: true, slug, origin });
     }
 
+    // Bind (or change) a doc as a site's comment space. Owner only, from the
+    // browser; the access policy follows the chosen mode.
+    if (p === '/api/feedback/site' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      if (!isValidSlug(body.slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const meta = await loadDocMeta(env, body.slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      if (!isDocOwnerSession(env, s, meta)) return json({ error: 'forbidden' }, { status: 403 });
+      if (body.off === true) {
+        const { site: _old, ...rest } = meta;
+        await putDocMetaJson(env, body.slug, JSON.stringify(rest));
+        return json({ ok: true, site: null });
+      }
+      const bound = normalizeSiteBinding(body);
+      if (bound.error) return json(bound, { status: 400 });
+      const next = { ...meta, site: bound.site, access: siteAccess(meta.access, bound.site.mode) };
+      await putDocMetaJson(env, body.slug, JSON.stringify(next));
+      const base = url.origin;
+      return json({
+        ok: true, site: bound.site, access: next.access,
+        snippet: `<script src="${base}/feedback.js" data-tdoc-space="${body.slug}" async></script>`,
+      });
+    }
+
     if (p === '/feedback/connect' && method === 'GET') {
       const nonce = rand(16);
       const headers = { 'Content-Security-Policy': cspHeader(nonce) };
@@ -9531,8 +9600,9 @@ export default {
       }
       const s = await getSession(env, req);
       const oidc = oidcConfig(env);
+      const space = isValidSlug(url.searchParams.get('space') || '') ? url.searchParams.get('space') : null;
       return html(feedbackConnectPage({
-        base: url.origin, origin, nonce,
+        base: url.origin, origin, nonce, space,
         identity: sessionPrincipal(s) ? { login: actorKey(s), name: actorDisplayName(s) } : null,
         doors: { oidc: !!oidc, oidcLabel: oidc && oidc.label, web: !!env.GITHUB_CLIENT_SECRET },
       }), { headers });
@@ -9546,6 +9616,20 @@ export default {
       if (!origin) return json({ error: 'invalid_origin' }, { status: 400 });
       let slug;
       let meta;
+      if (body.space) {
+        // A site's own space (the SDK): only on the origins it was bound to,
+        // and only for people its mode admits.
+        if (!isValidSlug(body.space)) return json({ error: 'invalid_space' }, { status: 400 });
+        meta = await loadDocMeta(env, body.space);
+        if (!meta || !meta.site) return json({ error: 'space_not_found', message: 'This site has no tdoc comment space.' }, { status: 404 });
+        if (!siteServesOrigin(meta, origin)) return json({ error: 'origin_not_allowed', message: `This comment space is not enabled for ${origin}.` }, { status: 403 });
+        const access = accessFromMeta(meta);
+        if (!canReadDoc(access, s, env, meta) || !canCommentOnDoc(access, s, env, meta)) {
+          return json({ error: 'not_invited', message: 'Comments on this site are invite-only. Ask the site owner to invite you.' }, { status: 403 });
+        }
+        const token = await mintFeedbackToken(env, s, body.space, origin, { site: true });
+        return json({ ...feedbackSessionPayload(env, url.origin, s, body.space, meta), token, site: meta.site.mode });
+      }
       if (body.slug) {
         // "Use an existing doc": any doc this person may comment on.
         if (!isValidSlug(body.slug)) return json({ error: 'invalid_slug' }, { status: 400 });
@@ -9573,12 +9657,14 @@ export default {
       // Joined another space for this app since this token was minted (an
       // invite): the token still names the old one. Say so, and the client
       // reconnects rather than quietly commenting in the wrong place.
-      if (s.feedback.origin) {
+      if (s.feedback.origin && !s.feedback.site) {
         const current = await env.META.get(feedbackSpaceIndexKey(s, s.feedback.origin));
         if (current && current !== s.feedback.slug) return json({ error: 'space_moved', slug: current }, { status: 409 });
       }
       const meta = await loadDocMeta(env, s.feedback.slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      // A site token lives only as long as the site binding that minted it.
+      if (s.feedback.site && !siteServesOrigin(meta, s.feedback.origin)) return json({ error: 'site_off', message: 'Comments are turned off on this site.' }, { status: 403 });
       const access = accessFromMeta(meta);
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       return json({

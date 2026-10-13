@@ -157,7 +157,15 @@ ${uiCss}
     return window.__TDOC_FEEDBACK_BASE__ || 'https://tdoc.dev';
   })();
   const autoOpen = Boolean(document.currentScript && document.currentScript.getAttribute('data-tdoc-open'));
-  const storageKey = `tdoc-feedback:${base}`;
+  // A site's own comment space (the SDK): <script … data-tdoc-space="…">.
+  // Its visitors comment there, so their session is kept apart from any
+  // personal feedback space the same browser has for this origin.
+  const space = (() => {
+    const raw = (document.currentScript && document.currentScript.getAttribute('data-tdoc-space'))
+      || window.__TDOC_SPACE__ || '';
+    return /^[a-z0-9][a-z0-9-]{0,80}$/.test(String(raw)) ? String(raw) : '';
+  })();
+  const storageKey = space ? `tdoc-feedback:${base}:${space}` : `tdoc-feedback:${base}`;
 
   // The connect popup mints a token that stands in for our missing cookie
   // (see getSession in the worker). It lives with the app's origin: one per
@@ -181,6 +189,12 @@ ${uiCss}
       return session && session.token ? { authorization: `Bearer ${session.token}` } : {};
     },
   });
+
+  // tdoc.on(...) listeners, for pages that build their own controls.
+  const listeners = {};
+  const emit = (event, detail) => {
+    for (const fn of (listeners[event] || []).slice()) { try { fn(detail); } catch (_) {} }
+  };
 
   async function request(pathname, options = {}) {
     const session = readSession();
@@ -208,7 +222,7 @@ ${uiCss}
   function connect() {
     if (connecting) return connecting;
     const attempt = new Promise((resolve, reject) => {
-      const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}`;
+      const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}${space ? `&space=${encodeURIComponent(space)}` : ''}`;
       let popup = null;
       let watch = null;
       const done = (fn) => (value) => {
@@ -459,11 +473,13 @@ ${uiCss}
           break;
         case 'tdoc-feedback-submit': {
           const made = await request('/api/comments', { method: 'POST', body: body({ text: message.text, anchor: message.anchor }) });
+          emit('comment', { id: made && made.id, text: message.text });
           if (message.sendToAgent && made && made.id) handoff = await sendToAgent(slug, made.id);
           break;
         }
         case 'tdoc-feedback-reply': {
           const made = await request('/api/comments', { method: 'POST', body: body({ text: message.text, parent_id: message.parentId }) });
+          emit('comment', { id: made && made.id, text: message.text, parentId: message.parentId });
           const target = message.handoffCommentId || (made && made.id);
           if (message.sendToAgent && target) handoff = await sendToAgent(slug, target);
           break;
@@ -744,15 +760,28 @@ ${uiCss}
     const canSendToAgent = Boolean(agent && agent.canSend);
 
     useEffect(() => {
-      window.tdocFeedback = {
+      const api = {
         toggle,
         open: () => { if (!shown) show({ intent: 'bookmark' }); },
         close: hide,
+        hide,
         comment: () => { setShown(true); setPicking(true); },
         disconnect: () => { writeSession(null); hide(); },
+        // tdoc.on('open' | 'close' | 'comment', fn) → returns an unsubscribe.
+        on: (event, fn) => {
+          if (typeof fn !== 'function') return () => {};
+          const list = (listeners[event] = listeners[event] || []);
+          list.push(fn);
+          return () => { const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); };
+        },
         base,
+        space: space || null,
       };
+      window.tdocFeedback = api;
+      // The public name. A page that already defines `tdoc` keeps its own.
+      if (!window.tdoc || window.tdoc.__tdocFeedback) window.tdoc = Object.assign(api, { __tdocFeedback: true });
     }, [shown, toggle, show, hide]);
+    useEffect(() => { emit(shown ? 'open' : 'close'); }, [shown]);
     useEffect(() => {
       if (autoOpen) show({ intent: 'bookmark' });
       // Once: the bookmarklet asked for the overlay when it loaded us.

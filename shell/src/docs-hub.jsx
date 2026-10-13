@@ -3,6 +3,8 @@ import { Check, ChevronRight, Folder, FolderPlus, Search, UsersRound, X } from '
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSelect } from './ui/select.jsx';
+import { SegmentedControl } from './ui/segmented-control.jsx';
+import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
@@ -202,6 +204,7 @@ function ownerLabel(doc, viewer) {
 function FeedbackList({ spaces: initial }) {
   // Counts cost a comment read per space, so they load when the tab opens.
   const [spaces, setSpaces] = useState(initial);
+  const [embedding, setEmbedding] = useState(null);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/me/feedback', { credentials: 'same-origin' })
@@ -231,22 +234,107 @@ function FeedbackList({ spaces: initial }) {
     );
   }
   return (
+    <>
     <div className="doc-list">
       {spaces.map((space) => {
         let host = space.origin;
         try { host = new URL(space.origin).host; } catch (_) {}
         return (
-          <a key={space.slug} className="doc-row flat-row" href={`/d/${encodeURIComponent(space.slug)}`}>
-            <div className="doc-info">
+          <div key={space.slug} className="doc-row flat-row tdoc-fb-row">
+            <a className="doc-info" href={`/d/${encodeURIComponent(space.slug)}`}>
               <span className="doc-title">{host}</span>
               <div className="doc-meta">
-                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
+                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', space.site ? (space.site.mode === 'public' ? 'on the site · anyone signed in' : 'on the site · invited only') : null, `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
               </div>
-            </div>
-          </a>
+            </a>
+            {space.mine ? (
+              <button type="button" className="tdoc-fbspace-btn tdoc-fb-embed-btn" onClick={() => setEmbedding(space)}>
+                {space.site ? 'Site settings' : 'Add to your site'}
+              </button>
+            ) : null}
+          </div>
         );
       })}
     </div>
+    {embedding ? (
+      <SiteEmbedDialog
+        space={embedding}
+        onClose={() => setEmbedding(null)}
+        onSaved={(site) => setSpaces((list) => list.map((s) => (s.slug === embedding.slug ? { ...s, site } : s)))}
+      />
+    ) : null}
+    </>
+  );
+}
+
+// Turn a feedback space into the site's own comment space: the snippet any
+// page can paste, which origins it works on, and who may comment.
+function SiteEmbedDialog({ space, onClose, onSaved }) {
+  const [origins, setOrigins] = useState(() => ((space.site && space.site.origins) || [space.origin]).join('\n'));
+  const [mode, setMode] = useState((space.site && space.site.mode) || 'invited');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [snippet, setSnippet] = useState(space.site ? `<script src="${location.origin}/feedback.js" data-tdoc-space="${space.slug}" async></script>` : '');
+  const save = async (off = false) => {
+    setBusy(true);
+    setError('');
+    try {
+      const r = await fetch('/api/feedback/site', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(off ? { slug: space.slug, off: true } : { slug: space.slug, origins: origins.split(/[\s,]+/).filter(Boolean), mode }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error === 'invalid_origin' ? `Not a site address: ${body.origin}. Use the form https://example.com.` : (body.message || body.error || 'Could not save'));
+      if (off) { onSaved(null); onClose(); return; }
+      setSnippet(body.snippet);
+      onSaved(body.site);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <AppDialog
+      open
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title="Comments on your site"
+      description="Paste one line into your site and visitors can comment on any page. Every comment lands in this space."
+      actions={(
+        <>
+          {space.site ? <button type="button" className="danger" disabled={busy} onClick={() => save(true)}>Turn off</button> : null}
+          <button type="button" onClick={onClose}>Close</button>
+          <button type="button" className="primary" disabled={busy} onClick={() => save(false)}>{busy ? 'Saving…' : 'Save'}</button>
+        </>
+      )}
+    >
+      <div className="tdoc-send">
+        <div className="tdoc-send-field">
+          <label className="tdoc-send-label" htmlFor="tdoc-site-origins">Site addresses <span>one per line</span></label>
+          <textarea id="tdoc-site-origins" className="tdoc-notify-instruction" rows={2} value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder="https://example.com" />
+        </div>
+        <div className="tdoc-send-field">
+          <span className="tdoc-send-label">Who can comment</span>
+          <SegmentedControl
+            ariaLabel="Who can comment"
+            value={mode}
+            onChange={setMode}
+            options={[{ value: 'invited', label: 'People you invite' }, { value: 'public', label: 'Anyone signed in' }]}
+          />
+          <p className="tdoc-send-hint">{mode === 'public' ? 'Any visitor who signs in to tdoc can read and comment.' : 'Only people you invite in Share can read and comment.'}</p>
+        </div>
+        {snippet ? (
+          <div className="tdoc-send-field">
+            <span className="tdoc-send-label">Paste this into your site</span>
+            <code className="tdoc-site-snippet">{snippet}</code>
+            <CopyPromptButton text={snippet} />
+          </div>
+        ) : null}
+        {error ? <p className="tdoc-send-result tdoc-notify-error" role="status">{error}</p> : null}
+      </div>
+    </AppDialog>
   );
 }
 
