@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# tdoc-folder — make folders and file docs into them, in My docs or a team.
+#
+# Same rules as the web: My docs folders hold your own docs; a team's folders
+# are shared by its members (any member makes one; its maker or an admin
+# renames/deletes it) and a team doc is filed by its author or an admin.
+# Uses the hosted Bearer in ~/.tdoc/published.json.
+#
+# Usage:
+#   tdoc-folder list [--team <name|id>] [--json]
+#   tdoc-folder create <name> [--parent <folder>] [--team <t>]   # existing name: returns it
+#   tdoc-folder add <slug>... --folder <folder> [--team <t>] [--create] [--parent <folder>]
+#   tdoc-folder remove <slug>... [--team <t>]                    # back to the top level
+#   tdoc-folder rename <folder> <new name> [--team <t>]
+#   tdoc-folder delete <folder> [--team <t>]                     # docs move up a level
+#   <folder> is an id (f_…), a path ("Reports/Daily"), or a name unique in that space.
+#   A team doc must be in the team first: tdoc-move --team <t> --folder <f> <slug>.
+#   tdoc-folder --help
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+
+usage() { sed -n '9,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+case "${1:-}" in
+  -h|--help|help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  list|ls|create|mkdir|add|remove|rename|delete|rm) CMD="$1"; shift ;;
+  *) usage ;;
+esac
+
+TEAM=""; FOLDER=""; PARENT=""; CREATE=0; AS_JSON=0; ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --team) TEAM="${2:-}"; [ -n "$TEAM" ] || { echo "--team needs a name or id" >&2; exit 2; }; shift 2 ;;
+    --team=*) TEAM="${1#--team=}"; shift ;;
+    --folder) FOLDER="${2:-}"; [ -n "$FOLDER" ] || { echo "--folder needs a name, path or id" >&2; exit 2; }; shift 2 ;;
+    --folder=*) FOLDER="${1#--folder=}"; shift ;;
+    --parent) PARENT="${2:-}"; [ -n "$PARENT" ] || { echo "--parent needs a folder" >&2; exit 2; }; shift 2 ;;
+    --parent=*) PARENT="${1#--parent=}"; shift ;;
+    --create) CREATE=1; shift ;;
+    --json) AS_JSON=1; shift ;;
+    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "unknown arg: $1" >&2; exit 2 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+
+CONFIG_FILE="$HOME/.tdoc/published.json"
+TOKEN="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" upload_token || true)"
+BASE="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" base || true)"
+if [ -z "$TOKEN" ] || [ -z "$BASE" ]; then
+  echo "[tdoc] not signed in to hosted tdoc — run 'tdoc-publish --signin-only' first." >&2
+  exit 1
+fi
+BASE="${BASE%/}"
+
+# api <METHOD> <path> [json body] — prints the body; fails on non-2xx or an
+# "error" key, printing a readable reason.
+api() {
+  local resp http body
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' -X "$1" "$BASE$2" \
+    -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
+    ${3:+-H "Content-Type: application/json" -d "$3"})" || { echo "[tdoc] no response from $BASE$2" >&2; return 1; }
+  http="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$' || [ -n "$(printf '%s' "$body" | json_get error)" ]; then
+    explain "$body" "$http"; return 1
+  fi
+  printf '%s' "$body"
+}
+
+explain() {
+  local err slug; err="$(printf '%s' "$1" | json_get error)"; slug="$(printf '%s' "$1" | json_get slug)"
+  case "$err" in
+    not_owner) echo "[tdoc] cannot file $slug: only its author (or, in a team, a team admin) can." >&2 ;;
+    doc_in_team) echo "[tdoc] $slug is in a team ($(printf '%s' "$1" | json_get team)); pass --team to file it in that team's folders." >&2 ;;
+    doc_not_in_team) echo "[tdoc] $slug is not in that team yet: tdoc-move --team <t> --folder <f> $slug" >&2 ;;
+    team_not_found) echo "[tdoc] you are not a member of that team." >&2 ;;
+    not_folder_owner) echo "[tdoc] only the folder's maker or a team admin can change it." >&2 ;;
+    too_many_folders) echo "[tdoc] folder limit reached ($(printf '%s' "$1" | json_get limit))." >&2 ;;
+    too_deep) echo "[tdoc] folders nest at most $(printf '%s' "$1" | json_get limit) deep." >&2 ;;
+    duplicate_name) echo "[tdoc] a folder by that name is already there." >&2 ;;
+    *) echo "[tdoc] request failed (HTTP $2): $1" >&2 ;;
+  esac
+}
+
+# A team id is taken as-is; a name is looked up among your teams.
+TEAM_ID=""
+if [ -n "$TEAM" ]; then
+  if printf '%s' "$TEAM" | grep -qE '^t_[a-f0-9]{16}$'; then
+    TEAM_ID="$TEAM"
+  else
+    TEAM_ID="$(api GET /api/teams | node -e '
+      let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+        let teams = []; try { teams = JSON.parse(s).teams || []; } catch {}
+        const want = process.argv[1].trim().toLowerCase();
+        const hit = teams.filter((t) => String(t.id).toLowerCase() === want || String(t.name || "").trim().toLowerCase() === want);
+        if (hit.length === 1) { process.stdout.write(String(hit[0].id)); return; }
+        process.stderr.write(hit.length
+          ? `[tdoc] more than one team is called "${process.argv[1]}"; pass its id (tdoc-move --teams).\n`
+          : `[tdoc] you are not in a team called "${process.argv[1]}". Your teams: ${teams.map((t) => t.name).join(", ") || "(none)"}\n`);
+        process.exit(1);
+      });' "$TEAM")" || exit 1
+  fi
+fi
+TEAM_Q="${TEAM_ID:+?team=$TEAM_ID}"
+TEAM_JSON="$( [ -n "$TEAM_ID" ] && json_str "$TEAM_ID" || printf null)"
+SPACE="$( [ -n "$TEAM_ID" ] && printf 'team %s' "$TEAM" || printf 'My docs')"
+
+# One GET per run: load_folders runs in this shell (not a $(...) subshell),
+# so resolve can read the result without asking again.
+FOLDERS_JSON=""
+load_folders() { [ -n "$FOLDERS_JSON" ] || FOLDERS_JSON="$(api GET "/api/folders$TEAM_Q")"; }
+
+# resolve <folder> — prints the folder id; exit 3 when there is no such folder.
+resolve() {
+  printf '%s' "$FOLDERS_JSON" | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      const folders = (JSON.parse(s).folders || []);
+      const byId = new Map(folders.map((f) => [f.id, f]));
+      const path = (f) => { const out = []; for (let c = f, i = 0; c && i < 8; c = byId.get(c.parent), i++) out.unshift(c.name); return out.join("/"); };
+      const want = process.argv[1].trim();
+      const low = want.toLowerCase();
+      let hit = folders.filter((f) => f.id === want);
+      if (!hit.length) hit = folders.filter((f) => path(f).toLowerCase() === low.replace(/^\/+|\/+$/g, ""));
+      if (!hit.length) hit = folders.filter((f) => f.name.toLowerCase() === low);
+      if (hit.length === 1) { process.stdout.write(hit[0].id); return; }
+      if (hit.length > 1) {
+        process.stderr.write(`[tdoc] more than one folder is called "${want}": ${hit.map((f) => `${path(f)} (${f.id})`).join(", ")}. Pass a path or id.\n`);
+        process.exit(1);
+      }
+      process.exit(3);
+    });' "$1"
+}
+
+require_folder() {
+  local id rc=0
+  id="$(resolve "$1")" || rc=$?
+  if [ "$rc" = 3 ]; then echo "[tdoc] no folder \"$1\" in $SPACE (tdoc-folder list${TEAM:+ --team \"$TEAM\"})." >&2; return 1; fi
+  [ "$rc" = 0 ] || return 1
+  printf '%s' "$id"
+}
+
+# create_folder <name> — idempotent; prints the folder id.
+create_folder() {
+  local parent_id="" resp
+  if [ -n "$PARENT" ]; then parent_id="$(require_folder "$PARENT")" || return 1; fi
+  resp="$(api POST /api/folders "{\"name\":$(json_str "$1"),\"parent\":$( [ -n "$parent_id" ] && json_str "$parent_id" || printf null),\"team\":$TEAM_JSON,\"existing_ok\":true}")" || return 1
+  if [ "$(printf '%s' "$resp" | json_get existed)" = "true" ]; then
+    echo "[tdoc] folder \"$1\" already in $SPACE ($(printf '%s' "$resp" | json_get folder.id))" >&2
+  else
+    echo "[tdoc] created folder \"$1\" in $SPACE ($(printf '%s' "$resp" | json_get folder.id))" >&2
+  fi
+  printf '%s' "$resp" | json_get folder.id
+}
+
+slugs_json() { printf '%s\n' "$@" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))'; }
+
+case "$CMD" in
+  list|ls|add|rename|delete|rm) load_folders || exit 1 ;;
+  *) if [ -n "$PARENT" ]; then load_folders || exit 1; fi ;;
+esac
+
+case "$CMD" in
+  list|ls)
+    if [ "$AS_JSON" = 1 ]; then printf '%s\n' "$FOLDERS_JSON"; exit 0; fi
+    printf '%s' "$FOLDERS_JSON" | node -e '
+      let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+        const b = JSON.parse(s); const folders = b.folders || [];
+        const byId = new Map(folders.map((f) => [f.id, f]));
+        const path = (f) => { const out = []; for (let c = f, i = 0; c && i < 8; c = byId.get(c.parent), i++) out.unshift(c.name); return out.join("/"); };
+        const counts = {};
+        for (const fid of Object.values(b.docs || {})) counts[fid] = (counts[fid] || 0) + 1;
+        if (!folders.length) { process.stderr.write("[tdoc] no folders yet\n"); return; }
+        for (const f of folders.map((f) => [path(f), f]).sort((a, b) => a[0].localeCompare(b[0]))) {
+          const docs = b.docs ? `\t${counts[f[1].id] || 0} docs` : "";
+          console.log(`${f[1].id}\t${f[0]}${docs}`);
+        }
+      });'
+    ;;
+  create|mkdir)
+    [ "${#ARGS[@]}" -eq 1 ] || usage
+    create_folder "${ARGS[0]}" >/dev/null || exit 1
+    ;;
+  add|remove)
+    [ "${#ARGS[@]}" -ge 1 ] || usage
+    if [ "$CMD" = add ]; then
+      [ -n "$FOLDER" ] || { echo "[tdoc] add needs --folder <folder>" >&2; exit 2; }
+      rc=0; FID="$(resolve "$FOLDER")" || rc=$?
+      if [ "$rc" = 3 ] && [ "$CREATE" = 1 ]; then
+        FID="$(create_folder "$FOLDER")" || exit 1
+      elif [ "$rc" = 3 ]; then
+        echo "[tdoc] no folder \"$FOLDER\" in $SPACE; pass --create to make it." >&2; exit 1
+      elif [ "$rc" != 0 ]; then exit 1; fi
+      DEST="$(json_str "$FID")"
+    else
+      DEST=null
+    fi
+    resp="$(api POST /api/folders/move "{\"slugs\":$(slugs_json "${ARGS[@]}"),\"folder\":$DEST,\"team\":$TEAM_JSON}")" || exit 1
+    if [ "$CMD" = add ]; then echo "[tdoc] in $SPACE / $FOLDER: ${ARGS[*]}"; else echo "[tdoc] top level of $SPACE: ${ARGS[*]}"; fi
+    ;;
+  rename)
+    [ "${#ARGS[@]}" -eq 2 ] || usage
+    FID="$(require_folder "${ARGS[0]}")" || exit 1
+    api PATCH /api/folders "{\"id\":$(json_str "$FID"),\"name\":$(json_str "${ARGS[1]}"),\"team\":$TEAM_JSON}" >/dev/null || exit 1
+    echo "[tdoc] renamed ${ARGS[0]} → ${ARGS[1]}"
+    ;;
+  delete|rm)
+    [ "${#ARGS[@]}" -eq 1 ] || usage
+    FID="$(require_folder "${ARGS[0]}")" || exit 1
+    api DELETE "/api/folders?id=$FID${TEAM_ID:+&team=$TEAM_ID}" >/dev/null || exit 1
+    echo "[tdoc] deleted folder ${ARGS[0]}; its docs moved up a level."
+    ;;
+esac

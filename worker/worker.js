@@ -3329,6 +3329,89 @@ function validFolderName(name) {
   return n;
 }
 
+// ---- team folders ----
+// A team's folder tree is one small KV value (`team-folders:<team>`), shared
+// by every member. Which folder a team doc sits in is stamped on the doc's
+// own meta (`team_folder`), not in that value: moving the doc out of the team
+// rewrites its meta anyway and takes the folder with it, so nothing goes
+// stale, and My docs reads it from the catalog it already loaded. Deleting a
+// folder rewrites no docs either: `gone` remembers where it was, and its docs
+// resolve one level up -- the same "contents move up" rule as My docs.
+const TEAM_FOLDER_GONE_MAX = 200;
+
+function teamFoldersKey(teamId) {
+  return validTeamId(teamId) ? `team-folders:${teamId}` : null;
+}
+
+async function loadTeamFolders(env, teamId) {
+  const raw = await loadPersonal(env, teamFoldersKey(teamId));
+  const { folders } = normalizeFolderState(raw);
+  const gone = {};
+  if (raw && raw.gone && typeof raw.gone === 'object') {
+    for (const [id, up] of Object.entries(raw.gone)) if (typeof up === 'string') gone[id] = up;
+  }
+  return { folders, docs: {}, gone };
+}
+
+async function saveTeamFolders(env, teamId, state) {
+  const key = teamFoldersKey(teamId);
+  if (!key) return;
+  const { folders } = normalizeFolderState({ folders: state.folders });
+  const gone = Object.fromEntries(Object.entries(state.gone || {}).slice(-TEAM_FOLDER_GONE_MAX));
+  await env.META.put(key, JSON.stringify({ folders, gone }));
+}
+
+// The folder a team doc shows in: its stamped folder, or, if that folder
+// was deleted, the nearest ancestor still standing ('' = the team's root).
+function resolveTeamFolder(state, id) {
+  const ids = new Set(state.folders.map((f) => f.id));
+  let cur = typeof id === 'string' ? id : '';
+  for (let i = 0; cur && !ids.has(cur) && i < 32; i += 1) cur = state.gone[cur] || '';
+  return ids.has(cur) ? cur : '';
+}
+
+function publicTeamFolder(folder, session, team) {
+  return {
+    id: folder.id,
+    name: folder.name,
+    parent: folder.parent || '',
+    // Any member files docs and makes folders; renaming or deleting one is
+    // its maker's or an admin's call.
+    can_manage: teamRole(team, session && session.account_id) === 'admin'
+      || (!!folder.created_by && folder.created_by === (session && session.account_id)),
+  };
+}
+
+// Who is asking, and whose folders: a team's (member only) or the caller's
+// own. Browser cookie or the CLI's hosted Bearer, same rules for both; a
+// cookie request must come from this origin (the Bearer cannot ride along
+// cross-site, a cookie can). Feedback widget tokens never reach folders.
+async function folderScope(env, req, url, teamId) {
+  const deny = (status, error) => ({ ok: false, response: json({ error }, { status }) });
+  const cookie = await getSession(env, req);
+  if (cookie && !sameOrigin(req, url)) return deny(403, 'forbidden');
+  if (teamId) {
+    const gate = await teamSession(env, req, url.origin, { bearer: true });
+    if (!gate.ok) return gate;
+    const s = gate.session;
+    const team = await loadTeam(env, String(teamId));
+    if (!teamMember(team, s.account_id)) return deny(404, 'team_not_found');
+    return { ok: true, session: s, team };
+  }
+  const s = cookie || (await sessionFromHostedBearer(env, req));
+  if (!actorKey(s)) return deny(401, 'sign_in_required');
+  if (s.feedback) return deny(403, 'feedback_token_scope');
+  return { ok: true, session: s, team: null };
+}
+
+// May this session file this team doc into one of the team's folders? The
+// team's admins, or its author while they are still on the team.
+function canFileTeamDoc(session, team, meta) {
+  if (!meta || meta.workspace_id !== team.id) return false;
+  if (teamRole(team, session.account_id) === 'admin') return true;
+  return sessionOwnsAccount(session, meta.hosted && meta.hosted.account_id);
+}
+
 // ---- teams (JUL-71) ----
 // A team is a private record (`team:<id>`) seen only by its members; each
 // member's account carries an index of its teams (`account-teams:<account>`)
@@ -3848,6 +3931,9 @@ async function indexData(env, session, origin) {
   const teamRecords = (await Promise.all((session && session.team_ids || []).map((id) => loadTeam(env, id))))
     .filter((team) => team && teamMember(team, viewerAccount));
   const teamById = new Map(teamRecords.map((team) => [team.id, team]));
+  // One small read per team (20 at most) for its folder tree; which folder
+  // each doc is in already came with the catalog (meta.team_folder).
+  const teamFolderStates = new Map(await Promise.all(teamRecords.map(async (team) => [team.id, await loadTeamFolders(env, team.id)])));
   const teamDocs = catalog.filter((row) => {
     if (isFeedbackSpace(row.meta) || !row.meta || !teamById.has(row.meta.workspace_id)) return false;
     return docReadableBy(env, session, row.meta);
@@ -3861,6 +3947,8 @@ async function indexData(env, session, origin) {
       author: author ? author.name : ownerDisplay(row),
       former_member: !author,
       can_manage: isDocOwnerSession(env, session, row.meta),
+      can_file: canFileTeamDoc(session, team, row.meta),
+      folder: resolveTeamFolder(teamFolderStates.get(team.id), row.meta.team_folder),
     };
   };
 
@@ -3877,6 +3965,9 @@ async function indexData(env, session, origin) {
     folders: folderState.folders.map((folder) => publicFolder(folder)),
     teams: teamRecords.map((team) => teamSummary(team, viewerAccount)),
     team_docs: teamDocs.map(teamDocRow),
+    team_folders: Object.fromEntries(teamRecords.map((team) => [
+      team.id, teamFolderStates.get(team.id).folders.map((folder) => publicTeamFolder(folder, session, team)),
+    ])),
     team_invites: sessionPrincipal(session) ? await pendingTeamInvitesFor(env, session).catch(() => []) : [],
   };
 }
@@ -8851,6 +8942,7 @@ export default {
         feedback: data.feedback,
         teams: data.teams,
         team_docs: data.team_docs,
+        team_folders: data.team_folders || {},
         team_invites: data.team_invites || [],
         ...(profile ? { profile } : {}),
       });
@@ -10417,8 +10509,8 @@ export default {
     }
 
     // ---- personal docs state (stars / folders) ----
-    // Viewer-scoped, cookie-authorized: stars follow the signed-in reader
-    // across any doc they can read; folders organize only their own catalog.
+    // Viewer-scoped: stars follow the signed-in reader across any doc they
+    // can read; folders organize their own catalog (or a team's, below).
     // No cross-user state is ever touched — each login mutates its own
     // stars:<login> / folders:<login> KV value.
     if (p === '/api/star' && method === 'POST') {
@@ -10439,42 +10531,81 @@ export default {
       return json({ ok: true, slug, starred });
     }
 
+    // Folders: My docs' own (`folders:<actor>`), or a team's when the request
+    // names one (`team-folders:<team>`, members only). The CLI's hosted Bearer
+    // is accepted like a session, so an agent can file what it publishes
+    // (tdoc-folder). One KV read per call, at most one write, none when
+    // nothing changes -- an agent re-filing every day costs nothing.
+    if (p === '/api/folders' && method === 'GET') {
+      const scope = await folderScope(env, req, url, url.searchParams.get('team'));
+      if (!scope.ok) return scope.response;
+      const s = scope.session;
+      if (scope.team) {
+        const state = await loadTeamFolders(env, scope.team.id);
+        return json({
+          ok: true,
+          team: { id: scope.team.id, name: scope.team.name },
+          folders: state.folders.map((folder) => publicTeamFolder(folder, s, scope.team)),
+        }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      const state = await loadFolderState(env, actorKey(s));
+      return json({
+        ok: true,
+        team: null,
+        folders: state.folders.map((folder) => publicFolder(folder)),
+        docs: state.docs,
+      }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
     if (p === '/api/folders' && method === 'POST') {
-      const s = await getSession(env, req);
-      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
+      const scope = await folderScope(env, req, url, body.team);
+      if (!scope.ok) return scope.response;
+      const s = scope.session;
+      const team = scope.team;
       const name = validFolderName(body.name);
       if (!name) return json({ error: 'invalid_name' }, { status: 400 });
-      const state = await loadFolderState(env, actorKey(s));
-      if (state.folders.length >= FOLDERS_MAX) return json({ error: 'too_many_folders' }, { status: 400 });
+      const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
       const parentId = body.parent == null || body.parent === '' ? null : String(body.parent);
-      if (parentId) {
-        if (!state.folders.some((f) => f.id === parentId)) return json({ error: 'parent_not_found' }, { status: 404 });
-        if (folderDepth(state, parentId) >= FOLDER_DEPTH_MAX) return json({ error: 'too_deep' }, { status: 400 });
-      }
+      if (parentId && !state.folders.some((f) => f.id === parentId)) return json({ error: 'parent_not_found' }, { status: 404 });
+      const show = (folder) => (team ? publicTeamFolder(folder, s, team) : publicFolder(folder));
       // Names are unique among SIBLINGS (Drive semantics) — the same name
       // under two different parents is fine.
-      if (state.folders.some((f) => (f.parent || null) === parentId && f.name.toLowerCase() === name.toLowerCase())) {
+      const same = state.folders.find((f) => (f.parent || null) === parentId && f.name.toLowerCase() === name.toLowerCase());
+      if (same) {
+        // `existing_ok`: "make sure it exists" -- an agent filing a daily
+        // report into the same folder every run gets the folder back.
+        if (body.existing_ok === true) return json({ ok: true, existed: true, folder: show(same) });
         return json({ error: 'duplicate_name' }, { status: 400 });
       }
+      if (state.folders.length >= FOLDERS_MAX) return json({ error: 'too_many_folders', limit: FOLDERS_MAX }, { status: 400 });
+      if (parentId && folderDepth(state, parentId) >= FOLDER_DEPTH_MAX) return json({ error: 'too_deep', limit: FOLDER_DEPTH_MAX }, { status: 400 });
       const folder = {
         id: `f_${Date.now()}_${rand(4)}`,
         name,
-        visibility: 'private',
         created: new Date().toISOString(),
+        ...(team ? { created_by: s.account_id } : { visibility: 'private' }),
         ...(parentId ? { parent: parentId } : {}),
       };
       state.folders.push(folder);
-      await saveFolderState(env, actorKey(s), state);
-      return json({ ok: true, folder: publicFolder(folder) });
+      if (team) {
+        // A recreated id is never in `gone`, but keep the map honest anyway.
+        delete state.gone[folder.id];
+        await saveTeamFolders(env, team.id, state);
+      } else {
+        await saveFolderState(env, actorKey(s), state);
+      }
+      return json({ ok: true, folder: show(folder) });
     }
 
     if (p === '/api/folders' && method === 'PATCH') {
-      const s = await getSession(env, req);
-      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
+      const scope = await folderScope(env, req, url, body.team);
+      if (!scope.ok) return scope.response;
+      const s = scope.session;
+      const team = scope.team;
       if (!body.id || typeof body.id !== 'string') return json({ error: 'invalid_id' }, { status: 400 });
       const wantsName = 'name' in body;
       const wantsVisibility = 'visibility' in body;
@@ -10482,9 +10613,13 @@ export default {
       if (!wantsName && !wantsVisibility && !wantsAllowed) {
         return json({ error: 'nothing_to_update' }, { status: 400 });
       }
-      const state = await loadFolderState(env, actorKey(s));
+      // A team folder is already shared with the team; its docs keep their
+      // own access. Share links stay a My docs feature.
+      if (team && (wantsVisibility || wantsAllowed)) return json({ error: 'team_folder_not_shareable' }, { status: 400 });
+      const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
       const folder = state.folders.find((f) => f.id === body.id);
       if (!folder) return json({ error: 'not_found' }, { status: 404 });
+      if (team && !publicTeamFolder(folder, s, team).can_manage) return json({ error: 'not_folder_owner' }, { status: 403 });
       if (wantsName) {
         const name = validFolderName(body.name);
         if (!name) return json({ error: 'invalid_name' }, { status: 400 });
@@ -10492,6 +10627,10 @@ export default {
           return json({ error: 'duplicate_name' }, { status: 400 });
         }
         folder.name = name;
+      }
+      if (team) {
+        await saveTeamFolders(env, team.id, state);
+        return json({ ok: true, folder: publicTeamFolder(folder, s, team) });
       }
       if (wantsVisibility) {
         if (!ACCESS_VISIBILITIES.has(body.visibility)) {
@@ -10524,12 +10663,15 @@ export default {
     }
 
     if (p === '/api/folders' && method === 'DELETE') {
-      const s = await getSession(env, req);
-      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      const scope = await folderScope(env, req, url, url.searchParams.get('team'));
+      if (!scope.ok) return scope.response;
+      const s = scope.session;
+      const team = scope.team;
       const id = url.searchParams.get('id');
-      const state = await loadFolderState(env, actorKey(s));
+      const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
       const gone = state.folders.find((f) => f.id === id);
       if (!gone) return json({ error: 'not_found' }, { status: 404 });
+      if (team && !publicTeamFolder(gone, s, team).can_manage) return json({ error: 'not_folder_owner' }, { status: 403 });
       // Contents move UP ONE LEVEL — docs and subfolders reparent to the
       // deleted folder's parent (root when it had none). Documents are
       // never deleted by a folder deletion.
@@ -10547,6 +10689,13 @@ export default {
         }
       }
       state.folders = state.folders.filter((f) => f.id !== id);
+      if (team) {
+        // Team docs carry their folder on their own meta; they find their
+        // way up through `gone` instead of a rewrite per doc.
+        state.gone[id] = up || '';
+        await saveTeamFolders(env, team.id, state);
+        return json({ ok: true });
+      }
       await saveFolderState(env, actorKey(s), state);
       await deleteFolderShareIndex(env, gone.share_id);
       return json({ ok: true });
@@ -10565,33 +10714,60 @@ export default {
     }
 
     if (p === '/api/folders/move' && method === 'POST') {
-      const s = await getSession(env, req);
-      if (!actorKey(s)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
-      const folderId = body.folder == null ? null : String(body.folder);
+      const scope = await folderScope(env, req, url, body.team);
+      if (!scope.ok) return scope.response;
+      const s = scope.session;
+      const team = scope.team;
+      const folderId = body.folder == null || body.folder === '' ? null : String(body.folder);
       const slugs = Array.isArray(body.slugs) ? body.slugs : [];
       if (!slugs.length || slugs.length > 100 || !slugs.every((x) => typeof x === 'string' && isValidSlug(x))) {
         return json({ error: 'invalid_slugs' }, { status: 400 });
       }
-      const state = await loadFolderState(env, actorKey(s));
+      const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
       if (folderId && !state.folders.some((f) => f.id === folderId)) {
         return json({ error: 'folder_not_found' }, { status: 404 });
       }
-      // Folders shelve the viewer's OWN catalog — moving someone else's doc
-      // is meaningless here and refused rather than silently recorded.
+      const metas = [];
       for (const slug of slugs) {
         const meta = await loadDocMeta(env, slug);
+        if (team) {
+          if (!meta || !docReadableBy(env, s, meta)) return json({ error: 'not_found', slug }, { status: 404 });
+          if (meta.workspace_id !== team.id) return json({ error: 'doc_not_in_team', slug }, { status: 409 });
+          if (!canFileTeamDoc(s, team, meta)) return json({ error: 'not_owner', slug }, { status: 403 });
+          metas.push([slug, meta]);
+          continue;
+        }
+        // Folders shelve the viewer's OWN catalog — moving someone else's doc
+        // is meaningless here and refused rather than silently recorded.
         if (!meta || !isDocOwnerSession(env, s, meta)) {
           return json({ error: 'not_owner', slug }, { status: 403 });
         }
+        // A team doc is not in My docs; filing it here would hide nothing
+        // and show nothing. Say where it is instead.
+        if (meta.workspace_id) return json({ error: 'doc_in_team', slug, team: meta.workspace_id }, { status: 409 });
       }
-      for (const slug of slugs) {
-        if (folderId) state.docs[slug] = folderId;
-        else delete state.docs[slug];
+      let changed = 0;
+      if (team) {
+        for (const [slug, meta] of metas) {
+          if (resolveTeamFolder(state, meta.team_folder) === (folderId || '')) continue;
+          const next = { ...meta };
+          if (folderId) next.team_folder = folderId;
+          else delete next.team_folder;
+          await putDocMetaJson(env, slug, JSON.stringify(next));
+          changed += 1;
+        }
+      } else {
+        for (const slug of slugs) {
+          if ((state.docs[slug] || null) === folderId) continue;
+          if (folderId) state.docs[slug] = folderId;
+          else delete state.docs[slug];
+          changed += 1;
+        }
+        if (changed) await saveFolderState(env, actorKey(s), state);
       }
-      await saveFolderState(env, actorKey(s), state);
-      return json({ ok: true, moved: slugs.length, folder: folderId });
+      return json({ ok: true, moved: slugs.length, changed, folder: folderId, team: team ? team.id : null });
     }
 
     // ---- teams (JUL-71) ----
@@ -10802,6 +10978,8 @@ export default {
       for (const [slug, meta] of metas) {
         const next = { ...meta };
         const policy = { ...accessFromMeta(meta) };
+        // A team folder belongs to the team the doc is leaving.
+        delete next.team_folder;
         if (team) {
           next.workspace_id = team.id;
           policy.team = true;

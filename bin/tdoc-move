@@ -11,6 +11,7 @@
 #   tdoc-move --teams                      # list the teams you are in
 #   tdoc-move --create-team <name>         # make a team (you are its admin)
 #   tdoc-move --team <name> --create <slug>  # move, making the team if missing
+#   tdoc-move --team <name> --folder <f> <slug>  # move, then file in that folder (made if missing; tdoc-folder)
 #   tdoc-move --set-default <name|id>      # new docs from this machine go to this team
 #   tdoc-move --set-default personal       # new docs go to My docs (the default)
 #   tdoc-move --default                    # where a new doc would go, and why
@@ -22,19 +23,21 @@ set -euo pipefail
 TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TDOC_BIN_DIR/lib/json.sh"
 
-TEAM=""; PERSONAL=0; LIST=0; CREATE=0; NEW_TEAM=""; SET_DEFAULT=""; SHOW_DEFAULT=0; SLUGS=()
+FOLDER=""; TEAM=""; PERSONAL=0; LIST=0; CREATE=0; NEW_TEAM=""; SET_DEFAULT=""; SHOW_DEFAULT=0; SLUGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --team) TEAM="${2:-}"; [ -n "$TEAM" ] || { echo "--team needs a name or id" >&2; exit 2; }; shift 2 ;;
     --team=*) TEAM="${1#--team=}"; shift ;;
     --personal) PERSONAL=1; shift ;;
+    --folder) FOLDER="${2:-}"; [ -n "$FOLDER" ] || { echo "--folder needs a name, path or id" >&2; exit 2; }; shift 2 ;;
+    --folder=*) FOLDER="${1#--folder=}"; shift ;;
     --teams) LIST=1; shift ;;
     --create) CREATE=1; shift ;;
     --set-default) SET_DEFAULT="${2:-}"; [ -n "$SET_DEFAULT" ] || { echo "--set-default needs a team or 'personal'" >&2; exit 2; }; shift 2 ;;
     --default) SHOW_DEFAULT=1; shift ;;
     --default-id) SHOW_DEFAULT=2; shift ;;
     --create-team) NEW_TEAM="${2:-}"; [ -n "$NEW_TEAM" ] || { echo "--create-team needs a name" >&2; exit 2; }; shift 2 ;;
-    -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown arg: $1" >&2; exit 2 ;;
     *) SLUGS+=("$1"); shift ;;
   esac
@@ -138,7 +141,7 @@ if [ "$LIST" = "1" ]; then
 fi
 
 if [ "${#SLUGS[@]}" -eq 0 ] || { [ -z "$TEAM" ] && [ "$PERSONAL" != "1" ]; } || { [ -n "$TEAM" ] && [ "$PERSONAL" = "1" ]; }; then
-  sed -n '9,21p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2
+  sed -n '9,22p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2
 fi
 
 TEAM_ID="null"
@@ -172,3 +175,12 @@ if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
   exit 1
 fi
 if [ -n "$TEAM" ]; then echo "[tdoc] in team $TEAM: ${SLUGS[*]}"; else echo "[tdoc] back in My docs: ${SLUGS[*]}"; fi
+if [ -n "$FOLDER" ]; then
+  # Filing is idempotent and makes the folder on first use, so a daily
+  # report can pass the same --folder on every run.
+  if [ -n "$TEAM" ]; then
+    "$TDOC_BIN_DIR/tdoc-folder" add --team "$id" --folder "$FOLDER" --create "${SLUGS[@]}"
+  else
+    "$TDOC_BIN_DIR/tdoc-folder" add --folder "$FOLDER" --create "${SLUGS[@]}"
+  fi
+fi

@@ -289,27 +289,28 @@ export function pollDeviceSignIn(deviceCode) {
   });
 }
 
-export function moveDocsToFolder(slugs, folder) {
+// `team` (optional) targets that team's folders instead of My docs'.
+export function moveDocsToFolder(slugs, folder, team) {
   return request('/api/folders/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slugs, folder: folder || null }),
+    body: JSON.stringify({ slugs, folder: folder || null, team: team || undefined }),
   });
 }
 
-export function createFolder(name, parent) {
+export function createFolder(name, parent, team) {
   return request('/api/folders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, parent: parent || undefined }),
+    body: JSON.stringify({ name, parent: parent || undefined, team: team || undefined }),
   });
 }
 
-export function renameFolder(id, name) {
+export function renameFolder(id, name, team) {
   return request('/api/folders', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, name }),
+    body: JSON.stringify({ id, name, team: team || undefined }),
   });
 }
 
@@ -324,8 +325,8 @@ export function updateFolderAccess(id, { visibility, allowed_users } = {}) {
   });
 }
 
-export function deleteFolder(id) {
-  const query = new URLSearchParams({ id });
+export function deleteFolder(id, team) {
+  const query = new URLSearchParams(team ? { id, team } : { id });
   return request(`/api/folders?${query}`, { method: 'DELETE' });
 }
 
