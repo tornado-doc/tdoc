@@ -2078,6 +2078,19 @@ async function markAgentRead(env, slug) {
   if (!env || !env.META || !slug) return;
   await env.META.put(`doc-agent-read:${slug}`, JSON.stringify({ at: new Date().toISOString() }));
 }
+// Mark every delivered, not-yet-acknowledged handoff on a doc as picked up.
+async function ackOpenHandoffs(env, slug) {
+  const list = await loadHandoffs(env, slug);
+  const at = new Date().toISOString();
+  let changed = false;
+  const next = list.map((h) => {
+    if (!h || h.acked_at || (h.delivery && h.delivery.status === 'failed') || h.resolved_at) return h;
+    changed = true;
+    return { ...h, acked_at: at };
+  });
+  if (changed) await env.META.put(`handoffs:${slug}`, JSON.stringify(next));
+  return changed;
+}
 async function readAgentStatus(env, slug) {
   let rec = null;
   try { rec = JSON.parse(await env.META.get(`doc-agent-read:${slug}`)); } catch {}
@@ -10904,6 +10917,17 @@ export default {
             await stampOnboardingFor(env, agentAuth.actor.account_id, 'comments_read');
           }
         } catch {}
+        // An agent that can write this doc and just pulled its comments has
+        // picked up whatever was handed to it. Nothing in the skill ever called
+        // /api/notify/ack, so every handoff sat at "waiting on agent" until the
+        // reply landed, and a person could not tell a working agent from a
+        // dead one (Julie, 2026-10-13). First ack wins, as on the ack route.
+        if (agentAuth && agentAuth.ok) {
+          try {
+            const writable = await requireDocWriteAccess(env, agentAuth.actor, slug);
+            if (writable.ok) await ackOpenHandoffs(env, slug);
+          } catch {}
+        }
       }
       // Read from the DO (source of truth; it lazily migrates from KV on first
       // touch). Migrate-in-memory for this response only — never persist from a
