@@ -328,6 +328,120 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert((after.teams || []).some((x) => x.id === id), 'the joined team is not in the spaces');
   });
 
+  const emailSession = async (email, acct) => {
+    const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    await env.META.put(`session:${id}`, JSON.stringify({ email, name: email, account_id: acct, created: new Date().toISOString() }));
+    return `tdoc_sid=${id}`;
+  };
+  const page = async (path, cookie) => {
+    const r = await worker.fetch(req(path, cookie ? { cookie } : {}), env, {});
+    return { status: r.status, location: r.headers.get('Location'), html: await r.text() };
+  };
+
+  let crew = null;
+  await t('a team gets a readable handle from its name; a second team with the same name gets the next one', async () => {
+    const made = await call('/api/teams', { method: 'POST', cookie: alice, headers: { Origin: 'https://tdoc.dev' }, body: { name: 'Be Freed!', invites: ['claire@befreed.ai', 'frank'] } });
+    assert(made.status === 200, `create ${made.status}`);
+    crew = made.body.team;
+    assert(crew.handle === 'be-freed' && crew.team_url === 'https://tdoc.dev/t/be-freed', `${crew.handle} ${crew.team_url}`);
+    assert(await env.META.get('team-handle:be-freed') === crew.id, 'handle index');
+    const twin = await call('/api/teams', { method: 'POST', cookie: bob, body: { name: 'be freed' } });
+    assert(twin.body.team.handle === 'be-freed-2', `twin ${twin.body.team.handle}`);
+    const detail = await call(`/api/team?id=${crew.id}`, { cookie: alice });
+    assert(detail.body.team.handle === 'be-freed' && detail.body.team.team_url.endsWith('/t/be-freed'), 'detail carries the link');
+  });
+
+  await t('a team from before handles existed gets one the first time a member opens it', async () => {
+    const legacy = JSON.parse(await env.META.get('team:t_0123456789abcdef'));
+    assert(!legacy.handle, 'precondition');
+    const detail = await call('/api/team?id=t_0123456789abcdef', { cookie: alice });
+    assert(detail.status === 200 && detail.body.team.handle === 'legacy-crew', `handle ${JSON.stringify(detail.body.team)}`);
+    const saved = JSON.parse(await env.META.get('team:t_0123456789abcdef'));
+    assert(saved.handle === 'legacy-crew' && await env.META.get('team-handle:legacy-crew') === 't_0123456789abcdef', 'saved with its handle');
+    const again = await call('/api/team?id=t_0123456789abcdef', { cookie: alice });
+    assert(again.body.team.handle === 'legacy-crew', 'kept');
+  });
+
+  await t('/t/<handle>: signed out → sign in and come back; member → the team space; unknown → 404', async () => {
+    const anon = await page('/t/be-freed');
+    assert(anon.status === 200 && anon.html.includes('Sign in') && anon.html.includes(encodeURIComponent('/t/be-freed')), `anon ${anon.status}`);
+    const member = await page('/t/be-freed', alice);
+    assert(member.status === 302 && member.location === `/me?team=${crew.id}`, `member ${member.status} ${member.location}`);
+    const byId = await page(`/t/${crew.id}`, alice);
+    assert(byId.status === 302 && byId.location === `/me?team=${crew.id}`, `by id ${byId.status}`);
+    const upper = await page('/t/Be-Freed', alice);
+    assert(upper.status === 302, `case ${upper.status}`);
+    const none = await page('/t/nobody-here', alice);
+    assert(none.status === 404, `unknown ${none.status}`);
+    const bad = await page('/t/t_ffffffffffffffff', alice);
+    assert(bad.status === 404, `unknown id ${bad.status}`);
+  });
+
+  await t('/t/<handle>: someone invited by address gets a Join button, and joining sends them to the team', async () => {
+    const claire = await emailSession('Claire@BeFreed.ai', 'acct-claire');
+    const open = await page('/t/be-freed', claire);
+    assert(open.status === 200, `invitee ${open.status}`);
+    const boot = bootData(open.html, '__TDOC_APP_BOOT__');
+    assert(boot.page === 'team-join' && boot.team.id === crew.id && !boot.token, `boot ${JSON.stringify(boot)}`);
+    assert(boot.identity.label === 'claire@befreed.ai' && boot.switch_href.includes('prompt=login'), `identity ${JSON.stringify(boot.identity)}`);
+    const joined = await call('/api/team/accept-invite', { method: 'POST', cookie: claire, headers: { Origin: 'https://tdoc.dev' }, body: { id: crew.id } });
+    assert(joined.status === 200 && joined.body.team.role === 'member', `join ${joined.status}`);
+    const after = await page('/t/be-freed', claire);
+    assert(after.status === 302 && after.location === `/me?team=${crew.id}`, `after ${after.status}`);
+  });
+
+  await t('/t/<handle>: an account that was not invited is told so, by name, with a way to switch', async () => {
+    const gina = await emailSession('gina@example.com', 'acct-gina');
+    const open = await page('/t/be-freed', gina);
+    assert(open.status === 200, `stranger ${open.status}`);
+    const boot = bootData(open.html, '__TDOC_APP_BOOT__');
+    assert(boot.page === 'status' && boot.title.includes('Be Freed!') && boot.message.includes('gina@example.com'), `boot ${JSON.stringify(boot)}`);
+    assert((boot.actions || []).some((a) => a.href.includes('prompt=login')), 'no account switch offered');
+    assert(!open.html.includes('acct-') && !open.html.includes('claire'), 'the page leaks members or invites');
+    const handleUser = await page('/t/be-freed', carol);
+    const b2 = bootData(handleUser.html, '__TDOC_APP_BOOT__');
+    assert(b2.message.includes('@carol'), `handle named: ${b2.message}`);
+  });
+
+  await t('/me?team=<id> for someone not in the team goes to the team link instead of being ignored', async () => {
+    const hank = await emailSession('hank@example.com', 'acct-hank');
+    const r = await page(`/me?team=${crew.id}`, hank);
+    assert(r.status === 302 && r.location === `/t/${crew.id}`, `${r.status} ${r.location}`);
+    const anon = await page(`/me?team=${crew.id}`);
+    assert(anon.status === 302 && anon.location === `/t/${crew.id}`, `anon ${anon.status} ${anon.location}`);
+    const mine = await page(`/me?team=${crew.id}`, alice);
+    assert(mine.status === 200, `member ${mine.status}`);
+    // The record says member but the account's team index fell behind:
+    // the page opens on the team and the index is repaired.
+    await env.META.put('account-teams:acct-alice', JSON.stringify([]));
+    const drift = await page(`/me?team=${crew.id}`, alice);
+    assert(drift.status === 200 && bootData(drift.html, '__TDOC_APP_BOOT__').teams.some((x) => x.id === crew.id), `drift ${drift.status}`);
+    assert(JSON.parse(await env.META.get('account-teams:acct-alice')).includes(crew.id), 'index not repaired');
+  });
+
+  await t('the invite index: a list too long for KV metadata and legacy teams whose save fails are still found', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => `person-${String(i).padStart(2, '0')}-with-a-long-address@example-company.com`);
+    const made = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'Big', invites: [...many, 'last@example.com'] } });
+    assert(made.status === 200, `create ${made.status}`);
+    const idx = env.META.metadata.get(`team:${made.body.team.id}`);
+    assert(idx && idx.p === 1 && !idx.i.includes('last@example.com'), `index should be partial: ${JSON.stringify(idx).length}`);
+    const last = await emailSession('last@example.com', 'acct-last');
+    const boot = bootData((await page('/me', last)).html, '__TDOC_APP_BOOT__');
+    assert((boot.team_invites || []).some((x) => x.id === made.body.team.id), `not found: ${JSON.stringify(boot.team_invites)}`);
+    // Twelve legacy teams, every re-save refused (a free-plan write cap):
+    // the first ten used to be read, the rest skipped on every request.
+    const ids = [];
+    for (let i = 0; i < 12; i++) {
+      const id = `t_${String(i).padStart(16, '0')}`;
+      ids.push(id);
+      await env.META.put(`team:${id}`, JSON.stringify({ id, name: `Old ${i}`, created: '2026-01-01T00:00:00Z', created_by: 'acct-alice', members: [{ account_id: 'acct-alice', key: 'alice', name: 'alice', role: 'admin', joined: '2026-01-01T00:00:00Z' }], invites: ['ivy@example.com'] }));
+      env.META.failPutOnce.add(`team:${id}`);
+    }
+    const ivy = await emailSession('ivy@example.com', 'acct-ivy');
+    const seen = (bootData((await page('/me', ivy)).html, '__TDOC_APP_BOOT__').team_invites || []).map((x) => x.id);
+    assert(ids.every((id) => seen.includes(id)), `missing: ${ids.filter((id) => !seen.includes(id))}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
