@@ -72,7 +72,8 @@ record the calling skill in `meta.json`.
 
 Server runs at `http://localhost:7878` (override with `TDOC_PORT`) and serves:
 - `/` — index of all docs
-- `/d/<slug>/v/<n>` — a specific version (reader shell + the author document in an isolated frame)
+- `/d/<slug>` — the doc, always at its newest version (the link to share)
+- `/d/<slug>/v/<n>` — one specific version (reader shell + the author document in an isolated frame)
 - `/d/<slug>/v/<n>/widget/<name>` — sandboxed interactive island (no reader chrome)
 - `/api/comments` GET/POST — comment persistence
 - `/api/ping` — health check; responds `{"ok":true,"service":"tdoc"}`. The
@@ -224,7 +225,7 @@ about. Two things change it, and only if the user says so in their own words:
 
 | The user said | Destination | What they get back |
 |---|---|---|
-| nothing about hosting | **hosted tdoc.dev** | `https://tdoc.dev/d/<slug>/v/1` — link-readable, not listed anywhere |
+| nothing about hosting | **hosted tdoc.dev** | `https://tdoc.dev/d/<slug>` — link-readable, not listed anywhere |
 | "publish to my own Cloudflare / Vercel", "self-host it" | their own worker | `<worker>.workers.dev` / `tdoc-<scope>.vercel.app` — still a public link, **not localhost** |
 | "keep it local", "don't upload it anywhere", "just show me locally" | local only | `http://localhost:7878/...` |
 
@@ -321,7 +322,8 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
    #   bash "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
    ```
 
-   Report the `https://tdoc.dev/d/<slug>/v/1` URL on its own line, and say what
+   Report the `https://tdoc.dev/d/<slug>` URL (no `/v/<n>`: it always opens the
+   newest version) on its own line, and say what
    it is — the user may never have seen a tdoc page before. Describe the
    access it actually has, which for a plain publish is the legacy policy:
 
@@ -572,9 +574,9 @@ silently is the #1 source of regression complaints.
    `status: "open"`. Re-running `/tdoc edit` will pick it up again.
 8. **Publish the new version and hand back its link**, the same way `/tdoc new`
    does. A doc that was published stays published; report
-   `https://tdoc.dev/d/<slug>/v/<n+1>` so the reviewer can see the version
-   their comment produced. The link a user already shared keeps working — a new
-   version never breaks it.
+   `https://tdoc.dev/d/<slug>` — the same link as before, which now opens the
+   version their comment produced. Give `/v/<n+1>` only if they ask for that
+   exact version. Links without a version always show the newest one.
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-publish" <slug>
@@ -717,9 +719,11 @@ Hosted needs no extra CLI beyond Node 18+ and curl. Self-hosting needs `jq`. Clo
 bash "$SKILL_DIR/bin/tdoc-publish" <slug>
 ```
 
-Prints the published URL: `https://tdoc.dev/d/<slug>/v/<N>` (hosted),
-`https://<worker>.<subdomain>.workers.dev/d/<slug>/v/<N>` (Cloudflare), or
-`https://tdoc-<scope>.vercel.app/d/<slug>/v/<N>` (Vercel).
+Prints the doc's link: `https://tdoc.dev/d/<slug>` (hosted),
+`https://<worker>.<subdomain>.workers.dev/d/<slug>` (Cloudflare), or
+`https://tdoc-<scope>.vercel.app/d/<slug>` (Vercel). That link always opens the
+newest version — it is the one to give people. The line after it names the
+exact-version link (`/v/<N>`) for when someone needs that version on purpose.
 
 ### `/tdoc pull <slug>` — pull comments from the published doc
 

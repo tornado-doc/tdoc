@@ -852,9 +852,13 @@ export function DocumentShell({ boot, config }) {
     document.body.appendChild(frame);
   };
 
+  // What Share copies: the doc's own address, which always opens the newest
+  // version (Julie, 2026-10-13). A link to exactly this version is offered
+  // as the secondary choice in the dialog.
   const shareUrl = config.isLanding
     ? `${location.origin}/`
-    : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
+    : `${location.origin}/d/${encodeURIComponent(config.slug)}`;
+  const versionUrl = config.isLanding ? null : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
 
   // While the owner waits on their agent, ask the server every few seconds
   // what it has done: read the comments (the card flips to "reading"), then
@@ -878,7 +882,11 @@ export function DocumentShell({ boot, config }) {
           // The thing it was waiting for arrived; the wait should not outlive
           // it into the next page.
           try { localStorage.removeItem(handoffKey); } catch {}
-          location.href = `/d/${encodeURIComponent(config.slug)}/v/${latest}?revised=1`;
+          // On the doc's own address the newest version is what it shows; a
+          // reader who chose a version is taken to the new one explicitly.
+          location.href = /\/v\/\d+\/?$/.test(location.pathname)
+            ? `/d/${encodeURIComponent(config.slug)}/v/${latest}?revised=1`
+            : `/d/${encodeURIComponent(config.slug)}?revised=1`;
           return;
         }
         const readAt = status?.read_at ? new Date(status.read_at).getTime() : 0;
@@ -1420,6 +1428,8 @@ export function DocumentShell({ boot, config }) {
           open={dialog?.type === 'share'}
           config={config}
           url={shareUrl}
+          versionUrl={versionUrl}
+          version={config.version}
           onOpenChange={(open) => !open && setDialog(null)}
           onCopied={() => showToast('Link copied')}
         />
@@ -1427,6 +1437,8 @@ export function DocumentShell({ boot, config }) {
         <ShareDialog
           open={dialog?.type === 'share'}
           url={shareUrl}
+          versionUrl={versionUrl}
+          version={config.version}
           team={config.teamManage}
           onOpenChange={(open) => !open && setDialog(null)}
           onCopied={() => showToast('Link copied')}

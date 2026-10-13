@@ -1,4 +1,6 @@
-// Bare /d/<slug> (no /v/<n>) resolves to the latest version via redirect.
+// Bare /d/<slug> (no /v/<n>) shows the latest version IN PLACE (Julie,
+// 2026-10-13): the address stays /d/<slug>, so one link always shows the
+// newest version. It used to 302 to /v/<latest>.
 //
 // Before this route existed, the canonical short link — the thing people
 // naturally paste — bounced to the not-found landing while every versioned
@@ -30,21 +32,28 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     }
   }
 
-  await t('bare /d/<slug> 302s to the latest version', async () => {
+  await t('bare /d/<slug> shows the latest version without redirecting', async () => {
     const env = makeEnv(mod.CommentsStore);
     await seed(env, 'pricing', [1, 2, 3]);
     const r = await worker.fetch(req('/d/pricing'), env, {});
-    assert(r.status === 302, `expected 302, got ${r.status}`);
-    assert(r.headers.get('Location') === '/d/pricing/v/3',
-      `expected /d/pricing/v/3, got ${r.headers.get('Location')}`);
+    assert(r.status === 200, `expected 200, got ${r.status} → ${r.headers.get('Location')}`);
+    const page = await r.text();
+    assert(page.includes('/d/pricing/v/3/frame'), 'not the latest version');
+    assert(/rel="canonical" href="[^"]*\/d\/pricing"/.test(page), 'canonical should be the bare doc URL');
+    // A new version: the same address now shows it.
+    await env.DOCS.put('docs/pricing/v4/index.html', '<h1>pricing v4</h1>');
+    const meta = JSON.parse(await env.META.get('meta:pricing'));
+    meta.versions.push({ n: 4, created: '2026-01-04T00:00:00Z' });
+    await env.META.put('meta:pricing', JSON.stringify(meta));
+    const again = await (await worker.fetch(req('/d/pricing?comment=c1'), env, {})).text();
+    assert(again.includes('/d/pricing/v/4/frame'), 'the same link did not move to v4');
   });
 
-  await t('trailing slash form redirects the same way', async () => {
+  await t('trailing slash form serves the latest the same way', async () => {
     const env = makeEnv(mod.CommentsStore);
     await seed(env, 'pricing', [1, 2]);
     const r = await worker.fetch(req('/d/pricing/'), env, {});
-    assert(r.status === 302 && r.headers.get('Location') === '/d/pricing/v/2',
-      `expected 302 → /d/pricing/v/2, got ${r.status} → ${r.headers.get('Location')}`);
+    assert(r.status === 200 && (await r.text()).includes('/d/pricing/v/2/frame'), `got ${r.status}`);
   });
 
   await t('unknown slug keeps the not-found landing redirect', async () => {

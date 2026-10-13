@@ -2122,7 +2122,7 @@ async function fetchStars(env) {
   }
 }
 
-async function serveDocVersion(env, req, slug, version, isLanding) {
+async function serveDocVersion(env, req, slug, version, isLanding, { head = false } = {}) {
   const gate = await enforceDocAccess(env, req, slug, version);
   if (!gate.ok) return { ok: false, response: gate.response };
   const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
@@ -2181,9 +2181,13 @@ async function serveDocVersion(env, req, slug, version, isLanding) {
   }
   const render = shellDocumentWorker;
   const reqUrl = new URL(req.url);
+  // The bare /d/<slug> address is the doc's canonical page: it always
+  // shows the newest version.
   const pageUrl = isLanding && (reqUrl.pathname === '/' || reqUrl.pathname === '')
     ? `${reqUrl.origin}/`
-    : `${reqUrl.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
+    : head
+      ? `${reqUrl.origin}/d/${encodeURIComponent(slug)}`
+      : `${reqUrl.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
   return {
     ok: true,
     // session rides along so the /d/ route can record the visit (recents)
@@ -9266,6 +9270,7 @@ export default {
     // unauthorized probe gets the same denial screen as /v/<n> and never
     // learns the version count; unknown slugs fall through to the existing
     // not-found landing redirect.
+    let docRoute = null;
     const docHeadMatch = p.match(/^\/d\/([^/]+)\/?$/);
     if (docHeadMatch && (method === 'GET' || method === 'HEAD')) {
       const slug = docHeadMatch[1];
@@ -9282,14 +9287,19 @@ export default {
       // here landed all of them on an ordinary page with nothing opened.
       // `url.search` is already percent-encoded by the URL parser, so it
       // cannot carry a newline into the header.
-      if (latest > 0) return redirectTo(`/d/${encodeURIComponent(slug)}/v/${latest}${url.search}`);
+      // Served in place, not redirected (Julie, 2026-10-13): /d/<slug> is
+      // the link people share, and it stays the address bar's URL, so the
+      // same link always shows the newest version. /v/<n> is for a person
+      // who wants one version on purpose.
+      if (latest > 0) docRoute = { slug, vStr: String(latest), head: true };
       // Unknown slug → the existing not-found landing redirect below.
     }
 
     // ---- doc view ----
     const docMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/?$/);
-    if (docMatch && (method === 'GET' || method === 'HEAD')) {
-      const [, slug, vStr] = docMatch;
+    if (docMatch && (method === 'GET' || method === 'HEAD')) docRoute = { slug: docMatch[1], vStr: docMatch[2], head: false };
+    if (docRoute) {
+      const { slug, vStr } = docRoute;
       // A feedback space is a list of comments left on an app, not a document
       // anyone reads; its page is that list, and the one link people share —
       // it joins them too. ?doc=1 still opens the underlying doc.
@@ -9328,7 +9338,7 @@ export default {
           }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store' } });
         }
       }
-      const res = await serveDocVersion(env, req, slug, Number(vStr));
+      const res = await serveDocVersion(env, req, slug, Number(vStr), false, { head: docRoute.head });
       // Google-Docs-style recents: remember the visit — owned or not — for
       // the signed-in viewer's /me Recent tab. Only successful reads count
       // (the access gate already passed), HEAD probes and anonymous readers

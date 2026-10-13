@@ -4,7 +4,8 @@ import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 
 export const day = (iso) => (typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '');
 
-export const docHref = (doc) => `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest}`;
+// The doc's own address: always its newest version, and the URL people copy.
+export const docHref = (doc) => `/d/${encodeURIComponent(doc.slug)}`;
 
 // Row-level "⋯" menu. Items: { label, icon?, tone?, className?, onSelect }.
 // Built on the shared AppMenu facade so every row gets outside-click and

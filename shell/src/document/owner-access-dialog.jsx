@@ -4,6 +4,7 @@ import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AppSelect } from '../ui/select.jsx';
 import { deleteDocument, updateDocumentAccess } from './api.js';
+import { VersionLinkChoice } from './document-dialogs.jsx';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
 
 // Mirrors normalizeInvitee in the worker: a handle reading first (so "@Bob"
@@ -99,7 +100,7 @@ export function InviteField({ users, onChange }) {
   );
 }
 
-export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied }) {
+export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOpenChange, onCopied }) {
   const manage = config.ownerManage || (config.teamManage?.canManage ? config.teamManage : null);
   const team = config.teamManage?.team || null;
   const [access, setAccess] = useState(manage?.access || {});
@@ -174,6 +175,7 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
           Copy link
         </button>
       </div>
+      <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
       {manage.versionCount != null ? (
         <p className="muted" style={{ margin: '8px 0 0' }}>
           {config.slug} · {manage.versionCount} versions · {manage.commentCount} comments

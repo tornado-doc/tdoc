@@ -1004,3 +1004,8 @@ button.tdoc-pin {
   border-color: var(--td-line); font-family: inherit;
 }
 .tdoc-modal .tdoc-send .tdoc-notify-recipient { padding: 2px 0; }
+
+/* Under a Share link: the link always opens the newest version; this exact
+   version is the quiet second choice. */
+.tdoc-share-version { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--td-muted); }
+.tdoc-modal .tdoc-share-version button.tdoc-quiet-link { margin: 0; color: var(--td-accent); }
