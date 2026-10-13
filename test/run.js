@@ -43,6 +43,7 @@ const OFFLINE = [
   'mention-directory.test.js',  // @ offers doc people, teammates, recent contacts first
   'publish-attribution.test.js', // author name + per-version publisher come from the credential
   'operator-fallback.test.js',  // TDOC_OWNER owns only ownerless docs, not email accounts' docs
+  'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
   'profile.test.js',            // /@handle public profiles
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()

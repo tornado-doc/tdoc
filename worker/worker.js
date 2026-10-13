@@ -11758,9 +11758,18 @@ export default {
       const clientVersion = (req.headers.get('x-tdoc-client') || '').slice(0, 64) || null;
       const r2Key = `docs/${slug}/v${verNum}/index.html`;
       const incomingLatest = latestVersionNumber(incoming);
-      const writesLatestMeta = !!incoming && (incomingLatest === 0 || verNum === incomingLatest);
       let versionReservation = null;
       const remoteLatest = latestVersionNumber(writeGate.meta);
+      // Catching up: the client is walking its versions upward and this one
+      // is exactly the next the server is missing. Commit it as latest now,
+      // instead of storing bytes the meta never lists. Without this, a v6
+      // whose first upload died after the R2 write (a 1102, a KV write
+      // failure) stayed an orphan, and every later publish hit
+      // version_conflict (latestVersion 5) forever (Julie, 2026-10-01 and
+      // 2026-10-13, pi-agent-harness).
+      const catchUp = !!incoming && !!writeGate.meta && remoteLatest > 0
+        && verNum === remoteLatest + 1 && incomingLatest > verNum;
+      const writesLatestMeta = !!incoming && (incomingLatest === 0 || verNum === incomingLatest || catchUp);
       if (writeGate.meta && verNum <= remoteLatest) {
         const existing = await env.DOCS.get(r2Key);
         const existingHtml = existing ? await existing.text() : null;
@@ -11857,6 +11866,9 @@ export default {
           }
           for (const item of (Array.isArray(incoming.versions) ? incoming.versions : [])) {
             const number = Number(item.n);
+            // A catch-up commits up to this version only; the client's newer
+            // ones land with their own uploads.
+            if (catchUp && number > verNum) continue;
             // `token` is the server's record of who published; a client
             // cannot write it.
             const { token: _clientToken, ...clean } = item || {};
