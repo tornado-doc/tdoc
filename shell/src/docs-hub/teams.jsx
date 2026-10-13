@@ -160,7 +160,7 @@ export function NewTeamDialog({ onClose, onCreated }) {
 export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
   const [team, setTeam] = useState(null);
   const [status, setStatus] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState('');
 
   useEffect(() => {
     getTeam(teamId).then((res) => setTeam(res.team)).catch((error) => setStatus(message(error)));
@@ -211,11 +211,23 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
                 <button
                   type="button"
                   className="tm-link-btn"
-                  onClick={() => copyText(team.invite_url).then(() => setCopied(true))}
+                  onClick={() => copyText(team.invite_url).then(() => setCopied('invite'))}
                 >
-                  <Link2 size={14} /> {copied ? 'Invite link copied' : 'Copy invite link'}
+                  <Link2 size={14} /> {copied === 'invite' ? 'Invite link copied' : 'Copy invite link'}
                 </button>
               ) : null}
+            </section>
+          ) : null}
+          {team.team_url ? (
+            <section className="manage-section">
+              <label className="field">Team link</label>
+              <div className="tm-team-link">
+                <code>{team.team_url.replace(/^https?:\/\//, '')}</code>
+                <button type="button" className="tm-text-btn" onClick={() => copyText(team.team_url).then(() => setCopied('team'))}>
+                  {copied === 'team' ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <p className="manage-hint">Opens the team for members and for people on the invite list. Anyone else is told whom to ask.</p>
             </section>
           ) : null}
           <section className="manage-section">

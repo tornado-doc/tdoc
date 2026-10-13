@@ -10,6 +10,9 @@
 .tm-role-label { color: var(--td-muted); font-size: 13px; }
 .tm-text-btn { border: 0 !important; background: none !important; color: var(--td-muted); font-size: 13px; padding: 4px !important; }
 .tm-link-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; }
+/* The team link, shown like the profile's share link: a chip and Copy. */
+.tm-team-link { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 4px 0 6px; }
+.tm-team-link code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; padding: 6px 10px; background: var(--td-surface-2); border-radius: 6px; }
 .tdoc-modal .actions .tm-push-left { margin: 0 auto 0 0; }
 
 /* SpaceBar: the spaces in view, above the page title. */

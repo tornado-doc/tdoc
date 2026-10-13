@@ -3362,10 +3362,12 @@ async function loadTeam(env, id) {
 // The team key carries who is invited in its KV metadata, so finding "teams
 // that invited me" is one list call, not a read per team (Julie, 2026-10-13:
 // people invited by handle got no email and never saw the team at all).
+// KV metadata holds 1024 bytes; a list that does not fit is marked partial
+// (`p`) so the scan reads the record instead of missing whoever came last.
 function teamIndex(team) {
   const idx = { v: 1, n: String(team.name || '').slice(0, 80), i: [] };
   for (const x of Array.isArray(team.invites) ? team.invites : []) {
-    if (JSON.stringify(idx).length + String(x).length > 980) break;
+    if (JSON.stringify(idx).length + String(x).length > 960) { idx.p = 1; break; }
     idx.i.push(String(x));
   }
   return idx;
@@ -3375,26 +3377,33 @@ async function saveTeam(env, team) {
 }
 
 // Teams that invited this person (by handle or address) and they have not
-// joined. Teams saved before the index existed are read once and indexed.
+// joined. Teams saved before the index existed are read and indexed, a few
+// writes per request; the ones past that budget are still read (a read is
+// cheap, and a write that keeps failing — the free plan's daily cap — must
+// not hide a team for good), up to a bound that keeps the request short.
 async function pendingTeamInvitesFor(env, session) {
   const mine = [sessionLogin(session), normalizeEmail(session && session.email)].filter(Boolean);
   if (!mine.length) return [];
   const out = [];
   let cursor;
   let backfills = 0;
+  let reads = 0;
   do {
     const page = await env.META.list({ prefix: 'team:', cursor });
     for (const k of page.keys) {
       let idx = k.metadata && k.metadata.v === 1 ? k.metadata : null;
       if (!idx) {
-        if (backfills >= 10) continue;
+        if (reads >= 100) continue;
         const team = await loadTeam(env, k.name.slice('team:'.length));
+        reads += 1;
         if (!team) continue;
-        backfills += 1;
-        try { await saveTeam(env, team); } catch {}
+        if (backfills < 10) {
+          backfills += 1;
+          try { await saveTeam(env, team); } catch {}
+        }
         idx = teamIndex(team);
       }
-      if (!idx.i.some((x) => mine.includes(x))) continue;
+      if (!idx.p && !idx.i.some((x) => mine.includes(x))) continue;
       const team = await loadTeam(env, k.name.slice('team:'.length));
       if (!team || teamMember(team, session.account_id) || !pendingTeamInvite(team, session)) continue;
       out.push({ id: team.id, name: team.name, member_count: team.members.length });
@@ -3482,6 +3491,8 @@ function teamDetail(team, accountId, origin) {
       me: m.account_id === accountId,
     })),
     invites: Array.isArray(team.invites) ? team.invites : [],
+    ...(team.handle ? { handle: team.handle } : {}),
+    team_url: teamUrl(team, origin),
     ...(admin && team.invite_token ? { invite_url: `${origin}/team/join/${team.invite_token}` } : {}),
   };
 }
@@ -3517,6 +3528,57 @@ async function teamForInviteToken(env, token) {
   if (typeof token !== 'string' || !/^[a-f0-9]{32}$/.test(token)) return null;
   const team = await loadTeam(env, await env.META.get(`team-invite:${token}`));
   return team && team.invite_token === token ? team : null;
+}
+
+// A team's readable address: /t/<handle>, e.g. /t/befreed. Derived from the
+// name the first time a member looks at the team, unique across teams
+// (`team-handle:<handle>` → id), and kept once given so a link already in
+// someone's inbox survives a rename. The id form /t/t_… always works too.
+// Unlike the invite token, the handle is not a secret and grants nothing:
+// the page it opens only ever reflects what the invite list already says.
+const TEAM_HANDLE_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+
+function teamHandleFromName(name) {
+  const base = String(name || '').normalize('NFKD').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 36).replace(/-+$/g, '');
+  return TEAM_HANDLE_RE.test(base) ? base : null;
+}
+
+// Reserves a handle for a team that has none; the caller saves the record.
+// Returns true when the team changed. befreed, then befreed-2, befreed-3…
+async function claimTeamHandle(env, team) {
+  if (!team || team.handle) return false;
+  const base = teamHandleFromName(team.name) || 'team';
+  for (let n = 1; n <= 20; n++) {
+    const candidate = n === 1 ? base : `${base}-${n}`;
+    const owner = await env.META.get(`team-handle:${candidate}`);
+    if (owner && owner !== team.id) continue;
+    if (!owner) await env.META.put(`team-handle:${candidate}`, team.id);
+    team.handle = candidate;
+    return true;
+  }
+  return false;
+}
+
+async function teamForHandle(env, raw) {
+  const key = String(raw || '').trim().toLowerCase();
+  if (validTeamId(key)) return loadTeam(env, key);
+  if (!TEAM_HANDLE_RE.test(key)) return null;
+  const team = await loadTeam(env, await env.META.get(`team-handle:${key}`));
+  return team && team.handle === key ? team : null;
+}
+
+function teamUrl(team, origin) {
+  return `${origin}/t/${team.handle || team.id}`;
+}
+
+// How a person is signed in, for a page that has to say "not this account":
+// @handle, the address, or both when the session carries both.
+function sessionIdentityLabel(session) {
+  const login = sessionLogin(session);
+  const email = normalizeEmail(session && session.email);
+  if (login && email) return `@${login} (${email})`;
+  return login ? `@${login}` : email || '';
 }
 
 // Team routes need an account, not just a sign-in: membership is keyed on
@@ -9009,8 +9071,80 @@ export default {
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
 
+    // The team link: /t/<handle> or /t/<id>. One address a member can pass
+    // on, and it never does nothing (Julie, 2026-10-13: an invitee opened
+    // /me?team=… and saw her own docs, with no word about the team). Signed
+    // out: sign in and come back. Member: the team's space. Invited: a Join
+    // button. Anyone else: which account this is, and whom to ask.
+    const teamLinkMatch = p.match(/^\/t\/([^/]+)\/?$/);
+    if (teamLinkMatch && (method === 'GET' || method === 'HEAD')) {
+      let team = null;
+      try { team = await teamForHandle(env, decodeURIComponent(teamLinkMatch[1])); } catch {}
+      if (!team) {
+        return statusPageResponse({
+          docTitle: 'Team not found · tdoc',
+          title: 'No team at this address',
+          message: 'Check the link with someone on the team.',
+          error: true,
+          status: 404,
+          actions: [{ label: 'My docs', href: '/me' }],
+        });
+      }
+      const s = await getSession(env, req);
+      const loginPath = oidcConfig(env) ? '/api/auth/oidc/login' : '/api/auth/web/login';
+      if (!sessionPrincipal(s)) {
+        return statusPageResponse({
+          docTitle: `${team.name} · tdoc`,
+          title: `${team.name} on tdoc`,
+          message: 'Sign in to open the team. First time here? Signing in creates your account automatically.',
+          actions: [{ label: 'Sign in', href: `${loginPath}?return=${encodeURIComponent(p)}`, primary: true }],
+        });
+      }
+      if (teamMember(team, s.account_id)) return redirectTo(`/me?team=${team.id}`);
+      if (method === 'HEAD') return new Response(null, { status: 200 });
+      const who = sessionIdentityLabel(s);
+      const switchHref = `${loginPath}?prompt=login&return=${encodeURIComponent(p)}`;
+      // Checked against this team's own record, not the invite index: a
+      // link to a named team must never depend on a scan being complete.
+      if (pendingTeamInvite(team, s)) {
+        const nonce = rand(16);
+        return html(SHELL.appHtml({
+          title: `Join ${team.name} · tdoc`,
+          nonceAttr: ` nonce="${nonce}"`,
+          runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+          runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+          bootJson: safeJsonForScript({
+            page: 'team-join',
+            team: { id: team.id, name: team.name, member_count: team.members.length },
+            identity: { login: actorKey(s), name: actorDisplayName(s), label: who },
+            switch_href: switchHref,
+          }),
+        }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+      }
+      return statusPageResponse({
+        docTitle: `${team.name} · tdoc`,
+        title: `${team.name} hasn’t invited this account`,
+        message: `You’re signed in as ${who}. Ask a ${team.name} admin to invite ${who}, or sign in with the account that was invited.`,
+        actions: [
+          { label: 'Sign in with another account', href: switchHref, primary: true },
+          { label: 'My docs', href: '/me' },
+        ],
+      });
+    }
+
     if (p === '/me' && (method === 'GET' || method === 'HEAD')) {
       const s = await getSession(env, req);
+      // ?team= names a team this person is not in: the team link answers
+      // (join if invited, otherwise who to ask) instead of My docs quietly
+      // opening on the wrong space. The record is the truth about
+      // membership; the session's index is repaired if it fell behind.
+      const asked = url.searchParams.get('team');
+      if (validTeamId(asked) && !sessionInTeam(s, asked)) {
+        const team = sessionPrincipal(s) ? await loadTeam(env, asked) : null;
+        if (!team || !teamMember(team, s.account_id)) return redirectTo(`/t/${asked}`);
+        try { await setAccountTeam(env, s.account_id, asked, true); } catch {}
+        s.team_ids = [...(s.team_ids || []), asked];
+      }
       if (!canSeeMyDocs(env, s, url.origin)) {
         const notice = sessionPrincipal(s) ? 'me' : 'signin';
         return new Response(null, {
@@ -10499,6 +10633,7 @@ export default {
         invites,
       };
       await rotateTeamInvite(env, team);
+      await claimTeamHandle(env, team);
       await saveTeam(env, team);
       await setAccountTeam(env, s.account_id, team.id, true);
       let emailed = [];
@@ -10520,7 +10655,13 @@ export default {
       const id = method === 'GET' ? url.searchParams.get('id') : body.id;
       const team = await loadTeam(env, id);
       if (!teamMember(team, s.account_id)) return json({ error: 'not_found' }, { status: 404 });
-      if (method === 'GET') return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
+      // Teams from before handles existed get theirs the first time a member
+      // opens the team: that is where the link is copied from.
+      const handled = await claimTeamHandle(env, team);
+      if (method === 'GET') {
+        if (handled) await saveTeam(env, team);
+        return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
+      }
       if (teamRole(team, s.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
       let added = [];
       if ('name' in body) {

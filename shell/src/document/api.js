@@ -361,6 +361,11 @@ export function joinTeam(token) {
   return teamRequest('/api/team/join', 'POST', { token });
 }
 
+// Join without a link: the team's invite list names this handle or address.
+export function acceptTeamInvite(id) {
+  return teamRequest('/api/team/accept-invite', 'POST', { id });
+}
+
 export function moveDocsToTeam(slugs, team) {
   return teamRequest('/api/team/move', 'POST', { slugs, team: team || null });
 }
