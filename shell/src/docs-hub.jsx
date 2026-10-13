@@ -338,6 +338,44 @@ function SiteEmbedDialog({ space, onClose, onSaved }) {
   );
 }
 
+// Teams that invited you by handle or address and you have not joined yet.
+// An invite by handle sends no email, so this is where the person finds it.
+function TeamInviteBanner({ invites }) {
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const join = async (team) => {
+    setBusy(team.id);
+    setError('');
+    try {
+      const r = await fetch('/api/team/accept-invite', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: team.id }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error === 'team_full' ? `${team.name} is full.` : (body.message || body.error || 'Could not join'));
+      location.href = `/me?team=${encodeURIComponent(team.id)}`;
+    } catch (err) {
+      setError(err.message);
+      setBusy('');
+    }
+  };
+  return (
+    <div className="tm-invites" role="region" aria-label="Team invitations">
+      {invites.map((team) => (
+        <div key={team.id} className="tm-invite">
+          <UsersRound size={16} aria-hidden="true" />
+          <span className="tm-invite-text"><b>{team.name}</b> invited you to its team{team.member_count ? ` · ${team.member_count} ${team.member_count === 1 ? 'member' : 'members'}` : ''}</span>
+          <button type="button" className="tdoc-fbspace-btn primary" disabled={busy === team.id} onClick={() => join(team)}>
+            {busy === team.id ? 'Joining…' : 'Join'}
+          </button>
+        </div>
+      ))}
+      {error ? <p className="tm-invite-error" role="status">{error}</p> : null}
+    </div>
+  );
+}
+
 function FlatList({ docs, label, viewer, empty, onToggleStar }) {
   if (!docs.length) return <p className="empty">{empty}</p>;
   return (
@@ -577,6 +615,9 @@ export function DocsHub({ boot }) {
         onClaimProfile={boot.profile ? () => setModal({ type: 'claim-handle' }) : null}
       />
       <main className="wrap">
+        {(boot.team_invites || []).length ? (
+          <TeamInviteBanner invites={boot.team_invites} />
+        ) : null}
         <SpaceBar
           teams={teams}
           space={space}

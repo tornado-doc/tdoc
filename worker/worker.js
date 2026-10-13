@@ -3346,8 +3346,50 @@ async function loadTeam(env, id) {
   } catch { return null; }
 }
 
+// The team key carries who is invited in its KV metadata, so finding "teams
+// that invited me" is one list call, not a read per team (Julie, 2026-10-13:
+// people invited by handle got no email and never saw the team at all).
+function teamIndex(team) {
+  const idx = { v: 1, n: String(team.name || '').slice(0, 80), i: [] };
+  for (const x of Array.isArray(team.invites) ? team.invites : []) {
+    if (JSON.stringify(idx).length + String(x).length > 980) break;
+    idx.i.push(String(x));
+  }
+  return idx;
+}
 async function saveTeam(env, team) {
-  await env.META.put(`team:${team.id}`, JSON.stringify(team));
+  await env.META.put(`team:${team.id}`, JSON.stringify(team), { metadata: teamIndex(team) });
+}
+
+// Teams that invited this person (by handle or address) and they have not
+// joined. Teams saved before the index existed are read once and indexed.
+async function pendingTeamInvitesFor(env, session) {
+  const mine = [sessionLogin(session), normalizeEmail(session && session.email)].filter(Boolean);
+  if (!mine.length) return [];
+  const out = [];
+  let cursor;
+  let backfills = 0;
+  do {
+    const page = await env.META.list({ prefix: 'team:', cursor });
+    for (const k of page.keys) {
+      let idx = k.metadata && k.metadata.v === 1 ? k.metadata : null;
+      if (!idx) {
+        if (backfills >= 10) continue;
+        const team = await loadTeam(env, k.name.slice('team:'.length));
+        if (!team) continue;
+        backfills += 1;
+        try { await saveTeam(env, team); } catch {}
+        idx = teamIndex(team);
+      }
+      if (!idx.i.some((x) => mine.includes(x))) continue;
+      const team = await loadTeam(env, k.name.slice('team:'.length));
+      if (!team || teamMember(team, session.account_id) || !pendingTeamInvite(team, session)) continue;
+      out.push({ id: team.id, name: team.name, member_count: team.members.length });
+    }
+    cursor = page.cursor;
+    if (page.list_complete) break;
+  } while (cursor);
+  return out;
 }
 
 async function loadAdminTeamIds(env, accountId, teamIds) {
@@ -3760,6 +3802,7 @@ async function indexData(env, session, origin) {
     folders: folderState.folders.map((folder) => publicFolder(folder)),
     teams: teamRecords.map((team) => teamSummary(team, viewerAccount)),
     team_docs: teamDocs.map(teamDocRow),
+    team_invites: sessionPrincipal(session) ? await pendingTeamInvitesFor(env, session).catch(() => []) : [],
   };
 }
 
@@ -8733,6 +8776,7 @@ export default {
         feedback: data.feedback,
         teams: data.teams,
         team_docs: data.team_docs,
+        team_invites: data.team_invites || [],
         ...(profile ? { profile } : {}),
       });
     }
@@ -10530,6 +10574,23 @@ export default {
       try { body = await req.json(); } catch {}
       const team = await teamForInviteToken(env, body.token);
       if (!team) return json({ error: 'invite_invalid' }, { status: 404 });
+      const joined = await joinTeamFromSession(env, team, s);
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit }, { status: 400 });
+      return json({ ok: true, team: teamSummary(team, s.account_id) });
+    }
+
+    // Accept an invite shown on My docs. The invite list is the proof, matched
+    // against the signed-in handle or address; no link needed.
+    if (p === '/api/team/accept-invite' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      const s = gate.session;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const team = await loadTeam(env, body.id);
+      if (!team) return json({ error: 'not_found' }, { status: 404 });
+      if (!teamMember(team, s.account_id) && !pendingTeamInvite(team, s)) return json({ error: 'no_invite' }, { status: 403 });
       const joined = await joinTeamFromSession(env, team, s);
       if (!joined.ok) return json({ error: joined.error, limit: joined.limit }, { status: 400 });
       return json({ ok: true, team: teamSummary(team, s.account_id) });
