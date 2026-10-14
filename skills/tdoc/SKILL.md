@@ -1233,6 +1233,8 @@ bash "$SKILL_DIR/bin/tdoc-folder" create "Daily reports" [--parent Reports] [--t
 bash "$SKILL_DIR/bin/tdoc-folder" add <slug>... --folder "Daily reports" --create [--team BeFreed]
 bash "$SKILL_DIR/bin/tdoc-folder" remove <slug>... [--team BeFreed]     # back to the top level
 bash "$SKILL_DIR/bin/tdoc-folder" rename <folder> <new name> | delete <folder>  [--team ...]
+bash "$SKILL_DIR/bin/tdoc-folder" share <folder> [--visibility unlisted|private|public] [--team ...]  # prints /f/<id>
+bash "$SKILL_DIR/bin/tdoc-folder" unshare <folder> [--team ...]          # the link stops working
 ```
 
 - Recurring docs (daily reports): publish with `--team <t> --folder <f>`
@@ -1244,6 +1246,10 @@ bash "$SKILL_DIR/bin/tdoc-folder" rename <folder> <new name> | delete <folder>  
   maker or a team admin renames/deletes it; a team doc is filed by its author
   or an admin, and must already be in the team (`tdoc-move --team` first).
 - Deleting a folder never deletes docs; they move up one level.
+- `share` (My docs or team; in a team, maker or admin) prints a link listing
+  the folder's docs (not subfolders). It grants no doc access: each doc still
+  opens only for whoever its own access allows, so a team-only doc stays
+  hidden outside the team. `private` = you (team: its members) + invitees.
 
 
 ### Comment anchor stability (important for `/tdoc edit`)

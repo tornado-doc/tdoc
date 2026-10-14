@@ -219,7 +219,8 @@ export function useDocsHub({ boot, onUnauthorized }) {
     let saved;
     const ok = await run(async () => { saved = (await updateFolderAccess(id, patch)).folder; });
     if (!ok) return null;
-    setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)));
+    // share_id spelled out: after "Stop sharing" the reply has none.
+    setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, ...saved, share_id: saved.share_id } : item)));
     return saved;
   }, [run]);
 

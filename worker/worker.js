@@ -3270,7 +3270,8 @@ async function mergeVerifiedAccountState(env, group) {
 // Folder link sharing (catalog only). Docs keep their own access; the share
 // page lists whichever of the folder's docs the viewer (cookie or Bearer) may
 // already read. unlisted/public = anyone with the link; private = owner +
-// allowlisted invitees (same shape as doc access).
+// allowlisted invitees (same shape as doc access). A team folder shares the
+// same way; its "owner" for a private link is the whole team.
 function folderVisibility(folder) {
   const v = folder && folder.visibility;
   return ACCESS_VISIBILITIES.has(v) ? v : 'private';
@@ -3302,11 +3303,15 @@ function publicFolder(folder) {
   return out;
 }
 
-function canAccessSharedFolder(folder, session, ownerKey) {
+function canAccessSharedFolder(folder, session, ownerKey, team = null) {
   const visibility = folderVisibility(folder);
   if (visibility === 'unlisted' || visibility === 'public') return true;
-  const me = actorKey(session);
-  if (me && normalizeActorKey(ownerKey) && me === normalizeActorKey(ownerKey)) return true;
+  if (team) {
+    if (teamMember(team, session && session.account_id)) return true;
+  } else {
+    const me = actorKey(session);
+    if (me && normalizeActorKey(ownerKey) && me === normalizeActorKey(ownerKey)) return true;
+  }
   const allowed = folderAllowedUsers(folder);
   const login = sessionLogin(session);
   if (login && allowed.includes(login)) return true;
@@ -3320,16 +3325,18 @@ async function loadFolderShareIndex(env, shareId) {
     const raw = await env.META.get(`folder-share:${shareId}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed.owner_key !== 'string' || typeof parsed.folder_id !== 'string') return null;
+    if (!parsed || typeof parsed.folder_id !== 'string') return null;
+    if (typeof parsed.owner_key !== 'string' && !validTeamId(parsed.team_id)) return null;
     return parsed;
   } catch {
     return null;
   }
 }
 
-async function putFolderShareIndex(env, shareId, ownerKey, folderId) {
+// `owner` is the My docs actor key, or `{ team: <id> }` for a team folder.
+async function putFolderShareIndex(env, shareId, owner, folderId) {
   await env.META.put(`folder-share:${shareId}`, JSON.stringify({
-    owner_key: ownerKey,
+    ...(owner && owner.team ? { team_id: owner.team } : { owner_key: owner }),
     folder_id: folderId,
   }));
 }
@@ -3339,17 +3346,65 @@ async function deleteFolderShareIndex(env, shareId) {
   try { await env.META.delete(`folder-share:${shareId}`); } catch {}
 }
 
-async function ensureFolderShareId(env, ownerKey, folder) {
+async function ensureFolderShareId(env, owner, folder) {
   if (folder.share_id) return folder.share_id;
   const shareId = `s_${rand(16)}`;
   folder.share_id = shareId;
-  await putFolderShareIndex(env, shareId, ownerKey, folder.id);
+  await putFolderShareIndex(env, shareId, owner, folder.id);
   return shareId;
+}
+
+// Stop sharing: the link dies (its index goes, and the folder forgets the
+// id, so a stale index could not match it either) and access resets.
+async function unshareFolder(env, folder) {
+  const shareId = folder.share_id;
+  delete folder.share_id;
+  folder.visibility = 'private';
+  folder.allowed_users = [];
+  await deleteFolderShareIndex(env, shareId);
+}
+
+function folderShareRow(slug, meta) {
+  const versions = Array.isArray(meta.versions) ? meta.versions : [];
+  const latest = versions[versions.length - 1]?.n || 1;
+  return {
+    slug,
+    title: meta.title || slug,
+    latest,
+    updated: versions[versions.length - 1]?.created || meta.created || '',
+    url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
+  };
+}
+
+// The docs of one team folder: the same one KV list My docs makes, narrowed
+// by each meta key's index (team, and the folder it is filed in) so only the
+// folder's own docs are read in full. Team folders came after the index, so
+// a doc filed in one always carries it. Docs whose folder was deleted show
+// in the nearest standing ancestor, as in the team space.
+async function teamFolderDocMetas(env, teamId, state, folderId) {
+  const slugs = [];
+  let cursor;
+  do {
+    const page = await env.META.list({ prefix: 'meta:', cursor });
+    for (const key of page.keys) {
+      const idx = key.metadata && key.metadata.v === META_INDEX_VERSION ? key.metadata : null;
+      if (!idx || idx.w !== teamId || idx.f === 1) continue;
+      if (typeof idx.tf === 'string' && resolveTeamFolder(state, idx.tf) !== folderId) continue;
+      slugs.push(key.name.slice('meta:'.length));
+    }
+    cursor = page.cursor;
+    if (page.list_complete) break;
+  } while (cursor);
+  const metas = await Promise.all(slugs.map(async (slug) => [slug, await loadDocMeta(env, slug)]));
+  return metas.filter(([, meta]) => meta && meta.workspace_id === teamId
+    && meta.created_from !== 'feedback'
+    && resolveTeamFolder(state, meta.team_folder) === folderId);
 }
 
 async function buildFolderShareListing(env, req, shareId) {
   const index = await loadFolderShareIndex(env, shareId);
   if (!index) return { ok: false, status: 404 };
+  if (index.team_id) return buildTeamFolderShareListing(env, req, shareId, index);
   const state = await loadFolderState(env, index.owner_key);
   const folder = state.folders.find((f) => f.id === index.folder_id);
   if (!folder || folder.share_id !== shareId) return { ok: false, status: 404 };
@@ -3368,20 +3423,37 @@ async function buildFolderShareListing(env, req, shareId) {
   for (const slug of slugs) {
     const meta = await loadDocMeta(env, slug);
     if (!meta || !docReadableBy(env, session, meta)) continue;
-    const versions = Array.isArray(meta.versions) ? meta.versions : [];
-    const latest = versions[versions.length - 1]?.n || 1;
-    docs.push({
-      slug,
-      title: meta.title || slug,
-      latest,
-      updated: versions[versions.length - 1]?.created || meta.created || '',
-      url: `/d/${encodeURIComponent(slug)}/v/${latest}`,
-    });
+    docs.push(folderShareRow(slug, meta));
   }
   docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
   return {
     ok: true,
     folder: { name: folder.name, visibility, share_id: shareId },
+    docs,
+  };
+}
+
+// A shared team folder: the folder's direct docs (subfolders are not listed,
+// same as My docs), each still behind its own access -- a team-only doc stays
+// invisible to someone outside the team even with the link.
+async function buildTeamFolderShareListing(env, req, shareId, index) {
+  const team = await loadTeam(env, index.team_id);
+  if (!team) return { ok: false, status: 404 };
+  const state = await loadTeamFolders(env, team.id);
+  const folder = state.folders.find((f) => f.id === index.folder_id);
+  if (!folder || folder.share_id !== shareId) return { ok: false, status: 404 };
+  const session = await getViewerSession(env, req);
+  if (!canAccessSharedFolder(folder, session, '', team)) {
+    return { ok: false, status: sessionPrincipal(session) ? 404 : 401 };
+  }
+  const docs = (await teamFolderDocMetas(env, team.id, state, folder.id))
+    .filter(([, meta]) => docReadableBy(env, session, meta))
+    .map(([slug, meta]) => folderShareRow(slug, meta))
+    .sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+  return {
+    ok: true,
+    // The team's name stays private: a link shows the folder, not who owns it.
+    folder: { name: folder.name, visibility: folderVisibility(folder), share_id: shareId },
     docs,
   };
 }
@@ -3463,15 +3535,19 @@ function resolveTeamFolder(state, id) {
 }
 
 function publicTeamFolder(folder, session, team) {
-  return {
+  const out = {
     id: folder.id,
     name: folder.name,
     parent: folder.parent || '',
-    // Any member files docs and makes folders; renaming or deleting one is
-    // its maker's or an admin's call.
+    // Any member files docs and makes folders; renaming, deleting or sharing
+    // one is its maker's or an admin's call.
     can_manage: teamRole(team, session && session.account_id) === 'admin'
       || (!!folder.created_by && folder.created_by === (session && session.account_id)),
+    visibility: folderVisibility(folder),
+    allowed_users: folderAllowedUsers(folder),
   };
+  if (folder.share_id) out.share_id = folder.share_id;
+  return out;
 }
 
 // Who is asking, and whose folders: a team's (member only) or the caller's
@@ -3917,6 +3993,9 @@ function docMetaIndex(meta) {
     o: String(hostedGithubLogin(m) || ''),
     k: String(hosted.owner_key || ''),
     w: String(m.workspace_id || ''),
+    // The team folder it is filed in, so a shared team folder lists its docs
+    // from this index without reading every team doc.
+    tf: String(m.workspace_id && m.team_folder || ''),
     f: m.created_from === 'feedback' ? 1 : 0,
     l: Number(versions[versions.length - 1]?.n) || 1,
     c: String(m.created || versions[0]?.created || ''),
@@ -10745,12 +10824,14 @@ export default {
       const wantsName = 'name' in body;
       const wantsVisibility = 'visibility' in body;
       const wantsAllowed = 'allowed_users' in body;
-      if (!wantsName && !wantsVisibility && !wantsAllowed) {
+      // `share: false` stops sharing: the link dies and access resets.
+      const wantsUnshare = body.share === false;
+      if (!wantsName && !wantsVisibility && !wantsAllowed && !wantsUnshare) {
         return json({ error: 'nothing_to_update' }, { status: 400 });
       }
-      // A team folder is already shared with the team; its docs keep their
-      // own access. Share links stay a My docs feature.
-      if (team && (wantsVisibility || wantsAllowed)) return json({ error: 'team_folder_not_shareable' }, { status: 400 });
+      if (wantsUnshare && (wantsVisibility || wantsAllowed)) {
+        return json({ error: 'invalid_access_value', field: 'share' }, { status: 400 });
+      }
       const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
       const folder = state.folders.find((f) => f.id === body.id);
       if (!folder) return json({ error: 'not_found' }, { status: 404 });
@@ -10762,10 +10843,6 @@ export default {
           return json({ error: 'duplicate_name' }, { status: 400 });
         }
         folder.name = name;
-      }
-      if (team) {
-        await saveTeamFolders(env, team.id, state);
-        return json({ ok: true, folder: publicTeamFolder(folder, s, team) });
       }
       if (wantsVisibility) {
         if (!ACCESS_VISIBILITIES.has(body.visibility)) {
@@ -10790,8 +10867,12 @@ export default {
       }
       // Mint a share id whenever access is touched so Copy link always works
       // (private invitees still open /f/<id> after sign-in).
-      if (wantsVisibility || wantsAllowed) {
-        await ensureFolderShareId(env, actorKey(s), folder);
+      const owner = team ? { team: team.id } : actorKey(s);
+      if (wantsUnshare) await unshareFolder(env, folder);
+      else if (wantsVisibility || wantsAllowed) await ensureFolderShareId(env, owner, folder);
+      if (team) {
+        await saveTeamFolders(env, team.id, state);
+        return json({ ok: true, folder: publicTeamFolder(folder, s, team) });
       }
       await saveFolderState(env, actorKey(s), state);
       return json({ ok: true, folder: publicFolder(folder) });
@@ -10829,6 +10910,7 @@ export default {
         // way up through `gone` instead of a rewrite per doc.
         state.gone[id] = up || '';
         await saveTeamFolders(env, team.id, state);
+        await deleteFolderShareIndex(env, gone.share_id);
         return json({ ok: true });
       }
       await saveFolderState(env, actorKey(s), state);

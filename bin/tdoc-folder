@@ -13,21 +13,27 @@
 #   tdoc-folder remove <slug>... [--team <t>]                    # back to the top level
 #   tdoc-folder rename <folder> <new name> [--team <t>]
 #   tdoc-folder delete <folder> [--team <t>]                     # docs move up a level
+#   tdoc-folder share <folder> [--visibility unlisted|private|public] [--team <t>]  # prints the link
+#   tdoc-folder unshare <folder> [--team <t>]                    # the link stops working
 #   <folder> is an id (f_…), a path ("Reports/Daily"), or a name unique in that space.
 #   A team doc must be in the team first: tdoc-move --team <t> --folder <f> <slug>.
+#   A share link lists the folder's docs; each doc keeps its own access (a
+#   team-only doc stays hidden from people outside the team). private = you
+#   (in a team: its members) plus invitees; share again keeps the current
+#   setting unless --visibility is given (a first share is unlisted).
 #   tdoc-folder --help
 set -euo pipefail
 TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TDOC_BIN_DIR/lib/json.sh"
 
-usage() { sed -n '9,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '9,23p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 case "${1:-}" in
-  -h|--help|help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  list|ls|create|mkdir|add|remove|rename|delete|rm) CMD="$1"; shift ;;
+  -h|--help|help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  list|ls|create|mkdir|add|remove|rename|delete|rm|share|unshare) CMD="$1"; shift ;;
   *) usage ;;
 esac
 
-TEAM=""; FOLDER=""; PARENT=""; CREATE=0; AS_JSON=0; ARGS=()
+TEAM=""; FOLDER=""; PARENT=""; VISIBILITY=""; CREATE=0; AS_JSON=0; ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --team) TEAM="${2:-}"; [ -n "$TEAM" ] || { echo "--team needs a name or id" >&2; exit 2; }; shift 2 ;;
@@ -36,9 +42,11 @@ while [ $# -gt 0 ]; do
     --folder=*) FOLDER="${1#--folder=}"; shift ;;
     --parent) PARENT="${2:-}"; [ -n "$PARENT" ] || { echo "--parent needs a folder" >&2; exit 2; }; shift 2 ;;
     --parent=*) PARENT="${1#--parent=}"; shift ;;
+    --visibility) VISIBILITY="${2:-}"; [ -n "$VISIBILITY" ] || { echo "--visibility needs unlisted, private or public" >&2; exit 2; }; shift 2 ;;
+    --visibility=*) VISIBILITY="${1#--visibility=}"; shift ;;
     --create) CREATE=1; shift ;;
     --json) AS_JSON=1; shift ;;
-    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown arg: $1" >&2; exit 2 ;;
     *) ARGS+=("$1"); shift ;;
   esac
@@ -78,7 +86,8 @@ explain() {
     doc_in_team) echo "[tdoc] $slug is in a team ($(printf '%s' "$1" | json_get team)); pass --team to file it in that team's folders." >&2 ;;
     doc_not_in_team) echo "[tdoc] $slug is not in that team yet: tdoc-move --team <t> --folder <f> $slug" >&2 ;;
     team_not_found) echo "[tdoc] you are not a member of that team." >&2 ;;
-    not_folder_owner) echo "[tdoc] only the folder's maker or a team admin can change it." >&2 ;;
+    not_folder_owner) echo "[tdoc] only the folder's maker or a team admin can change or share it." >&2 ;;
+    invalid_access_value) echo "[tdoc] --visibility must be unlisted, private or public." >&2 ;;
     too_many_folders) echo "[tdoc] folder limit reached ($(printf '%s' "$1" | json_get limit))." >&2 ;;
     too_deep) echo "[tdoc] folders nest at most $(printf '%s' "$1" | json_get limit) deep." >&2 ;;
     duplicate_name) echo "[tdoc] a folder by that name is already there." >&2 ;;
@@ -219,7 +228,7 @@ create_folder() {
 slugs_json() { printf '%s\n' "$@" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))'; }
 
 case "$CMD" in
-  list|ls|add|rename|delete|rm) load_folders || exit 1 ;;
+  list|ls|add|rename|delete|rm|share|unshare) load_folders || exit 1 ;;
   *) if [ -n "$PARENT" ]; then load_folders || exit 1; fi ;;
 esac
 
@@ -282,5 +291,32 @@ case "$CMD" in
     api DELETE "/api/folders?id=$FID${TEAM_ID:+&team=$TEAM_ID}" >/dev/null || exit 1
     recent forget "$FID"
     echo "[tdoc] deleted folder ${ARGS[0]}; its docs moved up a level."
+    ;;
+  share)
+    [ "${#ARGS[@]}" -eq 1 ] || usage
+    case "$VISIBILITY" in ""|unlisted|private|public) ;; *) echo "[tdoc] --visibility must be unlisted, private or public." >&2; exit 2 ;; esac
+    FID="$(require_folder "${ARGS[0]}")" || exit 1
+    if [ -z "$VISIBILITY" ]; then
+      # Sharing again only prints the link: a shared folder keeps its setting.
+      VISIBILITY="$(printf '%s' "$FOLDERS_JSON" | node -e '
+        let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+          const f = (JSON.parse(s).folders || []).find((x) => x.id === process.argv[1]) || {};
+          process.stdout.write(f.share_id && f.visibility ? f.visibility : "unlisted");
+        });' "$FID")"
+    fi
+    resp="$(api PATCH /api/folders "{\"id\":$(json_str "$FID"),\"visibility\":$(json_str "$VISIBILITY"),\"team\":$TEAM_JSON}")" || exit 1
+    SID="$(printf '%s' "$resp" | json_get folder.share_id)"
+    [ -n "$SID" ] || { echo "[tdoc] the server returned no link: $resp" >&2; exit 1; }
+    case "$VISIBILITY" in
+      private) echo "[tdoc] shared ${ARGS[0]} ($VISIBILITY: ${TEAM_ID:+team members and }invitees only; docs keep their own access)" >&2 ;;
+      *) echo "[tdoc] shared ${ARGS[0]} ($VISIBILITY: anyone with the link; docs keep their own access)" >&2 ;;
+    esac
+    printf '%s/f/%s\n' "$BASE" "$SID"
+    ;;
+  unshare)
+    [ "${#ARGS[@]}" -eq 1 ] || usage
+    FID="$(require_folder "${ARGS[0]}")" || exit 1
+    api PATCH /api/folders "{\"id\":$(json_str "$FID"),\"share\":false,\"team\":$TEAM_JSON}" >/dev/null || exit 1
+    echo "[tdoc] stopped sharing ${ARGS[0]}; its link no longer opens."
     ;;
 esac
