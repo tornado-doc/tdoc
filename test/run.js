@@ -46,6 +46,7 @@ const OFFLINE = [
   'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
+  'handoff-state.test.js',      // handoff classifier: waiting → stale at 5 min, expired past Raft's expiresAt
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
   'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
   'profile.test.js',            // /@handle public profiles

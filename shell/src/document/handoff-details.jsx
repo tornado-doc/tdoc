@@ -2,12 +2,14 @@
 // Replaces the old "Manage" entry that was an alias for Send to agent.
 
 import React, { useMemo, useState } from 'react';
-import { deliveryErrorText } from './notify-handoff.jsx';
+import { deliveryErrorText, resendResultText } from './notify-handoff.jsx';
+import { handoffStatusText } from './handoff-status-line.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { postNotifyHandoff, resendNotifyHandoff } from './api.js';
 import { formatHandoffAgo } from './handoff-ago.js';
 import {
   handoffActivityAt,
+  handoffWaitState,
   shortCommentPreview,
   summarizeHandoffSurfaces,
 } from './handoff-state.js';
@@ -19,6 +21,15 @@ const STATE_LABEL = {
   received: 'Agent received',
   replied: 'Agent replied',
 };
+
+// In-flight rows say what the card says: queued, picked up, or no response.
+function rowLabel(comment, state) {
+  if (state === 'waiting' || state === 'received') {
+    return handoffStatusText(comment, handoffWaitState(comment)) || STATE_LABEL[state];
+  }
+  const meta = rowMeta(comment, state);
+  return `${STATE_LABEL[state] || state}${meta ? ` · ${meta}` : ''}`;
+}
 
 function rowMeta(comment, state) {
   if (state === 'received' && comment.handoff_acked_at) {
@@ -78,8 +89,7 @@ export function HandoffDetailsPanel({
     setBusyId(comment.id);
     try {
       const body = await resendNotifyHandoff({ slug, handoff_id: comment.handoff_id });
-      const failed = body?.delivery?.status === 'failed';
-      onToast?.(failed ? 'Resend failed to deliver' : 'Resent', failed);
+      onToast?.(resendResultText(body), body?.delivery?.status === 'failed');
       await onRefresh?.();
     } catch (err) {
       onToast?.(err.message || 'Could not resend', true);
@@ -101,7 +111,6 @@ export function HandoffDetailsPanel({
       {rows.length ? (
         <ul className="tdoc-handoff-details-list">
           {rows.map(({ comment, state }) => {
-            const meta = rowMeta(comment, state);
             const busy = busyId === comment.id;
             return (
               <li key={comment.id} className="tdoc-handoff-details-row">
@@ -114,8 +123,7 @@ export function HandoffDetailsPanel({
                   }}
                 >
                   <span className={`tdoc-handoff-details-state is-${state}`}>
-                    {STATE_LABEL[state] || state}
-                    {meta ? ` · ${meta}` : ''}
+                    {rowLabel(comment, state)}
                   </span>
                   <span className="tdoc-handoff-details-preview">
                     {shortCommentPreview(comment.text)}

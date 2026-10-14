@@ -4,9 +4,9 @@ import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send, 
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
-import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText } from '../../shell/src/document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText } from '../../shell/src/document/notify-handoff.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from '../../shell/src/document/handoff-state.js';
-import { setApiTransport } from '../../shell/src/document/api.js';
+import { resendNotifyHandoff, setApiTransport } from '../../shell/src/document/api.js';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
 // controls keep the browser's default button look on foreign pages.
@@ -673,6 +673,7 @@ ${uiCss}
     const [reanchorId, setReanchorId] = useState(null);
     const [agent, setAgent] = useState(null);
     const [notifyIds, setNotifyIds] = useState(null);
+    const [notifyAvoid, setNotifyAvoid] = useState(null);
     const [, setViewportTick] = useState(0);
 
     const say = useCallback((text, bad = false) => {
@@ -1011,6 +1012,16 @@ ${uiCss}
             onResolve={(id, resolved) => mutate({ type: 'tdoc-feedback-resolve', id, resolved, pageUrl: canonical() })}
             onEdit={(id, text) => mutate({ type: 'tdoc-feedback-edit', id, text, pageUrl: canonical() })}
             onReanchor={(id) => { setOpenId(null); setReanchorId(id); }}
+            onResendHandoff={owner && session && session.notify ? async (c) => {
+              try {
+                const body = await resendNotifyHandoff({ slug: session.slug, handoff_id: c.handoff_id });
+                say(resendResultText(body), body?.delivery?.status === 'failed');
+                await load();
+              } catch (err) { say(err.message || 'Could not resend', true); }
+            } : null}
+            onSendHandoffElsewhere={owner && session && session.notify
+              ? (c) => { setNotifyAvoid(c.handoff_to || null); setNotifyIds([c.id]); }
+              : null}
           />
         ) : null}
 
@@ -1055,13 +1066,14 @@ ${uiCss}
           onPick={() => { setOpenId(null); setSelected(null); setPicking((v) => !v); }}
           onHide={hide}
           sendCount={ready.length}
-          onSend={owner && session && session.notify ? () => { setPicking(false); setNotifyIds(ready.map((c) => c.id)); } : null}
+          onSend={owner && session && session.notify ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
         />
         {notifyIds ? (
           <NotifyHandoffPanel
             slug={session.slug}
             open
             commentIds={notifyIds}
+            avoid={notifyAvoid}
             onClose={() => setNotifyIds(null)}
             onSent={() => load()}
           />

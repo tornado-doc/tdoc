@@ -36,6 +36,9 @@ function comment(partial) {
     summarizeHandoffSurfaces,
     shortCommentPreview,
     lastHumanAt,
+    handoffWaitState,
+    handoffWaitMinutes,
+    HANDOFF_STALE_MS,
   } = await load();
   let pass = 0;
   const ok = (n) => { console.log(`  ✓ ${n}`); pass += 1; };
@@ -157,6 +160,49 @@ function comment(partial) {
     ],
   })), 'ready');
   ok('the last speaker decides: agent last is replied, never ready');
+
+  // ---- the no-response ladder (Julie, 2026-10-13: ~15 min of nothing) ----
+  const SENT = Date.parse('2026-01-01T01:00:00Z');
+  const sent = (partial = {}) => comment({
+    handoff_status: 'sent',
+    handoff_at: '2026-01-01T01:00:00Z',
+    handoff_delivery: { status: 'delivered', at: '2026-01-01T01:00:00Z', expires_at: '2026-01-02T01:00:00Z' },
+    handoff_to: { provider: 'raft', agent_name: 'xiaocc' },
+    ...partial,
+  });
+  assert.strictEqual(HANDOFF_STALE_MS, 5 * 60 * 1000);
+  assert.strictEqual(handoffWaitState(sent(), SENT + 60 * 1000), 'waiting');
+  assert.strictEqual(handoffWaitState(sent(), SENT + HANDOFF_STALE_MS - 1), 'waiting');
+  ok('a fresh send is waiting (queued)');
+
+  assert.strictEqual(handoffWaitState(sent(), SENT + HANDOFF_STALE_MS), 'stale');
+  assert.strictEqual(handoffWaitMinutes(sent(), SENT + 7 * 60 * 1000 + 30 * 1000), 7);
+  ok('waiting turns stale at 5 min with no ack, and counts whole minutes');
+
+  assert.strictEqual(handoffWaitState(sent({ handoff_acked_at: '2026-01-01T01:01:00Z' }), SENT + 60 * 60 * 1000), 'received');
+  ok('an acked handoff never goes stale');
+
+  assert.strictEqual(handoffWaitState(sent({
+    replies: [{ id: 'r', author: { kind: 'agent', login: 'claude' }, created: '2026-01-01T01:30:00Z' }],
+  }), SENT + 60 * 60 * 1000), 'replied');
+  ok('a replied handoff never goes stale');
+
+  const resent = sent({ handoff_delivery: { status: 'delivered', at: '2026-01-01T01:10:00Z', expires_at: '2026-01-02T01:00:00Z' } });
+  assert.strictEqual(handoffWaitState(resent, SENT + 12 * 60 * 1000), 'waiting');
+  ok('a resend restarts the clock');
+  const deduped = sent({ handoff_delivery: { status: 'delivered', at: '2026-01-01T01:10:00Z', deduped: true } });
+  assert.strictEqual(handoffWaitState(deduped, SENT + 12 * 60 * 1000), 'stale');
+  ok('a resend Raft dropped as a duplicate does not');
+
+  assert.strictEqual(handoffWaitState(sent(), Date.parse('2026-01-02T01:00:00Z')), 'expired');
+  assert.strictEqual(handoffWaitState(sent({ handoff_delivery: { status: 'delivered', at: '2026-01-01T01:00:00Z', expires_at: '2026-01-01T01:02:00Z' } }), SENT + 3 * 60 * 1000), 'expired');
+  ok('past expiresAt and still unacked is expired, even before 5 min');
+  assert.strictEqual(handoffWaitState(sent({ handoff_acked_at: '2026-01-01T02:00:00Z' }), Date.parse('2026-01-03T00:00:00Z')), 'received');
+  ok('expiry does not override an ack');
+
+  assert.strictEqual(handoffWaitState(sent({ handoff_delivery: { status: 'failed', error: 'x' } }), SENT + 60 * 60 * 1000), 'failed');
+  assert.strictEqual(handoffWaitState(comment(), SENT), 'ready');
+  ok('other states pass through unchanged');
 
   console.log(`\n${pass} passed`);
 })().catch((e) => {

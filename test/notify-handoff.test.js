@@ -390,6 +390,64 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     } finally { globalThis.fetch = realFetch; }
   });
 
+  await t("Raft's event id, expiresAt and deduped are kept on the handoff's delivery", async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    let deduped = false;
+    stubRaft((url) => {
+      if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq1', agent: { serverId: 'srv-uuid' } });
+      if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
+      if (url.endsWith('/api/oauth/agent-events')) {
+        return Response.json({ id: 'evt_123', status: deduped ? 'duplicate' : 'queued', deduped, expiresAt: '2026-10-14T10:00:00.000Z' });
+      }
+      return null;
+    });
+    try {
+      const writes = [];
+      const put = env.META.put.bind(env.META);
+      env.META.put = (k, ...rest) => { writes.push(k); return put(k, ...rest); };
+      const r = await (await worker.fetch(req('/api/notify/handoff', {
+        method: 'POST', token, body: { slug: 'wire-doc', comment_ids: [commentId], recipient: fullTarget },
+      }), env, {})).json();
+      assert(r.delivery.status === 'delivered', `delivery: ${JSON.stringify(r.delivery)}`);
+      assert(writes.filter((k) => k === 'handoffs:wire-doc').length === 1, `handoff writes: ${writes.filter((k) => k.startsWith('handoffs:')).length}`);
+      const list = await (await worker.fetch(req('/api/notify/handoffs?slug=wire-doc', { token }), env, {})).json();
+      const d = list.handoffs[0].delivery;
+      assert(d.event_id === 'evt_123', `event_id: ${d.event_id}`);
+      assert(d.expires_at === '2026-10-14T10:00:00.000Z', `expires_at: ${d.expires_at}`);
+      assert(d.deduped === false, `deduped: ${d.deduped}`);
+      // The comment carries what the card needs: who, when, and the deadline.
+      const [c] = await (await worker.fetch(req('/api/comments?slug=wire-doc&version=1'), env, {})).json();
+      assert(c.handoff_delivery.expires_at === '2026-10-14T10:00:00.000Z', `comment expires_at: ${JSON.stringify(c.handoff_delivery)}`);
+      assert(c.handoff_delivery.at, 'comment carries the delivery time');
+      assert(c.handoff_to && c.handoff_to.agent_name === 'xiaocc' && c.handoff_to.provider === 'raft', `handoff_to: ${JSON.stringify(c.handoff_to)}`);
+      // A resend Raft recognises is recorded as deduped.
+      deduped = true;
+      const again = await (await worker.fetch(req('/api/notify/handoff/resend', {
+        method: 'POST', token, body: { slug: 'wire-doc', handoff_id: r.handoff_id },
+      }), env, {})).json();
+      assert(again.delivery.deduped === true && again.delivery.event_id === 'evt_123', `resend: ${JSON.stringify(again.delivery)}`);
+    } finally { globalThis.fetch = realFetch; }
+  });
+
+  await t('a malformed Raft answer still counts as delivered and stores nothing extra', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    stubRaft((url) => {
+      if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq1', agent: { serverId: 'srv-uuid' } });
+      if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
+      if (url.endsWith('/api/oauth/agent-events')) return new Response('accepted', { status: 202 });
+      return null;
+    });
+    try {
+      const r = await (await worker.fetch(req('/api/notify/handoff', {
+        method: 'POST', token, body: { slug: 'wire-doc', comment_ids: [commentId], recipient: fullTarget },
+      }), env, {})).json();
+      assert(r.delivery.status === 'delivered', `delivery: ${JSON.stringify(r.delivery)}`);
+      assert(!('event_id' in r.delivery) && !('expires_at' in r.delivery), `extra: ${JSON.stringify(r.delivery)}`);
+    } finally { globalThis.fetch = realFetch; }
+  });
+
   await t('a target with no slug fails clearly instead of 404-ing', async () => {
     const env = makeEnv(mod.CommentsStore, RAFT_ENV);
     const { token, commentId } = await seedWith(env);

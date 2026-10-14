@@ -55,13 +55,13 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  async function open({ ids, deliver = 'delivered' }) {
+  async function open({ ids, deliver = 'delivered', targets = null, query = '' }) {
     const page = await browser.newPage({ viewport: { width: 900, height: 720 } });
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     let handoffs = [{ handoff_id: 'h1', at: new Date(Date.now() - 20 * 60000).toISOString(), recipient: SMARTER, comment_ids: ['c0'], delivery: { status: 'delivered' } }];
     const posts = [];
-    await page.route('**/api/notify/targets*', (r) => r.fulfill({ json: { default: SMARTER, candidates: [DEVIN], fallback: DEVIN, reason: null } }));
+    await page.route('**/api/notify/targets*', (r) => r.fulfill({ json: targets || { default: SMARTER, candidates: [DEVIN], fallback: DEVIN, reason: null } }));
     await page.route('**/api/notify/handoffs*', (r) => r.fulfill({ json: { handoffs } }));
     await page.route('**/api/notify/handoff', async (r) => {
       const body = JSON.parse(r.request().postData());
@@ -71,7 +71,7 @@ async function t(name, fn) {
       handoffs = [{ handoff_id: `h${posts.length + 1}`, at: new Date().toISOString(), recipient: body.recipient, comment_ids: body.comment_ids, delivery: { status: 'delivered' } }, ...handoffs];
       return r.fulfill({ json: { ok: true, sent: body.comment_ids.length, delivery: { status: 'delivered' } } });
     });
-    await page.goto(`${base}/?ids=${encodeURIComponent(JSON.stringify(ids))}`);
+    await page.goto(`${base}/?ids=${encodeURIComponent(JSON.stringify(ids))}${query}`);
     const dialog = page.getByRole('dialog', { name: 'Send to agent' });
     await dialog.waitFor();
     await page.locator('#tdoc-notify-recipient').waitFor();
@@ -127,6 +127,67 @@ async function t(name, fn) {
       await primary.click();
       await page.getByText(/Not delivered to tdoc-claw-devin/).waitFor();
       assert.equal(posts.length, 2, 'Retry did not send again');
+      await page.close();
+    });
+    await t('a stopped agent is flagged in the picker and before sending, and sending still works', async () => {
+      const stopped = { ...DEVIN, status: 'stopped' };
+      const { page, dialog, primary, posts, pick, shot } = await open({ ids: ['c1'], targets: { default: SMARTER, candidates: [stopped], fallback: stopped, reason: null } });
+      assert.equal(await dialog.locator('.tdoc-send-warn').count(), 0, 'a running agent was warned about');
+      await page.locator('#tdoc-notify-recipient').click();
+      await page.getByRole('option', { name: /tdoc-claw-devin.*stopped in Raft/ }).waitFor();
+      await page.getByRole('option', { name: /tdoc-claw-devin/ }).click();
+      const warn = dialog.locator('.tdoc-send-warn');
+      assert.equal((await warn.textContent()).trim(), "tdoc-claw-devin is stopped in Raft — it won't receive this");
+      assert.equal(await primary.isEnabled(), true, 'a stopped agent blocked sending');
+      await shot('stopped');
+      await primary.click();
+      await page.getByText('Sent 1 comment to tdoc-claw-devin ✓').waitFor();
+      assert.equal(posts[0].recipient.agent_sub, 'd');
+      void pick;
+      await page.close();
+    });
+
+    await t('"Send to another agent" opens the picker on someone other than the silent agent', async () => {
+      const { page, primary } = await open({ ids: ['c1'], query: '&avoid=smarter-tdoc-claw' });
+      assert.equal((await primary.textContent()).trim(), 'Send to tdoc-claw-devin');
+      await page.close();
+    });
+
+    await t('the card line climbs queued → picked up → replied, and a silent one offers Resend / another agent', async () => {
+      const page = await browser.newPage({ viewport: { width: 900, height: 900 } });
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(`${base}/?view=status`);
+      const line = (id) => page.locator(`[data-comment-id="${id}"] .tdoc-handoff-line`);
+      await line('queued').waitFor();
+      assert.equal((await line('queued').textContent()).trim(), 'Sent to smarter-tdoc-claw · queued in Raft · 2 min ago');
+      assert.equal((await line('picked').textContent()).trim(), 'smarter-tdoc-claw picked it up · 3 min ago');
+      assert.equal((await line('stale').textContent()).trim(), 'No response for 7 min');
+      assert.equal((await line('expired').textContent()).trim(), 'Expired — the agent never picked it up');
+      assert.equal((await line('replied').textContent()).trim(), 'Agent replied');
+      // Buttons only where there is something to do.
+      for (const id of ['queued', 'picked', 'replied']) {
+        assert.equal(await page.locator(`[data-comment-id="${id}"] .tdoc-handoff-nudge`).count(), 0, `${id} has actions`);
+      }
+      const stale = page.locator('[data-comment-id="stale"] .tdoc-handoff-nudge button');
+      assert.deepEqual((await stale.allTextContents()).map((x) => x.trim()), ['Resend', 'Send to another agent']);
+      const expired = page.locator('[data-comment-id="expired"] .tdoc-handoff-nudge button');
+      assert.deepEqual((await expired.allTextContents()).map((x) => x.trim()), ['Resend']);
+      // Nothing spills out of a narrow card.
+      for (const id of ['queued', 'picked', 'stale', 'expired']) {
+        const [card, chip] = await Promise.all([
+          page.locator(`[data-comment-id="${id}"]`).boundingBox(),
+          line(id).boundingBox(),
+        ]);
+        assert.ok(chip.x + chip.width <= card.x + card.width + 0.5, `${id} line overflows its card`);
+      }
+      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'handoff-status-ladder.png'), clip: { x: 0, y: 0, width: 340, height: 720 } }); }
+      await stale.first().click();
+      await page.getByText('Resending…').waitFor();
+      await page.waitForFunction(() => document.getElementById('log').textContent === 'resend:stale');
+      await stale.nth(1).click();
+      await page.waitForFunction(() => document.getElementById('log').textContent === 'resend:stale,elsewhere:stale');
+      assert.deepEqual(errors, []);
       await page.close();
     });
   } finally {

@@ -7825,7 +7825,11 @@ const NOTIFY_PROVIDERS = {
           body: JSON.stringify(event),
         });
         if (!evRes.ok) return { status: 'failed', error: `event_${evRes.status}` };
-        return { status: 'delivered', error: null };
+        // Raft answers { id, status: queued|duplicate, deduped, expiresAt }.
+        // Kept on the delivery (same handoff write, no extra KV) so the card can
+        // say "queued in Raft" and, once expiresAt passes unacked, that the
+        // agent never picked it up -- instead of waiting on nothing.
+        return { status: 'delivered', error: null, ...raftEventReceipt(await evRes.json().catch(() => null)) };
       } catch (e) {
         return { status: 'failed', error: String((e && e.message) || e).slice(0, 200) };
       }
@@ -7893,6 +7897,19 @@ NOTIFY_PROVIDERS.webhook = {
   },
 };
 
+// The parts of Raft's agent-events answer worth keeping; anything malformed
+// is dropped rather than stored.
+function raftEventReceipt(b) {
+  if (!b || typeof b !== 'object') return {};
+  const out = {};
+  if (typeof b.id === 'string' && b.id) out.event_id = b.id.slice(0, 120);
+  if (typeof b.deduped === 'boolean') out.deduped = b.deduped;
+  else if (b.status === 'duplicate') out.deduped = true;
+  const exp = typeof b.expiresAt === 'string' ? Date.parse(b.expiresAt) : NaN;
+  if (Number.isFinite(exp)) out.expires_at = new Date(exp).toISOString();
+  return out;
+}
+
 function raftAuthHeaders(env) {
   const basic = btoa(`${env.RAFT_CLIENT_ID}:${env.RAFT_CLIENT_SECRET}`);
   return { 'Content-Type': 'application/json', Authorization: `Basic ${basic}` };
@@ -7912,6 +7929,7 @@ function raftAuthHeaders(env) {
 // does not know — the list is empty and the panel falls back to the agents
 // tdoc has seen plus a typed handle. Never an error a person has to read.
 const RAFT_DIRECTORY_TTL = 300;
+const RAFT_AGENT_STATUSES = new Set(['active', 'inactive', 'stopped']);
 function raftInstallationId(env, server) {
   if (server && server.installation_id) return String(server.installation_id);
   // Installations Raft has not reported per connect (the App owner's own
@@ -7994,6 +8012,12 @@ async function raftDirectoryAgents(env, server) {
           agent_sub: typeof a.id === 'string' ? a.id : '',
           agent_name: typeof a.handle === 'string' ? a.handle.replace(/^@/, '') : '',
         }))
+        .map((t, i) => {
+          // active | inactive | stopped. Read for the picker's "this agent is
+          // stopped" warning; it rides the same cached list, no extra call.
+          const st = t && b.agents[i] && b.agents[i].status;
+          return t && RAFT_AGENT_STATUSES.has(st) ? { ...t, status: st } : t;
+        })
         .filter((t) => t && t.agent_name)
         .slice(0, 200);
     }
@@ -8020,12 +8044,15 @@ function sameRaftAgent(a, b) {
 // Julie's picker after a server disconnect and reconnect (2026-10-06); picking
 // one again is the person reconnecting it. Sorted by name, because a list of
 // dozens is searched, not read.
-async function accountDirectoryAgents(env, accountId, known = [], servers = null) {
+// `seen`, when given, collects every directory entry (known ones included) so
+// the caller can carry Raft's status onto agents it already listed.
+async function accountDirectoryAgents(env, accountId, known = [], servers = null, seen = null) {
   if (!accountId) return [];
   const list = servers || await accountRaftServers(env, accountId);
   const out = [];
   for (const sv of list) {
     for (const t of await raftDirectoryAgents(env, sv)) {
+      if (seen) seen.push(t);
       if ([...known, ...out].some((k) => sameRaftAgent(k, t))) continue;
       out.push({ ...t, source: 'directory' });
     }
@@ -8229,12 +8256,20 @@ async function resolveNotifyTargets(env, slug) {
     .filter((t) => t && !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)))
     .sort(byRecency);
   const fallbackList = await accountNotifyTargets(env, ownerAccount);
-  const fallback = fallbackList[0] || null;
   const servers = await accountRaftServers(env, ownerAccount);
   // Then every other agent on the account's connected servers, from Raft's
   // directory, so the dropdown is the whole server and not only the agents
   // that happened to work with tdoc already.
-  const directory = await accountDirectoryAgents(env, ownerAccount, [...docTargets, ...fallbackList], servers);
+  const seen = [];
+  const directory = await accountDirectoryAgents(env, ownerAccount, [...docTargets, ...fallbackList], servers, seen);
+  // Raft's word on whether an agent is running, for agents tdoc already knew.
+  const withStatus = (t) => {
+    const d = seen.find((x) => x.status && sameRaftAgent(x, t));
+    return d ? { ...t, status: d.status } : t;
+  };
+  docTargets.splice(0, docTargets.length, ...docTargets.map(withStatus));
+  fallbackList.splice(0, fallbackList.length, ...fallbackList.map(withStatus));
+  const fallback = fallbackList[0] || null;
   if (docTargets.length) {
     // The doc's last-touched agent is preselected, but the person may send
     // to any of their agents: the doc's others first, then the account's.
@@ -8378,7 +8413,7 @@ function commentThreadActivity(comment) {
 // agent. Resolution is per comment id, so a partially-resolved handoff shows
 // exactly which of its comments are done.
 function withHandoffStatus(list, handoffs) {
-  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_acked_at: null, handoff_delivery: null };
+  const bare = { handoff_status: 'note', handoff_id: null, handoff_at: null, handoff_acked_at: null, handoff_delivery: null, handoff_to: null };
   if (!Array.isArray(list) || !Array.isArray(handoffs) || !handoffs.length) {
     return Array.isArray(list) ? list.map(c => ({ ...c, ...bare })) : list;
   }
@@ -8401,7 +8436,20 @@ function withHandoffStatus(list, handoffs) {
         // not heard — an agent that cannot ack is indistinguishable from one
         // that has not, so the UI must say "no response yet", never "not working".
         handoff_acked_at: h.acked_at || null,
-        handoff_delivery: h.delivery ? { status: h.delivery.status, error: h.delivery.error || null } : null,
+        handoff_delivery: h.delivery ? {
+          status: h.delivery.status,
+          error: h.delivery.error || null,
+          // When it was last (re)sent, and when the provider stops holding it
+          // for the agent: the clock and the deadline for "no response".
+          at: h.delivery.at || null,
+          expires_at: h.delivery.expires_at || null,
+          ...(h.delivery.deduped ? { deduped: true } : {}),
+        } : null,
+        // Who it went to, by handle only: what the card names ("Sent to x").
+        handoff_to: h.recipient ? {
+          provider: h.recipient.provider || '',
+          agent_name: h.recipient.agent_name || '',
+        } : null,
       });
     }
   }
@@ -11934,7 +11982,8 @@ export default {
           : null;
         if (listed) {
           const rest = current.filter((t) => !sameRaftAgent(t, listed));
-          await env.META.put(listKey, JSON.stringify([{ ...listed, last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX)));
+          // normalize: Raft's live status is read fresh, never stored here.
+          await env.META.put(listKey, JSON.stringify([{ ...normalizeNotifyTarget(listed), last_touched: new Date().toISOString() }, ...rest].slice(0, NOTIFY_AGENTS_MAX)));
           await unremoveTargets(env, accountId, (k) => k === notifyKey(listed));
           return json({ ok: true, target: listed });
         }
