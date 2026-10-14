@@ -29,6 +29,12 @@ class FakeKV {
     this.gets = [];
   }
   async get(k) { this.gets.push(k); return this.map.has(k) ? this.map.get(k) : null; }
+  // Workers KV returns the value and its metadata in one read; the doc and
+  // team indexes diff the prior metadata against the next record on write.
+  async getWithMetadata(k) {
+    this.gets.push(k);
+    return { value: this.map.has(k) ? this.map.get(k) : null, metadata: this.metadata.has(k) ? this.metadata.get(k) : null };
+  }
   async put(k, v, opts) {
     if (this.failPutOnce.has(k)) {
       this.failPutOnce.delete(k);
@@ -59,10 +65,13 @@ class FakeR2 {
     this.putCalls++;
     this.map.set(k, String(v));
   }
-  async get(k) {
+  // `range` as R2 takes it: the shell page reads only the head of a doc.
+  async get(k, opts) {
     if (!this.map.has(k)) return null;
-    const v = this.map.get(k);
-    return { text: async () => v };
+    let v = this.map.get(k);
+    const range = opts && opts.range;
+    if (range && typeof range.length === 'number') v = v.slice(range.offset || 0, (range.offset || 0) + range.length);
+    return { text: async () => v, size: this.map.get(k).length };
   }
   async head(k) {
     if (!this.map.has(k)) return null;
@@ -117,7 +126,9 @@ class FakeDurableNamespace {
 
 async function loadWorker() {
   const root = path.join(__dirname, '..', '..');
-  let src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
+  // TDOC_WORKER_JS: another worker.js to boot (test/bench compares a
+  // checkout of main against the working tree with it). Tests never set it.
+  let src = fs.readFileSync(process.env.TDOC_WORKER_JS || path.join(root, 'worker', 'worker.js'), 'utf8');
   // Inline the shell modules exactly like bin/tdoc-bundle, so the in-process
   // worker renders the real shell (doc pages carry the cfg with versions/
   // identity) instead of the bare no-SHELL fallback.

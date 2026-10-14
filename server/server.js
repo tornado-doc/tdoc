@@ -909,30 +909,46 @@ function frameCspHeader(nonce) {
 // three — no page overflow, columns at their natural width, header aligned.
 // Kept byte-identical in server.js; test/reader-patch-drift.test.js holds them
 // together.
+//
+// One pass over the bytes. The first version lowercased the WHOLE document
+// for every table tag it looked for, and tested "already wrapped" against
+// everything emitted so far -- O(tables x bytes): 480ms of CPU on a 660KB
+// report with forty tables, against Cloudflare's 10ms, so opening that doc
+// was error 1102 every time. Now the tags are found with one case-insensitive
+// regex walked forward, and only the bytes just before a table decide whether
+// it is already wrapped (the wrapper tag must END there, so a window as long
+// as any sane tag is the same test).
 function wrapBareTables(html) {
   if (typeof html !== 'string' || html.indexOf('<table') === -1) return html;
-  var out = '', i = 0;
+  var tags = /<\/?table/gi;
+  var next = function (from) { tags.lastIndex = from; return tags.exec(html); };
+  var WINDOW = 4096;
+  var out = [], i = 0, tail = '';
   while (i < html.length) {
-    var at = html.toLowerCase().indexOf('<table', i);
-    if (at === -1) { out += html.slice(i); break; }
+    var m = next(i);
+    while (m && m[0].length !== 6) m = next(m.index + 7);
+    if (!m) { out.push(html.slice(i)); break; }
+    var at = m.index;
     var before = html.slice(i, at);
-    var already = /<div[^>]*class="[^"]*tdoc-table-scroll[^"]*"[^>]*>\s*$/i.test(out + before);
+    var context = tail + (before.length > WINDOW ? before.slice(-WINDOW) : before);
+    var already = /<div[^>]*class="[^"]*tdoc-table-scroll[^"]*"[^>]*>\s*$/i.test(context);
     var depth = 0, j = at, end = -1;
     while (j < html.length) {
-      var open = html.toLowerCase().indexOf('<table', j);
-      var close = html.toLowerCase().indexOf('</table', j);
-      if (close === -1) break;
-      if (open !== -1 && open < close) { depth++; j = open + 6; continue; }
+      var t = next(j);
+      if (!t) break;
+      if (t[0].length === 6) { depth++; j = t.index + 6; continue; }
       depth--;
-      if (depth === 0) { end = html.indexOf('>', close); break; }
-      j = close + 7;
+      if (depth === 0) { end = html.indexOf('>', t.index); break; }
+      j = t.index + 7;
     }
-    if (end === -1) { out += html.slice(i); break; }
+    if (end === -1) { out.push(html.slice(i)); break; }
     var table = html.slice(at, end + 1);
-    out += before + (already ? table : '<div class="tdoc-table-scroll">' + table + '</div>');
+    var piece = before + (already ? table : '<div class="tdoc-table-scroll">' + table + '</div>');
+    out.push(piece);
+    tail = piece.length > WINDOW ? piece.slice(-WINDOW) : (tail + piece).slice(-WINDOW);
     i = end + 1;
   }
-  return out;
+  return out.join('');
 }
 
 const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';

@@ -50,11 +50,30 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   });
 
   await t('a doc written before the index is read once and indexed on the way', async () => {
+    // The platform is only scanned while a viewer's own facet is being
+    // built: `me` and `other` built theirs on their first publish (the quota
+    // count), so a newcomer's first My docs is the scan that gives the
+    // legacy key its index.
+    const late = await issue(worker, env, 'late');
+    await call('/api/me', { token: late.token });
     const md = env.META.metadata.get('meta:theirs-legacy');
     assert(md && md.a === other.account_id, `legacy key not backfilled: ${JSON.stringify(md)}`);
     env.META.gets = [];
     await call('/api/me', { token: me.token });
     assert(!env.META.gets.includes('meta:theirs-legacy'), 'the backfilled key is still read in full');
+    assert(!env.META.gets.some((k) => k.startsWith('meta:theirs-')), 'My docs read other people\'s docs');
+  });
+
+  await t('once built, My docs is a list per facet, not a walk over the platform', async () => {
+    const lists = [];
+    const orig = env.META.list.bind(env.META);
+    env.META.list = async (opts) => { lists.push(opts && opts.prefix); return orig(opts); };
+    try {
+      const r = await call('/api/me', { token: me.token });
+      assert(r.status === 200, `status ${r.status}`);
+      assert(!lists.includes('meta:'), `the platform was listed: ${lists.join(', ')}`);
+      assert(lists.some((p) => p === `docidx:p:${me.account_id}:`), `the viewer's facet was not listed: ${lists.join(', ')}`);
+    } finally { env.META.list = orig; }
   });
 
   await t('renaming and moving keep the index current', async () => {
