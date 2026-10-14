@@ -243,8 +243,8 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(me.body.docs.some((d) => d.slug === 'bob-notes'), 'back in My docs');
   });
 
-  await t('an invitee who opens a team doc before joining is offered the invite, and Accept lets them in (#711)', async () => {
-    const created = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'BeFreed', invites: ['Erin@Example.com'] } });
+  await t('an invitee who opens a team-private doc joins on view and reads it; Accept still works for the rest (#711)', async () => {
+    const created = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'BeFreed', invites: ['Erin@Example.com', 'hana@example.com'] } });
     assert(created.status === 200, `create ${created.status}`);
     const bf = created.body.team;
     await seedDoc(env, 'ads-report', 'alice');
@@ -257,26 +257,78 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     };
     const erin = await sid('erin@example.com', 'acct-erin');
     const gina = await sid('gina@example.com', 'acct-gina');
+    const hana = await sid('hana@example.com', 'acct-hana');
     const gate = await call('/d/ads-report', { cookie: erin });
     const html = await gate.r.text();
-    assert(gate.status === 403 && html.includes('BeFreed') && html.includes('acceptInvite'), `invitee did not get the invite: ${gate.status}`);
+    assert(gate.status === 200, `the invitee was not let in: ${gate.status}`);
+    assert(bootData(html, '__TDOC_SHELL__').joinedTeam?.name === 'BeFreed', 'no "You joined" notice');
+    const t1 = JSON.parse(await env.META.get(`team:${bf.id}`));
+    assert(t1.members.some((m) => m.account_id === 'acct-erin') && !t1.invites.includes('erin@example.com'), 'erin did not join');
+    const again = await call('/d/ads-report', { cookie: erin });
+    assert(again.status === 200 && !bootData(await again.r.text(), '__TDOC_SHELL__').joinedTeam, 'the notice is not one-time');
     const stranger = await call('/d/ads-report', { cookie: gina });
     const strangerHtml = await stranger.r.text();
     assert(stranger.status === 403 && !strangerHtml.includes('acceptInvite'), 'someone without an invite was offered one');
     const refused = await call('/api/team/accept', { method: 'POST', cookie: gina, body: { slug: 'ads-report' }, headers: { Origin: 'https://tdoc.dev' } });
     assert(refused.status === 403 && refused.body.error === 'no_invite', `no invite accepted: ${refused.status}`);
-    const crossSite = await call('/api/team/accept', { method: 'POST', cookie: erin, body: { slug: 'ads-report' }, headers: { Origin: 'https://evil.example' } });
+    const crossSite = await call('/api/team/accept', { method: 'POST', cookie: hana, body: { slug: 'ads-report' }, headers: { Origin: 'https://evil.example' } });
     assert(crossSite.status === 403, `cross-site accept ${crossSite.status}`);
-    const personal = await call('/api/team/accept', { method: 'POST', cookie: erin, body: { slug: 'solo' }, headers: { Origin: 'https://tdoc.dev' } });
+    const personal = await call('/api/team/accept', { method: 'POST', cookie: hana, body: { slug: 'solo' }, headers: { Origin: 'https://tdoc.dev' } });
     assert(personal.status === 404, `a personal doc's slug reached a team: ${personal.status}`);
-    const ok = await call('/api/team/accept', { method: 'POST', cookie: erin, body: { slug: 'ads-report' }, headers: { Origin: 'https://tdoc.dev' } });
+    const ok = await call('/api/team/accept', { method: 'POST', cookie: hana, body: { slug: 'ads-report' }, headers: { Origin: 'https://tdoc.dev' } });
     assert(ok.status === 200 && ok.body.next === '/d/ads-report' && ok.body.team.role === 'member', `accept ${ok.status} ${JSON.stringify(ok.body)}`);
-    const t2 = JSON.parse(await env.META.get(`team:${bf.id}`) || 'null') || (await call(`/api/team?id=${bf.id}`, { cookie: alice })).body.team;
-    assert(!(t2.invites || []).includes('erin@example.com'), 'the invite was not cleared');
-    const open = await call('/d/ads-report', { cookie: erin });
-    // The bare doc URL redirects to its latest version once readable.
-    assert(open.status === 200 || (open.status === 302 && /\/d\/ads-report\/v\/1/.test(open.r.headers.get('Location') || '')),
-      `after accepting, the doc is still gated: ${open.status} ${open.r.headers.get('Location')}`);
+    const t2 = JSON.parse(await env.META.get(`team:${bf.id}`));
+    assert(!(t2.invites || []).includes('hana@example.com'), 'the invite was not cleared');
+  });
+
+  await t('opening a readable team doc while invited joins the team; others, anonymous, bearer and members change nothing', async () => {
+    const made = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'Readers', invites: ['Jo@Example.com', 'kit'] } });
+    assert(made.status === 200, `create ${made.status}`);
+    const rt = made.body.team;
+    await seedDoc(env, 'open-memo', 'alice', { visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] });
+    const mv = await call('/api/team/move', { method: 'POST', cookie: alice, body: { slugs: ['open-memo'], team: rt.id } });
+    assert(mv.status === 200, `move ${mv.status}`);
+    const sidOf = async (data) => {
+      const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      await env.META.put(`session:${id}`, JSON.stringify({ ...data, created: new Date().toISOString() }));
+      return `tdoc_sid=${id}`;
+    };
+    const teamKey = `team:${rt.id}`;
+    const writes = [];
+    const realPut = env.META.put.bind(env.META);
+    env.META.put = async (k, v, o) => { writes.push(k); return realPut(k, v, o); };
+    const teamWrites = () => writes.filter((k) => k === teamKey || k.startsWith('account-teams:'));
+    try {
+      // Anonymous: served, nothing written.
+      const anon = await call('/d/open-memo/v/1');
+      assert(anon.status === 200 && !bootData(await anon.r.text(), '__TDOC_SHELL__').joinedTeam, `anon ${anon.status}`);
+      // Signed in, not invited: served, no change.
+      const nobody = await sidOf({ email: 'nobody@example.com', name: 'n', account_id: 'acct-nobody' });
+      const n = await call('/d/open-memo/v/1', { cookie: nobody });
+      assert(n.status === 200 && !bootData(await n.r.text(), '__TDOC_SHELL__').joinedTeam, `not invited ${n.status}`);
+      // Bearer token of an invited handle: an API caller never joins.
+      const kit = await issue(worker, env, 'kit');
+      const viaToken = await call('/d/open-memo/v/1', { token: kit.token });
+      assert(viaToken.status === 200, `bearer ${viaToken.status}`);
+      // Already a member: no team writes.
+      const m = await call('/d/open-memo/v/1', { cookie: alice });
+      assert(m.status === 200, `member ${m.status}`);
+      assert(teamWrites().length === 0, `writes without a join: ${teamWrites()}`);
+      const before = JSON.parse(await env.META.get(teamKey));
+      assert(before.members.length === 1 && before.invites.includes('kit'), 'team changed before any invitee opened it');
+      // Invited by email: opening the readable doc makes them a member.
+      const jo = await sidOf({ email: 'jo@example.com', name: 'Jo', account_id: 'acct-jo' });
+      const j = await call('/d/open-memo', { cookie: jo });
+      assert(j.status === 200, `invitee ${j.status}`);
+      assert(bootData(await j.r.text(), '__TDOC_SHELL__').joinedTeam?.name === 'Readers', 'no notice');
+      const after = JSON.parse(await env.META.get(teamKey));
+      assert(after.members.some((x) => x.account_id === 'acct-jo') && !after.invites.includes('jo@example.com'), 'jo is not a member');
+      assert(after.members.filter((x) => x.account_id === 'acct-jo').length === 1, 'joined twice');
+      const list = await call('/api/teams', { cookie: jo });
+      assert(list.body.teams.some((x) => x.id === rt.id), 'the team is not in their list');
+    } finally {
+      env.META.put = realPut;
+    }
   });
 
   await t('the CLI token can list its teams and move its own doc into one, and create a team without invites (tdoc-publish --team)', async () => {
