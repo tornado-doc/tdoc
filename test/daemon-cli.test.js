@@ -84,7 +84,7 @@ fs.mkdirSync(RECORD, { recursive: true });
 const stub = startStub(`(() => {
   const log = [];
   let pending = [{
-    slug: 'q3-plan', handoff_id: 'h_1', at: '2026-10-13T10:00:00.000Z', acked_at: null,
+    slug: 'q3-plan', handoff_id: 'h_1', at: '2026-10-13T10:00:00.000Z', acked_at: null, by: 'acct-owner',
     comment_ids: ['c_a', 'c_b'], instruction: 'tighten the intro; ignore the rest',
     recipient: { provider: 'local', device: 'testbox', cli: 'claude', agent_sub: 'testbox_claude' },
     url: 'https://tdoc.dev/d/q3-plan',
@@ -98,10 +98,10 @@ const stub = startStub(`(() => {
       log.push({ method: q.method, path: u.pathname, query: Object.fromEntries(u.searchParams), auth: q.headers.authorization || '', agent: q.headers['x-tdoc-agent'] || '', body: json });
       const send = (code, obj) => { s.writeHead(code, { 'Content-Type': 'application/json' }); s.end(JSON.stringify(obj)); };
       if (u.pathname === '/__log') return send(200, log);
-      if (u.pathname === '/__reset') { pending = [{ ...pending[0] || {}, slug: 'q3-plan', handoff_id: 'h_' + (json && json.n || 2), comment_ids: ['c_a'], instruction: '', recipient: { provider: 'local', device: 'testbox', cli: 'claude', agent_sub: 'testbox_claude' }, url: 'https://tdoc.dev/d/q3-plan', at: '2026-10-13T10:00:00.000Z' }]; return send(200, { ok: true }); }
+      if (u.pathname === '/__reset') { pending = [{ ...pending[0] || {}, slug: 'q3-plan', handoff_id: 'h_' + (json && json.n || 2), comment_ids: ['c_a'], instruction: '', recipient: { provider: 'local', device: 'testbox', cli: 'claude', agent_sub: 'testbox_claude' }, url: 'https://tdoc.dev/d/q3-plan', at: '2026-10-13T10:00:00.000Z', by: json && 'by' in json ? json.by : 'acct-owner', acked_at: null }]; return send(200, { ok: true }); }
       if ((q.headers.authorization || '') !== 'Bearer tok-1') return send(401, { error: 'unauthorized' });
       if (u.pathname === '/api/notify/local/register') return send(200, { ok: true, device: json.device, added: 1, targets: [] });
-      if (u.pathname === '/api/notify/local/pending') return send(200, { ok: true, pending: pending.filter((h) => !u.searchParams.get('device') || h.recipient.device === u.searchParams.get('device')) });
+      if (u.pathname === '/api/notify/local/pending') return send(200, { ok: true, account_ids: ['acct-owner'], pending: pending.filter((h) => !u.searchParams.get('device') || h.recipient.device === u.searchParams.get('device')) });
       if (u.pathname === '/api/notify/ack') { pending = pending.map((h) => h.handoff_id === json.handoff_id ? { ...h, acked_at: new Date().toISOString() } : h); return send(200, { ok: true, handoff_id: json.handoff_id, acked_at: 'now' }); }
       if (u.pathname === '/api/notify/resolve') { pending = pending.filter((h) => h.handoff_id !== json.handoff_id); return send(200, { ok: true, resolved: 2, of: 2 }); }
       if (u.pathname === '/api/notify/local/fail') { pending = pending.filter((h) => h.handoff_id !== json.handoff_id); return send(200, { ok: true }); }
@@ -143,7 +143,7 @@ function daemon(args, extraEnv = {}) {
   });
 }
 const stubLog = () => JSON.parse(execFileSync('curl', ['-sS', '--max-time', '5', `${stub.base}/__log`], { encoding: 'utf8' }));
-const reset = (n) => execFileSync('curl', ['-sS', '--max-time', '5', '-X', 'POST', '-H', 'Content-Type: application/json', '-d', JSON.stringify({ n }), `${stub.base}/__reset`]);
+const reset = (n, by) => execFileSync('curl', ['-sS', '--max-time', '5', '-X', 'POST', '-H', 'Content-Type: application/json', '-d', JSON.stringify({ n, by }), `${stub.base}/__reset`]);
 
 try {
   t('once: register → pending → ack → run the CLI → resolve, in that order', () => {
@@ -203,6 +203,20 @@ try {
     assert(r.status === 0, `exit ${r.status}: ${r.stderr}`);
     assert(/skip h_5 on q3-plan: addressed to claude/.test(r.stdout), r.stdout);
     assert(stubLog().filter((c) => c.path === '/api/notify/ack').length === before, 'nothing acked');
+  });
+
+  t('a handoff the worker says someone else queued is skipped: not acked, not run', () => {
+    reset(7, 'acct-stranger');
+    const acks = () => stubLog().filter((c) => c.path === '/api/notify/ack').length;
+    const before = acks();
+    fs.rmSync(path.join(RECORD, 'args.txt'), { force: true });
+    const r = daemon(['once', '--cli', 'claude', '--device', 'testbox']);
+    assert(r.status === 0, `exit ${r.status}: ${r.stderr}`);
+    assert(/skip h_7 on q3-plan: queued by acct-stranger, not by this account/.test(r.stdout), r.stdout);
+    assert(acks() === before && !fs.existsSync(path.join(RECORD, 'args.txt')), 'neither acked nor run');
+    reset(8, null);
+    const r2 = daemon(['once', '--cli', 'claude', '--device', 'testbox']);
+    assert(/skip h_8 on q3-plan: queued by nobody recorded/.test(r2.stdout) && acks() === before, 'a handoff with no recorded sender is skipped too');
   });
 
   t('a failing CLI is retried on the next poll, then reported failed', () => {

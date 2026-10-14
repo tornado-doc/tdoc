@@ -270,6 +270,92 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(targets.default && targets.default.provider === 'local', 'and they are offered again');
   });
 
+  // Who may make the owner's computer run. authorizeDocEdit admits more
+  // callers than that (a feedback token of the owner's, a team member); a
+  // site-mode space hands feedback tokens to visitors. Local is owner-only,
+  // through a door tdoc controls.
+  const home = { Origin: 'https://tdoc.dev' };
+  const site = 'https://app.example.com';
+  async function seedSite() {
+    const w = await seed('site-doc');
+    await register(w.env, w.owner.token);
+    const bound = await call(w.env, '/api/feedback/site', { method: 'POST', cookie: w.owner.cookie, headers: home, body: { slug: w.slug, origins: [site], mode: 'public' } });
+    assert(bound.status === 200, `bind ${bound.status} ${JSON.stringify(bound.body)}`);
+    const visitor = await putSession(w.env, 'visitor');
+    const vc = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: visitor, headers: home, body: { origin: site, space: w.slug } });
+    assert(vc.status === 200 && vc.body.token, `visitor connect ${vc.status} ${JSON.stringify(vc.body)}`);
+    const oc = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.owner.cookie, headers: home, body: { origin: site, space: w.slug } });
+    assert(oc.status === 200 && oc.body.token, `owner connect ${oc.status}`);
+    return { ...w, visitorToken: vc.body.token, ownerSiteToken: oc.body.token };
+  }
+  const sendLocal = (env, slug, ids, opts) => call(env, '/api/notify/handoff', { method: 'POST', ...opts, body: { slug, comment_ids: ids, recipient: LOCAL_CLAUDE } });
+
+  await t('a visitor to the owner\'s public site cannot queue work for the owner\'s computer', async () => {
+    const { env, slug, ids, visitorToken, owner } = await seedSite();
+    const r = await sendLocal(env, slug, ids, { token: visitorToken });
+    assert(r.status === 401 || r.status === 403, `visitor got ${r.status}: ${JSON.stringify(r.body)}`);
+    const targets = await call(env, `/api/notify/targets?slug=${slug}`, { token: visitorToken });
+    assert(targets.status !== 200 || !JSON.stringify(targets.body).includes('"local"'), `visitor sees local agents: ${JSON.stringify(targets.body)}`);
+    assert((await pending(env, owner.token)).body.pending.length === 0, 'nothing reached the daemon');
+  });
+
+  await t('the owner\'s own site token and per-person feedback token are refused for local, and do not see local in the picker', async () => {
+    const { env, slug, ids, ownerSiteToken, owner } = await seedSite();
+    const r = await sendLocal(env, slug, ids, { token: ownerSiteToken });
+    assert(r.status === 403 && r.body.error === 'local_agent_owner_only', `site token got ${r.status}: ${JSON.stringify(r.body)}`);
+    let targets = (await call(env, `/api/notify/targets?slug=${slug}`, { token: ownerSiteToken })).body;
+    assert(!targets.default && !(targets.candidates || []).length && targets.reason === 'no_agent_bound', `site token sees: ${JSON.stringify(targets)}`);
+    // The per-person feedback token ("use an existing doc") on the same doc.
+    const pc = await call(env, '/api/feedback/connect', { method: 'POST', cookie: owner.cookie, headers: home, body: { origin: 'https://other.example.com', slug } });
+    assert(pc.status === 200 && pc.body.token, `personal connect ${pc.status} ${JSON.stringify(pc.body)}`);
+    const p = await sendLocal(env, slug, ids, { token: pc.body.token });
+    assert(p.status === 403 && p.body.error === 'local_agent_owner_only', `personal token got ${p.status}: ${JSON.stringify(p.body)}`);
+    // Nothing a page can send picks local by default either.
+    const noRecipient = await call(env, '/api/notify/handoff', { method: 'POST', token: pc.body.token, body: { slug, comment_ids: ids } });
+    assert(noRecipient.status === 200 && noRecipient.body.delivery.status === 'failed' && noRecipient.body.delivery.error === 'no_recipient', `default routed to local: ${JSON.stringify(noRecipient.body)}`);
+    assert((await pending(env, owner.token)).body.pending.length === 0, 'nothing reached the daemon');
+  });
+
+  await t('an invited editor who may read and comment, but does not own the doc, is refused', async () => {
+    const { env, owner, slug, ids } = await seed('invited-doc');
+    await register(env, owner.token);
+    const share = await call(env, '/api/doc/access', { method: 'PATCH', cookie: owner.cookie, headers: home, body: { slug, access: { visibility: 'private', commenting: 'invited', allowed_users: ['editor'] } } });
+    assert(share.status === 200, `share ${share.status} ${JSON.stringify(share.body)}`);
+    const editor = await putSession(env, 'editor');
+    const r = await sendLocal(env, slug, ids, { cookie: editor });
+    assert(r.status === 401 || r.status === 403, `editor got ${r.status}: ${JSON.stringify(r.body)} (share ${share.status})`);
+    const other = await issue(worker, env, 'editor');
+    const viaToken = await sendLocal(env, slug, ids, { token: other.token });
+    assert(viaToken.status === 403, `editor's own token got ${viaToken.status}`);
+    assert((await pending(env, owner.token)).body.pending.length === 0, 'nothing reached the daemon');
+  });
+
+  await t('the owner is allowed, signed in or with their upload token, and the handoff records who queued it', async () => {
+    const { env, owner, slug, ids } = await seed('owner-doc');
+    await register(env, owner.token);
+    const viaCookie = await sendLocal(env, slug, [ids[0]], { cookie: owner.cookie });
+    assert(viaCookie.status === 200 && viaCookie.body.delivery.status === 'queued', `cookie: ${viaCookie.status} ${JSON.stringify(viaCookie.body)}`);
+    const viaToken = await sendLocal(env, slug, [ids[1]], { token: owner.token });
+    assert(viaToken.status === 200 && viaToken.body.delivery.status === 'queued', `token: ${viaToken.status} ${JSON.stringify(viaToken.body)}`);
+    const p = (await pending(env, owner.token)).body;
+    assert(p.pending.length === 2 && p.pending.every((h) => h.by === owner.account_id), `by: ${JSON.stringify(p.pending.map((h) => h.by))}`);
+    assert(p.account_ids.includes(owner.account_id), 'the daemon is told which accounts count as itself');
+    // A record that claims another sender never reaches a daemon.
+    const stored = JSON.parse(await env.META.get(`handoffs:${slug}`));
+    await env.META.put(`handoffs:${slug}`, JSON.stringify(stored.map((h, i) => (i === 0 ? { ...h, by: 'acct-forged' } : h))));
+    const after = (await pending(env, owner.token)).body;
+    assert(after.pending.length === 1 && after.pending[0].by === owner.account_id, 'a forged sender is dropped, not run');
+  });
+
+  await t('resend of a local handoff is owner-only too', async () => {
+    const { env, owner, slug, ids, ownerSiteToken } = await seedSite();
+    const sent = await sendLocal(env, slug, ids, { cookie: owner.cookie });
+    const r = await call(env, '/api/notify/handoff/resend', { method: 'POST', token: ownerSiteToken, body: { slug, handoff_id: sent.body.handoff_id } });
+    assert(r.status === 403 && r.body.error === 'local_agent_owner_only', `site token resend got ${r.status}`);
+    const again = await call(env, '/api/notify/handoff/resend', { method: 'POST', cookie: owner.cookie, body: { slug, handoff_id: sent.body.handoff_id } });
+    assert(again.status === 200 && again.body.delivery.status === 'queued', `owner resend ${again.status}`);
+  });
+
   await t('a stale pending entry (handoff gone or finished elsewhere) is pruned on the next poll, once', async () => {
     const { env, owner, slug, ids } = await seed();
     await register(env, owner.token);

@@ -186,11 +186,18 @@ async function register(cfg, st) {
   return r;
 }
 
-async function runHandoff(cfg, st, state, h) {
+async function runHandoff(cfg, st, state, h, accountIds) {
   const cli = h.recipient && h.recipient.cli;
   const key = h.handoff_id;
   state.attempts = state.attempts || {};
   const attempts = state.attempts[key] || 0;
+  // The same rule the worker applies, checked again here: a handoff this
+  // computer runs must have been queued by the account it is signed in as.
+  // Anything else is skipped, never acked, never run.
+  if (!h.by || !Array.isArray(accountIds) || !accountIds.includes(h.by)) {
+    log(`skip ${key} on ${h.slug}: queued by ${h.by || 'nobody recorded'}, not by this account`);
+    return;
+  }
   if (!st.clis.includes(cli)) {
     log(`skip ${key} on ${h.slug}: addressed to ${cli}, which this daemon does not run (--cli ${st.clis.join(',')})`);
     return;
@@ -252,6 +259,7 @@ async function once(cfg, st, state, { registerFirst = true } = {}) {
   if (registerFirst) await register(cfg, st);
   const r = await api(cfg, 'GET', `/api/notify/local/pending?device=${encodeURIComponent(st.device)}&limit=20`);
   const pending = Array.isArray(r.pending) ? r.pending : [];
+  const accountIds = Array.isArray(r.account_ids) ? r.account_ids : [];
   state.last_poll = new Date().toISOString();
   state.device = st.device;
   state.clis = st.clis;
@@ -262,7 +270,7 @@ async function once(cfg, st, state, { registerFirst = true } = {}) {
   // versions fork. Oldest first, the order tdoc returns.
   for (const h of pending) {
     if (stopping) break;
-    await runHandoff(cfg, st, state, h);
+    await runHandoff(cfg, st, state, h, accountIds);
   }
   return pending.length;
 }

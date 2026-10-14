@@ -7937,6 +7937,42 @@ async function localOwnerAccount(env, meta) {
   if (!owner) return null;
   return (await accountGroup(env, owner)).canonical;
 }
+// Who may make a local agent run. Stricter than authorizeDocEdit: a local
+// agent is the owner's own computer executing text other people wrote, so
+// only the owner's cookie session or upload token may queue for it. Never a
+// feedback / site token (it lives in a page tdoc does not control, even when
+// it is the owner's), never a team member or an invited editor, never the
+// self-host admin token (it owns no account to register a device under).
+// Returns the owner-group account id the caller proved, or null.
+async function localDriverAccount(env, gate) {
+  const meta = gate && gate.meta;
+  const docAcct = meta && meta.hosted && meta.hosted.account_id;
+  if (!docAcct || meta.workspace_id) return null;
+  const owner = (await accountGroup(env, docAcct)).ids;
+  if (gate.session) {
+    if (gate.session.feedback) return null;
+    const id = await sessionAccountId(env, gate.session);
+    if (!id) return null;
+    if (owner.includes(id)) return id;
+    return (await accountGroup(env, id)).ids.includes(docAcct) ? id : null;
+  }
+  const a = gate.actor;
+  if (!a || a.kind !== 'hosted') return null;
+  return sessionAccountIds(a).find((id) => owner.includes(id)) || null;
+}
+function isLocalTarget(t) { return !!t && t.provider === 'local'; }
+// The picker's answer with local agents taken out, for a caller who may not
+// drive them. The reason stays honest: nothing bound is still nothing bound.
+function withoutLocalTargets(resolved) {
+  const def = isLocalTarget(resolved.default) ? null : resolved.default;
+  const candidates = (resolved.candidates || []).filter((t) => !isLocalTarget(t));
+  const fallback = isLocalTarget(resolved.fallback) ? null : resolved.fallback;
+  const next = { ...resolved, default: def || candidates[0] || null, candidates: def ? candidates : candidates.slice(1), fallback };
+  if (!next.default && !next.candidates.length && !next.fallback) next.reason = next.reason || 'no_agent_bound';
+  return next;
+}
+const LOCAL_OWNER_ONLY = { error: 'local_agent_owner_only', message: 'Only the owner, signed in or with their own upload token, can send comments to an agent on their computer.' };
+
 async function loadLocalPending(env, accountId) {
   try {
     const list = JSON.parse((await env.META.get(`local-pending:${accountId}`)) || '[]');
@@ -12276,7 +12312,8 @@ export default {
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       if (gate.meta && gate.meta.workspace_id) return json({ default: null, candidates: [], fallback: null, reason: 'team_doc' });
-      return json(await notifyTargetsFor(env, slug, gate));
+      const resolved = await notifyTargetsFor(env, slug, gate);
+      return json((await localDriverAccount(env, gate)) ? resolved : withoutLocalTargets(resolved));
     }
 
     if (p === '/api/notify/handoffs' && method === 'GET') {
@@ -12314,14 +12351,20 @@ export default {
         ids = ids.filter((id) => !skipped.includes(id));
         if (!ids.length) return json({ ok: true, sent: 0, skipped, reason: 'agent_has_last_word' });
       }
-      const resolved = await notifyTargetsFor(env, slug, gate);
+      // A local agent runs on the owner's computer: only the owner's own
+      // session or token may queue for it, so for anyone else local agents
+      // are neither offered nor accepted (see localDriverAccount).
+      const localDriver = await localDriverAccount(env, gate);
+      const asked = recipient ? normalizeNotifyTarget(recipient) : null;
+      if (isLocalTarget(asked) && !localDriver) return json(LOCAL_OWNER_ONLY, { status: 403 });
+      const resolvedAll = await notifyTargetsFor(env, slug, gate);
+      const resolved = localDriver ? resolvedAll : withoutLocalTargets(resolvedAll);
       // A feedback token lives in a page tdoc does not control, so a script
       // there could hold it. From that door the recipient must be one of the
       // account's own agents that the panel offered — never an address the
       // page made up.
       const fromPage = Boolean(gate.session && gate.session.feedback) || Boolean(gate.meta && gate.meta.workspace_id);
       const offered = [resolved.default, ...(resolved.candidates || []), resolved.fallback].filter(Boolean);
-      const asked = recipient ? normalizeNotifyTarget(recipient) : null;
       // When the asked-for recipient is one tdoc offered, send to the STORED
       // copy: the client's object may carry fields (device, cli) that only the
       // record should decide.
@@ -12330,11 +12373,14 @@ export default {
       // No recipient is a 200 with a failed delivery, not a 4xx: the handoff
       // is a real record either way, and the panel renders "not delivered"
       // the same for "nobody bound" as for "Raft was down".
+      if (isLocalTarget(target) && !localDriver) return json(LOCAL_OWNER_ONLY, { status: 403 });
       const rec = await dispatchHandoff(env, {
         slug, meta: gate.meta, commentIds: ids,
         instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
         recipient: target, publicHost: env.PUBLIC_HOST,
-        by: gate.meta && gate.meta.workspace_id && gate.session ? gate.session.account_id : null,
+        // A local handoff records who queued it: the daemon re-checks that it
+        // was the owner before running anything.
+        by: isLocalTarget(target) ? localDriver : (gate.meta && gate.meta.workspace_id && gate.session ? gate.session.account_id : null),
       });
       // The first agent a person picks, when they had no default yet, is
       // their default from now on — so @agent has somewhere to go next time.
@@ -12382,13 +12428,17 @@ export default {
         commentIds: prev.comment_ids, instruction: prev.instruction, publicHost: env.PUBLIC_HOST,
       });
       const target = normalizeNotifyTarget(prev.recipient);
+      const localDriver = isLocalTarget(target) ? await localDriverAccount(env, gate) : null;
+      if (isLocalTarget(target) && !localDriver) return json(LOCAL_OWNER_ONLY, { status: 403 });
       const delivery = target
         ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
         : { status: 'failed', error: 'no_recipient' };
-      // A resend after a failed local run is a fresh turn for the daemon.
+      // A resend after a failed local run is a fresh turn for the daemon,
+      // queued by whoever pressed Resend (the owner, per the check above).
       const { run: _run, ...keep } = prev;
       const rec = await putHandoff(env, slug, {
         ...keep, delivery: { ...delivery, at: new Date().toISOString() },
+        ...(localDriver ? { by: localDriver } : {}),
       });
       if (target && target.provider === 'local') await localPendingAdd(env, gate.meta, slug, rec);
       return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery });
@@ -12474,7 +12524,7 @@ export default {
       // started the daemon on again is back.
       await unremoveTargets(env, accountId, (k) => wanted.some((w) => notifyKey(w) === k));
       await localTouchSeen(env, accountId, device);
-      return json({ ok: true, device, targets: wanted, added: missing.length }, { headers: { 'Cache-Control': 'no-store' } });
+      return json({ ok: true, device, account_id: accountId, targets: wanted, added: missing.length }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     // What a daemon should run next. Reads only, apart from the throttled
@@ -12489,7 +12539,8 @@ export default {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), LOCAL_PENDING_MAX);
       const pending = [];
       const cache = new Map();
-      for (const id of [auth.actor.account_id, ...(auth.actor.linked_account_ids || [])]) {
+      const accountIds = [auth.actor.account_id, ...(auth.actor.linked_account_ids || [])];
+      for (const id of accountIds) {
         const list = await loadLocalPending(env, id);
         if (!list.length) continue;
         const keep = [];
@@ -12498,12 +12549,17 @@ export default {
           if (!cache.has(e.slug)) cache.set(e.slug, await loadHandoffs(env, e.slug));
           const h = cache.get(e.slug).find((x) => x && x.handoff_id === e.handoff_id);
           if (localHandoffDone(h)) continue;
+          // Queued by someone who is not this account: not ours to run, and
+          // not kept. The dispatch gate already refuses this; a record that
+          // got here anyway is dropped rather than executed.
+          if (!h.by || !accountIds.includes(h.by)) continue;
           keep.push(e);
           if (device && e.device !== device) continue;
           pending.push({
             slug: e.slug,
             handoff_id: h.handoff_id,
             at: h.at,
+            by: h.by,
             acked_at: h.acked_at || null,
             comment_ids: h.comment_ids,
             instruction: h.instruction || '',
@@ -12515,7 +12571,7 @@ export default {
       }
       pending.sort((a, b) => String(a.at).localeCompare(String(b.at)));
       if (device) await localTouchSeen(env, auth.actor.account_id, device);
-      return json({ ok: true, device: device || null, pending: pending.slice(0, limit), server_time: new Date().toISOString() }, { headers: { 'Cache-Control': 'no-store' } });
+      return json({ ok: true, device: device || null, account_ids: accountIds, pending: pending.slice(0, limit), server_time: new Date().toISOString() }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
     // The daemon gave up on a handoff (the CLI failed twice, or timed out).
