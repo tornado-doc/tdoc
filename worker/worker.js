@@ -4717,6 +4717,18 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
     const key = normalizeActorKey(row.meta && row.meta.hosted && row.meta.hosted.owner_key);
     return key && key.startsWith('email:') ? key.slice(6).split('@')[0] : '';
   };
+  // The list's preview: the excerpt and first image cached on meta at
+  // publish (docPreviewFromHtml). The meta is already in hand for every
+  // row, so this costs nothing per row -- never a content read here. Images
+  // ride along only as a URL: an inline SVG data URL can run to 60KB and
+  // would make the boot payload grow with the pictures in people's docs.
+  const rowPreview = (row) => {
+    const preview = row.meta && row.meta.preview && typeof row.meta.preview === 'object' ? row.meta.preview : null;
+    if (!preview) return { excerpt: '', image: '' };
+    const excerpt = typeof preview.excerpt === 'string' && preview.excerpt ? preview.excerpt : (typeof preview.description === 'string' ? preview.description : '');
+    const image = typeof preview.image === 'string' && /^(?:https?:\/\/|\/)/i.test(preview.image) ? preview.image : '';
+    return { excerpt: excerpt.slice(0, 220), image };
+  };
   const publicRow = (row) => ({
     slug: row.slug,
     title: row.title,
@@ -4724,6 +4736,7 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
     created: row.created,
     updated: row.updated,
     owner: ownerDisplay(row),
+    ...rowPreview(row),
     // Computed here because only the server can compare canonical identities;
     // the client comparing display keys went quietly wrong for every session
     // shape that is not a bare handle.

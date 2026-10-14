@@ -77,7 +77,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     const needle = query.trim().toLowerCase();
     return docs
       .filter((doc) => doc.folder === folder)
-      .filter((doc) => `${doc.title} ${doc.slug}`.toLowerCase().includes(needle))
+      .filter((doc) => `${doc.title} ${doc.slug} ${doc.excerpt || ''}`.toLowerCase().includes(needle))
       .sort((a, b) => {
         if (sort === 'title') return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
         return String(b[sort]).localeCompare(String(a[sort]));

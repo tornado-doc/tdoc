@@ -334,6 +334,8 @@
   .row-check input, .select-all input { width: 15px; height: 15px; accent-color: var(--td-accent); cursor: pointer; }
   .doc-info { min-width: 0; flex: 1 1 auto; }
   .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-preview-image { width: 64px; height: 44px; flex: 0 0 64px; object-fit: cover; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-surface); }
+  .doc-preview-excerpt { margin-top: 3px; color: var(--td-ink); font-size: 12.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .78; }
   .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
   button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
   /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
@@ -432,6 +434,8 @@
   .search-field {
     flex-basis: 100%;
   }
+
+  .doc-preview-image { width: 52px; height: 40px; flex-basis: 52px; }
 
   .toolbar select,
   .toolbar .toolbar-select,

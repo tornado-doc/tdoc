@@ -5,7 +5,7 @@ import { AppDialog } from './ui/dialog.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
-import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
+import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
@@ -216,6 +216,38 @@ function ownerLabel(doc, viewer) {
   if (doc.mine) return 'me';
   if (!doc.owner) return null;
   return viewer && doc.owner === viewer ? 'me' : doc.owner;
+}
+
+// Personal and team spaces share this exact catalog control bar. A space may
+// add its own action at the end, but search and sort never fork again.
+function DocsToolbar({ query, onQuery, sort, onSort, children }) {
+  return (
+    <div className="toolbar">
+      <label className="search-field">
+        <Search size={15} />
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => onQuery(event.target.value)}
+          placeholder="Search title, slug, or preview"
+          aria-label="Search docs"
+        />
+      </label>
+      <AppSelect
+        plain
+        className="toolbar-select"
+        ariaLabel="Sort docs"
+        value={sort}
+        onChange={onSort}
+        options={[
+          { value: 'updated', label: 'Last updated' },
+          { value: 'created', label: 'Created' },
+          { value: 'title', label: 'Title' },
+        ]}
+      />
+      {children}
+    </div>
+  );
 }
 
 // Feedback spaces: one row per app, with where its comments stand. The row
@@ -516,7 +548,14 @@ export function DocsHub({ boot }) {
   const teamPath = [];
   for (let cur = teamFolderById.get(teamFolder); cur && teamPath.length < 8; cur = teamFolderById.get(cur.parent)) teamPath.unshift(cur);
   const allTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id) : [];
-  const shownTeamDocs = allTeamDocs.filter((doc) => (doc.folder || '') === teamFolder);
+  const teamNeedle = hub.query.trim().toLowerCase();
+  const shownTeamDocs = allTeamDocs
+    .filter((doc) => (doc.folder || '') === teamFolder)
+    .filter((doc) => `${doc.title} ${doc.slug} ${doc.excerpt || ''}`.toLowerCase().includes(teamNeedle))
+    .sort((a, b) => {
+      if (hub.sort === 'title') return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+      return String(b[hub.sort]).localeCompare(String(a[hub.sort]));
+    });
   const shownTeamFolders = spaceFolders
     .filter((item) => (item.parent || '') === teamFolder)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
@@ -718,11 +757,11 @@ export function DocsHub({ boot }) {
         {team ? (
           <>
             <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
-            <div className="toolbar">
+            <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
               <button type="button" className="new-folder-btn" onClick={() => setModal({ type: 'new-team-folder' })}>
                 <FolderPlus size={15} /> New folder
               </button>
-            </div>
+            </DocsToolbar>
             {teamPath.length ? (
               <nav className="crumbs" aria-label="Folder path">
                 <button className="crumb-root" type="button" onClick={() => setTeamFolder('')}>{team.name}</button>
@@ -773,35 +812,13 @@ export function DocsHub({ boot }) {
 
         {tab === 'mine' ? (
           <section className="pane" id="pane-mine">
-            <div className="toolbar">
-              <label className="search-field">
-                <Search size={15} />
-                <input
-                  type="search"
-                  value={hub.query}
-                  onChange={(event) => hub.setQuery(event.target.value)}
-                  placeholder="Search title or slug"
-                  aria-label="Search docs"
-                />
-              </label>
-              <AppSelect
-                plain
-                className="toolbar-select"
-                ariaLabel="Sort docs"
-                value={hub.sort}
-                onChange={hub.setSort}
-                options={[
-                  { value: 'updated', label: 'Last updated' },
-                  { value: 'created', label: 'Created' },
-                  { value: 'title', label: 'Title' },
-                ]}
-              />
+            <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
               {capabilities.folders ? (
                 <button type="button" className="new-folder-btn" onClick={() => setModal({ type: 'new-folder' })}>
                   <FolderPlus size={15} /> New folder
                 </button>
               ) : null}
-            </div>
+            </DocsToolbar>
 
             {hub.path.length ? (
               <nav className="crumbs" aria-label="Folder path">
@@ -853,30 +870,26 @@ export function DocsHub({ boot }) {
                 />
               ))}
             </div>
-            <div className={`doc-list${hub.selected.size ? ' is-selecting' : ''}`}>
-              {hub.shownDocs.map((doc) => (
-                <DocRow
-                  key={doc.slug}
-                  doc={doc}
-                  meta={[
-                    ownerLabel(doc, viewer),
-                    day(doc.created) ? `published ${day(doc.created)}` : null,
-                    day(doc.updated) && day(doc.updated) !== day(doc.created)
-                      ? `updated ${day(doc.updated)}`
-                      : null,
-                    doc.folder ? `in ${hub.folderById.get(doc.folder)?.name || ''}` : null,
-                  ].filter(Boolean).join(' · ')}
-                  selection={{ checked: hub.selected.has(doc.slug), onChange: () => hub.toggleSelected(doc.slug) }}
-                  starrable={capabilities.star}
-                  onToggleStar={hub.toggleStar}
-                  menuItems={docMenu([doc.slug], doc)}
-                  data={{ created: doc.created, updated: doc.updated, folder: doc.folder }}
-                />
-              ))}
-            </div>
-            {!hub.shownDocs.length && !hub.shownFolders.length ? (
-              <p className="empty">{hub.query ? 'No matches.' : 'No published docs here.'}</p>
-            ) : null}
+            <DocList
+              docs={hub.shownDocs}
+              selecting={hub.selected.size > 0}
+              rowProps={(doc) => ({
+                meta: [
+                  ownerLabel(doc, viewer),
+                  day(doc.created) ? `published ${day(doc.created)}` : null,
+                  day(doc.updated) && day(doc.updated) !== day(doc.created)
+                    ? `updated ${day(doc.updated)}`
+                    : null,
+                  doc.folder ? `in ${hub.folderById.get(doc.folder)?.name || ''}` : null,
+                ].filter(Boolean).join(' · '),
+                selection: { checked: hub.selected.has(doc.slug), onChange: () => hub.toggleSelected(doc.slug) },
+                starrable: capabilities.star,
+                onToggleStar: hub.toggleStar,
+                menuItems: docMenu([doc.slug], doc),
+                data: { created: doc.created, updated: doc.updated, folder: doc.folder },
+              })}
+              empty={!hub.shownFolders.length ? (hub.query ? 'No matches.' : 'No published docs here.') : null}
+            />
           </section>
         ) : null}
 

@@ -1067,7 +1067,11 @@ function localDocsData() {
         .map((item) => Number(item.name.slice(1))).sort((a, b) => b - a)[0] || 1;
     const created = meta.created || versions[0]?.created || '';
     const updated = versions[versions.length - 1]?.created || created;
-    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '' });
+    // The same preview the hosted catalog carries, when a local meta has one.
+    const preview = meta.preview && typeof meta.preview === 'object' ? meta.preview : {};
+    const excerpt = typeof preview.excerpt === 'string' ? preview.excerpt.slice(0, 220) : '';
+    const image = typeof preview.image === 'string' && /^(?:https?:\/\/|\/)/i.test(preview.image) ? preview.image : '';
+    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '', excerpt, image });
   }
   docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)) || a.title.localeCompare(b.title));
   return { docs, recent: [], starred: [], folders: [] };
