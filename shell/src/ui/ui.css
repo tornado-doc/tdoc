@@ -401,29 +401,34 @@ a.ui-menu-item:visited {
   background: var(--td-danger-tint);
 }
 
-.tdoc-notification-list {
-  display: grid;
-  gap: 2px;
+/* Notifications dialog: the browser-alert switch, a count line, then one
+   row per notification -- avatar, who did what on which doc, the comment's
+   own words, and when. Unread rows carry the accent tint and a dot. */
+.tdoc-notif-setting { padding: 0 0 12px; margin: 0 0 4px; border-bottom: 1px solid var(--td-line); }
+.tdoc-notif-setting .tdoc-switch { padding-left: 0; height: auto; }
+.tdoc-notif-setting .tdoc-switch:hover { border-color: transparent; background: none; }
+.tdoc-notif-setting .tdoc-switch-label { font-size: 14px; color: var(--td-ink); }
+.tdoc-notif-setting .manage-hint { margin: 4px 0 0 36px; }
+.tdoc-notif-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 10px 0 6px; }
+.tdoc-notif-count { font-size: 12px; font-weight: 600; color: var(--td-muted); }
+.tdoc-notif-head .tdoc-quiet-link, .tdoc-modal .tdoc-notif-head button.tdoc-quiet-link { margin: 0; font-size: 12px; }
+.tdoc-notification-list { display: grid; gap: 2px; margin: 0 -8px; max-height: min(56vh, 460px); overflow-y: auto; }
+.tdoc-modal button.tdoc-notif-row, button.tdoc-notif-row {
+  appearance: none; display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; min-height: 0;
+  margin: 0; padding: 10px 8px; border: 0; border-radius: 8px; background: none; box-shadow: none;
+  color: var(--td-ink); font-family: inherit; font-size: 14px; font-weight: 400; line-height: 1.4; text-align: left; cursor: pointer;
 }
-
-.tdoc-notification-list .tdoc-cluster-row {
-  width: 100%;
-  /* The row is a grid item, so its automatic minimum size is its content: the
-     track grows to the longest notification and the dialog scrolls sideways
-     instead of the text truncating. min-width:0 lets the track hold the
-     column, which is what makes the snip's ellipsis reachable. */
-  min-width: 0;
-}
-
-.tdoc-notification-list .tdoc-cluster-row.unread {
-  background: #eef2ff;
-}
-
-.tdoc-notification-list .tdoc-cluster-row > .muted {
-  flex-shrink: 0;
-  white-space: nowrap;
-  font-size: 12px;
-}
+.tdoc-modal button.tdoc-notif-row:hover, button.tdoc-notif-row:hover { background: var(--td-surface-2, #f7f7f5); }
+.tdoc-modal button.tdoc-notif-row.unread, button.tdoc-notif-row.unread { background: var(--td-accent-wash, rgba(22, 82, 240, .06)); }
+.tdoc-notif-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+.tdoc-notif-avatar--anon { display: grid; place-items: center; background: #8a93a2; color: #fff; font-size: 12px; font-weight: 600; }
+.tdoc-notif-main { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.tdoc-notif-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-notif-line strong { font-weight: 600; }
+.tdoc-notif-doc { color: var(--td-ink); font-weight: 500; }
+.tdoc-notif-preview { color: var(--td-muted); font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.tdoc-notif-time { flex: none; display: flex; align-items: center; gap: 6px; color: var(--td-muted); font-size: 12px; white-space: nowrap; padding-top: 1px; }
+.tdoc-notif-row.unread .tdoc-notif-time::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--td-accent); }
 
 .tdoc-modal .tds-step { display: flex; gap: 9px; align-items: flex-start; margin: 0 0 10px; font-size: 14px; color: #5b6070; }
 .tdoc-modal .tds-n { flex: none; width: 19px; height: 19px; border-radius: 50%; background: #eef3ff; color: var(--td-accent); font-size: 11.5px; font-weight: 700; display: grid; place-items: center; margin-top: 1px; }
