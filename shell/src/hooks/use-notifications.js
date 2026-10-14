@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   getUnreadNotificationCount,
   listNotifications,
@@ -22,11 +22,12 @@ export function useNotifications(enabled) {
     on: browserNotificationsEnabled(),
     permission: browserNotificationPermission(),
   }));
-  const lastUnread = useRef(-1);
 
-  // With desktop alerts on, a rise in the unread count fetches the newest
-  // page and alerts for what is new; a hidden tab keeps polling, since a
-  // hidden tab is exactly when an alert is worth having.
+  // With desktop alerts on, any unread at all fetches the newest page and
+  // alerts for events not alerted before. Watching only for a rise in the
+  // count missed a new reply that arrived as another was read (same total)
+  // and a reply folded into an already-unread row (count unchanged). A
+  // hidden tab keeps polling, since that is exactly when an alert matters.
   const refreshUnread = useCallback(async () => {
     if (!enabled) return;
     const alerting = browserNotificationsEnabled();
@@ -35,14 +36,13 @@ export function useNotifications(enabled) {
       const result = await getUnreadNotificationCount();
       const count = Number(result.unread) || 0;
       setUnread(count);
-      if (alerting && count > 0 && count > lastUnread.current) {
+      if (alerting && count > 0) {
         const page = await listNotifications(0);
         alertNewNotifications(page.items || [], {
           label: notificationLabel,
           open: (item) => { window.location.href = notificationTarget(item); },
         });
       }
-      lastUnread.current = count;
     } catch {
       // The identity may have expired. The next navigation will refresh it.
     }
@@ -79,7 +79,6 @@ export function useNotifications(enabled) {
   const setAlerts = useCallback(async (on) => {
     const permission = await setBrowserNotifications(on, items);
     setBrowserAlerts({ on: on && permission === 'granted', permission });
-    lastUnread.current = -1;
   }, [items]);
 
   useEffect(() => {
@@ -88,7 +87,7 @@ export function useNotifications(enabled) {
       const active = document.activeElement;
       const typing = active?.matches?.('input, textarea, [contenteditable="true"]');
       if (!typing) refreshUnread();
-    }, 30_000);
+    }, (typeof window !== 'undefined' && window.__TDOC_NOTIFY_POLL_MS) || 30_000);
     return () => window.clearInterval(timer);
   }, [refreshUnread]);
 

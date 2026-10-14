@@ -61,6 +61,7 @@ async function t(name, fn) {
     page.on('pageerror', (e) => errors.push(e.message));
     // Record desktop alerts instead of raising real ones.
     await page.addInitScript(() => {
+      window.__TDOC_NOTIFY_POLL_MS = 300;
       window.__alerts = [];
       class FakeNotification {
         constructor(title, opts) { window.__alerts.push({ title, body: opts && opts.body }); }
@@ -127,12 +128,42 @@ async function t(name, fn) {
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
       assert.equal(await page.evaluate(() => window.__alerts.length), 0, 'turning it on replayed the backlog');
       state.items = [row('n4', 'mention', 0, { actor: { login: 'claire', name: 'Claire' }, preview: 'Please check the numbers' }), ...state.items];
-      // The hook polls the unread count every 30 s.
-      await page.waitForFunction(() => window.__alerts.length > 0, null, { timeout: 40_000 });
+      await page.waitForFunction(() => window.__alerts.length > 0, null, { timeout: 5_000 });
       const alerts = await page.evaluate(() => window.__alerts);
       assert.equal(alerts.length, 1, JSON.stringify(alerts));
       assert.equal(alerts[0].title, 'Claire mentioned you on Q3 plan');
       assert.equal(alerts[0].body, 'Please check the numbers');
+      await context.close();
+    });
+
+    // A thread's unread replies share one row and one id: a second reply
+    // bumps count/at. It must alert again (review on #746).
+    await t('a second reply folded into an unread row alerts again', async () => {
+      const { context, page, dialog, state } = await open();
+      await dialog.getByRole('switch', { name: 'Browser notifications' }).click();
+      await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
+      await page.waitForTimeout(800);
+      assert.equal(await page.evaluate(() => window.__alerts.length), 0);
+      state.items = state.items.map((i) => (i.id === 'n2' ? { ...i, count: 2, at: new Date().toISOString(), preview: 'One more thing on the table' } : i));
+      await page.waitForFunction(() => window.__alerts.length > 0, null, { timeout: 5_000 });
+      const alerts = await page.evaluate(() => window.__alerts);
+      assert.equal(alerts.length, 1, JSON.stringify(alerts));
+      assert.equal(alerts[0].body, 'One more thing on the table');
+      await context.close();
+    });
+
+    // One read and one new: the unread total does not change, and the new one
+    // must still alert.
+    await t('a new notification arriving as another is read still alerts', async () => {
+      const { context, page, dialog, state } = await open();
+      await dialog.getByRole('switch', { name: 'Browser notifications' }).click();
+      await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
+      await page.waitForTimeout(800);
+      state.items = [row('n5', 'comment', 0, { actor: { login: 'dan', name: 'Dan' }, preview: 'Looks good' }), ...state.items.map((i) => (i.id === 'n1' ? { ...i, read: true } : i))];
+      await page.waitForFunction(() => window.__alerts.length > 0, null, { timeout: 5_000 });
+      const alerts = await page.evaluate(() => window.__alerts);
+      assert.equal(alerts.length, 1, JSON.stringify(alerts));
+      assert.equal(alerts[0].title, 'Dan commented on Q3 plan');
       await context.close();
     });
 

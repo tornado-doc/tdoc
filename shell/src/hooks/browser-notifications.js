@@ -37,8 +37,15 @@ function saveSeen(seen) {
 // the whole backlog as a burst of alerts.
 export function markSeen(items) {
   const seen = loadSeen();
-  for (const item of items || []) if (item && item.id) seen.add(item.id);
+  for (const item of items || []) if (item && item.id) seen.add(eventKey(item));
   saveSeen(seen);
+}
+
+// One notification row aggregates a thread's unread events and keeps its id
+// (a second reply bumps `count` and `at`), so the id alone would alert for
+// the first reply and never again. The fingerprint is the event, not the row.
+function eventKey(item) {
+  return `${item.id}|${item.at || ''}|${Number(item.count) || 1}`;
 }
 
 // Returns the resulting state: 'granted' (on), 'denied' (blocked by the
@@ -66,8 +73,8 @@ export function alertNewNotifications(items, { label, open }) {
   const seen = loadSeen();
   let shown = 0;
   for (const item of items || []) {
-    if (!item || item.read || !item.id || seen.has(item.id)) continue;
-    seen.add(item.id);
+    if (!item || item.read || !item.id || seen.has(eventKey(item))) continue;
+    seen.add(eventKey(item));
     // A tab opened after a busy afternoon alerts for the newest few only.
     if (shown >= ALERT_BURST_MAX) continue;
     try {
