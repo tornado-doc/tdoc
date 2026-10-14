@@ -111,6 +111,8 @@ export function DesktopCommentLayer({
   onEdit,
   onReanchor,
   handoff = null,
+  onResendHandoff = null,
+  onSendHandoffElsewhere = null,
 }) {
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
 
@@ -159,7 +161,7 @@ export function DesktopCommentLayer({
           position={cardPosition}
           expandReplies={expandReplies}
           canSendToAgent={canSendToAgent}
-                  agentSetupHref={agentSetupHref}
+          agentSetupHref={agentSetupHref}
           onReply={onReply}
           onReact={onReact}
           onDelete={onDelete}
@@ -167,6 +169,8 @@ export function DesktopCommentLayer({
           onEdit={onEdit}
           onReanchor={onReanchor}
           handoff={handoff}
+          onResendHandoff={onResendHandoff}
+          onSendHandoffElsewhere={onSendHandoffElsewhere}
         />
       ) : null}
     </>
@@ -194,6 +198,8 @@ export function MobileCommentDrawer({
   onReanchor,
   onNavigate,
   handoff = null,
+  onResendHandoff = null,
+  onSendHandoffElsewhere = null,
 }) {
   const drawerRef = useRef(null);
 
@@ -243,7 +249,7 @@ export function MobileCommentDrawer({
                   expandReplies={openCommentId === comment.id && expandReplies}
                   selected={openCommentId === comment.id}
                   canSendToAgent={canSendToAgent}
-                  agentSetupHref={agentSetupHref}
+          agentSetupHref={agentSetupHref}
                   onActivate={onNavigate}
                   onReply={onReply}
                   onReact={onReact}
@@ -252,6 +258,8 @@ export function MobileCommentDrawer({
                   onEdit={onEdit}
                   onReanchor={onReanchor}
                   handoff={handoff}
+                  onResendHandoff={onResendHandoff}
+                  onSendHandoffElsewhere={onSendHandoffElsewhere}
                 />
               ))}
             </Drawer.Content>

@@ -372,6 +372,30 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     } finally { directory = null; }
   });
 
+  await t("Raft's agent status rides along to the picker, for directory and already-known agents", async () => {
+    directory = [
+      { id: 'id-alpha', handle: 'alpha', status: 'stopped' },
+      { id: 'id-beta', handle: 'beta', status: 'active' },
+      { id: 'id-gamma', handle: 'gamma', status: 'bogus' },
+    ];
+    try {
+      const env = makeEnv(mod.CommentsStore, RAFT_DIR);
+      const owner = await issue(worker, env, 'owner');
+      await connectRaft(env, owner.cookie);
+      await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_sub: 'id-alpha' }), env, {});
+      await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'sdoc', version: 1, html: '<p>x</p>' } }), env, {});
+      const r = await (await worker.fetch(req('/api/notify/targets?slug=sdoc', { cookie: owner.cookie }), env, {})).json();
+      assert(r.default && r.default.agent_sub === 'id-alpha' && r.default.status === 'stopped', `default: ${JSON.stringify(r.default)}`);
+      const beta = r.candidates.find((c) => c.agent_sub === 'id-beta');
+      const gamma = r.candidates.find((c) => c.agent_sub === 'id-gamma');
+      assert(beta && beta.status === 'active', JSON.stringify(beta));
+      assert(gamma && !('status' in gamma), `an unknown status was passed on: ${JSON.stringify(gamma)}`);
+      // Status is what Raft says now, never stored on the account's own list.
+      const stored = JSON.parse(await env.META.get(`account-notify:${owner.account_id || ''}`) || '[]');
+      assert(!JSON.stringify(stored).includes('"status"'), `status persisted: ${JSON.stringify(stored)}`);
+    } finally { directory = null; }
+  });
+
   await t('a server with no configured installation id gets its list by asking Raft for the id', async () => {
     // Julie's friend: same tdoc App, her own server, so her own installation.
     directory = DIRECTORY;

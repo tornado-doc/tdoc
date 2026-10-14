@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { deliveryErrorText } from './document/notify-handoff.jsx';
+import { deliveryErrorText, resendResultText } from './document/notify-handoff.jsx';
 import { TopBar } from './top-bar.jsx';
 import { AppSwitch } from './ui/switch.jsx';
 import {
@@ -8,6 +8,7 @@ import {
   getOnboarding,
   postOnboardingEvent,
   renameDocument,
+  resendNotifyHandoff,
   setDocumentStar,
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
@@ -185,6 +186,9 @@ export function DocumentShell({ boot, config }) {
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
+  // "Send to another agent" from a card: the agent it is stuck on, so the
+  // picker opens on someone else.
+  const [notifyAvoid, setNotifyAvoid] = useState(null);
   const [seenMap, setSeenMap] = useState(() => readSeenMap(config.slug));
   const [sendToAgentBusy, setSendToAgentBusy] = useState(false);
   // Opening this doc accepted a team invite (server sets the flag only on
@@ -771,9 +775,25 @@ export function DocumentShell({ boot, config }) {
     && notifyTargets.reason !== 'no_agent_bound'
     && (notifyTargets.default || (notifyTargets.candidates || []).length || notifyTargets.fallback),
   );
-  const openNotifyPanel = (ids) => {
+  const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
+    setNotifyAvoid(avoid);
     setNotifyOpen(true);
+  };
+  // A card whose handoff nobody picked up: resend it (same event id, so Raft
+  // drops it if the first did land), or hand it to someone else.
+  const resendHandoff = async (comment) => {
+    if (!comment?.handoff_id) return;
+    try {
+      const body = await resendNotifyHandoff({ slug: config.slug, handoff_id: comment.handoff_id });
+      showToast(resendResultText(body), body?.delivery?.status === 'failed');
+      await comments.refresh();
+    } catch (err) {
+      showToast(err.message || 'Could not resend', true);
+    }
+  };
+  const sendHandoffElsewhere = (comment) => {
+    if (comment?.id) openNotifyPanel([comment.id], comment.handoff_to || null);
   };
   // Badge + send panel = comments ready to hand off (never sent, or human
   // wrote again after the last handoff). Not "open" and not "sent".
@@ -935,7 +955,7 @@ export function DocumentShell({ boot, config }) {
     let lastFingerprint = '';
     const fingerprint = () => (commentsRef.current || [])
       .filter((c) => c && c.handoff_status === 'sent')
-      .map((c) => `${c.id}:${c.handoff_at || ''}:${(c.replies || []).length}`)
+      .map((c) => `${c.id}:${c.handoff_at || ''}:${c.handoff_acked_at || ''}:${c.handoff_delivery?.at || ''}:${(c.replies || []).length}`)
       .sort()
       .join('|');
     const tick = async () => {
@@ -1339,6 +1359,8 @@ export function DocumentShell({ boot, config }) {
           onResolve={resolveComment}
           onReanchor={setReanchorId}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          onResendHandoff={canSendToAgent ? resendHandoff : null}
+          onSendHandoffElsewhere={canSendToAgent ? sendHandoffElsewhere : null}
           onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
         />
       ) : (
@@ -1373,6 +1395,8 @@ export function DocumentShell({ boot, config }) {
           onResolve={resolveComment}
           onReanchor={setReanchorId}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          onResendHandoff={canSendToAgent ? resendHandoff : null}
+          onSendHandoffElsewhere={canSendToAgent ? sendHandoffElsewhere : null}
         />
       )}
 
@@ -1410,6 +1434,7 @@ export function DocumentShell({ boot, config }) {
           slug={config.slug}
           open={notifyOpen}
           commentIds={notifyCommentIds || []}
+          avoid={notifyAvoid}
           onClose={() => setNotifyOpen(false)}
           onSent={async () => { await comments.refresh(); }}
           onTargetsChanged={notifyTargets.refresh}

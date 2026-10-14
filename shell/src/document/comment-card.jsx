@@ -1,97 +1,12 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { deliveryErrorText, ProviderMark } from './notify-handoff.jsx';
+import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
-import { formatHandoffAgo } from './handoff-banner.jsx';
-import { handoffSurfaceState, isHandoffInFlight } from './handoff-state.js';
-
-/** Latest agent verdict on a reply, if any (applied / partial / question). */
-function latestAgentVerdict(comment) {
-  const replies = comment?.replies || [];
-  for (let i = replies.length - 1; i >= 0; i -= 1) {
-    const status = replies[i]?.agent_status;
-    if (status === 'partial' || status === 'question' || status === 'applied' || status === 'answered') return status;
-  }
-  return null;
-}
-
-function HandoffStatusChips({ comment }) {
-  // Tick so "3m ago" advances while the card stays open with a sent handoff.
-  const [, setTick] = useState(0);
-  const verdict = latestAgentVerdict(comment);
-  const surface = handoffSurfaceState(comment);
-  const waiting = isHandoffInFlight(surface);
-  useEffect(() => {
-    if (!waiting) return undefined;
-    const id = window.setInterval(() => setTick((n) => n + 1), 30000);
-    return () => window.clearInterval(id);
-  }, [waiting]);
-  const ago = comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '';
-  const receivedAgo = comment.handoff_acked_at
-    ? formatHandoffAgo(comment.handoff_acked_at)
-    : '';
-  const chips = [];
-
-  if (surface === 'failed') {
-    chips.push(
-      <span
-        key="failed"
-        className="tdoc-handoff-chip is-failed"
-        title={deliveryErrorText(comment.handoff_delivery?.error) || undefined}
-      >
-        Not delivered
-      </span>,
-    );
-  } else if (surface === 'received') {
-    chips.push(
-      <span key="received" className="tdoc-handoff-chip is-received">
-        Agent received{receivedAgo ? ` · ${receivedAgo}` : ''}
-      </span>,
-    );
-  } else if (surface === 'waiting') {
-    chips.push(
-      <span key="waiting" className="tdoc-handoff-chip is-waiting">
-        Waiting on agent{ago ? ` · ${ago}` : ''}
-      </span>,
-    );
-  } else if (surface === 'replied' && (!verdict || verdict === 'answered')) {
-    // Positive cue when waiting clears — reply itself may be folded.
-    chips.push(
-      <span key="replied" className="tdoc-handoff-chip is-replied">
-        Agent replied
-      </span>,
-    );
-  }
-
-  if (verdict === 'partial') {
-    chips.push(
-      <span key="partial" className="tdoc-handoff-chip is-partial">
-        Partial — needs you
-      </span>,
-    );
-  } else if (verdict === 'question') {
-    chips.push(
-      <span key="question" className="tdoc-handoff-chip is-question" title="The agent needs your answer before it can continue">
-        Agent asked you
-      </span>,
-    );
-  } else if (verdict === 'answered' && surface !== 'replied') {
-    chips.push(
-      <span key="answered" className="tdoc-handoff-chip is-replied">
-        Agent answered
-      </span>,
-    );
-  }
-  // handoff_status resolved is folded into surface === 'replied' — no separate
-  // "Agent done" pill (redundant with the reply / this chip).
-
-  if (!chips.length) return null;
-  return <>{chips}</>;
-}
+import { HandoffStatusChips } from './handoff-status-line.jsx';
 
 function authorLine(author) {
   if (!author) return 'anonymous';
@@ -651,6 +566,9 @@ export function CommentCard({
   // Bridge 2, on the owner's own doc: { line, state, onCopy }. Shown under
   // every thread the agent has not answered yet — one paste covers them all.
   handoff = null,
+  // The owner's way out of a handoff nobody picked up (handoff-status-line).
+  onResendHandoff = null,
+  onSendHandoffElsewhere = null,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
   const [replyTarget, setReplyTarget] = useState(null);
@@ -796,7 +714,7 @@ export function CommentCard({
               : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
           </span>
         ) : null}
-        <HandoffStatusChips comment={comment} />
+        <HandoffStatusChips comment={comment} onResend={onResendHandoff} onSendElsewhere={onSendHandoffElsewhere} />
       </div>
       <header className="tdoc-cc-head">
         <Author

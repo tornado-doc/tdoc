@@ -884,6 +884,32 @@
     animation: tdoc-handoff-pulse 1.1s ease-in-out infinite;
   }
   .tdoc-handoff-chip.is-partial { color: #7a5b12; background: #f7f0d8; }
+  /* No response / expired: still, not pulsing -- nothing is happening. */
+  .tdoc-handoff-chip.is-stale { color: #7a5b12; background: #f7f0d8; }
+  /* The handoff line can name a long handle; it shortens, never spills. */
+  .tdoc-handoff-chip.tdoc-handoff-line { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+  .tdoc-handoff-chip.tdoc-handoff-line { gap: 0; }
+  .tdoc-handoff-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-handoff-line-tail { flex: 0 0 auto; white-space: pre; }
+  .tdoc-status-row:has(.tdoc-handoff-nudge) { flex-wrap: wrap; }
+  .tdoc-handoff-nudge {
+    flex: 1 0 100%;
+    display: flex;
+    gap: 12px;
+    padding: 2px 0 0 2px;
+  }
+  .tdoc-handoff-nudge .text-btn {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--td-accent, #1652f0);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+  }
+  .tdoc-handoff-nudge .text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
   .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
   @keyframes tdoc-handoff-pulse {
     0%, 100% {

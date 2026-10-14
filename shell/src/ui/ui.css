@@ -999,6 +999,7 @@ button.tdoc-pin {
 .tdoc-modal .tdoc-send-notice.tdoc-notify-error, .tdoc-modal .tdoc-send-result.tdoc-notify-error { color: var(--td-danger); }
 .tdoc-modal .tdoc-send-result.is-ok { color: #1a7340; font-weight: 600; }
 .tdoc-send-notice .text-btn { margin-left: 6px; }
+.tdoc-modal .tdoc-send-notice.tdoc-send-warn { color: #7a5b12; }
 .tdoc-modal .tdoc-send textarea.tdoc-notify-instruction {
   resize: none; min-height: 0; font-size: 14px; line-height: 1.45;
   border-color: var(--td-line); font-family: inherit;

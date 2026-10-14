@@ -73,10 +73,19 @@ function recipientOption(t, preselected) {
   const { label } = providerMeta(t);
   const who = readableHandle(t) || `${label} agent`;
   const where = t.provider === 'raft' && t.server_slug ? ` · ${t.server_slug}` : (t.provider === 'raft' ? '' : ` · ${label}`);
-  const why = sameTarget(t, preselected)
-    ? (t.source === 'doc' ? "this doc's agent" : 'default')
-    : (t.last_touched ? `used ${sinceText(t.last_touched)}` : '');
+  const why = agentDown(t)
+    ? `${t.status} in Raft`
+    : sameTarget(t, preselected)
+      ? (t.source === 'doc' ? "this doc's agent" : 'default')
+      : (t.last_touched ? `used ${sinceText(t.last_touched)}` : '');
   return { value: targetKey(t), label: `${who}${where}`, hint: why };
+}
+
+// Raft's directory says this agent is not running (worker raftDirectoryAgents,
+// read with the picker's own list). Sending still works; it just will not be
+// picked up until someone starts the agent.
+export function agentDown(t) {
+  return !!t && (t.status === 'stopped' || t.status === 'inactive');
 }
 
 // "smarter-tdoc-claw", or "your Raft agent" when the handle is unreadable.
@@ -146,6 +155,15 @@ export function deliveryErrorText(code) {
   const m = c.match(/^webhook_(\d{3})$/);
   if (m) return `the webhook answered ${m[1]}`;
   return c;
+}
+
+// The toast after Resend. Raft drops a resend it already holds (same event
+// id), and saying "Resent" then would promise a second nudge that never went.
+export function resendResultText(body) {
+  const d = body?.delivery;
+  if (d?.status === 'failed') return `Resend failed${d.error ? `: ${deliveryErrorText(d.error)}` : ''}`;
+  if (d?.deduped) return 'Already queued in Raft — not sent twice';
+  return 'Resent';
 }
 
 // What a person pastes into their own agent when none is linked to their
@@ -505,6 +523,9 @@ export function NotifyHandoffPanel({
   commentIds,
   onSent,
   onTargetsChanged,
+  // { provider, agent_name } of an agent that did not pick these up: the
+  // picker opens on someone else ("Send to another agent" on a card).
+  avoid = null,
 }) {
   const targets = useNotifyTargets(slug, open);
   const [selected, setSelected] = useState(null);
@@ -520,8 +541,11 @@ export function NotifyHandoffPanel({
   // is preselected; sending to it makes it the default.
   useEffect(() => {
     if (!open) return;
-    setSelected(targets.default || targets.candidates[0] || null);
-  }, [open, targets.default, targets.candidates]);
+    const all = [targets.default, ...targets.candidates].filter(Boolean);
+    const skip = (t) => avoid && avoid.agent_name && t.provider === (avoid.provider || t.provider)
+      && String(t.agent_name || '').toLowerCase() === String(avoid.agent_name).toLowerCase();
+    setSelected((avoid && all.find((t) => !skip(t))) || all[0] || null);
+  }, [open, targets.default, targets.candidates, avoid]);
 
   useEffect(() => {
     if (!open) return;
@@ -603,8 +627,7 @@ export function NotifyHandoffPanel({
     setStatus('');
     try {
       const body = await resendNotifyHandoff({ slug, handoff_id: handoffId });
-      const failed = body?.delivery?.status === 'failed';
-      setStatus(failed ? 'Resend failed to deliver' : 'Resent');
+      setStatus(resendResultText(body));
       if (onSent) onSent(body);
     } catch (err) {
       setStatus(err.message || 'Could not resend');
@@ -702,6 +725,14 @@ export function NotifyHandoffPanel({
               {boundHint || 'No agent has touched this doc yet. Pick one after an agent publishes or replies.'}
             </p>
           )}
+
+          {/* Raft says the chosen agent is not running. A warning, not a
+              block: the person may be about to start it. */}
+          {chosen && agentDown(chosen) && batch.length > 0 ? (
+            <p className="tdoc-send-notice tdoc-send-warn" role="status">
+              {agentLabel(chosen)} is {chosen.status} in Raft — it won&apos;t receive this
+            </p>
+          ) : null}
 
           {batch.length > 0 ? (
             <div className="tdoc-send-field">

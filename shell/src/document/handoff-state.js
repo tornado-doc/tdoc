@@ -106,6 +106,43 @@ export function threadPhase(comment) {
   return agent && agent >= lastHumanAt(comment) ? 'replied' : 'open';
 }
 
+/** How long a handoff may sit unacknowledged before the card says so. */
+export const HANDOFF_STALE_MS = 5 * 60 * 1000;
+
+/**
+ * The clock for "no response": the last (re)send, falling back to the
+ * handoff itself. A resend restarts it.
+ */
+export function handoffSentAt(comment) {
+  const d = comment?.handoff_delivery;
+  // A resend the provider dropped as a duplicate woke nobody: the clock
+  // keeps running from the original send.
+  return (d && !d.deduped && ts(d.at)) || ts(comment?.handoff_at);
+}
+
+/**
+ * Refines a 'waiting' handoff by how long it has gone unanswered:
+ *   waiting — sent, not acked, under HANDOFF_STALE_MS
+ *   stale   — sent, not acked, for HANDOFF_STALE_MS or more
+ *   expired — the provider's expiresAt passed and nobody acked it
+ * Any other surface state is returned unchanged.
+ */
+export function handoffWaitState(comment, now = Date.now()) {
+  const state = handoffSurfaceState(comment);
+  if (state !== 'waiting') return state;
+  const expires = ts(comment?.handoff_delivery?.expires_at);
+  if (expires && now >= expires) return 'expired';
+  const sent = handoffSentAt(comment);
+  if (sent && now - sent >= HANDOFF_STALE_MS) return 'stale';
+  return 'waiting';
+}
+
+/** Whole minutes since the handoff was last sent (0 when unknown). */
+export function handoffWaitMinutes(comment, now = Date.now()) {
+  const sent = handoffSentAt(comment);
+  return sent ? Math.max(0, Math.floor((now - sent) / 60000)) : 0;
+}
+
 /** In-flight = still expecting agent work (includes ack-without-reply). */
 export function isHandoffInFlight(state) {
   return state === 'waiting' || state === 'received';
