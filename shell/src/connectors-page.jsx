@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
-import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
+import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, LOCAL_DAEMON_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, localSeenText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
 
 // Where this account's comments go when someone presses Send to agent or
@@ -72,7 +72,7 @@ export function ConnectorsBody() {
     const c = confirm;
     setBusy(true);
     try {
-      await call('/api/me/connectors/remove', c.kind === 'raft' ? { provider: 'raft', server_id: c.server_id } : keyOf(c.target));
+      await call('/api/me/connectors/remove', c.kind === 'raft' || c.kind === 'local' ? { provider: c.kind, server_id: c.server_id } : keyOf(c.target));
       setNotice(`Disconnected ${c.title}.`);
       await load();
     }
@@ -117,15 +117,18 @@ export function ConnectorsBody() {
           <div className="tdoc-connectors">
             {connectors.map((c) => {
               const isRaft = c.kind === 'raft';
-              const sample = isRaft ? (defaultOn(c) || (c.agents || [])[0]) : c.target;
-              const title = isRaft ? `Raft · ${c.server_slug || 'server'}` : (readableHandle(c.target) || 'Webhook');
+              const isLocal = c.kind === 'local';
+              const sample = isRaft || isLocal ? (defaultOn(c) || (c.agents || [])[0]) : c.target;
+              const title = isRaft ? `Raft · ${c.server_slug || 'server'}` : isLocal ? `This computer · ${c.device}` : (readableHandle(c.target) || 'Webhook');
+              // A local device is connected while its daemon checks in.
+              const localUp = isLocal && (c.agents || []).some((a) => a.status === 'active');
               return (
                 <section key={c.id} className="tdoc-connector tdoc-conn-card">
                   <div className="tdoc-conn-card-head">
-                    <span className="tdoc-connector-logo"><ProviderMark target={isRaft ? { provider: 'raft' } : c.target} size={22} /></span>
+                    <span className="tdoc-connector-logo"><ProviderMark target={isRaft || isLocal ? { provider: c.kind } : c.target} size={22} /></span>
                     <div className="tdoc-conn-card-title">
                       <strong>{title}</strong>
-                      <span className="tdoc-connector-badge">Connected</span>
+                      <span className="tdoc-connector-badge">{isLocal ? (localUp ? 'Daemon running' : 'Daemon not running') : 'Connected'}</span>
                     </div>
                     <div className="tdoc-conn-card-actions">
                       <button
@@ -146,6 +149,12 @@ export function ConnectorsBody() {
                         <div><dt>Default agent</dt><dd>{defaultOn(c) ? (readableHandle(defaultOn(c)) || defaultOn(c).agent_sub) : (accountDefault ? 'On another connector' : 'Not set yet — choose one below; Send to agent needs it')}</dd></div>
                         <div><dt>Routing</dt><dd>Any agent on this server gets the comments on docs it wrote.</dd></div>
                         <div><dt>Delivery</dt><dd>tdoc shows when Raft accepts a handoff, then when the agent replies.</dd></div>
+                      </>
+                    ) : isLocal ? (
+                      <>
+                        <div><dt>Agents</dt><dd>{(c.agents || []).map((a) => a.cli).join(', ')}</dd></div>
+                        <div><dt>Last seen</dt><dd>{localSeenText((c.agents || [])[0]) || 'not yet'}</dd></div>
+                        <div><dt>Delivery</dt><dd>Comments wait here until the daemon on that computer polls (every minute while it runs), then the CLI edits the doc and replies.</dd></div>
                       </>
                     ) : (
                       <div><dt>Endpoint</dt><dd>{detailOf(c.target)}</dd></div>
@@ -183,6 +192,20 @@ export function ConnectorsBody() {
                   </details>
                 </>
               ) : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>) : null}
+              {conn.id === 'local' ? (
+                <>
+                  <p className="muted tdoc-conn-note">Needs the tdoc skill signed in on that computer (<code>tdoc-publish --signin-only</code>). Then, in a terminal or from the agent itself:</p>
+                  <pre className="tdoc-conn-pre">{`bash "$SKILL_DIR/bin/tdoc-daemon" start            # keeps polling
+bash "$SKILL_DIR/bin/tdoc-daemon" once             # one poll, for cron or launchd
+bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # prints a LaunchAgent plist`}</pre>
+                  <details className="tdoc-conn-alt" open>
+                    <summary>Or let the agent set it up</summary>
+                    <code>{LOCAL_DAEMON_PROMPT}</code>
+                    <CopyPromptButton text={LOCAL_DAEMON_PROMPT} />
+                  </details>
+                  <p className="muted tdoc-conn-note">Comments are untrusted input to that agent: the daemon runs the CLI with a conservative permission mode and tells it to touch only the doc. Only you, through the Send to agent button, can queue work for it.</p>
+                </>
+              ) : null}
               {conn.id === 'webhook' ? (
                 <>
                   <form className="tdoc-conn-form" onSubmit={addHook}>

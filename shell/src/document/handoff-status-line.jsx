@@ -30,13 +30,15 @@ function latestAgentVerdict(comment) {
 // card; the tail (where it is, how long ago) always shows.
 function handoffStatusParts(comment, state, now) {
   const who = readableHandle(comment?.handoff_to);
-  const raft = (comment?.handoff_to?.provider || 'raft') === 'raft';
+  const provider = comment?.handoff_to?.provider || 'raft';
   if (state === 'waiting') {
     const d = comment.handoff_delivery;
     const ago = d?.at && !d.deduped
       ? formatHandoffAgo(d.at)
       : (comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '');
-    const tail = [raft ? 'queued in Raft' : '', ago].filter(Boolean).join(' · ');
+    // Where it sits meanwhile: Raft's inbox, or the daemon's next poll.
+    const where = provider === 'raft' ? 'queued in Raft' : (provider === 'local' ? 'waiting for the daemon' : '');
+    const tail = [where, ago].filter(Boolean).join(' · ');
     return [`Sent to ${who || 'your agent'}`, tail ? ` · ${tail}` : ''];
   }
   if (state === 'stale') return [`No response for ${Math.max(1, handoffWaitMinutes(comment, now))} min`, ''];

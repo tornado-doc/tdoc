@@ -110,6 +110,12 @@ if [ -n "${SLOCK_CURRENT_SERVER_ID:-}" ] && [ -n "${SLOCK_CURRENT_AGENT_ID:-}" ]
   RAFT_AGENT_NAME="$(raft profile show 2>/dev/null | sed -n 's/^- Handle: @//p' | head -1 | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(encodeURIComponent(s.trim())))' 2>/dev/null || true)"
   if [ -n "$RAFT_AGENT_NAME" ]; then RAFT_AGENT_HDR+=(-H "X-Tdoc-Raft-Agent-Name: ${RAFT_AGENT_NAME}"); fi
 fi
+# A local agent run by bin/tdoc-daemon says which registered (device, cli) it
+# is, as <provider>/<server>/<agent>; honoured only for a target already on the
+# account, like the Raft claim above.
+if [ -n "${TDOC_AGENT:-}" ] && printf '%s' "$TDOC_AGENT" | grep -Eq '^[a-z]{1,20}/[A-Za-z0-9_-]{1,80}/[A-Za-z0-9_-]{1,80}$'; then
+  RAFT_AGENT_HDR+=(-H "X-Tdoc-Agent: ${TDOC_AGENT}")
+fi
 
 # Post the reply and gate on the outcome.
 #

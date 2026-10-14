@@ -626,6 +626,42 @@ the tdoc app must be installed on your Raft server. `--check` says whether it
 would work without changing anything. Never print or paste the credentials it
 reads.
 
+### `tdoc-daemon` — let tdoc hand comments to Claude Code / Codex on this computer
+
+Raft agents are pushed to; a laptop cannot be. `bin/tdoc-daemon` is the
+other way round: it registers this computer's CLIs ("claude on juliesmac",
+"codex on juliesmac") as local agents on the signed-in tdoc account, polls for
+comments handed to them (Send to agent / @agent), runs the CLI
+non-interactively on each handoff with the `/tdoc edit` flow, and marks the
+handoff resolved. Needs `~/.tdoc/published.json` (sign in with
+`tdoc-publish --signin-only` first).
+
+When a person asks to set it up ("let tdoc hand me comments on this
+computer"), run it; do not start it in the background on your own:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-daemon" start [--cli claude,codex] [--interval 60]
+bash "$SKILL_DIR/bin/tdoc-daemon" once             # one poll: cron, launchd
+bash "$SKILL_DIR/bin/tdoc-daemon" status
+bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # prints a LaunchAgent plist; loads nothing
+```
+
+State and logs live under `~/.tdoc/daemon/` (one log per run in `runs/`).
+One handoff runs at a time, in a scratch workdir per doc, with a timeout
+(`--timeout` seconds, default 1800). The CLI runs conservatively — claude in
+print mode with `--permission-mode dontAsk` and an allow-list of the tools the
+edit flow needs, codex in a `workspace-write` sandbox — because the comments
+and the handoff instruction are written by readers: the prompt names them as
+untrusted input about the document and nothing else. Only the doc owner —
+signed in, or with their own upload token — can queue work for a local
+agent: a feedback or site token, an invited editor or a team member cannot,
+and the daemon runs only handoffs tdoc says that account queued.
+`--permission-mode bypassPermissions` and `--runner oar` (run through
+`@botiverse/oar`, which skips permissions) are explicit opt-ins. If you are the CLI the daemon
+started (`TDOC_DAEMON=1` in the environment), follow the edit flow for the one
+doc named in the prompt and stop; the daemon resolves the handoff when you
+exit.
+
 ### `tdoc-site` — make the person's own website commentable
 
 When someone wants comments on their own web app or site (the feedback SDK),
