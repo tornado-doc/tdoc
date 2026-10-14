@@ -12,7 +12,8 @@ import {
   TerminalSquare,
   UserRound,
 } from 'lucide-react';
-import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from './ui/menu.jsx';
+import { AppMenu, AppMenuItem, AppMenuLinkItem, AppMenuSeparator, AppSubmenu } from './ui/menu.jsx';
+import { isPlainNavigationClick, startNavigationProgress } from './nav-progress.js';
 import { useNotifications } from './hooks/use-notifications.js';
 import { NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 
@@ -104,6 +105,7 @@ export function TopBar({
     if (onClaimProfile) onClaimProfile();
     else if (activeProfile) location.href = '/me#claim-profile';
   };
+  const publicProfileHref = activeProfile?.handle ? `/@${encodeURIComponent(activeProfile.handle)}` : null;
   const publicProfileLabel = activeProfile?.handle
     ? `Public profile (@${activeProfile.handle})`
     : 'Claim public profile';
@@ -111,9 +113,15 @@ export function TopBar({
   return (
     <header className="tdoc-bar">
       <div className="tdoc-bar-left">
-        <button className="tdoc-bar-mark" title="My docs" aria-label="My docs" onClick={() => { location.href = '/me'; }}>
+        <a
+          className="tdoc-bar-mark"
+          href="/me"
+          title="My docs"
+          aria-label="My docs"
+          onClick={(event) => { if (isPlainNavigationClick(event)) startNavigationProgress(); }}
+        >
           <img src="/tdoc_logo.svg" alt="" width="24" height="24" data-tdoc-dark="invert" />
-        </button>
+        </a>
         {children}
       </div>
       <div className="tdoc-bar-right">
@@ -142,9 +150,9 @@ export function TopBar({
                 Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
               </AppMenuItem>
               <AppMenuSeparator className="tdoc-mobile-overflow-only" />
-              <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={() => { location.href = '/me'; }}>
+              <AppMenuLinkItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" href="/me">
                 <Library size={15} /> My docs
-              </AppMenuItem>
+              </AppMenuLinkItem>
               {/* Both of these are "the account", and neither is something you
                   reach for often. Mobile-only like the rows above: on a desktop
                   the account chip beside this menu already carries them, and
@@ -159,14 +167,18 @@ export function TopBar({
                   </>
                 )}
               >
-                {activeProfile || onClaimProfile ? (
+                {publicProfileHref ? (
+                  <AppMenuLinkItem className="tdoc-action-menu-item" href={publicProfileHref}>
+                    <UserRound size={15} /> {publicProfileLabel}
+                  </AppMenuLinkItem>
+                ) : activeProfile || onClaimProfile ? (
                   <AppMenuItem className="tdoc-action-menu-item" onClick={openPublicProfile}>
                     <UserRound size={15} /> {publicProfileLabel}
                   </AppMenuItem>
                 ) : null}
-                <AppMenuItem className="tdoc-action-menu-item" onClick={() => { location.href = '/me/agents'; }}>
+                <AppMenuLinkItem className="tdoc-action-menu-item" href="/me/agents">
                   <TerminalSquare size={15} /> Agents
-                </AppMenuItem>
+                </AppMenuLinkItem>
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
                 </AppMenuItem>
@@ -192,11 +204,13 @@ export function TopBar({
             <AppMenuItem onClick={openNotifications}>
               Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
             </AppMenuItem>
-            <AppMenuItem onClick={() => { location.href = '/me'; }}>My docs</AppMenuItem>
-            {activeProfile || onClaimProfile ? (
+            <AppMenuLinkItem href="/me">My docs</AppMenuLinkItem>
+            {publicProfileHref ? (
+              <AppMenuLinkItem href={publicProfileHref}>{publicProfileLabel}</AppMenuLinkItem>
+            ) : activeProfile || onClaimProfile ? (
               <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
             ) : null}
-            <AppMenuItem onClick={() => { location.href = '/me/agents'; }}>Agents</AppMenuItem>
+            <AppMenuLinkItem href="/me/agents">Agents</AppMenuLinkItem>
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
         ) : authConfigured ? (

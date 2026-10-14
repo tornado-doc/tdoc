@@ -3794,7 +3794,21 @@ async function saveTeam(env, team) {
 // few writes per request; the ones past that budget are still read (a read
 // is cheap, and a write that keeps failing — the free plan's daily cap —
 // must not hide a team for good), up to a bound that keeps the request short.
-async function pendingTeamInvitesFor(env, session) {
+// Index upkeep a page read can leave for after its response. With a request
+// context the work runs under waitUntil and the reader does not wait for it;
+// without one (tests, scripts) it is awaited, as before. Index writes are
+// slow on the edge (each KV put is a round trip to the central store), and a
+// page that waited for a batch of them looked like a dead click: /me took
+// seconds on every load until a facet finished building.
+function deferIndexWork(ctx) {
+  return (work) => {
+    const p = Promise.resolve(work).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === 'function') { ctx.waitUntil(p); return Promise.resolve(); }
+    return p;
+  };
+}
+
+async function pendingTeamInvitesFor(env, session, defer = deferIndexWork(null)) {
   const mine = [sessionLogin(session), normalizeEmail(session && session.email)].filter(Boolean);
   if (!mine.length) return [];
   const out = [];
@@ -3807,27 +3821,36 @@ async function pendingTeamInvitesFor(env, session) {
   let built = null;
   try { built = await env.META.get(TEAM_INVITE_INDEX_BUILT); } catch {}
   if (built) {
-    const seen = new Set();
-    let sweeps = 0;
-    for (const who of mine) {
+    // Each identity's markers in parallel, and each marker's team read in
+    // parallel: these used to be one round trip after another.
+    const found = await Promise.all(mine.map(async (who) => {
       const prefix = `tinv:${who}:`;
+      const keys = [];
       let cursor;
       do {
         const page = await env.META.list({ prefix, cursor });
-        for (const k of page.keys) {
-          const teamId = k.name.slice(prefix.length);
-          if (!validTeamId(teamId) || seen.has(teamId)) continue;
-          seen.add(teamId);
-          if (!(await pending(teamId)) && sweeps < DOC_INDEX_SWEEP_WRITES) {
-            sweeps += 1;
-            env.META.delete(k.name).catch(() => {});
-          }
-        }
+        for (const k of page.keys) keys.push({ name: k.name, teamId: k.name.slice(prefix.length) });
         cursor = page.cursor;
         if (page.list_complete) break;
       } while (cursor);
-    }
-    return out;
+      return keys;
+    }));
+    const seen = new Set();
+    const markers = found.flat().filter((k) => {
+      if (!validTeamId(k.teamId) || seen.has(k.teamId)) return false;
+      seen.add(k.teamId);
+      return true;
+    });
+    const results = await Promise.all(markers.map((k) => pending(k.teamId)));
+    let sweeps = 0;
+    markers.forEach((k, i) => {
+      if (results[i] || sweeps >= DOC_INDEX_SWEEP_WRITES) return;
+      sweeps += 1;
+      env.META.delete(k.name).catch(() => {});
+    });
+    // `pending` pushed in completion order; keep the listing's order.
+    const order = new Map(markers.map((k, i) => [k.teamId, i]));
+    return out.sort((a, b) => order.get(a.id) - order.get(b.id));
   }
   let cursor;
   let backfills = 0;
@@ -3860,7 +3883,8 @@ async function pendingTeamInvitesFor(env, session) {
   } while (cursor);
   // Build: the markers this walk saw that are not there yet (one list of
   // what is), a batch per request, then the flag once none are missing.
-  try {
+  // After the response when there is one: the answer above is already whole.
+  await defer((async () => {
     const existing = new Set();
     let c2;
     do {
@@ -3874,10 +3898,11 @@ async function pendingTeamInvitesFor(env, session) {
     // one more write once every marker is there.
     const granted = await reserveIndexWrites(env, Math.min(missing.length + 1, TEAM_INVITE_BUILD_WRITES));
     const writes = Math.min(missing.length, granted);
-    for (const key of missing.slice(0, writes)) await env.META.put(key, '1');
+    const put = await Promise.allSettled(missing.slice(0, writes).map((key) => env.META.put(key, '1')));
+    if (put.some((r) => r.status === 'rejected')) complete = false;
     if (writes < missing.length || granted <= missing.length) complete = false;
     if (complete) await env.META.put(TEAM_INVITE_INDEX_BUILT, new Date().toISOString());
-  } catch {}
+  })());
   return out;
 }
 
@@ -4463,11 +4488,11 @@ async function scanDocIndex(env, { backfill = 5 } = {}) {
 // Every write is first reserved from the platform's daily backfill budget;
 // when the day's slice is spent the facet is left as it was (unbuilt, served
 // from the scan) until tomorrow.
-async function buildDocIndexes(env, facets, rows, budget = DOC_INDEX_BUILD_WRITES) {
+async function buildDocIndexes(env, facets, rows, budget = DOC_INDEX_BUILD_WRITES, listed = new Map()) {
   let writes = 0;
   for (const { facet, matches } of facets) {
     let existing;
-    try { existing = new Set((await listDocIndex(env, facet)).map((m) => m.slug)); } catch { return; }
+    try { existing = new Set((await (listed.get(facet) || listDocIndex(env, facet))).map((m) => m.slug)); } catch { return; }
     const missing = rows.filter((r) => r.idx && matches(r.idx) && !existing.has(r.slug));
     // The markers this request may write, plus one for the flag when they
     // would complete the facet.
@@ -4476,10 +4501,13 @@ async function buildDocIndexes(env, facets, rows, budget = DOC_INDEX_BUILD_WRITE
     const granted = await reserveIndexWrites(env, want);
     if (granted <= 0) return;
     const markers = Math.min(missing.length, granted);
-    for (const r of missing.slice(0, markers)) {
-      try { await env.META.put(docIndexMarkerKey(facet, r.slug), '1', { metadata: r.idx }); } catch { return; }
-      writes += 1;
-    }
+    // The batch in parallel: 25 puts one after another were seconds of wall
+    // time on the edge, for a page somebody was waiting on.
+    const put = await Promise.allSettled(missing.slice(0, markers).map((r) => (
+      env.META.put(docIndexMarkerKey(facet, r.slug), '1', { metadata: r.idx })
+    )));
+    writes += put.filter((r) => r.status === 'fulfilled').length;
+    if (put.some((r) => r.status === 'rejected')) return;
     if (markers < missing.length || granted <= missing.length) return;
     try { await env.META.put(docIndexBuiltKey(facet), new Date().toISOString()); } catch { return; }
     writes += 1;
@@ -4538,7 +4566,8 @@ async function joinedFeedbackSpaceSlugs(env, session) {
   return slugs.filter((s) => typeof s === 'string' && isValidSlug(s));
 }
 
-async function indexData(env, session, origin) {
+async function indexData(env, session, origin, { ctx = null } = {}) {
+  const defer = deferIndexWork(ctx);
   // Which rows this viewer could possibly see, decided from the index alone:
   // their own (by account, handle or owner key), their teams', and the ones
   // they starred or opened. Only those are read in full; the final checks
@@ -4549,10 +4578,25 @@ async function indexData(env, session, origin) {
   const actorKeys = new Set([viewerKeyEarly, ...((session && session.linked_actor_keys) || [])].filter(Boolean).map(String));
   const login = sessionLogin(session);
   const teamIds = new Set((session && session.team_ids) || []);
-  const [starItemsEarly, recentItemsEarly] = viewerKeyEarly
-    ? await Promise.all([loadStars(env, viewerKeyEarly), loadRecents(env, viewerKeyEarly)])
-    : [[], []];
-  const savedSlugs = new Set([...starItemsEarly, ...recentItemsEarly].map((item) => item && item.slug).filter(Boolean));
+  // Everything below that does not depend on the catalog starts now and is
+  // collected at the end: each of these used to wait for the one before it,
+  // so My docs paid a dozen KV round trips in series before it answered.
+  const viewerKeyAll = actorKey(session);
+  const viewerAccountAll = session && session.account_id;
+  const folderStateP = viewerKeyAll ? loadFolderState(env, viewerKeyAll) : Promise.resolve({ folders: [], docs: {} });
+  const teamsP = Promise.all(((session && session.team_ids) || []).map(async (id) => {
+    const team = await loadTeam(env, id);
+    if (!team || !teamMember(team, viewerAccountAll)) return null;
+    return { team, folders: await loadTeamFolders(env, team.id) };
+  }));
+  const invitesP = sessionPrincipal(session) ? pendingTeamInvitesFor(env, session, defer).catch(() => []) : Promise.resolve([]);
+  const joinedP = joinedFeedbackSpaceSlugs(env, session);
+  folderStateP.catch(() => {}); teamsP.catch(() => {}); joinedP.catch(() => {});
+  const savedEarlyP = viewerKeyEarly
+    ? Promise.all([loadStars(env, viewerKeyEarly), loadRecents(env, viewerKeyEarly)])
+    : Promise.resolve([[], []]);
+  // Filled once the stars and recents arrive, before any row is judged.
+  const savedSlugs = new Set();
   const hostedEarly = hostedRegistrationEnabled(env, origin);
   const wanted = (slug, idx) => !hostedEarly
     || savedSlugs.has(slug)
@@ -4581,16 +4625,27 @@ async function indexData(env, session, origin) {
     for (const id of teamIds) facets.push({ facet: `w:${id}`, matches: teamDocMatcher(id) });
     if (operator) facets.push({ facet: 'n', matches: ownerlessDocMatcher });
   }
-  const unbuilt = hostedEarly ? await unbuiltDocIndexes(env, facets.map((f) => f.facet)) : ['scan'];
+  // The facet lists are read alongside the built check: once built (every
+  // load but the first few) they are the answer, and while building they
+  // are what the build diffs against, so the list is never wasted.
+  const listed = new Map(facets.map((f) => [f.facet, listDocIndex(env, f.facet)]));
+  for (const p of listed.values()) p.catch(() => {});
+  const [[starItemsEarly, recentItemsEarly], unbuilt] = await Promise.all([
+    savedEarlyP,
+    hostedEarly ? unbuiltDocIndexes(env, facets.map((f) => f.facet)) : ['scan'],
+  ]);
+  for (const item of [...starItemsEarly, ...recentItemsEarly]) if (item && item.slug) savedSlugs.add(item.slug);
   let rows;
   if (unbuilt.length) {
     rows = await scanDocIndex(env);
-    if (hostedEarly) await buildDocIndexes(env, facets.filter((f) => unbuilt.includes(f.facet)), rows);
+    // Built after the response: this request answers from the scan either
+    // way, and its marker writes are the slowest calls the page could make.
+    if (hostedEarly) await defer(buildDocIndexes(env, facets.filter((f) => unbuilt.includes(f.facet)), rows, DOC_INDEX_BUILD_WRITES, listed));
   } else {
-    const lists = await Promise.all(facets.map(async (f) => (await listDocIndex(env, f.facet)).map((m) => ({ slug: m.slug, facet: f }))));
+    const lists = await Promise.all(facets.map(async (f) => (await listed.get(f.facet)).map((m) => ({ slug: m.slug, facet: f }))));
     const bySlug = new Map();
     for (const m of lists.flat()) if (!bySlug.has(m.slug)) bySlug.set(m.slug, { slug: m.slug, idx: null, known: true, marker: m.facet });
-    for (const slug of [...savedSlugs, ...(await joinedFeedbackSpaceSlugs(env, session))]) {
+    for (const slug of [...savedSlugs, ...(await joinedP)]) {
       if (!bySlug.has(slug) && isValidSlug(slug)) bySlug.set(slug, { slug, idx: null, known: true });
     }
     rows = [...bySlug.values()];
@@ -4646,7 +4701,7 @@ async function indexData(env, session, origin) {
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 
   const [starItems, recentItems, folderState] = viewerKey
-    ? [starItemsEarly, recentItemsEarly, await loadFolderState(env, viewerKey)]
+    ? [starItemsEarly, recentItemsEarly, await folderStateP]
     : [[], [], { folders: [], docs: {} }];
   const starred = new Set(starItems.map((item) => item.slug));
   const bySlug = new Map(catalog.map((row) => [row.slug, row]));
@@ -4679,12 +4734,13 @@ async function indexData(env, session, origin) {
   });
 
   const viewerAccount = session && session.account_id;
-  const teamRecords = (await Promise.all((session && session.team_ids || []).map((id) => loadTeam(env, id))))
-    .filter((team) => team && teamMember(team, viewerAccount));
+  // One small read per team (20 at most) for its folder tree, started with
+  // the team read above; which folder each doc is in already came with the
+  // catalog (meta.team_folder).
+  const teamLoads = (await teamsP).filter(Boolean);
+  const teamRecords = teamLoads.map((t) => t.team);
   const teamById = new Map(teamRecords.map((team) => [team.id, team]));
-  // One small read per team (20 at most) for its folder tree; which folder
-  // each doc is in already came with the catalog (meta.team_folder).
-  const teamFolderStates = new Map(await Promise.all(teamRecords.map(async (team) => [team.id, await loadTeamFolders(env, team.id)])));
+  const teamFolderStates = new Map(teamLoads.map((t) => [t.team.id, t.folders]));
   const teamDocs = catalog.filter((row) => {
     if (isFeedbackSpace(row.meta) || !row.meta || !teamById.has(row.meta.workspace_id)) return false;
     return docReadableBy(env, session, row.meta);
@@ -4719,7 +4775,7 @@ async function indexData(env, session, origin) {
     team_folders: Object.fromEntries(teamRecords.map((team) => [
       team.id, teamFolderStates.get(team.id).folders.map((folder) => publicTeamFolder(folder, session, team)),
     ])),
-    team_invites: sessionPrincipal(session) ? await pendingTeamInvitesFor(env, session).catch(() => []) : [],
+    team_invites: await invitesP,
   };
 }
 
@@ -9942,10 +9998,10 @@ export default {
           status: sessionPrincipal(s) ? 403 : 401,
         });
       }
-      const data = await indexData(env, s, url.origin);
-      const profile = hostedRegistrationEnabled(env, url.origin)
-        ? await profileBootForSession(env, s)
-        : null;
+      const [data, profile] = await Promise.all([
+        indexData(env, s, url.origin, { ctx }),
+        hostedRegistrationEnabled(env, url.origin) ? profileBootForSession(env, s) : null,
+      ]);
       const pinSet = new Set((profile && profile.pins) || []);
       return json({
         ok: true,
@@ -10262,10 +10318,19 @@ export default {
       if (method === 'HEAD') return new Response(null, { status: 200 });
       const nonce = rand(16);
       const identity = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
-      const data = await indexData(env, s, url.origin);
-      const profile = hostedRegistrationEnabled(env, url.origin)
-        ? await profileBootForSession(env, s)
-        : null;
+      // Independent reads, side by side: My docs used to wait for each in
+      // turn after the catalog, and a slow page reads as a dead click.
+      const [data, profile, onboarding, debug] = await Promise.all([
+        indexData(env, s, url.origin, { ctx }),
+        hostedRegistrationEnabled(env, url.origin) ? profileBootForSession(env, s) : null,
+        (async () => {
+          try {
+            const id = await sessionAccountId(env, s);
+            return id ? await loadOnboarding(env, id) : null;
+          } catch { return null; }
+        })(),
+        isDebugAccount(env, s),
+      ]);
       const pinSet = new Set((profile && profile.pins) || []);
       const docs = (data.docs || []).map((row) => ({
         ...row,
@@ -10283,15 +10348,10 @@ export default {
           // Mirrors the /api/doc/create gate: offering "start from scratch" on a
           // host that will 403 it is worse than not offering it.
           capabilities: { create: isOwnerSession(env, s) || hostedAccountCopiesEnabled(env, req) },
-          onboarding: await (async () => {
-            try {
-              const id = await sessionAccountId(env, s);
-              return id ? await loadOnboarding(env, id) : null;
-            } catch { return null; }
-          })(),
+          onboarding,
           // The checklist lives here, so every state reads differently on this
           // page -- it is the one surface that has a face for all six.
-          debug: await isDebugAccount(env, s),
+          debug,
           ...(profile ? { profile } : {}),
           ...data,
           docs,

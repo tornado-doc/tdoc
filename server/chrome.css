@@ -53,7 +53,9 @@
      display:inline-flex + align-items:center but no horizontal centring, so a
      24px mark in a 32px padding-0 box sits flush left and the hover highlight
      lands 8px off to the right of the drawing. */
-  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; justify-content: center; }
+  /* A link (it goes to My docs), so it supplies the box the button rule gave it. */
+  .tdoc-bar .tdoc-bar-mark { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; transition: background .12s; }
+  .tdoc-bar .tdoc-bar-mark:hover { background: #f0f1f4; }
   .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
   .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; }
   .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
@@ -747,7 +749,7 @@
   @media (max-width: 700px) {
     .tdoc-bar { padding: 0 8px; gap: 4px; }
     .tdoc-bar button { min-width: 44px; min-height: 44px; justify-content: center; }
-    .tdoc-bar button.tdoc-bar-mark { width: 44px; height: 44px; }
+    .tdoc-bar .tdoc-bar-mark { width: 44px; height: 44px; }
     .tdoc-version-wrap, .tdoc-bar #tdoc-version-toggle { display: none; }
     .tdoc-bar .doc-title { flex: 1 1 auto; font-size: 13px; }
     /* The 44px touch-target rule above centres every button in the bar, which
@@ -1068,3 +1070,28 @@
     text-align: center;
     box-sizing: border-box;
   }
+
+/* A navigation is under way (shell/src/nav-progress.js): a thin bar along the
+   top of the window from the click until the next page replaces this one, so
+   a page that is slow to answer never looks like a click that did nothing. */
+html[data-tdoc-navigating] body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483647;
+  width: 100%;
+  height: 2px;
+  background: var(--td-accent, #2f6feb);
+  transform-origin: 0 50%;
+  animation: tdoc-nav-progress 8s cubic-bezier(.1, .7, .2, 1) forwards;
+  pointer-events: none;
+}
+html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; }
+@keyframes tdoc-nav-progress {
+  from { transform: scaleX(0.05); }
+  to { transform: scaleX(0.92); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-tdoc-navigating] body::after { animation: none; transform: scaleX(0.6); }
+}

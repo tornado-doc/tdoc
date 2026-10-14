@@ -300,6 +300,37 @@ button.tdoc-pin {
   background: #f0f1f4;
 }
 
+/* Menu rows that are links (AppMenuLinkItem): no underline or link colour,
+   and while their page loads, a small spinner at the row's end. */
+a.ui-menu-item,
+a.ui-menu-item:visited {
+  color: #1a1a1a;
+  text-decoration: none;
+}
+.ui-menu-item.ui-menu-link-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ui-menu-item.ui-menu-link-item.tdoc-action-menu-item { gap: 9px; }
+.ui-menu-item[data-pending] { cursor: progress; }
+.ui-menu-item-spinner {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: ui-menu-item-spin 0.7s linear infinite;
+}
+@keyframes ui-menu-item-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ui-menu-item-spinner { animation-duration: 2s; }
+}
+
 /* AppSelect (ui/select.jsx): the closed box is chrome.css .tdoc-select; the
    open list is the menu popup, as wide as the box and above dialogs, since a
    dropdown inside a modal opens over it. */
