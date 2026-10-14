@@ -7846,6 +7846,34 @@ function markInboxRead(inbox, { ids, comment_id } = {}) {
   return { items };
 }
 
+// One person can be several actor keys -- a GitHub handle and the email
+// they signed in with, linked into one account. A mention is delivered to
+// whichever key the author typed, so reading only the session's main key
+// lost every notification addressed to the others: tagged by email, never
+// told (Julie, 2026-10-14). The bell reads, counts and marks all of them.
+async function loadViewerInboxes(env, session) {
+  const parts = [];
+  for (const who of actorKeys(session)) {
+    const { key, inbox } = await loadInbox(env, who);
+    if (key && !parts.some((p) => p.key === key)) parts.push({ key, inbox });
+  }
+  return parts;
+}
+
+function mergeInboxes(parts) {
+  const seen = new Set();
+  const items = [];
+  for (const part of parts) {
+    for (const item of (part.inbox && Array.isArray(part.inbox.items) ? part.inbox.items : [])) {
+      if (!item || seen.has(item.id)) continue;
+      seen.add(item.id);
+      items.push(item);
+    }
+  }
+  items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  return { items };
+}
+
 function pageInbox(inbox, { offset = 0, limit = INBOX_PAGE } = {}) {
   const items = inbox && Array.isArray(inbox.items) ? inbox.items.filter(Boolean) : [];
   const unread = items.filter(i => !i.read);
@@ -11599,43 +11627,34 @@ export default {
     if (p === '/api/notifications' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(actorKey(s));
-      if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
-      let inbox = emptyInbox();
-      try {
-        const raw = await env.META.get(key);
-        if (raw) inbox = JSON.parse(raw);
-      } catch { inbox = emptyInbox(); }
+      const parts = await loadViewerInboxes(env, s);
+      if (!parts.length) return json({ error: 'sign_in_required' }, { status: 401 });
       const offset = Number(url.searchParams.get('offset') || 0);
-      return json(pageInbox(inbox, { offset }));
+      return json(pageInbox(mergeInboxes(parts), { offset }));
     }
     if (p === '/api/notifications/unread' && method === 'GET') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(actorKey(s));
-      if (!key) return json({ unread: 0 });
-      let inbox = emptyInbox();
-      try {
-        const raw = await env.META.get(key);
-        if (raw) inbox = JSON.parse(raw);
-      } catch { inbox = emptyInbox(); }
-      return json({ unread: inboxUnread(inbox) });
+      const parts = await loadViewerInboxes(env, s);
+      return json({ unread: inboxUnread(mergeInboxes(parts)) });
     }
     if (p === '/api/notifications/read' && method === 'POST') {
       const s = await getSession(env, req);
       if (!s) return json({ error: 'sign_in_required' }, { status: 401 });
-      const key = inboxKey(actorKey(s));
-      if (!key) return json({ error: 'sign_in_required' }, { status: 401 });
+      const parts = await loadViewerInboxes(env, s);
+      if (!parts.length) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
       try { body = await req.json(); } catch {}
-      let inbox = emptyInbox();
-      try {
-        const raw = await env.META.get(key);
-        if (raw) inbox = JSON.parse(raw);
-      } catch { inbox = emptyInbox(); }
-      inbox = markInboxRead(inbox, { ids: body.ids, comment_id: body.comment_id });
-      await env.META.put(key, JSON.stringify(inbox));
-      return json({ ok: true, unread: inboxUnread(inbox) });
+      // `all` marks everything read (the dialog's Mark all read).
+      for (const part of parts) {
+        const next = body.all
+          ? { items: part.inbox.items.map((i) => (i ? { ...i, read: true } : i)) }
+          : markInboxRead(part.inbox, { ids: body.ids, comment_id: body.comment_id });
+        if (JSON.stringify(next) === JSON.stringify(part.inbox)) continue;
+        part.inbox = next;
+        await env.META.put(part.key, JSON.stringify(next));
+      }
+      return json({ ok: true, unread: inboxUnread(mergeInboxes(parts)) });
     }
 
     // ---- personal docs state (stars / folders) ----

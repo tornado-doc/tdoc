@@ -1,21 +1,48 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getUnreadNotificationCount,
   listNotifications,
+  markAllNotificationsRead,
   markNotificationsRead,
 } from '../document/api.js';
+import { notificationLabel, notificationTarget } from '../notifications-dialog.jsx';
+import {
+  alertNewNotifications,
+  browserNotificationPermission,
+  browserNotificationsEnabled,
+  setBrowserNotifications,
+} from './browser-notifications.js';
 
 export function useNotifications(enabled) {
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [browserAlerts, setBrowserAlerts] = useState(() => ({
+    on: browserNotificationsEnabled(),
+    permission: browserNotificationPermission(),
+  }));
+  const lastUnread = useRef(-1);
 
+  // With desktop alerts on, a rise in the unread count fetches the newest
+  // page and alerts for what is new; a hidden tab keeps polling, since a
+  // hidden tab is exactly when an alert is worth having.
   const refreshUnread = useCallback(async () => {
-    if (!enabled || document.hidden) return;
+    if (!enabled) return;
+    const alerting = browserNotificationsEnabled();
+    if (document.hidden && !alerting) return;
     try {
       const result = await getUnreadNotificationCount();
-      setUnread(Number(result.unread) || 0);
+      const count = Number(result.unread) || 0;
+      setUnread(count);
+      if (alerting && count > 0 && count > lastUnread.current) {
+        const page = await listNotifications(0);
+        alertNewNotifications(page.items || [], {
+          label: notificationLabel,
+          open: (item) => { window.location.href = notificationTarget(item); },
+        });
+      }
+      lastUnread.current = count;
     } catch {
       // The identity may have expired. The next navigation will refresh it.
     }
@@ -43,6 +70,18 @@ export function useNotifications(enabled) {
     await markNotificationsRead([item.id]);
   }, []);
 
+  const markAllRead = useCallback(async () => {
+    setItems((current) => current.map((row) => ({ ...row, read: true })));
+    setUnread(0);
+    await markAllNotificationsRead();
+  }, []);
+
+  const setAlerts = useCallback(async (on) => {
+    const permission = await setBrowserNotifications(on, items);
+    setBrowserAlerts({ on: on && permission === 'granted', permission });
+    lastUnread.current = -1;
+  }, [items]);
+
   useEffect(() => {
     refreshUnread();
     const timer = window.setInterval(() => {
@@ -53,5 +92,5 @@ export function useNotifications(enabled) {
     return () => window.clearInterval(timer);
   }, [refreshUnread]);
 
-  return { items, unread, hasMore, loading, load, markRead };
+  return { items, unread, hasMore, loading, load, markRead, markAllRead, browserAlerts, setAlerts };
 }

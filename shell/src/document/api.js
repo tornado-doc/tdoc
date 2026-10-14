@@ -266,6 +266,14 @@ export function getUnreadNotificationCount() {
   return request('/api/notifications/unread');
 }
 
+export function markAllNotificationsRead() {
+  return request('/api/notifications/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ all: true }),
+  });
+}
+
 export function markNotificationsRead(ids) {
   return request('/api/notifications/read', {
     method: 'POST',
