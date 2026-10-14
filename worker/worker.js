@@ -3869,14 +3869,13 @@ async function pendingTeamInvitesFor(env, session) {
       c2 = page.cursor;
       if (page.list_complete) break;
     } while (c2);
-    let writes = 0;
-    for (const [x, teamId] of markers) {
-      const key = teamInviteMarkerKey(x, teamId);
-      if (existing.has(key)) continue;
-      if (writes >= TEAM_INVITE_BUILD_WRITES) { complete = false; break; }
-      await env.META.put(key, '1');
-      writes += 1;
-    }
+    const missing = markers.map(([x, teamId]) => teamInviteMarkerKey(x, teamId)).filter((key) => !existing.has(key));
+    // From the same daily backfill budget as the doc facets; the flag needs
+    // one more write once every marker is there.
+    const granted = await reserveIndexWrites(env, Math.min(missing.length + 1, TEAM_INVITE_BUILD_WRITES));
+    const writes = Math.min(missing.length, granted);
+    for (const key of missing.slice(0, writes)) await env.META.put(key, '1');
+    if (writes < missing.length || granted <= missing.length) complete = false;
     if (complete) await env.META.put(TEAM_INVITE_INDEX_BUILT, new Date().toISOString());
   } catch {}
   return out;
@@ -4227,14 +4226,31 @@ async function putDocMetaJson(env, slug, json) {
   let parsed = null;
   try { parsed = JSON.parse(json); } catch {}
   const idx = parsed ? docMetaIndex(parsed) : null;
-  // Markers before the record: a marker that fails leaves the record as it
-  // was, and the retry writes both; a record that fails after its marker
-  // leaves an orphan the readers ignore and sweep. The other order could
-  // commit a doc that no list ever finds.
-  const prior = idx ? await priorDocMetaIndex(env, slug) : null;
-  const sync = idx ? await syncDocIndex(env, slug, idx, prior) : null;
+  // The record is the write that matters; a marker is a shortcut to it. So a
+  // marker that cannot be written (the day's KV writes spent, a transient
+  // error) never fails the publish: the record is stored, and the facets
+  // that needed the marker are asked for a rebuild (unbuildDocIndexes) --
+  // their next reader answers from the scan, as before the index existed,
+  // and writes the marker when KV lets it. A marker that could not be
+  // removed is a stale one, which readers ignore and sweep.
+  let sync = null;
+  if (idx) {
+    try { sync = await syncDocIndex(env, slug, idx, await priorDocMetaIndex(env, slug)); } catch (e) {
+      console.error('[docidx] marker sync failed (recoverable):', e && e.message ? e.message : String(e));
+    }
+  }
   await env.META.put(`meta:${slug}`, json, idx ? { metadata: idx } : undefined);
-  if (sync) await sync.after();
+  if (sync) {
+    try { await sync.after(); } catch {}
+    if (sync.failed.length) await unbuildDocIndexes(env, sync.failed);
+  } else if (idx) {
+    // Not even the facets could be worked out: ask for every facet the
+    // record names to be rebuilt.
+    const named = [];
+    if (idx.a) named.push(`p:${idx.a}`);
+    if (idx.w) named.push(`w:${idx.w}`);
+    await unbuildDocIndexes(env, named);
+  }
 }
 
 // ─────────────── the per-owner / per-team doc index ───────────────
@@ -4313,9 +4329,12 @@ async function syncDocIndex(env, slug, idx, priorIdx) {
   const groups = new Map();
   const next = await docIndexFacets(env, idx, groups);
   const prior = priorIdx ? await docIndexFacets(env, priorIdx, groups) : [];
-  await Promise.all(next.filter((f) => !prior.includes(f)).map((f) => env.META.put(docIndexMarkerKey(f, slug), '1', { metadata: idx })));
+  const added = next.filter((f) => !prior.includes(f));
+  const results = await Promise.allSettled(added.map((f) => env.META.put(docIndexMarkerKey(f, slug), '1', { metadata: idx })));
+  const failed = added.filter((f, i) => results[i].status === 'rejected');
   const gone = prior.filter((f) => !next.includes(f));
   return {
+    failed,
     after: async () => {
       await Promise.all(gone.map((f) => env.META.delete(docIndexMarkerKey(f, slug)).catch(() => {})));
     },
@@ -4345,10 +4364,62 @@ async function listDocIndex(env, facet) {
   return out;
 }
 
-// Which of these facets still have no index: a parallel read per facet.
+// The index bookkeeping Durable Object (see CommentsStore '/index'). Every
+// call is best-effort: without it there is no backfill budget, so nothing is
+// backfilled, and a facet that lost a marker is simply never marked built.
+const INDEX_STORE_NAME = '__tdoc-index__';
+async function indexStoreOp(env, op) {
+  if (!env || !env.COMMENTS) return null;
+  try {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(INDEX_STORE_NAME));
+    const r = await stub.fetch('https://do/index', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: INDEX_STORE_NAME, op }),
+    });
+    const out = await r.json();
+    return out && out.ok ? out : null;
+  } catch { return null; }
+}
+
+// How many backfill writes the whole platform may still spend today. The
+// free plan's 1,000 KV writes a day are shared with every publish, comment
+// and star, and running out stops all of them: the backfill gets a slice,
+// counted once for every isolate in one Durable Object, and past it a facet
+// answers from the scan and is not marked built, exactly as before.
+const INDEX_BACKFILL_DAILY_CAP = 300;
+function indexBackfillDailyCap(env) {
+  const n = Number(env && env.TDOC_INDEX_BACKFILL_DAILY);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : INDEX_BACKFILL_DAILY_CAP;
+}
+async function reserveIndexWrites(env, n) {
+  if (!(n > 0)) return 0;
+  const out = await indexStoreOp(env, { kind: 'reserve', n, cap: indexBackfillDailyCap(env), day: new Date().toISOString().slice(0, 10) });
+  return out ? Number(out.granted) || 0 : 0;
+}
+
+// Which of these facets must be (re)built: the ones with no built flag, and
+// the ones the DO says lost a marker (a marker write that failed after the
+// doc's record was stored -- the record must win, so the facet is rebuilt
+// from the scan instead, which also wrote its flag away if KV let it).
 async function unbuiltDocIndexes(env, facets) {
-  const flags = await Promise.all(facets.map((f) => env.META.get(docIndexBuiltKey(f)).catch(() => null)));
-  return facets.filter((f, i) => !flags[i]);
+  if (!facets.length) return [];
+  const [flags, dirty] = await Promise.all([
+    Promise.all(facets.map((f) => env.META.get(docIndexBuiltKey(f)).catch(() => null))),
+    indexStoreOp(env, { kind: 'dirty', facets }),
+  ]);
+  const lost = new Set((dirty && dirty.dirty) || []);
+  return facets.filter((f, i) => !flags[i] || lost.has(f));
+}
+
+// A marker could not be written for these facets: ask for a rebuild. The
+// flag delete is a KV write too and may be what is failing, so the DO is
+// told as well, and either is enough.
+async function unbuildDocIndexes(env, facets) {
+  if (!facets.length) return;
+  await Promise.all([
+    ...facets.map((f) => env.META.delete(docIndexBuiltKey(f)).catch(() => {})),
+    indexStoreOp(env, { kind: 'mark', facets }),
+  ]);
 }
 
 // Every doc's index record, the old way: one list call per 1,000 docs on
@@ -4389,19 +4460,30 @@ async function scanDocIndex(env, { backfill = 5 } = {}) {
 
 // Write the markers a facet is missing, a bounded batch per request, and
 // mark the facet built once none are. `facets` is [{ facet, matches(idx) }].
+// Every write is first reserved from the platform's daily backfill budget;
+// when the day's slice is spent the facet is left as it was (unbuilt, served
+// from the scan) until tomorrow.
 async function buildDocIndexes(env, facets, rows, budget = DOC_INDEX_BUILD_WRITES) {
   let writes = 0;
   for (const { facet, matches } of facets) {
     let existing;
     try { existing = new Set((await listDocIndex(env, facet)).map((m) => m.slug)); } catch { return; }
     const missing = rows.filter((r) => r.idx && matches(r.idx) && !existing.has(r.slug));
-    for (const r of missing) {
-      if (writes >= budget) return;
+    // The markers this request may write, plus one for the flag when they
+    // would complete the facet.
+    const want = Math.min(missing.length + 1, budget - writes);
+    if (want <= 0) return;
+    const granted = await reserveIndexWrites(env, want);
+    if (granted <= 0) return;
+    const markers = Math.min(missing.length, granted);
+    for (const r of missing.slice(0, markers)) {
       try { await env.META.put(docIndexMarkerKey(facet, r.slug), '1', { metadata: r.idx }); } catch { return; }
       writes += 1;
     }
+    if (markers < missing.length || granted <= missing.length) return;
     try { await env.META.put(docIndexBuiltKey(facet), new Date().toISOString()); } catch { return; }
     writes += 1;
+    await indexStoreOp(env, { kind: 'clear', facets: [facet] });
   }
 }
 
@@ -9375,6 +9457,41 @@ export class CommentsStore {
     let payload;
     try { payload = await req.json(); } catch { return Response.json({ list: [] }); }
     const { slug, op } = payload;
+
+    // INDEX BOOKKEEPING: the one place on the platform that counts how many
+    // index markers the lazy backfill may still write today, and which
+    // facets lost a marker and must be rebuilt. DO storage, not KV: a DO
+    // write is not one of the free plan's 1,000 KV writes, and a count that
+    // lived in one isolate's memory would be as many counts as there are
+    // isolates. Reached under a reserved name no slug can take.
+    if (u.pathname === '/index') {
+      let out = { ok: false };
+      try {
+        await this.state.storage.transaction(async (txn) => {
+          const kind = op && op.kind;
+          if (kind === 'reserve') {
+            const key = `index-budget:${String(op.day || '').slice(0, 10)}`;
+            const used = Number(await txn.get(key)) || 0;
+            const cap = Math.max(0, Number(op.cap) || 0);
+            const granted = Math.max(0, Math.min(Number(op.n) || 0, cap - used));
+            if (granted > 0) await txn.put(key, used + granted);
+            out = { ok: true, granted, used: used + granted, cap };
+          } else if (kind === 'dirty') {
+            const facets = Array.isArray(op.facets) ? op.facets : [];
+            const dirty = [];
+            for (const f of facets) if (await txn.get(`index-dirty:${f}`)) dirty.push(f);
+            out = { ok: true, dirty };
+          } else if (kind === 'mark') {
+            for (const f of (Array.isArray(op.facets) ? op.facets : [])) await txn.put(`index-dirty:${f}`, 1);
+            out = { ok: true };
+          } else if (kind === 'clear') {
+            for (const f of (Array.isArray(op.facets) ? op.facets : [])) await txn.delete(`index-dirty:${f}`);
+            out = { ok: true };
+          }
+        });
+      } catch { out = { ok: false }; }
+      return Response.json(out);
+    }
 
     if (u.pathname === '/version') {
       const result = await this._saveVersion(slug, op || {});

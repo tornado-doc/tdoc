@@ -225,6 +225,69 @@ function wrapBareTablesReference(html) {
     assert(again.body.docs.map((d) => d.slug).join() === 'dora-old' && !spy.seen.includes('meta:'), `second: ${spy.seen.join(', ')}`);
   });
 
+  console.log('doc index: the daily backfill budget and marker writes that fail');
+  await t('backfill stops at the platform\'s daily budget and the facet is not marked built', async () => {
+    const dan = await issue(worker, env, 'dan');
+    const created = '2026-02-01T00:00:00.000Z';
+    for (let i = 0; i < 12; i++) {
+      const slug = `dan-${String(i).padStart(2, '0')}`;
+      await env.META.put(`meta:${slug}`, JSON.stringify({ title: slug, slug, created, versions: [{ n: 1, created }], hosted: { account_id: dan.account_id, github_login: 'dan', owner_key: 'dan' } }));
+    }
+    const facet = `docidx:p:${dan.account_id}:`;
+    const flag = `docidx:built:p:${dan.account_id}`;
+    // The budget is counted in the Durable Object; this day's slice is almost spent.
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName('__tdoc-index__'));
+    const day = new Date().toISOString().slice(0, 10);
+    const used = (await (await stub.fetch('https://do/index', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: '__tdoc-index__', op: { kind: 'reserve', n: 0, cap: 300, day } }) })).json()).used;
+    const capEnv = { ...env, TDOC_INDEX_BACKFILL_DAILY: String(used + 5) };
+    const first = await worker.fetch(req('/api/me', { token: dan.token }), capEnv, {}).then((r) => r.json());
+    assert(first.docs.length === 12, `scan still answers: ${first.docs.length}`);
+    assert(keys(facet).length === 5, `wrote ${keys(facet).length} markers with 5 left in the budget`);
+    assert(!env.META.map.has(flag), 'facet marked built with markers missing');
+    const second = await worker.fetch(req('/api/me', { token: dan.token }), capEnv, {}).then((r) => r.json());
+    assert(second.docs.length === 12 && keys(facet).length === 5, 'wrote past the budget');
+    // Tomorrow (a higher cap stands in for the new day): the build resumes and completes.
+    const third = await worker.fetch(req('/api/me', { token: dan.token }), { ...env, TDOC_INDEX_BACKFILL_DAILY: String(used + 100) }, {}).then((r) => r.json());
+    assert(third.docs.length === 12 && keys(facet).length === 12 && env.META.map.has(flag), `after the budget returns: ${keys(facet).length} markers, built=${env.META.map.has(flag)}`);
+  });
+
+  await t('a marker write that fails never fails the publish; the doc still shows, and the facet heals itself', async () => {
+    const fay = await issue(worker, env, 'fay');
+    await publish(fay, 'fay-first');
+    await call('/api/me', { token: fay.token });
+    assert(env.META.map.has(`docidx:built:p:${fay.account_id}`), 'facet not built');
+    const origPut = env.META.put.bind(env.META);
+    env.META.put = async (k, v, o) => { if (k.startsWith('docidx:')) throw new Error('KV put: daily write limit exceeded'); return origPut(k, v, o); };
+    let r;
+    try { r = await publish(fay, 'fay-second'); } finally { env.META.put = origPut; }
+    assert(r.status === 200, `publish failed with marker writes failing: ${r.status} ${JSON.stringify(r.body)}`);
+    assert(env.META.map.has('meta:fay-second'), 'record not stored');
+    assert(!env.META.map.has(`docidx:p:${fay.account_id}:fay-second`), 'test did not exercise a failed marker');
+    assert(!env.META.map.has(`docidx:built:p:${fay.account_id}`), 'facet still claims to be built after losing a marker');
+    const me = await call('/api/me', { token: fay.token });
+    const slugs = me.body.docs.map((d) => d.slug).sort();
+    assert(JSON.stringify(slugs) === JSON.stringify(['fay-first', 'fay-second']), `after a lost marker: ${slugs}`);
+    assert(env.META.map.has(`docidx:p:${fay.account_id}:fay-second`) && env.META.map.has(`docidx:built:p:${fay.account_id}`), 'the rebuild did not restore the marker and the flag');
+  });
+
+  await t('when even the flag delete fails, the DO remembers the lost marker and the next reader rebuilds', async () => {
+    const gus = await issue(worker, env, 'gus');
+    await publish(gus, 'gus-first');
+    await call('/api/me', { token: gus.token });
+    const origPut = env.META.put.bind(env.META);
+    const origDelete = env.META.delete.bind(env.META);
+    env.META.put = async (k, v, o) => { if (k.startsWith('docidx:')) throw new Error('quota'); return origPut(k, v, o); };
+    env.META.delete = async (k) => { if (k.startsWith('docidx:')) throw new Error('quota'); return origDelete(k); };
+    let r;
+    try { r = await publish(gus, 'gus-second'); } finally { env.META.put = origPut; env.META.delete = origDelete; }
+    assert(r.status === 200, `publish ${r.status}`);
+    assert(env.META.map.has(`docidx:built:p:${gus.account_id}`), 'the flag delete was supposed to fail');
+    const me = await call('/api/me', { token: gus.token });
+    const slugs = me.body.docs.map((d) => d.slug).sort();
+    assert(JSON.stringify(slugs) === JSON.stringify(['gus-first', 'gus-second']), `doc lost: ${slugs}`);
+    assert(env.META.map.has(`docidx:p:${gus.account_id}:gus-second`), 'marker not restored');
+  });
+
   console.log('team invites: a reverse index');
   await t('an invite writes tinv:<invitee>:<team>; joining removes it; pending invites are read from it', async () => {
     const eve = await issue(worker, env, 'eve');
@@ -302,6 +365,38 @@ function wrapBareTablesReference(html) {
     await call('/d/nohash/v/1/frame', { dest: 'iframe' }); await settle(); await call('/d/nohash/v/1/frame', { dest: 'iframe' });
     env.DOCS.get = origGet;
     assert(gets === 2, `unhashed version read ${gets} times`);
+  });
+
+  await t('the frame cache is behind the access gate and keyed per doc and version: a cached body is never served for another doc, another version, or to someone denied', async () => {
+    const created = '2026-01-01T00:00:00.000Z';
+    const hedy = await issue(worker, env, 'hedy');
+    const pub = (slug, body) => ({ title: slug, slug, created, versions: [{ n: 1, created, sha: 'feedfacefeedface' }, { n: 2, created, sha: 'feedfacefeedface' }], access: { visibility: 'public', commenting: 'signed_in', history_visibility: 'public', allowed_users: [] }, hosted: { account_id: hedy.account_id, github_login: 'hedy', owner_key: 'hedy' } });
+    // Two docs, two versions each, all four with the SAME recorded sha.
+    for (const slug of ['twin-a', 'twin-b']) {
+      await env.META.put(`meta:${slug}`, JSON.stringify(pub(slug)), { metadata: { v: 1, a: hedy.account_id } });
+      for (const v of [1, 2]) await env.DOCS.put(`docs/${slug}/v${v}/index.html`, `<!doctype html><html><head><title>${slug}</title></head><body><p>body of ${slug} v${v}</p></body></html>`);
+    }
+    const bodyOf = async (p) => (await call(p, { dest: 'iframe', cookie: hedy.cookie })).r.text();
+    assert((await bodyOf('/d/twin-a/v/1/frame')).includes('body of twin-a v1'), 'a v1');
+    await settle();
+    assert((await bodyOf('/d/twin-b/v/1/frame')).includes('body of twin-b v1'), 'b v1 served a\'s cached body');
+    await settle();
+    assert((await bodyOf('/d/twin-a/v/2/frame')).includes('body of twin-a v2'), 'a v2 served v1\'s cached body');
+    await settle();
+    assert((await bodyOf('/d/twin-a/v/1/frame')).includes('body of twin-a v1'), 'a v1 (cached) wrong');
+    // Now twin-a goes private: the cached body must not reach a stranger.
+    const priv = pub('twin-a'); priv.access.visibility = 'private';
+    await env.META.put('meta:twin-a', JSON.stringify(priv), { metadata: { v: 1, a: hedy.account_id } });
+    const denied = await call('/d/twin-a/v/1/frame', { dest: 'iframe' });
+    assert(denied.status === 401 || denied.status === 403, `stranger got ${denied.status}`);
+    const html = await denied.r.text();
+    assert(!html.includes('body of twin-a'), 'the cached body leaked past the gate');
+    const still = await bodyOf('/d/twin-a/v/1/frame');
+    assert(still.includes('body of twin-a v1'), 'the owner lost the doc');
+    // Only valid slugs reach the cache key; the key is this origin's own URL.
+    const src = workerSrc.slice(workerSrc.indexOf('const frameMatch = p.match'), workerSrc.indexOf('const frameMatch = p.match') + 3000);
+    assert(src.indexOf('enforceDocAccess(') < src.indexOf('frameCacheGet('), 'the cache is read before the access gate');
+    assert(src.indexOf('isValidSlug(slug)') < src.indexOf('frameCacheKey('), 'an unvalidated slug reaches the cache key');
   });
 
   await t('/export marks anchors in one pass with the same output as the rebuild-per-comment version', async () => {
