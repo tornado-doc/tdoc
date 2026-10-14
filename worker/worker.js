@@ -3086,22 +3086,24 @@ const FOLDER_BLOB_FRESH_MS = 120 * 1000;
 const FOLDER_BLOB_OVERLAY_MAX = 200;
 const folderBlobOverlay = new Map();
 
+// KV wins only when it is strictly newer than this isolate's own write and
+// is not that write itself (`w`). Millisecond clocks tie on a fast machine;
+// a tie must not hand back the stale value the write replaced.
 async function readFolderBlob(env, key) {
   const raw = await loadPersonal(env, key);
   const mine = key ? folderBlobOverlay.get(key) : null;
-  if (mine && Date.now() - mine.at < FOLDER_BLOB_FRESH_MS
-      && !(raw && Number(raw.at) >= mine.at)) {
-    return JSON.parse(mine.json);
-  }
-  return raw;
+  if (!mine || Date.now() - mine.at >= FOLDER_BLOB_FRESH_MS) return raw;
+  if (raw && (raw.w === mine.w || Number(raw.at) > mine.at)) return raw;
+  return JSON.parse(mine.json);
 }
 
 async function writeFolderBlob(env, key, value) {
   const at = Date.now();
-  const json = JSON.stringify({ ...value, at });
+  const w = rand(4);
+  const json = JSON.stringify({ ...value, at, w });
   await env.META.put(key, json);
   folderBlobOverlay.delete(key);
-  folderBlobOverlay.set(key, { at, json });
+  folderBlobOverlay.set(key, { at, w, json });
   if (folderBlobOverlay.size > FOLDER_BLOB_OVERLAY_MAX) folderBlobOverlay.delete(folderBlobOverlay.keys().next().value);
 }
 

@@ -244,11 +244,21 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(JSON.stringify(names) === JSON.stringify(['Monthly', 'Older', 'Weekly', '日报']), `folders ${names}`);
   });
 
-  await t('same isolate: a move right after a create reads its own write', async () => {
+  await t('same isolate: a move right after a create reads its own write, even within the same millisecond', async () => {
     senv.META.settle();
-    const made = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Same edge' } })).body.folder;
-    const moved = await onA('/api/folders/move', { method: 'POST', token: kim.token, body: { slugs: ['kim-3'], folder: made.id } });
-    assert(moved.status === 200, `same-isolate move ${moved.status} ${JSON.stringify(moved.body)}`);
+    // A fast machine makes the stale value and the new one in one ms: the
+    // tie must still go to this isolate's own write, not the stale read.
+    const realNow = Date.now;
+    const frozen = realNow();
+    Date.now = () => frozen;
+    try {
+      await onB('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Same ms' } });
+      const made = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Same edge' } })).body.folder;
+      const moved = await onA('/api/folders/move', { method: 'POST', token: kim.token, body: { slugs: ['kim-3'], folder: made.id } });
+      assert(moved.status === 200, `same-isolate move ${moved.status} ${JSON.stringify(moved.body)}`);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   await t('team: a twin made by racing creates is filed into, not duplicated', async () => {
