@@ -3069,14 +3069,92 @@ function normalizeFolderState(state) {
   return { folders, docs };
 }
 
+// ---- folder blobs vs. KV's eventual consistency ----
+// A folder tree is one KV value, and KV reads are edge-cached for up to ~60s:
+// a read right after a write can return the value from before it. Two cheap
+// guards keep "create, then file into it" from failing or losing folders:
+//  1. Read-your-writes in this isolate: every folder blob carries `at` (write
+//     time), and the last one this isolate wrote wins over an older KV read.
+//  2. Hints from the client: a folder it was just handed back by create
+//     (`folder_def` on move, `known` on create) is put back if a stale read
+//     lacks it -- only when the id's own timestamp is recent, so this can
+//     never resurrect an old folder (see adoptRecentFolders).
+// What is left: a write by another isolate from a stale read can still drop
+// a folder created by someone else within the cache window. Moving folders
+// to a Durable Object would close that; it is not worth it at this size.
+const FOLDER_BLOB_FRESH_MS = 120 * 1000;
+const FOLDER_BLOB_OVERLAY_MAX = 200;
+const folderBlobOverlay = new Map();
+
+async function readFolderBlob(env, key) {
+  const raw = await loadPersonal(env, key);
+  const mine = key ? folderBlobOverlay.get(key) : null;
+  if (mine && Date.now() - mine.at < FOLDER_BLOB_FRESH_MS
+      && !(raw && Number(raw.at) >= mine.at)) {
+    return JSON.parse(mine.json);
+  }
+  return raw;
+}
+
+async function writeFolderBlob(env, key, value) {
+  const at = Date.now();
+  const json = JSON.stringify({ ...value, at });
+  await env.META.put(key, json);
+  folderBlobOverlay.delete(key);
+  folderBlobOverlay.set(key, { at, json });
+  if (folderBlobOverlay.size > FOLDER_BLOB_OVERLAY_MAX) folderBlobOverlay.delete(folderBlobOverlay.keys().next().value);
+}
+
+// The ms timestamp a folder id was minted at (`f_<ms>_<hex>`), or 0.
+function folderIdTime(id) {
+  const m = /^f_(\d{13})_[0-9a-f]{8}$/.exec(typeof id === 'string' ? id : '');
+  return m ? Number(m[1]) : 0;
+}
+
+// Put back folders the client just made that a stale read does not show.
+// A hint is taken only when its id was minted in the last two minutes (the
+// window a stale read can hide it), it is not already there, and (team) it
+// was not deleted since. A same-named sibling already there wins instead --
+// that is the same folder made twice by racing runs. Returns a map of hinted
+// id -> the id to use (itself, or that sibling). The session was already
+// checked for this space; it could have made the folder with POST anyway.
+function adoptRecentFolders(state, hints, { team = null, session = null } = {}) {
+  const use = new Map();
+  const list = (Array.isArray(hints) ? hints : [hints]).slice(0, 10);
+  const now = Date.now();
+  for (const h of list) {
+    if (!h || typeof h !== 'object') continue;
+    const id = typeof h.id === 'string' ? h.id : '';
+    const at = folderIdTime(id);
+    if (!at || now - at > FOLDER_BLOB_FRESH_MS || at - now > 30 * 1000) continue;
+    if (state.folders.some((f) => f.id === id)) { use.set(id, id); continue; }
+    if (state.gone && id in state.gone) continue;
+    const name = validFolderName(h.name);
+    if (!name) continue;
+    const parent = typeof h.parent === 'string' && h.parent ? (use.get(h.parent) || h.parent) : null;
+    const twin = state.folders.find((f) => (f.parent || null) === parent && f.name.toLowerCase() === name.toLowerCase());
+    if (twin) { use.set(id, twin.id); continue; }
+    if (state.folders.length >= FOLDERS_MAX) continue;
+    state.folders.push({
+      id,
+      name,
+      created: new Date(at).toISOString(),
+      ...(team ? { created_by: session && session.account_id } : { visibility: 'private' }),
+      ...(parent ? { parent } : {}),
+    });
+    use.set(id, id);
+  }
+  return use;
+}
+
 async function loadFolderState(env, login) {
-  return normalizeFolderState(await loadPersonal(env, personalKey('folders', login)));
+  return normalizeFolderState(await readFolderBlob(env, personalKey('folders', login)));
 }
 
 async function saveFolderState(env, login, state) {
   const key = personalKey('folders', login);
   if (!key) return;
-  await env.META.put(key, JSON.stringify(normalizeFolderState(state)));
+  await writeFolderBlob(env, key, normalizeFolderState(state));
 }
 
 // Provider-proof is the only entry point to this migration. It copies
@@ -3344,7 +3422,7 @@ function teamFoldersKey(teamId) {
 }
 
 async function loadTeamFolders(env, teamId) {
-  const raw = await loadPersonal(env, teamFoldersKey(teamId));
+  const raw = await readFolderBlob(env, teamFoldersKey(teamId));
   const { folders } = normalizeFolderState(raw);
   const gone = {};
   if (raw && raw.gone && typeof raw.gone === 'object') {
@@ -3358,7 +3436,7 @@ async function saveTeamFolders(env, teamId, state) {
   if (!key) return;
   const { folders } = normalizeFolderState({ folders: state.folders });
   const gone = Object.fromEntries(Object.entries(state.gone || {}).slice(-TEAM_FOLDER_GONE_MAX));
-  await env.META.put(key, JSON.stringify({ folders, gone }));
+  await writeFolderBlob(env, key, { folders, gone });
 }
 
 // The folder a team doc shows in: its stamped folder, or, if that folder
@@ -10567,7 +10645,11 @@ export default {
       const name = validFolderName(body.name);
       if (!name) return json({ error: 'invalid_name' }, { status: 400 });
       const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
-      const parentId = body.parent == null || body.parent === '' ? null : String(body.parent);
+      // Folders this client made moments ago that a stale read may not show
+      // yet: seen, they answer existing_ok and survive this write.
+      const known = adoptRecentFolders(state, body.known, { team, session: s });
+      let parentId = body.parent == null || body.parent === '' ? null : String(body.parent);
+      if (parentId && known.has(parentId)) parentId = known.get(parentId);
       if (parentId && !state.folders.some((f) => f.id === parentId)) return json({ error: 'parent_not_found' }, { status: 404 });
       const show = (folder) => (team ? publicTeamFolder(folder, s, team) : publicFolder(folder));
       // Names are unique among SIBLINGS (Drive semantics) — the same name
@@ -10720,12 +10802,21 @@ export default {
       if (!scope.ok) return scope.response;
       const s = scope.session;
       const team = scope.team;
-      const folderId = body.folder == null || body.folder === '' ? null : String(body.folder);
+      let folderId = body.folder == null || body.folder === '' ? null : String(body.folder);
       const slugs = Array.isArray(body.slugs) ? body.slugs : [];
       if (!slugs.length || slugs.length > 100 || !slugs.every((x) => typeof x === 'string' && isValidSlug(x))) {
         return json({ error: 'invalid_slugs' }, { status: 400 });
       }
       const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
+      // A folder created seconds ago may be missing from a stale read; the
+      // client sends back what create gave it (`folder_def`) so the filing
+      // lands instead of a folder_not_found. A team move writes only doc
+      // metas, so the team tree is not rewritten from this stale read.
+      let adopted = false;
+      if (folderId && !state.folders.some((f) => f.id === folderId) && body.folder_def && body.folder_def.id === folderId) {
+        const use = adoptRecentFolders(state, body.folder_def, { team, session: s });
+        if (use.has(folderId)) { adopted = use.get(folderId) === folderId; folderId = use.get(folderId); }
+      }
       if (folderId && !state.folders.some((f) => f.id === folderId)) {
         return json({ error: 'folder_not_found' }, { status: 404 });
       }
@@ -10765,7 +10856,7 @@ export default {
           else delete state.docs[slug];
           changed += 1;
         }
-        if (changed) await saveFolderState(env, actorKey(s), state);
+        if (changed || adopted) await saveFolderState(env, actorKey(s), state);
       }
       return json({ ok: true, moved: slugs.length, changed, folder: folderId, team: team ? team.id : null });
     }

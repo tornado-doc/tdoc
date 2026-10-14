@@ -998,11 +998,11 @@ t('tdoc-folder resolves team + folder names, creates idempotently, files docs; t
     assert(!/folders\/move/.test(calls()), 'filed into a folder that does not exist');
     const made = run(['add', 'daily-1', '--folder', 'Daily reports', '--create']);
     assert(made.status === 0, `add --create: ${made.stderr}`);
-    assert(/POST \/api\/folders Bearer tok-1 \{"name":"Daily reports","parent":null,"team":null,"existing_ok":true\}/.test(calls()), `create call:\n${calls()}`);
-    assert(/POST \/api\/folders\/move Bearer tok-1 \{"slugs":\["daily-1"\],"folder":"f_1","team":null\}/.test(calls()), `move call:\n${calls()}`);
+    assert(/POST \/api\/folders Bearer tok-1 \{"name":"Daily reports","parent":null,"team":null,"existing_ok":true,"known":\[\]\}/.test(calls()), `create call:\n${calls()}`);
+    assert(/POST \/api\/folders\/move Bearer tok-1 \{"slugs":\["daily-1"\],"folder":"f_1","folder_def":\{"id":"f_1","name":"Daily reports","parent":null\},"team":null\}/.test(calls()), `move call:\n${calls()}`);
     fs.writeFileSync(log, '');
     const again = run(['add', 'daily-2', 'daily-3', '--folder', 'daily REPORTS', '--create']);
-    assert(again.status === 0 && !/POST \/api\/folders /.test(calls()) && /"slugs":\["daily-2","daily-3"\],"folder":"f_1"/.test(calls()), `existing folder by name:\n${calls()}`);
+    assert(again.status === 0 && !/POST \/api\/folders /.test(calls()) && /"slugs":\["daily-2","daily-3"\],"folder":"f_1","folder_def":\{"id":"f_1"/.test(calls()), `existing folder by name:\n${calls()}`);
     const created = run(['create', 'Daily reports']);
     assert(created.status === 0 && /already in My docs/.test(created.stderr), `idempotent create: ${created.stderr}`);
     const nested = run(['create', '2026', '--parent', 'Daily reports']);
@@ -1015,7 +1015,7 @@ t('tdoc-folder resolves team + folder names, creates idempotently, files docs; t
     const team = run(['add', 'team-daily', '--team', 'befreed', '--folder', '日报', '--create']);
     assert(team.status === 0, `team add: ${team.stderr}`);
     assert(/GET \/api\/folders\?team=t_0123456789abcdef /.test(calls()) && /"name":"日报","parent":null,"team":"t_0123456789abcdef","existing_ok":true/.test(calls())
-      && /"slugs":\["team-daily"\],"folder":"f_1","team":"t_0123456789abcdef"/.test(calls()), `team calls:\n${calls()}`);
+      && /"slugs":\["team-daily"\],"folder":"f_1","folder_def":\{"id":"f_1","name":"日报","parent":null\},"team":"t_0123456789abcdef"/.test(calls()), `team calls:\n${calls()}`);
     const refused = run(['add', 'not-mine', '--folder', 'Daily reports']);
     assert(refused.status !== 0 && /cannot file not-mine/.test(refused.stderr), `refusal: ${refused.status} ${refused.stderr}`);
     const unknownTeam = run(['list', '--team', 'nope']);
@@ -1023,7 +1023,36 @@ t('tdoc-folder resolves team + folder names, creates idempotently, files docs; t
     fs.writeFileSync(log, '');
     const moved = run(['--team', 'BeFreed', '--folder', '日报', 'team-daily-2'], path.join(BIN, 'tdoc-move'));
     assert(moved.status === 0, `tdoc-move --folder: ${moved.stderr}`);
-    assert(/POST \/api\/team\/move [^\n]*"team":"t_0123456789abcdef"/.test(calls()) && /"slugs":\["team-daily-2"\],"folder":"f_1","team":"t_0123456789abcdef"/.test(calls()), `move + file:\n${calls()}`);
+    assert(/POST \/api\/team\/move [^\n]*"team":"t_0123456789abcdef"/.test(calls()) && /"slugs":\["team-daily-2"\],"folder":"f_1","folder_def":\{"id":"f_1","name":"日报","parent":null\},"team":"t_0123456789abcdef"/.test(calls()), `move + file:\n${calls()}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-folder add retries a folder_not_found once, then explains it', () => {
+  const bin = path.join(BIN, 'tdoc-folder');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-folder-retry-'));
+  const log = path.join(home, 'calls.log');
+  // The move answers folder_not_found to the first `misses` calls.
+  const stub = startStub(
+    `((st)=>(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
+    `require('fs').appendFileSync(${JSON.stringify(log)},q.method+' '+q.url+'\\n');` +
+    `s.writeHead(200,{'content-type':'application/json'});const u=new URL(q.url,'http://x');const body=b?JSON.parse(b):{};` +
+    `if(u.pathname==='/api/folders'&&q.method==='GET')return s.end(JSON.stringify({ok:true,folders:[{id:'f_1',name:'Daily'}],docs:{}}));` +
+    `if(u.pathname==='/api/folders/move'){if(body.slugs[0]==='once'&&!st.once){st.once=1;return s.end(JSON.stringify({error:'folder_not_found'}));}` +
+    `if(body.slugs[0]==='never')return s.end(JSON.stringify({error:'folder_not_found'}));return s.end(JSON.stringify({ok:true}));}` +
+    `s.end('{}');});})({})`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${stub.port}`, upload_token: 'tok-1' }));
+    const env = { ...process.env, HOME: home, TDOC_FOLDER_RETRY_DELAY: '0' };
+    const moves = () => (fs.readFileSync(log, 'utf8').match(/folders\/move/g) || []).length;
+    const once = spawnSync(bin, ['add', 'once', '--folder', 'Daily'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(once.status === 0 && moves() === 2 && !/not in My docs/.test(once.stderr), `retry: ${once.status} ${moves()} ${once.stderr}`);
+    fs.writeFileSync(log, '');
+    const never = spawnSync(bin, ['add', 'never', '--folder', 'Daily'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(never.status !== 0 && moves() === 2 && /that folder is not in My docs/.test(never.stderr), `gave up: ${never.status} ${moves()} ${never.stderr}`);
   } finally {
     stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
