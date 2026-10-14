@@ -54,6 +54,16 @@ export function StarButton({ doc, onToggle }) {
 
 // One document row for every tab. `meta` is the caller's one-line summary;
 // `selection` (optional) adds the checkbox; `menuItems` (optional) adds "⋯".
+// A doc's excerpt opens with its own title (the <title>, then the <h1>), which
+// the row already shows above it: drop those leading repeats.
+function excerptBelowTitle(excerpt, title) {
+  let text = String(excerpt || '').trim();
+  const head = String(title || '').trim();
+  if (!head) return text;
+  while (text.toLowerCase().startsWith(head.toLowerCase())) text = text.slice(head.length).replace(/^[\s:：·—–-]+/, '');
+  return text;
+}
+
 export function DocRow({
   doc,
   meta,
@@ -67,6 +77,7 @@ export function DocRow({
   const dataAttrs = Object.fromEntries(
     Object.entries(data).map(([key, value]) => [`data-${key}`, value]),
   );
+  const excerpt = excerptBelowTitle(doc.excerpt, doc.title);
   const classes = ['doc-row', selection?.checked ? 'is-selected' : null, className]
     .filter(Boolean)
     .join(' ');
@@ -84,6 +95,8 @@ export function DocRow({
       ) : null}
       <div className="doc-info">
         <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
+        {/* The same opening-line preview the public profile cards show. */}
+        {excerpt ? <div className="doc-excerpt">{excerpt}</div> : null}
         <div className="doc-meta">{meta}</div>
       </div>
       <div className="row-actions">

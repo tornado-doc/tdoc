@@ -32,6 +32,7 @@ const OFFLINE = [
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
   'ui-primitives.test.js',    // product UI uses shell/src/ui primitives; no native <select>
+  'me-docs-preview.test.js',  // My docs rows carry the opening line from meta.preview, no body reads
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
@@ -141,6 +142,7 @@ const BROWSER = [
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
+  'my-docs-preview-ui.test.js', // My docs rows show the opening line, 1 line desktop / 2 phone
 ];
 
 // Existing opt-in UI suites; --all retains their broader coverage.

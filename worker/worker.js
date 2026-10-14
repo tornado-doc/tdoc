@@ -4676,6 +4676,10 @@ async function indexData(env, session, origin) {
       ? !!(session && session.account_id && row.meta.hosted && row.meta.hosted.account_id === session.account_id)
       : isDocOwnerSession(env, session, row.meta),
     starred: starred.has(row.slug),
+    // The doc's opening line, so a row says what it is at a glance. Read
+    // from meta.preview, which publish and save already write: no document
+    // body is fetched here, so the catalog's per-request CPU does not grow.
+    excerpt: typeof row.meta?.preview?.excerpt === 'string' ? row.meta.preview.excerpt.slice(0, 180) : '',
   });
 
   const viewerAccount = session && session.account_id;

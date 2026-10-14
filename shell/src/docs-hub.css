@@ -335,6 +335,9 @@
   .doc-info { min-width: 0; flex: 1 1 auto; }
   .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
+  /* A row's opening line (DocRow): what the doc is, between title and meta. */
+  .doc-excerpt { margin-top: 2px; color: var(--td-muted); font-size: 13px; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 700px) { .doc-excerpt { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
   button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
   /* Delete lives behind a quiet ⋯ overflow — the catalog reads as a clean list,
      not a management console. Faint by default, clearer on row hover. */

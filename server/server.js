@@ -1067,7 +1067,10 @@ function localDocsData() {
         .map((item) => Number(item.name.slice(1))).sort((a, b) => b - a)[0] || 1;
     const created = meta.created || versions[0]?.created || '';
     const updated = versions[versions.length - 1]?.created || created;
-    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '' });
+    // Same opening-line preview the hosted catalog serves (meta.preview there).
+    let excerpt = '';
+    try { excerpt = SHELL.excerptFromHtml(fs.readFileSync(path.join(ROOT, slug, `v${latest}`, 'index.html'), 'utf8'), 180) || ''; } catch {}
+    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '', excerpt });
   }
   docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)) || a.title.localeCompare(b.title));
   return { docs, recent: [], starred: [], folders: [] };
