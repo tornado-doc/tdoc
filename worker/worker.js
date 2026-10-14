@@ -332,6 +332,9 @@ async function linkAccountGroup(env, accountIds, canonical, actorKeys = []) {
   const normalizedActorKeys = [...new Set(expandedActorKeys.map(normalizeActorKey).filter(Boolean))].slice(0, 8);
   const record = JSON.stringify({ canonical, ids, actor_keys: normalizedActorKeys, linked_at: new Date().toISOString() });
   await Promise.all(ids.map((id) => env.META.put(`account-group:${id}`, record)));
+  // The merged identity lists one personal doc index, under the canonical
+  // account; the members' own are rebuilt into it on the next My docs.
+  await Promise.all(ids.map((id) => env.META.delete(docIndexBuiltKey(`p:${id}`)).catch(() => {})));
   return { canonical, ids, actor_keys: normalizedActorKeys };
 }
 
@@ -571,6 +574,7 @@ function canCommentOnDoc(access, session, env, meta) {
 // thinner version is how one of them ends up leaving the DO populated, which
 // is what made delete-then-recreate resurrect old comments.
 async function deleteDocEverywhere(env, slug) {
+  const idx = await priorDocMetaIndex(env, slug);
   let cursor;
   do {
     const r = await env.DOCS.list({ prefix: `docs/${slug}/`, cursor });
@@ -578,6 +582,7 @@ async function deleteDocEverywhere(env, slug) {
     cursor = r.truncated ? r.cursor : undefined;
   } while (cursor);
   await env.META.delete(`meta:${slug}`);
+  await removeDocIndex(env, slug, idx);
   // Through the DO (the canonical store), not just the KV mirror: deleting
   // only KV left DO storage populated. The wipe op clears state.storage; the
   // legacy KV value goes too, as cleanup.
@@ -1635,30 +1640,46 @@ const READER_BLOCK_RE = /<style[^>]*\bid="tdoc-reader"/i;
 // three — no page overflow, columns at their natural width, header aligned.
 // Kept byte-identical in server.js; test/reader-patch-drift.test.js holds them
 // together.
+//
+// One pass over the bytes. The first version lowercased the WHOLE document
+// for every table tag it looked for, and tested "already wrapped" against
+// everything emitted so far -- O(tables x bytes): 480ms of CPU on a 660KB
+// report with forty tables, against Cloudflare's 10ms, so opening that doc
+// was error 1102 every time. Now the tags are found with one case-insensitive
+// regex walked forward, and only the bytes just before a table decide whether
+// it is already wrapped (the wrapper tag must END there, so a window as long
+// as any sane tag is the same test).
 function wrapBareTables(html) {
   if (typeof html !== 'string' || html.indexOf('<table') === -1) return html;
-  var out = '', i = 0;
+  var tags = /<\/?table/gi;
+  var next = function (from) { tags.lastIndex = from; return tags.exec(html); };
+  var WINDOW = 4096;
+  var out = [], i = 0, tail = '';
   while (i < html.length) {
-    var at = html.toLowerCase().indexOf('<table', i);
-    if (at === -1) { out += html.slice(i); break; }
+    var m = next(i);
+    while (m && m[0].length !== 6) m = next(m.index + 7);
+    if (!m) { out.push(html.slice(i)); break; }
+    var at = m.index;
     var before = html.slice(i, at);
-    var already = /<div[^>]*class="[^"]*tdoc-table-scroll[^"]*"[^>]*>\s*$/i.test(out + before);
+    var context = tail + (before.length > WINDOW ? before.slice(-WINDOW) : before);
+    var already = /<div[^>]*class="[^"]*tdoc-table-scroll[^"]*"[^>]*>\s*$/i.test(context);
     var depth = 0, j = at, end = -1;
     while (j < html.length) {
-      var open = html.toLowerCase().indexOf('<table', j);
-      var close = html.toLowerCase().indexOf('</table', j);
-      if (close === -1) break;
-      if (open !== -1 && open < close) { depth++; j = open + 6; continue; }
+      var t = next(j);
+      if (!t) break;
+      if (t[0].length === 6) { depth++; j = t.index + 6; continue; }
       depth--;
-      if (depth === 0) { end = html.indexOf('>', close); break; }
-      j = close + 7;
+      if (depth === 0) { end = html.indexOf('>', t.index); break; }
+      j = t.index + 7;
     }
-    if (end === -1) { out += html.slice(i); break; }
+    if (end === -1) { out.push(html.slice(i)); break; }
     var table = html.slice(at, end + 1);
-    out += before + (already ? table : '<div class="tdoc-table-scroll">' + table + '</div>');
+    var piece = before + (already ? table : '<div class="tdoc-table-scroll">' + table + '</div>');
+    out.push(piece);
+    tail = piece.length > WINDOW ? piece.slice(-WINDOW) : (tail + piece).slice(-WINDOW);
     i = end + 1;
   }
-  return out;
+  return out.join('');
 }
 
 // text-size-adjust: iOS Safari otherwise "autosizes" long text blocks, so
@@ -1667,6 +1688,115 @@ function wrapBareTables(html) {
 const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 function hasReaderBlock(html) {
   return READER_BLOCK_RE.test(html);
+}
+
+// What /frame does to the stored bytes before the per-request probe tag goes
+// in. Documents created before creation-time baking carry no #tdoc-reader
+// block, so the reading template is supplied in the FRAME RESPONSE (never
+// written back to storage). No second condition: see the matching comment
+// in server/server.js — the old "and contains no max-width" proxy starved
+// the documents that followed the contract, and :where() zero-specificity
+// makes the injection harmless to a document that styles itself.
+function bakeFrameBody(raw) {
+  let body = forceWidgetSandbox(raw);
+  if (!hasReaderBlock(body)) {
+    const rcss = readerCssSource();
+    if (rcss) {
+      const rtag = `<style id="tdoc-reader">${rcss}</style>`;
+      // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
+      body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
+    }
+  }
+  body = wrapBareTables(body);
+  if (body.indexOf('id="tdoc-reader-patch"') === -1) {
+    const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
+    // Anchor on the OPENING tag. The baked reader CSS carries a comment
+    // that quotes `</head>` literally, so a first-match replace on the
+    // closing tag drops the style inside that comment, where it is inert
+    // and invisible — it took a byte-level look at the response to see.
+    // A document's real <head> necessarily precedes any prose quoting it.
+    body = /<head[^>]*>/i.test(body)
+      ? body.replace(/<head[^>]*>/i, (open) => `${open}${ptag}`)
+      : ptag + body;
+  }
+  return body;
+}
+
+// The baked frame body in the edge cache (Cache API: free on every plan,
+// per-colo, no KV write). Keyed by the version's recorded content hash and
+// by a hash of everything the bake adds, so a deploy that changes the reader
+// template or the patch simply misses. The key is a URL on this worker's own
+// origin that no route serves; the cache is only ever read here, after the
+// access gate has passed.
+let FRAME_BAKE_GENERATION = null;
+async function frameBakeGeneration() {
+  if (FRAME_BAKE_GENERATION) return FRAME_BAKE_GENERATION;
+  const build = runtimeInfo();
+  const src = `${readerCssSource()}\n${READER_PATCH_CSS}\n${build.worker_sha || ''}\n${build.bundle_sha || ''}`;
+  FRAME_BAKE_GENERATION = (await sha256Hex(src)).slice(0, 12);
+  return FRAME_BAKE_GENERATION;
+}
+function frameCacheKey(origin, slug, version, meta, generation) {
+  const entry = (Array.isArray(meta && meta.versions) ? meta.versions : []).find((v) => Number(v.n) === Number(version));
+  const sha = entry && typeof entry.sha === 'string' && /^[0-9a-f]{16}$/.test(entry.sha) ? entry.sha : null;
+  if (!sha || !origin) return null;
+  return `${origin}/__frame-cache/${encodeURIComponent(slug)}/v${Number(version)}/${sha}-${generation}`;
+}
+function edgeCache() {
+  try { return typeof caches !== 'undefined' && caches && caches.default ? caches.default : null; } catch { return null; }
+}
+// The cached entry is the baked body up to its `</body>` (the probe tag goes
+// there), with the rest in a header, so a hit is piped to the reader as
+// bytes -- never decoded into a string, searched and re-encoded on the way.
+const FRAME_TAIL_HEADER = 'X-Tdoc-Frame-Tail';
+function splitFrameBody(baked) {
+  const at = baked.indexOf('</body>');
+  return at === -1 ? { head: baked, tail: '' } : { head: baked.slice(0, at), tail: baked.slice(at) };
+}
+// What follows the cached head: the probe tag, then the document's own tail.
+function frameSuffix(tag, tail) {
+  return tail ? `${tag}\n${tail}` : tag;
+}
+// Returns { body: ReadableStream, tail } or null.
+async function frameCacheGet(key) {
+  const cache = edgeCache();
+  if (!cache) return null;
+  try {
+    const hit = await cache.match(key);
+    if (!hit || !hit.body) return null;
+    return { body: hit.body, tail: decodeURIComponent(hit.headers.get(FRAME_TAIL_HEADER) || '') };
+  } catch { return null; }
+}
+async function frameCachePut(key, baked) {
+  const cache = edgeCache();
+  if (!cache) return;
+  try {
+    const { head, tail } = splitFrameBody(baked);
+    await cache.put(key, new Response(head, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'public, max-age=31536000',
+        [FRAME_TAIL_HEADER]: encodeURIComponent(tail),
+      },
+    }));
+  } catch {}
+}
+// The cached bytes, then `suffix`, as one stream. A cache read that fails
+// midway aborts the response rather than ending a document early.
+function streamWithSuffix(body, suffix) {
+  const { readable, writable } = new TransformStream();
+  const bytes = new TextEncoder().encode(suffix);
+  (async () => {
+    try {
+      await body.pipeTo(writable, { preventClose: true });
+      const w = writable.getWriter();
+      await w.write(bytes);
+      await w.close();
+    } catch (e) {
+      try { await writable.abort(e); } catch {}
+    }
+  })();
+  return readable;
 }
 
 // The document-content invariants, in ONE place. Every path that stores a
@@ -1803,13 +1933,19 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     try { return pageUrl ? new URL(pageUrl).origin : ''; } catch (_) { return ''; }
   })();
   const access = accessFromMeta(docMeta || {});
-  const description = (SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180)) || '';
-  const cachedImage = docMeta && docMeta.preview && typeof docMeta.preview.image === 'string'
-    ? docMeta.preview.image
-    : '';
-  const fromHtml = (SHELL.previewFromHtml && SHELL.previewFromHtml(scanHtml, {
+  // The description stored at publish is used only for the version it was
+  // computed from; any other version's page still scans its own head. The
+  // image candidate from the head is only computed when no image was stored
+  // -- each scan is a few regex passes over 96KB, and both used to run on
+  // every view.
+  const preview = docMeta && docMeta.preview && typeof docMeta.preview === 'object' ? docMeta.preview : null;
+  const description = (preview && typeof preview.description === 'string' && Number(preview.description_v) === Number(version))
+    ? preview.description
+    : ((SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180)) || '');
+  const cachedImage = preview && typeof preview.image === 'string' ? preview.image : '';
+  const fromHtml = cachedImage ? '' : ((SHELL.previewFromHtml && SHELL.previewFromHtml(scanHtml, {
     slug, version, maxLen: 180,
-  }).image) || '';
+  }).image) || '');
   let shareImage = cachedImage || fromHtml || '';
   if (shareImage && shareImage.startsWith('/') && origin) shareImage = origin + shareImage;
   // -v2 cache-busts Apple/iMessage OG caches that pin the old tornado PNG URL.
@@ -2153,7 +2289,18 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
   const gate = await enforceDocAccess(env, req, slug, version, { joinInvite: !isLanding && req.method === 'GET', joined: joinedTeam });
   if (!gate.ok) return { ok: false, response: gate.response };
   joinedTeam = gate.joinedTeam || joinedTeam;
-  const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+  // The shell page reads only the head of the document (share excerpt,
+  // share image, onboarding CTA -- see SHELL_SCAN_BYTES), so only the head
+  // is fetched: a 2MB doc no longer costs 2MB of R2 transfer and decoding on
+  // every view. The unbundled worker (no SHELL) serves the bytes bare and
+  // still needs all of them. A range R2 will not serve falls back to a plain
+  // read rather than a missing page.
+  const docKey = `docs/${slug}/v${version}/index.html`;
+  let obj = null;
+  if (SHELL) {
+    try { obj = await env.DOCS.get(docKey, { range: { offset: 0, length: SHELL_SCAN_BYTES } }); } catch { obj = null; }
+  }
+  if (!obj) obj = await env.DOCS.get(docKey);
   if (!obj) return { ok: false, response: text(`Not found: ${slug} v${version}`, { status: 404 }) };
   const raw = await obj.text();
   const session = gate.session;
@@ -2182,13 +2329,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
   let ownerManage = null;
   if (isOwner) {
     let commentCount = 0;
-    try {
-      const list = await readComments(env, slug);
-      ensureMigrated(list);
-      for (const c of historyList(list)) {
-        commentCount += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
-      }
-    } catch {}
+    try { commentCount = await countDocComments(env, slug); } catch {}
     ownerManage = { access: gate.access, versionCount: versions.length, commentCount };
   }
   const teamManage = await teamManageFor(env, session, gate.meta, gate.access, isOwner);
@@ -3382,19 +3523,9 @@ function folderShareRow(slug, meta) {
 // a doc filed in one always carries it. Docs whose folder was deleted show
 // in the nearest standing ancestor, as in the team space.
 async function teamFolderDocMetas(env, teamId, state, folderId) {
-  const slugs = [];
-  let cursor;
-  do {
-    const page = await env.META.list({ prefix: 'meta:', cursor });
-    for (const key of page.keys) {
-      const idx = key.metadata && key.metadata.v === META_INDEX_VERSION ? key.metadata : null;
-      if (!idx || idx.w !== teamId || idx.f === 1) continue;
-      if (typeof idx.tf === 'string' && resolveTeamFolder(state, idx.tf) !== folderId) continue;
-      slugs.push(key.name.slice('meta:'.length));
-    }
-    cursor = page.cursor;
-    if (page.list_complete) break;
-  } while (cursor);
+  // The team's facet: one list bounded by the team's own docs (built from
+  // the platform scan the first time anyone needs it).
+  const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
   const metas = await Promise.all(slugs.map(async (slug) => [slug, await loadDocMeta(env, slug)]));
   return metas.filter(([, meta]) => meta && meta.workspace_id === teamId
     && meta.created_from !== 'feedback'
@@ -3623,45 +3754,131 @@ function teamIndex(team) {
   }
   return idx;
 }
+// Each invitation is also a marker key the invitee can list by prefix --
+//   tinv:<handle or address>:<team id>
+// -- so "teams that invited me" costs one list per identity, not a walk over
+// every team on the platform. Kept current here from the team's prior index
+// metadata (the invite list it carried), and verified against the team
+// record when read: a stale marker is swept, never shown.
+function teamInviteMarkerKey(invitee, teamId) { return `tinv:${invitee}:${teamId}`; }
+const TEAM_INVITE_INDEX_BUILT = 'tinv:built';
+// Small: the first My docs after this ships also builds the viewer's doc
+// facets, and the two batches together must stay well inside a day's
+// 1,000 writes even if every active account loads My docs that day.
+const TEAM_INVITE_BUILD_WRITES = 15;
+
 async function saveTeam(env, team) {
+  const next = [...new Set((Array.isArray(team.invites) ? team.invites : []).map(String))];
+  // The invites the stored record carried, from its metadata; unknown when
+  // the record predates the index or its list did not fit, in which case
+  // every current invite is written (idempotent) and none removed.
+  let prior = null;
+  if (env.META && typeof env.META.getWithMetadata === 'function') {
+    try {
+      const r = await env.META.getWithMetadata(`team:${team.id}`);
+      const md = r && r.metadata;
+      if (md && md.v === 1 && !md.p && Array.isArray(md.i)) prior = md.i.map(String);
+    } catch {}
+  }
+  const was = new Set(prior || []);
+  await Promise.all(next.filter((x) => !was.has(x)).map((x) => env.META.put(teamInviteMarkerKey(x, team.id), '1')));
   await env.META.put(`team:${team.id}`, JSON.stringify(team), { metadata: teamIndex(team) });
+  await Promise.all((prior || []).filter((x) => !next.includes(x)).map((x) => env.META.delete(teamInviteMarkerKey(x, team.id)).catch(() => {})));
 }
 
 // Teams that invited this person (by handle or address) and they have not
-// joined. Teams saved before the index existed are read and indexed, a few
-// writes per request; the ones past that budget are still read (a read is
-// cheap, and a write that keeps failing — the free plan's daily cap — must
-// not hide a team for good), up to a bound that keeps the request short.
+// joined. From the invite markers once those exist for every team; until
+// then the old walk over every team answers, and writes the markers it
+// finds on the way, a bounded batch per request, then marks the index
+// built. Teams saved before the team index existed are read and indexed, a
+// few writes per request; the ones past that budget are still read (a read
+// is cheap, and a write that keeps failing — the free plan's daily cap —
+// must not hide a team for good), up to a bound that keeps the request short.
 async function pendingTeamInvitesFor(env, session) {
   const mine = [sessionLogin(session), normalizeEmail(session && session.email)].filter(Boolean);
   if (!mine.length) return [];
   const out = [];
+  const pending = async (teamId) => {
+    const team = await loadTeam(env, teamId);
+    if (!team || teamMember(team, session.account_id) || !pendingTeamInvite(team, session)) return false;
+    out.push({ id: team.id, name: team.name, member_count: team.members.length });
+    return true;
+  };
+  let built = null;
+  try { built = await env.META.get(TEAM_INVITE_INDEX_BUILT); } catch {}
+  if (built) {
+    const seen = new Set();
+    let sweeps = 0;
+    for (const who of mine) {
+      const prefix = `tinv:${who}:`;
+      let cursor;
+      do {
+        const page = await env.META.list({ prefix, cursor });
+        for (const k of page.keys) {
+          const teamId = k.name.slice(prefix.length);
+          if (!validTeamId(teamId) || seen.has(teamId)) continue;
+          seen.add(teamId);
+          if (!(await pending(teamId)) && sweeps < DOC_INDEX_SWEEP_WRITES) {
+            sweeps += 1;
+            env.META.delete(k.name).catch(() => {});
+          }
+        }
+        cursor = page.cursor;
+        if (page.list_complete) break;
+      } while (cursor);
+    }
+    return out;
+  }
   let cursor;
   let backfills = 0;
   let reads = 0;
+  let complete = true;
+  const markers = [];
   do {
     const page = await env.META.list({ prefix: 'team:', cursor });
     for (const k of page.keys) {
+      const teamId = k.name.slice('team:'.length);
       let idx = k.metadata && k.metadata.v === 1 ? k.metadata : null;
-      if (!idx) {
-        if (reads >= 100) continue;
-        const team = await loadTeam(env, k.name.slice('team:'.length));
+      let team = null;
+      if (!idx || idx.p) {
+        if (reads >= 100) { complete = false; continue; }
+        team = await loadTeam(env, teamId);
         reads += 1;
         if (!team) continue;
-        if (backfills < 10) {
+        if (!idx && backfills < 10) {
           backfills += 1;
           try { await saveTeam(env, team); } catch {}
         }
-        idx = teamIndex(team);
+        idx = { ...teamIndex(team), i: (team.invites || []).map(String), p: 0 };
       }
-      if (!idx.p && !idx.i.some((x) => mine.includes(x))) continue;
-      const team = await loadTeam(env, k.name.slice('team:'.length));
-      if (!team || teamMember(team, session.account_id) || !pendingTeamInvite(team, session)) continue;
-      out.push({ id: team.id, name: team.name, member_count: team.members.length });
+      for (const x of idx.i) markers.push([x, teamId]);
+      if (!idx.i.some((x) => mine.includes(x))) continue;
+      await pending(teamId);
     }
     cursor = page.cursor;
     if (page.list_complete) break;
   } while (cursor);
+  // Build: the markers this walk saw that are not there yet (one list of
+  // what is), a batch per request, then the flag once none are missing.
+  try {
+    const existing = new Set();
+    let c2;
+    do {
+      const page = await env.META.list({ prefix: 'tinv:', cursor: c2 });
+      for (const k of page.keys) existing.add(k.name);
+      c2 = page.cursor;
+      if (page.list_complete) break;
+    } while (c2);
+    let writes = 0;
+    for (const [x, teamId] of markers) {
+      const key = teamInviteMarkerKey(x, teamId);
+      if (existing.has(key)) continue;
+      if (writes >= TEAM_INVITE_BUILD_WRITES) { complete = false; break; }
+      await env.META.put(key, '1');
+      writes += 1;
+    }
+    if (complete) await env.META.put(TEAM_INVITE_INDEX_BUILT, new Date().toISOString());
+  } catch {}
   return out;
 }
 
@@ -4009,19 +4226,237 @@ function docMetaIndex(meta) {
 async function putDocMetaJson(env, slug, json) {
   let parsed = null;
   try { parsed = JSON.parse(json); } catch {}
-  return env.META.put(`meta:${slug}`, json, parsed ? { metadata: docMetaIndex(parsed) } : undefined);
+  const idx = parsed ? docMetaIndex(parsed) : null;
+  // Markers before the record: a marker that fails leaves the record as it
+  // was, and the retry writes both; a record that fails after its marker
+  // leaves an orphan the readers ignore and sweep. The other order could
+  // commit a doc that no list ever finds.
+  const prior = idx ? await priorDocMetaIndex(env, slug) : null;
+  const sync = idx ? await syncDocIndex(env, slug, idx, prior) : null;
+  await env.META.put(`meta:${slug}`, json, idx ? { metadata: idx } : undefined);
+  if (sync) await sync.after();
 }
 
-async function indexData(env, session, origin) {
-  let keys = [];
+// ─────────────── the per-owner / per-team doc index ───────────────
+//
+// The catalog index above made My docs cheap to DECIDE but not cheap to
+// FIND: every request still listed every meta key on the platform (one KV
+// list per 1,000 docs, the metadata of all of them parsed), so one person's
+// My docs, the quota count on every publish and a shared team folder all
+// grew with everyone else's docs. Each doc now also owns a marker key per
+// facet it belongs to:
+//
+//   docidx:p:<account>:<slug>   its owner's canonical account
+//   docidx:l:<handle>:<slug>    a handle with no account (pre-account docs)
+//   docidx:w:<team>:<slug>      the team it is filed in
+//   docidx:n:<slug>             no owner at all (the deploy operator's)
+//
+// A facet is one list call, bounded by that facet's own docs. The marker's
+// metadata is a copy of the index record, advisory only: the full meta is
+// read and re-checked before anything is shown, so a stale or orphaned
+// marker narrows, never grants, and is swept when found.
+//
+// Facets are built lazily, by whoever needs them: the first My docs after
+// this shipped (or the first publish, for the quota count) still runs the
+// old platform scan and writes the missing markers, a bounded batch per
+// request, then sets docidx:built:<facet>. The free plan allows 1,000 KV
+// writes a day, so the batch is small and only facets somebody actually
+// uses are ever built. After that, publish / delete / move keep the markers
+// current from inside putDocMetaJson and deleteDocEverywhere: a new doc is
+// one extra write (two for a team doc), a republish none, a move one put
+// and one delete.
+const DOC_INDEX_BUILD_WRITES = 25;
+const DOC_INDEX_SWEEP_WRITES = 3;
+
+function docIndexMarkerKey(facet, slug) { return `docidx:${facet}:${slug}`; }
+function docIndexBuiltKey(facet) { return `docidx:built:${facet}`; }
+
+async function priorDocMetaIndex(env, slug) {
+  if (!env.META || typeof env.META.getWithMetadata !== 'function') return null;
+  try {
+    const r = await env.META.getWithMetadata(`meta:${slug}`);
+    const md = r && r.metadata;
+    return md && md.v === META_INDEX_VERSION ? md : null;
+  } catch { return null; }
+}
+
+// The marker keys a doc owns, from its index record. The owner facet is the
+// account's canonical id (one small read), so linked identities share one
+// list. A pre-account doc that names only a handle is filed under that
+// handle's account, if one exists; a doc that names nobody is the operator's.
+async function docIndexFacets(env, idx, groups = new Map()) {
+  const out = [];
+  if (!idx) return out;
+  let account = idx.a || '';
+  if (!account && idx.o) {
+    try { const rec = await lookupHostedAccount(env, idx.o); account = (rec && rec.account_id) || ''; } catch {}
+  }
+  if (account) {
+    if (!groups.has(account)) {
+      let canonical = account;
+      try { canonical = (await accountGroup(env, account)).canonical || account; } catch {}
+      groups.set(account, canonical);
+    }
+    out.push(`p:${groups.get(account)}`);
+  } else if (idx.o) {
+    out.push(`l:${idx.o}`);
+  } else if (!idx.k) {
+    out.push('n');
+  }
+  if (idx.w) out.push(`w:${idx.w}`);
+  return out;
+}
+
+// Markers the new record needs that the prior one did not are written now;
+// `after()` removes the ones it no longer needs, once the record is stored.
+async function syncDocIndex(env, slug, idx, priorIdx) {
+  const groups = new Map();
+  const next = await docIndexFacets(env, idx, groups);
+  const prior = priorIdx ? await docIndexFacets(env, priorIdx, groups) : [];
+  await Promise.all(next.filter((f) => !prior.includes(f)).map((f) => env.META.put(docIndexMarkerKey(f, slug), '1', { metadata: idx })));
+  const gone = prior.filter((f) => !next.includes(f));
+  return {
+    after: async () => {
+      await Promise.all(gone.map((f) => env.META.delete(docIndexMarkerKey(f, slug)).catch(() => {})));
+    },
+  };
+}
+
+async function removeDocIndex(env, slug, idx) {
+  if (!idx) return;
+  try {
+    const facets = await docIndexFacets(env, idx);
+    await Promise.all(facets.map((f) => env.META.delete(docIndexMarkerKey(f, slug)).catch(() => {})));
+  } catch {}
+}
+
+async function listDocIndex(env, facet) {
+  const prefix = `docidx:${facet}:`;
+  const out = [];
   let cursor;
   do {
-    const page = await env.META.list({ prefix: 'meta:', cursor });
-    keys = keys.concat(page.keys);
+    const page = await env.META.list({ prefix, cursor });
+    for (const k of page.keys) {
+      out.push({ slug: k.name.slice(prefix.length), idx: k.metadata && k.metadata.v === META_INDEX_VERSION ? k.metadata : null });
+    }
     cursor = page.cursor;
     if (page.list_complete) break;
   } while (cursor);
+  return out;
+}
 
+// Which of these facets still have no index: a parallel read per facet.
+async function unbuiltDocIndexes(env, facets) {
+  const flags = await Promise.all(facets.map((f) => env.META.get(docIndexBuiltKey(f)).catch(() => null)));
+  return facets.filter((f, i) => !flags[i]);
+}
+
+// Every doc's index record, the old way: one list call per 1,000 docs on
+// the platform, and a full read for each key written before the index (a
+// few of which are given their index on the way, as before). The scan is
+// what the lazy build consumes, and what a request still answers from
+// while its facets are being built.
+async function scanDocIndex(env, { backfill = 5 } = {}) {
+  const rows = [];
+  let cursor;
+  do {
+    const page = await env.META.list({ prefix: 'meta:', cursor });
+    for (const key of page.keys) {
+      const idx = key.metadata && key.metadata.v === META_INDEX_VERSION ? key.metadata : null;
+      rows.push({ slug: key.name.slice('meta:'.length), idx, known: !!idx });
+    }
+    cursor = page.cursor;
+    if (page.list_complete) break;
+  } while (cursor);
+  let backfills = 0;
+  await Promise.all(rows.filter((r) => !r.idx).map(async (r) => {
+    let raw = null;
+    let meta = null;
+    try { raw = await env.META.get(`meta:${r.slug}`); meta = JSON.parse(raw || 'null'); } catch {}
+    if (!meta || typeof meta !== 'object') return;
+    r.idx = docMetaIndex(meta);
+    r.meta = meta;
+    r.raw = raw;
+    // Gently: the free Workers plan allows 1,000 KV writes a day, and a
+    // publish needs a few of them.
+    if (backfills < backfill) {
+      backfills += 1;
+      try { await env.META.put(`meta:${r.slug}`, raw, { metadata: r.idx }); } catch {}
+    }
+  }));
+  return rows.filter((r) => r.idx);
+}
+
+// Write the markers a facet is missing, a bounded batch per request, and
+// mark the facet built once none are. `facets` is [{ facet, matches(idx) }].
+async function buildDocIndexes(env, facets, rows, budget = DOC_INDEX_BUILD_WRITES) {
+  let writes = 0;
+  for (const { facet, matches } of facets) {
+    let existing;
+    try { existing = new Set((await listDocIndex(env, facet)).map((m) => m.slug)); } catch { return; }
+    const missing = rows.filter((r) => r.idx && matches(r.idx) && !existing.has(r.slug));
+    for (const r of missing) {
+      if (writes >= budget) return;
+      try { await env.META.put(docIndexMarkerKey(facet, r.slug), '1', { metadata: r.idx }); } catch { return; }
+      writes += 1;
+    }
+    try { await env.META.put(docIndexBuiltKey(facet), new Date().toISOString()); } catch { return; }
+    writes += 1;
+  }
+}
+
+// How a viewer's own docs are recognised in an index record: by account
+// (theirs and any linked), by handle, or by owner key -- the same test the
+// catalog has always made, now also the test that fills their facet.
+function personalDocMatcher({ accountIds = [], login = null, actorKeys = [] }) {
+  const ids = new Set(accountIds.filter(Boolean));
+  const keys = new Set(actorKeys.filter(Boolean).map(String));
+  return (idx) => !!((idx.a && ids.has(idx.a)) || (idx.o && login && idx.o === login) || (idx.k && keys.has(idx.k)));
+}
+const teamDocMatcher = (teamId) => (idx) => idx.w === teamId;
+const ownerlessDocMatcher = (idx) => !idx.a && !idx.o && !idx.k;
+
+// One facet's slugs, from its markers when built; otherwise from the
+// platform scan, building the facet on the way.
+async function docIndexSlugs(env, facet, matches) {
+  const unbuilt = await unbuiltDocIndexes(env, [facet]);
+  if (!unbuilt.length) return (await listDocIndex(env, facet)).map((m) => m.slug);
+  const rows = await scanDocIndex(env);
+  await buildDocIndexes(env, [{ facet, matches }], rows);
+  return rows.filter((r) => matches(r.idx)).map((r) => r.slug);
+}
+
+// A stale marker, found by a reader: swept, a few per request.
+function docIndexSweeper(env, budget = DOC_INDEX_SWEEP_WRITES) {
+  let used = 0;
+  return (facet, slug) => {
+    if (used >= budget) return;
+    used += 1;
+    env.META.delete(docIndexMarkerKey(facet, slug)).catch(() => {});
+  };
+}
+
+// The feedback spaces this viewer joined, from their own join keys; the
+// ones they own are in their personal facet.
+async function joinedFeedbackSpaceSlugs(env, session) {
+  const owner = feedbackSpaceOwnerKey(session);
+  if (!owner) return [];
+  const prefix = `feedback:space:${owner}:`;
+  const names = [];
+  let cursor;
+  try {
+    do {
+      const page = await env.META.list({ prefix, cursor });
+      for (const k of page.keys) names.push(k.name);
+      cursor = page.cursor;
+      if (page.list_complete) break;
+    } while (cursor);
+  } catch { return []; }
+  const slugs = await Promise.all(names.slice(0, 50).map((name) => env.META.get(name).catch(() => null)));
+  return slugs.filter((s) => typeof s === 'string' && isValidSlug(s));
+}
+
+async function indexData(env, session, origin) {
   // Which rows this viewer could possibly see, decided from the index alone:
   // their own (by account, handle or owner key), their teams', and the ones
   // they starred or opened. Only those are read in full; the final checks
@@ -4046,23 +4481,58 @@ async function indexData(env, session, origin) {
     || idx.f === 1
     // The deploy operator owns legacy docs that name no owner at all.
     || (operator && !idx.a && !idx.o && !idx.k);
-  let backfills = 0;
-  const loaded = await Promise.all(keys.map(async (key) => {
-    const slug = key.name.slice('meta:'.length);
-    const idx = key.metadata && key.metadata.v === META_INDEX_VERSION ? key.metadata : null;
-    if (idx && !wanted(slug, idx)) return null;
-    let raw = null;
-    let meta = {};
-    try { raw = await env.META.get(key.name); meta = JSON.parse(raw || '{}'); } catch {}
-    // A key written before the index existed: give it one now, a few per
-    // request, so the full reads fade out without a migration step.
-    // Gently: the free Workers plan allows 1,000 KV writes a day, and a
-    // publish needs a few of them.
-    if (!idx && raw && backfills < 5) {
-      backfills += 1;
-      try { await env.META.put(key.name, raw, { metadata: docMetaIndex(meta) }); } catch {}
+
+  // Where the candidate rows come from. On the hosted product each of the
+  // viewer's facets (their account, each team, the ownerless pool for the
+  // operator) is one bounded list -- once built. Until then, and on a
+  // self-hosted worker where every doc is the operator's, the platform scan
+  // answers and builds the missing facets a batch at a time.
+  const facets = [];
+  if (hostedEarly) {
+    if (session && session.account_id) {
+      facets.push({ facet: `p:${session.account_id}`, matches: personalDocMatcher({ accountIds: [...accountIds], login, actorKeys: [...actorKeys] }) });
+    } else if (login) {
+      // A handle with no account yet (signed in, nothing published): docs
+      // that name only the handle are found under it.
+      facets.push({ facet: `l:${login}`, matches: personalDocMatcher({ login, actorKeys: [...actorKeys] }) });
     }
-    if (!idx && !wanted(slug, docMetaIndex(meta))) return null;
+    for (const id of teamIds) facets.push({ facet: `w:${id}`, matches: teamDocMatcher(id) });
+    if (operator) facets.push({ facet: 'n', matches: ownerlessDocMatcher });
+  }
+  const unbuilt = hostedEarly ? await unbuiltDocIndexes(env, facets.map((f) => f.facet)) : ['scan'];
+  let rows;
+  if (unbuilt.length) {
+    rows = await scanDocIndex(env);
+    if (hostedEarly) await buildDocIndexes(env, facets.filter((f) => unbuilt.includes(f.facet)), rows);
+  } else {
+    const lists = await Promise.all(facets.map(async (f) => (await listDocIndex(env, f.facet)).map((m) => ({ slug: m.slug, facet: f }))));
+    const bySlug = new Map();
+    for (const m of lists.flat()) if (!bySlug.has(m.slug)) bySlug.set(m.slug, { slug: m.slug, idx: null, known: true, marker: m.facet });
+    for (const slug of [...savedSlugs, ...(await joinedFeedbackSpaceSlugs(env, session))]) {
+      if (!bySlug.has(slug) && isValidSlug(slug)) bySlug.set(slug, { slug, idx: null, known: true });
+    }
+    rows = [...bySlug.values()];
+  }
+  const sweep = docIndexSweeper(env);
+  const loaded = await Promise.all(rows.map(async (row) => {
+    const slug = row.slug;
+    const idx = row.idx;
+    if (idx && !wanted(slug, idx)) return null;
+    let raw = row.raw || null;
+    let meta = row.meta || null;
+    if (!meta) {
+      try { raw = await env.META.get(`meta:${slug}`); meta = JSON.parse(raw || 'null'); } catch { meta = null; }
+    }
+    if (!meta || typeof meta !== 'object') {
+      // A marker for a doc that is gone.
+      if (row.marker) sweep(row.marker.facet, slug);
+      return null;
+    }
+    const fresh = docMetaIndex(meta);
+    if (!wanted(slug, fresh)) {
+      if (row.marker && !row.marker.matches(fresh)) sweep(row.marker.facet, slug);
+      return null;
+    }
     const versions = Array.isArray(meta.versions) ? meta.versions : [];
     return {
       slug,
@@ -5129,37 +5599,29 @@ function utf8ByteLength(s) {
   return new TextEncoder().encode(String(s || '')).byteLength;
 }
 
+// The account's facet lists its docs; the marker metadata answers "whose is
+// it" (the owner is a facet, so that field is never stale) without reading
+// a single doc. A facet nobody has built yet is built here, from the scan.
 async function countHostedDocs(env, accountId, stopAt) {
   if (!accountId || !env.META) return 0;
   const group = await accountGroup(env, accountId);
   const owners = new Set(group.ids);
+  const facet = `p:${group.canonical}`;
+  const owned = (idx) => !!(idx && idx.a && owners.has(idx.a));
+  let records;
+  if ((await unbuiltDocIndexes(env, [facet])).length) {
+    const rows = await scanDocIndex(env);
+    await buildDocIndexes(env, [{ facet, matches: personalDocMatcher({ accountIds: group.ids, actorKeys: group.actor_keys }) }], rows);
+    records = rows.map((r) => r.idx);
+  } else {
+    records = (await listDocIndex(env, facet)).map((m) => m.idx);
+  }
   let n = 0;
-  let cursor;
-  do {
-    const r = await env.META.list({ prefix: 'meta:', cursor });
-    for (const k of r.keys || []) {
-      // The index answers "whose is it" without reading the doc's meta.
-      const idx = k.metadata && k.metadata.v === META_INDEX_VERSION ? k.metadata : null;
-      if (idx) {
-        if (idx.a && owners.has(idx.a)) {
-          n++;
-          if (stopAt && n >= stopAt) return n;
-        }
-        continue;
-      }
-      let meta = null;
-      try {
-        const raw = await env.META.get(k.name);
-        if (raw) meta = JSON.parse(raw);
-      } catch {}
-      if (meta && meta.hosted && owners.has(meta.hosted.account_id)) {
-        n++;
-        if (stopAt && n >= stopAt) return n;
-      }
-    }
-    cursor = r.cursor;
-    if (r.list_complete) break;
-  } while (cursor);
+  for (const idx of records) {
+    if (!owned(idx)) continue;
+    n++;
+    if (stopAt && n >= stopAt) return n;
+  }
   return n;
 }
 
@@ -5172,33 +5634,30 @@ async function newestDocFor(env, accountId) {
   if (!accountId || !env || !env.META) return null;
   const group = await accountGroup(env, accountId);
   const owners = new Set(group.ids);
+  const facet = `p:${group.canonical}`;
+  const owned = (idx) => !!(idx && idx.a && owners.has(idx.a));
   let best = null;
-  let cursor;
-  do {
-    const r = await env.META.list({ prefix: 'meta:', cursor });
-    for (const k of r.keys || []) {
-      const idx = k.metadata && k.metadata.v === META_INDEX_VERSION ? k.metadata : null;
-      if (idx) {
-        if (idx.a && owners.has(idx.a) && (!best || idx.u > best.created)) best = { slug: k.name.slice('meta:'.length), created: idx.u };
-        continue;
-      }
-      let meta = null;
-      try {
-        const raw = await env.META.get(k.name);
-        if (raw) meta = JSON.parse(raw);
-      } catch {}
-      if (!meta || !meta.hosted || !owners.has(meta.hosted.account_id)) continue;
-      // The newest version's stamp, not `meta.created` -- nothing writes that.
-      // Ranking on a field that is always '' made this "whichever KV listed
-      // first", so the debug states rebuilt the journey on a doc that could be
-      // months older than the one the tester had just published.
-      const versions = Array.isArray(meta.versions) ? meta.versions : [];
-      const created = (versions.length ? versions[versions.length - 1].created : meta.created) || '';
-      if (!best || created > best.created) best = { slug: k.name.slice('meta:'.length), created };
-    }
-    cursor = r.cursor;
-    if (r.list_complete) break;
-  } while (cursor);
+  const consider = (slug, created) => { if (!best || created > best.created) best = { slug, created }; };
+  if ((await unbuiltDocIndexes(env, [facet])).length) {
+    const rows = await scanDocIndex(env);
+    await buildDocIndexes(env, [{ facet, matches: personalDocMatcher({ accountIds: group.ids, actorKeys: group.actor_keys }) }], rows);
+    // The newest version's stamp (`u`), not `meta.created` -- nothing
+    // writes that. Ranking on a field that is always '' made this
+    // "whichever KV listed first", so the debug states rebuilt the journey
+    // on a doc that could be months older than the one just published.
+    for (const r of rows) if (owned(r.idx)) consider(r.slug, r.idx.u || '');
+    return best ? best.slug : null;
+  }
+  // The marker's copy of the record is not refreshed on republish, so the
+  // account's own docs (and only those) are read for the stamp.
+  const mine = (await listDocIndex(env, facet)).filter((m) => owned(m.idx));
+  const metas = await Promise.all(mine.map((m) => loadDocMeta(env, m.slug)));
+  mine.forEach((m, i) => {
+    const meta = metas[i];
+    if (!meta || !meta.hosted || !owners.has(meta.hosted.account_id)) return;
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    consider(m.slug, (versions.length ? versions[versions.length - 1].created : meta.created) || '');
+  });
   return best ? best.slug : null;
 }
 
@@ -6309,7 +6768,19 @@ function docPreviewFromHtml(html, { slug, version, title } = {}) {
   if (!SHELL || typeof SHELL.previewFromHtml !== 'function') {
     return { excerpt: '', image: '' };
   }
-  return SHELL.previewFromHtml(html, { slug, version, title, maxLen: 220, skipHeading: true });
+  const preview = SHELL.previewFromHtml(html, { slug, version, title, maxLen: 220, skipHeading: true });
+  // The doc page's share description, computed here once instead of on
+  // every view: the same call over the same head of the same bytes that
+  // the page would make (shellDocumentWorker), so the card does not change.
+  if (typeof SHELL.excerptFromHtml === 'function') {
+    const head = typeof html === 'string' && html.length > SHELL_SCAN_BYTES ? html.slice(0, SHELL_SCAN_BYTES) : (html || '');
+    preview.description = SHELL.excerptFromHtml(head, 180) || '';
+    // Stamped with the version it describes: a write path that leaves the
+    // preview behind (the browser's Save) must not hand a newer version an
+    // older one's words.
+    preview.description_v = Number(version) || 0;
+  }
+  return preview;
 }
 
 async function refreshDocPreview(env, slug, meta) {
@@ -8637,6 +9108,27 @@ async function mutateComments(env, slug, op) {
 // Read the comment list for `slug` from the DO (the source of truth). Returns
 // the raw list array; callers fold it (snapshotList / historyList). When the DO
 // binding is absent, falls back to reading KV directly.
+// Comments plus replies, as the owner's manage menu counts them.
+function countCommentRecords(list) {
+  ensureMigrated(list);
+  let n = 0;
+  for (const c of historyList(list)) n += 1 + (Array.isArray(c.replies) ? c.replies.length : 0);
+  return n;
+}
+
+async function countDocComments(env, slug) {
+  if (env.COMMENTS) {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+    const r = await stub.fetch('https://do/count', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug }),
+    });
+    const out = await r.json();
+    return Number(out && out.count) || 0;
+  }
+  return countCommentRecords(safeParseList(await env.META.get(`comments:${slug}`)));
+}
+
 async function readComments(env, slug) {
   if (env.COMMENTS) {
     const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
@@ -8951,7 +9443,7 @@ export class CommentsStore {
     // persisted (seeds the canonical store) but only when storage was empty —
     // never an overwrite. On a corrupt value, return [] for DISPLAY only; the
     // stored bytes are left intact.
-    if (u.pathname === '/read') {
+    if (u.pathname === '/read' || u.pathname === '/count') {
       let list = [];
       try {
         await this.state.storage.transaction(async (txn) => {
@@ -8960,6 +9452,11 @@ export class CommentsStore {
           if (empty) await txn.put('list', list);
         });
       } catch { list = []; }
+      // The owner's doc page shows how many comments a delete would take
+      // with it. Counted here, so the page does not ship and fold the whole
+      // list for one number (a 300-comment doc: 300KB of JSON and ~6ms of
+      // the page's 10ms).
+      if (u.pathname === '/count') return Response.json({ count: countCommentRecords(list) });
       return Response.json({ list });
     }
 
@@ -9904,41 +10401,33 @@ export default {
       }
       const gate = await enforceDocAccess(env, req, slug, Number(vStr));
       if (!gate.ok) return gate.response;
-      const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
-      if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
       const nonce = rand(16);
       let body = '';
-      if (method !== 'HEAD') {
-        body = forceWidgetSandbox(await obj.text());
-        // Documents created before creation-time baking carry no #tdoc-reader
-        // block, so the reading template is supplied in the FRAME RESPONSE
-        // (never written back to storage). No second condition: see the
-        // matching comment in server/server.js — the old "and contains no
-        // max-width" proxy starved the documents that followed the contract,
-        // and :where() zero-specificity makes the injection harmless to a
-        // document that styles itself.
-        if (!hasReaderBlock(body)) {
-          const rcss = (typeof READER_CSS === 'string' && READER_CSS.indexOf('__TDOC_') !== 0) ? READER_CSS : '';
-          if (rcss) {
-            const rtag = `<style id="tdoc-reader">${rcss}</style>`;
-            // Callback so a `$` in the template stays literal (see bin/tdoc-bake).
-            body = /<\/head>/i.test(body) ? body.replace(/<\/head>/i, () => `${rtag}</head>`) : rtag + body;
-          }
-        }
-        body = wrapBareTables(body);
-        if (body.indexOf('id="tdoc-reader-patch"') === -1) {
-          const ptag = `<style id="tdoc-reader-patch">${READER_PATCH_CSS}</style>`;
-          // Anchor on the OPENING tag. The baked reader CSS carries a comment
-          // that quotes `</head>` literally, so a first-match replace on the
-          // closing tag drops the style inside that comment, where it is inert
-          // and invisible — it took a byte-level look at the response to see.
-          // A document's real <head> necessarily precedes any prose quoting it.
-          body = /<head[^>]*>/i.test(body)
-            ? body.replace(/<head[^>]*>/i, (open) => `${open}${ptag}`)
-            : ptag + body;
-        }
+      if (method === 'HEAD') {
+        const head = await env.DOCS.head(`docs/${slug}/v${vStr}/index.html`);
+        if (!head) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+      } else {
+        // The baked body (reader template, table wrappers, phone patch) is
+        // the same for every reader of a version, so it is kept in the edge
+        // cache under the version's content hash; only the nonce'd probe tag
+        // is per request. A version whose meta records no hash (written
+        // before hashes were) is baked on every view, as before.
+        const cacheKey = frameCacheKey(url.origin, slug, vStr, gate.meta, await frameBakeGeneration());
         const tag = `<script id="tdoc-frame-probe" data-tdoc-provider nonce="${nonce}">${PROBE_JS}</script>`;
-        body = body.includes('</body>') ? body.replace('</body>', `${tag}\n</body>`) : body + tag;
+        const hit = cacheKey ? await frameCacheGet(cacheKey) : null;
+        if (hit) {
+          body = streamWithSuffix(hit.body, frameSuffix(tag, hit.tail));
+        } else {
+          const obj = await env.DOCS.get(`docs/${slug}/v${vStr}/index.html`);
+          if (!obj) return text(`Not found: ${slug} v${vStr}`, { status: 404 });
+          const baked = bakeFrameBody(await obj.text());
+          if (cacheKey) {
+            const store = frameCachePut(cacheKey, baked);
+            if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(store); else await store;
+          }
+          const { head, tail } = splitFrameBody(baked);
+          body = head + frameSuffix(tag, tail);
+        }
       }
       return html(body, {
         headers: {
@@ -10125,14 +10614,51 @@ export default {
       // 3. Inline TDOC-COMMENT markers around anchored text. Done with simple
       //    text replacement; if the same text appears multiple times, we mark
       //    only the first occurrence (matches the live anchor behavior).
+      //    Positions are found on the stored bytes and the markers go in with
+      //    one pass at the end: rebuilding a 660KB document once per comment
+      //    (300 comments: 200ms of CPU) is what made Download and Duplicate
+      //    fail with Cloudflare 1102 on exactly the documents people had
+      //    reviewed the most. Same output as the rebuild-per-comment version:
+      //    an anchor inside an earlier one nests; an anchor that only partly
+      //    overlaps an earlier one would have been broken by its markers, so
+      //    its next occurrence is taken instead, as before.
+      const marks = [];
       for (const c of openComments) {
         if (c.anchor?.kind !== 'text' && !c.anchor?.text) continue;
         const needle = c.anchor.text;
         if (!needle || needle.length < 2) continue;
-        const idx = html.indexOf(needle);
-        if (idx === -1) continue;
-        const replacement = `<!--TDOC-COMMENT id="${forHtmlComment(c.id)}" by="${forHtmlComment(c.author?.login || 'anonymous')}"-->${needle}<!--/TDOC-COMMENT-->`;
-        html = html.slice(0, idx) + replacement + html.slice(idx + needle.length);
+        let start = -1;
+        for (let from = 0; from <= html.length;) {
+          const at = html.indexOf(needle, from);
+          if (at === -1) break;
+          const end = at + needle.length;
+          const fits = marks.every((m) => end <= m.start || at >= m.end || (at >= m.start && end <= m.end));
+          if (fits) { start = at; break; }
+          from = at + 1;
+        }
+        if (start === -1) continue;
+        marks.push({
+          start,
+          end: start + needle.length,
+          order: marks.length,
+          open: `<!--TDOC-COMMENT id="${forHtmlComment(c.id)}" by="${forHtmlComment(c.author?.login || 'anonymous')}"-->`,
+          close: '<!--/TDOC-COMMENT-->',
+        });
+      }
+      if (marks.length) {
+        const points = [];
+        for (const m of marks) {
+          points.push({ pos: m.start, open: 1, order: m.order, text: m.open });
+          points.push({ pos: m.end, open: 0, order: m.order, text: m.close });
+        }
+        // At one position a close goes before an open; opens nest outer
+        // (earlier) first, closes inner (later) first.
+        points.sort((a, b) => a.pos - b.pos || a.open - b.open || (a.open ? a.order - b.order : b.order - a.order));
+        const parts = [];
+        let last = 0;
+        for (const p of points) { parts.push(html.slice(last, p.pos), p.text); last = p.pos; }
+        parts.push(html.slice(last));
+        html = parts.join('');
       }
 
       // Both kinds are STATIC now. /fork's interactive overlay mode is retired

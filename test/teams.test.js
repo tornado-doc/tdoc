@@ -367,6 +367,9 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     // A team written before the invite index existed: no KV metadata.
     const legacy = { id: 't_0123456789abcdef', name: 'Legacy crew', created: '2026-01-01T00:00:00Z', created_by: 'acct-alice', members: [{ account_id: 'acct-alice', key: 'alice', name: 'alice', role: 'admin', joined: '2026-01-01T00:00:00Z' }], invites: ['dave'] };
     await env.META.put('team:t_0123456789abcdef', JSON.stringify(legacy));
+    // ...and before the invite markers: the index forgets it is built, so
+    // the next My docs walks the teams again and indexes this one.
+    await env.META.delete('tinv:built');
     const boot = async () => bootData(await (await call('/me', { cookie: dave })).r.text(), '__TDOC_APP_BOOT__');
     const before = await boot();
     const ids = (before.team_invites || []).map((x) => x.id).sort();
@@ -489,6 +492,8 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
       await env.META.put(`team:${id}`, JSON.stringify({ id, name: `Old ${i}`, created: '2026-01-01T00:00:00Z', created_by: 'acct-alice', members: [{ account_id: 'acct-alice', key: 'alice', name: 'alice', role: 'admin', joined: '2026-01-01T00:00:00Z' }], invites: ['ivy@example.com'] }));
       env.META.failPutOnce.add(`team:${id}`);
     }
+    // Legacy means before the invite index too: forget it is built.
+    await env.META.delete('tinv:built');
     const ivy = await emailSession('ivy@example.com', 'acct-ivy');
     const seen = (bootData((await page('/me', ivy)).html, '__TDOC_APP_BOOT__').team_invites || []).map((x) => x.id);
     assert(ids.every((id) => seen.includes(id)), `missing: ${ids.filter((id) => !seen.includes(id))}`);

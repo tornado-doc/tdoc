@@ -152,6 +152,11 @@ async function seedDoc(env, slug, { owner, created = '2026-01-01T00:00:00.000Z',
   if (access) meta.access = access;
   await env.META.put(`meta:${slug}`, JSON.stringify(meta));
   for (const v of vs) await env.DOCS.put(`docs/${slug}/v${v.n}/index.html`, `<h1>${slug}</h1>`);
+  // Written straight into KV, this doc models one from before the per-owner
+  // index existed: every built facet forgets it is built, so the next My
+  // docs scans the platform and indexes the doc, as the first My docs after
+  // the index shipped does for real data.
+  for (const key of [...env.META.map.keys()]) if (key.startsWith('docidx:built:')) await env.META.delete(key);
 }
 
 function bootData(html, name) {
