@@ -314,10 +314,13 @@ export function renameFolder(id, name, team) {
   });
 }
 
-export function updateFolderAccess(id, { visibility, allowed_users } = {}) {
+// `share: false` stops sharing (the link dies); `team` names a team folder.
+export function updateFolderAccess(id, { visibility, allowed_users, share } = {}, team) {
   const body = { id };
   if (visibility !== undefined) body.visibility = visibility;
   if (allowed_users !== undefined) body.allowed_users = allowed_users;
+  if (share === false) body.share = false;
+  if (team) body.team = team;
   return request('/api/folders', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

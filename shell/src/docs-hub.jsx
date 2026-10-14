@@ -20,6 +20,7 @@ import {
   moveDocsToTeam,
   removeTeamMember,
   renameFolder,
+  updateFolderAccess,
 } from './document/api.js';
 import {
   LeaveTeamDialog,
@@ -85,7 +86,9 @@ function NameDialog({ title, confirmLabel, initialName, maxLength = 60, onSave, 
   );
 }
 
-function FolderShareDialog({ folder, onClose, onAccess }) {
+// `team` (its name) for a team folder: there a private link opens for the
+// whole team plus whoever is invited.
+function FolderShareDialog({ folder, team = '', onClose, onAccess }) {
   const [visibility, setVisibility] = useState(folder.visibility === 'private' ? 'private' : 'unlisted');
   const [allowedUsers, setAllowedUsers] = useState(() => folder.allowed_users || []);
   const [shareId, setShareId] = useState(folder.share_id || '');
@@ -110,8 +113,8 @@ function FolderShareDialog({ folder, onClose, onAccess }) {
   const accessDescription = visibility !== 'private'
     ? 'Anyone with the link sees docs they already have permission to read.'
     : invitedCount
-      ? `Only you and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open this folder. Docs keep their own access.`
-      : 'Only you can open this folder. Add people below to invite them.';
+      ? `Only ${team ? `${team} members` : 'you'} and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open this folder. Docs keep their own access.`
+      : `Only ${team ? `${team} members` : 'you'} can open this folder. Add people below to invite them.`;
 
   const save = async (patch) => {
     const previous = { visibility, allowedUsers, shareId };
@@ -121,7 +124,7 @@ function FolderShareDialog({ folder, onClose, onAccess }) {
     setAllowedUsers(nextAllowed);
     setBusy(true);
     setStatus('Saving…');
-    const saved = await onAccess({ visibility: nextVisibility, allowed_users: nextAllowed });
+    const saved = await onAccess(patch.share === false ? { share: false } : { visibility: nextVisibility, allowed_users: nextAllowed });
     setBusy(false);
     if (!saved) {
       setVisibility(previous.visibility);
@@ -139,14 +142,23 @@ function FolderShareDialog({ folder, onClose, onAccess }) {
     setVisibility(next.visibility);
     setAllowedUsers(next.allowed_users);
     setShareId(next.share_id);
-    setStatus('Saved.');
+    setStatus(patch.share === false ? 'Link turned off.' : 'Saved.');
   };
 
   return (
     <HubDialog
       title="Share"
       onClose={onClose}
-      actions={<button type="button" onClick={onClose}>Close</button>}
+      actions={(
+        <>
+          {shareId ? (
+            <button type="button" className="folder-unshare" disabled={busy} onClick={() => save({ share: false, visibility: 'private', allowed_users: [] })}>
+              Stop sharing
+            </button>
+          ) : null}
+          <button type="button" onClick={onClose}>Close</button>
+        </>
+      )}
     >
       {shareUrl ? (
         <>
@@ -176,7 +188,7 @@ function FolderShareDialog({ folder, onClose, onAccess }) {
           disabled={busy}
           onChange={(next) => save({ visibility: next })}
           options={[
-            { value: 'private', label: 'Only people I invite' },
+            { value: 'private', label: team ? 'The team and people I invite' : 'Only people I invite' },
             { value: 'unlisted', label: 'Anyone with the link' },
           ]}
         />
@@ -636,6 +648,7 @@ export function DocsHub({ boot }) {
   ];
 
   const teamFolderMenu = (item) => (item.can_manage ? [
+    { label: 'Share', onSelect: () => setModal({ type: 'share-team-folder', folder: item }) },
     { label: 'Rename', onSelect: () => setModal({ type: 'rename-team-folder', folder: item }) },
     {
       label: 'Delete folder',
@@ -1016,6 +1029,17 @@ export function DocsHub({ boot }) {
       {modal?.type === 'new-team-folder' ? (
         <NameDialog title="New folder" confirmLabel="Create" initialName="" onClose={closeModal}
           onSave={(name) => closeIf(saveTeamFolder({ name }))} />
+      ) : null}
+      {modal?.type === 'share-team-folder' && team ? (
+        <FolderShareDialog
+          folder={spaceFolders.find((item) => item.id === modal.folder.id) || modal.folder}
+          team={team.name}
+          onClose={closeModal}
+          onAccess={(patch) => teamRun(updateFolderAccess(modal.folder.id, patch, team.id).then(({ folder }) => {
+            setSpaceFolders((list) => list.map((item) => (item.id === folder.id ? { ...item, ...folder, share_id: folder.share_id } : item)));
+            return folder;
+          })).then((saved) => saved || null)}
+        />
       ) : null}
       {modal?.type === 'rename-team-folder' ? (
         <NameDialog title="Rename folder" confirmLabel="Save" initialName={modal.folder.name} onClose={closeModal}
