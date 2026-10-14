@@ -693,7 +693,7 @@ t('a page offers only the states it can show', () => {
   // Each surface says which one it is.
   assert(gate.includes("surface={step === 'doc' ? 'doc' : 'connect'}"), 'the gate names its step');
   assert(shell.includes("surface={config.isLanding ? 'landing' : 'document'}"), 'a document names itself');
-  assert(hub.includes('surface="hub"') && worker.includes('debug: await isDebugAccount(env, s),'),
+  assert(hub.includes('surface="hub"') && /isDebugAccount\(env, s\),\n\s*\]\);[\s\S]{0,2000}?\bdebug,/.test(worker),
     'and the hub, where the checklist is');
   // Whatever the page can show, the record's current value is always printed:
   // "you are at revised, and these are the ones this page can show you".

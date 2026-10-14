@@ -198,10 +198,12 @@ function wrapBareTablesReference(html) {
     const flag = `docidx:built:p:${cat.account_id}`;
     assert(!env.META.map.has(flag), 'a token mint must not build the facet');
     const first = await call('/api/me', { token: cat.token });
+    await settle(); // the index is built after the response
     assert(first.status === 200 && first.body.docs.length === 30, `first My docs: ${first.status} ${first.body && first.body.docs.length}`);
     assert(keys(facet).length === 25, `first batch wrote ${keys(facet).length} markers`);
     assert(!env.META.map.has(flag), 'facet marked built before every marker was written');
     const second = await call('/api/me', { token: cat.token });
+    await settle(); // the index is built after the response
     assert(second.body.docs.length === 30, 'second My docs incomplete');
     assert(keys(facet).length === 30 && env.META.map.has(flag), `after the second batch: ${keys(facet).length} markers, built=${env.META.map.has(flag)}`);
     const spy = listSpy();
@@ -217,6 +219,7 @@ function wrapBareTablesReference(html) {
     const created = '2026-02-01T00:00:00.000Z';
     await env.META.put('meta:dora-old', JSON.stringify({ title: 'Old', slug: 'dora-old', created, versions: [{ n: 1, created }], hosted: { github_login: 'dora' } }));
     const first = await call('/api/me', { cookie });
+    await settle(); // the index is built after the response
     assert(first.status === 200 && first.body.docs.map((d) => d.slug).join() === 'dora-old', `first: ${first.status} ${JSON.stringify(first.body && first.body.docs)}`);
     assert(env.META.map.has('docidx:l:dora:dora-old') && env.META.map.has('docidx:built:l:dora'), `handle facet: ${keys('docidx:l:').join(', ')}`);
     const spy = listSpy();
@@ -255,6 +258,7 @@ function wrapBareTablesReference(html) {
     const fay = await issue(worker, env, 'fay');
     await publish(fay, 'fay-first');
     await call('/api/me', { token: fay.token });
+    await settle(); // the index is built after the response
     assert(env.META.map.has(`docidx:built:p:${fay.account_id}`), 'facet not built');
     const origPut = env.META.put.bind(env.META);
     env.META.put = async (k, v, o) => { if (k.startsWith('docidx:')) throw new Error('KV put: daily write limit exceeded'); return origPut(k, v, o); };
@@ -265,6 +269,7 @@ function wrapBareTablesReference(html) {
     assert(!env.META.map.has(`docidx:p:${fay.account_id}:fay-second`), 'test did not exercise a failed marker');
     assert(!env.META.map.has(`docidx:built:p:${fay.account_id}`), 'facet still claims to be built after losing a marker');
     const me = await call('/api/me', { token: fay.token });
+    await settle(); // the index is built after the response
     const slugs = me.body.docs.map((d) => d.slug).sort();
     assert(JSON.stringify(slugs) === JSON.stringify(['fay-first', 'fay-second']), `after a lost marker: ${slugs}`);
     assert(env.META.map.has(`docidx:p:${fay.account_id}:fay-second`) && env.META.map.has(`docidx:built:p:${fay.account_id}`), 'the rebuild did not restore the marker and the flag');
@@ -274,6 +279,7 @@ function wrapBareTablesReference(html) {
     const gus = await issue(worker, env, 'gus');
     await publish(gus, 'gus-first');
     await call('/api/me', { token: gus.token });
+    await settle(); // the index is built after the response
     const origPut = env.META.put.bind(env.META);
     const origDelete = env.META.delete.bind(env.META);
     env.META.put = async (k, v, o) => { if (k.startsWith('docidx:')) throw new Error('quota'); return origPut(k, v, o); };
@@ -283,6 +289,7 @@ function wrapBareTablesReference(html) {
     assert(r.status === 200, `publish ${r.status}`);
     assert(env.META.map.has(`docidx:built:p:${gus.account_id}`), 'the flag delete was supposed to fail');
     const me = await call('/api/me', { token: gus.token });
+    await settle(); // the index is built after the response
     const slugs = me.body.docs.map((d) => d.slug).sort();
     assert(JSON.stringify(slugs) === JSON.stringify(['gus-first', 'gus-second']), `doc lost: ${slugs}`);
     assert(env.META.map.has(`docidx:p:${gus.account_id}:gus-second`), 'marker not restored');
