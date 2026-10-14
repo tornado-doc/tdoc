@@ -59,6 +59,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-feedback-dock a:hover,
     #tdoc-feedback-root .tdoc-feedback-dock .on { background: #f0f0ee; }
     #tdoc-feedback-root .tdoc-feedback-dock .icon, #tdoc-feedback-root .tdoc-feedback-dock a { padding: 7px; color: #6b6a66; }
+    #tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share { padding: 7px 11px; color: #1a1a1a; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary { background: #1652f0; color: #fff; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary:hover,
     #tdoc-feedback-root .tdoc-feedback-dock button.primary.on { background: #1245d0; color: #fff; }
@@ -515,30 +516,6 @@ ${uiCss}
     }
   }
 
-  async function copyText(value) {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(value);
-        return true;
-      }
-    } catch (_) {}
-    try {
-      const area = document.createElement('textarea');
-      area.value = value;
-      area.setAttribute('readonly', '');
-      area.style.position = 'fixed';
-      area.style.opacity = '0';
-      document.body.appendChild(area);
-      area.select();
-      const ok = document.execCommand('copy');
-      area.remove();
-      return ok;
-    } catch (_) {
-      return false;
-    }
-  }
-
-
   const PANEL_WIDTH = 340;
   const POLL_MS = 15_000;
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
@@ -568,13 +545,9 @@ ${uiCss}
   const isOpen = (c) => threadPhase(c) === 'open';
 
   function Dock({ session, openCount, panelOpen, picking, onList, onPick, onHide, sendCount, onSend }) {
-    const [copied, setCopied] = useState(false);
-    const invite = session && (session.invite_url || session.doc_url);
-    const share = async () => {
-      if (!invite || !(await copyText(invite))) return;
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    };
+    // Share is the space doc's own Share dialog, as on any doc: who can
+    // comment here is whoever it lets in.
+    const shareUrl = session && session.share_url;
     return (
       <div className="tdoc-feedback-dock" role="toolbar" aria-label="tdoc feedback" style={panelOpen ? { right: PANEL_WIDTH + 18 } : null}>
         <button type="button" className={panelOpen ? 'on' : ''} onClick={onList} title="All comments on this app">
@@ -590,10 +563,10 @@ ${uiCss}
             <Send aria-hidden="true" />{sendCount ? <span className="tdoc-fb-send-badge">{sendCount > 99 ? '99+' : sendCount}</span> : null}
           </button>
         ) : null}
-        {invite ? (
-          <button type="button" onClick={share} title="Copy an invite link — teammates who open it comment in this same thread">
-            <Link2 aria-hidden="true" /> {copied ? 'Invite link copied' : 'Invite'}
-          </button>
+        {shareUrl ? (
+          <a className="tdoc-fb-share" href={shareUrl} target="_blank" rel="noopener noreferrer" title="Choose who can see and comment, like any tdoc doc">
+            <Link2 aria-hidden="true" /> Share
+          </a>
         ) : null}
         {session && session.doc_url ? (
           <a href={session.doc_url} target="_blank" rel="noopener noreferrer" title="Open this thread on tdoc"><ExternalLink aria-hidden="true" /></a>

@@ -20,12 +20,8 @@ const pathOf = (href) => {
   try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href || '(no page)'; }
 };
 
-async function copy(text) {
-  try { await navigator.clipboard.writeText(text); return true; } catch (_) { return false; }
-}
-
 export function FeedbackSpace({ boot }) {
-  const { slug, version, title, origin, inviteUrl, docUrl, bookmarklet, identity, isOwner, canComment, signinUrl } = boot;
+  const { slug, version, title, origin, shareUrl, docUrl, bookmarklet, identity, isOwner, canComment, signinUrl } = boot;
   const host = (() => { try { return new URL(origin).host; } catch (_) { return origin; } })();
   const [joined, setJoined] = useState(Boolean(boot.joined));
   const [comments, setComments] = useState(null);
@@ -33,7 +29,6 @@ export function FeedbackSpace({ boot }) {
   const [filter, setFilter] = useState('open');
   const [openId, setOpenId] = useState(null);
   const [notice, setNotice] = useState('');
-  const [copied, setCopied] = useState(false);
   const [notifyIds, setNotifyIds] = useState(null);
   const [joinBusy, setJoinBusy] = useState(false);
 
@@ -103,9 +98,7 @@ export function FeedbackSpace({ boot }) {
         </p>
         <div className="tdoc-fbspace-actions">
           <a className="tdoc-fbspace-btn" href={origin} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open the app</a>
-          <button type="button" className="tdoc-fbspace-btn" onClick={async () => { if (await copy(inviteUrl)) { setCopied(true); setTimeout(() => setCopied(false), 1800); } }}>
-            <Link2 size={14} /> {copied ? 'Link copied' : 'Copy invite link'}
-          </button>
+          <a className="tdoc-fbspace-btn" href={shareUrl}><Link2 size={14} /> Share</a>
           {isOwner && notify.ready && notify.available ? (
             <button type="button" className="tdoc-fbspace-btn primary" onClick={() => setNotifyIds(ready.map((c) => c.id))}>
               <Send size={14} /> Send to agent{ready.length ? ` (${ready.length})` : ''}

@@ -180,7 +180,16 @@ export function DocumentShell({ boot, config }) {
   // The bar's copy of the name, so a rename shows immediately instead of
   // waiting for a reload. The boot config stays the source it starts from.
   const [title, setTitle] = useState(config.title || '');
-  const [dialog, setDialog] = useState(null);
+  // ?share=1 arrives with Share open (a feedback space's Share button links
+  // here); read once and taken off the URL.
+  const [dialog, setDialog] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('share') !== '1' || config.isLanding) return null;
+    params.delete('share');
+    const rest = params.toString();
+    try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
+    return { type: 'share' };
+  });
   // Connected-App notify panel (doc-level send). Separate from onboarding
   // copy-paste handoff below.
   const [notifyOpen, setNotifyOpen] = useState(false);

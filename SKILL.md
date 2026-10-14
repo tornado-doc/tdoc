@@ -669,14 +669,15 @@ bind one of their feedback spaces to the site's origins. No browser click
 needed; only the space's owner can do it (hosted upload token).
 
 ```bash
-bash "$SKILL_DIR/bin/tdoc-site" bind <space-slug> --origin https://app.example.com [--origin ...] [--mode invited|public]
+bash "$SKILL_DIR/bin/tdoc-site" bind <space-slug> --origin https://app.example.com [--origin ...]
 bash "$SKILL_DIR/bin/tdoc-site" show <space-slug>   # current binding + snippet
 bash "$SKILL_DIR/bin/tdoc-site" off <space-slug>    # unbind
 ```
 
-`invited` (default) lets only people the owner invited comment; `public` lets
-anyone signed in. `bind` and `show` print the one-line `<script>` snippet to
-add to the site's HTML.
+Who can comment is the space doc's own access, shared like any doc (Share
+dialog on tdoc, or move it into a team with `tdoc-move`); binding never
+changes it. `--mode` is accepted for old scripts and ignored. `bind` and
+`show` print the one-line `<script>` snippet to add to the site's HTML.
 
 ### `/tdoc serve` — (re)start the server
 
