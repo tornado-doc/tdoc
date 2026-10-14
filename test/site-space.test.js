@@ -66,6 +66,32 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 404, `${r.status}`);
   });
 
+  await t('the owner\'s agent binds, reads and unbinds with its upload token (tdoc-site); others cannot', async () => {
+    const bearer = (tok) => ({ Authorization: `Bearer ${tok}` });
+    const r = await call('/api/feedback/site', { method: 'POST', headers: bearer(owner.token), body: { slug, origins: [site, 'https://www.example.com'], mode: 'public' } });
+    assert(r.status === 200 && r.body.site.origins.length === 2 && r.body.site.mode === 'public', `bearer bind ${r.status} ${JSON.stringify(r.body)}`);
+    assert(r.body.snippet.includes(`data-tdoc-space="${slug}"`), 'no snippet');
+    const read = await call(`/api/feedback/site?slug=${slug}`, { headers: bearer(owner.token) });
+    assert(read.status === 200 && read.body.site.mode === 'public' && read.body.snippet, `read ${read.status} ${JSON.stringify(read.body)}`);
+    const notOwner = await call('/api/feedback/site', { method: 'POST', headers: bearer(visitor.token), body: { slug, origins: ['https://evil.example'] } });
+    assert(notOwner.status === 403, `non-owner token bound: ${notOwner.status}`);
+    const notOwnerRead = await call(`/api/feedback/site?slug=${slug}`, { headers: bearer(visitor.token) });
+    assert(notOwnerRead.status === 403, `non-owner read ${notOwnerRead.status}`);
+    const anon = await call('/api/feedback/site', { method: 'POST', body: { slug, origins: [site] } });
+    assert(anon.status === 401, `anon ${anon.status}`);
+    const crossSite = await call('/api/feedback/site', { method: 'POST', cookie: owner.cookie, headers: { Origin: 'https://evil.example' }, body: { slug, off: true } });
+    assert(crossSite.status === 403, `cross-origin cookie ${crossSite.status}`);
+    // A visitor's feedback token (the SDK's) is never an owner credential.
+    const c = await call('/api/feedback/connect', { method: 'POST', cookie: owner.cookie, headers: home, body: { origin: site, space: slug } });
+    assert(c.status === 200 && c.body.token, `connect ${c.status}`);
+    const scoped = await call('/api/feedback/site', { method: 'POST', headers: bearer(c.body.token), body: { slug, off: true } });
+    assert(scoped.status === 403 && scoped.body.error === 'feedback_token_scope', `feedback token ${scoped.status} ${JSON.stringify(scoped.body)}`);
+    const off = await call('/api/feedback/site', { method: 'POST', headers: bearer(owner.token), body: { slug, off: true } });
+    assert(off.status === 200 && off.body.site === null, `off ${off.status}`);
+    const gone = await call(`/api/feedback/site?slug=${slug}`, { headers: bearer(owner.token) });
+    assert(gone.status === 200 && gone.body.site === null && !gone.body.snippet, 'still bound');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

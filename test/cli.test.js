@@ -30,7 +30,7 @@ console.log('cli (Batch D resilience)');
 
 // ---- static checks across all CLIs ----
 t('every curl call carries --max-time (no unbounded hang)', () => {
-  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply', 'tdoc-me', 'tdoc-move', 'tdoc-folder']) {
+  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply', 'tdoc-me', 'tdoc-move', 'tdoc-folder', 'tdoc-site']) {
     const src = readBin(f);
     // Actual invocations only: `curl` in COMMAND position — at the start of a
     // line or right after |, ;, &, ( or $( — and followed by a flag, quote or
