@@ -187,7 +187,11 @@ export function DocumentShell({ boot, config }) {
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
   const [seenMap, setSeenMap] = useState(() => readSeenMap(config.slug));
   const [sendToAgentBusy, setSendToAgentBusy] = useState(false);
-  const [toast, setToast] = useState(null);
+  // Opening this doc accepted a team invite (server sets the flag only on
+  // that one view): say so once, long enough to read.
+  const [toast, setToast] = useState(() => (
+    config.joinedTeam?.name ? { text: `You joined ${config.joinedTeam.name}`, error: false, ms: 4000 } : null
+  ));
   // setToast('done') for confirmations; setToast('...', true) for failures,
   // which are painted in the danger tone and stay long enough to read.
   const showToast = useCallback((text, error = false) => setToast({ text, error }), []);
@@ -560,7 +564,7 @@ export function DocumentShell({ boot, config }) {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), toast.error ? 5000 : 1800);
+    const timer = window.setTimeout(() => setToast(null), toast.ms || (toast.error ? 5000 : 1800));
     return () => window.clearTimeout(timer);
   }, [toast]);
 

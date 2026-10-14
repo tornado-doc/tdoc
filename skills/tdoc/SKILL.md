@@ -626,6 +626,22 @@ the tdoc app must be installed on your Raft server. `--check` says whether it
 would work without changing anything. Never print or paste the credentials it
 reads.
 
+### `tdoc-site` — make the person's own website commentable
+
+When someone wants comments on their own web app or site (the feedback SDK),
+bind one of their feedback spaces to the site's origins. No browser click
+needed; only the space's owner can do it (hosted upload token).
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-site" bind <space-slug> --origin https://app.example.com [--origin ...] [--mode invited|public]
+bash "$SKILL_DIR/bin/tdoc-site" show <space-slug>   # current binding + snippet
+bash "$SKILL_DIR/bin/tdoc-site" off <space-slug>    # unbind
+```
+
+`invited` (default) lets only people the owner invited comment; `public` lets
+anyone signed in. `bind` and `show` print the one-line `<script>` snippet to
+add to the site's HTML.
+
 ### `/tdoc serve` — (re)start the server
 
 ```bash

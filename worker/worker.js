@@ -717,13 +717,22 @@ async function docOwnerToken(env, req, meta) {
   return actor;
 }
 
-async function enforceDocAccess(env, req, slug, version) {
+// `joinInvite`: the HTML doc view (GET) asks the gate to accept a pending
+// team invite first, so an invitee who opens any of the team's docs joins
+// (joinInvitedTeamOnView) and a team-private doc then simply opens.
+// `joined`: a team this same request already joined (the /d/<slug> route
+// gates twice); counted without re-reading KV, which may not show it yet.
+async function enforceDocAccess(env, req, slug, version, { joinInvite = false, joined = null } = {}) {
   const meta = await loadDocMeta(env, slug);
   // No meta yet (orphan R2 object) — treat as public so legacy uploads still work.
   const access = accessFromMeta(meta || {});
   let session = await getSession(env, req);
+  if (joined && sessionPrincipal(session) && !sessionInTeam(session, joined.id)) {
+    session.team_ids = [...(session.team_ids || []), joined.id];
+  }
+  const joinedTeam = joinInvite ? await joinInvitedTeamOnView(env, req, session, meta) : null;
   if (canReadDoc(access, session, env, meta)) {
-    return { ok: true, access, session, meta };
+    return { ok: true, access, session, meta, ...(joinedTeam ? { joinedTeam } : {}) };
   }
   // Without this the owner is denied their own private doc from their own
   // terminal: /tdoc pull is the documented pre-step to /tdoc edit, and
@@ -1754,6 +1763,8 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     // part of what is being tested. Rides in the options seat rather than
     // becoming a nineteenth positional argument.
     debug: !!(oidc && oidc.debug),
+    // Set only on the view that accepted a team invite (one-time notice).
+    joinedTeam: (oidc && oidc.joinedTeam) ? { name: oidc.joinedTeam.name } : null,
     mode: 'published',
     versions: vlist,
     stars: stars || null,
@@ -2138,9 +2149,10 @@ async function fetchStars(env) {
   }
 }
 
-async function serveDocVersion(env, req, slug, version, isLanding, { head = false } = {}) {
-  const gate = await enforceDocAccess(env, req, slug, version);
+async function serveDocVersion(env, req, slug, version, isLanding, { head = false, joinedTeam = null } = {}) {
+  const gate = await enforceDocAccess(env, req, slug, version, { joinInvite: !isLanding && req.method === 'GET', joined: joinedTeam });
   if (!gate.ok) return { ok: false, response: gate.response };
+  joinedTeam = gate.joinedTeam || joinedTeam;
   const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
   if (!obj) return { ok: false, response: text(`Not found: ${slug} v${version}`, { status: 404 }) };
   const raw = await obj.text();
@@ -2209,7 +2221,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, debug: await isDebugAccount(env, session) }, pageUrl), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, joinedTeam, debug: await isDebugAccount(env, session) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce) },
     }),
   };
@@ -3675,18 +3687,46 @@ async function teamSession(env, req, origin, { bearer = false } = {}) {
   const session = (await getSession(env, req)) || (bearer ? await sessionFromHostedBearer(env, req) : null);
   if (!sessionPrincipal(session)) return { ok: false, response: json({ error: 'sign_in_required' }, { status: 401 }) };
   if (session.feedback) return { ok: false, response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
-  if (!session.account_id && hostedRegistrationEnabled(env, origin)) {
-    try {
-      const acct = await ensureSessionHostedAccount(env, session);
-      if (acct && acct.account_id) {
-        session.account_id = acct.account_id;
-        session.team_ids = await loadAccountTeamIds(env, acct.account_id);
-        session.team_admin_ids = await loadAdminTeamIds(env, acct.account_id, session.team_ids);
-      }
-    } catch {}
-  }
+  await ensureSessionAccount(env, session, origin);
   if (!session.account_id) return { ok: false, response: json({ error: 'account_required' }, { status: 403 }) };
   return { ok: true, session };
+}
+
+// A signed-in person with no account yet gets one (teams are keyed by
+// account). Mutates the session in place; best-effort.
+async function ensureSessionAccount(env, session, origin) {
+  if (session.account_id || !hostedRegistrationEnabled(env, origin)) return;
+  try {
+    const acct = await ensureSessionHostedAccount(env, session);
+    if (acct && acct.account_id) {
+      session.account_id = acct.account_id;
+      session.team_ids = await loadAccountTeamIds(env, acct.account_id);
+      session.team_admin_ids = await loadAdminTeamIds(env, acct.account_id, session.team_ids);
+    }
+  } catch {}
+}
+
+// Opening a team's doc while invited to that team accepts the invite: the
+// invitation is the consent, and the doc is where people arrive from it.
+// Browser cookie sessions only (never a bearer or feedback token), only for
+// a doc that belongs to a team the session is not already in. One team read
+// per such view; writes only when someone actually joins. Returns the team
+// joined, or null.
+async function joinInvitedTeamOnView(env, req, session, meta) {
+  const teamId = meta && meta.workspace_id;
+  if (!teamId || !sessionPrincipal(session) || session.feedback || sessionInTeam(session, teamId)) return null;
+  let team = null;
+  try { team = await loadTeam(env, teamId); } catch { return null; }
+  if (!team || !pendingTeamInvite(team, session)) return null;
+  if (session.account_id && teamMember(team, session.account_id)) return null;
+  await ensureSessionAccount(env, session, requestOrigin(req));
+  if (!session.account_id) return null;
+  try {
+    const joined = await joinTeamFromSession(env, team, session);
+    if (!joined.ok) return null;
+  } catch { return null; }
+  session.team_ids = [...(session.team_ids || []).filter((id) => id !== team.id), team.id];
+  return { id: team.id, name: team.name || 'your team' };
 }
 
 async function teamManageFor(env, session, meta, access, isOwner) {
@@ -9564,7 +9604,7 @@ export default {
       // is this same head URL, and an unauthorized probe learns nothing —
       // not even the version count. On success the gate's own meta yields
       // the redirect target (one KV read, not two).
-      const gate = await enforceDocAccess(env, req, slug, null);
+      const gate = await enforceDocAccess(env, req, slug, null, { joinInvite: method === 'GET' });
       if (!gate.ok) return gate.response;
       const latest = latestVersionNumber(gate.meta);
       // The query rides along. Everything that deep-links into a doc without
@@ -9577,7 +9617,7 @@ export default {
       // the link people share, and it stays the address bar's URL, so the
       // same link always shows the newest version. /v/<n> is for a person
       // who wants one version on purpose.
-      if (latest > 0) docRoute = { slug, vStr: String(latest), head: true };
+      if (latest > 0) docRoute = { slug, vStr: String(latest), head: true, joinedTeam: gate.joinedTeam || null };
       // Unknown slug → the existing not-found landing redirect below.
     }
 
@@ -9624,7 +9664,7 @@ export default {
           }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store' } });
         }
       }
-      const res = await serveDocVersion(env, req, slug, Number(vStr), false, { head: docRoute.head });
+      const res = await serveDocVersion(env, req, slug, Number(vStr), false, { head: docRoute.head, joinedTeam: docRoute.joinedTeam || null });
       // Google-Docs-style recents: remember the visit — owned or not — for
       // the signed-in viewer's /me Recent tab. Only successful reads count
       // (the access gate already passed), HEAD probes and anonymous readers
@@ -9861,18 +9901,29 @@ export default {
       return json({ ok: true, slug, origin });
     }
 
-    // Bind (or change) a doc as a site's comment space. Owner only, from the
-    // browser; the access policy follows the chosen mode.
-    if (p === '/api/feedback/site' && method === 'POST') {
-      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+    // Bind (or change) a doc as a site's comment space. Owner only: from the
+    // browser (same-origin cookie) or from the owner's agent (hosted upload
+    // Bearer, tdoc-site), so binding needs no click. The access policy
+    // follows the chosen mode. GET reads the binding back (owner only).
+    if (p === '/api/feedback/site' && (method === 'POST' || method === 'GET')) {
       const s = await getSession(env, req);
-      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (s && s.feedback) return json({ error: 'feedback_token_scope' }, { status: 403 });
+      if (s && method === 'POST' && !sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const owner = s || await sessionFromHostedBearer(env, req);
+      if (!sessionPrincipal(owner)) return json({ error: 'sign_in_required' }, { status: 401 });
       let body = {};
-      try { body = await req.json(); } catch {}
+      if (method === 'GET') body = { slug: url.searchParams.get('slug') };
+      else { try { body = await req.json(); } catch {} }
       if (!isValidSlug(body.slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const meta = await loadDocMeta(env, body.slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
-      if (!isDocOwnerSession(env, s, meta)) return json({ error: 'forbidden' }, { status: 403 });
+      if (!isDocOwnerSession(env, owner, meta)) return json({ error: 'forbidden' }, { status: 403 });
+      if (method === 'GET') {
+        return json({
+          ok: true, site: meta.site || null, access: accessFromMeta(meta),
+          ...(meta.site ? { snippet: `<script src="${url.origin}/feedback.js" data-tdoc-space="${body.slug}" async></script>` } : {}),
+        }, { headers: { 'Cache-Control': 'no-store' } });
+      }
       if (body.off === true) {
         const { site: _old, ...rest } = meta;
         await putDocMetaJson(env, body.slug, JSON.stringify(rest));
