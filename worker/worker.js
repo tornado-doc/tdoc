@@ -3273,9 +3273,9 @@ function folderIdTime(id) {
 // that is the same folder made twice by racing runs. Returns a map of hinted
 // id -> the id to use (itself, or that sibling). The session was already
 // checked for this space; it could have made the folder with POST anyway.
-function adoptRecentFolders(state, hints, { team = null, session = null } = {}) {
+function adoptRecentFolders(state, hints, { team = null, session = null, max = 10 } = {}) {
   const use = new Map();
-  const list = (Array.isArray(hints) ? hints : [hints]).slice(0, 10);
+  const list = (Array.isArray(hints) ? hints : [hints]).slice(0, max);
   const now = Date.now();
   for (const h of list) {
     if (!h || typeof h !== 'object') continue;
@@ -3709,6 +3709,159 @@ function canFileTeamDoc(session, team, meta) {
   if (!meta || meta.workspace_id !== team.id) return false;
   if (teamRole(team, session.account_id) === 'admin') return true;
   return sessionOwnsAccount(session, meta.hosted && meta.hosted.account_id);
+}
+
+// ---- a My docs folder, moved into a team ----
+// The folder's subtree is made again in the team (same names and nesting; a
+// same-named folder already at that level is merged into), each doc the
+// caller owns moves into the team the way /api/team/move moves one and is
+// filed into its folder's twin, and the personal folders left empty go.
+// Bounded per request for the free plan: at most FOLDER_TEAM_MOVE_WRITES doc
+// metas written and FOLDER_TEAM_MOVE_READS read, one write per folder blob;
+// `remaining` says to call again. Every step is idempotent, so a re-run (or
+// a retry after a failure) finishes the job. Stale folder reads between
+// calls are covered by what the caller sends back from the last answer:
+// `known` (the team folders it made, put back like any fresh folder hint)
+// and `done` (docs already moved, dropped from My docs without a re-read).
+const FOLDER_TEAM_MOVE_WRITES = 50;
+const FOLDER_TEAM_MOVE_READS = 100;
+const FOLDER_TEAM_MOVE_DONE_MAX = 2000;
+
+async function moveFolderToTeam(env, session, team, body) {
+  const fail = (status, error, extra = {}) => ({ ok: false, status, body: { error, ...extra } });
+  const owner = actorKey(session);
+  const personal = await loadFolderState(env, owner);
+  const root = personal.folders.find((f) => f.id === body.folder);
+  if (!root) return fail(404, 'folder_not_found');
+
+  // The subtree, parents before children.
+  const subtree = [root];
+  const inTree = new Set([root.id]);
+  for (let i = 0; i < subtree.length; i += 1) {
+    for (const f of personal.folders) {
+      if (f.parent === subtree[i].id && !inTree.has(f.id)) { inTree.add(f.id); subtree.push(f); }
+    }
+  }
+
+  // Its twin in the team: put back the folders an earlier call made that a
+  // stale read hides, then match by name level by level, making the rest.
+  const teamState = await loadTeamFolders(env, team.id);
+  if (Array.isArray(body.known)) adoptRecentFolders(teamState, body.known, { team, session, max: FOLDERS_MAX });
+  const twin = new Map();
+  const toMake = [];
+  for (const f of subtree) {
+    const parent = f === root ? null : twin.get(f.parent) || null;
+    const name = validFolderName(f.name) || 'Folder';
+    const same = teamState.folders.find((t) => (t.parent || null) === parent && t.name.toLowerCase() === name.toLowerCase());
+    if (same) { twin.set(f.id, same.id); continue; }
+    const made = {
+      id: `f_${Date.now()}_${rand(4)}`,
+      name,
+      created: new Date().toISOString(),
+      created_by: session.account_id,
+      ...(parent ? { parent } : {}),
+    };
+    toMake.push(made);
+    teamState.folders.push(made);
+    twin.set(f.id, made.id);
+  }
+  if (teamState.folders.length > FOLDERS_MAX) return fail(400, 'too_many_folders', { limit: FOLDERS_MAX, needed: toMake.length });
+
+  // The docs to move: every My docs entry filed anywhere in the subtree.
+  const done = new Set(Array.isArray(body.done) ? body.done.slice(0, FOLDER_TEAM_MOVE_DONE_MAX).filter((x) => typeof x === 'string') : []);
+  let personalChanged = false;
+  const pending = [];
+  for (const [slug, fid] of Object.entries(personal.docs)) {
+    if (!inTree.has(fid)) continue;
+    if (done.has(slug)) { delete personal.docs[slug]; personalChanged = true; continue; }
+    pending.push([slug, fid]);
+  }
+  const results = [];
+  const writes = [];
+  let reads = 0;
+  let next = 0;
+  for (; next < pending.length && reads < FOLDER_TEAM_MOVE_READS && writes.length < FOLDER_TEAM_MOVE_WRITES; next += 1) {
+    const [slug, fid] = pending[next];
+    const target = twin.get(fid);
+    reads += 1;
+    const meta = await loadDocMeta(env, slug);
+    if (!meta) {
+      // Deleted since it was filed: only the stale entry goes.
+      delete personal.docs[slug]; personalChanged = true;
+      results.push({ slug, status: 'skipped', reason: 'not_found' });
+      continue;
+    }
+    if (meta.workspace_id === team.id) {
+      // Moved by an earlier call whose My docs write a stale read undid.
+      delete personal.docs[slug]; personalChanged = true;
+      if (meta.team_folder !== target && canFileTeamDoc(session, team, meta)) {
+        writes.push([slug, { ...meta, team_folder: target }]);
+        results.push({ slug, status: 'moved', folder: target });
+      } else {
+        results.push({ slug, status: 'already', folder: resolveTeamFolder(teamState, meta.team_folder) });
+      }
+      continue;
+    }
+    if (meta.workspace_id) {
+      // In another team already: it shows there, not in this folder.
+      delete personal.docs[slug]; personalChanged = true;
+      results.push({ slug, status: 'skipped', reason: 'in_other_team' });
+      continue;
+    }
+    if (!isDocOwnerSession(env, session, meta)) {
+      // Not the caller's to move: it stays, and so does its folder.
+      results.push({ slug, status: 'skipped', reason: 'not_owner' });
+      continue;
+    }
+    // The same change /api/team/move makes, plus the folder.
+    delete personal.docs[slug]; personalChanged = true;
+    writes.push([slug, { ...meta, workspace_id: team.id, team_folder: target, access: { ...accessFromMeta(meta), team: true } }]);
+    results.push({ slug, status: 'moved', folder: target });
+  }
+  const remaining = pending.length - next;
+
+  // Last call: the personal folders now empty go, deepest first. One still
+  // holding a doc that could not move stays, and so do its ancestors.
+  const removed = [];
+  if (!remaining) {
+    const holds = new Set(Object.values(personal.docs).filter((fid) => inTree.has(fid)));
+    for (const f of [...subtree].reverse()) {
+      if (holds.has(f.id)) { if (f.parent) holds.add(f.parent); continue; }
+      removed.push(f);
+    }
+    if (removed.length) {
+      const gone = new Set(removed.map((f) => f.id));
+      personal.folders = personal.folders.filter((f) => !gone.has(f.id));
+      personalChanged = true;
+    }
+  }
+
+  // Folders before the docs that point at them; My docs last, so a failure
+  // midway leaves every doc either still in My docs or filed in the team.
+  if (toMake.length) await saveTeamFolders(env, team.id, teamState);
+  for (const [slug, meta] of writes) await putDocMetaJson(env, slug, JSON.stringify(meta));
+  if (personalChanged) await saveFolderState(env, owner, personal);
+  for (const f of removed) await deleteFolderShareIndex(env, f.share_id);
+
+  const byId = new Map(teamState.folders.map((f) => [f.id, f]));
+  return {
+    ok: true,
+    body: {
+      ok: true,
+      team: { id: team.id, name: team.name },
+      folder: twin.get(root.id),
+      // Hand these back as `known` on the next call.
+      folders: [...new Set(twin.values())].map((id) => byId.get(id)).filter(Boolean)
+        .map((f) => ({ id: f.id, name: f.name, parent: f.parent || null })),
+      created_folders: toMake.length,
+      results,
+      moved: results.filter((r) => r.status === 'moved').length,
+      skipped: results.filter((r) => r.status === 'skipped').length,
+      remaining,
+      removed_folders: removed.length,
+      kept_folders: remaining ? subtree.length : subtree.length - removed.length,
+    },
+  };
 }
 
 // ---- teams (JUL-71) ----
@@ -11933,6 +12086,20 @@ export default {
         if (changed || adopted) await saveFolderState(env, actorKey(s), state);
       }
       return json({ ok: true, moved: slugs.length, changed, folder: folderId, team: team ? team.id : null });
+    }
+
+    // A whole My docs folder into a team: see moveFolderToTeam. Cookie
+    // (same origin) or the owner's hosted Bearer; members only.
+    if (p === '/api/folders/move-to-team' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      if (!body.team) return json({ error: 'team_required' }, { status: 400 });
+      if (!body.folder || typeof body.folder !== 'string') return json({ error: 'invalid_folder' }, { status: 400 });
+      const scope = await folderScope(env, req, url, String(body.team));
+      if (!scope.ok) return scope.response;
+      if (!actorKey(scope.session)) return json({ error: 'sign_in_required' }, { status: 401 });
+      const out = await moveFolderToTeam(env, scope.session, scope.team, body);
+      return json(out.body, { status: out.ok ? 200 : out.status });
     }
 
     // ---- teams (JUL-71) ----

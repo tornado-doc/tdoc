@@ -54,6 +54,7 @@ const OFFLINE = [
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
   'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
   'docs-hub-unified.test.js',   // My docs + team use one toolbar/list and cached previews
+  'folder-move-to-team.test.js', // a whole My docs folder into a team: batches, re-runs, stale reads
   'profile.test.js',            // /@handle public profiles
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
