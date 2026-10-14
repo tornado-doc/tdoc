@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  answerAccessRequest as answerAccessRequestApi,
   getUnreadNotificationCount,
   listNotifications,
   markAllNotificationsRead,
@@ -70,6 +71,14 @@ export function useNotifications(enabled) {
     await markNotificationsRead([item.id]);
   }, []);
 
+  const answerAccessRequest = useCallback(async (item, action) => {
+    const result = await answerAccessRequestApi({ slug: item.slug, requester: item.requester || item.actor?.login, action });
+    setItems((current) => current.map((row) => (
+      row.id === item.id ? { ...row, read: true, resolved: result.resolved } : row
+    )));
+    setUnread((current) => Math.max(0, current - (item.read ? 0 : 1)));
+  }, []);
+
   const markAllRead = useCallback(async () => {
     setItems((current) => current.map((row) => ({ ...row, read: true })));
     setUnread(0);
@@ -91,5 +100,5 @@ export function useNotifications(enabled) {
     return () => window.clearInterval(timer);
   }, [refreshUnread]);
 
-  return { items, unread, hasMore, loading, load, markRead, markAllRead, browserAlerts, setAlerts };
+  return { items, unread, hasMore, loading, load, markRead, markAllRead, answerAccessRequest, browserAlerts, setAlerts };
 }
