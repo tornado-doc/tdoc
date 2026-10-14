@@ -15,21 +15,24 @@
 #   tdoc-folder delete <folder> [--team <t>]                     # docs move up a level
 #   tdoc-folder share <folder> [--visibility unlisted|private|public] [--team <t>]  # prints the link
 #   tdoc-folder unshare <folder> [--team <t>]                    # the link stops working
+#   tdoc-folder move-to-team <folder> --team <t>   # a My docs folder, subfolders and docs, into a team
 #   <folder> is an id (f_…), a path ("Reports/Daily"), or a name unique in that space.
 #   A team doc must be in the team first: tdoc-move --team <t> --folder <f> <slug>.
 #   A share link lists the folder's docs; each doc keeps its own access (a
 #   team-only doc stays hidden from people outside the team). private = you
 #   (in a team: its members) plus invitees; share again keeps the current
 #   setting unless --visibility is given (a first share is unlisted).
+#   move-to-team makes the same folders in the team (merging into same-named
+#   ones), moves your docs in, and removes the emptied My docs folders.
 #   tdoc-folder --help
 set -euo pipefail
 TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TDOC_BIN_DIR/lib/json.sh"
 
-usage() { sed -n '9,23p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '9,26p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 case "${1:-}" in
-  -h|--help|help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  list|ls|create|mkdir|add|remove|rename|delete|rm|share|unshare) CMD="$1"; shift ;;
+  -h|--help|help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  list|ls|create|mkdir|add|remove|rename|delete|rm|share|unshare|move-to-team) CMD="$1"; shift ;;
   *) usage ;;
 esac
 
@@ -46,7 +49,7 @@ while [ $# -gt 0 ]; do
     --visibility=*) VISIBILITY="${1#--visibility=}"; shift ;;
     --create) CREATE=1; shift ;;
     --json) AS_JSON=1; shift ;;
-    -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown arg: $1" >&2; exit 2 ;;
     *) ARGS+=("$1"); shift ;;
   esac
@@ -86,6 +89,7 @@ explain() {
     doc_in_team) echo "[tdoc] $slug is in a team ($(printf '%s' "$1" | json_get team)); pass --team to file it in that team's folders." >&2 ;;
     doc_not_in_team) echo "[tdoc] $slug is not in that team yet: tdoc-move --team <t> --folder <f> $slug" >&2 ;;
     team_not_found) echo "[tdoc] you are not a member of that team." >&2 ;;
+    team_required) echo "[tdoc] move-to-team needs --team <name|id>." >&2 ;;
     not_folder_owner) echo "[tdoc] only the folder's maker or a team admin can change or share it." >&2 ;;
     invalid_access_value) echo "[tdoc] --visibility must be unlisted, private or public." >&2 ;;
     too_many_folders) echo "[tdoc] folder limit reached ($(printf '%s' "$1" | json_get limit))." >&2 ;;
@@ -118,6 +122,11 @@ fi
 TEAM_Q="${TEAM_ID:+?team=$TEAM_ID}"
 TEAM_JSON="$( [ -n "$TEAM_ID" ] && json_str "$TEAM_ID" || printf null)"
 SPACE="$( [ -n "$TEAM_ID" ] && printf 'team %s' "$TEAM" || printf 'My docs')"
+# move-to-team names a My docs folder; --team is where it goes.
+if [ "$CMD" = move-to-team ]; then
+  [ -n "$TEAM_ID" ] || { echo "[tdoc] move-to-team needs --team <name|id>." >&2; exit 2; }
+  TEAM_Q=""; SPACE="My docs"
+fi
 
 # Folders made from this machine in the last two minutes, per space. The
 # server's folder list is an edge-cached KV read that can lag a create by up
@@ -125,7 +134,7 @@ SPACE="$( [ -n "$TEAM_ID" ] && printf 'team %s' "$TEAM" || printf 'My docs')"
 # folder it made and make another. Remembered ones are merged into the list
 # and sent back as hints the server accepts only while they are that fresh.
 RECENT_FILE="$HOME/.tdoc/folders-recent.json"
-SPACE_KEY="${TEAM_ID:-me}"
+SPACE_KEY="$( [ "$CMD" = move-to-team ] && printf me || printf %s "${TEAM_ID:-me}")"
 # recent <op> [json] — get: this space's fresh entries (JSON array);
 # add <folder json>: remember one; forget <id>: drop one.
 recent() {
@@ -228,7 +237,7 @@ create_folder() {
 slugs_json() { printf '%s\n' "$@" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))'; }
 
 case "$CMD" in
-  list|ls|add|rename|delete|rm|share|unshare) load_folders || exit 1 ;;
+  list|ls|add|rename|delete|rm|share|unshare|move-to-team) load_folders || exit 1 ;;
   *) if [ -n "$PARENT" ]; then load_folders || exit 1; fi ;;
 esac
 
@@ -318,5 +327,47 @@ case "$CMD" in
     FID="$(require_folder "${ARGS[0]}")" || exit 1
     api PATCH /api/folders "{\"id\":$(json_str "$FID"),\"share\":false,\"team\":$TEAM_JSON}" >/dev/null || exit 1
     echo "[tdoc] stopped sharing ${ARGS[0]}; its link no longer opens."
+    ;;
+  move-to-team)
+    [ "${#ARGS[@]}" -eq 1 ] || usage
+    FID="$(require_folder "${ARGS[0]}")" || exit 1
+    # One call moves a bounded batch and says how many are left; loop until
+    # none are, handing back the team folders made (`known`) and the docs
+    # already moved (`done`) so a stale read on the next call loses neither.
+    STATE='{"known":[],"done":[],"moved":0,"skipped":[],"remaining":-1}'
+    while :; do
+      BODY="$(printf '%s' "$STATE" | node -e '
+        let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+          const st = JSON.parse(s);
+          process.stdout.write(JSON.stringify({ folder: process.argv[1], team: process.argv[2], known: st.known, done: st.done }));
+        });' "$FID" "$TEAM_ID")"
+      resp="$(api POST /api/folders/move-to-team "$BODY")" || exit 1
+      STATE="$(node -e '
+        const st = JSON.parse(process.argv[1]); const r = JSON.parse(process.argv[2]);
+        const results = r.results || [];
+        const progress = results.filter((x) => !(x.status === "skipped" && x.reason === "not_owner")).length;
+        st.stuck = r.remaining > 0 && !progress;
+        st.known = r.folders || st.known;
+        st.done = [...new Set([...st.done, ...results.filter((x) => !(x.status === "skipped" && x.reason === "not_owner")).map((x) => x.slug)])];
+        st.moved += r.moved || 0;
+        for (const x of results) if (x.status === "skipped" && !st.skipped.some((y) => y.slug === x.slug)) st.skipped.push({ slug: x.slug, reason: x.reason });
+        st.remaining = r.remaining || 0;
+        st.folder = r.folder; st.team = r.team; st.kept = r.kept_folders || 0;
+        if (r.remaining) process.stderr.write(`[tdoc] moved ${st.moved} so far, ${r.remaining} to go…\n`);
+        process.stdout.write(JSON.stringify(st));' "$STATE" "$resp")" || exit 1
+      [ "$(printf '%s' "$STATE" | json_get remaining)" = 0 ] && break
+      if [ "$(printf '%s' "$STATE" | json_get stuck)" = true ]; then
+        echo "[tdoc] stopped: the docs left in ${ARGS[0]} are not yours to move." >&2; break
+      fi
+    done
+    printf '%s' "$STATE" | node -e '
+      let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+        const st = JSON.parse(s); const [name, base] = process.argv.slice(1);
+        const why = { not_owner: "not yours", in_other_team: "already in another team", not_found: "no longer exists" };
+        process.stderr.write(`[tdoc] moved ${st.moved} doc${st.moved === 1 ? "" : "s"} from My docs / ${name} into team ${st.team.name} / ${name}\n`);
+        for (const x of st.skipped) process.stderr.write(`[tdoc]   skipped ${x.slug}: ${why[x.reason] || x.reason}\n`);
+        if (st.kept) process.stderr.write(`[tdoc] ${st.kept} My docs folder${st.kept === 1 ? "" : "s"} kept for the docs that stayed.\n`);
+        process.stdout.write(`${base}/me?team=${encodeURIComponent(st.team.id)}&folder=${encodeURIComponent(st.folder)}\n`);
+      });' "${ARGS[0]}" "$BASE"
     ;;
 esac

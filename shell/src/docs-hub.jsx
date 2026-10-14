@@ -24,6 +24,7 @@ import {
 import {
   LeaveTeamDialog,
   MembersDialog,
+  MoveFolderToTeamDialog,
   MoveToTeamDialog,
   NewTeamDialog,
   SpaceBar,
@@ -668,13 +669,14 @@ export function DocsHub({ boot }) {
   const folderMenu = (item) => [
     { label: 'Share', onSelect: () => setModal({ type: 'share-folder', folder: item }) },
     { label: 'Rename', onSelect: () => setModal({ type: 'rename-folder', folder: item }) },
+    teams.length ? { label: 'Move to team…', className: 'folder-move-team', onSelect: () => setModal({ type: 'move-folder-team', folder: item }) } : null,
     {
       label: 'Delete folder',
       tone: 'danger',
       className: 'folder-delete',
       onSelect: () => setModal({ type: 'delete-folder', folder: item }),
     },
-  ];
+  ].filter(Boolean);
 
   const teamFolderMenu = (item) => (item.can_manage ? [
     { label: 'Share', onSelect: () => setModal({ type: 'share-team-folder', folder: item }) },
@@ -948,6 +950,21 @@ export function DocsHub({ boot }) {
           onMove={(target) => moveDocsToTeam(modal.slugs, target.id)
             .then(() => { location.href = `/me?team=${encodeURIComponent(target.id)}`; })
             .catch(teamFailed)}
+        />
+      ) : null}
+      {modal?.type === 'move-folder-team' ? (
+        <MoveFolderToTeamDialog
+          folder={modal.folder}
+          teams={teams}
+          docCount={(() => {
+            const tree = new Set([modal.folder.id]);
+            for (let grew = true; grew;) {
+              grew = false;
+              for (const item of hub.folders) if (tree.has(item.parent) && !tree.has(item.id)) { tree.add(item.id); grew = true; }
+            }
+            return hub.docs.filter((doc) => doc.mine !== false && tree.has(doc.folder)).length;
+          })()}
+          onClose={closeModal}
         />
       ) : null}
       {modal?.type === 'delete-team-doc' ? (
