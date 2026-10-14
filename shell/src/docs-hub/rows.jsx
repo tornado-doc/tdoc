@@ -82,8 +82,18 @@ export function DocRow({
           />
         </label>
       ) : null}
+      {doc.image ? (
+        <img
+          className="doc-preview-image"
+          src={doc.image}
+          alt=""
+          loading="lazy"
+          onError={(event) => { event.currentTarget.hidden = true; }}
+        />
+      ) : null}
       <div className="doc-info">
         <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
+        {doc.excerpt ? <div className="doc-preview-excerpt">{doc.excerpt}</div> : null}
         <div className="doc-meta">{meta}</div>
       </div>
       <div className="row-actions">
@@ -91,6 +101,20 @@ export function DocRow({
         <RowMenu label="More actions" items={menuItems} />
       </div>
     </div>
+  );
+}
+
+// One list surface for personal and team spaces. The caller supplies only the
+// actions/metadata that differ; preview layout, selection state, and empty
+// treatment stay identical instead of slowly becoming two products.
+export function DocList({ docs, rowProps, selecting = false, empty = null }) {
+  return (
+    <>
+      <div className={`doc-list${selecting ? ' is-selecting' : ''}`}>
+        {docs.map((doc) => <DocRow key={doc.slug} doc={doc} {...rowProps(doc)} />)}
+      </div>
+      {!docs.length && empty ? <p className="empty">{empty}</p> : null}
+    </>
   );
 }
 

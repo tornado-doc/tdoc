@@ -183,6 +183,14 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     }
   });
 
+  await t('Docs Hub rows show the cached preview without opening document content', async () => {
+    const row = page.locator('.doc-row[data-slug="sample-doc"]');
+    const excerpt = await row.locator('.doc-preview-excerpt').textContent();
+    if (!excerpt.includes('recognizable before opening')) throw new Error(`preview excerpt missing: ${excerpt}`);
+    const image = row.locator('.doc-preview-image');
+    if (await image.getAttribute('src') !== '/tdoc_logo.svg') throw new Error('preview image missing');
+  });
+
   await t('Docs Hub Create a doc is a menu, and the agent answer composes its line', async () => {
     await page.click('.mk-btn');
     // A modal to choose between two things is a room built for a sentence, so

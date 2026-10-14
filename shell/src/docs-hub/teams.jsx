@@ -11,7 +11,7 @@ import {
   setTeamRole,
   updateTeam,
 } from '../document/api.js';
-import { DocRow, day } from './rows.jsx';
+import { DocList, day } from './rows.jsx';
 import './teams.css';
 
 const ERRORS = {
@@ -87,24 +87,19 @@ export function SpaceBar({ teams, space, onSpace, onNewTeam }) {
 export function TeamPane({ team, docs, viewer, menuFor, inFolder = false }) {
   return (
     <section className="pane" id="pane-team">
-      <div className="doc-list">
-        {docs.map((doc) => (
-          <DocRow
-            key={doc.slug}
-            doc={doc}
-            meta={[
-              `by ${doc.mine ? 'me' : doc.author || 'unknown'}${doc.former_member ? ' (former member)' : ''}`,
-              day(doc.updated) ? `updated ${day(doc.updated)}` : null,
-            ].filter(Boolean).join(' · ')}
-            starrable={false}
-            menuItems={menuFor(doc)}
-            data={{ created: doc.created, updated: doc.updated, author: doc.author || viewer }}
-          />
-        ))}
-      </div>
-      {!docs.length && !inFolder ? (
-        <p className="empty">No docs in {team.name} yet. Create one, or move one here from My docs.</p>
-      ) : null}
+      <DocList
+        docs={docs}
+        rowProps={(doc) => ({
+          meta: [
+            `by ${doc.mine ? 'me' : doc.author || 'unknown'}${doc.former_member ? ' (former member)' : ''}`,
+            day(doc.updated) ? `updated ${day(doc.updated)}` : null,
+          ].filter(Boolean).join(' · '),
+          starrable: false,
+          menuItems: menuFor(doc),
+          data: { created: doc.created, updated: doc.updated, author: doc.author || viewer },
+        })}
+        empty={!inFolder ? `No docs in ${team.name} yet. Create one, or move one here from My docs.` : null}
+      />
     </section>
   );
 }
