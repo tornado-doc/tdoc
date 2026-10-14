@@ -3,7 +3,6 @@ import { Check, ChevronRight, Folder, FolderPlus, Search, UsersRound, X } from '
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSelect } from './ui/select.jsx';
-import { SegmentedControl } from './ui/segmented-control.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocRow, FolderRow, day } from './docs-hub/rows.jsx';
@@ -247,7 +246,7 @@ function FeedbackList({ spaces: initial }) {
         <ol>
           <li><b>Get the bookmark</b> — drag it to your bookmarks bar.</li>
           <li><b>Open your app</b> and click it, then <b>+ Comment</b>.</li>
-          <li><b>Invite teammates</b> to the same list, or <b>Send to agent</b>.</li>
+          <li><b>Share</b> the list with teammates, or <b>Send to agent</b>.</li>
         </ol>
         <a className="tdoc-fbspace-btn primary" href="/feedback">Get the bookmark</a>
       </div>
@@ -264,7 +263,7 @@ function FeedbackList({ spaces: initial }) {
             <a className="doc-info" href={`/d/${encodeURIComponent(space.slug)}`}>
               <span className="doc-title">{host}</span>
               <div className="doc-meta">
-                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', space.site ? (space.site.mode === 'public' ? 'on the site · anyone signed in' : 'on the site · invited only') : null, `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
+                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', space.site ? 'on the site' : null, `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
               </div>
             </a>
             {space.mine ? (
@@ -288,10 +287,10 @@ function FeedbackList({ spaces: initial }) {
 }
 
 // Turn a feedback space into the site's own comment space: the snippet any
-// page can paste, which origins it works on, and who may comment.
+// page can paste and which origins it works on. Who may comment is the
+// space's own Share settings, as on any doc.
 function SiteEmbedDialog({ space, onClose, onSaved }) {
   const [origins, setOrigins] = useState(() => ((space.site && space.site.origins) || [space.origin]).join('\n'));
-  const [mode, setMode] = useState((space.site && space.site.mode) || 'invited');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [snippet, setSnippet] = useState(space.site ? `<script src="${location.origin}/feedback.js" data-tdoc-space="${space.slug}" async></script>` : '');
@@ -303,7 +302,7 @@ function SiteEmbedDialog({ space, onClose, onSaved }) {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(off ? { slug: space.slug, off: true } : { slug: space.slug, origins: origins.split(/[\s,]+/).filter(Boolean), mode }),
+        body: JSON.stringify(off ? { slug: space.slug, off: true } : { slug: space.slug, origins: origins.split(/[\s,]+/).filter(Boolean) }),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error === 'invalid_origin' ? `Not a site address: ${body.origin}. Use the form https://example.com.` : (body.message || body.error || 'Could not save'));
@@ -321,7 +320,7 @@ function SiteEmbedDialog({ space, onClose, onSaved }) {
       open
       onOpenChange={(open) => { if (!open) onClose(); }}
       title="Comments on your site"
-      description="Paste one line into your site and visitors can comment on any page. Every comment lands in this space."
+      description="Paste one line into your site and the people you share this space with can comment on any page. Every comment lands here."
       actions={(
         <>
           {space.site ? <button type="button" className="danger" disabled={busy} onClick={() => save(true)}>Turn off</button> : null}
@@ -335,16 +334,7 @@ function SiteEmbedDialog({ space, onClose, onSaved }) {
           <label className="tdoc-send-label" htmlFor="tdoc-site-origins">Site addresses <span>one per line</span></label>
           <textarea id="tdoc-site-origins" className="tdoc-notify-instruction" rows={2} value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder="https://example.com" />
         </div>
-        <div className="tdoc-send-field">
-          <span className="tdoc-send-label">Who can comment</span>
-          <SegmentedControl
-            ariaLabel="Who can comment"
-            value={mode}
-            onChange={setMode}
-            options={[{ value: 'invited', label: 'People you invite' }, { value: 'public', label: 'Anyone signed in' }]}
-          />
-          <p className="tdoc-send-hint">{mode === 'public' ? 'Any visitor who signs in to tdoc can read and comment.' : 'Only people you invite in Share can read and comment.'}</p>
-        </div>
+        <p className="tdoc-send-hint">Who can comment follows this space's <a href={`/d/${encodeURIComponent(space.slug)}?doc=1&share=1`}>Share settings</a>, like any doc.</p>
         {snippet ? (
           <div className="tdoc-send-field">
             <span className="tdoc-send-label">Paste this into your site</span>

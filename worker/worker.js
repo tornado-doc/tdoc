@@ -4173,7 +4173,7 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
     }
     if (!owned && !joined) return null;
     if (!docReadableBy(env, session, row.meta)) return null;
-    const item = { ...toPublic(row), origin, mine: owned, ...(owned && row.meta && row.meta.site ? { site: row.meta.site } : {}) };
+    const item = { ...toPublic(row), origin, mine: owned, ...(owned && row.meta && row.meta.site ? { site: siteView(row.meta.site) } : {}) };
     if (withCounts) {
       let open = 0, replied = 0;
       try {
@@ -6008,9 +6008,12 @@ async function mintFeedbackToken(env, session, slug, origin, { site = false } = 
 // ── A site's own comment space (the SDK) ─────────────────────────────────
 // A site owner binds one space to their site: every visitor's comments land
 // in it, instead of each visitor getting a space of their own. The binding
-// names the origins it serves (another site cannot borrow the id) and who
-// may comment: anyone signed in ('public') or only people the owner invited
-// ('invited'). Julie, 2026-10-13: "any web page natively commentable".
+// names only the origins it serves (another site cannot borrow the id). Who
+// may read and comment is the space doc's own access, set in Share like any
+// doc: invited people, anyone with the link, or its team when it is a team
+// doc ("share should work exactly like a normal doc", Julie, 2026-10-14).
+// A `mode` sent by older clients (invited/public) is accepted and ignored;
+// binding never rewrites access.
 const SITE_ORIGINS_MAX = 10;
 function normalizeSiteBinding(raw) {
   const b = raw && typeof raw === 'object' ? raw : {};
@@ -6024,20 +6027,16 @@ function normalizeSiteBinding(raw) {
   }
   if (!origins.length) return { error: 'origins_required' };
   if (origins.length > SITE_ORIGINS_MAX) return { error: 'too_many_origins', limit: SITE_ORIGINS_MAX };
-  const mode = b.mode === 'public' ? 'public' : 'invited';
-  return { site: { origins, mode } };
+  return { site: { origins } };
 }
 function siteServesOrigin(meta, origin) {
   const site = meta && meta.site;
   return Boolean(site && Array.isArray(site.origins) && site.origins.includes(origin));
 }
-// Who may comment follows the mode: public reads and comments with any
-// sign-in; invited is private to the owner's invite list.
-function siteAccess(prev, mode) {
-  const base = normalizeAccess(prev || {}, { legacy: false });
-  return mode === 'public'
-    ? { ...base, visibility: base.visibility === 'public' ? 'public' : 'unlisted', commenting: 'signed_in' }
-    : { ...base, visibility: 'private', commenting: 'invited' };
+// The binding as clients see it: origins only (a stored legacy `mode` meant
+// nothing once access stopped following it).
+function siteView(site) {
+  return site && Array.isArray(site.origins) ? { origins: site.origins } : null;
 }
 
 function feedbackSessionPayload(env, base, session, slug, meta) {
@@ -6048,9 +6047,9 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
     version,
     title: (meta && meta.title) || slug,
     doc_url: `${base}/d/${encodeURIComponent(slug)}/v/${version}`,
-    // What Share copies: opening it puts the person in THIS space for the
-    // app, instead of the one of their own a first connect would make.
-    invite_url: `${base}/d/${encodeURIComponent(slug)}`,
+    // The space doc with its normal Share dialog open: who can comment is
+    // whoever that dialog lets in, exactly as on any doc.
+    share_url: `${base}/d/${encodeURIComponent(slug)}?doc=1&share=1`,
     origin: (meta && meta.feedback && meta.feedback.origin) || null,
     // This host can hand comments to an agent (the local twin cannot).
     notify: true,
@@ -10620,7 +10619,7 @@ export default {
               version: latestVersionNumber(gate.meta) || Number(vStr),
               title: gate.meta.title || 'Feedback',
               origin: spaceOrigin,
-              inviteUrl: `${url.origin}/d/${encodeURIComponent(slug)}`,
+              shareUrl: `/d/${encodeURIComponent(slug)}?doc=1&share=1`,
               docUrl: `/d/${encodeURIComponent(slug)}/v/${Number(vStr)}?doc=1`,
               bookmarklet: feedbackBookmarklet(feedbackScriptSrc(url.origin)),
               identity: signedIn ? { login: actorKey(viewer), avatar_url: viewer.avatar_url || '', name: actorDisplayName(viewer) } : null,
@@ -10908,8 +10907,8 @@ export default {
 
     // Bind (or change) a doc as a site's comment space. Owner only: from the
     // browser (same-origin cookie) or from the owner's agent (hosted upload
-    // Bearer, tdoc-site), so binding needs no click. The access policy
-    // follows the chosen mode. GET reads the binding back (owner only).
+    // Bearer, tdoc-site), so binding needs no click. Only the origins change;
+    // access stays whatever Share says. GET reads the binding back (owner only).
     if (p === '/api/feedback/site' && (method === 'POST' || method === 'GET')) {
       const s = await getSession(env, req);
       if (s && s.feedback) return json({ error: 'feedback_token_scope' }, { status: 403 });
@@ -10925,7 +10924,7 @@ export default {
       if (!isDocOwnerSession(env, owner, meta)) return json({ error: 'forbidden' }, { status: 403 });
       if (method === 'GET') {
         return json({
-          ok: true, site: meta.site || null, access: accessFromMeta(meta),
+          ok: true, site: siteView(meta.site), access: accessFromMeta(meta),
           ...(meta.site ? { snippet: `<script src="${url.origin}/feedback.js" data-tdoc-space="${body.slug}" async></script>` } : {}),
         }, { headers: { 'Cache-Control': 'no-store' } });
       }
@@ -10936,11 +10935,10 @@ export default {
       }
       const bound = normalizeSiteBinding(body);
       if (bound.error) return json(bound, { status: 400 });
-      const next = { ...meta, site: bound.site, access: siteAccess(meta.access, bound.site.mode) };
-      await putDocMetaJson(env, body.slug, JSON.stringify(next));
+      await putDocMetaJson(env, body.slug, JSON.stringify({ ...meta, site: bound.site }));
       const base = url.origin;
       return json({
-        ok: true, site: bound.site, access: next.access,
+        ok: true, site: bound.site, access: accessFromMeta(meta),
         snippet: `<script src="${base}/feedback.js" data-tdoc-space="${body.slug}" async></script>`,
       });
     }
@@ -10972,17 +10970,20 @@ export default {
       let meta;
       if (body.space) {
         // A site's own space (the SDK): only on the origins it was bound to,
-        // and only for people its mode admits.
+        // and only for people the space doc's own access admits, exactly as
+        // on the doc page. Like opening a team doc, a pending invite to the
+        // space's team is accepted here (joinInvitedTeamOnView).
         if (!isValidSlug(body.space)) return json({ error: 'invalid_space' }, { status: 400 });
         meta = await loadDocMeta(env, body.space);
         if (!meta || !meta.site) return json({ error: 'space_not_found', message: 'This site has no tdoc comment space.' }, { status: 404 });
         if (!siteServesOrigin(meta, origin)) return json({ error: 'origin_not_allowed', message: `This comment space is not enabled for ${origin}.` }, { status: 403 });
         const access = accessFromMeta(meta);
-        if (!canReadDoc(access, s, env, meta) || !canCommentOnDoc(access, s, env, meta)) {
-          return json({ error: 'not_invited', message: 'Comments on this site are invite-only. Ask the site owner to invite you.' }, { status: 403 });
+        const admitted = () => canReadDoc(access, s, env, meta) && canCommentOnDoc(access, s, env, meta);
+        if (!admitted() && !(await joinInvitedTeamOnView(env, req, s, meta) && admitted())) {
+          return json({ error: 'not_invited', message: 'This site\'s comments are not shared with you. Ask its owner to share them with you.' }, { status: 403 });
         }
         const token = await mintFeedbackToken(env, s, body.space, origin, { site: true });
-        return json({ ...feedbackSessionPayload(env, url.origin, s, body.space, meta), token, site: meta.site.mode });
+        return json({ ...feedbackSessionPayload(env, url.origin, s, body.space, meta), token, site: true });
       }
       if (body.slug) {
         // "Use an existing doc": any doc this person may comment on.

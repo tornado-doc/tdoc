@@ -2,13 +2,13 @@
 # tdoc-site — bind a feedback space to your own website, without a browser.
 #
 # Same as "Add to your site" on the web: the space's owner names the site
-# origins it serves and who may comment. Prints the <script> snippet to
-# paste into the site. Uses the hosted Bearer in ~/.tdoc/published.json.
+# origins it serves. Who may comment is the space doc's own access, shared
+# like any doc (Share on tdoc, or tdoc-move into a team).
+# Prints the <script> snippet to paste into the site. Uses the hosted Bearer
+# in ~/.tdoc/published.json.
 #
 # Usage:
-#   tdoc-site bind <space-slug> --origin https://app.example.com [--origin ...] [--mode invited|public]
-#       invited (default): only people the owner invited may comment
-#       public: anyone signed in may comment (alias: signed_in)
+#   tdoc-site bind <space-slug> --origin https://app.example.com [--origin ...]
 #   tdoc-site show <space-slug>    # current binding and snippet
 #   tdoc-site off <space-slug>     # unbind; visitors can no longer connect
 #   tdoc-site --help
@@ -16,7 +16,7 @@ set -euo pipefail
 TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TDOC_BIN_DIR/lib/json.sh"
 
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; }
 
 CMD="${1:-}"
 case "$CMD" in
@@ -25,7 +25,7 @@ case "$CMD" in
   *) usage >&2; exit 2 ;;
 esac
 
-SLUG=""; MODE="invited"; ORIGINS=()
+SLUG=""; MODE=""; ORIGINS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --origin) [ -n "${2:-}" ] || { echo "--origin needs a URL like https://app.example.com" >&2; exit 2; }; ORIGINS+=("$2"); shift 2 ;;
@@ -38,11 +38,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$SLUG" ] || { usage >&2; exit 2; }
-case "$MODE" in
-  invited) ;;
-  public|signed_in|signed-in|anyone) MODE="public" ;;
-  *) echo "--mode is invited or public" >&2; exit 2 ;;
-esac
+if [ -n "$MODE" ]; then
+  echo "[tdoc] --mode is ignored: who can comment is the space's own sharing (Share on tdoc)." >&2
+fi
 
 CONFIG_FILE="$HOME/.tdoc/published.json"
 TOKEN="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" upload_token || true)"
@@ -77,7 +75,8 @@ print_site() {
       const b = JSON.parse(s);
       if (!b.site) { console.log("not bound to a site"); return; }
       console.log(`origins: ${b.site.origins.join(" ")}`);
-      console.log(`mode:    ${b.site.mode === "public" ? "public (anyone signed in may comment)" : "invited (only people you invited may comment)"}`);
+      const a = b.access || {};
+      console.log(`access:  ${a.visibility || "?"}, commenting ${a.commenting || "?"}${a.team ? " (team)" : ""} (change it in Share, like any doc)`);
       if (b.snippet) { console.log("\nPaste into your site:\n"); console.log(b.snippet); }
     });'
 }
@@ -97,7 +96,7 @@ case "$CMD" in
   bind)
     [ "${#ORIGINS[@]}" -gt 0 ] || { echo "name at least one --origin" >&2; exit 2; }
     ORIGINS_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${ORIGINS[@]}")"
-    resp="$(post "{\"slug\":$(json_str "$SLUG"),\"origins\":$ORIGINS_JSON,\"mode\":$(json_str "$MODE")}")" || { echo "[tdoc] no response" >&2; exit 1; }
+    resp="$(post "{\"slug\":$(json_str "$SLUG"),\"origins\":$ORIGINS_JSON}")" || { echo "[tdoc] no response" >&2; exit 1; }
     [ "$(printf '%s' "$resp" | json_get ok)" = "true" ] || fail "$resp"
     print_site "$resp"
     ;;

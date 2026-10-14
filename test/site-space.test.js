@@ -1,6 +1,7 @@
 // The SDK: a site owner binds one comment space to their site. Visitors on
-// the bound origins comment into it; other origins cannot borrow it; the
-// owner chooses invited-only or anyone signed in (Julie, 2026-10-13).
+// the bound origins comment into it; other origins cannot borrow it. Who may
+// comment is the space doc's own Share settings, like any doc: binding never
+// rewrites access (Julie, 2026-10-14).
 
 const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js');
 
@@ -24,34 +25,79 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   console.log('site comment space');
   const owner = await issue(worker, env, 'owner');
   const visitor = await issue(worker, env, 'visitor');
+  const friend = await issue(worker, env, 'friend');
+  const mate = await issue(worker, env, 'mate');
+  const newbie = await issue(worker, env, 'newbie');
   const made = await call('/api/feedback/connect', { method: 'POST', cookie: owner.cookie, headers: home, body: { origin: site } });
   assert(made.status === 200, `space ${made.status}`);
   const slug = made.body.slug;
 
-  await t('only the owner can bind a space to a site, and gets the snippet', async () => {
+  const patchAccess = (access) => call('/api/doc/access', { method: 'PATCH', cookie: owner.cookie, headers: home, body: { slug, access } });
+  const connectAs = (who, origin = site) => call('/api/feedback/connect', { method: 'POST', cookie: who.cookie, headers: home, body: { origin, space: slug } });
+
+  await t('only the owner can bind a space to a site, and gets the snippet; binding leaves access alone', async () => {
     const stranger = await call('/api/feedback/site', { method: 'POST', cookie: visitor.cookie, headers: home, body: { slug, origins: [site] } });
     assert(stranger.status === 403, `stranger ${stranger.status}`);
     const bad = await call('/api/feedback/site', { method: 'POST', cookie: owner.cookie, headers: home, body: { slug, origins: ['not a url'] } });
     assert(bad.status === 400 && bad.body.error === 'invalid_origin', `bad ${bad.status}`);
+    const before = await call(`/api/feedback/site?slug=${slug}`, { cookie: owner.cookie, headers: home });
+    // A legacy `mode` is accepted and ignored.
     const r = await call('/api/feedback/site', { method: 'POST', cookie: owner.cookie, headers: home, body: { slug, origins: [`${site}/`], mode: 'invited' } });
-    assert(r.status === 200 && r.body.site.origins[0] === site && r.body.site.mode === 'invited', JSON.stringify(r.body));
+    assert(r.status === 200 && r.body.site.origins[0] === site && !('mode' in r.body.site), JSON.stringify(r.body));
     assert(r.body.snippet.includes(`data-tdoc-space="${slug}"`), r.body.snippet);
-    assert(r.body.access.visibility === 'private' && r.body.access.commenting === 'invited', JSON.stringify(r.body.access));
+    assert(JSON.stringify(r.body.access) === JSON.stringify(before.body.access), `access changed: ${JSON.stringify(before.body.access)} → ${JSON.stringify(r.body.access)}`);
   });
 
-  await t('invited-only: a visitor who was not invited is told so', async () => {
-    const r = await call('/api/feedback/connect', { method: 'POST', cookie: visitor.cookie, headers: home, body: { origin: site, space: slug } });
-    assert(r.status === 403 && r.body.error === 'not_invited', `${r.status} ${JSON.stringify(r.body)}`);
+  await t('Share decides: a private space refuses a visitor who was not invited, and says so', async () => {
+    const p = await patchAccess({ visibility: 'private', commenting: 'invited', allowed_users: [] });
+    assert(p.status === 200, `patch ${p.status} ${JSON.stringify(p.body)}`);
+    // Re-binding (even with the old "public" mode) never undoes Share.
+    const again = await call('/api/feedback/site', { method: 'POST', cookie: owner.cookie, headers: home, body: { slug, origins: [site], mode: 'public' } });
+    assert(again.body.access.visibility === 'private' && again.body.access.commenting === 'invited', JSON.stringify(again.body.access));
+    const r = await connectAs(visitor);
+    assert(r.status === 403 && r.body.error === 'not_invited' && /share/i.test(r.body.message), `${r.status} ${JSON.stringify(r.body)}`);
+  });
+
+  await t('a person the owner adds in Share connects and comments through the SDK', async () => {
+    await patchAccess({ allowed_users: ['friend'] });
+    const r = await connectAs(friend);
+    assert(r.status === 200 && r.body.slug === slug && r.body.token, `${r.status} ${JSON.stringify(r.body)}`);
+    assert(r.body.share_url && r.body.share_url.endsWith(`/d/${slug}?doc=1&share=1`) && !('invite_url' in r.body), `share_url ${r.body.share_url}`);
+    const posted = await call('/api/comments', { method: 'POST', headers: { Authorization: `Bearer ${r.body.token}` }, body: { slug, version: 1, text: 'invited and here', anchor: { kind: 'product', url: `${site}/`, selector: 'main' } } });
+    assert(posted.status === 200, `comment ${posted.status} ${JSON.stringify(posted.body)}`);
   });
 
   await t('another site cannot borrow the space', async () => {
-    const r = await call('/api/feedback/connect', { method: 'POST', cookie: owner.cookie, headers: home, body: { origin: 'https://evil.example', space: slug } });
+    const r = await connectAs(owner, 'https://evil.example');
     assert(r.status === 403 && r.body.error === 'origin_not_allowed', `${r.status}`);
   });
 
-  await t('anyone signed in: a visitor connects and comments into the site\'s space', async () => {
-    await call('/api/feedback/site', { method: 'POST', cookie: owner.cookie, headers: home, body: { slug, origins: [site], mode: 'public' } });
-    const c = await call('/api/feedback/connect', { method: 'POST', cookie: visitor.cookie, headers: home, body: { origin: site, space: slug } });
+  await t('a team space: members comment, outsiders are refused, a pending invitee joins on connect', async () => {
+    const made = await call('/api/teams', { method: 'POST', cookie: owner.cookie, headers: home, body: { name: 'Acme', invites: ['mate', 'newbie'] } });
+    assert(made.status === 200, `team ${made.status} ${JSON.stringify(made.body)}`);
+    const teamId = made.body.team.id;
+    const accepted = await call('/api/team/accept-invite', { method: 'POST', cookie: mate.cookie, headers: home, body: { id: teamId } });
+    assert(accepted.status === 200, `accept ${accepted.status}`);
+    const moved = await call('/api/team/move', { method: 'POST', cookie: owner.cookie, headers: home, body: { slugs: [slug], team: teamId } });
+    assert(moved.status === 200, `move ${moved.status} ${JSON.stringify(moved.body)}`);
+    // Still bound: moving is not unbinding.
+    const m = await connectAs(mate);
+    assert(m.status === 200 && m.body.token, `member ${m.status} ${JSON.stringify(m.body)}`);
+    const posted = await call('/api/comments', { method: 'POST', headers: { Authorization: `Bearer ${m.body.token}` }, body: { slug, version: 1, text: 'teammate here', anchor: { kind: 'product', url: `${site}/`, selector: 'main' } } });
+    assert(posted.status === 200, `member comment ${posted.status}`);
+    const out = await connectAs(visitor);
+    assert(out.status === 403 && out.body.error === 'not_invited', `outsider ${out.status}`);
+    const n = await connectAs(newbie);
+    assert(n.status === 200 && n.body.token, `invitee ${n.status} ${JSON.stringify(n.body)}`);
+    const team = await call(`/api/team?id=${teamId}`, { cookie: newbie.cookie, headers: home });
+    assert(team.status === 200 && !(team.body.team.invites || []).includes('newbie'), `invitee did not join ${team.status} ${JSON.stringify(team.body)}`);
+    // Back out of the team so the next cases see a personal space again.
+    await call('/api/team/move', { method: 'POST', cookie: owner.cookie, headers: home, body: { slugs: [slug], team: null } });
+    await patchAccess({ visibility: 'unlisted', commenting: 'signed_in' });
+  });
+
+  await t('anyone signed in (link + signed-in commenting in Share): a visitor connects and comments', async () => {
+    const c = await connectAs(visitor);
     assert(c.status === 200 && c.body.slug === slug && c.body.token, `${c.status} ${JSON.stringify(c.body)}`);
     const auth = { Authorization: `Bearer ${c.body.token}` };
     const session = await call('/api/feedback/session', { headers: auth });
@@ -69,10 +115,10 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   await t('the owner\'s agent binds, reads and unbinds with its upload token (tdoc-site); others cannot', async () => {
     const bearer = (tok) => ({ Authorization: `Bearer ${tok}` });
     const r = await call('/api/feedback/site', { method: 'POST', headers: bearer(owner.token), body: { slug, origins: [site, 'https://www.example.com'], mode: 'public' } });
-    assert(r.status === 200 && r.body.site.origins.length === 2 && r.body.site.mode === 'public', `bearer bind ${r.status} ${JSON.stringify(r.body)}`);
+    assert(r.status === 200 && r.body.site.origins.length === 2 && !('mode' in r.body.site) && r.body.access.commenting === 'signed_in', `bearer bind ${r.status} ${JSON.stringify(r.body)}`);
     assert(r.body.snippet.includes(`data-tdoc-space="${slug}"`), 'no snippet');
     const read = await call(`/api/feedback/site?slug=${slug}`, { headers: bearer(owner.token) });
-    assert(read.status === 200 && read.body.site.mode === 'public' && read.body.snippet, `read ${read.status} ${JSON.stringify(read.body)}`);
+    assert(read.status === 200 && read.body.site.origins.length === 2 && read.body.snippet, `read ${read.status} ${JSON.stringify(read.body)}`);
     const notOwner = await call('/api/feedback/site', { method: 'POST', headers: bearer(visitor.token), body: { slug, origins: ['https://evil.example'] } });
     assert(notOwner.status === 403, `non-owner token bound: ${notOwner.status}`);
     const notOwnerRead = await call(`/api/feedback/site?slug=${slug}`, { headers: bearer(visitor.token) });

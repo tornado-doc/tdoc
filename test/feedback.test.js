@@ -178,11 +178,12 @@ const APP = 'http://localhost:3000';
     body: JSON.stringify({ slug }),
   });
 
-  await t('an invite puts a teammate in the same space: their next connect lands there', async () => {
+  await t('a shared link puts a teammate in the same space: their next connect lands there', async () => {
     const env = makeEnv(mod.CommentsStore);
     const julie = await putSession(env, 'julie');
     const { body: space } = await connect(env, julie);
-    assert(space.invite_url === `https://tdoc.dev/d/${space.slug}`, `invite_url ${space.invite_url}`);
+    // Share is the space doc's own Share dialog, as on any doc.
+    assert(space.share_url === `https://tdoc.dev/d/${space.slug}?doc=1&share=1` && !space.invite_url, `share_url ${space.share_url}`);
     assert(space.origin === APP, `origin ${space.origin}`);
     const can = await putSession(env, 'can');
     // One link: the space's own page lists the comments and offers Join.
