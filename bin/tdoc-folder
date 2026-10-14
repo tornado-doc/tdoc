@@ -54,14 +54,18 @@ fi
 BASE="${BASE%/}"
 
 # api <METHOD> <path> [json body] — prints the body; fails on non-2xx or an
-# "error" key, printing a readable reason.
+# "error" key, printing a readable reason. An error named in $API_SOFT_ERR
+# returns 4 silently, so the caller can retry it.
+API_SOFT_ERR=""
 api() {
-  local resp http body
+  local resp http body err
   resp="$(curl -sS --connect-timeout 10 --max-time 30 -w $'\n%{http_code}' -X "$1" "$BASE$2" \
     -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
     ${3:+-H "Content-Type: application/json" -d "$3"})" || { echo "[tdoc] no response from $BASE$2" >&2; return 1; }
   http="${resp##*$'\n'}"; body="${resp%$'\n'*}"
-  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$' || [ -n "$(printf '%s' "$body" | json_get error)" ]; then
+  err="$(printf '%s' "$body" | json_get error)"
+  if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$' || [ -n "$err" ]; then
+    if [ -n "$API_SOFT_ERR" ] && [ "$err" = "$API_SOFT_ERR" ]; then return 4; fi
     explain "$body" "$http"; return 1
   fi
   printf '%s' "$body"
@@ -78,6 +82,7 @@ explain() {
     too_many_folders) echo "[tdoc] folder limit reached ($(printf '%s' "$1" | json_get limit))." >&2 ;;
     too_deep) echo "[tdoc] folders nest at most $(printf '%s' "$1" | json_get limit) deep." >&2 ;;
     duplicate_name) echo "[tdoc] a folder by that name is already there." >&2 ;;
+    folder_not_found) echo "[tdoc] that folder is not in $SPACE (tdoc-folder list${TEAM:+ --team \"$TEAM\"})." >&2 ;;
     *) echo "[tdoc] request failed (HTTP $2): $1" >&2 ;;
   esac
 }
@@ -105,10 +110,61 @@ TEAM_Q="${TEAM_ID:+?team=$TEAM_ID}"
 TEAM_JSON="$( [ -n "$TEAM_ID" ] && json_str "$TEAM_ID" || printf null)"
 SPACE="$( [ -n "$TEAM_ID" ] && printf 'team %s' "$TEAM" || printf 'My docs')"
 
+# Folders made from this machine in the last two minutes, per space. The
+# server's folder list is an edge-cached KV read that can lag a create by up
+# to a minute, so a second run right after the first would not see the
+# folder it made and make another. Remembered ones are merged into the list
+# and sent back as hints the server accepts only while they are that fresh.
+RECENT_FILE="$HOME/.tdoc/folders-recent.json"
+SPACE_KEY="${TEAM_ID:-me}"
+# recent <op> [json] — get: this space's fresh entries (JSON array);
+# add <folder json>: remember one; forget <id>: drop one.
+recent() {
+  node -e '(() => {
+    const fs = require("fs");
+    const [file, space, op, arg] = process.argv.slice(1);
+    let all = []; try { all = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+    if (!Array.isArray(all)) all = [];
+    const now = Date.now();
+    const at = (id) => { const m = /^f_(\d{13})_/.exec(String(id || "")); return m ? Number(m[1]) : 0; };
+    all = all.filter((e) => e && e.folder && now - at(e.folder.id) < 110000 && at(e.folder.id) - now < 30000);
+    if (op === "get") { process.stdout.write(JSON.stringify(all.filter((e) => e.space === space).map((e) => e.folder))); return; }
+    if (op === "add") {
+      const f = JSON.parse(arg);
+      if (!at(f.id)) return;
+      all = all.filter((e) => e.folder.id !== f.id);
+      all.push({ space, folder: { id: f.id, name: f.name, parent: f.parent || null } });
+    }
+    if (op === "forget") all = all.filter((e) => e.folder.id !== arg);
+    try { fs.mkdirSync(require("path").dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(all)); } catch {}
+  })()' "$RECENT_FILE" "$SPACE_KEY" "$@" 2>/dev/null || { [ "$1" = get ] && printf '[]'; }
+}
+
 # One GET per run: load_folders runs in this shell (not a $(...) subshell),
-# so resolve can read the result without asking again.
+# so resolve can read the result without asking again. Fresh folders this
+# machine made that the (possibly stale) list lacks are merged in.
 FOLDERS_JSON=""
-load_folders() { [ -n "$FOLDERS_JSON" ] || FOLDERS_JSON="$(api GET "/api/folders$TEAM_Q")"; }
+load_folders() {
+  [ -z "$FOLDERS_JSON" ] || return 0
+  FOLDERS_JSON="$(api GET "/api/folders$TEAM_Q")" || return 1
+  FOLDERS_JSON="$(printf '%s' "$FOLDERS_JSON" | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      const b = JSON.parse(s); b.folders = b.folders || [];
+      const ids = new Set(b.folders.map((f) => f.id));
+      for (const f of JSON.parse(process.argv[1] || "[]")) if (!ids.has(f.id)) b.folders.push(f);
+      process.stdout.write(JSON.stringify(b));
+    });' "$(recent get)")"
+}
+
+# folder_def <id> — {id,name,parent} of a listed folder, for the server to
+# put back if its read is stale; null when unknown.
+folder_def() {
+  printf '%s' "$FOLDERS_JSON" | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      let f = null; try { f = (JSON.parse(s).folders || []).find((x) => x.id === process.argv[1]); } catch {}
+      process.stdout.write(f ? JSON.stringify({ id: f.id, name: f.name, parent: f.parent || null }) : "null");
+    });' "$1"
+}
 
 # resolve <folder> — prints the folder id; exit 3 when there is no such folder.
 resolve() {
@@ -139,17 +195,25 @@ require_folder() {
   printf '%s' "$id"
 }
 
-# create_folder <name> — idempotent; prints the folder id.
+# create_folder <name> — idempotent; prints the folder's {id,name,parent}
+# JSON, which the caller hands straight to the move (never re-listed: the
+# list may not show it yet).
 create_folder() {
-  local parent_id="" resp
+  local parent_id="" resp def
   if [ -n "$PARENT" ]; then parent_id="$(require_folder "$PARENT")" || return 1; fi
-  resp="$(api POST /api/folders "{\"name\":$(json_str "$1"),\"parent\":$( [ -n "$parent_id" ] && json_str "$parent_id" || printf null),\"team\":$TEAM_JSON,\"existing_ok\":true}")" || return 1
+  resp="$(api POST /api/folders "{\"name\":$(json_str "$1"),\"parent\":$( [ -n "$parent_id" ] && json_str "$parent_id" || printf null),\"team\":$TEAM_JSON,\"existing_ok\":true,\"known\":$(recent get)}")" || return 1
+  def="$(printf '%s' "$resp" | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      const f = JSON.parse(s).folder || {};
+      process.stdout.write(JSON.stringify({ id: f.id, name: f.name, parent: f.parent || null }));
+    });')"
   if [ "$(printf '%s' "$resp" | json_get existed)" = "true" ]; then
     echo "[tdoc] folder \"$1\" already in $SPACE ($(printf '%s' "$resp" | json_get folder.id))" >&2
   else
     echo "[tdoc] created folder \"$1\" in $SPACE ($(printf '%s' "$resp" | json_get folder.id))" >&2
   fi
-  printf '%s' "$resp" | json_get folder.id
+  recent add "$def"
+  printf '%s' "$def"
 }
 
 slugs_json() { printf '%s\n' "$@" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))'; }
@@ -186,15 +250,24 @@ case "$CMD" in
       [ -n "$FOLDER" ] || { echo "[tdoc] add needs --folder <folder>" >&2; exit 2; }
       rc=0; FID="$(resolve "$FOLDER")" || rc=$?
       if [ "$rc" = 3 ] && [ "$CREATE" = 1 ]; then
-        FID="$(create_folder "$FOLDER")" || exit 1
+        DEF="$(create_folder "$FOLDER")" || exit 1
+        FID="$(printf '%s' "$DEF" | json_get id)"
       elif [ "$rc" = 3 ]; then
         echo "[tdoc] no folder \"$FOLDER\" in $SPACE; pass --create to make it." >&2; exit 1
-      elif [ "$rc" != 0 ]; then exit 1; fi
-      DEST="$(json_str "$FID")"
+      elif [ "$rc" != 0 ]; then exit 1
+      else DEF="$(folder_def "$FID")"; fi
+      DEST="$(json_str "$FID"),\"folder_def\":$DEF"
     else
       DEST=null
     fi
-    resp="$(api POST /api/folders/move "{\"slugs\":$(slugs_json "${ARGS[@]}"),\"folder\":$DEST,\"team\":$TEAM_JSON}")" || exit 1
+    MOVE_BODY="{\"slugs\":$(slugs_json "${ARGS[@]}"),\"folder\":$DEST,\"team\":$TEAM_JSON}"
+    # A folder made a moment ago can still read as missing at another edge;
+    # one short retry covers that before giving up.
+    rc=0; resp="$(API_SOFT_ERR=folder_not_found api POST /api/folders/move "$MOVE_BODY")" || rc=$?
+    if [ "$rc" = 4 ]; then
+      sleep "${TDOC_FOLDER_RETRY_DELAY:-3}"
+      resp="$(api POST /api/folders/move "$MOVE_BODY")" || exit 1
+    elif [ "$rc" != 0 ]; then exit 1; fi
     if [ "$CMD" = add ]; then echo "[tdoc] in $SPACE / $FOLDER: ${ARGS[*]}"; else echo "[tdoc] top level of $SPACE: ${ARGS[*]}"; fi
     ;;
   rename)
@@ -207,6 +280,7 @@ case "$CMD" in
     [ "${#ARGS[@]}" -eq 1 ] || usage
     FID="$(require_folder "${ARGS[0]}")" || exit 1
     api DELETE "/api/folders?id=$FID${TEAM_ID:+&team=$TEAM_ID}" >/dev/null || exit 1
+    recent forget "$FID"
     echo "[tdoc] deleted folder ${ARGS[0]}; its docs moved up a level."
     ;;
 esac

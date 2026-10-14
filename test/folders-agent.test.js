@@ -2,7 +2,44 @@
 // in My docs and in a team's shared folders, with the same rules as the
 // browser. Runs worker.js in-process with fake bindings.
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const http = require('http');
+const { spawn } = require('child_process');
 const { loadWorker, makeEnv, req, issue, bootData } = require('./helpers/worker-harness.js');
+
+// Workers KV as seen from an edge that cached a folder blob: after a put, the
+// next `reads` gets of that key still return what was there before it.
+function staleFolders(kv, reads) {
+  const lag = new Map();
+  const stale = (k) => /^(team-)?folders:/.test(k);
+  const get = kv.get.bind(kv);
+  const put = kv.put.bind(kv);
+  kv.get = async (k) => {
+    const l = lag.get(k);
+    if (l && l.reads > 0) { l.reads -= 1; kv.gets.push(k); return l.prev; }
+    return get(k);
+  };
+  kv.put = async (k, v, opts) => {
+    if (stale(k)) lag.set(k, { prev: await kv.get(k), reads });
+    if (lag.has(k)) lag.get(k).reads = reads;
+    return put(k, v, opts);
+  };
+  kv.settle = () => lag.clear();
+  kv.truth = async (k) => { const raw = await get(k); return raw ? JSON.parse(raw) : null; };
+  return kv;
+}
+
+function runBin(bin, args, env) {
+  return new Promise((resolve) => {
+    const child = spawn(bin, args, { env });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
 
 let pass = 0, fail = 0;
 async function t(n, fn) {
@@ -149,6 +186,143 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(back.status === 200, `move out ${back.status}`);
     const meta = JSON.parse(await env.META.get('meta:team-daily'));
     assert(!meta.workspace_id && !('team_folder' in meta), `team folder left behind ${JSON.stringify(meta)}`);
+  });
+
+  // ---- stale KV (edge-cached reads) ----
+  // Two isolates of the worker share one KV whose folder reads lag writes:
+  // `A` takes the folder creates, `B` everything else, so B never sees A's
+  // write through its own memory -- the cross-edge case the CLI hit.
+  console.log('folders under stale KV reads (two isolates)');
+  const workerB = (await loadWorker()).default;
+  const senv = makeEnv(mod.CommentsStore);
+  staleFolders(senv.META, 1000);
+  const onA = async (path, opts = {}) => {
+    const r = await worker.fetch(req(path, opts), senv, {});
+    return { status: r.status, body: await r.json() };
+  };
+  const onB = async (path, opts = {}) => {
+    const r = await workerB.fetch(req(path, opts), senv, {});
+    return { status: r.status, body: await r.json() };
+  };
+  const kim = await issue(worker, senv, 'kim');
+  const lee = await issue(worker, senv, 'lee');
+  for (const slug of ['kim-1', 'kim-2', 'kim-3', 'kim-t1', 'kim-t2']) {
+    const up = await onA('/api/upload', { method: 'POST', token: kim.token, body: { slug, version: 1, html: `<p>${slug}</p>` } });
+    assert(up.status === 200, `upload ${slug} ${up.status}`);
+  }
+
+  await t('stale read: create then move elsewhere fails without the folder def, files with it, and keeps the folder', async () => {
+    const older = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Older' } })).body.folder;
+    senv.META.settle();
+    const made = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: '日报', existing_ok: true } })).body.folder;
+    const bare = await onB('/api/folders/move', { method: 'POST', token: kim.token, body: { slugs: ['kim-1'], folder: made.id } });
+    assert(bare.status === 404 && bare.body.error === 'folder_not_found', `the bug no longer reproduces? ${bare.status}`);
+    const def = { id: made.id, name: made.name, parent: null };
+    const moved = await onB('/api/folders/move', { method: 'POST', token: kim.token, body: { slugs: ['kim-1'], folder: made.id, folder_def: def } });
+    assert(moved.status === 200 && moved.body.folder === made.id && moved.body.changed === 1, `move with def ${moved.status} ${JSON.stringify(moved.body)}`);
+    const truth = await senv.META.truth('folders:kim');
+    assert(truth.folders.some((f) => f.id === made.id) && truth.folders.some((f) => f.id === older.id), `folder lost ${JSON.stringify(truth)}`);
+    assert(truth.docs['kim-1'] === made.id, 'doc not filed');
+    // Someone else's folder id, or an old one, is not taken on the client's word.
+    const old = { id: `f_${Date.now() - 10 * 60 * 1000}_0123abcd`, name: 'Ghost', parent: null };
+    const ghost = await onB('/api/folders/move', { method: 'POST', token: kim.token, body: { slugs: ['kim-2'], folder: old.id, folder_def: old } });
+    assert(ghost.status === 404 && ghost.body.error === 'folder_not_found', `old def resurrected ${ghost.status}`);
+    const forged = { id: `f_${Date.now()}_0123abcd`, name: '', parent: null };
+    const bad = await onB('/api/folders/move', { method: 'POST', token: kim.token, body: { slugs: ['kim-2'], folder: forged.id, folder_def: forged } });
+    assert(bad.status === 404, `invalid def accepted ${bad.status}`);
+  });
+
+  await t('stale read: a create that cannot see a fresh folder neither duplicates nor drops it when told about it', async () => {
+    senv.META.settle();
+    const first = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Weekly', existing_ok: true } })).body.folder;
+    const known = [{ id: first.id, name: first.name, parent: null }];
+    const again = await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'weekly', existing_ok: true, known } });
+    assert(again.status === 200 && again.body.existed === true && again.body.folder.id === first.id, `re-create ${JSON.stringify(again.body)}`);
+    const other = await onB('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Monthly', existing_ok: true, known } });
+    assert(other.status === 200 && !other.body.existed, `other create ${other.status}`);
+    const names = (await senv.META.truth('folders:kim')).folders.map((f) => f.name).sort();
+    assert(JSON.stringify(names) === JSON.stringify(['Monthly', 'Older', 'Weekly', '日报']), `folders ${names}`);
+  });
+
+  await t('same isolate: a move right after a create reads its own write, even within the same millisecond', async () => {
+    senv.META.settle();
+    // A fast machine makes the stale value and the new one in one ms: the
+    // tie must still go to this isolate's own write, not the stale read.
+    const realNow = Date.now;
+    const frozen = realNow();
+    Date.now = () => frozen;
+    try {
+      await onB('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Same ms' } });
+      const made = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Same edge' } })).body.folder;
+      const moved = await onA('/api/folders/move', { method: 'POST', token: kim.token, body: { slugs: ['kim-3'], folder: made.id } });
+      assert(moved.status === 200, `same-isolate move ${moved.status} ${JSON.stringify(moved.body)}`);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  await t('team: a twin made by racing creates is filed into, not duplicated', async () => {
+    senv.META.settle();
+    const tm = (await onA('/api/teams', { method: 'POST', token: kim.token, body: { name: 'Racers' } })).body.team;
+    const a = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Daily', team: tm.id } })).body.folder;
+    senv.META.settle();
+    const b = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Elsewhere', team: tm.id } })).body.folder;
+    // B still reads the tree with Daily but not Elsewhere; a def of a fresh
+    // same-named "Daily" (another run's) resolves to the one B sees.
+    const twin = { id: `f_${Date.now()}_00ff00ff`, name: 'daily', parent: null };
+    for (const slug of ['kim-t1']) await onA('/api/team/move', { method: 'POST', token: kim.token, body: { team: tm.id, slugs: [slug] } });
+    const moved = await onB('/api/folders/move', { method: 'POST', token: kim.token, body: { team: tm.id, slugs: ['kim-t1'], folder: twin.id, folder_def: twin } });
+    assert(moved.status === 200 && moved.body.folder === a.id, `twin ${JSON.stringify(moved.body)}`);
+    const fresh = await onB('/api/folders/move', { method: 'POST', token: kim.token, body: { team: tm.id, slugs: ['kim-t1'], folder: b.id, folder_def: { id: b.id, name: b.name, parent: null } } });
+    assert(fresh.status === 200 && fresh.body.folder === b.id, `fresh team folder ${JSON.stringify(fresh.body)}`);
+    const outsider = await onB('/api/folders/move', { method: 'POST', token: lee.token, body: { team: tm.id, slugs: ['kim-t1'], folder: b.id, folder_def: { id: b.id, name: b.name } } });
+    assert(outsider.status === 404 && outsider.body.error === 'team_not_found', `outsider ${outsider.status}`);
+  });
+
+  await t('CLI: two rapid tdoc-move --folder runs under stale reads make one folder, file both docs, lose none', async () => {
+    senv.META.settle();
+    const tm = (await onA('/api/teams', { method: 'POST', token: kim.token, body: { name: 'BeFreed' } })).body.team;
+    const keep = (await onA('/api/folders', { method: 'POST', token: kim.token, body: { name: 'Keep me', team: tm.id } })).body.folder;
+    senv.META.settle();
+    // Creates alternate between two more isolates, so the second run's
+    // create (if any) cannot see the first's through isolate memory either.
+    const creators = [(await loadWorker()).default, (await loadWorker()).default];
+    let creates = 0;
+    const server = http.createServer((q, s) => {
+      let b = '';
+      q.on('data', (d) => { b += d; }).on('end', async () => {
+        const u = new URL(q.url, 'https://tdoc.dev');
+        const w = q.method === 'POST' && u.pathname === '/api/folders' ? creators[creates++ % 2] : workerB;
+        const r = await w.fetch(new Request(`https://tdoc.dev${u.pathname}${u.search}`, {
+          method: q.method, headers: { authorization: q.headers.authorization || '', 'content-type': 'application/json' }, body: b || undefined,
+        }), senv, {});
+        s.writeHead(r.status, { 'content-type': 'application/json' });
+        s.end(await r.text());
+      });
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-stale-'));
+    try {
+      fs.mkdirSync(path.join(home, '.tdoc'));
+      fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${server.address().port}`, upload_token: kim.token }));
+      const env = { ...process.env, HOME: home, TDOC_FOLDER_RETRY_DELAY: '0' };
+      const bin = path.join(__dirname, '..', 'bin', 'tdoc-move');
+      for (const slug of ['kim-t2', 'kim-2']) {
+        const r = await runBin(bin, ['--team', 'BeFreed', '--folder', '日报', slug], env);
+        assert(r.status === 0, `tdoc-move ${slug}: ${r.status}\n${r.stderr}`);
+      }
+      const truth = await senv.META.truth(`team-folders:${tm.id}`);
+      const daily = truth.folders.filter((f) => f.name === '日报');
+      assert(daily.length === 1, `expected one 日报, got ${JSON.stringify(truth.folders)}`);
+      assert(truth.folders.some((f) => f.id === keep.id), 'an existing folder was lost');
+      for (const slug of ['kim-t2', 'kim-2']) {
+        const meta = JSON.parse(await senv.META.get(`meta:${slug}`));
+        assert(meta.workspace_id === tm.id && meta.team_folder === daily[0].id, `${slug} not filed: ${JSON.stringify(meta)}`);
+      }
+    } finally {
+      server.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
