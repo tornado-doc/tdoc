@@ -3,7 +3,7 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Webhook } from 'lucide-react';
+import { Terminal, Webhook } from 'lucide-react';
 import { RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
@@ -52,6 +52,9 @@ export function providerMeta(t) {
   if (p === 'webhook') {
     return { key: 'webhook', label: 'Webhook', mark: 'webhook' };
   }
+  if (p === 'local') {
+    return { key: 'local', label: 'Local', mark: 'local' };
+  }
   return { key: p || 'agent', label: p ? p[0].toUpperCase() + p.slice(1) : 'agent', mark: '' };
 }
 
@@ -72,9 +75,10 @@ function recipientPrimary(t) {
 function recipientOption(t, preselected) {
   const { label } = providerMeta(t);
   const who = readableHandle(t) || `${label} agent`;
-  const where = t.provider === 'raft' && t.server_slug ? ` · ${t.server_slug}` : (t.provider === 'raft' ? '' : ` · ${label}`);
+  // A local agent's name already says where it is ("claude on juliesmac").
+  const where = t.provider === 'raft' && t.server_slug ? ` · ${t.server_slug}` : (t.provider === 'raft' || t.provider === 'local' ? '' : ` · ${label}`);
   const why = agentDown(t)
-    ? `${t.status} in Raft`
+    ? (t.provider === 'local' ? localSeenText(t) : `${t.status} in Raft`)
     : sameTarget(t, preselected)
       ? (t.source === 'doc' ? "this doc's agent" : 'default')
       : (t.last_touched ? `used ${sinceText(t.last_touched)}` : '');
@@ -86,6 +90,14 @@ function recipientOption(t, preselected) {
 // picked up until someone starts the agent.
 export function agentDown(t) {
   return !!t && (t.status === 'stopped' || t.status === 'inactive');
+}
+
+// A local agent is reachable exactly when its daemon has checked in lately;
+// the worker stamps last_seen from the daemon's polls (at most every 10 min).
+export function localSeenText(t) {
+  if (!t || t.provider !== 'local') return '';
+  if (!t.last_seen) return 'daemon not seen yet';
+  return t.status === 'inactive' ? `daemon not seen since ${sinceText(t.last_seen)}` : `seen ${sinceText(t.last_seen)}`;
 }
 
 // "smarter-tdoc-claw", or "your Raft agent" when the handle is unreadable.
@@ -119,6 +131,7 @@ export function ProviderMark({ target, size = 18 }) {
   const meta = providerMeta(target);
   if (meta.mark === 'raft') return <RaftMark size={size} />;
   if (meta.mark === 'webhook') return <Webhook size={size} aria-hidden="true" />;
+  if (meta.mark === 'local') return <Terminal size={size} aria-hidden="true" />;
   return <span className="tdoc-notify-provider-fallback" aria-hidden="true">{meta.label.slice(0, 1)}</span>;
 }
 
@@ -152,6 +165,7 @@ export function deliveryErrorText(code) {
   if (/^event_/.test(c)) return "Raft didn't accept the message";
   if (c === 'webhook_timeout') return "the webhook didn't answer within 8 seconds";
   if (c === 'webhook_secret_missing') return 'this webhook needs to be added again';
+  if (c === 'agent_run_failed') return 'the local agent run failed (see ~/.tdoc/daemon/daemon.log on that computer); Resend queues it again';
   const m = c.match(/^webhook_(\d{3})$/);
   if (m) return `the webhook answered ${m[1]}`;
   return c;
@@ -174,6 +188,10 @@ export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I ca
 // next connector is one more entry here (name, what it is, how to connect),
 // and the Send to agent panel lists whatever is in it when nothing is
 // connected yet.
+// What a person pastes into Claude Code or Codex on their own computer: the
+// agent starts the daemon (bin/tdoc-daemon), which registers that computer.
+export const LOCAL_DAEMON_PROMPT = 'Let tdoc hand me comments on this computer: use the tdoc skill and run bin/tdoc-daemon start.';
+
 export const AGENT_CONNECTORS = [
   {
     id: 'raft',
@@ -182,6 +200,13 @@ export const AGENT_CONNECTORS = [
     blurb: 'Sign in with Raft once; every agent on that server gets the comments on the docs it writes.',
     action: { label: 'Connect with Raft', href: '/api/me/connectors/raft/start' },
     prompt: CONNECT_AGENT_PROMPT,
+  },
+  {
+    id: 'local',
+    name: 'Local agent',
+    blurb: 'Claude Code or Codex on your own computer. A small daemon picks up comments while it runs; nothing to host.',
+    action: { label: 'Set up', href: '/me/agents?tab=send' },
+    prompt: LOCAL_DAEMON_PROMPT,
   },
   {
     id: 'webhook',
