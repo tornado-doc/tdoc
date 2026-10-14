@@ -373,3 +373,25 @@ export function acceptTeamInvite(id) {
 export function moveDocsToTeam(slugs, team) {
   return teamRequest('/api/team/move', 'POST', { slugs, team: team || null });
 }
+
+// A whole My docs folder into a team. The server moves a bounded batch per
+// call and says how many are `remaining`; each call hands back the team
+// folders it made (`known`) and the docs already moved (`done`) so a stale
+// read on the next one neither duplicates a folder nor re-reads every doc.
+export async function moveFolderToTeam(folder, team, onProgress) {
+  let known = [];
+  const done = [];
+  let moved = 0;
+  const skipped = [];
+  for (let round = 0; round < 100; round += 1) {
+    const r = await teamRequest('/api/folders/move-to-team', 'POST', { folder, team, known, done });
+    const progress = (r.results || []).filter((x) => !(x.status === 'skipped' && x.reason === 'not_owner'));
+    known = r.folders || known;
+    for (const x of progress) done.push(x.slug);
+    for (const x of r.results || []) if (x.status === 'skipped' && !skipped.some((y) => y.slug === x.slug)) skipped.push(x);
+    moved += r.moved || 0;
+    if (onProgress) onProgress({ moved, remaining: r.remaining || 0 });
+    if (!r.remaining || !progress.length) return { ...r, moved, skipped };
+  }
+  throw new Error('The move did not finish; try again to pick up where it stopped.');
+}

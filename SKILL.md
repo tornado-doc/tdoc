@@ -1272,6 +1272,7 @@ bash "$SKILL_DIR/bin/tdoc-folder" remove <slug>... [--team BeFreed]     # back t
 bash "$SKILL_DIR/bin/tdoc-folder" rename <folder> <new name> | delete <folder>  [--team ...]
 bash "$SKILL_DIR/bin/tdoc-folder" share <folder> [--visibility unlisted|private|public] [--team ...]  # prints /f/<id>
 bash "$SKILL_DIR/bin/tdoc-folder" unshare <folder> [--team ...]          # the link stops working
+bash "$SKILL_DIR/bin/tdoc-folder" move-to-team <folder> --team BeFreed   # a whole My docs folder into a team
 ```
 
 - Recurring docs (daily reports): publish with `--team <t> --folder <f>`
@@ -1287,6 +1288,15 @@ bash "$SKILL_DIR/bin/tdoc-folder" unshare <folder> [--team ...]          # the l
   the folder's docs (not subfolders). It grants no doc access: each doc still
   opens only for whoever its own access allows, so a team-only doc stays
   hidden outside the team. `private` = you (team: its members) + invitees.
+- `move-to-team` moves a My docs folder with its subfolders and your docs into
+  a team: the same folders are made there (a same-named folder at the same
+  level is merged into), each doc moves like `tdoc-move --team` and is filed
+  in its folder, and the emptied My docs folders are removed (a folder's
+  share link goes with it). It loops in batches until done and prints the
+  team folder's `/me` link; re-running finishes an interrupted move. A doc
+  that is not yours is skipped and reported, and keeps its folder. There is
+  no reverse for a whole folder: move team docs back one by one
+  (`tdoc-move --personal` / "Move to My docs").
 
 
 ### Comment anchor stability (important for `/tdoc edit`)

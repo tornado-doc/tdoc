@@ -7,6 +7,7 @@ import { copyText } from '../document/model.js';
 import {
   createTeam,
   getTeam,
+  moveFolderToTeam,
   removeTeamMember,
   setTeamRole,
   updateTeam,
@@ -18,6 +19,7 @@ const ERRORS = {
   last_admin: 'Make someone else an admin first. A team always keeps at least one admin.',
   team_limit: 'You are in the maximum number of teams.',
   invalid_name: 'Give the team a name (up to 60 characters).',
+  too_many_folders: 'That team has too many folders to take these. Delete or merge some first.',
 };
 const message = (error) => ERRORS[error?.body?.error] || error?.message || 'Request failed';
 
@@ -305,6 +307,83 @@ export function MoveToTeamDialog({ teams, count, skipped = 0, onMove, onClose })
       {skipped ? (
         <p className="manage-hint">{skipped === 1 ? '1 selected doc is' : `${skipped} selected docs are`} not yours, so {skipped === 1 ? 'it stays' : 'they stay'} where {skipped === 1 ? 'it is' : 'they are'}. Only a doc&apos;s author can move it into a team.</p>
       ) : null}
+    </AppDialog>
+  );
+}
+
+// A My docs folder, with its subfolders and your docs, into a team: pick the
+// team, confirm, watch it go, land on the folder in the team.
+export function MoveFolderToTeamDialog({ folder, teams, docCount, onClose }) {
+  const [target, setTarget] = useState(null);
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [left, setLeft] = useState(null);
+  const docs = docCount === 1 ? '1 doc' : `${docCount} docs`;
+  const run = async () => {
+    setBusy(true);
+    setStatus('Moving…');
+    try {
+      const result = await moveFolderToTeam(folder.id, target.id, ({ moved, remaining }) => {
+        if (remaining) setStatus(`Moving… ${moved} of ${moved + remaining}`);
+      });
+      const href = `/me?team=${encodeURIComponent(target.id)}&folder=${encodeURIComponent(result.folder || '')}`;
+      if (!result.skipped.length) { location.href = href; return; }
+      setLeft({ href, count: result.skipped.length });
+      setStatus('');
+    } catch (error) {
+      setStatus(message(error));
+    }
+    setBusy(false);
+  };
+  const close = () => { if (!busy) onClose(); };
+  if (left) {
+    return (
+      <AppDialog
+        open
+        onOpenChange={(open) => { if (!open) close(); }}
+        title={`Moved to ${target.name}`}
+        actions={<button type="button" onClick={() => { location.href = left.href; }}>Open in {target.name}</button>}
+      >
+        <p>{left.count === 1 ? '1 doc was' : `${left.count} docs were`} not yours to move, so {left.count === 1 ? 'it stays' : 'they stay'} in {folder.name} in My docs.</p>
+      </AppDialog>
+    );
+  }
+  if (!target) {
+    return (
+      <AppDialog
+        open
+        onOpenChange={(open) => { if (!open) close(); }}
+        title={`Move ${folder.name} to a team`}
+        actions={<button type="button" onClick={close}>Cancel</button>}
+      >
+        <div className="move-list">
+          {teams.map((team) => (
+            <button key={team.id} type="button" onClick={() => setTarget(team)}>
+              <span className="tm-space-mark" aria-hidden="true" style={{ background: `hsl(${teamHue(team.id)} 55% 46%)` }}>
+                {String(team.name || '?').trim().slice(0, 1).toUpperCase()}
+              </span>
+              {team.name}
+            </button>
+          ))}
+        </div>
+      </AppDialog>
+    );
+  }
+  return (
+    <AppDialog
+      open
+      onOpenChange={(open) => { if (!open) close(); }}
+      title={`Move ${folder.name} to ${target.name}?`}
+      actions={(
+        <>
+          <button type="button" onClick={() => { setTarget(null); setStatus(''); }} disabled={busy}>Back</button>
+          <button type="button" className="primary folder-move-team-confirm" onClick={run} disabled={busy}>Move {docs}</button>
+        </>
+      )}
+    >
+      <p>{folder.name}, its subfolders and {docs} move into {target.name}. A folder with the same name there is merged into.</p>
+      <p className="manage-hint">The team becomes the owner and every member can open and comment. You stay the author. The emptied folders leave My docs.</p>
+      {status ? <p className="status" role="status">{status}</p> : null}
     </AppDialog>
   );
 }
