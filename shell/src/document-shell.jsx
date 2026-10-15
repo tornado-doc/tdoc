@@ -115,10 +115,19 @@ function OldVersionNotice({ value }) {
   return (
     <div className="tdoc-oldver-slot">
       <div className="tdoc-oldver-strip tdoc-oldver-visible">
-        <span>
-          You're viewing v{value.current} - the latest is{' '}
-          <a href={value.latestUrl}>v{value.latest}</a>
-        </span>
+        {value.fresh ? (
+          // Published while this page was open: say so, and let the reader
+          // move when they are ready instead of reloading under them.
+          <span role="status">
+            v{value.latest} was just published.{' '}
+            <a href={value.latestUrl}>Open v{value.latest}</a>
+          </span>
+        ) : (
+          <span>
+            You're viewing v{value.current} - the latest is{' '}
+            <a href={value.latestUrl}>v{value.latest}</a>
+          </span>
+        )}
       </div>
     </div>
   );
@@ -133,6 +142,9 @@ const RESOLVED_KEY = 'tdoc-show-resolved';
 // server — the agent pulling the comments, then publishing — so the card can
 // say "your agent is reading this" because it is, not because a timer ran.
 const HANDOFF_POLL_MS = 3000;
+// Live sync while a doc is open (see the effect in DocumentShell).
+const LIVE_SYNC_MIN_MS = (typeof window !== "undefined" && window.__TDOC_LIVE_SYNC_MS) || 20000;
+const LIVE_SYNC_MAX_MS = 60000;
 // Whether the block is open. The onboarding doc opens it; anywhere else the
 // reader's last choice holds.
 const HANDOFF_OPEN_KEY = 'tdoc-handoff-open';
@@ -946,6 +958,48 @@ export function DocumentShell({ boot, config }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [handoff.state, handoff.copiedAt, config.slug, config.version, commentsRefresh]);
 
+  // Live sync for anyone reading: replies (an agent's included) arrive in
+  // their threads, and a version published meanwhile is announced in the
+  // strip above the doc rather than navigated to. Only a visible tab polls;
+  // coming back to the tab checks at once; a quiet doc backs off to a minute.
+  // Before this, polling ran only while a handoff was still `sent`, so a
+  // reply that came after the agent picked the comment up needed a reload
+  // (Julie, 2026-10-15).
+  const [liveLatest, setLiveLatest] = useState(0);
+  useEffect(() => {
+    if (config.isLanding || config.mode === 'local' || !config.slug) return undefined;
+    let cancelled = false;
+    let timer = null;
+    let delay = LIVE_SYNC_MIN_MS;
+    let last = '';
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'hidden') { timer = window.setTimeout(tick, delay); return; }
+      let seen = '';
+      try {
+        const status = await getAgentStatus(config.slug);
+        const latest = Number(status?.latest_version) || 0;
+        if (!cancelled && latest) setLiveLatest(latest);
+        seen = String(latest);
+      } catch { /* next tick */ }
+      try { await commentsRefresh(); } catch { /* next tick */ }
+      if (cancelled) return;
+      const fingerprint = `${seen}|${(commentsRef.current || []).map((c) => `${c && c.id}:${(c && c.replies || []).length}:${c && c.status}`).join(',')}`;
+      delay = fingerprint === last ? Math.min(delay * 2, LIVE_SYNC_MAX_MS) : LIVE_SYNC_MIN_MS;
+      last = fingerprint;
+      timer = window.setTimeout(tick, delay);
+    };
+    timer = window.setTimeout(tick, LIVE_SYNC_MIN_MS);
+    const onVis = () => {
+      if (document.visibilityState !== 'visible' || cancelled) return;
+      delay = LIVE_SYNC_MIN_MS;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(tick, 300);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
+  }, [config.slug, config.isLanding, config.mode, commentsRefresh]);
+
   // Connected-App handoffs: while any comment is still `sent`, refresh so the
   // waiting tags and banner catch agent replies / resolve without a manual reload.
   // No outstanding sent → no requests. Hidden tab → pause. Back off when quiet.
@@ -1261,7 +1315,12 @@ export function DocumentShell({ boot, config }) {
           showToast('Diagram applied. Save the document to publish a new version.');
         }} />
       <div className="tdoc-reader-surface" hidden={comparing}>
-      <OldVersionNotice value={boot.oldVersion} />
+      <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
+        current: Number(config.version),
+        latest: liveLatest,
+        latestUrl: `/d/${encodeURIComponent(config.slug)}/v/${liveLatest}`,
+        fresh: true,
+      } : null)} />
 
       {notifyEnabled ? (
         <HandoffBanner
