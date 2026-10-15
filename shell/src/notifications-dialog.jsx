@@ -22,17 +22,24 @@ function notificationAction(item) {
   if (item.kind === 'reaction') return `reacted ${item.emoji || ''}${count > 1 ? ` and ${count - 1} more` : ''}`;
   if (item.kind === 'mention') return 'mentioned you';
   if (item.kind === 'reply') return `replied${count > 1 ? ` and ${count - 1} more replied` : ''}`;
-  if (item.kind === 'access_request') return `requested access${count > 1 ? ` and ${count - 1} more asked` : ''}`;
+  if (item.kind === 'access_request') return 'asked for access to';
+  if (item.kind === 'access_granted') return 'gave you access to';
   return `commented${count > 1 ? ` and ${count - 1} more commented` : ''}`;
 }
 
 // One line, for a desktop alert's title.
+function joiner(item) {
+  return item.kind === 'access_request' || item.kind === 'access_granted' ? '' : ' on';
+}
+
 export function notificationLabel(item) {
-  return `${actorName(item)} ${notificationAction(item)} on ${item.title || item.slug}`;
+  return `${actorName(item)} ${notificationAction(item)}${joiner(item)} ${item.title || item.slug}`;
 }
 
 export function notificationTarget(item) {
   if (!item?.slug) return '';
+  // Access is about the document, not a comment: open its latest version.
+  if (item.kind === 'access_request' || item.kind === 'access_granted') return `/d/${encodeURIComponent(item.slug)}`;
   const version = Math.max(1, Number(item.version) || 1);
   const target = item.comment_id || item.thread_id;
   const query = target ? `?comment=${encodeURIComponent(target)}` : '';
@@ -87,26 +94,34 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
       {notifications.loading && !notifications.items.length ? <p className="muted">Loading…</p> : null}
       {!notifications.loading && !notifications.items.length ? <p className="muted">No notifications yet.</p> : null}
       <div className="tdoc-notification-list">
-        {notifications.items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`tdoc-notif-row${item.read ? '' : ' unread'}`}
-            onClick={() => onSelect(item)}
-          >
-            {item.actor?.avatar_url
-              ? <img className="tdoc-notif-avatar" src={item.actor.avatar_url} alt="" />
-              : <span className="tdoc-notif-avatar tdoc-notif-avatar--anon" aria-hidden="true">{actorName(item).slice(0, 1).toUpperCase()}</span>}
-            <span className="tdoc-notif-main">
-              <span className="tdoc-notif-line">
-                <strong>{actorName(item)}</strong> {notificationAction(item)} on <span className="tdoc-notif-doc">{item.title || item.slug}</span>
-              </span>
-              {item.preview ? <span className="tdoc-notif-preview">{item.preview}</span> : null}
-              {item.kind === 'access_request' ? <span className="tdoc-notif-preview">Open Share to invite them.</span> : null}
-            </span>
-            <span className="tdoc-notif-time">{relativeTime(item.created || item.at || item.updated)}</span>
-          </button>
-        ))}
+        {notifications.items.map((item) => {
+          const pending = item.kind === 'access_request' && !item.resolved;
+          return (
+            <div key={item.id} className={`tdoc-notif-row${item.read ? '' : ' unread'}`}>
+              <button type="button" className="tdoc-notif-open" onClick={() => onSelect(item)}>
+                {item.actor?.avatar_url
+                  ? <img className="tdoc-notif-avatar" src={item.actor.avatar_url} alt="" />
+                  : <span className="tdoc-notif-avatar tdoc-notif-avatar--anon" aria-hidden="true">{actorName(item).slice(0, 1).toUpperCase()}</span>}
+                <span className="tdoc-notif-main">
+                  <span className="tdoc-notif-line">
+                    <strong>{actorName(item)}</strong> {notificationAction(item)}{joiner(item)} <span className="tdoc-notif-doc">{item.title || item.slug}</span>
+                  </span>
+                  {item.preview ? <span className="tdoc-notif-preview">{item.preview}</span> : null}
+                  {item.resolved === 'approved' ? <span className="tdoc-notif-preview">Approved. {actorName(item)} can open it now.</span> : null}
+                  {item.resolved === 'ignored' ? <span className="tdoc-notif-preview">Ignored.</span> : null}
+                </span>
+                <span className="tdoc-notif-time">{relativeTime(item.created || item.at || item.updated)}</span>
+              </button>
+              {pending ? (
+                // Answer it here: the request is the whole job, not a link to go find Share.
+                <span className="tdoc-notif-actions">
+                  <button type="button" className="primary" onClick={() => notifications.answerAccessRequest(item, 'approve')}>Approve</button>
+                  <button type="button" onClick={() => notifications.answerAccessRequest(item, 'ignore')}>Ignore</button>
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </AppDialog>
   );

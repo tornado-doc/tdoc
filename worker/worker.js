@@ -7943,7 +7943,8 @@ function inboxGroupKey(kind, slug, targetId) {
   if (kind === 'comment') return `comment:${slug}`;
   if (kind === 'reply') return `reply:${targetId}`;
   if (kind === 'reaction') return `reaction:${targetId}`;
-  if (kind === 'access_request') return `access_request:${slug}`;
+  // One row per person asking: each is approved or ignored on its own.
+  if (kind === 'access_request') return targetId ? `access_request:${slug}:${targetId}` : `access_request:${slug}`;
   return `other:${slug || 'x'}`;
 }
 
@@ -7985,6 +7986,7 @@ function applyInboxEvent(inbox, ev) {
     read: false,
     count: 1,
     emoji: ev.emoji || null,
+    ...(ev.requester ? { requester: ev.requester } : {}),
   };
   return { items: [row, ...items].slice(0, INBOX_MAX) };
 }
@@ -14073,8 +14075,13 @@ export default {
             id: `n_${Date.now()}_${rand(4)}`,
             kind: 'access_request',
             slug,
+            title: meta.title || slug,
+            // One row per person asking, so each can be approved on its own
+            // from the notification itself.
+            target_id: asker,
+            requester: asker,
             at: new Date().toISOString(),
-            actor: { login: asker, name: actorDisplayName(session) },
+            actor: { login: asker, name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
           });
           await env.META.put(key, JSON.stringify(next));
         }
@@ -14105,6 +14112,62 @@ export default {
           : 'The unsubscribe link is single-use and time-limited. If you still receive unwanted email, reply to it and the operator will remove you.',
         error: !done,
       });
+    }
+
+    // An access request is answered from the notification itself: Approve
+    // adds the person to the doc and tells them; Ignore just closes it. Either
+    // way the owner's notification row records the outcome, so the loop is
+    // closed where it was opened (Julie, 2026-10-14).
+    if (p === '/api/doc/access-request' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const { slug, requester, action } = body || {};
+      if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      if (action !== 'approve' && action !== 'ignore') return json({ error: 'invalid_action' }, { status: 400 });
+      const who = normalizeActorKey(requester);
+      if (!who) return json({ error: 'invalid_requester' }, { status: 400 });
+      const auth = await authorizeOwnerMutation(req, env, slug);
+      if (!auth.ok) return auth.response;
+      const meta = auth.meta || await loadDocMeta(env, slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      const title = meta.title || slug;
+      if (action === 'approve') {
+        const entry = who.startsWith('email:') ? who.slice('email:'.length) : who;
+        const allowed = accessFromMeta(meta).allowed_users;
+        if (!allowed.includes(entry)) {
+          const next = applyAccessPatch(meta, { allowed_users: allowed.concat(entry) });
+          if (next.error) return json({ error: next.error }, { status: 400 });
+          await putDocMetaJson(env, slug, JSON.stringify(next.meta));
+        }
+        const approver = auth.session || null;
+        const { key, inbox } = await loadInbox(env, who);
+        if (key) {
+          await env.META.put(key, JSON.stringify(applyInboxEvent(inbox, {
+            id: `n_${Date.now()}_${rand(4)}`,
+            kind: 'access_granted',
+            slug,
+            title,
+            at: new Date().toISOString(),
+            actor: approver
+              ? { login: actorKey(approver), name: actorDisplayName(approver), avatar_url: approver.avatar_url || '' }
+              : null,
+          })));
+        }
+      }
+      // A later request from the same person is a new question.
+      await env.META.delete(`access-req:${slug}:${who}`);
+      if (auth.session) {
+        for (const part of await loadViewerInboxes(env, auth.session)) {
+          let changed = false;
+          const items = part.inbox.items.map((i) => {
+            if (!i || i.kind !== 'access_request' || i.slug !== slug || normalizeActorKey(i.requester || (i.actor && i.actor.login)) !== who) return i;
+            changed = true;
+            return { ...i, read: true, resolved: action === 'approve' ? 'approved' : 'ignored' };
+          });
+          if (changed) await env.META.put(part.key, JSON.stringify({ items }));
+        }
+      }
+      return json({ ok: true, slug, requester: who, resolved: action === 'approve' ? 'approved' : 'ignored' });
     }
 
     if (p === '/api/doc/access' && method === 'PATCH') {

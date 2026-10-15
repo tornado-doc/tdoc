@@ -53,7 +53,7 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  async function open(width = 900) {
+  async function open(width = 900, extra = []) {
     const context = await browser.newContext({ viewport: { width, height: 760 } });
     await context.grantPermissions(['notifications'], { origin: base });
     const page = await context.newPage();
@@ -75,6 +75,7 @@ async function t(name, fn) {
       items: [row('n1', 'mention', 3), row('n2', 'reply', 50, { actor: { login: 'serena', name: 'Serena' }, preview: 'Done, updated the table.' }), row('n3', 'comment', 60 * 26, { read: true, count: 3, actor: { login: 'bob', name: 'Bob' }, preview: 'Typo in the second section.' })],
       posts: [],
     };
+    state.items = [...extra, ...state.items];
     const unread = () => state.items.filter((i) => !i.read).length;
     await page.route('**/api/notifications/unread', (r) => r.fulfill({ json: { unread: unread() } }));
     await page.route('**/api/notifications/read', (r) => {
@@ -84,6 +85,11 @@ async function t(name, fn) {
       return r.fulfill({ json: { ok: true, unread: unread() } });
     });
     await page.route('**/api/notifications?*', (r) => r.fulfill({ json: { items: state.items, unread: unread(), has_more: false } }));
+    await page.route('**/api/doc/access-request', (r) => {
+      const body = JSON.parse(r.request().postData());
+      state.posts.push(body);
+      return r.fulfill({ json: { ok: true, resolved: body.action === 'approve' ? 'approved' : 'ignored' } });
+    });
     await page.goto(base);
     const dialog = page.getByRole('dialog', { name: 'Notifications' });
     await dialog.waitFor();
@@ -103,7 +109,7 @@ async function t(name, fn) {
       assert.doesNotMatch(await rows.nth(2).getAttribute('class'), /\bunread\b/);
       assert.equal((await rows.nth(2).locator('.tdoc-notif-line').textContent()).trim(), 'Bob commented and 2 more commented on Q3 plan');
       assert.equal((await dialog.locator('.tdoc-notif-count').textContent()).trim(), '2 unread');
-      const pad = await rows.nth(0).evaluate((el) => parseFloat(getComputedStyle(el).paddingTop));
+      const pad = await rows.nth(0).locator('.tdoc-notif-open').evaluate((el) => parseFloat(getComputedStyle(el).paddingTop));
       assert.ok(pad >= 8, `rows are cramped (${pad}px padding)`);
       await shot(page, 'desktop');
       assert.deepEqual(errors, []);
@@ -164,6 +170,20 @@ async function t(name, fn) {
       const alerts = await page.evaluate(() => window.__alerts);
       assert.equal(alerts.length, 1, JSON.stringify(alerts));
       assert.equal(alerts[0].title, 'Dan commented on Q3 plan');
+      await context.close();
+    });
+
+    await t('an access request is answered on the notification: Approve closes it and says so', async () => {
+      const request = row('n6', 'access_request', 1, { actor: { login: 'claire', name: 'Claire' }, requester: 'claire', preview: '', comment_id: undefined });
+      const { context, page, dialog, state } = await open(900, [request]);
+      const first = dialog.locator('.tdoc-notif-row').first();
+      assert.equal((await first.locator('.tdoc-notif-line').textContent()).trim(), 'Claire asked for access to Q3 plan');
+      await shot(page, 'access-request');
+      await first.getByRole('button', { name: 'Approve', exact: true }).click();
+      await first.getByText('Approved. Claire can open it now.').waitFor();
+      assert.deepEqual(state.posts.at(-1), { slug: 'q3-plan', requester: 'claire', action: 'approve' });
+      assert.equal(await first.getByRole('button', { name: 'Approve', exact: true }).count(), 0, 'Approve is still offered after approving');
+      assert.doesNotMatch(await first.getAttribute('class'), /\bunread\b/);
       await context.close();
     });
 

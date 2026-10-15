@@ -33,6 +33,7 @@ const OFFLINE = [
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
   'ui-primitives.test.js',    // product UI uses shell/src/ui primitives; no native <select>
   'notifications-merge.test.js', // the bell reads every linked actor key (handle + email)
+  'access-request-actions.test.js', // access requests answered from the notification: approve / ignore
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
