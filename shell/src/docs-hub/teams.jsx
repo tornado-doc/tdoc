@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { DatabaseBackup, Link2, MessageSquareText, Plus, RefreshCw, UserRound, UsersRound } from 'lucide-react';
+import { DatabaseBackup, Link2, MessageSquareText, RefreshCw, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppSelect } from '../ui/select.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
@@ -53,48 +53,11 @@ function PersonRow({ member, name, sub, right }) {
   );
 }
 
-// The spaces, side by side and always in view (Julie, 2026-10-10: a title
-// that is secretly a dropdown is not where a first-time person looks for
-// their team). One pill per space, the current one filled; New team at the
-// end, so a person with no team yet learns that teams exist. On a phone the
-// row scrolls sideways instead of wrapping into a block.
 function teamHue(id) {
   let h = 0;
   for (const ch of String(id || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return h;
 }
-export function SpaceBar({ teams, space, onSpace, onNewTeam }) {
-  const pill = (id, label, icon) => (
-    <button
-      key={id || 'me'}
-      type="button"
-      role="tab"
-      aria-selected={space === id}
-      className={`tm-space${space === id ? ' is-active' : ''}`}
-      onClick={() => onSpace(id)}
-    >
-      {icon}
-      <span className="tm-space-name">{label}</span>
-    </button>
-  );
-  return (
-    <nav className="tm-spaces" aria-label="Spaces">
-      <div className="tm-spaces-row" role="tablist">
-        {pill('', 'My docs', <UserRound size={14} aria-hidden="true" />)}
-        {teams.map((team) => pill(team.id, team.name, (
-          <span className="tm-space-mark" aria-hidden="true" style={{ background: `hsl(${teamHue(team.id)} 55% 46%)` }}>
-            {String(team.name || '?').trim().slice(0, 1).toUpperCase()}
-          </span>
-        )))}
-        <button type="button" className="tm-space tm-space-new" onClick={onNewTeam}>
-          <Plus size={14} aria-hidden="true" />
-          <span className="tm-space-name">New team</span>
-        </button>
-      </div>
-    </nav>
-  );
-}
-
 export function TeamPane({ team, docs, viewer, menuFor, inFolder = false }) {
   return (
     <section className="pane" id="pane-team">

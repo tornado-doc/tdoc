@@ -49,14 +49,21 @@ t('agent pickers are searchable (AppCombobox)', () => {
     'AppCombobox must look like AppSelect closed and open the same menu popup above dialogs');
 });
 
-t('spaces are visible pills above the title, not a dropdown hidden in it', () => {
-  // Julie, 2026-10-10: a first-time person does not find their team behind a
-  // title that is secretly a menu.
+t('one space switcher: in the top bar, on every page; no second set of pills', () => {
+  // Julie, 2026-10-16: switch workspace from the top-right like Notion. The
+  // pill row it replaced (2026-10-10) must not come back beside it.
   const hub = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub.jsx'), 'utf8');
-  assert(/<SpaceBar\b/.test(hub) && !/SpaceSwitcher/.test(hub), 'My docs must render SpaceBar');
-  assert(/<h1>\{team \? team\.name : 'My docs'\}<\/h1>/.test(hub), 'the title is plain text again');
+  assert(!/<SpaceBar\b/.test(hub), 'My docs renders the old pill row again');
+  assert(/onSpace=\{pickSpace\}/.test(hub), 'My docs does not hand the top-bar switcher its space');
+  assert(/<h1>\{team \? team\.name : 'My docs'\}<\/h1>/.test(hub), 'the title is plain text, not a menu');
+  const bar = fs.readFileSync(path.join(ROOT, 'shell/src/top-bar.jsx'), 'utf8');
+  assert(/<WorkspaceSwitcher\b/.test(bar), 'the top bar has no workspace switcher');
+  const sw = fs.readFileSync(path.join(ROOT, 'shell/src/workspace-switcher.jsx'), 'utf8');
+  assert(/AppMenu/.test(sw) && /New team/.test(sw), 'the switcher must be an AppMenu ending in New team');
   const teams = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub/teams.jsx'), 'utf8');
-  assert(/role="tablist"/.test(teams) && /New team/.test(teams), 'every space and New team are in view');
+  assert(!/function SpaceBar|className="tm-spaces"/.test(teams), 'the old pill switcher implementation still exists');
+  const doc = fs.readFileSync(path.join(ROOT, 'shell/src/document-shell.jsx'), 'utf8');
+  assert(/space=\{config\.teamManage\?\.team\?\.id \|\| ''\}/.test(doc), 'a team document does not identify its current workspace');
 });
 
 t('a multi-selection can move to a team, only the author\'s own docs, saying what it skipped', () => {

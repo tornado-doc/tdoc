@@ -1212,6 +1212,8 @@ export function DocumentShell({ boot, config }) {
     >
       <TopBar
         identity={config.identity}
+        space={config.teamManage?.team?.id || ''}
+        currentTeam={config.teamManage?.team || null}
         theme={supportsTheme ? theme : 'light'}
         supportsTheme={supportsTheme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
