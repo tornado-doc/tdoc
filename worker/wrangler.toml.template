@@ -28,6 +28,20 @@ bucket_name = "tdoc-docs"
 binding = "META"
 id = "PLACEHOLDER_KV_ID"
 
+# Team/Pro Data Mirror. Publishing stays on the request path; customer-owned
+# S3/R2 backup writes happen here with retries and a dead-letter queue, so a
+# destination outage cannot break tdoc. CD creates both queues idempotently.
+[[queues.producers]]
+binding = "BACKUP_QUEUE"
+queue = "tdoc-backups"
+
+[[queues.consumers]]
+queue = "tdoc-backups"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 10
+dead_letter_queue = "tdoc-backups-dlq"
+
 # Invitation emails need ONE of two delivery plugs, and BOTH are optional —
 # with neither, the worker sends nothing and invitations stay in-app only:
 #   - Secret: RESEND_API_KEY (`wrangler secret put RESEND_API_KEY`) sends
@@ -88,6 +102,9 @@ TDOC_DEBUG_ACCOUNTS = "PLACEHOLDER_DEBUG_ACCOUNTS"
 RAFT_INSTALLATION_IDS = '{"1ed923e0-27a4-47ff-b09a-ea27efe06877":"b3177b35-c920-4960-b459-b7de83086812"}'
 
 # Secret: TDOC_UPLOAD_TOKEN — set via `wrangler secret put TDOC_UPLOAD_TOKEN`
+# Secret (recommended): TDOC_DATA_MIRROR_KEY — stable high-entropy key used
+# only to encrypt customer S3 credentials in KV. Existing installs fall back
+# to TDOC_UPLOAD_TOKEN so a deploy never silently disables configured mirrors.
 # Secret: GITHUB_CLIENT_SECRET — set via `wrangler secret put GITHUB_CLIENT_SECRET`.
 #   The web OAuth redirect flow (browsers) needs it to exchange the code for a
 #   token; generate it on the SAME OAuth App as GITHUB_CLIENT_ID above, and set

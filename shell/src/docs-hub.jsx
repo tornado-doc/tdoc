@@ -28,6 +28,7 @@ import {
   MoveToTeamDialog,
   NewTeamDialog,
   SpaceBar,
+  TeamBackupDialog,
   TeamCommentsPane,
   TeamPane,
 } from './docs-hub/teams.jsx';
@@ -943,7 +944,11 @@ export function DocsHub({ boot }) {
             item.id === next.id ? { ...item, name: next.name, role: next.role, member_count: next.member_count } : item
           )))}
           onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
+          onBackup={(current) => setModal({ type: 'team-backup', team: current })}
         />
+      ) : null}
+      {modal?.type === 'team-backup' ? (
+        <TeamBackupDialog team={modal.team} onClose={closeModal} />
       ) : null}
       {modal?.type === 'leave-team' ? (
         <LeaveTeamDialog

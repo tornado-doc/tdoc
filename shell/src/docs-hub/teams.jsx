@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Link2, MessageSquareText, Plus, UserRound, UsersRound } from 'lucide-react';
+import { DatabaseBackup, Link2, MessageSquareText, Plus, RefreshCw, UserRound, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppSelect } from '../ui/select.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
 import { copyText } from '../document/model.js';
 import {
   createTeam,
+  getTeamBackup,
   getTeam,
   listTeamComments,
   moveFolderToTeam,
+  removeTeamBackup,
   removeTeamMember,
+  saveTeamBackup,
   setTeamRole,
+  syncTeamBackup,
   updateTeam,
 } from '../document/api.js';
 import { DocList, day } from './rows.jsx';
@@ -21,6 +25,10 @@ const ERRORS = {
   team_limit: 'You are in the maximum number of teams.',
   invalid_name: 'Give the team a name (up to 60 characters).',
   too_many_folders: 'That team has too many folders to take these. Delete or merge some first.',
+  backup_queue_unavailable: 'Data Mirror is not available on this deployment yet.',
+  backup_queue_failed: 'The bucket is connected, but tdoc could not queue the backup. Try Sync everything again.',
+  backup_connection_failed: 'tdoc could not write to that bucket. Check the endpoint, bucket, region and keys.',
+  backup_encryption_unavailable: 'This deployment needs its Data Mirror encryption key configured.',
 };
 const message = (error) => ERRORS[error?.body?.error] || error?.message || 'Request failed';
 
@@ -297,7 +305,7 @@ export function NewTeamDialog({ onClose, onCreated }) {
   );
 }
 
-export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
+export function MembersDialog({ teamId, onClose, onLeave, onChanged, onBackup }) {
   const [team, setTeam] = useState(null);
   const [status, setStatus] = useState('');
   const [copied, setCopied] = useState('');
@@ -334,6 +342,7 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
       actions={(
         <>
           <button type="button" className="danger tm-push-left" disabled={!team || soleAdmin} onClick={() => onLeave(team, me)}>Leave team</button>
+          {admin ? <button type="button" onClick={() => onBackup(team)}><DatabaseBackup size={14} /> Data backup</button> : null}
           <button type="button" onClick={onClose}>Close</button>
         </>
       )}
@@ -424,6 +433,104 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged }) {
           <p className="status" role="status">{status || '\u00a0'}</p>
         </>
       )}
+    </AppDialog>
+  );
+}
+
+function backupTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+}
+
+export function TeamBackupDialog({ team, onClose }) {
+  const [backup, setBackup] = useState(null);
+  const [form, setForm] = useState({ endpoint: '', bucket: '', region: 'auto', prefix: 'tdoc-backups', access_key_id: '', secret_access_key: '' });
+  const [status, setStatus] = useState('Loading…');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    getTeamBackup(team.id).then((result) => {
+      const next = result.backup || { enabled: false };
+      setBackup(next);
+      if (next.enabled) setForm((current) => ({
+        ...current,
+        endpoint: next.endpoint || '', bucket: next.bucket || '', region: next.region || 'auto', prefix: next.prefix || 'tdoc-backups',
+      }));
+      setStatus('');
+    }).catch((error) => setStatus(message(error)));
+  }, [team.id]);
+
+  const field = (name) => (event) => setForm((current) => ({ ...current, [name]: event.target.value }));
+  const save = async () => {
+    setBusy(true);
+    setStatus('Testing the bucket…');
+    try {
+      const result = await saveTeamBackup(team.id, form);
+      setBackup(result.backup);
+      setForm((current) => ({ ...current, secret_access_key: '' }));
+      setStatus('Connected. The first full backup is running in the background.');
+    } catch (error) { setStatus(message(error)); }
+    setBusy(false);
+  };
+  const sync = async () => {
+    setBusy(true);
+    setStatus('Starting a full backup…');
+    try {
+      const result = await syncTeamBackup(team.id);
+      setBackup(result.backup);
+      setStatus('Full backup queued. You can close this window.');
+    } catch (error) { setStatus(message(error)); }
+    setBusy(false);
+  };
+  const remove = async () => {
+    setBusy(true);
+    setStatus('Turning off…');
+    try {
+      await removeTeamBackup(team.id);
+      setBackup({ enabled: false });
+      setStatus('Data Mirror is off. Existing files in your bucket were not deleted.');
+    } catch (error) { setStatus(message(error)); }
+    setBusy(false);
+  };
+
+  return (
+    <AppDialog
+      open
+      onOpenChange={(open) => { if (!open && !busy) onClose(); }}
+      title={`${team.name} data backup`}
+      actions={(
+        <>
+          <button type="button" onClick={onClose} disabled={busy}>Close</button>
+          <button type="button" className="primary" onClick={save} disabled={busy || !form.endpoint.trim() || !form.bucket.trim() || !form.region.trim() || !form.access_key_id.trim() || !form.secret_access_key}>Connect and back up</button>
+        </>
+      )}
+    >
+      <div className="tm-backup-intro">
+        <DatabaseBackup size={22} aria-hidden="true" />
+        <div><b>Keep a copy in your own object store.</b><p>tdoc stays live even if the destination is offline. Failed copies retry automatically.</p></div>
+      </div>
+      {backup?.enabled ? (
+        <section className={`tm-backup-health ${backup.state === 'error' ? 'is-error' : ''}`}>
+          <div><b>{backup.state === 'syncing' ? 'Initial backup running' : backup.state === 'error' ? 'Backup needs attention' : 'Backup active'}</b><span>{backup.endpoint}/{backup.bucket}/{backup.prefix}/{team.id}</span></div>
+          {backup.last_synced_at ? <span>Last copy {backupTime(backup.last_synced_at)}</span> : null}
+          {backup.last_error ? <span>{backup.last_error}</span> : null}
+          <div className="tm-backup-health-actions">
+            <button type="button" className="tm-link-btn" onClick={sync} disabled={busy}><RefreshCw size={14} /> Sync everything now</button>
+            <button type="button" className="tm-text-btn tm-backup-off" onClick={remove} disabled={busy}>Turn off</button>
+          </div>
+        </section>
+      ) : null}
+      <div className="tm-backup-grid">
+        <label className="field tm-backup-wide">S3-compatible endpoint<input type="url" placeholder="https://account.r2.cloudflarestorage.com" value={form.endpoint} onChange={field('endpoint')} /></label>
+        <label className="field">Bucket<input type="text" placeholder="company-backups" value={form.bucket} onChange={field('bucket')} /></label>
+        <label className="field">Region<input type="text" placeholder="auto" value={form.region} onChange={field('region')} /></label>
+        <label className="field tm-backup-wide">Folder prefix<input type="text" placeholder="tdoc-backups" value={form.prefix} onChange={field('prefix')} /></label>
+        <label className="field">Access key ID<input type="text" autoComplete="off" placeholder={backup?.access_key_hint || 'Access key ID'} value={form.access_key_id} onChange={field('access_key_id')} /></label>
+        <label className="field">Secret access key<input type="password" autoComplete="new-password" placeholder="Secret access key" value={form.secret_access_key} onChange={field('secret_access_key')} /></label>
+      </div>
+      <p className="manage-hint">Use a key limited to PutObject for this bucket. Credentials are encrypted before storage and are never shown again. Turning this off never deletes the customer-owned copy.</p>
+      {status ? <p className="status" role="status">{status}</p> : null}
     </AppDialog>
   );
 }

@@ -575,6 +575,9 @@ function canCommentOnDoc(access, session, env, meta) {
 // is what made delete-then-recreate resurrect old comments.
 async function deleteDocEverywhere(env, slug) {
   const idx = await priorDocMetaIndex(env, slug);
+  if (idx && validTeamId(idx.w)) {
+    await enqueueTeamBackup(env, { kind: 'deleted', team: idx.w, slug, deleted_at: new Date().toISOString() });
+  }
   let cursor;
   do {
     const r = await env.DOCS.list({ prefix: `docs/${slug}/`, cursor });
@@ -3654,6 +3657,7 @@ async function saveTeamFolders(env, teamId, state) {
   const { folders } = normalizeFolderState({ folders: state.folders });
   const gone = Object.fromEntries(Object.entries(state.gone || {}).slice(-TEAM_FOLDER_GONE_MAX));
   await writeFolderBlob(env, key, { folders, gone });
+  await enqueueTeamBackup(env, { kind: 'team', team: teamId });
 }
 
 // The folder a team doc shows in: its stamped folder, or, if that folder
@@ -3937,6 +3941,7 @@ async function saveTeam(env, team) {
   await Promise.all(next.filter((x) => !was.has(x)).map((x) => env.META.put(teamInviteMarkerKey(x, team.id), '1')));
   await env.META.put(`team:${team.id}`, JSON.stringify(team), { metadata: teamIndex(team) });
   await Promise.all((prior || []).filter((x) => !next.includes(x)).map((x) => env.META.delete(teamInviteMarkerKey(x, team.id)).catch(() => {})));
+  await enqueueTeamBackup(env, { kind: 'team', team: team.id });
 }
 
 // Teams that invited this person (by handle or address) and they have not
@@ -4453,6 +4458,354 @@ async function teamCommentsPage(env, session, teamId, offset = 0) {
   return { team: { id: team.id, name: team.name }, items, next, docs_scanned: page.length, docs_total: slugs.length };
 }
 
+// ─────────────────── customer-owned team backup mirrors ───────────────────
+// tdoc stays authoritative. Team/Pro customers may keep a continuously
+// updated copy in any S3-compatible bucket (AWS S3, R2, MinIO). Writes never
+// wait for the destination: a Queue consumer signs the S3 request, retries
+// transient failures, and exposes health without turning a backup outage into
+// a publishing outage.
+const TEAM_BACKUP_PREFIX = 'team-backup:';
+const TEAM_BACKUP_OBJECT_PAGE = 10;
+
+function teamBackupKey(teamId) { return `${TEAM_BACKUP_PREFIX}${teamId}`; }
+function teamBackupDocStateKey(teamId, slug) { return `_team-backup/${teamId}/docs/${slug}/manifest.json`; }
+
+function cleanBackupEndpoint(value) {
+  try {
+    const u = new URL(String(value || '').trim());
+    if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) return null;
+    u.pathname = u.pathname.replace(/\/+$/, '');
+    return u.toString().replace(/\/$/, '');
+  } catch { return null; }
+}
+
+function cleanBackupPart(value, max = 120) {
+  const out = String(value || '').trim().replace(/^\/+|\/+$/g, '');
+  return out && out.length <= max && !out.split('/').some((part) => !part || part === '.' || part === '..') ? out : null;
+}
+
+function backupMasterSecret(env) {
+  return String((env && (env.TDOC_DATA_MIRROR_KEY || env.TDOC_UPLOAD_TOKEN)) || '');
+}
+
+function b64urlBytes(bytes) {
+  let raw = '';
+  for (const byte of bytes) raw += String.fromCharCode(byte);
+  return btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function bytesFromB64url(value) {
+  const raw = atob(String(value || '').replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(value || '').length / 4) * 4, '='));
+  return Uint8Array.from(raw, (ch) => ch.charCodeAt(0));
+}
+
+async function encryptBackupCredentials(env, value) {
+  const master = backupMasterSecret(env);
+  if (!master) throw new Error('backup_encryption_unavailable');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`tdoc-team-backup-v1\0${master}`));
+  const key = await crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value)));
+  return `v1.${b64urlBytes(iv)}.${b64urlBytes(new Uint8Array(cipher))}`;
+}
+
+async function decryptBackupCredentials(env, value) {
+  const [version, ivText, cipherText] = String(value || '').split('.');
+  const master = backupMasterSecret(env);
+  if (version !== 'v1' || !ivText || !cipherText || !master) throw new Error('backup_credentials_unavailable');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`tdoc-team-backup-v1\0${master}`));
+  const key = await crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['decrypt']);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytesFromB64url(ivText) }, key, bytesFromB64url(cipherText));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+async function loadTeamBackup(env, teamId, withCredentials = false) {
+  let record = null;
+  try { record = JSON.parse(await env.META.get(teamBackupKey(teamId))); } catch {}
+  if (!record || record.v !== 1 || record.enabled !== true) return null;
+  if (!withCredentials) return record;
+  return { ...record, credentials: await decryptBackupCredentials(env, record.credentials) };
+}
+
+function publicTeamBackup(record) {
+  if (!record) return { enabled: false };
+  return {
+    enabled: true,
+    endpoint: record.endpoint,
+    bucket: record.bucket,
+    region: record.region,
+    prefix: record.prefix,
+    access_key_hint: record.access_key_hint || '',
+    state: record.state || 'active',
+    configured_at: record.configured_at || null,
+    last_synced_at: record.last_synced_at || null,
+    initial_synced_at: record.initial_synced_at || null,
+    last_error: record.last_error || null,
+  };
+}
+
+// The customer copy is a portable data export, not a database dump. Keep the
+// content needed to understand and reconstruct the team while leaving tdoc's
+// account ids, invite secrets, share tokens, and publisher-token fingerprints
+// inside tdoc.
+function backupTeamExport(team) {
+  return {
+    format: 'tdoc-team', version: 1,
+    id: team.id, name: team.name,
+    ...(team.handle ? { handle: team.handle } : {}),
+    created: team.created || null,
+    members: (Array.isArray(team.members) ? team.members : []).map((member) => ({
+      name: member.name || 'Member', role: member.role || 'member', joined: member.joined || null,
+    })),
+  };
+}
+
+function backupFoldersExport(state) {
+  return {
+    format: 'tdoc-folders', version: 1,
+    folders: (Array.isArray(state && state.folders) ? state.folders : []).map((folder) => ({
+      id: folder.id, name: folder.name,
+      ...(folder.parent ? { parent: folder.parent } : {}),
+      ...(folder.created ? { created: folder.created } : {}),
+    })),
+  };
+}
+
+function backupMetaExport(meta) {
+  const copy = JSON.parse(JSON.stringify(meta || {}));
+  if (copy.hosted && typeof copy.hosted === 'object') {
+    delete copy.hosted.account_id;
+    delete copy.hosted.owner_key;
+    delete copy.hosted.owner_keys;
+    delete copy.hosted.email;
+  }
+  if (Array.isArray(copy.versions)) {
+    copy.versions = copy.versions.map((item) => {
+      const next = { ...(item || {}) };
+      delete next.token;
+      delete next.client;
+      return next;
+    });
+  }
+  return copy;
+}
+
+async function saveTeamBackupStatus(env, teamId, patch) {
+  const current = await loadTeamBackup(env, teamId);
+  if (!current) return;
+  await env.META.put(teamBackupKey(teamId), JSON.stringify({ ...current, ...patch }));
+}
+
+async function enqueueTeamBackup(env, job) {
+  if (!env || !env.BACKUP_QUEUE || !job || !validTeamId(job.team)) return false;
+  if (!(await loadTeamBackup(env, job.team))) return false;
+  try { await env.BACKUP_QUEUE.send({ v: 1, ...job }); return true; } catch (error) {
+    console.error('[team-backup] queue failed (non-fatal):', error && error.message ? error.message : String(error));
+    return false;
+  }
+}
+
+function hexBytes(bytes) { return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join(''); }
+async function sha256Bytes(value) {
+  const bytes = value instanceof Uint8Array ? value : new TextEncoder().encode(String(value));
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+}
+async function hmacBytes(key, value) {
+  const raw = key instanceof Uint8Array ? key : new TextEncoder().encode(String(key));
+  const imported = await crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', imported, new TextEncoder().encode(String(value))));
+}
+
+function backupObjectPath(config, teamId, relative) {
+  return [config.prefix, teamId, relative].filter(Boolean)
+    .flatMap((part) => String(part).split('/'))
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+}
+
+async function backupS3Put(config, teamId, relative, body, contentType = 'application/octet-stream') {
+  const bytes = body instanceof Uint8Array ? body : new TextEncoder().encode(String(body));
+  const endpoint = new URL(config.endpoint);
+  const path = `${endpoint.pathname.replace(/\/+$/, '')}/${encodeURIComponent(config.bucket)}/${backupObjectPath(config, teamId, relative)}`.replace(/\/{2,}/g, '/');
+  const url = new URL(endpoint.origin);
+  url.pathname = path;
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const date = amzDate.slice(0, 8);
+  const payloadHash = hexBytes(await sha256Bytes(bytes));
+  const canonicalHeaders = `host:${url.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';
+  const canonicalRequest = `PUT\n${url.pathname}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+  const scope = `${date}/${config.region}/s3/aws4_request`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${hexBytes(await sha256Bytes(canonicalRequest))}`;
+  const kDate = await hmacBytes(`AWS4${config.credentials.secret_access_key}`, date);
+  const kRegion = await hmacBytes(kDate, config.region);
+  const kService = await hmacBytes(kRegion, 's3');
+  const kSigning = await hmacBytes(kService, 'aws4_request');
+  const signature = hexBytes(await hmacBytes(kSigning, stringToSign));
+  const response = await fetch(url.toString(), {
+    method: 'PUT', body: bytes,
+    headers: {
+      Authorization: `AWS4-HMAC-SHA256 Credential=${config.credentials.access_key_id}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+      'Content-Type': contentType,
+      'x-amz-content-sha256': payloadHash,
+      'x-amz-date': amzDate,
+    },
+  });
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+    throw new Error(`destination_${response.status}${detail ? `: ${detail}` : ''}`);
+  }
+  return { path: relative, bytes: bytes.byteLength, sha256: payloadHash, content_type: contentType };
+}
+
+function backupContentType(key, object) {
+  const stored = object && object.httpMetadata && object.httpMetadata.contentType;
+  if (stored) return stored;
+  if (/\.html?$/i.test(key)) return 'text/html; charset=utf-8';
+  if (/\.json$/i.test(key)) return 'application/json; charset=utf-8';
+  if (/\.svg$/i.test(key)) return 'image/svg+xml';
+  if (/\.png$/i.test(key)) return 'image/png';
+  if (/\.jpe?g$/i.test(key)) return 'image/jpeg';
+  if (/\.webp$/i.test(key)) return 'image/webp';
+  return 'application/octet-stream';
+}
+
+async function writeTeamBackupManifest(env, config, team, writeCore = false) {
+  const writeJson = (name, value) => backupS3Put(
+    config, team.id, name, JSON.stringify(value, null, 2), 'application/json; charset=utf-8',
+  );
+  const contentType = 'application/json; charset=utf-8';
+  const teamBody = JSON.stringify(backupTeamExport(team), null, 2);
+  const foldersBody = JSON.stringify(backupFoldersExport(await loadTeamFolders(env, team.id)), null, 2);
+  let coreObjects = Array.isArray(config.core_objects) && config.core_objects.length === 2
+    ? config.core_objects : null;
+  const slugsPromise = docIndexSlugs(env, `w:${team.id}`, teamDocMatcher(team.id));
+  if (writeCore || !coreObjects) {
+    coreObjects = await Promise.all([
+      backupS3Put(config, team.id, 'team.json', teamBody, contentType),
+      backupS3Put(config, team.id, 'folders.json', foldersBody, contentType),
+    ]);
+    // The manifest may be retried after its PUT fails. Remember only core
+    // objects that were successfully written, so a later doc/comment job can
+    // reuse their checksums without paying two unchanged customer-bucket
+    // writes on every small edit.
+    await saveTeamBackupStatus(env, team.id, { core_objects: coreObjects });
+  }
+  const [teamObject, foldersObject] = coreObjects;
+  const slugs = await slugsPromise;
+  await writeJson('manifest.json', {
+    format: 'tdoc-portability-backup', version: 1,
+    team: { id: team.id, name: team.name },
+    exported_at: new Date().toISOString(),
+    objects: [teamObject, foldersObject],
+    documents: slugs.sort().map((slug) => ({ slug, manifest: `docs/${slug}/manifest.json` })),
+  });
+}
+
+async function teamBackupJob(env, job) {
+  if (!job || job.v !== 1 || !validTeamId(job.team)) return;
+  const config = await loadTeamBackup(env, job.team, true);
+  if (!config) return;
+  const team = await loadTeam(env, job.team);
+  if (!team) return;
+  const writeJson = (name, value) => backupS3Put(config, team.id, name, JSON.stringify(value, null, 2), 'application/json; charset=utf-8');
+
+  if (job.kind === 'full') {
+    let slugs = Array.isArray(job.slugs) ? job.slugs.filter(isValidSlug) : null;
+    if (!slugs) {
+      slugs = await docIndexSlugs(env, `w:${team.id}`, teamDocMatcher(team.id));
+      await saveTeamBackupStatus(env, team.id, { state: 'syncing', last_error: null });
+    }
+    const index = Math.max(0, Number(job.index) || 0);
+    if (index >= slugs.length) {
+      await writeTeamBackupManifest(env, config, team, true);
+      const at = new Date().toISOString();
+      await saveTeamBackupStatus(env, team.id, { state: 'active', initial_synced_at: at, last_synced_at: at, last_error: null });
+      return;
+    }
+    await env.BACKUP_QUEUE.send({ v: 1, kind: 'doc', team: team.id, slug: slugs[index], full: { slugs, index } });
+    return;
+  }
+
+  if (job.kind === 'team') {
+    await writeTeamBackupManifest(env, config, team, true);
+  } else if (job.kind === 'deleted' && isValidSlug(job.slug)) {
+    await writeJson(`docs/${job.slug}/deleted.json`, {
+      slug: job.slug,
+      deleted_at: job.deleted_at || new Date().toISOString(),
+      reason: job.reason || 'deleted',
+    });
+    await env.DOCS.delete(teamBackupDocStateKey(team.id, job.slug));
+    await writeTeamBackupManifest(env, config, team);
+  } else if (job.kind === 'comments' && isValidSlug(job.slug)) {
+    const meta = await loadDocMeta(env, job.slug);
+    const cached = await env.DOCS.get(teamBackupDocStateKey(team.id, job.slug));
+    if (!meta || meta.workspace_id !== team.id) {
+      await writeTeamBackupManifest(env, config, team);
+    } else if (!cached) {
+      // A comment can land while the first full copy is still walking this
+      // team. Export the whole doc once; later comments use the cached open
+      // manifest and copy only comments.json + manifest.json.
+      await teamBackupJob(env, { ...job, kind: 'doc' });
+      return;
+    } else {
+      let manifest = null;
+      try { manifest = JSON.parse(await cached.text()); } catch {}
+      if (!manifest || !Array.isArray(manifest.objects)) {
+        await teamBackupJob(env, { ...job, kind: 'doc' });
+        return;
+      }
+      const commentPath = `docs/${job.slug}/comments.json`;
+      const commentObject = await writeJson(commentPath, await readComments(env, job.slug));
+      manifest = {
+        ...manifest, exported_at: new Date().toISOString(),
+        objects: [...manifest.objects.filter((object) => object && object.path !== commentPath), commentObject],
+      };
+      const manifestJson = JSON.stringify(manifest, null, 2);
+      await backupS3Put(config, team.id, `docs/${job.slug}/manifest.json`, manifestJson, 'application/json; charset=utf-8');
+      await env.DOCS.put(teamBackupDocStateKey(team.id, job.slug), manifestJson);
+    }
+  } else if (job.kind === 'doc' && isValidSlug(job.slug)) {
+    const meta = await loadDocMeta(env, job.slug);
+    if (meta && meta.workspace_id === team.id) {
+      const objects = Array.isArray(job.objects) ? job.objects.slice() : [];
+      if (!job.cursor) {
+        objects.push(...await Promise.all([
+          writeJson(`docs/${job.slug}/meta.json`, backupMetaExport(meta)),
+          writeJson(`docs/${job.slug}/comments.json`, await readComments(env, job.slug)),
+        ]));
+      }
+      const page = await env.DOCS.list({ prefix: `docs/${job.slug}/`, cursor: job.cursor, limit: TEAM_BACKUP_OBJECT_PAGE });
+      for (const item of page.objects || []) {
+        const object = await env.DOCS.get(item.key);
+        if (!object) continue;
+        const value = typeof object.arrayBuffer === 'function'
+          ? new Uint8Array(await object.arrayBuffer())
+          : await object.text();
+        objects.push(await backupS3Put(config, team.id, item.key, value, backupContentType(item.key, object)));
+      }
+      if (page.truncated && page.cursor) {
+        await env.BACKUP_QUEUE.send({ ...job, cursor: page.cursor, objects });
+        return;
+      }
+      const manifest = {
+        format: 'tdoc-document-backup', version: 1, slug: job.slug,
+        exported_at: new Date().toISOString(), objects,
+      };
+      const manifestJson = JSON.stringify(manifest, null, 2);
+      await backupS3Put(config, team.id, `docs/${job.slug}/manifest.json`, manifestJson, 'application/json; charset=utf-8');
+      await env.DOCS.put(teamBackupDocStateKey(team.id, job.slug), manifestJson);
+    }
+    if (job.full) {
+      await env.BACKUP_QUEUE.send({ v: 1, kind: 'full', team: team.id, slugs: job.full.slugs, index: job.full.index + 1 });
+      return;
+    }
+    await writeTeamBackupManifest(env, config, team);
+  }
+  await saveTeamBackupStatus(env, team.id, { state: 'active', last_synced_at: new Date().toISOString(), last_error: null });
+}
+
 // ─────────────────────── the doc catalog index ───────────────────────
 //
 // My docs used to read and parse EVERY doc's meta on the platform on every
@@ -4489,6 +4842,7 @@ async function putDocMetaJson(env, slug, json) {
   let parsed = null;
   try { parsed = JSON.parse(json); } catch {}
   const idx = parsed ? docMetaIndex(parsed) : null;
+  const priorIdx = idx ? await priorDocMetaIndex(env, slug) : null;
   // The record is the write that matters; a marker is a shortcut to it. So a
   // marker that cannot be written (the day's KV writes spent, a transient
   // error) never fails the publish: the record is stored, and the facets
@@ -4498,7 +4852,7 @@ async function putDocMetaJson(env, slug, json) {
   // removed is a stale one, which readers ignore and sweep.
   let sync = null;
   if (idx) {
-    try { sync = await syncDocIndex(env, slug, idx, await priorDocMetaIndex(env, slug)); } catch (e) {
+    try { sync = await syncDocIndex(env, slug, idx, priorIdx); } catch (e) {
       console.error('[docidx] marker sync failed (recoverable):', e && e.message ? e.message : String(e));
     }
   }
@@ -4513,6 +4867,15 @@ async function putDocMetaJson(env, slug, json) {
     if (idx.a) named.push(`p:${idx.a}`);
     if (idx.w) named.push(`w:${idx.w}`);
     await unbuildDocIndexes(env, named);
+  }
+  if (parsed && validTeamId(parsed.workspace_id)) {
+    await enqueueTeamBackup(env, { kind: 'doc', team: parsed.workspace_id, slug });
+  }
+  if (priorIdx && validTeamId(priorIdx.w) && priorIdx.w !== String(parsed && parsed.workspace_id || '')) {
+    await enqueueTeamBackup(env, {
+      kind: 'deleted', team: priorIdx.w, slug,
+      deleted_at: new Date().toISOString(), reason: 'moved',
+    });
   }
 }
 
@@ -9501,26 +9864,35 @@ function withHandoffStatus(list, handoffs) {
 }
 
 async function mutateComments(env, slug, op) {
+  let result;
   if (env.COMMENTS) {
     const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
     const r = await stub.fetch('https://do/mutate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug, op }),
     });
-    return r.json();
+    result = await r.json();
+  } else {
+    // Fallback (DO binding absent): direct KV read-modify-write. NOT serialized,
+    // but keeps the worker functional without the DO. The DO path is the norm.
+    const cKey = `comments:${slug}`;
+    const raw = await env.META.get(cKey);
+    const list = safeParseList(raw);
+    const res = applyCommentOp(list, op);
+    if (res.status === 200) {
+      if (res.__wipe) await env.META.delete(cKey);
+      else await env.META.put(cKey, JSON.stringify(list));
+    }
+    const { __wipe, ...clean } = res;
+    result = clean;
   }
-  // Fallback (DO binding absent): direct KV read-modify-write. NOT serialized,
-  // but keeps the worker functional without the DO. The DO path is the norm.
-  const cKey = `comments:${slug}`;
-  const raw = await env.META.get(cKey);
-  const list = safeParseList(raw);
-  const res = applyCommentOp(list, op);
-  if (res.status === 200) {
-    if (res.__wipe) await env.META.delete(cKey);
-    else await env.META.put(cKey, JSON.stringify(list));
+  if (result && result.status === 200) {
+    const meta = await loadDocMeta(env, slug);
+    if (meta && validTeamId(meta.workspace_id)) {
+      await enqueueTeamBackup(env, { kind: 'comments', team: meta.workspace_id, slug });
+    }
   }
-  const { __wipe, ...clean } = res;
-  return clean;
+  return result;
 }
 
 // Read the comment list for `slug` from the DO (the source of truth). Returns
@@ -12293,6 +12665,80 @@ export default {
       return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
     }
 
+    // Customer-owned backup mirror. Browser admins only: these credentials
+    // can copy every team document, so a terminal token and a team member are
+    // intentionally insufficient. The destination is tested before its
+    // encrypted credential record becomes active.
+    if (p === '/api/team/backup' && ['GET', 'PUT', 'POST', 'DELETE'].includes(method)) {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      if (method !== 'GET' && !sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      let body = {};
+      if (method !== 'GET') { try { body = await req.json(); } catch {} }
+      const id = method === 'GET' ? url.searchParams.get('id') : body.id;
+      const team = await loadTeam(env, id);
+      if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      if (method === 'GET') return json({ ok: true, backup: publicTeamBackup(await loadTeamBackup(env, team.id)) });
+      if (method === 'DELETE') {
+        await env.META.delete(teamBackupKey(team.id));
+        return json({ ok: true, backup: { enabled: false } });
+      }
+      if (!env.BACKUP_QUEUE) return json({ error: 'backup_queue_unavailable' }, { status: 503 });
+      if (method === 'POST') {
+        if (!(await loadTeamBackup(env, team.id))) return json({ error: 'backup_not_configured' }, { status: 404 });
+        await saveTeamBackupStatus(env, team.id, { state: 'syncing', last_error: null });
+        try { await env.BACKUP_QUEUE.send({ v: 1, kind: 'full', team: team.id }); }
+        catch (error) {
+          await saveTeamBackupStatus(env, team.id, { state: 'error', last_error: 'Could not queue the full backup.' });
+          return json({ error: 'backup_queue_failed' }, { status: 503 });
+        }
+        return json({ ok: true, backup: publicTeamBackup(await loadTeamBackup(env, team.id)) });
+      }
+
+      const endpoint = cleanBackupEndpoint(body.endpoint);
+      const bucket = /^[A-Za-z0-9][A-Za-z0-9._-]{1,62}$/.test(String(body.bucket || '').trim()) ? String(body.bucket).trim() : null;
+      const region = /^[a-z0-9-]{1,40}$/.test(String(body.region || '').trim()) ? String(body.region).trim() : null;
+      const prefix = body.prefix == null || String(body.prefix).trim() === '' ? 'tdoc-backups' : cleanBackupPart(body.prefix, 200);
+      const accessKeyId = String(body.access_key_id || '').trim();
+      const secretAccessKey = String(body.secret_access_key || '');
+      if (!endpoint) return json({ error: 'invalid_backup_endpoint' }, { status: 400 });
+      if (!bucket) return json({ error: 'invalid_backup_bucket' }, { status: 400 });
+      if (!region) return json({ error: 'invalid_backup_region' }, { status: 400 });
+      if (!prefix) return json({ error: 'invalid_backup_prefix' }, { status: 400 });
+      if (accessKeyId.length < 3 || accessKeyId.length > 200 || secretAccessKey.length < 8 || secretAccessKey.length > 300) {
+        return json({ error: 'backup_credentials_required' }, { status: 400 });
+      }
+      const candidate = {
+        endpoint, bucket, region, prefix,
+        credentials: { access_key_id: accessKeyId, secret_access_key: secretAccessKey },
+      };
+      try {
+        await backupS3Put(candidate, team.id, 'connection.json', JSON.stringify({
+          service: 'tdoc', team: team.id, connected_at: new Date().toISOString(), format: 1,
+        }, null, 2), 'application/json; charset=utf-8');
+      } catch (error) {
+        return json({ error: 'backup_connection_failed', message: error.message || String(error) }, { status: 400 });
+      }
+      const now = new Date().toISOString();
+      let encryptedCredentials;
+      try { encryptedCredentials = await encryptBackupCredentials(env, candidate.credentials); }
+      catch { return json({ error: 'backup_encryption_unavailable' }, { status: 503 }); }
+      const record = {
+        v: 1, enabled: true, endpoint, bucket, region, prefix,
+        credentials: encryptedCredentials,
+        access_key_hint: accessKeyId.length > 8 ? `${accessKeyId.slice(0, 4)}…${accessKeyId.slice(-4)}` : '••••',
+        configured_at: now, state: 'syncing', last_synced_at: null, initial_synced_at: null, last_error: null,
+      };
+      await env.META.put(teamBackupKey(team.id), JSON.stringify(record));
+      try { await env.BACKUP_QUEUE.send({ v: 1, kind: 'full', team: team.id }); }
+      catch {
+        await saveTeamBackupStatus(env, team.id, { state: 'error', last_error: 'Connected, but could not queue the first backup.' });
+        return json({ error: 'backup_queue_failed' }, { status: 503 });
+      }
+      return json({ ok: true, backup: publicTeamBackup(record) });
+    }
+
     // Role changes and removals share one invariant: a team always keeps at
     // least one admin. Leaving is removing yourself, so it obeys it too.
     if ((p === '/api/team/role' || p === '/api/team/remove') && method === 'POST') {
@@ -14385,5 +14831,26 @@ export default {
       });
     }
     return text('Not found', { status: 404 });
+  },
+
+  async queue(batch, env) {
+    for (const message of batch.messages || []) {
+      const job = message && message.body;
+      try {
+        await teamBackupJob(env, job);
+        if (typeof message.ack === 'function') message.ack();
+      } catch (error) {
+        console.error('[team-backup] sync failed:', error && error.message ? error.message : String(error));
+        if (job && validTeamId(job.team)) {
+          try {
+            await saveTeamBackupStatus(env, job.team, {
+              state: 'error', last_error: String((error && error.message) || error).slice(0, 240),
+            });
+          } catch {}
+        }
+        if (typeof message.retry === 'function') message.retry();
+        else throw error;
+      }
+    }
   },
 };

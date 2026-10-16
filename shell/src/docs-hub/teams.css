@@ -98,6 +98,35 @@
   .tm-comment-filters button, .tm-comment-since input { min-height: 44px; }
 }
 
+/* Customer-owned Data Mirror setup. Secrets stay in familiar labeled form
+   fields; health is a separate compact card so a returning admin can see the
+   answer without re-reading the setup copy. */
+.tm-backup-intro { display: flex; gap: 10px; align-items: flex-start; padding: 2px 0 12px; }
+.tm-backup-intro svg { flex: none; color: var(--td-accent); margin-top: 1px; }
+.tm-backup-intro b { color: var(--td-ink); }
+.tm-backup-intro p { margin: 3px 0 0; color: var(--td-muted); font-size: 13px; line-height: 1.45; }
+.tm-backup-health {
+  display: grid; gap: 7px; margin-bottom: 16px; padding: 12px;
+  border: 1px solid var(--td-line); border-radius: 10px; background: var(--td-surface-2);
+  color: var(--td-muted); font-size: 12px;
+}
+.tm-backup-health > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.tm-backup-health b { color: var(--td-ink); font-size: 13px; }
+.tm-backup-health span { overflow-wrap: anywhere; }
+.tm-backup-health.is-error { border-color: var(--td-danger, #b42318); }
+.tm-backup-health-actions { display: flex; align-items: center; gap: 12px; }
+.tm-backup-off { color: var(--td-danger, #b42318); }
+.tm-backup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tm-backup-grid .field { display: grid; gap: 5px; min-width: 0; }
+.tm-backup-grid input { box-sizing: border-box; width: 100%; min-width: 0; }
+.tm-backup-wide { grid-column: 1 / -1; }
+@media (max-width: 560px) {
+  .tm-backup-grid { grid-template-columns: 1fr; }
+  .tm-backup-wide { grid-column: auto; }
+  .tm-backup-grid input, .tm-backup-health button { min-height: 44px; }
+  .tm-backup-health-actions { align-items: stretch; flex-direction: column; gap: 4px; }
+}
+
 /* Pending team invitations on My docs. */
 .tm-invites { display: grid; gap: 8px; margin: 0 0 14px; }
 .tm-invite {

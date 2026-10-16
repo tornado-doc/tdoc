@@ -1298,6 +1298,32 @@ bash "$SKILL_DIR/bin/tdoc-folder" move-to-team <folder> --team BeFreed   # a who
   no reverse for a whole folder: move team docs back one by one
   (`tdoc-move --personal` / "Move to My docs").
 
+### Team data portability backups (`tdoc-backup`)
+
+A team admin can connect one customer-owned S3-compatible bucket from
+**Members → Data backup**. tdoc remains the source of truth and copies an
+open-format backup asynchronously; a destination outage never blocks reading,
+commenting, or publishing. Turning the feature off never deletes the copy.
+
+The backup contains a versioned `manifest.json`, sanitized team/folder data,
+every document's metadata, comments, HTML versions and widget files. It does
+not contain tdoc sessions, account ids, invite/share tokens, or publisher-token
+fingerprints. Deleted or moved-out docs get tombstones instead of destructive
+remote deletes.
+
+To download with the AWS CLI (S3, R2, or a compatible endpoint) and verify all
+recorded sizes/checksums, or to verify a directory downloaded another way:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-backup" download s3://<bucket>/<prefix>/<team-id> <directory> \
+  --endpoint https://<account>.r2.cloudflarestorage.com --region auto
+bash "$SKILL_DIR/bin/tdoc-backup" verify <directory>
+```
+
+Download uses the customer's normal AWS credentials/profile. The first release
+is an independently readable/exportable copy; importing it back into tdoc is a
+separate recovery feature, not implied by verification.
+
 
 ### Comment anchor stability (important for `/tdoc edit`)
 

@@ -1,0 +1,102 @@
+#!/bin/sh
+':' //; exec node "$0" "$@"
+// Download and verify an open-format tdoc portability backup. Download uses
+// the standard AWS CLI so S3, R2, and compatible stores share the customer's
+// normal credential/profile flow; verification itself has no dependencies.
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { spawnSync } = require('child_process');
+
+function usage(code = 2) {
+  const out = code ? process.stderr : process.stdout;
+  out.write(`tdoc-backup — download or verify a customer-owned team backup
+
+Usage:
+  tdoc-backup verify <directory>
+  tdoc-backup download <s3://bucket/prefix/team-id> <directory> [--endpoint <url>] [--region <region>]
+
+Download uses the AWS CLI and its normal AWS_ACCESS_KEY_ID /
+AWS_SECRET_ACCESS_KEY or profile configuration, then verifies the copy.
+`);
+  process.exit(code);
+}
+
+function readJson(file, label) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (error) { throw new Error(`${label}: ${error.message}`); }
+}
+
+function safeFile(root, relative) {
+  if (typeof relative !== 'string' || !relative || path.isAbsolute(relative)) throw new Error(`unsafe backup path: ${relative}`);
+  const target = path.resolve(root, relative);
+  const base = path.resolve(root) + path.sep;
+  if (!target.startsWith(base)) throw new Error(`unsafe backup path: ${relative}`);
+  return target;
+}
+
+function verifyObject(root, object) {
+  if (!object || !/^[a-f0-9]{64}$/.test(String(object.sha256 || ''))) throw new Error(`invalid checksum record: ${JSON.stringify(object)}`);
+  const file = safeFile(root, object.path);
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`missing: ${object.path}`);
+  const bytes = fs.readFileSync(file);
+  if (Number(object.bytes) !== bytes.length) throw new Error(`size mismatch: ${object.path}`);
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+  if (digest !== object.sha256) throw new Error(`checksum mismatch: ${object.path}`);
+  return bytes.length;
+}
+
+function verify(root) {
+  const manifest = readJson(path.join(root, 'manifest.json'), 'manifest.json');
+  if (manifest.format !== 'tdoc-portability-backup' || manifest.version !== 1) throw new Error('unsupported backup format');
+  let files = 0, bytes = 0;
+  for (const object of Array.isArray(manifest.objects) ? manifest.objects : []) {
+    bytes += verifyObject(root, object); files += 1;
+  }
+  const seen = new Set();
+  for (const document of Array.isArray(manifest.documents) ? manifest.documents : []) {
+    if (!document || typeof document.slug !== 'string' || seen.has(document.slug)) throw new Error('invalid or duplicate document entry');
+    seen.add(document.slug);
+    const file = safeFile(root, document.manifest);
+    const doc = readJson(file, document.manifest);
+    if (doc.format !== 'tdoc-document-backup' || doc.version !== 1 || doc.slug !== document.slug) {
+      throw new Error(`invalid document manifest: ${document.manifest}`);
+    }
+    for (const object of Array.isArray(doc.objects) ? doc.objects : []) {
+      bytes += verifyObject(root, object); files += 1;
+    }
+    files += 1; bytes += fs.statSync(file).size;
+  }
+  process.stdout.write(`[tdoc] backup verified: ${seen.size} docs, ${files} files, ${bytes} bytes\n`);
+}
+
+const args = process.argv.slice(2);
+if (!args.length || ['-h', '--help', 'help'].includes(args[0])) usage(args.length ? 0 : 2);
+const command = args.shift();
+if (command === 'verify') {
+  if (args.length !== 1) usage();
+  try { verify(path.resolve(args[0])); } catch (error) { console.error(`[tdoc] backup invalid: ${error.message}`); process.exit(1); }
+} else if (command === 'download') {
+  const source = args.shift();
+  const destination = args.shift();
+  if (!/^s3:\/\/[A-Za-z0-9][A-Za-z0-9._-]{1,62}(?:\/[^\s]*)?$/.test(String(source || '')) || !destination) usage();
+  let endpoint = '', region = '';
+  while (args.length) {
+    const flag = args.shift();
+    if (flag === '--endpoint') endpoint = args.shift() || '';
+    else if (flag === '--region') region = args.shift() || '';
+    else usage();
+  }
+  if (endpoint && !/^https:\/\/[^\s]+$/.test(endpoint)) throw new Error('--endpoint must be https');
+  const awsArgs = ['s3', 'sync', source.replace(/\/$/, '') + '/', path.resolve(destination), '--only-show-errors'];
+  if (endpoint) awsArgs.push('--endpoint-url', endpoint);
+  if (region) awsArgs.push('--region', region);
+  const result = spawnSync('aws', awsArgs, { stdio: 'inherit' });
+  if (result.error && result.error.code === 'ENOENT') {
+    console.error('[tdoc] AWS CLI is required for download. Install it, or sync the S3 path with your existing tool and run tdoc-backup verify.');
+    process.exit(1);
+  }
+  if (result.error || result.status !== 0) process.exit(result.status || 1);
+  try { verify(path.resolve(destination)); } catch (error) { console.error(`[tdoc] backup invalid: ${error.message}`); process.exit(1); }
+} else usage();
