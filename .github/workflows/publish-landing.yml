@@ -60,7 +60,7 @@ jobs:
           # Pair the payload with the commit the Worker deploy just shipped.
           # workflow_dispatch has no workflow_run, so fall back to github.sha.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
 
