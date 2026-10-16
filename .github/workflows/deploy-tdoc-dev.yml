@@ -107,7 +107,7 @@ jobs:
           npx --yes wrangler@4.90.1 queues create tdoc-backups-dlq >/dev/null 2>&1 || npx --yes wrangler@4.90.1 queues info tdoc-backups-dlq >/dev/null
 
       - name: Deploy Worker tdoc (tdoc.dev)
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
