@@ -16,6 +16,7 @@ import { AppMenu, AppMenuItem, AppMenuLinkItem, AppMenuSeparator, AppSubmenu } f
 import { isPlainNavigationClick, startNavigationProgress } from './nav-progress.js';
 import { useNotifications } from './hooks/use-notifications.js';
 import { NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
+import { WorkspaceSwitcher } from './workspace-switcher.jsx';
 
 // Sign in always asks which account: after Sign out, the provider (and
 // GitHub behind it) still remember the last one, and going straight back in
@@ -42,6 +43,12 @@ export function TopBar({
   onSignIn = defaultSignIn,
   profile = null,
   onClaimProfile = null,
+  // The space this page belongs to: a team id, '' for My docs, null for none.
+  space = null,
+  teams = null,
+  currentTeam = null,
+  onSpace = null,
+  onNewTeam = null,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -193,6 +200,7 @@ export function TopBar({
         {supportsTheme ? <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
           {dark ? <Sun size={14} /> : <Moon size={14} />}
         </button> : null}
+        {identity ? <WorkspaceSwitcher space={space} teams={teams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
         {identity ? (
           <AppMenu trigger={(
             <button className="tdoc-chip tdoc-account-trigger" type="button">

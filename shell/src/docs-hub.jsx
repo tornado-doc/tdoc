@@ -27,7 +27,6 @@ import {
   MoveFolderToTeamDialog,
   MoveToTeamDialog,
   NewTeamDialog,
-  SpaceBar,
   TeamBackupDialog,
   TeamCommentsPane,
   TeamPane,
@@ -527,8 +526,10 @@ export function DocsHub({ boot }) {
     return TABS.some(([id]) => id === asked) ? asked : 'mine';
   });
   // Capture the account-menu destination before useDocsHub normalizes the URL.
+  // ?new_team=1 is the top-bar switcher's "New team" from any page.
   const [modal, setModal] = useState(() => (
-    boot.profile && location.hash === '#claim-profile' ? { type: 'claim-handle' } : null
+    boot.profile && location.hash === '#claim-profile' ? { type: 'claim-handle' }
+      : new URLSearchParams(location.search).get('new_team') === '1' ? { type: 'new-team' } : null
   ));
   const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
   const [teams, setTeams] = useState(() => boot.teams || []);
@@ -735,17 +736,15 @@ export function DocsHub({ boot }) {
         identity={boot.identity}
         profile={boot.profile || null}
         onClaimProfile={boot.profile ? () => setModal({ type: 'claim-handle' }) : null}
+        space={space}
+        teams={teams}
+        onSpace={pickSpace}
+        onNewTeam={() => setModal({ type: 'new-team' })}
       />
       <main className="wrap">
         {(boot.team_invites || []).length ? (
           <TeamInviteBanner invites={boot.team_invites} />
         ) : null}
-        <SpaceBar
-          teams={teams}
-          space={space}
-          onSpace={pickSpace}
-          onNewTeam={() => setModal({ type: 'new-team' })}
-        />
         <div className="page-hd">
           <h1>{team ? team.name : 'My docs'}</h1>
           {team ? (
