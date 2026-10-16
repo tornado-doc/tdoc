@@ -4368,6 +4368,91 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
   return out.filter(Boolean).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 }
 
+// A team's review inbox is deliberately read in bounded document pages. A
+// large team must never turn one /me request into an unbounded fan-out to
+// every CommentsStore; the client follows `next` until it has the team. This
+// also gives the first rows back quickly while the rest continue loading.
+const TEAM_COMMENT_DOC_PAGE = 12;
+
+function teamCommentAuthor(author) {
+  const a = author && typeof author === 'object' ? author : {};
+  const login = typeof a.login === 'string' ? a.login : '';
+  const email = login.startsWith('email:') ? normalizeEmail(login.slice(6)) : null;
+  return {
+    key: normalizeActorKey(login) || login,
+    name: String(a.name || (email ? email.split('@')[0] : login) || 'Someone').slice(0, 100),
+    avatar_url: typeof a.avatar_url === 'string' ? a.avatar_url : '',
+    kind: a.kind === 'agent' ? 'agent' : 'human',
+  };
+}
+
+function teamCommentAnchor(anchor) {
+  if (!anchor || typeof anchor !== 'object') return '';
+  const text = typeof anchor.text === 'string' ? anchor.text.trim() : '';
+  const label = typeof anchor.label === 'string' ? anchor.label.trim() : '';
+  const selector = typeof anchor.selector === 'string' ? anchor.selector.trim() : '';
+  return (text || label || selector).replace(/\s+/g, ' ').slice(0, 240);
+}
+
+function teamCommentRows(slug, meta, list) {
+  ensureMigrated(list);
+  const title = String((meta && meta.title) || slug);
+  const rows = [];
+  for (const thread of historyList(list)) {
+    if (!thread || thread.deleted) continue;
+    const resolved = thread.status === 'applied';
+    const anchor = teamCommentAnchor(thread.anchor);
+    const base = {
+      slug,
+      title,
+      thread_id: thread.id,
+      anchor,
+      resolved,
+    };
+    rows.push({
+      ...base,
+      id: thread.id,
+      kind: 'comment',
+      version: Math.max(1, Number(thread.created_in || thread.version) || 1),
+      text: String(thread.text || '').slice(0, 2000),
+      created: thread.created || '',
+      author: teamCommentAuthor(thread.author),
+    });
+    for (const reply of (Array.isArray(thread.replies) ? thread.replies : [])) {
+      if (!reply || reply.deleted) continue;
+      rows.push({
+        ...base,
+        id: reply.id,
+        parent_id: reply.parent_id || thread.id,
+        kind: 'reply',
+        version: Math.max(1, Number(reply.created_in || reply.version || thread.created_in || thread.version) || 1),
+        text: String(reply.text || '').slice(0, 2000),
+        created: reply.created || '',
+        author: teamCommentAuthor(reply.author),
+      });
+    }
+  }
+  return rows;
+}
+
+async function teamCommentsPage(env, session, teamId, offset = 0) {
+  const team = await loadTeam(env, teamId);
+  if (!team || !session || !teamMember(team, session.account_id)) return null;
+  const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
+  slugs.sort();
+  const start = Math.max(0, Number(offset) || 0);
+  const page = slugs.slice(start, start + TEAM_COMMENT_DOC_PAGE);
+  const chunks = await Promise.all(page.map(async (slug) => {
+    const meta = await loadDocMeta(env, slug);
+    // Index markers only narrow; the full record is the permission truth.
+    if (!meta || meta.workspace_id !== teamId || !docReadableBy(env, session, meta)) return [];
+    try { return teamCommentRows(slug, meta, await readComments(env, slug)); } catch { return []; }
+  }));
+  const items = chunks.flat().sort((a, b) => String(b.created).localeCompare(String(a.created)));
+  const next = start + page.length < slugs.length ? start + page.length : null;
+  return { team: { id: team.id, name: team.name }, items, next, docs_scanned: page.length, docs_total: slugs.length };
+}
+
 // ─────────────────────── the doc catalog index ───────────────────────
 //
 // My docs used to read and parse EVERY doc's meta on the platform on every
@@ -10186,6 +10271,17 @@ export default {
       const bySlug = new Map((data.feedback || []).map((x) => [x.slug, x]));
       const spaces = await feedbackSpacesFor(env, s, metas.filter((m) => m.meta).map((m) => ({ ...m, updated: bySlug.get(m.slug).updated })), (row) => bySlug.get(row.slug), true);
       return json({ ok: true, spaces }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (p === '/api/team/comments' && method === 'GET') {
+      const s = await getViewerSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const teamId = url.searchParams.get('id');
+      if (!validTeamId(teamId)) return json({ error: 'invalid_team' }, { status: 400 });
+      const page = await teamCommentsPage(env, s, teamId, url.searchParams.get('offset'));
+      // A team is private membership data: outsiders get the same answer as a
+      // missing team and cannot use this endpoint to enumerate names or ids.
+      if (!page) return json({ error: 'not_found' }, { status: 404 });
+      return json({ ok: true, ...page }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/api/me' && method === 'GET') {
       const s = await getViewerSession(env, req);

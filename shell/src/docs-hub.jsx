@@ -28,6 +28,7 @@ import {
   MoveToTeamDialog,
   NewTeamDialog,
   SpaceBar,
+  TeamCommentsPane,
   TeamPane,
 } from './docs-hub/teams.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
@@ -535,6 +536,9 @@ export function DocsHub({ boot }) {
     const initial = new URLSearchParams(location.search).get('team') || '';
     return (boot.teams || []).some((team) => team.id === initial) ? initial : '';
   });
+  const [teamView, setTeamView] = useState(() => (
+    new URLSearchParams(location.search).get('view') === 'comments' ? 'comments' : 'docs'
+  ));
   const team = teams.find((item) => item.id === space) || null;
   // A team's folders: shared by its members, filed into by the doc's author
   // or an admin (agents do the same through tdoc-folder).
@@ -562,14 +566,15 @@ export function DocsHub({ boot }) {
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   const teamFolderCounts = {};
   for (const doc of allTeamDocs) teamFolderCounts[doc.folder || ''] = (teamFolderCounts[doc.folder || ''] || 0) + 1;
-  const pickSpace = (id) => { setTeamFolder(''); setSpace(id); };
+  const pickSpace = (id) => { setTeamFolder(''); setTeamView('docs'); setSpace(id); };
 
   useEffect(() => {
     if (space) {
       const folderPart = teamFolder ? `&folder=${encodeURIComponent(teamFolder)}` : '';
-      history.replaceState(null, '', `?team=${encodeURIComponent(space)}${folderPart}`);
+      const viewPart = teamView === 'comments' ? '&view=comments' : '';
+      history.replaceState(null, '', `?team=${encodeURIComponent(space)}${folderPart}${viewPart}`);
     } else if (new URLSearchParams(location.search).has('team')) history.replaceState(null, '', location.pathname);
-  }, [space, teamFolder]);
+  }, [space, teamFolder, teamView]);
 
   const setSpaceFolders = (update) => setTeamFolders((all) => ({ ...all, [team.id]: update(all[team.id] || []) }));
   const teamRun = (operation, success) => operation
@@ -758,35 +763,45 @@ export function DocsHub({ boot }) {
         </div>
         {team ? (
           <>
-            <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
-            <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
-              <button type="button" className="new-folder-btn" onClick={() => setModal({ type: 'new-team-folder' })}>
-                <FolderPlus size={15} /> New folder
-              </button>
-            </DocsToolbar>
-            {teamPath.length ? (
-              <nav className="crumbs" aria-label="Folder path">
-                <button className="crumb-root" type="button" onClick={() => setTeamFolder('')}>{team.name}</button>
-                {teamPath.map((item) => (
-                  <React.Fragment key={item.id}>
-                    <ChevronRight className="sep" size={14} />
-                    <button className="crumb-root cur" type="button" onClick={() => setTeamFolder(item.id)}>{item.name}</button>
-                  </React.Fragment>
-                ))}
-              </nav>
-            ) : null}
-            <div id="folder-rows">
-              {shownTeamFolders.map((item) => (
-                <FolderRow
-                  key={item.id}
-                  folder={item}
-                  count={teamFolderCounts[item.id] || 0}
-                  onOpen={() => setTeamFolder(item.id)}
-                  menuItems={teamFolderMenu(item)}
-                />
-              ))}
+            <div className="tabs tm-view-tabs" role="tablist" aria-label={`${team.name} views`}>
+              <button type="button" className={`tab${teamView === 'docs' ? ' is-active' : ''}`} role="tab" aria-selected={teamView === 'docs'} onClick={() => setTeamView('docs')}>Docs</button>
+              <button type="button" className={`tab${teamView === 'comments' ? ' is-active' : ''}`} role="tab" aria-selected={teamView === 'comments'} onClick={() => { setTeamFolder(''); setTeamView('comments'); }}>Comments</button>
             </div>
-            <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} inFolder={!!teamFolder || shownTeamFolders.length > 0} />
+            {teamView === 'comments' ? (
+              <TeamCommentsPane team={team} />
+            ) : (
+              <>
+                <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
+                <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
+                  <button type="button" className="new-folder-btn" onClick={() => setModal({ type: 'new-team-folder' })}>
+                    <FolderPlus size={15} /> New folder
+                  </button>
+                </DocsToolbar>
+                {teamPath.length ? (
+                  <nav className="crumbs" aria-label="Folder path">
+                    <button className="crumb-root" type="button" onClick={() => setTeamFolder('')}>{team.name}</button>
+                    {teamPath.map((item) => (
+                      <React.Fragment key={item.id}>
+                        <ChevronRight className="sep" size={14} />
+                        <button className="crumb-root cur" type="button" onClick={() => setTeamFolder(item.id)}>{item.name}</button>
+                      </React.Fragment>
+                    ))}
+                  </nav>
+                ) : null}
+                <div id="folder-rows">
+                  {shownTeamFolders.map((item) => (
+                    <FolderRow
+                      key={item.id}
+                      folder={item}
+                      count={teamFolderCounts[item.id] || 0}
+                      onOpen={() => setTeamFolder(item.id)}
+                      menuItems={teamFolderMenu(item)}
+                    />
+                  ))}
+                </div>
+                <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} inFolder={!!teamFolder || shownTeamFolders.length > 0} />
+              </>
+            )}
           </>
         ) : (
         <>
