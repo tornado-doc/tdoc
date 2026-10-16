@@ -56,6 +56,8 @@ const OFFLINE = [
   'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
   'docs-hub-unified.test.js',   // My docs + team use one toolbar/list and cached previews
   'folder-move-to-team.test.js', // a whole My docs folder into a team: batches, re-runs, stale reads
+  'team-backup.test.js',         // customer-owned S3/R2 mirror: encryption, queue, retries, tombstones
+  'backup-cli.test.js',          // open-format portability copy download + checksum verification
   'profile.test.js',            // /@handle public profiles
   'jul36-owner-manage.test.js', // JUL-36 owner manage UX: server-gated data, token-only mutations, no native confirm()
   'runtime-provenance.test.js', // release provenance + content-hash redeploy
@@ -147,6 +149,7 @@ const BROWSER = [
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout
+  'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
 ];
 

@@ -374,6 +374,22 @@ export function updateTeam(id, patch) {
   return teamRequest('/api/team', 'PATCH', { id, ...patch });
 }
 
+export function getTeamBackup(id) {
+  return request(`/api/team/backup?${new URLSearchParams({ id })}`);
+}
+
+export function saveTeamBackup(id, backup) {
+  return teamRequest('/api/team/backup', 'PUT', { id, ...backup });
+}
+
+export function syncTeamBackup(id) {
+  return teamRequest('/api/team/backup', 'POST', { id });
+}
+
+export function removeTeamBackup(id) {
+  return teamRequest('/api/team/backup', 'DELETE', { id });
+}
+
 export function setTeamRole(id, accountId, role) {
   return teamRequest('/api/team/role', 'POST', { id, account_id: accountId, role });
 }

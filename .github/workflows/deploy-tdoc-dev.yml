@@ -98,6 +98,14 @@ jobs:
             exit 1
           fi
 
+      - name: Ensure Data Mirror queues
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@4.90.1 queues create tdoc-backups >/dev/null 2>&1 || npx --yes wrangler@4.90.1 queues info tdoc-backups >/dev/null
+          npx --yes wrangler@4.90.1 queues create tdoc-backups-dlq >/dev/null 2>&1 || npx --yes wrangler@4.90.1 queues info tdoc-backups-dlq >/dev/null
+
       - name: Deploy Worker tdoc (tdoc.dev)
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
