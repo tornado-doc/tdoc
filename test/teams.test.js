@@ -208,9 +208,9 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const comment = feed.body.items.find((item) => item.id === first.body.id);
     const child = feed.body.items.find((item) => item.id === reply.body.id);
     const stillOpen = feed.body.items.find((item) => item.id === open.body.id);
-    assert(comment && comment.kind === 'comment' && comment.resolved && comment.anchor === 'agent pass', `comment row ${JSON.stringify(comment)}`);
-    assert(child && child.kind === 'reply' && child.thread_id === first.body.id && child.resolved, `reply row ${JSON.stringify(child)}`);
-    assert(stillOpen && !stillOpen.resolved && stillOpen.title === 'bob-notes', `open row ${JSON.stringify(stillOpen)}`);
+    assert(comment && comment.kind === 'comment' && comment.resolved && comment.anchor === 'agent pass' && comment.reply_count === 1, `comment row ${JSON.stringify(comment)}`);
+    assert(child && child.kind === 'reply' && child.thread_id === first.body.id && child.resolved && child.reply_count === 1, `reply row ${JSON.stringify(child)}`);
+    assert(stillOpen && !stillOpen.resolved && stillOpen.title === 'bob-notes' && stillOpen.reply_count === 0, `open row ${JSON.stringify(stillOpen)}`);
     assert(!JSON.stringify(feed.body).includes('allowed_users'), 'feed leaks document access policy');
 
     const outsider = await call(`/api/team/comments?id=${team.id}`, { cookie: dave });

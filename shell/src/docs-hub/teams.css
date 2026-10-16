@@ -50,7 +50,7 @@
 .tm-view-tabs { margin: 0 0 14px; }
 .tm-comments-pane { display: grid; gap: 12px; }
 .tm-comment-filters {
-  display: grid; grid-template-columns: minmax(130px, .75fr) minmax(150px, 1fr) minmax(180px, 1.3fr) minmax(150px, .9fr);
+  display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr));
   gap: 8px; align-items: end;
 }
 .tm-comment-filter { width: 100%; min-width: 0; }

@@ -4407,12 +4407,14 @@ function teamCommentRows(slug, meta, list) {
     if (!thread || thread.deleted) continue;
     const resolved = thread.status === 'applied';
     const anchor = teamCommentAnchor(thread.anchor);
+    const replies = (Array.isArray(thread.replies) ? thread.replies : []).filter((reply) => reply && !reply.deleted);
     const base = {
       slug,
       title,
       thread_id: thread.id,
       anchor,
       resolved,
+      reply_count: replies.length,
     };
     rows.push({
       ...base,
@@ -4423,8 +4425,7 @@ function teamCommentRows(slug, meta, list) {
       created: thread.created || '',
       author: teamCommentAuthor(thread.author),
     });
-    for (const reply of (Array.isArray(thread.replies) ? thread.replies : [])) {
-      if (!reply || reply.deleted) continue;
+    for (const reply of replies) {
       rows.push({
         ...base,
         id: reply.id,

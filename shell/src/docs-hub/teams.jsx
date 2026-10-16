@@ -142,6 +142,8 @@ export function TeamCommentsPane({ team }) {
   const [totalDocs, setTotalDocs] = useState(0);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('unresolved');
+  const [replyState, setReplyState] = useState('all');
+  const [authorKind, setAuthorKind] = useState('all');
   const [person, setPerson] = useState('');
   const [doc, setDoc] = useState('');
   const [since, setSince] = useState('');
@@ -182,6 +184,9 @@ export function TeamCommentsPane({ team }) {
   const sinceMs = since ? Date.parse(`${since}T00:00:00`) : 0;
   const shown = items
     .filter((item) => status === 'all' || (status === 'resolved' ? item.resolved : !item.resolved))
+    .filter((item) => replyState === 'all'
+      || (replyState === 'unreplied' ? item.kind === 'comment' && Number(item.reply_count || 0) === 0 : Number(item.reply_count || 0) > 0))
+    .filter((item) => authorKind === 'all' || item.author?.kind === authorKind)
     .filter((item) => !person || item.author?.key === person)
     .filter((item) => !doc || item.slug === doc)
     .filter((item) => !sinceMs || Date.parse(item.created || '') >= sinceMs)
@@ -199,6 +204,28 @@ export function TeamCommentsPane({ team }) {
             { value: 'unresolved', label: 'Unresolved' },
             { value: 'resolved', label: 'Resolved' },
             { value: 'all', label: 'All status' },
+          ]}
+        />
+        <AppSelect
+          className="tm-comment-filter"
+          ariaLabel="Reply status"
+          value={replyState}
+          onChange={setReplyState}
+          options={[
+            { value: 'all', label: 'All conversations' },
+            { value: 'unreplied', label: 'Unreplied' },
+            { value: 'replied', label: 'Replied' },
+          ]}
+        />
+        <AppSelect
+          className="tm-comment-filter"
+          ariaLabel="Author type"
+          value={authorKind}
+          onChange={setAuthorKind}
+          options={[
+            { value: 'all', label: 'People + AI' },
+            { value: 'human', label: 'People only' },
+            { value: 'agent', label: 'AI only' },
           ]}
         />
         <AppSelect
