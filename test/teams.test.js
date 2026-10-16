@@ -181,6 +181,44 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(!html.includes('allowed_users'), 'catalog leaks no access policy');
   });
 
+  await t('team members browse every team comment and reply; outsiders cannot', async () => {
+    const first = await call('/api/comments', {
+      method: 'POST', cookie: carol,
+      body: { slug: 'plan', version: 3, text: 'Sky found a gap in this section', anchor: { kind: 'text', text: 'agent pass' } },
+    });
+    assert(first.status === 200 && first.body.id, `first comment ${first.status} ${JSON.stringify(first.body)}`);
+    const reply = await call('/api/comments', {
+      method: 'POST', cookie: bob,
+      body: { slug: 'plan', version: 3, parent_id: first.body.id, text: 'I will fix it' },
+    });
+    assert(reply.status === 200 && reply.body.id, `reply ${reply.status} ${JSON.stringify(reply.body)}`);
+    const open = await call('/api/comments', {
+      method: 'POST', cookie: bob,
+      body: { slug: 'bob-notes', version: 1, text: 'This one is still open', anchor: null },
+    });
+    assert(open.status === 200, `open comment ${open.status}`);
+    const resolved = await call('/api/comments', {
+      method: 'PATCH', cookie: carol,
+      body: { slug: 'plan', version: 3, id: first.body.id, resolved: true },
+    });
+    assert(resolved.status === 200, `resolve ${resolved.status}`);
+
+    const feed = await call(`/api/team/comments?id=${team.id}`, { cookie: alice });
+    assert(feed.status === 200 && feed.body.docs_total >= 2, `feed ${feed.status} ${JSON.stringify(feed.body)}`);
+    const comment = feed.body.items.find((item) => item.id === first.body.id);
+    const child = feed.body.items.find((item) => item.id === reply.body.id);
+    const stillOpen = feed.body.items.find((item) => item.id === open.body.id);
+    assert(comment && comment.kind === 'comment' && comment.resolved && comment.anchor === 'agent pass', `comment row ${JSON.stringify(comment)}`);
+    assert(child && child.kind === 'reply' && child.thread_id === first.body.id && child.resolved, `reply row ${JSON.stringify(child)}`);
+    assert(stillOpen && !stillOpen.resolved && stillOpen.title === 'bob-notes', `open row ${JSON.stringify(stillOpen)}`);
+    assert(!JSON.stringify(feed.body).includes('allowed_users'), 'feed leaks document access policy');
+
+    const outsider = await call(`/api/team/comments?id=${team.id}`, { cookie: dave });
+    assert(outsider.status === 404, `outsider enumerated team ${outsider.status}`);
+    const anonymous = await call(`/api/team/comments?id=${team.id}`);
+    assert(anonymous.status === 401, `anonymous ${anonymous.status}`);
+  });
+
   await t('only team admins manage a team doc, even against its own author', async () => {
     const member = await call('/api/doc/access', { method: 'PATCH', cookie: bob, body: { slug: 'plan', access: { team: false } } });
     assert(member.status === 403 || member.status === 401, `member ${member.status}`);

@@ -217,6 +217,11 @@ export function listNotifications(offset = 0) {
   return request(`/api/notifications?${query}`);
 }
 
+export function listTeamComments(team, offset = 0) {
+  const query = new URLSearchParams({ id: team, offset: String(offset) });
+  return request(`/api/team/comments?${query}`);
+}
+
 // Raft / provider notify handoff (Connected App). Same endpoint for doc-level
 // and single-comment "send to agent" — comment_ids length is what differs.
 export function listNotifyTargets(slug) {

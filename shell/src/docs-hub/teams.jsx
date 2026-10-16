@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link2, Plus, UserRound, UsersRound } from 'lucide-react';
+import { Link2, MessageSquareText, Plus, UserRound, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppSelect } from '../ui/select.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
@@ -7,6 +7,7 @@ import { copyText } from '../document/model.js';
 import {
   createTeam,
   getTeam,
+  listTeamComments,
   moveFolderToTeam,
   removeTeamMember,
   setTeamRole,
@@ -102,6 +103,148 @@ export function TeamPane({ team, docs, viewer, menuFor, inFolder = false }) {
         })}
         empty={!inFolder ? `No docs in ${team.name} yet. Create one, or move one here from My docs.` : null}
       />
+    </section>
+  );
+}
+
+function commentDate(value) {
+  const date = new Date(value || '');
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function commentTarget(item) {
+  const version = Math.max(1, Number(item.version) || 1);
+  return `/d/${encodeURIComponent(item.slug)}/v/${version}?comment=${encodeURIComponent(item.id || item.thread_id)}`;
+}
+
+function CommentAvatar({ author }) {
+  if (author?.avatar_url) return <img className="tm-comment-avatar" src={author.avatar_url} alt="" />;
+  return <span className="tm-comment-avatar tm-comment-avatar--anon" aria-hidden="true">{String(author?.name || '?').slice(0, 1).toUpperCase()}</span>;
+}
+
+// A browseable team review surface, separate from the bell. The bell answers
+// “what needs my attention”; this answers “what is everyone discussing across
+// this team?” and therefore intentionally includes comments not addressed to
+// the current viewer.
+export function TeamCommentsPane({ team }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadedDocs, setLoadedDocs] = useState(0);
+  const [totalDocs, setTotalDocs] = useState(0);
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('unresolved');
+  const [person, setPerson] = useState('');
+  const [doc, setDoc] = useState('');
+  const [since, setSince] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setItems([]);
+    setLoading(true);
+    setLoadedDocs(0);
+    setTotalDocs(0);
+    setError('');
+    (async () => {
+      let offset = 0;
+      try {
+        do {
+          const page = await listTeamComments(team.id, offset);
+          if (cancelled) return;
+          setItems((current) => [...current, ...(page.items || [])]);
+          setLoadedDocs((n) => n + Number(page.docs_scanned || 0));
+          setTotalDocs(Number(page.docs_total || 0));
+          offset = page.next == null ? null : Number(page.next);
+        } while (offset != null);
+      } catch (e) {
+        if (!cancelled) setError(message(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [team.id]);
+
+  const people = new Map();
+  const docs = new Map();
+  for (const item of items) {
+    if (item.author?.key) people.set(item.author.key, item.author.name || item.author.key);
+    if (item.slug) docs.set(item.slug, item.title || item.slug);
+  }
+  const sinceMs = since ? Date.parse(`${since}T00:00:00`) : 0;
+  const shown = items
+    .filter((item) => status === 'all' || (status === 'resolved' ? item.resolved : !item.resolved))
+    .filter((item) => !person || item.author?.key === person)
+    .filter((item) => !doc || item.slug === doc)
+    .filter((item) => !sinceMs || Date.parse(item.created || '') >= sinceMs)
+    .sort((a, b) => String(b.created).localeCompare(String(a.created)));
+
+  return (
+    <section className="pane tm-comments-pane" id="pane-team-comments">
+      <div className="tm-comment-filters" aria-label="Filter team comments">
+        <AppSelect
+          className="tm-comment-filter"
+          ariaLabel="Comment status"
+          value={status}
+          onChange={setStatus}
+          options={[
+            { value: 'unresolved', label: 'Unresolved' },
+            { value: 'resolved', label: 'Resolved' },
+            { value: 'all', label: 'All status' },
+          ]}
+        />
+        <AppSelect
+          className="tm-comment-filter"
+          ariaLabel="Comment author"
+          value={person}
+          onChange={setPerson}
+          options={[
+            { value: '', label: 'All people' },
+            ...[...people].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
+          ]}
+        />
+        <AppSelect
+          className="tm-comment-filter"
+          ariaLabel="Comment document"
+          value={doc}
+          onChange={setDoc}
+          options={[
+            { value: '', label: 'All docs' },
+            ...[...docs].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
+          ]}
+        />
+        <label className="tm-comment-since">
+          <span>Since</span>
+          <input type="date" value={since} onChange={(event) => setSince(event.target.value)} />
+        </label>
+      </div>
+
+      {loading ? <p className="muted tm-comment-progress">Loading comments… {loadedDocs}{totalDocs ? ` of ${totalDocs}` : ''} docs</p> : null}
+      {error ? <p className="tm-comment-error">{error}</p> : null}
+      {!loading && !error && !shown.length ? (
+        <div className="empty">
+          <MessageSquareText size={22} aria-hidden="true" />
+          <p>{items.length ? 'No comments match these filters.' : `No comments in ${team.name} yet.`}</p>
+        </div>
+      ) : null}
+      <div className="tm-comment-list">
+        {shown.map((item) => (
+          <a className={`tm-comment-row${item.resolved ? ' is-resolved' : ''}`} href={commentTarget(item)} key={`${item.slug}:${item.id}`}>
+            <CommentAvatar author={item.author} />
+            <span className="tm-comment-body">
+              <span className="tm-comment-line">
+                <strong>{item.author?.name || 'Someone'}</strong>
+                <span>{item.kind === 'reply' ? 'replied in' : 'commented on'}</span>
+                <b>{item.title || item.slug}</b>
+                <span className={`tm-comment-status${item.resolved ? ' resolved' : ''}`}>{item.resolved ? 'Resolved' : 'Unresolved'}</span>
+              </span>
+              <span className="tm-comment-text">{item.text}</span>
+              {item.anchor ? <span className="tm-comment-anchor">“{item.anchor}”</span> : null}
+            </span>
+            <time className="tm-comment-time" dateTime={item.created}>{commentDate(item.created)}</time>
+          </a>
+        ))}
+      </div>
     </section>
   );
 }
