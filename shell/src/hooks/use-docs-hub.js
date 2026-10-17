@@ -39,8 +39,15 @@ export function useDocsHub({ boot, onUnauthorized }) {
   }, [toast]);
 
   useEffect(() => {
-    const next = folder ? `?folder=${encodeURIComponent(folder)}` : location.pathname;
-    history.replaceState(null, '', next);
+    const url = new URL(location.href);
+    // Team folders are owned by the workspace view, not this personal-docs
+    // hook. Preserve the unified view parameter instead of erasing it.
+    if (!url.searchParams.has('team')) {
+      if (folder) url.searchParams.set('folder', folder);
+      else url.searchParams.delete('folder');
+      url.searchParams.delete('tab');
+      history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }
     setSelected(new Set());
   }, [folder]);
 

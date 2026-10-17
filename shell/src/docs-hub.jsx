@@ -23,19 +23,18 @@ import {
 } from './document/api.js';
 import {
   LeaveTeamDialog,
-  MembersDialog,
   MoveFolderToTeamDialog,
   MoveToTeamDialog,
   NewTeamDialog,
-  TeamBackupDialog,
   TeamCommentsPane,
   TeamPane,
+  TeamSettingsPane,
 } from './docs-hub/teams.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
-const TABS = [['mine', 'My docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['feedback', 'Feedback']];
+const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['settings', 'Settings']];
 const CURATE_WARN_KEY = 'tdoc.curateWarned';
 
 function needsCurateWarn() {
@@ -437,6 +436,28 @@ function FlatList({ docs, label, viewer, empty, onToggleStar }) {
   );
 }
 
+function AccountSettingsPane({ identity, profile }) {
+  const name = identity?.name || identity?.email || identity?.login || 'Your account';
+  return (
+    <section className="tm-settings" aria-label="Personal workspace settings">
+      <div className="tm-settings-title"><h2>Workspace settings</h2><p>Settings for your personal workspace.</p></div>
+      <section className="tm-settings-card">
+        <div className="tm-settings-head"><div><h2>Profile</h2><p>{name}</p></div></div>
+        <a className="new-folder-btn" href={profile?.handle ? `/@${encodeURIComponent(profile.handle)}` : '/me#claim-profile'}>
+          {profile?.handle ? 'Open public profile' : 'Claim public profile'}
+        </a>
+      </section>
+      <section className="tm-settings-card">
+        <div className="tm-settings-head"><div><h2>Agents</h2><p>Choose where comments go and which devices can access your account.</p></div></div>
+        <div className="tm-settings-links">
+          <a className="new-folder-btn" href="/me/agents?tab=send">Send comments to</a>
+          <a className="new-folder-btn" href="/me/agents?tab=access">Access</a>
+        </div>
+      </section>
+    </section>
+  );
+}
+
 // Claim or change via the same AppDialog / HubDialog surface as rename +
 // folder share. Letters/numbers/hyphens; changing frees the previous @handle.
 function ClaimHandleDialog({ suggested, current, onClose }) {
@@ -520,10 +541,14 @@ export function DocsHub({ boot }) {
     // expired, and the route's own redirect is the sign-in path.
     onUnauthorized: () => { location.href = '/?notice=signin'; },
   });
-  // ?tab=feedback opens straight onto a tab (links from the feedback pages).
-  const [tab, setTab] = useState(() => {
-    const asked = new URLSearchParams(location.search).get('tab');
-    return TABS.some(([id]) => id === asked) ? asked : 'mine';
+  // Every workspace uses the same navigation. Recent and Starred are
+  // deliberately account-wide; the other views follow the active workspace.
+  // Keep old ?tab=feedback links working while moving to the unified ?view=.
+  const [view, setView] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    const asked = params.get('view') || params.get('tab');
+    const normalized = asked === 'feedback' ? 'comments' : asked === 'mine' ? 'docs' : asked;
+    return VIEWS.some(([id]) => id === normalized) ? normalized : 'docs';
   });
   // Capture the account-menu destination before useDocsHub normalizes the URL.
   // ?new_team=1 is the top-bar switcher's "New team" from any page.
@@ -538,9 +563,6 @@ export function DocsHub({ boot }) {
     const initial = new URLSearchParams(location.search).get('team') || '';
     return (boot.teams || []).some((team) => team.id === initial) ? initial : '';
   });
-  const [teamView, setTeamView] = useState(() => (
-    new URLSearchParams(location.search).get('view') === 'comments' ? 'comments' : 'docs'
-  ));
   const team = teams.find((item) => item.id === space) || null;
   // A team's folders: shared by its members, filed into by the doc's author
   // or an admin (agents do the same through tdoc-folder).
@@ -568,15 +590,20 @@ export function DocsHub({ boot }) {
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   const teamFolderCounts = {};
   for (const doc of allTeamDocs) teamFolderCounts[doc.folder || ''] = (teamFolderCounts[doc.folder || ''] || 0) + 1;
-  const pickSpace = (id) => { setTeamFolder(''); setTeamView('docs'); setSpace(id); };
+  const pickSpace = (id) => { setTeamFolder(''); setSpace(id); };
 
   useEffect(() => {
     if (space) {
-      const folderPart = teamFolder ? `&folder=${encodeURIComponent(teamFolder)}` : '';
-      const viewPart = teamView === 'comments' ? '&view=comments' : '';
+      const folderPart = view === 'docs' && teamFolder ? `&folder=${encodeURIComponent(teamFolder)}` : '';
+      const viewPart = view === 'docs' ? '' : `&view=${encodeURIComponent(view)}`;
       history.replaceState(null, '', `?team=${encodeURIComponent(space)}${folderPart}${viewPart}`);
-    } else if (new URLSearchParams(location.search).has('team')) history.replaceState(null, '', location.pathname);
-  }, [space, teamFolder, teamView]);
+    } else {
+      const query = view === 'docs'
+        ? (hub.folder ? `?folder=${encodeURIComponent(hub.folder)}` : '')
+        : `?view=${encodeURIComponent(view)}`;
+      history.replaceState(null, '', `${location.pathname}${query}`);
+    }
+  }, [space, teamFolder, view, hub.folder]);
 
   const setSpaceFolders = (update) => setTeamFolders((all) => ({ ...all, [team.id]: update(all[team.id] || []) }));
   const teamRun = (operation, success) => operation
@@ -747,28 +774,46 @@ export function DocsHub({ boot }) {
         ) : null}
         <div className="page-hd">
           <h1>{team ? team.name : 'My docs'}</h1>
-          {team ? (
-            <button type="button" className="new-folder-btn tm-members-btn" onClick={() => setModal({ type: 'members' })}>
-              <UsersRound size={15} /> {team.member_count} {team.member_count === 1 ? 'member' : 'members'}
-            </button>
+          {view === 'docs' ? (
+            <CreateMenu
+              create={hub.createDoc}
+              team={team ? team.id : ''}
+              canCreate={capabilities.create}
+              onAgent={openAgentRecipe}
+              onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
+              trigger={<button className="mk-btn" type="button">Create a doc</button>}
+            />
           ) : null}
-          <CreateMenu
-            create={hub.createDoc}
-            team={team ? team.id : ''}
-            canCreate={capabilities.create}
-            onAgent={openAgentRecipe}
-            onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
-            trigger={<button className="mk-btn" type="button">Create a doc</button>}
-          />
         </div>
-        {team ? (
+        <div className="tabs" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
+          {VIEWS.map(([id, label]) => (
+            <button key={id} type="button" className={`tab${view === id ? ' is-active' : ''}`} role="tab" aria-selected={view === id} onClick={() => { setTeamFolder(''); setView(id); }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {view === 'recent' ? (
+          <section className="pane" id="pane-recent">
+            <p className="loc-hint muted">Across all workspaces.</p>
+            <FlatList docs={hub.recent} label="visited" viewer={viewer} empty="Docs you open show up here." onToggleStar={hub.toggleStar} />
+          </section>
+        ) : view === 'starred' ? (
+          <section className="pane" id="pane-starred">
+            <p className="loc-hint muted">Across all workspaces.</p>
+            <FlatList docs={hub.starred} label="starred" viewer={viewer} empty="Star docs to find them again quickly." onToggleStar={hub.toggleStar} />
+          </section>
+        ) : team ? (
           <>
-            <div className="tabs tm-view-tabs" role="tablist" aria-label={`${team.name} views`}>
-              <button type="button" className={`tab${teamView === 'docs' ? ' is-active' : ''}`} role="tab" aria-selected={teamView === 'docs'} onClick={() => setTeamView('docs')}>Docs</button>
-              <button type="button" className={`tab${teamView === 'comments' ? ' is-active' : ''}`} role="tab" aria-selected={teamView === 'comments'} onClick={() => { setTeamFolder(''); setTeamView('comments'); }}>Comments</button>
-            </div>
-            {teamView === 'comments' ? (
+            {view === 'comments' ? (
               <TeamCommentsPane team={team} />
+            ) : view === 'settings' ? (
+              <TeamSettingsPane
+                team={team}
+                onChanged={(next) => setTeams((list) => list.map((item) => (
+                  item.id === next.id ? { ...item, name: next.name, role: next.role, member_count: next.member_count } : item
+                )))}
+                onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
+              />
             ) : (
               <>
                 <p className="loc-hint tm-loc muted">Docs here belong to the team. Every member can open and comment.</p>
@@ -812,22 +857,7 @@ export function DocsHub({ boot }) {
         {boot.debug ? (
           <DebugBar record={boot.onboarding} surface="hub" onState={() => location.reload()} />
         ) : null}
-        <div className="tabs" role="tablist">
-          {TABS.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`tab${tab === id ? ' is-active' : ''}`}
-              role="tab"
-              aria-selected={tab === id}
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {tab === 'mine' ? (
+        {view === 'docs' ? (
           <section className="pane" id="pane-mine">
             <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
               {capabilities.folders ? (
@@ -910,21 +940,12 @@ export function DocsHub({ boot }) {
           </section>
         ) : null}
 
-        {tab === 'recent' ? (
-          <section className="pane" id="pane-recent">
-            <FlatList docs={hub.recent} label="visited" viewer={viewer} empty="Docs you open show up here." onToggleStar={hub.toggleStar} />
-          </section>
-        ) : null}
-        {tab === 'feedback' ? (
+        {view === 'comments' ? (
           <section className="pane" id="pane-feedback">
             <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} />
           </section>
         ) : null}
-        {tab === 'starred' ? (
-          <section className="pane" id="pane-starred">
-            <FlatList docs={hub.starred} label="starred" viewer={viewer} empty="Star docs to find them again quickly." onToggleStar={hub.toggleStar} />
-          </section>
-        ) : null}
+        {view === 'settings' ? <AccountSettingsPane identity={boot.identity} profile={boot.profile} /> : null}
         </>
         )}
       </main>
@@ -934,20 +955,6 @@ export function DocsHub({ boot }) {
           onClose={closeModal}
           onCreated={(created) => { location.href = `/me?team=${encodeURIComponent(created.id)}`; }}
         />
-      ) : null}
-      {modal?.type === 'members' && team ? (
-        <MembersDialog
-          teamId={team.id}
-          onClose={closeModal}
-          onChanged={(next) => setTeams((list) => list.map((item) => (
-            item.id === next.id ? { ...item, name: next.name, role: next.role, member_count: next.member_count } : item
-          )))}
-          onLeave={(current, me) => setModal({ type: 'leave-team', team: current, me })}
-          onBackup={(current) => setModal({ type: 'team-backup', team: current })}
-        />
-      ) : null}
-      {modal?.type === 'team-backup' ? (
-        <TeamBackupDialog team={modal.team} onClose={closeModal} />
       ) : null}
       {modal?.type === 'leave-team' ? (
         <LeaveTeamDialog

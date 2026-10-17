@@ -332,7 +332,7 @@ export function NewTeamDialog({ onClose, onCreated }) {
   );
 }
 
-export function MembersDialog({ teamId, onClose, onLeave, onChanged, onBackup }) {
+export function MembersDialog({ teamId, onClose, onLeave, onChanged, inline = false }) {
   const [team, setTeam] = useState(null);
   const [status, setStatus] = useState('');
   const [copied, setCopied] = useState('');
@@ -360,20 +360,22 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, onBackup })
   const admins = team ? team.members.filter((m) => m.role === 'admin').length : 0;
   const soleAdmin = admin && admins === 1;
   const me = team?.members.find((m) => m.me);
+  const Shell = inline ? 'section' : AppDialog;
+  const shellProps = inline ? { className: 'tm-settings-card', 'aria-labelledby': 'tm-members-heading' } : {
+    open: true,
+    onOpenChange: (open) => { if (!open) onClose(); },
+    title: team ? `${team.name} members` : 'Members',
+    actions: (
+      <>
+        <button type="button" className="danger tm-push-left" disabled={!team || soleAdmin} onClick={() => onLeave(team, me)}>Leave team</button>
+        <button type="button" onClick={onClose}>Close</button>
+      </>
+    ),
+  };
 
   return (
-    <AppDialog
-      open
-      onOpenChange={(open) => { if (!open) onClose(); }}
-      title={team ? `${team.name} members` : 'Members'}
-      actions={(
-        <>
-          <button type="button" className="danger tm-push-left" disabled={!team || soleAdmin} onClick={() => onLeave(team, me)}>Leave team</button>
-          {admin ? <button type="button" onClick={() => onBackup(team)}><DatabaseBackup size={14} /> Data backup</button> : null}
-          <button type="button" onClick={onClose}>Close</button>
-        </>
-      )}
-    >
+    <Shell {...shellProps}>
+      {inline ? <div className="tm-settings-head"><div><h2 id="tm-members-heading">Members</h2><p>Invite people and manage who can administer this workspace.</p></div><span>{team?.members?.length || 0}</span></div> : null}
       {!team ? <p className="muted">{status || 'Loading…'}</p> : (
         <>
           {admin ? (
@@ -458,9 +460,12 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, onBackup })
                 : 'Only admins can invite or remove people.'}
           </p>
           <p className="status" role="status">{status || '\u00a0'}</p>
+          {inline ? (
+            <button type="button" className="danger tm-settings-leave" disabled={soleAdmin} onClick={() => onLeave(team, me)}>Leave workspace</button>
+          ) : null}
         </>
       )}
-    </AppDialog>
+    </Shell>
   );
 }
 
@@ -470,7 +475,7 @@ function backupTime(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
 }
 
-export function TeamBackupDialog({ team, onClose }) {
+export function TeamBackupDialog({ team, onClose, inline = false }) {
   const [backup, setBackup] = useState(null);
   const [form, setForm] = useState({ endpoint: '', bucket: '', region: 'auto', prefix: 'tdoc-backups', access_key_id: '', secret_access_key: '' });
   const [status, setStatus] = useState('Loading…');
@@ -520,23 +525,35 @@ export function TeamBackupDialog({ team, onClose }) {
     } catch (error) { setStatus(message(error)); }
     setBusy(false);
   };
+  const Shell = inline ? 'section' : AppDialog;
+  const saveButton = <button type="button" className="primary" onClick={save} disabled={busy || !form.endpoint.trim() || !form.bucket.trim() || !form.region.trim() || !form.access_key_id.trim() || !form.secret_access_key}>Connect and back up</button>;
+  const shellProps = inline ? { className: 'tm-settings-card', 'aria-labelledby': 'tm-backup-heading' } : {
+    open: true,
+    onOpenChange: (open) => { if (!open && !busy) onClose(); },
+    title: `${team.name} data backup`,
+    actions: (
+      <>
+        <button type="button" onClick={onClose} disabled={busy}>Close</button>
+        {saveButton}
+      </>
+    ),
+  };
 
   return (
-    <AppDialog
-      open
-      onOpenChange={(open) => { if (!open && !busy) onClose(); }}
-      title={`${team.name} data backup`}
-      actions={(
-        <>
-          <button type="button" onClick={onClose} disabled={busy}>Close</button>
-          <button type="button" className="primary" onClick={save} disabled={busy || !form.endpoint.trim() || !form.bucket.trim() || !form.region.trim() || !form.access_key_id.trim() || !form.secret_access_key}>Connect and back up</button>
-        </>
-      )}
-    >
+    <Shell {...shellProps}>
+      {inline ? <div className="tm-settings-head"><div><h2 id="tm-backup-heading">Data backup</h2><p>Keep a portable copy in storage your company owns.</p></div></div> : null}
       <div className="tm-backup-intro">
         <DatabaseBackup size={22} aria-hidden="true" />
-        <div><b>Keep a copy in your own object store.</b><p>tdoc stays live even if the destination is offline. Failed copies retry automatically.</p></div>
+        <div>
+          <b>Keep a copy in your own storage.</b>
+          <p>First create a bucket in Cloudflare R2, Amazon S3, or another S3-compatible service. Then paste that bucket's connection details below.</p>
+        </div>
       </div>
+      <ol className="tm-backup-steps">
+        <li>Create a private bucket with your storage provider.</li>
+        <li>Create a key that can write to only that bucket.</li>
+        <li>Connect it here. tdoc will keep copying changes automatically.</li>
+      </ol>
       {backup?.enabled ? (
         <section className={`tm-backup-health ${backup.state === 'error' ? 'is-error' : ''}`}>
           <div><b>{backup.state === 'syncing' ? 'Initial backup running' : backup.state === 'error' ? 'Backup needs attention' : 'Backup active'}</b><span>{backup.endpoint}/{backup.bucket}/{backup.prefix}/{team.id}</span></div>
@@ -556,9 +573,24 @@ export function TeamBackupDialog({ team, onClose }) {
         <label className="field">Access key ID<input type="text" autoComplete="off" placeholder={backup?.access_key_hint || 'Access key ID'} value={form.access_key_id} onChange={field('access_key_id')} /></label>
         <label className="field">Secret access key<input type="password" autoComplete="new-password" placeholder="Secret access key" value={form.secret_access_key} onChange={field('secret_access_key')} /></label>
       </div>
-      <p className="manage-hint">Use a key limited to PutObject for this bucket. Credentials are encrypted before storage and are never shown again. Turning this off never deletes the customer-owned copy.</p>
+      <p className="manage-hint"><b>Where do I see the backup?</b> Open the bucket in your R2, S3, or storage provider console. tdoc keeps running normally and does not replace that provider's file browser.</p>
+      <p className="manage-hint">Credentials are encrypted before storage and are never shown again. Turning this off never deletes your copy.</p>
       {status ? <p className="status" role="status">{status}</p> : null}
-    </AppDialog>
+      {inline ? <div className="tm-settings-actions">{saveButton}</div> : null}
+    </Shell>
+  );
+}
+
+export function TeamSettingsPane({ team, onChanged, onLeave }) {
+  return (
+    <section className="tm-settings" aria-label={`${team.name} workspace settings`}>
+      <div className="tm-settings-title">
+        <h2>Workspace settings</h2>
+        <p>Manage this workspace in one place.</p>
+      </div>
+      <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} />
+      {team.role === 'admin' ? <TeamBackupDialog team={team} inline /> : null}
+    </section>
   );
 }
 
