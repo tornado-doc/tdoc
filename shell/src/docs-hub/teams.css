@@ -25,11 +25,17 @@
    of /me, with filters that collapse cleanly on phones. */
 .tm-view-tabs { margin: 0 0 14px; }
 .tm-comments-pane { display: grid; gap: 12px; }
-.tm-comment-filters {
-  display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr));
-  gap: 8px; align-items: end;
+.tm-comment-toolbar { display: flex; align-items: center; gap: 8px; }
+.tm-comment-filter { width: 180px; min-width: 0; }
+.tm-comment-filter-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  box-sizing: border-box; height: 36px; padding: 0 11px; border: 1px solid var(--td-line); border-radius: 8px;
+  background: var(--td-ground); color: var(--td-muted); font: 600 13px/1 system-ui, sans-serif; cursor: pointer;
 }
-.tm-comment-filter { width: 100%; min-width: 0; }
+.tm-comment-filter-button:hover, .tm-comment-filter-button.is-active { border-color: var(--td-accent); color: var(--td-accent); }
+.tm-comment-filter-fields { display: grid; gap: 12px; }
+.tm-comment-filter-fields .field { display: grid; gap: 5px; min-width: 0; color: var(--td-muted); font-size: 12px; }
+.tm-comment-filter-fields .tdoc-select { width: 100%; }
 .tm-comment-since { display: grid; gap: 4px; color: var(--td-muted); font-size: 12px; }
 .tm-comment-since input {
   box-sizing: border-box; width: 100%; height: 36px; padding: 0 10px;
@@ -63,15 +69,15 @@
 .tm-comment-time { white-space: nowrap; color: var(--td-muted); font-size: 12px; }
 
 @media (max-width: 700px) {
-  .tm-comment-filters { grid-template-columns: 1fr 1fr; }
   .tm-comment-row { grid-template-columns: 32px minmax(0, 1fr); padding: 11px 10px; }
   .tm-comment-time { grid-column: 2; }
   .tm-comment-line { flex-wrap: wrap; }
   .tm-comment-line b { max-width: 100%; }
 }
 @media (max-width: 420px) {
-  .tm-comment-filters { grid-template-columns: 1fr; }
-  .tm-comment-filters button, .tm-comment-since input { min-height: 44px; }
+  .tm-comment-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .tm-comment-filter { width: 100%; }
+  .tm-comment-toolbar button, .tm-comment-filter-dialog button, .tm-comment-filter-dialog input { min-height: 44px; }
 }
 
 /* Customer-owned Data Mirror setup. Secrets stay in familiar labeled form

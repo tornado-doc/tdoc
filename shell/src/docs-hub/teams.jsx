@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { DatabaseBackup, Link2, MessageSquareText, RefreshCw, UsersRound } from 'lucide-react';
+import { DatabaseBackup, Link2, MessageSquareText, RefreshCw, SlidersHorizontal, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppSelect } from '../ui/select.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
@@ -110,6 +110,7 @@ export function TeamCommentsPane({ team }) {
   const [person, setPerson] = useState('');
   const [doc, setDoc] = useState('');
   const [since, setSince] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +146,14 @@ export function TeamCommentsPane({ team }) {
     if (item.slug) docs.set(item.slug, item.title || item.slug);
   }
   const sinceMs = since ? Date.parse(`${since}T00:00:00`) : 0;
+  const advancedCount = [replyState !== 'all', authorKind !== 'all', !!person, !!doc, !!since].filter(Boolean).length;
+  const clearAdvanced = () => {
+    setReplyState('all');
+    setAuthorKind('all');
+    setPerson('');
+    setDoc('');
+    setSince('');
+  };
   const shown = items
     .filter((item) => status === 'all' || (status === 'resolved' ? item.resolved : !item.resolved))
     .filter((item) => replyState === 'all'
@@ -157,7 +166,7 @@ export function TeamCommentsPane({ team }) {
 
   return (
     <section className="pane tm-comments-pane" id="pane-team-comments">
-      <div className="tm-comment-filters" aria-label="Filter team comments">
+      <div className="tm-comment-toolbar" aria-label="Filter team comments">
         <AppSelect
           className="tm-comment-filter"
           ariaLabel="Comment status"
@@ -169,53 +178,81 @@ export function TeamCommentsPane({ team }) {
             { value: 'all', label: 'All status' },
           ]}
         />
-        <AppSelect
-          className="tm-comment-filter"
-          ariaLabel="Reply status"
-          value={replyState}
-          onChange={setReplyState}
-          options={[
-            { value: 'all', label: 'All conversations' },
-            { value: 'unreplied', label: 'Unreplied' },
-            { value: 'replied', label: 'Replied' },
-          ]}
-        />
-        <AppSelect
-          className="tm-comment-filter"
-          ariaLabel="Author type"
-          value={authorKind}
-          onChange={setAuthorKind}
-          options={[
-            { value: 'all', label: 'People + AI' },
-            { value: 'human', label: 'People only' },
-            { value: 'agent', label: 'AI only' },
-          ]}
-        />
-        <AppSelect
-          className="tm-comment-filter"
-          ariaLabel="Comment author"
-          value={person}
-          onChange={setPerson}
-          options={[
-            { value: '', label: 'All people' },
-            ...[...people].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
-          ]}
-        />
-        <AppSelect
-          className="tm-comment-filter"
-          ariaLabel="Comment document"
-          value={doc}
-          onChange={setDoc}
-          options={[
-            { value: '', label: 'All docs' },
-            ...[...docs].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
-          ]}
-        />
-        <label className="tm-comment-since">
-          <span>Since</span>
-          <input type="date" value={since} onChange={(event) => setSince(event.target.value)} />
-        </label>
+        <button type="button" className={`tm-comment-filter-button${advancedCount ? ' is-active' : ''}`} onClick={() => setFiltersOpen(true)}>
+          <SlidersHorizontal size={15} aria-hidden="true" />
+          Filters{advancedCount ? ` · ${advancedCount}` : ''}
+        </button>
       </div>
+
+      <AppDialog
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        title="Filter comments"
+        className="tm-comment-filter-dialog"
+        actions={(
+          <>
+            {advancedCount ? <button type="button" className="tdoc-quiet-link tm-push-left" onClick={clearAdvanced}>Clear filters</button> : null}
+            <button type="button" onClick={() => setFiltersOpen(false)}>Done</button>
+          </>
+        )}
+      >
+        <div className="tm-comment-filter-fields">
+          <label className="field">
+            <span>Replies</span>
+            <AppSelect
+              ariaLabel="Reply status"
+              value={replyState}
+              onChange={setReplyState}
+              options={[
+                { value: 'all', label: 'All conversations' },
+                { value: 'unreplied', label: 'Unreplied' },
+                { value: 'replied', label: 'Replied' },
+              ]}
+            />
+          </label>
+          <label className="field">
+            <span>Authors</span>
+            <AppSelect
+              ariaLabel="Author type"
+              value={authorKind}
+              onChange={setAuthorKind}
+              options={[
+                { value: 'all', label: 'People + AI' },
+                { value: 'human', label: 'People only' },
+                { value: 'agent', label: 'AI only' },
+              ]}
+            />
+          </label>
+          <label className="field">
+            <span>Person</span>
+            <AppSelect
+              ariaLabel="Comment author"
+              value={person}
+              onChange={setPerson}
+              options={[
+                { value: '', label: 'All people' },
+                ...[...people].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
+              ]}
+            />
+          </label>
+          <label className="field">
+            <span>Document</span>
+            <AppSelect
+              ariaLabel="Comment document"
+              value={doc}
+              onChange={setDoc}
+              options={[
+                { value: '', label: 'All docs' },
+                ...[...docs].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
+              ]}
+            />
+          </label>
+          <label className="field tm-comment-since">
+            <span>Since</span>
+            <input type="date" value={since} onChange={(event) => setSince(event.target.value)} />
+          </label>
+        </div>
+      </AppDialog>
 
       {loading ? <p className="muted tm-comment-progress">Loading comments… {loadedDocs}{totalDocs ? ` of ${totalDocs}` : ''} docs</p> : null}
       {error ? <p className="tm-comment-error">{error}</p> : null}

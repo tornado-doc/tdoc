@@ -89,6 +89,7 @@ async function t(name, fn) {
       await page.getByRole('combobox', { name: 'Comment status' }).click();
       await page.getByRole('option', { name: 'All status' }).click();
       assert.equal(await page.locator('.tm-comment-row').count(), 5);
+      await page.getByRole('button', { name: 'Filters' }).click();
       await page.getByRole('combobox', { name: 'Comment author' }).click();
       await page.getByRole('option', { name: 'Sky' }).click();
       assert.equal(await page.locator('.tm-comment-row').count(), 2);
@@ -106,6 +107,8 @@ async function t(name, fn) {
 
     await t('unreplied and author-type filters compose', async () => {
       const { context, page } = await open(1100);
+      assert.equal(await page.getByRole('combobox', { name: 'Reply status' }).count(), 0);
+      await page.getByRole('button', { name: 'Filters' }).click();
       await page.getByRole('combobox', { name: 'Reply status' }).click();
       await page.getByRole('option', { name: 'Unreplied' }).click();
       assert.equal(await page.locator('.tm-comment-row').count(), 2);
@@ -114,19 +117,25 @@ async function t(name, fn) {
       await page.getByRole('option', { name: 'People only' }).click();
       assert.equal(await page.locator('.tm-comment-row').count(), 1);
       assert.match(await page.locator('.tm-comment-row').first().textContent(), /Sky/);
+      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-comments-filters-desktop.png'), fullPage: true }); }
+      await page.getByRole('button', { name: 'Done' }).click();
+      assert.equal(await page.getByRole('button', { name: 'Filters · 2' }).count(), 1);
       await context.close();
     });
 
-    await t('phone view has 44px filters and no sideways overflow', async () => {
+    await t('phone view keeps one 44px toolbar row and no sideways overflow', async () => {
       const { context, page } = await open(390);
       const layout = await page.evaluate(() => ({
         width: innerWidth,
         scroll: document.documentElement.scrollWidth,
-        controls: [...document.querySelectorAll('.tm-comment-filter, .tm-comment-since input')].map((el) => el.getBoundingClientRect().height),
+        controls: [...document.querySelectorAll('.tm-comment-filter, .tm-comment-filter-button')].map((el) => ({ height: el.getBoundingClientRect().height, top: el.getBoundingClientRect().top })),
       }));
       assert.ok(layout.scroll <= layout.width + 1, JSON.stringify(layout));
-      assert.ok(layout.controls.every((height) => height >= 44), JSON.stringify(layout.controls));
+      assert.ok(layout.controls.every(({ height }) => height >= 44), JSON.stringify(layout.controls));
+      assert.equal(new Set(layout.controls.map(({ top }) => Math.round(top))).size, 1, JSON.stringify(layout.controls));
       if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-comments-phone.png'), fullPage: true }); }
+      await page.getByRole('button', { name: 'Filters' }).click();
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'team-comments-filters-phone.png'), fullPage: true });
       await context.close();
     });
   } finally {
