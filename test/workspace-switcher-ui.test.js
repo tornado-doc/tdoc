@@ -38,6 +38,9 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
       await items.first().waitFor();
       assert.deepEqual((await items.allTextContents()).map((s) => s.trim()), ['My docs', 'BeFreed', 'Smrti Lab', 'New team']);
       assert.equal(await page.locator('.ui-menu-popup .tdoc-space-check').count(), 1);
+      assert.equal(await trigger.locator('svg').count(), 1, 'the trigger should only keep its dropdown chevron');
+      assert.equal(await page.getByRole('menuitem', { name: 'My docs' }).locator('svg').count(), 0, 'My docs has a decorative icon');
+      assert.equal(await page.getByRole('menuitem', { name: 'Smrti Lab' }).locator('svg').count(), 0, 'team rows have decorative icons');
       if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'switcher-desktop.png') }); }
       await page.getByRole('menuitem', { name: 'Smrti Lab' }).click();
       await page.getByRole('heading', { name: 'Smrti Lab' }).waitFor();

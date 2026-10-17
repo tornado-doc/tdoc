@@ -8,12 +8,6 @@ import { AppMenu, AppMenuItem, AppMenuSeparator } from './ui/menu.jsx';
 // the same on every page and on a phone. On My docs it switches in place
 // (onSpace / onNewTeam); elsewhere it navigates. `space` is the current team
 // id, '' for My docs, or null when the page belongs to no space.
-export function spaceHue(id) {
-  let h = 0;
-  for (const ch of String(id || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
-}
-
 export function WorkspaceSwitcher({ space = null, teams: given = null, currentTeam = null, onSpace = null, onNewTeam = null }) {
   const go = (id) => (onSpace ? onSpace(id) : (location.href = id ? `/me?team=${encodeURIComponent(id)}` : '/me'));
   const [teams, setTeams] = useState(given || null);
