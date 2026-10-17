@@ -1051,12 +1051,11 @@ a.ui-menu-item:visited {
 .tdoc-share-version { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--td-muted); }
 .tdoc-modal .tdoc-share-version button.tdoc-quiet-link { margin: 0; color: var(--td-accent); }
 
-/* Top-bar workspace switcher (workspace-switcher.jsx): the account chip's
-   shape, a square team mark instead of an avatar. It is the only space
-   switcher, so it stays on a phone, narrower. */
-.tdoc-bar .tdoc-space-trigger { padding: 3px 10px 3px 6px; gap: 6px; max-width: 220px; }
+/* Top-bar workspace switcher (workspace-switcher.jsx): one text-first control
+   on every page, kept visible and compact on a phone. */
+.tdoc-bar .tdoc-space-trigger { padding: 5px 10px 5px 12px; gap: 6px; max-width: 220px; }
+.tdoc-bar .tdoc-space-trigger .tdoc-space-name { display: inline; }
 .tdoc-bar .tdoc-space-trigger .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tdoc-space-mark { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: #fff; font-size: 11px; font-weight: 700; }
 .tdoc-space-item-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tdoc-space-check { margin-left: auto; color: var(--td-accent); }
 @media (max-width: 700px) { .tdoc-bar .tdoc-space-trigger { max-width: 140px; } }
