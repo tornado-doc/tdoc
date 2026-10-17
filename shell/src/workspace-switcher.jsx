@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Check, ChevronDown, Plus } from 'lucide-react';
-import { AppMenu, AppMenuItem, AppMenuSeparator } from './ui/menu.jsx';
+import { Check, ChevronDown, Plus, Settings } from 'lucide-react';
+import { AppMenu, AppMenuItem, AppMenuLinkItem, AppMenuSeparator } from './ui/menu.jsx';
 
 // Which space you are in, and every other one a click away, in the top bar
 // on every page (Julie, 2026-10-16: "右上角 … 和 notion 一样 switch
@@ -41,6 +41,10 @@ export function WorkspaceSwitcher({ space = null, teams: given = null, currentTe
         </AppMenuItem>
       ))}
       <AppMenuSeparator />
+      <AppMenuLinkItem className="tdoc-action-menu-item" href={current ? `/me?team=${encodeURIComponent(current.id)}&view=settings` : '/me?view=settings'}>
+        <Settings size={15} aria-hidden="true" />
+        <span className="tdoc-space-item-name">Workspace settings</span>
+      </AppMenuLinkItem>
       <AppMenuItem className="tdoc-action-menu-item" onClick={() => (onNewTeam ? onNewTeam() : (location.href = '/me?new_team=1'))}>
         <Plus size={15} aria-hidden="true" />
         <span className="tdoc-space-item-name">New team</span>

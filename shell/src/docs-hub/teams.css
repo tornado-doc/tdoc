@@ -83,10 +83,38 @@
 /* Customer-owned Data Mirror setup. Secrets stay in familiar labeled form
    fields; health is a separate compact card so a returning admin can see the
    answer without re-reading the setup copy. */
+.tm-settings { display: grid; gap: 16px; padding-top: 4px; }
+.tm-settings-title h2 { margin: 0; font-size: 20px; }
+.tm-settings-title p { margin: 4px 0 0; color: var(--td-muted); font-size: 13px; }
+.tm-settings-card { padding: 18px; border: 1px solid var(--td-line); border-radius: 12px; background: #fff; }
+.tm-settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.tm-settings-head h2 { margin: 0; font-size: 16px; }
+.tm-settings-head p { margin: 4px 0 0; color: var(--td-muted); font-size: 13px; }
+.tm-settings-head > span { color: var(--td-muted); font-size: 12px; }
+.tm-settings-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+.tm-settings-actions button { min-height: 36px; }
+.tm-settings-leave { margin-top: 4px; }
+.tm-settings-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.tm-settings-card .tm-link-btn,
+.tm-settings-card .tm-settings-actions .primary,
+.tm-settings-card .tm-settings-leave {
+  box-sizing: border-box; border: 1px solid var(--td-line); border-radius: 8px;
+  padding: 8px 12px; background: #fff; color: var(--td-ink); font: inherit; cursor: pointer;
+}
+.tm-settings-card .tm-link-btn:hover { background: var(--td-surface); }
+.tm-settings-card .tm-settings-actions .primary { border-color: var(--td-accent); background: var(--td-accent); color: #fff; font-weight: 600; }
+.tm-settings-card .tm-settings-actions .primary:disabled,
+.tm-settings-card .tm-settings-leave:disabled { opacity: .5; cursor: default; }
+.tm-settings-card .tm-settings-leave { border-color: var(--td-danger); color: var(--td-danger); }
 .tm-backup-intro { display: flex; gap: 10px; align-items: flex-start; padding: 2px 0 12px; }
 .tm-backup-intro svg { flex: none; color: var(--td-accent); margin-top: 1px; }
 .tm-backup-intro b { color: var(--td-ink); }
 .tm-backup-intro p { margin: 3px 0 0; color: var(--td-muted); font-size: 13px; line-height: 1.45; }
+.tm-backup-steps {
+  margin: 0 0 16px; padding: 12px 12px 12px 32px; border-radius: 10px;
+  background: var(--td-surface-2); color: var(--td-muted); font-size: 13px; line-height: 1.5;
+}
+.tm-backup-steps li + li { margin-top: 4px; }
 .tm-backup-health {
   display: grid; gap: 7px; margin-bottom: 16px; padding: 12px;
   border: 1px solid var(--td-line); border-radius: 10px; background: var(--td-surface-2);
@@ -100,9 +128,15 @@
 .tm-backup-off { color: var(--td-danger, #b42318); }
 .tm-backup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tm-backup-grid .field { display: grid; gap: 5px; min-width: 0; }
-.tm-backup-grid input { box-sizing: border-box; width: 100%; min-width: 0; }
+.tm-backup-grid input {
+  box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--td-line);
+  border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--td-ink); font: inherit;
+}
+.tm-backup-grid input:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
 .tm-backup-wide { grid-column: 1 / -1; }
 @media (max-width: 560px) {
+  .tm-settings-card { padding: 14px; }
+  .tm-settings-actions button, .tm-settings-leave { width: 100%; min-height: 44px; justify-content: center; }
   .tm-backup-grid { grid-template-columns: 1fr; }
   .tm-backup-wide { grid-column: auto; }
   .tm-backup-grid input, .tm-backup-health button { min-height: 44px; }

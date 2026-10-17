@@ -78,7 +78,9 @@ async function t(name, fn) {
   try {
     await t('connects a bucket and explains asynchronous ownership clearly', async () => {
       const { context, page, calls } = await open(1050);
-      assert.match(await page.locator('.tm-backup-intro').textContent(), /tdoc stays live even if the destination is offline/);
+      assert.match(await page.locator('.tm-backup-intro').textContent(), /First create a bucket in Cloudflare R2, Amazon S3/);
+      assert.match(await page.locator('.tm-backup-steps').textContent(), /Create a private bucket.*Create a key.*Connect it here/s);
+      assert.match(await page.getByText('Where do I see the backup?').locator('..').textContent(), /Open the bucket in your R2, S3, or storage provider console/);
       await page.getByLabel('S3-compatible endpoint').fill('https://acct.r2.cloudflarestorage.com');
       await page.getByLabel('Bucket').fill('acme-backups');
       await page.getByLabel('Access key ID').fill('ACCESS-KEY-1234');
