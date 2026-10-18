@@ -80,6 +80,19 @@ t('preview storage is not production, and DO is stripped', () => {
   assert(!/durable_objects/.test(tpl), 'preview wrangler must omit COMMENTS DO');
 });
 
+t('unchanged PR fixtures do not burn the daily KV write budget', () => {
+  assert(wf.includes('FIXTURE_FINGERPRINT='), 'preview seed must fingerprint its fixture inputs');
+  assert(wf.includes('preview-fixtures:pr-${{ github.event.pull_request.number }}'),
+    'fixture fingerprint must be isolated per PR');
+  assert(wf.includes('wrangler kv key get "$FIXTURE_MARKER"'),
+    'preview seed must read the prior fingerprint before deleting data');
+  assert(wf.includes('preview fixtures unchanged; skipping KV delete/reseed'),
+    'an unchanged rerun must skip destructive fixture writes');
+  assert(wf.includes('wrangler kv key put "$FIXTURE_MARKER" "$FIXTURE_FINGERPRINT"'),
+    'a successful seed must record its fingerprint');
+  assert(wf.includes('--ttl 1209600'), 'the fixture marker must expire with 14-day preview data');
+});
+
 t('never uses a personal Worker or the production upload token', () => {
   assert(wf.includes('TDOC_PREVIEW_UPLOAD_TOKEN'), 'must use a preview-only upload token');
   assert(!wf.includes('secrets.TDOC_DEV_UPLOAD_TOKEN'), 'must not reuse the tdoc.dev upload token');
