@@ -46,7 +46,7 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  async function open(width, enabled = false) {
+  async function open(width, enabled = false, extra = {}) {
     const context = await browser.newContext({ viewport: { width, height: 820 } });
     const page = await context.newPage();
     const calls = [];
@@ -56,7 +56,7 @@ async function t(name, fn) {
       if (request.method() === 'GET') {
         await route.fulfill({ json: { ok: true, backup: enabled ? {
           enabled: true, endpoint: 'https://acct.r2.cloudflarestorage.com', bucket: 'acme-backups', region: 'auto', prefix: 'tdoc-backups',
-          access_key_hint: 'ACCE…1234', state: 'active', last_synced_at: '2026-10-16T20:00:00Z',
+          access_key_hint: 'ACCE…1234', state: 'active', last_synced_at: '2026-10-16T20:00:00Z', ...extra,
         } : { enabled: false } } });
       } else if (request.method() === 'PUT') {
         await route.fulfill({ json: { ok: true, backup: {
@@ -105,6 +105,14 @@ async function t(name, fn) {
       await page.getByRole('button', { name: 'Turn off' }).click();
       await page.getByText('Existing files in your bucket were not deleted.').waitFor();
       assert.equal(calls.at(-1).method, 'DELETE');
+      await context.close();
+    });
+
+    await t('a backup paused by an ended Team plan says so and keeps its settings', async () => {
+      const { context, page } = await open(1050, true, { paused: true });
+      assert.match(await page.locator('.tm-backup-health').textContent(), /Backup paused.*The Team plan ended\. Your settings are kept, and copying resumes when the plan is renewed\./s);
+      assert.doesNotMatch(await page.locator('.tm-backup-health').textContent(), /Automatic backup active/);
+      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-backup-paused-desktop.png'), fullPage: true }); }
       await context.close();
     });
 

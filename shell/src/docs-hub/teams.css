@@ -177,3 +177,16 @@
 .tm-invite-text { flex: 1; min-width: 0; }
 .tm-invite button { flex: none; }
 .tm-invite-error { margin: 0; font-size: 13px; color: var(--td-danger, #b42318); }
+
+/* Team plan card (#48). */
+.tm-plan-badge { flex: none; padding: 3px 9px; border-radius: 999px; background: var(--td-surface-2); color: var(--td-muted); font-size: 12px; font-weight: 600; }
+.tm-plan-badge.is-team { background: var(--td-accent); color: #fff; }
+.tm-plan-summary { margin: 0 0 12px; color: var(--td-ink); font-size: 14px; }
+.tm-plan-summary.is-error { color: var(--td-danger, #b42318); }
+.tm-plan-choose { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; color: var(--td-muted); font-size: 13px; }
+.tm-plan-choose b { color: var(--td-ink); }
+.tm-plan-note { margin: 0; color: var(--td-muted); font-size: 12px; line-height: 1.45; }
+@media (max-width: 640px) {
+  .tm-plan-choose { flex-direction: column; align-items: flex-start; }
+  .tm-settings-card#billing .tm-settings-actions button { min-height: 44px; }
+}
