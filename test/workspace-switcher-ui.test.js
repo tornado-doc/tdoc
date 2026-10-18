@@ -25,6 +25,10 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
     const open = async (width, query) => {
       const page = await browser.newPage({ viewport: { width, height: 800 } });
       await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, teams: TEAMS, team_docs: [], team_folders: {} })) }));
+      await page.route('**/api/me/connectors', (r) => r.fulfill({ json: { connectors: [{
+        id: 'local:juliesmac', kind: 'local', device: 'juliesmac',
+        agents: [{ provider: 'local', device: 'juliesmac', server_id: 'juliesmac', cli: 'claude', agent_sub: 'juliesmac_claude', status: 'active', last_seen: new Date().toISOString() }],
+      }] } }));
       await page.route('**/api/team/backup?*', (r) => r.fulfill({ json: { ok: true, backup: { enabled: false } } }));
       await page.route(/\/api\/team\?/, (r) => r.fulfill({ json: { ok: true, team: {
         ...TEAMS[0], invites: [], invite_url: 'https://tdoc.dev/t/acme/join', team_url: 'https://tdoc.dev/t/befreed',
@@ -77,6 +81,8 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
       await admin.getByRole('heading', { name: 'Workspace settings' }).waitFor();
       assert.deepEqual(await admin.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Settings']);
       await admin.getByRole('heading', { name: 'Members' }).waitFor();
+      await admin.getByRole('heading', { name: 'Always-on agent' }).waitFor();
+      assert.match(await admin.locator('.tm-daemon-card').textContent(), /Running.*only admins can send/s);
       await admin.getByRole('heading', { name: 'Data backup' }).waitFor();
       assert.match(admin.url(), /view=settings/);
       if (SHOTS) await admin.screenshot({ path: path.join(SHOTS, 'workspace-settings-desktop.png'), fullPage: true });
@@ -85,7 +91,16 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
       const member = await open(1280, '?team=tm_lab');
       await member.getByRole('tab', { name: 'Settings' }).click();
       assert.equal(await member.getByRole('heading', { name: 'Data backup' }).count(), 0);
+      assert.match(await member.locator('.tm-daemon-card').textContent(), /Only a workspace admin can connect and run an agent/);
       await member.close();
+    });
+    await t('personal Settings exposes the non-Raft daemon setup', async () => {
+      const page = await open(1280, '?view=settings');
+      await page.getByRole('heading', { name: 'Always-on agent' }).waitFor();
+      const text = await page.locator('.tm-daemon-card').textContent();
+      assert.match(text, /Claude Code or Codex.*Running/s);
+      assert.match(text, /install-launchd/);
+      await page.close();
     });
     await t('phone: the switcher is there and the old pill row is gone', async () => {
       const page = await open(390, '?team=tm_befreed');

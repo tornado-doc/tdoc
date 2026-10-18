@@ -18,6 +18,7 @@ import {
   updateTeam,
 } from '../document/api.js';
 import { DocList, day } from './rows.jsx';
+import { DaemonSettingsCard } from './daemon-settings.jsx';
 import './teams.css';
 
 const ERRORS = {
@@ -589,6 +590,7 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
         <p>Manage this workspace in one place.</p>
       </div>
       <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} />
+      <DaemonSettingsCard team={team} />
       {team.role === 'admin' ? <TeamBackupDialog team={team} inline /> : null}
     </section>
   );

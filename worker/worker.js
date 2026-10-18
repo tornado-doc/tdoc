@@ -9238,15 +9238,26 @@ async function localOwnerAccount(env, meta) {
 }
 // Who may make a local agent run. Stricter than authorizeDocEdit: a local
 // agent is the owner's own computer executing text other people wrote, so
-// only the owner's cookie session or upload token may queue for it. Never a
-// feedback / site token (it lives in a page tdoc does not control, even when
-// it is the owner's), never a team member or an invited editor, never the
-// self-host admin token (it owns no account to register a device under).
-// Returns the owner-group account id the caller proved, or null.
+// only the owner's cookie session or upload token may queue for it. On a team
+// doc the equivalent authority is a current team admin, and the only daemon
+// offered is that admin's own account daemon. Never a feedback / site token
+// (it lives in a page tdoc does not control, even when it is the owner's),
+// never an ordinary team member or invited editor, never the self-host admin
+// token (it owns no account to register a device under). Returns the account
+// id whose daemon the caller proved they may run, or null.
 async function localDriverAccount(env, gate) {
   const meta = gate && gate.meta;
   const docAcct = meta && meta.hosted && meta.hosted.account_id;
-  if (!docAcct || meta.workspace_id) return null;
+  if (!docAcct) return null;
+  if (meta.workspace_id) {
+    if (gate.session && gate.session.feedback) return null;
+    const actor = gate.session || gate.actor;
+    const ids = sessionAccountIds(actor);
+    if (!ids.length) return null;
+    const team = await loadTeam(env, meta.workspace_id);
+    const admin = ids.map((id) => teamMember(team, id)).find((m) => m && m.role === 'admin');
+    return admin ? admin.account_id : null;
+  }
   const owner = (await accountGroup(env, docAcct)).ids;
   if (gate.session) {
     if (gate.session.feedback) return null;
@@ -9271,6 +9282,13 @@ function withoutLocalTargets(resolved) {
   return next;
 }
 const LOCAL_OWNER_ONLY = { error: 'local_agent_owner_only', message: 'Only the owner, signed in or with their own upload token, can send comments to an agent on their computer.' };
+const TEAM_ADMIN_AGENT_ONLY = { error: 'team_agent_admin_only', message: 'Only a team admin can run a local agent on a team document.' };
+const TEAM_LOCAL_AGENT_ONLY = { error: 'team_local_agent_only', message: 'Team documents can be sent only to a local daemon connected by the current admin.' };
+function teamLocalHandoffAllowed(actor, writeGate, handoff) {
+  if (!(writeGate && writeGate.meta && writeGate.meta.workspace_id)) return true;
+  if (!(handoff && isLocalTarget(handoff.recipient))) return false;
+  return !!(writeGate.teamAdmin && handoff.by && sessionOwnsAccount(actor, handoff.by));
+}
 
 async function loadLocalPending(env, accountId) {
   try {
@@ -9278,8 +9296,12 @@ async function loadLocalPending(env, accountId) {
     return Array.isArray(list) ? list.filter((e) => e && typeof e.slug === 'string' && typeof e.handoff_id === 'string') : [];
   } catch { return []; }
 }
+async function localPendingAccount(env, meta, record) {
+  if (meta && meta.workspace_id && record && record.by) return (await accountGroup(env, record.by)).canonical;
+  return localOwnerAccount(env, meta);
+}
 async function localPendingAdd(env, meta, slug, record) {
-  const accountId = await localOwnerAccount(env, meta);
+  const accountId = await localPendingAccount(env, meta, record);
   const t = record && record.recipient;
   if (!accountId || !t || t.provider !== 'local') return false;
   const list = await loadLocalPending(env, accountId);
@@ -9288,11 +9310,11 @@ async function localPendingAdd(env, meta, slug, record) {
   await env.META.put(`local-pending:${accountId}`, JSON.stringify(next));
   return true;
 }
-async function localPendingRemove(env, meta, handoffId) {
-  const accountId = await localOwnerAccount(env, meta);
+async function localPendingRemove(env, meta, record) {
+  const accountId = await localPendingAccount(env, meta, record);
   if (!accountId) return false;
   const list = await loadLocalPending(env, accountId);
-  const next = list.filter((e) => e.handoff_id !== handoffId);
+  const next = list.filter((e) => e.handoff_id !== record.handoff_id);
   if (next.length === list.length) return false;
   await env.META.put(`local-pending:${accountId}`, JSON.stringify(next));
   return true;
@@ -9762,22 +9784,19 @@ async function resolveNotifyTargets(env, slug) {
   };
 }
 
-// A team doc has no one owner whose agent answers for it: whoever presses
-// the button sends to their own agents, never to a teammate's.
-// Team docs: off for now. On Raft the trust boundary is the server; on a
-// personal doc it is the author. A team doc has neither yet — it cannot be
-// co-edited, so whose agent should answer it is undecided — and until that
-// is settled nobody hands its comments to an agent (Julie, 2026-10-03).
-const TEAM_DOC_AGENT_OFF = { error: 'team_docs_agent_disabled', message: 'Send to agent is not available on team docs yet.' };
-
-async function notifyTargetsFor(env, slug, gate) {
+// A team admin may run only their own local daemon. This deliberately does
+// not make the admin's Raft/webhook connections team-wide, and an ordinary
+// member cannot cause code to run on an admin's computer.
+async function notifyTargetsFor(env, slug, gate, localDriver = null) {
   if (!(gate.meta && gate.meta.workspace_id)) return resolveNotifyTargets(env, slug);
-  const own = await accountNotifyTargets(env, gate.session && gate.session.account_id);
+  if (!localDriver) return { default: null, candidates: [], fallback: null, reason: 'team_admin_only' };
+  const own = (await accountNotifyTargets(env, localDriver)).filter(isLocalTarget);
+  await decorateLocalSeen(env, localDriver, [own]);
   return {
     default: own[0] ? { ...own[0], source: 'account' } : null,
     candidates: own.slice(1).map(t => ({ ...t, source: 'account' })),
     fallback: own[0] || null,
-    reason: own.length ? null : 'no_agent_bound',
+    reason: own.length ? null : 'no_team_daemon',
   };
 }
 
@@ -13826,9 +13845,9 @@ export default {
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
-      if (gate.meta && gate.meta.workspace_id) return json({ default: null, candidates: [], fallback: null, reason: 'team_doc' });
-      const resolved = await notifyTargetsFor(env, slug, gate);
-      return json((await localDriverAccount(env, gate)) ? resolved : withoutLocalTargets(resolved));
+      const localDriver = await localDriverAccount(env, gate);
+      const resolved = await notifyTargetsFor(env, slug, gate, localDriver);
+      return json(localDriver ? resolved : withoutLocalTargets(resolved));
     }
 
     if (p === '/api/notify/handoffs' && method === 'GET') {
@@ -13849,7 +13868,6 @@ export default {
       if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
-      if (gate.meta && gate.meta.workspace_id) return json(TEAM_DOC_AGENT_OFF, { status: 403 });
       // Threads whose last word is already an agent's are the person's turn:
       // handing them off again only made the agent answer itself. Drop them
       // here, whatever the client sent.
@@ -13867,12 +13885,14 @@ export default {
         if (!ids.length) return json({ ok: true, sent: 0, skipped, reason: 'agent_has_last_word' });
       }
       // A local agent runs on the owner's computer: only the owner's own
-      // session or token may queue for it, so for anyone else local agents
-      // are neither offered nor accepted (see localDriverAccount).
+      // session or token may queue for it. On a team doc, only a current admin
+      // may queue that admin's own daemon (see localDriverAccount).
       const localDriver = await localDriverAccount(env, gate);
+      if (gate.meta && gate.meta.workspace_id && !localDriver) return json(TEAM_ADMIN_AGENT_ONLY, { status: 403 });
       const asked = recipient ? normalizeNotifyTarget(recipient) : null;
+      if (gate.meta && gate.meta.workspace_id && asked && !isLocalTarget(asked)) return json(TEAM_LOCAL_AGENT_ONLY, { status: 400 });
       if (isLocalTarget(asked) && !localDriver) return json(LOCAL_OWNER_ONLY, { status: 403 });
-      const resolvedAll = await notifyTargetsFor(env, slug, gate);
+      const resolvedAll = await notifyTargetsFor(env, slug, gate, localDriver);
       const resolved = localDriver ? resolvedAll : withoutLocalTargets(resolvedAll);
       // A feedback token lives in a page tdoc does not control, so a script
       // there could hold it. From that door the recipient must be one of the
@@ -13899,7 +13919,9 @@ export default {
       });
       // The first agent a person picks, when they had no default yet, is
       // their default from now on — so @agent has somewhere to go next time.
-      const ownerAccount = gate.meta && gate.meta.hosted && gate.meta.hosted.account_id;
+      const ownerAccount = gate.meta && gate.meta.workspace_id
+        ? localDriver
+        : (gate.meta && gate.meta.hosted && gate.meta.hosted.account_id);
       const delivered = rec.delivery && rec.delivery.status !== 'failed';
       //
       // Any agent a person sends to is also their most recently used one,
@@ -13915,7 +13937,7 @@ export default {
       // until someone else is picked or another agent does work on it. Without
       // this the next @agent went back to whoever touched the doc last
       // (Julie, 2026-10-06).
-      if (asked && (target === asked || target === known) && !sameNotifyTarget(asked, resolved.default)
+      if (!(gate.meta && gate.meta.workspace_id) && asked && (target === asked || target === known) && !sameNotifyTarget(asked, resolved.default)
         && offered.some((t) => sameNotifyTarget(t, asked))) {
         await touchDocAgent(env, slug, target);
       }
@@ -13929,12 +13951,8 @@ export default {
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
-      if (gate.meta && gate.meta.workspace_id) return json(TEAM_DOC_AGENT_OFF, { status: 403 });
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
-      if (gate.meta && gate.meta.workspace_id && prev.by !== (gate.session && gate.session.account_id)) {
-        return json({ error: 'not_handoff_sender' }, { status: 403 });
-      }
       // A resend reuses the original externalEventId, so a provider that did
       // receive the first attempt drops the duplicate instead of waking the
       // agent twice for the same batch.
@@ -13944,6 +13962,9 @@ export default {
       });
       const target = normalizeNotifyTarget(prev.recipient);
       const localDriver = isLocalTarget(target) ? await localDriverAccount(env, gate) : null;
+      if (gate.meta && gate.meta.workspace_id && (!localDriver || prev.by !== localDriver)) {
+        return json({ error: 'not_handoff_sender' }, { status: 403 });
+      }
       if (isLocalTarget(target) && !localDriver) return json(LOCAL_OWNER_ONLY, { status: 403 });
       const delivery = target
         ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
@@ -13977,6 +13998,7 @@ export default {
       if (!writeGate.ok) return writeGate.response;
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      if (!teamLocalHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
       // First ack wins. The useful fact is when work STARTED, not when an agent
       // last pinged, so a re-ack must not push the clock forward.
       if (prev.acked_at) {
@@ -13997,6 +14019,7 @@ export default {
       if (!writeGate.ok) return writeGate.response;
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      if (!teamLocalHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
       const asked = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : null;
       // Resolving without a list means "all of them"; a list resolves only
       // what it names, so an agent can report partial progress honestly.
@@ -14005,7 +14028,7 @@ export default {
         : [...prev.comment_ids];
       const rec = await putHandoff(env, slug, { ...prev, resolved_ids: resolvedIds });
       if (prev.recipient && prev.recipient.provider === 'local' && localHandoffDone(rec)) {
-        await localPendingRemove(env, writeGate.meta, prev.handoff_id);
+        await localPendingRemove(env, writeGate.meta, prev);
       }
       return json({ ok: true, handoff_id: rec.handoff_id, resolved: resolvedIds.length, of: prev.comment_ids.length });
     }
@@ -14054,7 +14077,7 @@ export default {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), LOCAL_PENDING_MAX);
       const pending = [];
       const cache = new Map();
-      const accountIds = [auth.actor.account_id, ...(auth.actor.linked_account_ids || [])];
+      const accountIds = (await accountGroup(env, auth.actor.account_id)).ids;
       for (const id of accountIds) {
         const list = await loadLocalPending(env, id);
         if (!list.length) continue;
@@ -14104,13 +14127,14 @@ export default {
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
       if (!prev.recipient || prev.recipient.provider !== 'local') return json({ error: 'not_a_local_handoff' }, { status: 400 });
+      if (!teamLocalHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
       const at = new Date().toISOString();
       const rec = await putHandoff(env, slug, {
         ...prev,
         delivery: { status: 'failed', error: 'agent_run_failed', at },
         run: { status: 'failed', at, error: String(body.error || '').slice(0, 300) },
       });
-      await localPendingRemove(env, writeGate.meta, prev.handoff_id);
+      await localPendingRemove(env, writeGate.meta, prev);
       return json({ ok: true, handoff_id: rec.handoff_id, delivery: rec.delivery });
     }
 
