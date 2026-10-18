@@ -2,14 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { DatabaseBackup, Link2, MessageSquareText, RefreshCw, SlidersHorizontal, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppSelect } from '../ui/select.jsx';
+import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
 import { copyText } from '../document/model.js';
 import {
   createTeam,
   getTeamBackup,
+  getTeamBilling,
   getTeam,
   listTeamComments,
   moveFolderToTeam,
+  openTeamBilling,
   removeTeamBackup,
   removeTeamMember,
   saveTeamBackup,
@@ -30,6 +33,9 @@ const ERRORS = {
   backup_queue_failed: 'The bucket is connected, but tdoc could not queue the backup. Try Sync everything again.',
   backup_connection_failed: 'tdoc could not write to that bucket. Check the endpoint, bucket, region and keys.',
   backup_encryption_unavailable: 'This deployment needs its Data Mirror encryption key configured.',
+  billing_unavailable: 'Billing is not set up on this deployment.',
+  already_subscribed: 'This team already has the Team plan. Use Manage billing.',
+  no_billing_customer: 'There is no billing account yet. Upgrade first.',
 };
 const message = (error) => ERRORS[error?.body?.error] || error?.message || 'Request failed';
 
@@ -605,6 +611,94 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
   );
 }
 
+const SEAT_PRICE = { month: 8, year: 80 };
+
+function billingDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// Team plan. Free up to `free_seats` members; the Team plan bills every
+// member per seat through Stripe. Hidden on a deployment without Stripe.
+export function TeamBillingCard({ team }) {
+  const [billing, setBilling] = useState(null);
+  const [period, setPeriod] = useState('month');
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+  const returned = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('billing') : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    let tries = 0;
+    const load = () => getTeamBilling(team.id).then((result) => {
+      if (cancelled) return;
+      setBilling(result.billing);
+      // Stripe confirms by webhook a moment after Checkout returns.
+      if (returned === 'success' && result.billing.plan !== 'team' && tries++ < 5) setTimeout(load, 2000);
+    }).catch((error) => { if (!cancelled) setStatus(message(error)); });
+    load();
+    if (returned === 'success') setStatus('Payment received. The Team plan turns on in a few seconds.');
+    if (returned === 'canceled') setStatus('Checkout was canceled. Nothing was charged.');
+    return () => { cancelled = true; };
+  }, [team.id]);
+
+  if (!billing || !billing.configured) return null;
+  const go = async (action) => {
+    setBusy(true);
+    setStatus(action === 'portal' ? 'Opening Stripe…' : 'Opening checkout…');
+    try {
+      const result = await openTeamBilling(team.id, action, action === 'checkout' ? period : undefined);
+      location.assign(result.url);
+    } catch (error) {
+      setStatus(message(error));
+      setBusy(false);
+    }
+  };
+  const paid = billing.plan === 'team';
+  const seats = billing.seats;
+  const renews = billingDate(billing.current_period_end);
+  const summary = paid
+    ? billing.status === 'past_due'
+      ? 'The last payment failed. Update the card to keep the Team plan.'
+      : `${billing.quantity || seats} ${(billing.quantity || seats) === 1 ? 'seat' : 'seats'}, billed ${billing.interval === 'year' ? 'yearly' : 'monthly'}.${renews ? ` ${billing.cancel_at_period_end ? 'Ends' : 'Renews'} ${renews}.` : ''}`
+    : billing.over_free
+      ? `${seats} members. New members need the Team plan.`
+      : `${seats} of ${billing.free_seats} free seats used.`;
+
+  return (
+    <section className="tm-settings-card" id="billing" aria-labelledby="tm-billing-heading">
+      <div className="tm-settings-head">
+        <div>
+          <h2 id="tm-billing-heading">Plan</h2>
+          <p>Free for up to {billing.free_seats} members. The Team plan is ${SEAT_PRICE.month} per member a month, or ${SEAT_PRICE.year} a year.</p>
+        </div>
+        <span className={`tm-plan-badge${paid ? ' is-team' : ''}`}>{paid ? 'Team' : 'Free'}</span>
+      </div>
+      <p className={`tm-plan-summary${billing.status === 'past_due' ? ' is-error' : ''}`}>{summary}</p>
+      {paid ? null : (
+        <div className="tm-plan-choose">
+          <SegmentedControl
+            ariaLabel="Billing period"
+            value={period}
+            onChange={setPeriod}
+            options={[{ value: 'month', label: 'Monthly' }, { value: 'year', label: 'Yearly' }]}
+          />
+          <span>{seats} × ${SEAT_PRICE[period]} = <b>${seats * SEAT_PRICE[period]}</b> / {period === 'year' ? 'year' : 'month'}</span>
+        </div>
+      )}
+      <p className="tm-plan-note">Every admin and member is a seat; agents never are. Seats follow the member list, and changes are prorated.</p>
+      {status ? <p className="status" role="status">{status}</p> : null}
+      <div className="tm-settings-actions">
+        {paid || billing.has_customer ? (
+          <button type="button" className={paid ? 'primary' : 'tm-link-btn'} onClick={() => go('portal')} disabled={busy}>Manage billing</button>
+        ) : null}
+        {paid ? null : <button type="button" className="primary" onClick={() => go('checkout')} disabled={busy}>Upgrade to Team</button>}
+      </div>
+    </section>
+  );
+}
+
 export function TeamSettingsPane({ team, onChanged, onLeave }) {
   return (
     <section className="tm-settings" aria-label={`${team.name} workspace settings`}>
@@ -612,6 +706,7 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
         <h2>Workspace settings</h2>
         <p>Manage this workspace in one place.</p>
       </div>
+      {team.role === 'admin' ? <TeamBillingCard team={team} /> : null}
       <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} />
       <section className="tm-settings-card" id="agents">
         <div className="tm-settings-head"><div><h2>Agents</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
