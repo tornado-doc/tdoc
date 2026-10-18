@@ -22,25 +22,41 @@ const STRIPE = { STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_PRICE_MONTHLY: 'price_mo
 function stubStripe() {
   const calls = [];
   const subs = new Map();
+  const sessions = { n: 0, map: new Map() };
+  const failNext = { subscriptionPost: 0 };
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init = {}) => {
     const u = new URL(typeof input === 'string' ? input : input.url);
     if (u.hostname !== 'api.stripe.com') return realFetch(input, init);
     const form = new URLSearchParams(init.body || '');
-    calls.push({ method: init.method || 'GET', path: u.pathname, form, auth: init.headers && init.headers.Authorization });
+    calls.push({ method: init.method || 'GET', path: u.pathname, form, auth: init.headers && init.headers.Authorization, idem: init.headers && init.headers['Idempotency-Key'] });
     const reply = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-    if (u.pathname === '/v1/checkout/sessions') return reply({ id: 'cs_1', url: 'https://checkout.stripe.com/c/cs_1' });
+    if (u.pathname === '/v1/checkout/sessions') {
+      const id = `cs_${++sessions.n}`;
+      sessions.map.set(id, { id, status: 'open', url: `https://checkout.stripe.com/c/${id}` });
+      return reply(sessions.map.get(id));
+    }
+    const cs = u.pathname.match(/^\/v1\/checkout\/sessions\/([^/]+)(\/expire)?$/);
+    if (cs) {
+      const one = sessions.map.get(cs[1]);
+      if (!one) return reply({ error: { message: 'No such session' } }, 404);
+      if (cs[2]) one.status = 'expired';
+      return reply(one);
+    }
     if (u.pathname === '/v1/billing_portal/sessions') return reply({ id: 'bps_1', url: 'https://billing.stripe.com/p/session_1' });
     const m = u.pathname.match(/^\/v1\/subscriptions\/([^/]+)$/);
     if (m) {
       const sub = subs.get(m[1]);
       if (!sub) return reply({ error: { message: 'No such subscription' } }, 404);
-      if ((init.method || 'GET') === 'POST') sub.items.data[0].quantity = Number(form.get('items[0][quantity]'));
+      if ((init.method || 'GET') === 'POST') {
+        if (failNext.subscriptionPost > 0) { failNext.subscriptionPost -= 1; return reply({ error: { message: 'Stripe is down' } }, 500); }
+        sub.items.data[0].quantity = Number(form.get('items[0][quantity]'));
+      }
       return reply(sub);
     }
     return reply({ error: { message: `unexpected ${u.pathname}` } }, 400);
   };
-  return { calls, subs, restore: () => { globalThis.fetch = realFetch; } };
+  return { calls, subs, sessions, failNext, restore: () => { globalThis.fetch = realFetch; } };
 }
 
 function subscription(id, teamId, quantity, status = 'active', interval = 'month') {
@@ -89,7 +105,10 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     };
     return { env, admin, team, join, invite, fill };
   }
+  let eventSeq = 0;
   const webhook = (env, event, opts = {}) => {
+    eventSeq += 1;
+    event = { id: `evt_${eventSeq}`, created: 1700000000 + eventSeq, ...event };
     const s = signed(event, opts.secret);
     return worker.fetch(new Request('https://tdoc.dev/api/stripe/webhook', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Stripe-Signature': opts.header || s.header }, body: s.payload,
@@ -149,6 +168,13 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
       assert(cross.status === 403, `cross-origin checkout ${cross.status}`);
       const co = await call(env, '/api/team/billing', { method: 'POST', cookie: admin.cookie, headers: origin, body: { id: team.id, action: 'checkout', interval: 'year' } });
       assert(co.status === 200 && co.body.url === 'https://checkout.stripe.com/c/cs_1', JSON.stringify(co.body));
+      const twice = await call(env, '/api/team/billing', { method: 'POST', cookie: admin.cookie, headers: origin, body: { id: team.id, action: 'checkout', interval: 'year' } });
+      assert(twice.body.url === co.body.url, 'a second click opened a second Checkout');
+      assert(stripe.calls.filter((c) => c.method === 'POST' && c.path === '/v1/checkout/sessions').length === 1, 'two Checkout sessions created');
+      assert(stripe.calls.find((c) => c.path === '/v1/checkout/sessions').idem, 'Checkout sent without an idempotency key');
+      stripe.sessions.map.get('cs_1').status = 'complete';
+      const paidNotConfirmed = await call(env, '/api/team/billing', { method: 'POST', cookie: admin.cookie, headers: origin, body: { id: team.id, action: 'checkout' } });
+      assert(paidNotConfirmed.status === 409 && paidNotConfirmed.body.error === 'checkout_completing', 'a paid but unconfirmed Checkout could be sold again');
       const sent = stripe.calls.find((c) => c.path === '/v1/checkout/sessions').form;
       assert(sent.get('mode') === 'subscription');
       assert(sent.get('line_items[0][price]') === 'price_year' && sent.get('line_items[0][quantity]') === '2', `line item ${sent.toString()}`);
@@ -218,6 +244,43 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
       assert((await fill(1, 21)).status === 402, 'canceled plan still adds docs');
       const v2 = await call(env, '/api/upload', { method: 'POST', token: admin.token, body: { slug: 'doc-3', version: 2, html: '<p>still editable</p>' } });
       assert(v2.status === 200, 'existing doc no longer editable after cancel');
+    } finally { stripe.restore(); }
+  });
+
+  await t('without the webhook secret billing stays off, so nobody can pay for a plan that never turns on', async () => {
+    const { env, admin, team } = await setup({ ...STRIPE, STRIPE_WEBHOOK_SECRET: '' });
+    const plan = await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie });
+    assert(plan.body.billing.configured === false, JSON.stringify(plan.body));
+  });
+
+  await t('events out of order or redelivered never resurrect a canceled plan', async () => {
+    const stripe = stubStripe();
+    try {
+      const { env, admin, team } = await setup();
+      const upd = await webhook(env, { id: 'evt_old', created: 1800000100, type: 'customer.subscription.updated', data: { object: subscription('sub_3', team.id, 1) } });
+      assert(upd.status === 200);
+      await webhook(env, { id: 'evt_del', created: 1800000200, type: 'customer.subscription.deleted', data: { object: subscription('sub_3', team.id, 1, 'canceled') } });
+      const late = await (await webhook(env, { id: 'evt_late', created: 1800000150, type: 'customer.subscription.updated', data: { object: subscription('sub_3', team.id, 1) } })).json();
+      assert(late.ignored === 'stale', JSON.stringify(late));
+      const again = await (await webhook(env, { id: 'evt_del', created: 1800000200, type: 'customer.subscription.deleted', data: { object: subscription('sub_3', team.id, 1, 'canceled') } })).json();
+      assert(again.duplicate === true, JSON.stringify(again));
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.plan === 'free' && plan.status === 'canceled', JSON.stringify(plan));
+    } finally { stripe.restore(); }
+  });
+
+  await t('a seat sync that failed is retried the next time the plan is opened', async () => {
+    const stripe = stubStripe();
+    try {
+      const { env, admin, team, join, invite } = await setup();
+      await invite(['r1']);
+      stripe.subs.set('sub_4', subscription('sub_4', team.id, 1));
+      await webhook(env, { type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_4', metadata: { team_id: team.id } } } });
+      stripe.failNext.subscriptionPost = 1;
+      assert((await join('r1')).r.status === 200, 'join failed because Stripe did');
+      assert(stripe.subs.get('sub_4').items.data[0].quantity === 1, 'stub should still bill 1 seat');
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(stripe.subs.get('sub_4').items.data[0].quantity === 2 && plan.quantity === 2, `not reconciled: ${JSON.stringify(plan)}`);
     } finally { stripe.restore(); }
   });
 

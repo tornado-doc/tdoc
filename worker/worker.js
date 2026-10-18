@@ -4190,16 +4190,18 @@ async function joinTeamFromSession(env, team, s) {
 // editable whatever the plan, and a backup already running keeps running.
 // The plan bills every admin and member per seat, monthly or yearly; agents
 // are not members, so they never take a seat. Nothing here runs until
-// STRIPE_SECRET_KEY and both price ids are set, so an unconfigured deploy
+// STRIPE_SECRET_KEY, both price ids and STRIPE_WEBHOOK_SECRET are set, so an unconfigured deploy
 // (local, preview, self-hosted) behaves exactly as before: no limit, no plan.
 // Stripe is the source of truth; `team-billing:<id>` is its last webhook,
 // written only on checkout and subscription changes.
 const TEAM_FREE_DOCS = 20;
 const STRIPE_API = 'https://api.stripe.com/v1';
 const STRIPE_SIGNATURE_TOLERANCE_S = 300;
+// The webhook secret counts: without it a team could pay and never be told.
 function stripeConfigured(env) {
-  return !!(env && env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_MONTHLY && env.STRIPE_PRICE_YEARLY);
+  return !!(env && env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_MONTHLY && env.STRIPE_PRICE_YEARLY && env.STRIPE_WEBHOOK_SECRET);
 }
+function teamCheckoutKey(teamId) { return `team-checkout:${teamId}`; }
 function teamBillingKey(teamId) { return `team-billing:${teamId}`; }
 async function loadTeamBilling(env, teamId) {
   try { const rec = JSON.parse(await env.META.get(teamBillingKey(teamId))); return rec && typeof rec === 'object' ? rec : null; } catch { return null; }
@@ -4257,8 +4259,9 @@ function stripeForm(params, prefix = '', out = new URLSearchParams()) {
   }
   return out;
 }
-async function stripeApi(env, method, path, params) {
+async function stripeApi(env, method, path, params, idempotencyKey) {
   const init = { method, headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` } };
+  if (idempotencyKey) init.headers['Idempotency-Key'] = idempotencyKey;
   if (params && method !== 'GET') {
     init.headers['Content-Type'] = 'application/x-www-form-urlencoded';
     init.body = stripeForm(params).toString();
@@ -4280,7 +4283,7 @@ async function verifyStripeSignature(secret, payload, header, nowS = Math.floor(
   for (const s of sigs) if (await timingSafeEqual(s, expected)) return true;
   return false;
 }
-function billingFromSubscription(sub, prev) {
+function billingFromSubscription(sub, prev, event) {
   const item = sub && sub.items && Array.isArray(sub.items.data) ? sub.items.data[0] : null;
   const price = item && item.price;
   return {
@@ -4295,6 +4298,9 @@ function billingFromSubscription(sub, prev) {
     current_period_end: ((item && item.current_period_end) || sub.current_period_end)
       ? new Date(((item && item.current_period_end) || sub.current_period_end) * 1000).toISOString() : null,
     cancel_at_period_end: !!sub.cancel_at_period_end,
+    // The newest event applied; older ones arriving late are dropped.
+    event_created: (event && event.created) || (prev && prev.event_created) || 0,
+    event_id: (event && event.id) || (prev && prev.event_id) || null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -4310,8 +4316,9 @@ async function syncTeamSeats(env, team) {
     const sub = await stripeApi(env, 'POST', `/subscriptions/${encodeURIComponent(billing.subscription)}`, {
       items: { 0: { id: billing.item, quantity: seats } },
       proration_behavior: 'create_prorations',
-    });
+    }, `seats:${billing.subscription}:${billing.quantity}->${seats}`);
     await env.META.put(teamBillingKey(team.id), JSON.stringify(billingFromSubscription(sub, billing)));
+    return true;
   } catch (error) {
     console.error(`[billing] seat sync failed team=${team.id}: ${error.message || error}`);
   }
@@ -12991,6 +12998,9 @@ export default {
       if (method === 'POST') { try { body = await req.json(); } catch {} }
       const team = await loadTeam(env, method === 'GET' ? url.searchParams.get('id') : body.id);
       if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      // A seat sync that failed earlier is retried here, so a missed update
+      // cannot leave the subscription under-billed for long.
+      await syncTeamSeats(env, team);
       const billing = await loadTeamBilling(env, team.id);
       if (method === 'GET') return json({ ok: true, billing: await publicTeamBilling(env, team, billing) });
       if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
@@ -13004,10 +13014,23 @@ export default {
         }
         if (body.action === 'checkout') {
           if (teamBillingPaid(billing)) return json({ error: 'already_subscribed' }, { status: 409 });
-          const price = body.interval === 'year' ? env.STRIPE_PRICE_YEARLY : env.STRIPE_PRICE_MONTHLY;
+          const interval = body.interval === 'year' ? 'year' : 'month';
+          const quantity = Math.max(1, team.members.length);
+          // One open Checkout per team: a double click, a retry or a second
+          // admin gets the same session, and a paid one that the webhook has
+          // not confirmed yet is not sold twice.
+          let pending = null;
+          try { pending = JSON.parse(await env.META.get(teamCheckoutKey(team.id))); } catch {}
+          if (pending && pending.id) {
+            const open = await stripeApi(env, 'GET', `/checkout/sessions/${encodeURIComponent(pending.id)}`).catch(() => null);
+            if (open && open.status === 'complete') return json({ error: 'checkout_completing', message: 'Payment went through. The Team plan turns on in a few seconds.' }, { status: 409 });
+            if (open && open.status === 'open' && open.url && pending.interval === interval && pending.quantity === quantity) return json({ ok: true, url: open.url });
+            if (open && open.status === 'open') await stripeApi(env, 'POST', `/checkout/sessions/${encodeURIComponent(pending.id)}/expire`).catch(() => null);
+          }
+          const price = interval === 'year' ? env.STRIPE_PRICE_YEARLY : env.STRIPE_PRICE_MONTHLY;
           const checkout = await stripeApi(env, 'POST', '/checkout/sessions', {
             mode: 'subscription',
-            line_items: { 0: { price, quantity: Math.max(1, team.members.length) } },
+            line_items: { 0: { price, quantity } },
             client_reference_id: team.id,
             metadata: { team_id: team.id },
             subscription_data: { metadata: { team_id: team.id } },
@@ -13015,7 +13038,8 @@ export default {
             allow_promotion_codes: 'true',
             success_url: `${back}&billing=success#billing`,
             cancel_url: `${back}&billing=canceled#billing`,
-          });
+          }, `checkout:${team.id}:${interval}:${quantity}:${(pending && pending.id) || 'none'}:${Math.floor(Date.now() / 600000)}`);
+          await env.META.put(teamCheckoutKey(team.id), JSON.stringify({ id: checkout.id, interval, quantity, at: new Date().toISOString() }));
           return json({ ok: true, url: checkout.url });
         }
       } catch (error) {
@@ -13028,7 +13052,7 @@ export default {
     // proof. Only subscription state is recorded; the team id rides in the
     // metadata tdoc set at Checkout, so an event for anything else is ignored.
     if (p === '/api/stripe/webhook' && method === 'POST') {
-      if (!env.STRIPE_WEBHOOK_SECRET || !stripeConfigured(env)) return json({ error: 'billing_unavailable' }, { status: 503 });
+      if (!stripeConfigured(env)) return json({ error: 'billing_unavailable' }, { status: 503 });
       const payload = await req.text();
       if (!(await verifyStripeSignature(env.STRIPE_WEBHOOK_SECRET, payload, req.headers.get('stripe-signature')))) {
         return json({ error: 'bad_signature' }, { status: 400 });
@@ -13048,12 +13072,22 @@ export default {
       const team = teamId ? await loadTeam(env, teamId) : null;
       if (!team || !sub) return json({ received: true, ignored: true });
       const prev = await loadTeamBilling(env, team.id);
-      // A late event about an older subscription must not overwrite the
-      // current one's state.
+      // Stripe does not deliver in order and retries freely. An event already
+      // applied, or older than the last one applied, changes nothing: a late
+      // subscription.updated cannot bring back a plan a later deletion ended.
+      // checkout.session.completed reads the subscription live, so it is
+      // current whenever it arrives.
+      const created = Number(event.created) || 0;
+      if (prev && event.id && prev.event_id === event.id) return json({ received: true, duplicate: true });
+      if (prev && event.type !== 'checkout.session.completed' && created && created < (Number(prev.event_created) || 0)) {
+        return json({ received: true, ignored: 'stale' });
+      }
+      // An event about an older subscription must not overwrite the current one's state.
       if (prev && prev.subscription && prev.subscription !== sub.id && teamBillingPaid(prev) && event.type !== 'checkout.session.completed') {
         return json({ received: true, ignored: true });
       }
-      await env.META.put(teamBillingKey(team.id), JSON.stringify(billingFromSubscription(sub, prev)));
+      await env.META.put(teamBillingKey(team.id), JSON.stringify(billingFromSubscription(sub, prev, event)));
+      if (event.type === 'checkout.session.completed') await env.META.delete(teamCheckoutKey(team.id)).catch(() => {});
       // Members may have joined between Checkout and this event.
       await syncTeamSeats(env, team);
       return json({ received: true });
