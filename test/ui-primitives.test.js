@@ -106,5 +106,16 @@ t('advanced connector setup stays behind progressive disclosure', () => {
   assert((src.match(/<details className="tdoc-conn-alt">/g) || []).length >= 3, 'connector advanced details are missing');
 });
 
+t('document owners can move the open doc between workspaces', () => {
+  const toolbar = fs.readFileSync(path.join(ROOT, 'shell/src/document/document-toolbar.jsx'), 'utf8');
+  assert(/data-action="move-document"/.test(toolbar) && /Move document…/.test(toolbar), 'document More menu has no move action');
+  const shell = fs.readFileSync(path.join(ROOT, 'shell/src/document-shell.jsx'), 'utf8');
+  assert(/config\.mode === 'published' && config\.isOwner \? openMoveDocument : null/.test(shell), 'move action is not limited to the published doc owner');
+  assert(/await moveDocsToTeam\(\[config\.slug\], target\.id\)/.test(shell), 'move action does not call the shared workspace move API');
+  assert(/includePersonal=\{Boolean\(config\.teamManage\?\.team\?\.id\)\}/.test(shell), 'team docs cannot return to My docs');
+  const teams = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub/teams.jsx'), 'utf8');
+  assert(/team\.id !== currentTeam/.test(teams), 'move dialog does not hide the current workspace');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
