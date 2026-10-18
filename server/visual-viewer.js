@@ -73,6 +73,7 @@
     var a = active; active = null;
     if (a.target.matches(':popover-open')) a.target.hidePopover();
     restoreAttr(a.target, 'style', a.style); restoreAttr(a.target, 'popover', a.popover); restoreAttr(a.target, 'id', a.id);
+    a.unclipped.forEach(function (item) { restoreAttr(item.node, 'style', item.style); });
     a.inert.forEach(function (node) { node.removeAttribute('inert'); });
     a.hidden.forEach(function (item) { restoreAttr(item.node, 'aria-hidden', item.value); });
     if (a.wrapper) { a.wrapper.replaceWith(a.el); }
@@ -128,7 +129,7 @@
     panel.appendChild(toolbar); document.body.appendChild(panel);
     active = { el: el, target: target, wrapper: wrapper, panel: panel, trigger: trigger,
       style: target.getAttribute('style'), popover: target.getAttribute('popover'), id: target.getAttribute('id'),
-      width: width, height: height, x: 0, y: 0, scrollX: scrollX, scrollY: scrollY, inert: [], hidden: [] };
+      width: width, height: height, x: 0, y: 0, scrollX: scrollX, scrollY: scrollY, inert: [], hidden: [], unclipped: [] };
     // Keep the original visual's ancestry active while excluding the rest of
     // the document from focus and the accessibility tree.
     for (var branch = target; branch && branch !== document.body; branch = branch.parentElement) {
@@ -153,7 +154,28 @@
     if (dark) css.filter = target.matches('img:not([data-tdoc-dark="invert"]),video:not([data-tdoc-dark="invert"]),canvas:not([data-tdoc-dark="invert"]),iframe:not([data-tdoc-dark="invert"])')
       ? 'none' : 'invert(1) hue-rotate(180deg)' + (original.filter === 'none' ? '' : ' ' + original.filter);
     if (!target.matches('iframe,video') && !target.querySelector('iframe,video,input,select')) css['touch-action'] = 'none';
+    // A visual wider than the reader column (a wide table, a figure with a
+    // horizontal scrollbar) is shown whole: widen it by what its scroll
+    // containers hide, lay it out unclipped, then fit that full size.
+    var scrollers = target.matches('img,svg,canvas,video,iframe') ? [] : [target].concat(Array.from(target.querySelectorAll('*'))).filter(function (node) {
+      var x = getComputedStyle(node).overflowX;
+      return (x === 'auto' || x === 'scroll') && node.scrollWidth > node.clientWidth + 1;
+    });
+    if (scrollers.length) {
+      width += Math.max.apply(null, scrollers.map(function (node) { return node.scrollWidth - node.clientWidth; }));
+      css.width = width + 'px'; css.height = 'auto';
+    }
     Object.keys(css).forEach(function (key) { target.style.setProperty(key, css[key], 'important'); });
+    scrollers.forEach(function (node) {
+      if (node === target) return;
+      active.unclipped.push({ node: node, style: node.getAttribute('style') });
+      node.style.setProperty('overflow', 'visible', 'important');
+    });
+    if (scrollers.length) {
+      active.width = width;
+      active.height = target.offsetHeight;
+      target.style.setProperty('height', active.height + 'px', 'important');
+    }
     target.setAttribute('popover', 'manual');
     if (!target.id) target.id = 'tdoc-visual-target';
     panel.setAttribute('aria-owns', target.id);

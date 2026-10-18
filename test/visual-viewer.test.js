@@ -55,6 +55,20 @@ const { resolveTarget } = require('./helpers/fixture-server');
         await page.locator('[data-visual-open]').waitFor({state:'detached'});
         assert.equal(await frame.locator(selector).getAttribute('style'),before,'temporary styles restored');
       }
+      const strip = frame.locator('#strip');
+      const stripBefore = await strip.locator('div').getAttribute('style');
+      assert(await strip.locator('div').evaluate(el => el.scrollWidth > el.clientWidth), 'fixture strip scrolls in the column');
+      await strip.click({position:{x:25,y:25}});
+      await page.locator('[data-visual-open]').waitFor();
+      const shown = await strip.evaluate(el => ({
+        scrolls: [el, ...el.querySelectorAll('*')].some(n => n.scrollWidth > n.clientWidth + 1),
+        frames: [...el.querySelectorAll('img')].map(i => { const r = i.getBoundingClientRect(); return [r.left, r.right]; }),
+      }));
+      assert(!shown.scrolls, `fullscreen strip does not scroll sideways at ${width}px`);
+      assert(shown.frames.every(([l, r]) => l >= -1 && r <= width + 1), `every frame of the strip is visible at ${width}px`);
+      await frame.getByRole('button',{name:'Close fullscreen'}).click();
+      await page.locator('[data-visual-open]').waitFor({state:'detached'});
+      assert.equal(await strip.locator('div').getAttribute('style'), stripBefore, 'strip scroller style restored');
       const widget = frame.frameLocator('#widget');
       await widget.getByRole('button',{name:'Add one'}).click();
       await frame.getByRole('button',{name:'View Interactive counter fullscreen'}).click();
