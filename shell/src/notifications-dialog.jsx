@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSwitch } from './ui/switch.jsx';
 
@@ -44,6 +44,40 @@ export function notificationTarget(item) {
   const target = item.comment_id || item.thread_id;
   const query = target ? `?comment=${encodeURIComponent(target)}` : '';
   return `/d/${encodeURIComponent(item.slug)}/v/${version}${query}`;
+}
+
+// A product-level soft ask before Chrome's permission prompt. It is shown on
+// document pages only, and only after unread collaboration activity makes the
+// value concrete. Not now (or dismissing Chrome's prompt) snoozes it for seven
+// days; no browser permission is requested until Turn on is clicked.
+export function BrowserAlertsPrompt({ notifications }) {
+  const [result, setResult] = useState('');
+  if (!notifications.browserPrompt && !result) return null;
+
+  const enable = async () => setResult(await notifications.setAlerts(true));
+  const dismiss = () => {
+    notifications.dismissAlertsPrompt();
+    setResult('');
+  };
+  const granted = result === 'granted';
+  const blocked = result === 'denied' || result === 'default';
+
+  return (
+    <aside className="tdoc-notif-prompt" role="dialog" aria-label="Turn on browser notifications">
+      <div className="tdoc-notif-prompt-copy">
+        <strong>{granted ? 'Test alert sent' : blocked ? 'Notifications weren’t enabled' : 'Don’t miss replies'}</strong>
+        <span>{granted
+          ? 'If you didn’t see it, allow Chrome notifications in your system settings. Keep a tdoc tab open for alerts.'
+          : blocked
+            ? 'You can allow tdoc in Chrome’s site settings and turn it on later from Notifications.'
+            : 'Get a Chrome alert when someone comments, mentions you, or replies. tdoc needs to stay open in a tab.'}</span>
+      </div>
+      <div className="tdoc-notif-prompt-actions">
+        {!result ? <button type="button" className="primary" onClick={enable}>Turn on</button> : null}
+        <button type="button" onClick={dismiss}>{result ? 'Close' : 'Not now'}</button>
+      </div>
+    </aside>
+  );
 }
 
 function BrowserAlertsSetting({ notifications }) {

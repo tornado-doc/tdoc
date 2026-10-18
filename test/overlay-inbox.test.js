@@ -8,6 +8,7 @@ function assert(value, message) { if (!value) throw new Error(message); }
 const root = path.join(__dirname, '..');
 const dialog = fs.readFileSync(path.join(root, 'shell/src/notifications-dialog.jsx'), 'utf8');
 const hook = fs.readFileSync(path.join(root, 'shell/src/hooks/use-notifications.js'), 'utf8');
+const browserAlerts = fs.readFileSync(path.join(root, 'shell/src/hooks/browser-notifications.js'), 'utf8');
 const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
 const topBar = fs.readFileSync(path.join(root, 'shell/src/top-bar.jsx'), 'utf8');
 
@@ -51,6 +52,20 @@ t('reply deep-links resolve to the parent and open the thread', () => {
 t('identity menu shows unread state and notifications command', () => {
   assert(topBar.includes('tdoc-unread-dot'), 'unread dot missing');
   assert(topBar.includes('Notifications{notifications.unread'), 'unread menu label missing');
+});
+
+t('the document soft ask waits for unread value, requests permission only on click, and snoozes seven days', () => {
+  assert(browserAlerts.includes("browserNotificationPermission() !== 'default'"), 'soft ask is not permission-gated');
+  assert(browserAlerts.includes('Number(unread) < 1'), 'soft ask appears without collaboration activity');
+  assert(browserAlerts.includes('7 * 24 * 60 * 60 * 1000'), 'seven-day quiet period missing');
+  assert(dialog.includes('onClick={enable}>Turn on'), 'soft ask does not wait for a click');
+  assert(dialog.includes("notifications.dismissAlertsPrompt()"), 'Not now does not snooze');
+  assert(shell.includes('notificationPrompt={!config.isLanding}'), 'soft ask is not scoped to document pages');
+});
+
+t('approval sends a proof alert and says the open-tab limit plainly', () => {
+  assert(browserAlerts.includes("new window.Notification('Browser notifications are on'"), 'proof alert missing');
+  assert(dialog.includes('Keep a tdoc tab open for alerts.'), 'success state hides the open-tab limit');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
