@@ -3832,6 +3832,7 @@ async function moveFolderToTeam(env, session, team, body) {
   }
   const results = [];
   const writes = [];
+  let entering = 0;
   let reads = 0;
   let next = 0;
   for (; next < pending.length && reads < FOLDER_TEAM_MOVE_READS && writes.length < FOLDER_TEAM_MOVE_WRITES; next += 1) {
@@ -3870,6 +3871,7 @@ async function moveFolderToTeam(env, session, team, body) {
     // The same change /api/team/move makes, plus the folder.
     delete personal.docs[slug]; personalChanged = true;
     writes.push([slug, { ...meta, workspace_id: team.id, team_folder: target, access: { ...accessFromMeta(meta), team: true } }]);
+    entering += 1;
     results.push({ slug, status: 'moved', folder: target });
   }
   const remaining = pending.length - next;
@@ -3889,6 +3891,11 @@ async function moveFolderToTeam(env, session, team, body) {
       personalChanged = true;
     }
   }
+
+  // Checked before anything is written, so a refused batch leaves this
+  // call's docs where they were; batches already moved stay in the team.
+  const blocked = await teamPlanBlocksDocs(env, team, entering);
+  if (blocked) return { ok: false, status: 402, body: blocked };
 
   // Folders before the docs that point at them; My docs last, so a failure
   // midway leaves every doc either still in My docs or filed in the team.
@@ -4167,9 +4174,6 @@ async function joinTeamFromSession(env, team, s) {
   if (teamMember(team, s.account_id)) return { ok: true };
   if (team.members.length >= TEAM_MEMBERS_MAX) return { error: 'team_full', limit: TEAM_MEMBERS_MAX };
   if ((s.team_ids || []).length >= TEAMS_PER_ACCOUNT_MAX) return { error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX };
-  if (!(await teamHasSeatFor(env, team))) {
-    return { error: 'seats_upgrade_required', limit: TEAM_FREE_SEATS, message: `${team.name} has used its ${TEAM_FREE_SEATS} free seats. Ask an admin to upgrade to the Team plan.` };
-  }
   team.members.push(teamMemberFromSession(s, 'member'));
   const mine = [sessionLogin(s), normalizeEmail(s.email)].filter(Boolean);
   team.invites = (Array.isArray(team.invites) ? team.invites : []).filter((x) => !mine.includes(x));
@@ -4180,14 +4184,17 @@ async function joinTeamFromSession(env, team, s) {
 }
 
 // ─────────────────────────── Team plan (Stripe) ───────────────────────────
-// A team is free up to TEAM_FREE_SEATS members. The Team plan bills every
-// admin and member per seat, monthly or yearly; there are no other roles, and
-// agents are not members, so they never take a seat. Nothing here runs until
+// Members are never limited: collaboration is free. A free team holds up to
+// TEAM_FREE_DOCS docs; the next doc created in or moved into it, and turning
+// on Data backup, need the Team plan. Docs already there stay readable and
+// editable whatever the plan, and a backup already running keeps running.
+// The plan bills every admin and member per seat, monthly or yearly; agents
+// are not members, so they never take a seat. Nothing here runs until
 // STRIPE_SECRET_KEY and both price ids are set, so an unconfigured deploy
 // (local, preview, self-hosted) behaves exactly as before: no limit, no plan.
 // Stripe is the source of truth; `team-billing:<id>` is its last webhook,
 // written only on checkout and subscription changes.
-const TEAM_FREE_SEATS = 3;
+const TEAM_FREE_DOCS = 20;
 const STRIPE_API = 'https://api.stripe.com/v1';
 const STRIPE_SIGNATURE_TOLERANCE_S = 300;
 function stripeConfigured(env) {
@@ -4202,17 +4209,34 @@ async function loadTeamBilling(env, teamId) {
 function teamBillingPaid(billing) {
   return !!(billing && ['active', 'trialing', 'past_due'].includes(billing.status));
 }
-async function teamHasSeatFor(env, team) {
-  if (!stripeConfigured(env) || team.members.length < TEAM_FREE_SEATS) return true;
-  return teamBillingPaid(await loadTeamBilling(env, team.id));
+// The team's docs as the team space lists them (feedback threads are not
+// docs). Index markers are advisory, so each is checked against its meta.
+async function teamDocCount(env, teamId) {
+  const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
+  const metas = await Promise.all(slugs.map((slug) => loadDocMeta(env, slug)));
+  return metas.filter((meta) => meta && meta.workspace_id === teamId && meta.created_from !== 'feedback').length;
 }
-function publicTeamBilling(env, team, billing) {
-  const seats = team.members.length;
-  const paid = teamBillingPaid(billing);
+// Can `adding` more docs go into this team? Returns null when yes, else the
+// 402 body to answer with.
+async function teamPlanBlocksDocs(env, team, adding = 1) {
+  if (!team || !stripeConfigured(env) || adding <= 0) return null;
+  if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
+  const count = await teamDocCount(env, team.id);
+  if (count + adding <= TEAM_FREE_DOCS) return null;
   return {
-    configured: stripeConfigured(env),
-    free_seats: TEAM_FREE_SEATS,
-    seats,
+    error: 'team_plan_required', limit: TEAM_FREE_DOCS, docs: count,
+    message: `${team.name} is on the free plan, which holds ${TEAM_FREE_DOCS} docs. Ask an admin to upgrade to the Team plan to add more.`,
+  };
+}
+async function publicTeamBilling(env, team, billing) {
+  const paid = teamBillingPaid(billing);
+  const configured = stripeConfigured(env);
+  const docs = configured ? await teamDocCount(env, team.id) : null;
+  return {
+    configured,
+    free_docs: TEAM_FREE_DOCS,
+    docs,
+    seats: team.members.length,
     plan: paid ? 'team' : 'free',
     status: (billing && billing.status) || null,
     interval: (billing && billing.interval) || null,
@@ -4220,7 +4244,7 @@ function publicTeamBilling(env, team, billing) {
     current_period_end: (billing && billing.current_period_end) || null,
     cancel_at_period_end: !!(billing && billing.cancel_at_period_end),
     has_customer: !!(billing && billing.customer),
-    over_free: seats > TEAM_FREE_SEATS && !paid,
+    at_limit: !paid && docs != null && docs >= TEAM_FREE_DOCS,
   };
 }
 // Stripe takes form encoding with bracketed keys for nested values.
@@ -6645,6 +6669,10 @@ function blankDocSlug(bytes) {
 // on the person's behalf. Ownership, quota and slug rules are the ones the
 // create-from-scratch path always had; `meta` and `version` are what differs.
 async function createDocForSession(env, req, session, { html, meta, version, team = null }) {
+  if (team) {
+    const blocked = await teamPlanBlocksDocs(env, await loadTeam(env, team), 1);
+    if (blocked) return { ok: false, response: json(blocked, { status: 402 }) };
+  }
   const ownerCreate = isOwnerSession(env, session);
   // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
   // its owner unless it has opted into hosted accounts. tdoc.dev is open.
@@ -12893,6 +12921,11 @@ export default {
         await env.META.delete(teamBackupKey(team.id));
         return json({ ok: true, backup: { enabled: false } });
       }
+      // Turning backup on is a Team plan feature; one already set up keeps
+      // running and can still be reconnected, re-synced or turned off.
+      if (method === 'PUT' && stripeConfigured(env) && !(await loadTeamBackup(env, team.id)) && !teamBillingPaid(await loadTeamBilling(env, team.id))) {
+        return json({ error: 'team_plan_required', message: 'Data backup is part of the Team plan. Upgrade in Plan to turn it on.' }, { status: 402 });
+      }
       if (!env.BACKUP_QUEUE) return json({ error: 'backup_queue_unavailable' }, { status: 503 });
       if (method === 'POST') {
         if (!(await loadTeamBackup(env, team.id))) return json({ error: 'backup_not_configured' }, { status: 404 });
@@ -12959,7 +12992,7 @@ export default {
       const team = await loadTeam(env, method === 'GET' ? url.searchParams.get('id') : body.id);
       if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
       const billing = await loadTeamBilling(env, team.id);
-      if (method === 'GET') return json({ ok: true, billing: publicTeamBilling(env, team, billing) });
+      if (method === 'GET') return json({ ok: true, billing: await publicTeamBilling(env, team, billing) });
       if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
       if (!stripeConfigured(env)) return json({ error: 'billing_unavailable' }, { status: 503 });
       const back = `${url.origin}/me?team=${encodeURIComponent(team.id)}&view=settings`;
@@ -13069,7 +13102,7 @@ export default {
       const team = await teamForInviteToken(env, body.token);
       if (!team) return json({ error: 'invite_invalid' }, { status: 404 });
       const joined = await joinTeamFromSession(env, team, s);
-      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: joined.error === 'seats_upgrade_required' ? 402 : 400 });
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: 400 });
       return json({ ok: true, team: teamSummary(team, s.account_id) });
     }
 
@@ -13086,7 +13119,7 @@ export default {
       if (!team) return json({ error: 'not_found' }, { status: 404 });
       if (!teamMember(team, s.account_id) && !pendingTeamInvite(team, s)) return json({ error: 'no_invite' }, { status: 403 });
       const joined = await joinTeamFromSession(env, team, s);
-      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: joined.error === 'seats_upgrade_required' ? 402 : 400 });
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: 400 });
       return json({ ok: true, team: teamSummary(team, s.account_id) });
     }
 
@@ -13107,7 +13140,7 @@ export default {
       if (!team) return json({ error: 'not_found' }, { status: 404 });
       if (!teamMember(team, s.account_id) && !pendingTeamInvite(team, s)) return json({ error: 'no_invite' }, { status: 403 });
       const joined = await joinTeamFromSession(env, team, s);
-      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: joined.error === 'seats_upgrade_required' ? 402 : 400 });
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: 400 });
       return json({ ok: true, team: teamSummary(team, s.account_id), next: `/d/${encodeURIComponent(slug)}` });
     }
 
@@ -13138,6 +13171,10 @@ export default {
         if (meta && team && meta.workspace_id === team.id) continue;
         if (!meta || !isDocOwnerSession(env, s, meta)) return json({ error: 'not_owner', slug }, { status: 403 });
         metas.push([slug, meta]);
+      }
+      if (team) {
+        const blocked = await teamPlanBlocksDocs(env, team, metas.length);
+        if (blocked) return json(blocked, { status: 402 });
       }
       for (const [slug, meta] of metas) {
         const next = { ...meta };

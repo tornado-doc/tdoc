@@ -1,5 +1,5 @@
-// Team plan card (#48): free seats, upgrade with a monthly/yearly choice, a paid
-// plan's seats and renewal, Manage billing, and a phone layout.
+// Team plan card (#48): free docs used, upgrade with a monthly/yearly choice, a
+// paid plan's seats and renewal, Manage billing, and a phone layout.
 const assert = require('assert/strict');
 const fs = require('fs');
 const os = require('os');
@@ -47,8 +47,8 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  const FREE = { configured: true, free_seats: 3, seats: 3, plan: 'free', status: null, interval: null, quantity: null, current_period_end: null, cancel_at_period_end: false, has_customer: false, over_free: false };
-  const PAID = { ...FREE, seats: 5, plan: 'team', status: 'active', interval: 'year', quantity: 5, current_period_end: '2027-10-18T00:00:00Z', has_customer: true };
+  const FREE = { configured: true, free_docs: 20, docs: 12, seats: 3, plan: 'free', status: null, interval: null, quantity: null, current_period_end: null, cancel_at_period_end: false, has_customer: false, at_limit: false };
+  const PAID = { ...FREE, docs: 53, seats: 5, plan: 'team', status: 'active', interval: 'year', quantity: 5, current_period_end: '2027-10-18T00:00:00Z', has_customer: true };
 
   async function open(width, billing, query = '') {
     const context = await browser.newContext({ viewport: { width, height: 820 } });
@@ -75,9 +75,9 @@ async function t(name, fn) {
       await context.close();
     });
 
-    await t('a free team sees its seats, the price for both periods, and upgrades through Checkout', async () => {
+    await t('a free team sees its docs used, the price for both periods, and upgrades through Checkout', async () => {
       const { context, page, calls } = await open(1050, FREE);
-      assert.match(await page.locator('#billing').textContent(), /Free for up to 3 members.*\$8 per member a month, or \$80 a year.*3 of 3 free seats used/s);
+      assert.match(await page.locator('#billing').textContent(), /Free for 20 docs and any number of members.*unlimited docs and Data backup.*\$8 per member a month, or \$80 a year.*12 of 20 free docs used/s);
       assert.equal(await page.locator('.tm-plan-badge').textContent(), 'Free');
       assert.match(await page.locator('.tm-plan-choose').textContent(), /3 × \$8 = \$24 \/ month/);
       await page.getByRole('radio', { name: 'Yearly' }).click();
@@ -90,9 +90,10 @@ async function t(name, fn) {
       await context.close();
     });
 
-    await t('a team over the free seats is told new members need the plan', async () => {
-      const { context, page } = await open(1050, { ...FREE, seats: 6, over_free: true });
-      assert.match(await page.locator('.tm-plan-summary').textContent(), /6 members\. New members need the Team plan\./);
+    await t('a team at the free limit is told new docs need the plan and existing ones stay editable', async () => {
+      const { context, page } = await open(1050, { ...FREE, docs: 53, seats: 5, at_limit: true });
+      assert.match(await page.locator('.tm-plan-summary.is-error').textContent(), /53 docs\. The free plan holds 20; upgrade to add more\. Existing docs stay editable\./);
+      await shot(page, 'team-billing-limit-desktop.png');
       await context.close();
     });
 

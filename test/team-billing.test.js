@@ -1,4 +1,5 @@
-// Team plan (#48): free up to 3 members, then $8/seat via Stripe.
+// Team plan (#48): members are free and unlimited; a free team holds 20 docs.
+// The 21st doc in, or turning on Data backup, needs the Team plan ($8/seat).
 //
 // Drives the real routes through worker.js with fake bindings and a stubbed
 // api.stripe.com, so Checkout, the Customer Portal, the signed webhook and
@@ -78,7 +79,15 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     };
     // Invite people by handle so accept-invite is allowed.
     const invite = (logins) => call(env, '/api/team', { method: 'PATCH', cookie: admin.cookie, headers: origin, body: { id: team.id, invites: logins } });
-    return { env, admin, team, join, invite };
+    const fill = async (n, from = 0) => {
+      for (let i = from; i < from + n; i++) {
+        const slug = `doc-${i}`;
+        const up = await call(env, '/api/upload', { method: 'POST', token: admin.token, body: { slug, version: 1, html: `<p>${slug}</p>` } });
+        assert(up.status === 200, `upload ${slug} ${up.status} ${JSON.stringify(up.body)}`);
+      }
+      return call(env, '/api/team/move', { method: 'POST', token: admin.token, body: { team: team.id, slugs: Array.from({ length: n }, (_, k) => `doc-${from + k}`) } });
+    };
+    return { env, admin, team, join, invite, fill };
   }
   const webhook = (env, event, opts = {}) => {
     const s = signed(event, opts.secret);
@@ -87,29 +96,44 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     }), env, { waitUntil() {} });
   };
 
-  await t('without Stripe configured nothing changes: a 4th member joins and the plan reads unavailable', async () => {
-    const { env, admin, team, join, invite } = await setup({});
-    await invite(['a1', 'a2', 'a3']);
-    for (const login of ['a1', 'a2', 'a3']) assert((await join(login)).r.status === 200, `${login} could not join`);
+  await t('without Stripe configured nothing changes: a 21st doc moves in and the plan reads unavailable', async () => {
+    const { env, admin, team, fill } = await setup({});
+    assert((await fill(21)).status === 200, 'unconfigured move refused');
     const plan = await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie });
-    assert(plan.status === 200 && plan.body.billing.configured === false && plan.body.billing.seats === 4, JSON.stringify(plan.body));
+    assert(plan.status === 200 && plan.body.billing.configured === false, JSON.stringify(plan.body));
     const co = await call(env, '/api/team/billing', { method: 'POST', cookie: admin.cookie, headers: origin, body: { id: team.id, action: 'checkout' } });
     assert(co.status === 503, `checkout without Stripe ${co.status}`);
   });
 
-  await t('a free team takes 3 members; the 4th is told to ask an admin to upgrade', async () => {
+  await t('a free team: unlimited members, 20 docs; the 21st doc in is refused, existing docs still publish', async () => {
     const stripe = stubStripe();
     try {
-      const { env, team, join, invite } = await setup();
-      await invite(['b1', 'b2', 'b3']);
-      assert((await join('b1')).r.status === 200);
-      assert((await join('b2')).r.status === 200);
-      const fourth = await join('b3');
-      assert(fourth.r.status === 402 && fourth.r.body.error === 'seats_upgrade_required', `${fourth.r.status} ${JSON.stringify(fourth.r.body)}`);
-      assert(/upgrade/i.test(fourth.r.body.message), 'message says to upgrade');
-      const plan = await call(env, `/api/team/billing?id=${team.id}`, { cookie: fourth.who.cookie });
-      assert(plan.status === 404, 'a non-member cannot read the plan');
-      assert(stripe.calls.length === 0, 'free joins never call Stripe');
+      const { env, admin, team, join, invite, fill } = await setup();
+      const people = ['b1', 'b2', 'b3', 'b4', 'b5'];
+      await invite(people);
+      for (const login of people) assert((await join(login)).r.status === 200, `${login} could not join a free team`);
+      assert((await fill(20)).status === 200, '20 docs refused');
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.docs === 20 && plan.free_docs === 20 && plan.at_limit === true && plan.seats === 6, JSON.stringify(plan));
+      const over = await fill(1, 20);
+      assert(over.status === 402 && over.body.error === 'team_plan_required' && /upgrade/i.test(over.body.message), `${over.status} ${JSON.stringify(over.body)}`);
+      const v2 = await call(env, '/api/upload', { method: 'POST', token: admin.token, body: { slug: 'doc-0', version: 2, html: '<p>edited</p>' } });
+      assert(v2.status === 200, `a new version of an existing team doc was refused: ${v2.status}`);
+      // A whole My docs folder moving in is counted the same way, before any write.
+      await call(env, '/api/upload', { method: 'POST', token: admin.token, body: { slug: 'in-folder', version: 1, html: '<p>f</p>' } });
+      const folder = (await call(env, '/api/folders', { method: 'POST', token: admin.token, body: { name: 'Research' } })).body.folder;
+      await call(env, '/api/folders/move', { method: 'POST', token: admin.token, body: { slugs: ['in-folder'], folder: folder.id } });
+      const folderMove = await call(env, '/api/folders/move-to-team', { method: 'POST', token: admin.token, body: { folder: folder.id, team: team.id } });
+      assert(folderMove.status === 402 && folderMove.body.error === 'team_plan_required', `folder move ${folderMove.status} ${JSON.stringify(folderMove.body)}`);
+      const stayed = await call(env, '/api/folders', { token: admin.token });
+      assert(stayed.body.folders.some((f) => f.id === folder.id), 'the refused folder left My docs');
+      const blank = await call(env, '/api/doc/create', { method: 'POST', cookie: admin.cookie, headers: origin, body: { team: team.id } });
+      assert(blank.status === 402 && blank.body.error === 'team_plan_required', `create in team ${blank.status}`);
+      const backup = await call(env, '/api/team/backup', { method: 'PUT', cookie: admin.cookie, headers: origin, body: { id: team.id, endpoint: 'https://acct.r2.cloudflarestorage.com', bucket: 'b-1', region: 'auto', access_key_id: 'AKIA1234', secret_access_key: 'secret-1234' } });
+      assert(backup.status === 402 && backup.body.error === 'team_plan_required', `backup on free plan ${backup.status} ${JSON.stringify(backup.body)}`);
+      assert(stripe.calls.length === 0, 'the free path never calls Stripe');
+      const outsider = await issue(worker, env, 'nobody');
+      assert((await call(env, `/api/team/billing?id=${team.id}`, { cookie: outsider.cookie })).status === 404, 'a non-member read the plan');
     } finally { stripe.restore(); }
   });
 
@@ -146,19 +170,26 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     } finally { stripe.restore(); }
   });
 
-  await t('checkout completed activates the plan, then a 4th member joins and seats follow membership', async () => {
+  await t('checkout completed activates the plan; docs past 20 move in and seats follow membership', async () => {
     const stripe = stubStripe();
     try {
-      const { env, admin, team, join, invite } = await setup();
-      await invite(['d1', 'd2', 'd3', 'd4']);
+      const { env, admin, team, join, invite, fill } = await setup();
+      await invite(['d1', 'd2', 'd3']);
       await join('d1'); await join('d2');
       stripe.subs.set('sub_1', subscription('sub_1', team.id, 3));
-      const done = await webhook(env, { type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_1', client_reference_id: team.id, metadata: { team_id: team.id } } } });
-      assert(done.status === 200, `webhook ${done.status}`);
+      const event = { type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_1', client_reference_id: team.id, metadata: { team_id: team.id } } } };
+      assert((await webhook(env, event)).status === 200);
       let plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
-      assert(plan.plan === 'team' && plan.status === 'active' && plan.interval === 'month' && plan.quantity === 3, JSON.stringify(plan));
+      assert(plan.plan === 'team' && plan.status === 'active' && plan.interval === 'month' && plan.quantity === 3 && plan.at_limit === false, JSON.stringify(plan));
+      // Redelivery is harmless: same state, no Stripe write.
+      const before = env.META.map.get(`team-billing:${team.id}`);
+      const posts = stripe.calls.filter((c) => c.method === 'POST').length;
+      assert((await webhook(env, event)).status === 200);
+      assert(JSON.parse(env.META.map.get(`team-billing:${team.id}`)).subscription === JSON.parse(before).subscription);
+      assert(stripe.calls.filter((c) => c.method === 'POST').length === posts, 'a redelivered event changed the subscription');
+      assert((await fill(21)).status === 200, 'a paid team could not hold 21 docs');
       const fourth = await join('d3');
-      assert(fourth.r.status === 200, `paid 4th join ${fourth.r.status} ${JSON.stringify(fourth.r.body)}`);
+      assert(fourth.r.status === 200, `paid join ${fourth.r.status}`);
       const update = stripe.calls.filter((c) => c.method === 'POST' && c.path === '/v1/subscriptions/sub_1').pop();
       assert(update && update.form.get('items[0][id]') === 'si_1' && update.form.get('items[0][quantity]') === '4', 'seat count not synced on join');
       assert(update.form.get('proration_behavior') === 'create_prorations');
@@ -176,18 +207,17 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     } finally { stripe.restore(); }
   });
 
-  await t('a canceled subscription ends the plan: joining past 3 is blocked again', async () => {
+  await t('a canceled subscription ends the plan: the next doc past 20 is refused, existing ones stay', async () => {
     const stripe = stubStripe();
     try {
-      const { env, team, join, invite } = await setup();
-      await invite(['e1', 'e2', 'e3']);
-      await join('e1'); await join('e2');
-      stripe.subs.set('sub_2', subscription('sub_2', team.id, 3));
+      const { env, admin, team, fill } = await setup();
+      stripe.subs.set('sub_2', subscription('sub_2', team.id, 1));
       await webhook(env, { type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_2', metadata: { team_id: team.id } } } });
-      const gone = await webhook(env, { type: 'customer.subscription.deleted', data: { object: subscription('sub_2', team.id, 3, 'canceled') } });
-      assert(gone.status === 200);
-      const blocked = await join('e3');
-      assert(blocked.r.status === 402, `join after cancel ${blocked.r.status}`);
+      assert((await fill(21)).status === 200);
+      assert((await webhook(env, { type: 'customer.subscription.deleted', data: { object: subscription('sub_2', team.id, 1, 'canceled') } })).status === 200);
+      assert((await fill(1, 21)).status === 402, 'canceled plan still adds docs');
+      const v2 = await call(env, '/api/upload', { method: 'POST', token: admin.token, body: { slug: 'doc-3', version: 2, html: '<p>still editable</p>' } });
+      assert(v2.status === 200, 'existing doc no longer editable after cancel');
     } finally { stripe.restore(); }
   });
 

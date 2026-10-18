@@ -619,8 +619,9 @@ function billingDate(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-// Team plan. Free up to `free_seats` members; the Team plan bills every
-// member per seat through Stripe. Hidden on a deployment without Stripe.
+// Team plan. Members are always free; a free team holds `free_docs` docs.
+// The Team plan (unlimited docs, Data backup) bills every member per seat
+// through Stripe. Hidden on a deployment without Stripe.
 export function TeamBillingCard({ team }) {
   const [billing, setBilling] = useState(null);
   const [period, setPeriod] = useState('month');
@@ -662,20 +663,20 @@ export function TeamBillingCard({ team }) {
     ? billing.status === 'past_due'
       ? 'The last payment failed. Update the card to keep the Team plan.'
       : `${billing.quantity || seats} ${(billing.quantity || seats) === 1 ? 'seat' : 'seats'}, billed ${billing.interval === 'year' ? 'yearly' : 'monthly'}.${renews ? ` ${billing.cancel_at_period_end ? 'Ends' : 'Renews'} ${renews}.` : ''}`
-    : billing.over_free
-      ? `${seats} members. New members need the Team plan.`
-      : `${seats} of ${billing.free_seats} free seats used.`;
+    : billing.at_limit
+      ? `${billing.docs} docs. The free plan holds ${billing.free_docs}; upgrade to add more. Existing docs stay editable.`
+      : `${billing.docs} of ${billing.free_docs} free docs used.`;
 
   return (
     <section className="tm-settings-card" id="billing" aria-labelledby="tm-billing-heading">
       <div className="tm-settings-head">
         <div>
           <h2 id="tm-billing-heading">Plan</h2>
-          <p>Free for up to {billing.free_seats} members. The Team plan is ${SEAT_PRICE.month} per member a month, or ${SEAT_PRICE.year} a year.</p>
+          <p>Free for {billing.free_docs} docs and any number of members. The Team plan adds unlimited docs and Data backup for ${SEAT_PRICE.month} per member a month, or ${SEAT_PRICE.year} a year.</p>
         </div>
         <span className={`tm-plan-badge${paid ? ' is-team' : ''}`}>{paid ? 'Team' : 'Free'}</span>
       </div>
-      <p className={`tm-plan-summary${billing.status === 'past_due' ? ' is-error' : ''}`}>{summary}</p>
+      <p className={`tm-plan-summary${billing.status === 'past_due' || billing.at_limit ? ' is-error' : ''}`}>{summary}</p>
       {paid ? null : (
         <div className="tm-plan-choose">
           <SegmentedControl
