@@ -110,6 +110,7 @@ const OFFLINE = [
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'agent-reply-once.test.js', // #349 the agent answers once per human turn
+  'kv-write-budget.test.js', // repeat actions spend no extra KV writes (daily quota)
   'reply-activity.test.js', // old versions see live reply status without rewriting their snapshot
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position

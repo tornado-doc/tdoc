@@ -2232,8 +2232,11 @@ async function loadOnboarding(env, accountId) {
 async function stampOnboardingFor(env, accountId, step, extra) {
   if (!env || !env.META || !accountId) return null;
   const at = new Date().toISOString();
-  const next = stampOnboarding(await loadOnboarding(env, accountId), step, at, extra);
-  await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+  const prev = await loadOnboarding(env, accountId);
+  const next = stampOnboarding(prev, step, at, extra);
+  // Steps stamp once. Most calls (every My docs load, every agent pull,
+  // every comment) find the step already there; KV writes are a daily quota.
+  if (JSON.stringify(next) !== JSON.stringify(prev)) await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
   return next;
 }
 // Is this doc the one FIRST-DOC.md produced? tdoc-write --first-doc marks the
@@ -8695,6 +8698,7 @@ function mentionableUsers({ ownerLogin, allowedUsers, participants, includeAllow
 //   teammate  — in the team that owns this doc, or in one of yours
 //   recent    — you tagged or answered them, or they tagged or answered you
 const CONTACTS_MAX = 40;
+const CONTACTS_REFRESH_MS = 24 * 3600 * 1000;
 function contactsKey(actor) { return actor ? `contacts:${actor}` : null; }
 async function loadContacts(env, actor) {
   const key = contactsKey(actor);
@@ -8707,6 +8711,10 @@ async function recordContacts(env, actor, people, at) {
   const fresh = (people || []).filter((p) => p && p.login && p.login !== actor);
   if (!key || !fresh.length) return;
   const prev = await loadContacts(env, actor);
+  // Answering the same people again only refreshes `at`; within a day that
+  // cannot change who is offered after "@", so it is not worth a KV write.
+  const fresher = (p) => { const old = prev.find((x) => x.login === p.login); return old && Date.parse(at) - (Date.parse(old.at) || 0) < CONTACTS_REFRESH_MS; };
+  if (fresh.every(fresher)) return;
   const byLogin = new Map(prev.map((p) => [p.login, p]));
   for (const p of fresh) byLogin.set(p.login, { login: p.login, name: p.name || (byLogin.get(p.login) || {}).name || '', avatar_url: p.avatar_url || (byLogin.get(p.login) || {}).avatar_url || '', at });
   const next = [...byLogin.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, CONTACTS_MAX);
