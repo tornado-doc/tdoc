@@ -4204,6 +4204,9 @@ async function joinTeamFromSession(env, team, s) {
 // Stripe is the source of truth; `team-billing:<id>` is its last webhook,
 // written only on checkout and subscription changes.
 const TEAM_FREE_DOCS = 20;
+// What the plan card shows. The Stripe Prices behind STRIPE_PRICE_MONTHLY /
+// STRIPE_PRICE_YEARLY must charge these per seat (USD).
+const TEAM_SEAT_PRICE_USD = { month: 5, year: 50 };
 const STRIPE_API = 'https://api.stripe.com/v1';
 const STRIPE_SIGNATURE_TOLERANCE_S = 300;
 // The webhook secret counts: without it a team could pay and never be told.
@@ -4254,6 +4257,7 @@ async function publicTeamBilling(env, team, billing) {
   return {
     configured,
     free_docs: TEAM_FREE_DOCS,
+    prices: TEAM_SEAT_PRICE_USD,
     docs,
     seats: team.members.length,
     plan: paid ? 'team' : 'free',
@@ -4323,17 +4327,29 @@ function billingFromSubscription(sub, prev, event) {
 }
 // Seats follow membership. Called after every join and removal; a no-op
 // without a live subscription or when the quantity already matches.
-async function syncTeamSeats(env, team) {
+// `verify` reads the subscription's real quantity from Stripe first (Plan
+// card, portal): a sync whose Stripe update landed but whose KV write did
+// not would otherwise look settled locally while Stripe bills another number.
+async function syncTeamSeats(env, team, { verify = false } = {}) {
   if (!stripeConfigured(env)) return;
-  const billing = await loadTeamBilling(env, team.id);
+  let billing = await loadTeamBilling(env, team.id);
   if (!teamBillingPaid(billing) || !billing.subscription || !billing.item) return;
   const seats = Math.max(1, team.members.length);
-  if (billing.quantity === seats) return;
   try {
+    if (verify) {
+      const live = await stripeApi(env, 'GET', `/subscriptions/${encodeURIComponent(billing.subscription)}`);
+      const fresh = billingFromSubscription(live, billing);
+      if (fresh.quantity !== billing.quantity || fresh.status !== billing.status) {
+        await env.META.put(teamBillingKey(team.id), JSON.stringify(fresh));
+      }
+      billing = fresh;
+      if (!teamBillingPaid(billing)) return;
+    }
+    if (billing.quantity === seats) return;
     const sub = await stripeApi(env, 'POST', `/subscriptions/${encodeURIComponent(billing.subscription)}`, {
       items: { 0: { id: billing.item, quantity: seats } },
       proration_behavior: 'create_prorations',
-    }, `seats:${billing.subscription}:${billing.quantity}->${seats}`);
+    }, `seats:${billing.subscription}:${billing.quantity}->${seats}:${Math.floor(Date.now() / 600000)}`);
     await env.META.put(teamBillingKey(team.id), JSON.stringify(billingFromSubscription(sub, billing)));
     return true;
   } catch (error) {
@@ -13023,9 +13039,9 @@ export default {
       if (method === 'POST') { try { body = await req.json(); } catch {} }
       const team = await loadTeam(env, method === 'GET' ? url.searchParams.get('id') : body.id);
       if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
-      // A seat sync that failed earlier is retried here, so a missed update
-      // cannot leave the subscription under-billed for long.
-      await syncTeamSeats(env, team);
+      // A seat sync that failed earlier is retried here against Stripe's real
+      // quantity, so a missed update cannot leave the bill wrong for long.
+      await syncTeamSeats(env, team, { verify: true });
       const billing = await loadTeamBilling(env, team.id);
       if (method === 'GET') return json({ ok: true, billing: await publicTeamBilling(env, team, billing) });
       if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
@@ -13104,7 +13120,14 @@ export default {
       // current whenever it arrives.
       const created = Number(event.created) || 0;
       if (prev && event.id && prev.event_id === event.id) return json({ received: true, duplicate: true });
-      if (prev && event.type !== 'checkout.session.completed' && created && created < (Number(prev.event_created) || 0)) {
+      const lastCreated = Number(prev && prev.event_created) || 0;
+      if (prev && event.type !== 'checkout.session.completed' && created && created < lastCreated) {
+        return json({ received: true, ignored: 'stale' });
+      }
+      // Stripe times are whole seconds. In a tie, an ending (canceled,
+      // unpaid, expired) beats a live state: never revive within the second.
+      if (prev && prev.subscription === sub.id && created && created === lastCreated
+        && !teamBillingPaid(prev) && prev.status && teamBillingPaid({ status: sub.status }) && event.type !== 'checkout.session.completed') {
         return json({ received: true, ignored: 'stale' });
       }
       // An event about an older subscription must not overwrite the current one's state.

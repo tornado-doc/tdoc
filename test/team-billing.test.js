@@ -317,6 +317,34 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     } finally { stripe.restore(); }
   });
 
+  await t('in the same second, a cancellation beats a late update', async () => {
+    const stripe = stubStripe();
+    try {
+      const { env, admin, team } = await setup();
+      await webhook(env, { id: 'evt_a', created: 1800000300, type: 'customer.subscription.updated', data: { object: subscription('sub_7', team.id, 1) } });
+      await webhook(env, { id: 'evt_b', created: 1800000400, type: 'customer.subscription.deleted', data: { object: subscription('sub_7', team.id, 1, 'canceled') } });
+      const tie = await (await webhook(env, { id: 'evt_c', created: 1800000400, type: 'customer.subscription.updated', data: { object: subscription('sub_7', team.id, 1) } })).json();
+      assert(tie.ignored === 'stale', JSON.stringify(tie));
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.plan === 'free' && plan.status === 'canceled', JSON.stringify(plan));
+    } finally { stripe.restore(); }
+  });
+
+  await t('opening the plan reconciles against Stripe\'s real quantity, not the local copy', async () => {
+    const stripe = stubStripe();
+    try {
+      const { env, admin, team, join, invite } = await setup();
+      await invite(['q1']);
+      await join('q1');
+      stripe.subs.set('sub_8', subscription('sub_8', team.id, 2));
+      await webhook(env, { type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_8', metadata: { team_id: team.id } } } });
+      // Stripe was moved to 3 seats but tdoc's record never heard: it still says 2, the member count.
+      stripe.subs.get('sub_8').items.data[0].quantity = 3;
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(stripe.subs.get('sub_8').items.data[0].quantity === 2 && plan.quantity === 2, `Stripe left at ${stripe.subs.get('sub_8').items.data[0].quantity}: ${JSON.stringify(plan)}`);
+    } finally { stripe.restore(); }
+  });
+
   await t('a seat sync that failed is retried the next time the plan is opened', async () => {
     const stripe = stubStripe();
     try {

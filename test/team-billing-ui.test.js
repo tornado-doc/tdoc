@@ -47,7 +47,7 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  const FREE = { configured: true, free_docs: 20, docs: 12, seats: 3, plan: 'free', status: null, interval: null, quantity: null, current_period_end: null, cancel_at_period_end: false, has_customer: false, at_limit: false };
+  const FREE = { configured: true, free_docs: 20, prices: { month: 5, year: 50 }, docs: 12, seats: 3, plan: 'free', status: null, interval: null, quantity: null, current_period_end: null, cancel_at_period_end: false, has_customer: false, at_limit: false };
   const PAID = { ...FREE, docs: 53, seats: 5, plan: 'team', status: 'active', interval: 'year', quantity: 5, current_period_end: '2027-10-18T00:00:00Z', has_customer: true };
 
   async function open(width, billing, query = '') {
@@ -77,11 +77,11 @@ async function t(name, fn) {
 
     await t('a free team sees its docs used, the price for both periods, and upgrades through Checkout', async () => {
       const { context, page, calls } = await open(1050, FREE);
-      assert.match(await page.locator('#billing').textContent(), /Free for 20 docs and any number of members.*unlimited docs and Data backup.*\$8 per member a month, or \$80 a year.*12 of 20 free docs used/s);
+      assert.match(await page.locator('#billing').textContent(), /Free for 20 docs and any number of members.*unlimited docs and Data backup.*\$5 per member a month, or \$50 a year.*12 of 20 free docs used/s);
       assert.equal(await page.locator('.tm-plan-badge').textContent(), 'Free');
-      assert.match(await page.locator('.tm-plan-choose').textContent(), /3 × \$8 = \$24 \/ month/);
+      assert.match(await page.locator('.tm-plan-choose').textContent(), /3 × \$5 = \$15 \/ month/);
       await page.getByRole('radio', { name: 'Yearly' }).click();
-      assert.match(await page.locator('.tm-plan-choose').textContent(), /3 × \$80 = \$240 \/ year/);
+      assert.match(await page.locator('.tm-plan-choose').textContent(), /3 × \$50 = \$150 \/ year/);
       assert.equal(await page.getByRole('button', { name: 'Manage billing' }).count(), 0, 'no portal before a customer exists');
       await shot(page, 'team-billing-free-desktop.png');
       await page.getByRole('button', { name: 'Upgrade to Team' }).click();

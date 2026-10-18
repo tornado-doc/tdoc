@@ -612,8 +612,6 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
   );
 }
 
-const SEAT_PRICE = { month: 8, year: 80 };
-
 function billingDate(value) {
   if (!value) return '';
   const date = new Date(value);
@@ -657,6 +655,7 @@ export function TeamBillingCard({ team }) {
       setBusy(false);
     }
   };
+  const prices = billing.prices;
   const paid = billing.plan === 'team';
   const seats = billing.seats;
   const renews = billingDate(billing.current_period_end);
@@ -673,7 +672,7 @@ export function TeamBillingCard({ team }) {
       <div className="tm-settings-head">
         <div>
           <h2 id="tm-billing-heading">Plan</h2>
-          <p>Free for {billing.free_docs} docs and any number of members. The Team plan adds unlimited docs and Data backup for ${SEAT_PRICE.month} per member a month, or ${SEAT_PRICE.year} a year.</p>
+          <p>Free for {billing.free_docs} docs and any number of members. The Team plan adds unlimited docs and Data backup for ${prices.month} per member a month, or ${prices.year} a year.</p>
         </div>
         <span className={`tm-plan-badge${paid ? ' is-team' : ''}`}>{paid ? 'Team' : 'Free'}</span>
       </div>
@@ -686,7 +685,7 @@ export function TeamBillingCard({ team }) {
             onChange={setPeriod}
             options={[{ value: 'month', label: 'Monthly' }, { value: 'year', label: 'Yearly' }]}
           />
-          <span>{seats} × ${SEAT_PRICE[period]} = <b>${seats * SEAT_PRICE[period]}</b> / {period === 'year' ? 'year' : 'month'}</span>
+          <span>{seats} × ${prices[period]} = <b>${seats * prices[period]}</b> / {period === 'year' ? 'year' : 'month'}</span>
         </div>
       )}
       <p className="tm-plan-note">Every admin and member is a seat; agents never are. Seats follow the member list, and changes are prorated.</p>
