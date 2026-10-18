@@ -53,24 +53,27 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  async function open(width = 900, extra = []) {
+  async function open(width = 900, extra = [], notificationPermission = 'granted', requestResult = 'granted') {
     const context = await browser.newContext({ viewport: { width, height: 760 } });
-    await context.grantPermissions(['notifications'], { origin: base });
+    if (notificationPermission === 'granted') await context.grantPermissions(['notifications'], { origin: base });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     // Record desktop alerts instead of raising real ones.
-    await page.addInitScript(() => {
+    await page.addInitScript(({ permission, requested }) => {
       window.__TDOC_NOTIFY_POLL_MS = 300;
       window.__alerts = [];
       class FakeNotification {
         constructor(title, opts) { window.__alerts.push({ title, body: opts && opts.body }); }
         close() {}
       }
-      FakeNotification.permission = 'granted';
-      FakeNotification.requestPermission = async () => 'granted';
+      FakeNotification.permission = permission;
+      FakeNotification.requestPermission = async () => {
+        FakeNotification.permission = requested;
+        return requested;
+      };
       window.Notification = FakeNotification;
-    });
+    }, { permission: notificationPermission, requested: requestResult });
     const state = {
       items: [row('n1', 'mention', 3), row('n2', 'reply', 50, { actor: { login: 'serena', name: 'Serena' }, preview: 'Done, updated the table.' }), row('n3', 'comment', 60 * 26, { read: true, count: 3, actor: { login: 'bob', name: 'Bob' }, preview: 'Typo in the second section.' })],
       posts: [],
@@ -90,10 +93,12 @@ async function t(name, fn) {
       state.posts.push(body);
       return r.fulfill({ json: { ok: true, resolved: body.action === 'approve' ? 'approved' : 'ignored' } });
     });
-    await page.goto(base);
+    await page.goto(`${base}${notificationPermission === 'default' ? '/?prompt=1' : ''}`);
     const dialog = page.getByRole('dialog', { name: 'Notifications' });
-    await dialog.waitFor();
-    await dialog.locator('.tdoc-notif-row').first().waitFor();
+    if (notificationPermission !== 'default') {
+      await dialog.waitFor();
+      await dialog.locator('.tdoc-notif-row').first().waitFor();
+    }
     return { context, page, dialog, state, errors };
   }
   const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, `notifications-${name}.png`) }); } };
@@ -125,6 +130,60 @@ async function t(name, fn) {
       await context.close();
     });
 
+    await t('a document with unread activity soft-asks before Chrome and sends a proof alert after approval', async () => {
+      const { context, page } = await open(900, [], 'default', 'granted');
+      await page.waitForFunction(() => window.__notifications?.unread > 0);
+      const promptState = await page.evaluate(() => ({ permission: Notification.permission, prompt: window.__notifications.browserPrompt, unread: window.__notifications.unread }));
+      assert.equal(promptState.prompt, true, JSON.stringify(promptState));
+      const prompt = page.getByRole('dialog', { name: 'Turn on browser notifications' });
+      await prompt.getByText('Don’t miss replies').waitFor();
+      await shot(page, 'prompt-desktop');
+      assert.equal(await page.evaluate(() => Notification.permission), 'default');
+      await prompt.getByRole('button', { name: 'Turn on' }).click();
+      await prompt.getByText('Test alert sent').waitFor();
+      await shot(page, 'prompt-approved');
+      const alerts = await page.evaluate(() => window.__alerts);
+      assert.equal(alerts.length, 1, JSON.stringify(alerts));
+      assert.equal(alerts[0].title, 'Browser notifications are on');
+      assert.equal(await page.evaluate(() => localStorage.getItem('tdoc.browserNotify')), '1');
+      await context.close();
+    });
+
+    await t('Not now and a dismissed Chrome prompt both silence the soft ask for seven days', async () => {
+      const first = await open(900, [], 'default', 'granted');
+      const firstPrompt = first.page.getByRole('dialog', { name: 'Turn on browser notifications' });
+      await firstPrompt.getByRole('button', { name: 'Not now' }).click();
+      const firstUntil = await first.page.evaluate(() => Number(localStorage.getItem('tdoc.browserNotify.snoozeUntil')));
+      assert.ok(firstUntil > Date.now() + 6.9 * 24 * 60 * 60 * 1000, String(firstUntil));
+      await first.page.reload();
+      assert.equal(await first.page.getByRole('dialog', { name: 'Turn on browser notifications' }).count(), 0);
+      await first.context.close();
+
+      const second = await open(900, [], 'default', 'default');
+      const secondPrompt = second.page.getByRole('dialog', { name: 'Turn on browser notifications' });
+      await secondPrompt.getByRole('button', { name: 'Turn on' }).click();
+      await secondPrompt.getByText('Notifications weren’t enabled').waitFor();
+      const secondUntil = await second.page.evaluate(() => Number(localStorage.getItem('tdoc.browserNotify.snoozeUntil')));
+      assert.ok(secondUntil > Date.now() + 6.9 * 24 * 60 * 60 * 1000, String(secondUntil));
+      await second.context.close();
+    });
+
+    await t('the phone soft ask fits the viewport and keeps 44px actions', async () => {
+      const { context, page } = await open(390, [], 'default', 'granted');
+      const prompt = page.getByRole('dialog', { name: 'Turn on browser notifications' });
+      await prompt.waitFor();
+      const layout = await prompt.evaluate((element) => ({
+        right: element.getBoundingClientRect().right,
+        width: element.getBoundingClientRect().width,
+        viewport: innerWidth,
+        actions: [...element.querySelectorAll('button')].map((button) => button.getBoundingClientRect().height),
+      }));
+      assert.ok(layout.right <= layout.viewport + 1 && layout.width <= layout.viewport - 24 + 1, JSON.stringify(layout));
+      assert.ok(layout.actions.every((height) => height >= 44), JSON.stringify(layout.actions));
+      await shot(page, 'prompt-phone');
+      await context.close();
+    });
+
     await t('the browser switch starts off, and once on, a new notification raises one desktop alert', async () => {
       const { context, page, dialog, state } = await open();
       const sw = dialog.getByRole('switch', { name: 'Browser notifications' });
@@ -132,13 +191,13 @@ async function t(name, fn) {
       assert.equal(await page.evaluate(() => window.__alerts.length), 0, 'alerted before being turned on');
       await sw.click();
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
-      assert.equal(await page.evaluate(() => window.__alerts.length), 0, 'turning it on replayed the backlog');
+      assert.equal(await page.evaluate(() => window.__alerts.length), 1, 'approval did not send the proof alert');
       state.items = [row('n4', 'mention', 0, { actor: { login: 'claire', name: 'Claire' }, preview: 'Please check the numbers' }), ...state.items];
-      await page.waitForFunction(() => window.__alerts.length > 0, null, { timeout: 5_000 });
+      await page.waitForFunction(() => window.__alerts.length > 1, null, { timeout: 5_000 });
       const alerts = await page.evaluate(() => window.__alerts);
-      assert.equal(alerts.length, 1, JSON.stringify(alerts));
-      assert.equal(alerts[0].title, 'Claire mentioned you on Q3 plan');
-      assert.equal(alerts[0].body, 'Please check the numbers');
+      assert.equal(alerts.length, 2, JSON.stringify(alerts));
+      assert.equal(alerts[1].title, 'Claire mentioned you on Q3 plan');
+      assert.equal(alerts[1].body, 'Please check the numbers');
       await context.close();
     });
 
@@ -149,12 +208,12 @@ async function t(name, fn) {
       await dialog.getByRole('switch', { name: 'Browser notifications' }).click();
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
       await page.waitForTimeout(800);
-      assert.equal(await page.evaluate(() => window.__alerts.length), 0);
+      assert.equal(await page.evaluate(() => window.__alerts.length), 1);
       state.items = state.items.map((i) => (i.id === 'n2' ? { ...i, count: 2, at: new Date().toISOString(), preview: 'One more thing on the table' } : i));
-      await page.waitForFunction(() => window.__alerts.length > 0, null, { timeout: 5_000 });
+      await page.waitForFunction(() => window.__alerts.length > 1, null, { timeout: 5_000 });
       const alerts = await page.evaluate(() => window.__alerts);
-      assert.equal(alerts.length, 1, JSON.stringify(alerts));
-      assert.equal(alerts[0].body, 'One more thing on the table');
+      assert.equal(alerts.length, 2, JSON.stringify(alerts));
+      assert.equal(alerts[1].body, 'One more thing on the table');
       await context.close();
     });
 
@@ -166,10 +225,10 @@ async function t(name, fn) {
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
       await page.waitForTimeout(800);
       state.items = [row('n5', 'comment', 0, { actor: { login: 'dan', name: 'Dan' }, preview: 'Looks good' }), ...state.items.map((i) => (i.id === 'n1' ? { ...i, read: true } : i))];
-      await page.waitForFunction(() => window.__alerts.length > 0, null, { timeout: 5_000 });
+      await page.waitForFunction(() => window.__alerts.length > 1, null, { timeout: 5_000 });
       const alerts = await page.evaluate(() => window.__alerts);
-      assert.equal(alerts.length, 1, JSON.stringify(alerts));
-      assert.equal(alerts[0].title, 'Dan commented on Q3 plan');
+      assert.equal(alerts.length, 2, JSON.stringify(alerts));
+      assert.equal(alerts[1].title, 'Dan commented on Q3 plan');
       await context.close();
     });
 

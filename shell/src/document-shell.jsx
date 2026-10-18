@@ -1286,6 +1286,7 @@ export function DocumentShell({ boot, config }) {
           history.replaceState(null, '', target);
           setDeepTarget(commentId);
         }}
+        notificationPrompt={!config.isLanding}
         authConfigured={config.authConfigured !== false}
         // The top bar's Sign in on the landing returns into the onboarding:
         // a new account lands on the first screen; one that has finished or

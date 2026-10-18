@@ -6,8 +6,10 @@
 
 const PREF_KEY = 'tdoc.browserNotify';
 const SEEN_KEY = 'tdoc.browserNotify.seen';
+const SNOOZE_KEY = 'tdoc.browserNotify.snoozeUntil';
 const SEEN_MAX = 200;
 const ALERT_BURST_MAX = 3;
+export const BROWSER_NOTIFICATION_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function browserNotificationsSupported() {
   return typeof window !== 'undefined' && 'Notification' in window;
@@ -23,6 +25,18 @@ export function browserNotificationsEnabled() {
   } catch {
     return false;
   }
+}
+
+// The soft ask appears only when notifications have something useful to do:
+// a signed-in person is on a document with unread collaboration activity.
+// Chrome's permission prompt is never opened until they choose Turn on.
+export function browserNotificationPromptEligible(unread = 0) {
+  if (!browserNotificationsSupported() || browserNotificationPermission() !== 'default' || Number(unread) < 1) return false;
+  try { return Number(window.localStorage.getItem(SNOOZE_KEY) || 0) <= Date.now(); } catch { return true; }
+}
+
+export function snoozeBrowserNotificationPrompt() {
+  try { window.localStorage.setItem(SNOOZE_KEY, String(Date.now() + BROWSER_NOTIFICATION_SNOOZE_MS)); } catch { /* private mode */ }
 }
 
 function loadSeen() {
@@ -54,14 +68,31 @@ export async function setBrowserNotifications(on, currentItems = []) {
   if (!browserNotificationsSupported()) return 'unsupported';
   if (!on) {
     try { window.localStorage.removeItem(PREF_KEY); } catch { /* ignore */ }
+    snoozeBrowserNotificationPrompt();
     return window.Notification.permission;
   }
   const permission = window.Notification.permission === 'granted'
     ? 'granted'
     : await window.Notification.requestPermission();
   if (permission === 'granted') {
-    try { window.localStorage.setItem(PREF_KEY, '1'); } catch { /* ignore */ }
+    try {
+      window.localStorage.setItem(PREF_KEY, '1');
+      window.localStorage.removeItem(SNOOZE_KEY);
+    } catch { /* ignore */ }
     markSeen(currentItems);
+    // Immediate proof that permission works. This also exposes an OS-level
+    // block (for example Chrome disabled in macOS Settings) before the person
+    // waits for a real comment that never appears.
+    try {
+      new window.Notification('Browser notifications are on', {
+        body: 'tdoc will alert you while a tdoc tab is open.',
+        tag: 'tdoc-browser-notifications-ready',
+        icon: '/tdoc_logo.png',
+      });
+    } catch { /* the settings hint explains service-worker-only browsers */ }
+  } else {
+    // A dismissed or denied browser prompt must not turn into repeated asks.
+    snoozeBrowserNotificationPrompt();
   }
   return permission;
 }

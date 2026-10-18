@@ -15,7 +15,7 @@ import {
 import { AppMenu, AppMenuItem, AppMenuLinkItem, AppMenuSeparator, AppSubmenu } from './ui/menu.jsx';
 import { isPlainNavigationClick, startNavigationProgress } from './nav-progress.js';
 import { useNotifications } from './hooks/use-notifications.js';
-import { NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
+import { BrowserAlertsPrompt, NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 import { WorkspaceSwitcher } from './workspace-switcher.jsx';
 
 // Sign in always asks which account: after Sign out, the provider (and
@@ -37,6 +37,7 @@ export function TopBar({
   onThemeChange,
   supportsTheme = true,
   onNotificationNavigate,
+  notificationPrompt = false,
   // Every page has a way in. A page that does not say otherwise signs in
   // through the provider and comes back here; the doc page passes its own.
   authConfigured = true,
@@ -233,6 +234,7 @@ export function TopBar({
         onOpenChange={setNotificationsOpen}
         onSelect={selectNotification}
       />
+      {notificationPrompt ? <BrowserAlertsPrompt notifications={notifications} /> : null}
     </header>
   );
 }

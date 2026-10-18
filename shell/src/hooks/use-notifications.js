@@ -9,9 +9,11 @@ import {
 import { notificationLabel, notificationTarget } from '../notifications-dialog.jsx';
 import {
   alertNewNotifications,
+  browserNotificationPromptEligible,
   browserNotificationPermission,
   browserNotificationsEnabled,
   setBrowserNotifications,
+  snoozeBrowserNotificationPrompt,
 } from './browser-notifications.js';
 
 export function useNotifications(enabled) {
@@ -19,6 +21,7 @@ export function useNotifications(enabled) {
   const [unread, setUnread] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [, setPromptRevision] = useState(0);
   const [browserAlerts, setBrowserAlerts] = useState(() => ({
     on: browserNotificationsEnabled(),
     permission: browserNotificationPermission(),
@@ -88,7 +91,14 @@ export function useNotifications(enabled) {
   const setAlerts = useCallback(async (on) => {
     const permission = await setBrowserNotifications(on, items);
     setBrowserAlerts({ on: on && permission === 'granted', permission });
+    setPromptRevision((value) => value + 1);
+    return permission;
   }, [items]);
+
+  const dismissAlertsPrompt = useCallback(() => {
+    snoozeBrowserNotificationPrompt();
+    setPromptRevision((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     refreshUnread();
@@ -100,5 +110,6 @@ export function useNotifications(enabled) {
     return () => window.clearInterval(timer);
   }, [refreshUnread]);
 
-  return { items, unread, hasMore, loading, load, markRead, markAllRead, answerAccessRequest, browserAlerts, setAlerts };
+  const browserPrompt = browserNotificationPromptEligible(unread);
+  return { items, unread, hasMore, loading, load, markRead, markAllRead, answerAccessRequest, browserAlerts, browserPrompt, setAlerts, dismissAlertsPrompt };
 }
