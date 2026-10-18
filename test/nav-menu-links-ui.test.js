@@ -101,7 +101,7 @@ function waitFor(port, timeoutMs = 8000) {
         }
         const agents = page.getByRole('menuitem', { name: 'Agents', exact: true });
         await agents.waitFor();
-        assert.equal(await agents.getAttribute('href'), '/me/agents', `${name} ${width}px: Agents is a real link`);
+        assert.equal(await agents.getAttribute('href'), '/me?view=settings#agents', `${name} ${width}px: Agents opens workspace settings`);
         if (width <= 700) await page.keyboard.press('Escape');
 
         // Hold /me, click, and look. Playwright cannot evaluate in a page

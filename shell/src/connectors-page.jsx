@@ -28,7 +28,7 @@ function detailOf(t) {
 
 async function copy(text) { try { await navigator.clipboard.writeText(text); return true; } catch (_) { return false; } }
 
-export function ConnectorsBody() {
+export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agents' }) {
   const [targets, setTargets] = useState(null);
   const [accountDefault, setAccountDefault] = useState(null);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -106,7 +106,7 @@ export function ConnectorsBody() {
   return (
     <>
         <p className="muted" style={{ marginTop: 0 }}>
-          Each doc's comments go to the agent you last picked for it in Send to agent, or else the agent that last worked on it. Docs with neither go to your default agent.
+          {team ? `Only workspace admins can send ${team.name}'s comments to the agents connected here.` : "Each doc's comments go to the agent you last picked for it in Send to agent, or else the agent that last worked on it. Docs with neither go to your default agent."}
         </p>
         {notice ? <p className="muted" role="status">{notice}</p> : null}
 
@@ -184,7 +184,7 @@ export function ConnectorsBody() {
                       ✓ Connected to {connectors.filter((x) => x.kind === 'raft').map((x) => x.server_slug || 'a server').join(', ')}. Connect another only if some of your agents live on a different Raft server.
                     </p>
                   ) : null}
-                  <RaftConnectButton label={connectors.some((x) => x.kind === 'raft') ? 'Connect another Raft server' : 'Connect with Raft'} />
+                  <RaftConnectButton startHref={`/api/me/connectors/raft/start?return=${encodeURIComponent(returnTo)}`} label={connectors.some((x) => x.kind === 'raft') ? 'Connect another Raft server' : 'Connect with Raft'} />
                   <details className="tdoc-conn-alt" open>
                     <summary>Or let an agent connect itself</summary>
                     <code>{CONNECT_AGENT_PROMPT}</code>

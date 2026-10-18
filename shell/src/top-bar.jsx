@@ -183,7 +183,7 @@ export function TopBar({
                     <UserRound size={15} /> {publicProfileLabel}
                   </AppMenuItem>
                 ) : null}
-                <AppMenuLinkItem className="tdoc-action-menu-item" href="/me/agents">
+                <AppMenuLinkItem className="tdoc-action-menu-item" href="/me?view=settings#agents">
                   <TerminalSquare size={15} /> Agents
                 </AppMenuLinkItem>
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
@@ -218,7 +218,7 @@ export function TopBar({
             ) : activeProfile || onClaimProfile ? (
               <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
             ) : null}
-            <AppMenuLinkItem href="/me/agents">Agents</AppMenuLinkItem>
+            <AppMenuLinkItem href="/me?view=settings#agents">Agents</AppMenuLinkItem>
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
         ) : authConfigured ? (

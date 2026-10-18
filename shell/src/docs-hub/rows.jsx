@@ -58,6 +58,7 @@ export function DocRow({
   doc,
   meta,
   selection,
+  layout = 'list',
   starrable = true,
   onToggleStar,
   menuItems = [],
@@ -67,7 +68,7 @@ export function DocRow({
   const dataAttrs = Object.fromEntries(
     Object.entries(data).map(([key, value]) => [`data-${key}`, value]),
   );
-  const classes = ['doc-row', selection?.checked ? 'is-selected' : null, className]
+  const classes = ['doc-row', layout === 'grid' ? 'is-card' : null, selection?.checked ? 'is-selected' : null, className]
     .filter(Boolean)
     .join(' ');
   return (
@@ -82,7 +83,19 @@ export function DocRow({
           />
         </label>
       ) : null}
-      {doc.image ? (
+      {layout === 'grid' ? (
+        <a className="doc-card-preview" href={docHref(doc)} aria-label={`Open ${doc.title}`}>
+          <span>{doc.excerpt || doc.title}</span>
+          {doc.image ? (
+            <img
+              src={doc.image}
+              alt=""
+              loading="lazy"
+              onError={(event) => { event.currentTarget.hidden = true; }}
+            />
+          ) : null}
+        </a>
+      ) : doc.image ? (
         <img
           className="doc-preview-image"
           src={doc.image}
@@ -107,11 +120,11 @@ export function DocRow({
 // One list surface for personal and team spaces. The caller supplies only the
 // actions/metadata that differ; preview layout, selection state, and empty
 // treatment stay identical instead of slowly becoming two products.
-export function DocList({ docs, rowProps, selecting = false, empty = null }) {
+export function DocList({ docs, rowProps, selecting = false, empty = null, layout = 'list' }) {
   return (
     <>
-      <div className={`doc-list${selecting ? ' is-selecting' : ''}`}>
-        {docs.map((doc) => <DocRow key={doc.slug} doc={doc} {...rowProps(doc)} />)}
+      <div className={`doc-list is-${layout}${selecting ? ' is-selecting' : ''}`}>
+        {docs.map((doc) => <DocRow key={doc.slug} doc={doc} layout={layout} {...rowProps(doc)} />)}
       </div>
       {!docs.length && empty ? <p className="empty">{empty}</p> : null}
     </>

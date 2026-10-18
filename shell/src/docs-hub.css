@@ -25,6 +25,7 @@
      creates, because nothing here can create a doc — their agent writes it. */
   .page-hd { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
   .page-hd h1 { margin: 0; }
+  .page-hd-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
   .page-hd .loc-hint { margin: 4px 0 0; font-size: 13px; }
   .profile-hd { align-items: flex-start; }
   .profile-avatar { border-radius: 20px; display: block; flex-shrink: 0; width: 40px; height: 40px; object-fit: cover; }
@@ -344,6 +345,20 @@
   .row-menu-btn { border: none; background: none; color: #ccc; font-size: 20px; line-height: 1; padding: 2px 8px; border-radius: 6px; }
   .doc-row:hover .row-menu-btn { color: var(--td-muted); }
   .row-menu-btn:hover, .row-menu-btn[aria-expanded="true"] { background: var(--td-line); color: var(--td-ink); }
+  .catalog-layout { display: inline-flex; padding: 2px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-surface); }
+  .catalog-layout button { width: 34px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--td-muted); }
+  .catalog-layout button:hover { color: var(--td-ink); }
+  .catalog-layout button.is-active { background: #fff; color: var(--td-accent); box-shadow: 0 1px 3px rgba(16,18,26,.12); }
+  .doc-list.is-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(190px,1fr)); gap: 16px; padding: 4px 0 12px; }
+  .doc-list.is-grid .doc-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--td-line); border-radius: 10px; background: #fff; min-width: 0; }
+  .doc-list.is-grid .doc-row:hover { border-color: #c9cbd2; box-shadow: 0 3px 10px rgba(16,18,26,.08); }
+  .doc-list.is-grid .row-check { position: absolute; z-index: 1; top: 16px; left: 16px; padding: 4px; border-radius: 5px; background: rgba(255,255,255,.92); }
+  .doc-card-preview { position: relative; grid-column: 1 / -1; aspect-ratio: 4 / 3; min-width: 0; overflow: hidden; display: flex; align-items: flex-start; border: 1px solid var(--td-line); border-radius: 7px; background: var(--td-surface); color: var(--td-ink); text-decoration: none; }
+  .doc-card-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--td-surface); }
+  .doc-card-preview span { display: -webkit-box; margin: 16px; overflow: hidden; -webkit-line-clamp: 6; -webkit-box-orient: vertical; font: 13px/1.55 Georgia, serif; color: var(--td-muted); }
+  .doc-list.is-grid .doc-info { align-self: stretch; }
+  .doc-list.is-grid .doc-preview-excerpt { display: none; }
+  .doc-list.is-grid .row-actions { align-self: end; display: flex; align-items: center; }
   /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
      switches over the already-rendered page — no fetch on tab change. */
   .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--td-line); overflow-x: auto; scrollbar-width: none; }
@@ -440,6 +455,10 @@
   .tab { padding-left: 8px; padding-right: 8px; font-size: 13px; }
 
   .doc-preview-image { width: 52px; height: 40px; flex-basis: 52px; }
+  .catalog-layout button { width: 40px; height: 40px; }
+  .doc-list.is-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+  .doc-list.is-grid .doc-row { padding: 8px; }
+  .doc-card-preview span { margin: 12px; -webkit-line-clamp: 4; font-size: 12px; }
 
   .toolbar select,
   .toolbar .toolbar-select,
@@ -721,7 +740,8 @@
 .tdoc-conn-form label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--td-muted); }
 .tdoc-conn-form label em { font-style: normal; font-weight: 400; }
 .tdoc-conn-form .tdoc-fbspace-btn { height: 34px; }
-.tdoc-conn-pre { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--td-surface, #f5f5f3); font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre; overflow-x: auto; color: var(--td-ink); }
+.tdoc-connectors, .tdoc-connector { min-width: 0; max-width: 100%; }
+.tdoc-conn-pre { box-sizing: border-box; min-width: 0; max-width: 100%; margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--td-surface, #f5f5f3); font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre; overflow-x: auto; color: var(--td-ink); }
 .tdoc-conn-form input { font-family: inherit; font-weight: 400; font-size: 14px; line-height: 1.2; height: 34px; padding: 0 10px; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
 @media (max-width: 640px) { .tdoc-conn-form { grid-template-columns: 1fr; } }
 
@@ -754,11 +774,11 @@
 .onb-optional span { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; background: var(--td-surface, #f3f3f1); font-size: 11px; font-weight: 600; }
 
 .tdoc-conn-default-form { display: flex; gap: 6px; margin-top: 6px; max-width: 420px; }
-.tdoc-conn-default-form input { flex: 1; font: inherit; font-size: 13px; padding: 5px 9px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-bg, #fff); color: var(--td-ink); }
+.tdoc-conn-default-form input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 5px 9px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-bg, #fff); color: var(--td-ink); }
 .tdoc-conn-alt { font-size: 13px; color: var(--td-muted); }
 .tdoc-conn-alt summary { cursor: pointer; }
 .tdoc-conn-alt[open] { display: grid; gap: 8px; }
-.tdoc-conn-alt code { margin: 2px 0 0; padding: 10px 12px; }
+.tdoc-conn-alt code { box-sizing: border-box; min-width: 0; max-width: 100%; margin: 2px 0 0; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tdoc-conn-alt .tdoc-copy-prompt { justify-self: start; }
 .tdoc-connector > a.tdoc-fbspace-btn { justify-self: start; }
 
@@ -777,12 +797,14 @@
 .tdoc-conn-facts dt { color: var(--td-muted); }
 .tdoc-conn-facts dd { margin: 0; }
 .tdoc-conn-inline-form { display: flex; gap: 8px; padding-left: 52px; max-width: 520px; }
-.tdoc-conn-inline-form input { flex: 1; height: 34px; padding: 0 10px; font-family: inherit; font-weight: 400; font-size: 14px; line-height: 1.2; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
+.tdoc-conn-inline-form input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; font-family: inherit; font-weight: 400; font-size: 14px; line-height: 1.2; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
 .tdoc-link-btn { justify-self: start; margin-left: 52px; padding: 0; border: 0; background: none; color: var(--td-accent); font-family: inherit; font-weight: 600; font-size: 13px; line-height: 1.2; cursor: pointer; }
 .tdoc-link-btn:hover { text-decoration: underline; }
 .tdoc-conn-card-title strong { white-space: nowrap; }
 @media (max-width: 640px) {
   .tdoc-conn-card-head { flex-wrap: wrap; }
+  .tdoc-conn-card-title { flex-wrap: wrap; }
+  .tdoc-conn-card-title strong { white-space: normal; overflow-wrap: anywhere; }
   /* On a phone the actions take their own row instead of squeezing the
      name into one word per line. */
   .tdoc-conn-card-actions { order: 3; width: 100%; }

@@ -12,6 +12,8 @@ function withBoot(html, update) {
   return html.replace(/(window\.__TDOC_APP_BOOT__ = )(.*?)(;<\/script>)/, (_, b, j, a) => b + JSON.stringify(update(JSON.parse(j))) + a);
 }
 const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count: 4 }, { id: 'tm_lab', name: 'Smrti Lab', role: 'member', member_count: 2 }];
+const PERSONAL = { slug: 'personal-plan', title: 'Personal plan', excerpt: 'Only in My docs', workspace_id: '', folder: '', mine: true, created: '2026-10-01', updated: '2026-10-02', at: '2026-10-03', starred: true };
+const TEAM_DOC = { slug: 'team-plan', title: 'Team plan', excerpt: 'Only in BeFreed', workspace_id: 'tm_befreed', team: 'tm_befreed', author: 'Alice', created: '2026-10-01', updated: '2026-10-02', at: '2026-10-03', starred: true, can_file: true, can_manage: true };
 
 (async () => {
   console.log('Workspace switcher UI');
@@ -24,11 +26,15 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
     const shell = await (await fetch(`${base}/me`)).text();
     const open = async (width, query) => {
       const page = await browser.newPage({ viewport: { width, height: 800 } });
-      await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, teams: TEAMS, team_docs: [], team_folders: {} })) }));
-      await page.route('**/api/me/connectors', (r) => r.fulfill({ json: { connectors: [{
-        id: 'local:juliesmac', kind: 'local', device: 'juliesmac',
-        agents: [{ provider: 'local', device: 'juliesmac', server_id: 'juliesmac', cli: 'claude', agent_sub: 'juliesmac_claude', status: 'active', last_seen: new Date().toISOString() }],
-      }] } }));
+      await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, teams: TEAMS, docs: [PERSONAL], recent: [PERSONAL, TEAM_DOC], starred: [PERSONAL, TEAM_DOC], team_docs: [TEAM_DOC], team_folders: {} })) }));
+      await page.route('**/api/me/connectors', (r) => r.fulfill({ json: {
+        targets: [], available: [{ id: 'raft', ready: true }, { id: 'local', ready: true }, { id: 'webhook', ready: true }],
+        connectors: [
+          { id: 'raft:srv', kind: 'raft', server_id: 'srv', server_slug: 'acme', agents: [{ provider: 'raft', server_id: 'srv', agent_sub: 'alice-bot', agent_name: 'alice-bot' }] },
+          { id: 'local:juliesmac', kind: 'local', device: 'juliesmac', agents: [{ provider: 'local', device: 'juliesmac', server_id: 'juliesmac', cli: 'claude', agent_sub: 'juliesmac_claude', status: 'active', last_seen: new Date().toISOString() }] },
+        ],
+      } }));
+      await page.route('**/api/me/tokens', (r) => r.fulfill({ json: { ok: true, tokens: [] } }));
       await page.route('**/api/team/backup?*', (r) => r.fulfill({ json: { ok: true, backup: { enabled: false } } }));
       await page.route(/\/api\/team\?/, (r) => r.fulfill({ json: { ok: true, team: {
         ...TEAMS[0], invites: [], invite_url: 'https://tdoc.dev/t/acme/join', team_url: 'https://tdoc.dev/t/befreed',
@@ -62,16 +68,36 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
       await page.getByRole('dialog', { name: 'New team' }).waitFor();
       await page.close();
     });
-    await t('every workspace has the same tabs and Recent stays account-wide', async () => {
+    await t('every workspace has the same tabs and Recent/Starred follow the workspace', async () => {
       const page = await open(1280, '');
       assert.deepEqual(await page.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Settings']);
       await page.getByRole('tab', { name: 'Recent' }).click();
-      await page.getByText('Across all workspaces.').waitFor();
+      await page.getByRole('link', { name: 'Personal plan' }).waitFor();
+      assert.equal(await page.getByRole('link', { name: 'Team plan' }).count(), 0);
       await page.locator('.tdoc-space-trigger').click();
       await page.getByRole('menuitem', { name: 'BeFreed' }).click();
       await page.getByRole('heading', { name: 'BeFreed' }).waitFor();
       assert.match(page.url(), /team=tm_befreed.*view=recent/);
       assert.equal(await page.getByRole('tab', { name: 'Recent' }).getAttribute('aria-selected'), 'true');
+      await page.getByRole('link', { name: 'Team plan' }).waitFor();
+      assert.equal(await page.getByRole('link', { name: 'Personal plan' }).count(), 0);
+      await page.close();
+    });
+    await t('grid/list preview switch is shared, complete, and remembered', async () => {
+      const page = await open(1280, '');
+      await page.getByRole('button', { name: 'Grid view' }).click();
+      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
+      assert.match(await page.locator('.doc-card-preview').textContent(), /Only in My docs/);
+      assert.equal(await page.getByRole('button', { name: 'Grid view' }).getAttribute('aria-pressed'), 'true');
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-grid-desktop.png'), fullPage: true });
+      await page.reload();
+      await page.locator('.doc-list.is-grid').waitFor();
+      await page.locator('.tdoc-space-trigger').click();
+      await page.getByRole('menuitem', { name: 'BeFreed' }).click();
+      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
+      assert.match(await page.locator('.doc-card-preview').textContent(), /Only in BeFreed/);
+      await page.getByRole('button', { name: 'List view' }).click();
+      assert.equal(await page.locator('.doc-list.is-list').count(), 1);
       await page.close();
     });
     await t('the global switcher opens a real workspace settings page', async () => {
@@ -81,8 +107,9 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
       await admin.getByRole('heading', { name: 'Workspace settings' }).waitFor();
       assert.deepEqual(await admin.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Settings']);
       await admin.getByRole('heading', { name: 'Members' }).waitFor();
-      await admin.getByRole('heading', { name: 'Always-on agent' }).waitFor();
-      assert.match(await admin.locator('.tm-daemon-card').textContent(), /Running.*only admins can send/s);
+      await admin.getByRole('heading', { name: 'Agents' }).waitFor();
+      const agents = await admin.locator('#agents').textContent();
+      assert.match(agents, /Raft · acme.*This computer · juliesmac.*Daemon running/s);
       await admin.getByRole('heading', { name: 'Data backup' }).waitFor();
       assert.match(admin.url(), /view=settings/);
       if (SHOTS) await admin.screenshot({ path: path.join(SHOTS, 'workspace-settings-desktop.png'), fullPage: true });
@@ -91,15 +118,16 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
       const member = await open(1280, '?team=tm_lab');
       await member.getByRole('tab', { name: 'Settings' }).click();
       assert.equal(await member.getByRole('heading', { name: 'Data backup' }).count(), 0);
-      assert.match(await member.locator('.tm-daemon-card').textContent(), /Only a workspace admin can connect and run an agent/);
+      assert.match(await member.locator('#agents').textContent(), /Only a workspace admin can connect agents/);
       await member.close();
     });
-    await t('personal Settings exposes the non-Raft daemon setup', async () => {
+    await t('personal Settings has one Agents area for Raft and local setup', async () => {
       const page = await open(1280, '?view=settings');
-      await page.getByRole('heading', { name: 'Always-on agent' }).waitFor();
-      const text = await page.locator('.tm-daemon-card').textContent();
-      assert.match(text, /Claude Code or Codex.*Running/s);
+      await page.getByRole('heading', { name: 'Agents' }).waitFor();
+      const text = await page.locator('#agents').textContent();
+      assert.match(text, /Raft · acme.*This computer · juliesmac/s);
       assert.match(text, /install-launchd/);
+      await page.getByRole('heading', { name: 'Agent access' }).waitFor();
       await page.close();
     });
     await t('phone: the switcher is there and the old pill row is gone', async () => {
@@ -109,10 +137,22 @@ const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count:
       assert.equal(await trigger.isVisible(), true);
       assert.equal(await page.locator('.tm-spaces').count(), 0, 'the pill row is back');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'switcher-phone.png') });
+      await page.getByRole('button', { name: 'Grid view' }).click();
+      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'grid overflows sideways');
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-grid-phone.png'), fullPage: true });
       await trigger.click();
       await page.getByRole('menuitem', { name: 'Workspace settings' }).click();
       await page.getByRole('heading', { name: 'Data backup' }).waitFor();
-      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'settings page overflows sideways');
+      const geometry = await page.evaluate(() => ({
+        width: innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        offenders: [...document.querySelectorAll('body *')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return { tag: el.tagName, cls: el.className, left: Math.round(r.left), right: Math.round(r.right), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth };
+        }).filter((x) => x.left < -1 || x.right > innerWidth + 1 || x.scrollWidth > x.clientWidth + 1).slice(0, 8),
+      }));
+      assert.ok(geometry.scrollWidth <= geometry.width + 1, `settings page overflows sideways ${JSON.stringify(geometry)}`);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'workspace-settings-phone.png'), fullPage: true });
       await page.close();
     });

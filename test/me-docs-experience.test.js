@@ -206,6 +206,7 @@ function bootData(html, name) {
     const boot = bootData(await me.text(), '__TDOC_APP_BOOT__');
     assert(boot.recent.some((doc) => doc.slug === 'bobs-doc'), 'Recent data must list the visited doc');
     assert(boot.recent.find((doc) => doc.slug === 'bobs-doc').owner === 'bob', 'Recent row must identify whose doc it is');
+    assert(boot.recent.find((doc) => doc.slug === 'bobs-doc').workspace_id === '', 'personal recent row must name the personal workspace');
     // Not alice's doc — it must NOT appear in her own catalog list.
     assert(!boot.docs.some((doc) => doc.slug === 'bobs-doc'), "someone else's doc must stay out of My docs");
   });

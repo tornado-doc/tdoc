@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Laptop } from 'lucide-react';
 import { AppDialog } from './ui/dialog.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from './agent-marks.jsx';
@@ -38,6 +38,13 @@ export function DevicesBody({ tokens: given }) {
   const [confirmAll, setConfirmAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  useEffect(() => {
+    if (Array.isArray(given)) return;
+    fetch('/api/me/tokens', { credentials: 'same-origin' })
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+      .then((body) => setTokens((body.tokens || []).slice().sort((a, b) => String(b.last_used || b.created || '').localeCompare(String(a.last_used || a.created || '')))))
+      .catch(() => setNotice('Could not load agent access. Reload and try again.'));
+  }, [given]);
 
   const revoke = async () => {
     const target = confirm;

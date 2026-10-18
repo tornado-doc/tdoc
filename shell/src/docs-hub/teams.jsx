@@ -18,7 +18,7 @@ import {
   updateTeam,
 } from '../document/api.js';
 import { DocList, day } from './rows.jsx';
-import { DaemonSettingsCard } from './daemon-settings.jsx';
+import { ConnectorsBody } from '../connectors-page.jsx';
 import './teams.css';
 
 const ERRORS = {
@@ -59,11 +59,12 @@ function teamHue(id) {
   for (const ch of String(id || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return h;
 }
-export function TeamPane({ team, docs, viewer, menuFor, inFolder = false }) {
+export function TeamPane({ team, docs, viewer, menuFor, inFolder = false, layout = 'list' }) {
   return (
     <section className="pane" id="pane-team">
       <DocList
         docs={docs}
+        layout={layout}
         rowProps={(doc) => ({
           meta: [
             `by ${doc.mine ? 'me' : doc.author || 'unknown'}${doc.former_member ? ' (former member)' : ''}`,
@@ -590,7 +591,12 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
         <p>Manage this workspace in one place.</p>
       </div>
       <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} />
-      <DaemonSettingsCard team={team} />
+      <section className="tm-settings-card" id="agents">
+        <div className="tm-settings-head"><div><h2>Agents</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
+        {team.role === 'admin'
+          ? <ConnectorsBody team={team} returnTo={`/me?team=${encodeURIComponent(team.id)}&view=settings#agents`} />
+          : <p className="empty">Only a workspace admin can connect agents and send team comments to them.</p>}
+      </section>
       {team.role === 'admin' ? <TeamBackupDialog team={team} inline /> : null}
     </section>
   );

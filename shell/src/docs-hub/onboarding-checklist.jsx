@@ -280,7 +280,7 @@ export function OnboardingChecklist({ record: initial, docs }) {
           agent — without it counting against "done". */}
       {open ? (
         <p className="onb-optional">
-          <span>Optional</span> Send comments straight to your agent from tdoc. <a href="/me/agents?tab=send">Set up an agent</a>
+          <span>Optional</span> Send comments straight to your agent from tdoc. <a href="/me?view=settings#agents">Set up an agent</a>
         </p>
       ) : null}
     </section>

@@ -127,7 +127,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(asDave.status === 403, `dave ${asDave.status}`);
   });
 
-  await t('every member edits a team doc; only admins can run their own local daemon; outsiders cannot', async () => {
+  await t('every member edits a team doc; only admins can use their own agents; outsiders cannot', async () => {
     const html = '<!doctype html><html><head><title>plan</title></head><body><h1>plan</h1><p>bob was here</p></body></html>';
     const outsider = await call('/api/doc/versions', { method: 'POST', cookie: dave, body: { slug: 'plan', baseVersion: 1, html } });
     assert(outsider.status === 403 || outsider.status === 401, `outsider save ${outsider.status}`);
@@ -147,13 +147,15 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(memberTargets.status === 200 && !memberTargets.body.default && memberTargets.body.reason === 'team_admin_only', `member targets ${JSON.stringify(memberTargets.body)}`);
     const adminTargets = await call('/api/notify/targets?slug=plan', { cookie: alice });
     assert(adminTargets.status === 200 && adminTargets.body.default?.provider === 'local' && adminTargets.body.default.server_id === 'alice-mac', `admin targets ${JSON.stringify(adminTargets.body)}`);
-    assert(!(adminTargets.body.candidates || []).some((x) => x.provider === 'raft'), 'team picker exposes only the admin local daemon');
+    assert((adminTargets.body.candidates || []).some((x) => x.provider === 'raft' && x.agent_sub === 'alice-bot'), 'team picker includes the admin Raft agents');
     const outsiderTargets = await call('/api/notify/targets?slug=plan', { cookie: dave });
     assert(outsiderTargets.status === 403 || outsiderTargets.status === 401, `outsider targets ${outsiderTargets.status}`);
     const memberSend = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: ['c1'], recipient: local('bob-mac') } });
     assert(memberSend.status === 403 && memberSend.body.error === 'team_agent_admin_only', `member handoff ${memberSend.status} ${JSON.stringify(memberSend.body)}`);
     const raftSend = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: ['c1'], recipient: raft } });
-    assert(raftSend.status === 400 && raftSend.body.error === 'team_local_agent_only', `raft handoff ${raftSend.status}`);
+    assert(raftSend.status === 200 && raftSend.body.handoff_id, `raft handoff ${raftSend.status} ${JSON.stringify(raftSend.body)}`);
+    const raftRecord = (JSON.parse(await env.META.get('handoffs:plan')) || []).find((h) => h.handoff_id === raftSend.body.handoff_id);
+    assert(raftRecord?.by === 'acct-alice' && raftRecord?.recipient?.provider === 'raft', `team Raft handoff stays bound to its admin ${JSON.stringify(raftRecord)}`);
     const sent = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: ['c1'], recipient: local('alice-mac') } });
     assert(sent.status === 200 && sent.body.delivery.status === 'queued', `admin handoff ${sent.status} ${JSON.stringify(sent.body)}`);
     assert(!JSON.parse(await env.META.get('meta:plan')).notify_agents, 'an admin daemon is not stored as a shared team-doc agent');
@@ -192,11 +194,16 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
   });
 
   await t('/api/me lists team docs separately from personal docs', async () => {
+    await env.META.put('recents:bob', JSON.stringify({ items: [{ slug: 'plan', at: '2026-10-18T07:00:00.000Z' }] }));
+    await env.META.put('stars:bob', JSON.stringify({ items: [{ slug: 'plan', at: '2026-10-18T07:00:00.000Z' }] }));
     const me = await call('/api/me', { cookie: bob });
     assert(me.status === 200, `me ${me.status}`);
     assert(!me.body.docs.some((d) => d.slug === 'bob-notes'), 'team doc left My docs');
     const row = me.body.team_docs.find((d) => d.slug === 'plan');
     assert(row && row.author === 'alice' && !row.former_member && row.can_manage === false, `row ${JSON.stringify(row)}`);
+    assert(row.workspace_id === team.id, `team row lost its workspace ${JSON.stringify(row)}`);
+    assert(me.body.recent.find((d) => d.slug === 'plan')?.workspace_id === team.id, 'recent row must carry its team workspace');
+    assert(me.body.starred.find((d) => d.slug === 'plan')?.workspace_id === team.id, 'starred row must carry its team workspace');
     assert(me.body.teams.length === 1 && me.body.teams[0].role === 'member', 'team summary');
     const html = await (await worker.fetch(req('/me', { cookie: bob }), env, {})).text();
     assert(!html.includes('allowed_users'), 'catalog leaks no access policy');
