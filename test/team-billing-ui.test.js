@@ -86,7 +86,7 @@ async function t(name, fn) {
       await shot(page, 'team-billing-free-desktop.png');
       await page.getByRole('button', { name: 'Upgrade to Team' }).click();
       await page.waitForURL(/stripe-hosted\?checkout/);
-      assert.deepEqual(calls.at(-1).body, { id: 't_0123456789abcdef', action: 'checkout', interval: 'year' });
+      assert.deepEqual(calls.filter((c) => c.method === 'POST').at(-1).body, { id: 't_0123456789abcdef', action: 'checkout', interval: 'year' });
       await context.close();
     });
 
@@ -106,7 +106,7 @@ async function t(name, fn) {
       await shot(page, 'team-billing-paid-desktop.png');
       await page.getByRole('button', { name: 'Manage billing' }).click();
       await page.waitForURL(/stripe-hosted\?portal/);
-      assert.deepEqual(calls.at(-1).body, { id: 't_0123456789abcdef', action: 'portal' });
+      assert.deepEqual(calls.filter((c) => c.method === 'POST').at(-1).body, { id: 't_0123456789abcdef', action: 'portal' });
       await context.close();
     });
 

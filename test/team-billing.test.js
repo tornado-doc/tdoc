@@ -330,6 +330,27 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     } finally { stripe.restore(); }
   });
 
+  await t('a late completed Checkout for an old subscription never replaces the current plan', async () => {
+    const stripe = stubStripe();
+    try {
+      const { env, admin, team } = await setup();
+      stripe.subs.set('sub_A', subscription('sub_A', team.id, 1));
+      await webhook(env, { id: 'evt_a1', created: 1800001000, type: 'customer.subscription.created', data: { object: subscription('sub_A', team.id, 1) } });
+      stripe.subs.get('sub_A').status = 'canceled';
+      await webhook(env, { id: 'evt_a2', created: 1800001100, type: 'customer.subscription.deleted', data: { object: subscription('sub_A', team.id, 1, 'canceled') } });
+      stripe.subs.set('sub_B', subscription('sub_B', team.id, 1));
+      await webhook(env, { id: 'evt_b1', created: 1800001200, type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_B', metadata: { team_id: team.id } } } });
+      const late = await (await webhook(env, { id: 'evt_a0', created: 1800000900, type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_A', metadata: { team_id: team.id } } } })).json();
+      assert(late.ignored, `late Checkout A applied: ${JSON.stringify(late)}`);
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.plan === 'team' && plan.status === 'active', `plan B lost: ${JSON.stringify(plan)}`);
+      assert(JSON.parse(env.META.map.get(`team-billing:${team.id}`)).subscription === 'sub_B');
+      // A live re-read of the current subscription never moves the event watermark back.
+      await webhook(env, { id: 'evt_b0', created: 1800001150, type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_B', metadata: { team_id: team.id } } } });
+      assert(JSON.parse(env.META.map.get(`team-billing:${team.id}`)).event_created === 1800001200, 'watermark went backwards');
+    } finally { stripe.restore(); }
+  });
+
   await t('opening the plan reconciles against Stripe\'s real quantity, not the local copy', async () => {
     const stripe = stubStripe();
     try {

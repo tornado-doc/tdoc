@@ -4320,7 +4320,7 @@ function billingFromSubscription(sub, prev, event) {
       ? new Date(((item && item.current_period_end) || sub.current_period_end) * 1000).toISOString() : null,
     cancel_at_period_end: !!sub.cancel_at_period_end,
     // The newest event applied; older ones arriving late are dropped.
-    event_created: (event && event.created) || (prev && prev.event_created) || 0,
+    event_created: Math.max(Number(event && event.created) || 0, Number(prev && prev.event_created) || 0),
     event_id: (event && event.id) || (prev && prev.event_id) || null,
     updated_at: new Date().toISOString(),
   };
@@ -13121,18 +13121,21 @@ export default {
       const created = Number(event.created) || 0;
       if (prev && event.id && prev.event_id === event.id) return json({ received: true, duplicate: true });
       const lastCreated = Number(prev && prev.event_created) || 0;
-      if (prev && event.type !== 'checkout.session.completed' && created && created < lastCreated) {
-        return json({ received: true, ignored: 'stale' });
-      }
-      // Stripe times are whole seconds. In a tie, an ending (canceled,
-      // unpaid, expired) beats a live state: never revive within the second.
-      if (prev && prev.subscription === sub.id && created && created === lastCreated
-        && !teamBillingPaid(prev) && prev.status && teamBillingPaid({ status: sub.status }) && event.type !== 'checkout.session.completed') {
-        return json({ received: true, ignored: 'stale' });
-      }
-      // An event about an older subscription must not overwrite the current one's state.
-      if (prev && prev.subscription && prev.subscription !== sub.id && teamBillingPaid(prev) && event.type !== 'checkout.session.completed') {
-        return json({ received: true, ignored: true });
+      const sameSub = !!(prev && prev.subscription === sub.id);
+      // checkout.session.completed reads its subscription live, so for the
+      // subscription already on record it is current whenever it arrives.
+      // Every other case obeys event time and subscription identity.
+      const liveSame = event.type === 'checkout.session.completed' && sameSub;
+      if (prev && !liveSame) {
+        if (created && created < lastCreated) return json({ received: true, ignored: 'stale' });
+        // Stripe times are whole seconds. In a tie, an ending (canceled,
+        // unpaid, expired) beats a live state: never revive within the second.
+        if (sameSub && created && created === lastCreated && !teamBillingPaid(prev) && prev.status && teamBillingPaid({ status: sub.status })) {
+          return json({ received: true, ignored: 'stale' });
+        }
+        // An event about another subscription never replaces a paid one: a
+        // late completed Checkout A cannot overwrite the current plan B.
+        if (prev.subscription && !sameSub && teamBillingPaid(prev)) return json({ received: true, ignored: true });
       }
       const next = billingFromSubscription(sub, prev, event);
       await env.META.put(teamBillingKey(team.id), JSON.stringify(next));
