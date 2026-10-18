@@ -14,6 +14,10 @@ function withBoot(html, update) {
 const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count: 4 }, { id: 'tm_lab', name: 'Smrti Lab', role: 'member', member_count: 2 }];
 const PERSONAL = { slug: 'personal-plan', title: 'Personal plan', excerpt: 'Only in My docs', workspace_id: '', folder: '', mine: true, created: '2026-10-01', updated: '2026-10-02', at: '2026-10-03', starred: true };
 const TEAM_DOC = { slug: 'team-plan', title: 'Team plan', excerpt: 'Only in BeFreed', workspace_id: 'tm_befreed', team: 'tm_befreed', author: 'Alice', created: '2026-10-01', updated: '2026-10-02', at: '2026-10-03', starred: true, can_file: true, can_manage: true };
+const PERSONAL_FOLDERS = [{ id: 'f_research', name: 'Research', parent: '' }, { id: 'f_2027', name: '2027', parent: 'f_research' }];
+const NESTED_PERSONAL = { slug: 'revenue-plan', title: 'Revenue plan', excerpt: 'Expansion in Japan', workspace_id: '', folder: 'f_2027', mine: true, created: '2026-10-04', updated: '2026-10-05', at: '2026-10-05', starred: false };
+const TEAM_FOLDERS = [{ id: 'tf_strategy', name: 'Strategy', parent: '' }, { id: 'tf_launch', name: 'Launch', parent: 'tf_strategy' }];
+const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Confidential tiger notes', workspace_id: 'tm_befreed', team: 'tm_befreed', folder: 'tf_launch', author: 'Alice', created: '2026-10-04', updated: '2026-10-05', at: '2026-10-05', starred: false, can_file: true, can_manage: true };
 
 (async () => {
   console.log('Workspace switcher UI');
@@ -26,7 +30,7 @@ const TEAM_DOC = { slug: 'team-plan', title: 'Team plan', excerpt: 'Only in BeFr
     const shell = await (await fetch(`${base}/me`)).text();
     const open = async (width, query) => {
       const page = await browser.newPage({ viewport: { width, height: 800 } });
-      await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, teams: TEAMS, docs: [PERSONAL], recent: [PERSONAL, TEAM_DOC], starred: [PERSONAL, TEAM_DOC], team_docs: [TEAM_DOC], team_folders: {} })) }));
+      await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, teams: TEAMS, docs: [PERSONAL, NESTED_PERSONAL], folders: PERSONAL_FOLDERS, recent: [PERSONAL, TEAM_DOC], starred: [PERSONAL, TEAM_DOC], team_docs: [TEAM_DOC, NESTED_TEAM], team_folders: { tm_befreed: TEAM_FOLDERS } })) }));
       await page.route('**/api/me/connectors', (r) => r.fulfill({ json: {
         targets: [], available: [{ id: 'raft', ready: true }, { id: 'local', ready: true }, { id: 'webhook', ready: true }],
         connectors: [
@@ -100,6 +104,30 @@ const TEAM_DOC = { slug: 'team-plan', title: 'Team plan', excerpt: 'Only in BeFr
       assert.equal(await page.locator('.doc-list.is-list').count(), 1);
       await page.close();
     });
+    await t('search returns documents from every folder, not folder rows, with paths and field scopes', async () => {
+      const page = await open(1280, '');
+      assert.equal(await page.locator('.folder-row').count(), 1);
+      const search = page.getByRole('searchbox', { name: 'Search docs' });
+      await search.fill('Japan');
+      await page.getByRole('link', { name: 'Revenue plan' }).waitFor();
+      assert.equal(await page.locator('.folder-row').count(), 0);
+      assert.match(await page.locator('.doc-path').textContent(), /Research.*2027/);
+      assert.match(await page.locator('.search-syntax').textContent(), /Searching every folder.*title:/);
+      await search.fill('title:Japan');
+      assert.equal(await page.getByRole('link', { name: 'Revenue plan' }).count(), 0);
+      await search.fill('path:2027');
+      await page.getByRole('link', { name: 'Revenue plan' }).waitFor();
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-search-desktop.png'), fullPage: true });
+
+      await page.locator('.tdoc-space-trigger').click();
+      await page.getByRole('menuitem', { name: 'BeFreed' }).click();
+      await page.getByRole('heading', { name: 'BeFreed' }).waitFor();
+      await search.fill('preview:tiger');
+      await page.getByRole('link', { name: 'Launch brief' }).waitFor();
+      assert.match(await page.locator('.doc-path').textContent(), /Strategy.*Launch/);
+      assert.equal(await page.locator('.folder-row').count(), 0);
+      await page.close();
+    });
     await t('the global switcher opens a real workspace settings page', async () => {
       const admin = await open(1280, '?team=tm_befreed');
       await admin.locator('.tdoc-space-trigger').click();
@@ -154,6 +182,15 @@ const TEAM_DOC = { slug: 'team-plan', title: 'Team plan', excerpt: 'Only in BeFr
       }));
       assert.ok(geometry.scrollWidth <= geometry.width + 1, `settings page overflows sideways ${JSON.stringify(geometry)}`);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'workspace-settings-phone.png'), fullPage: true });
+      await page.close();
+    });
+    await t('phone: all-folder search stays readable without sideways overflow', async () => {
+      const page = await open(390, '');
+      await page.getByRole('searchbox', { name: 'Search docs' }).fill('path:2027');
+      await page.getByRole('link', { name: 'Revenue plan' }).waitFor();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'search results overflow sideways');
+      assert.equal(await page.locator('.folder-row').count(), 0);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-search-phone.png'), fullPage: true });
       await page.close();
     });
     await t('on My docs, switching happens in place', async () => {

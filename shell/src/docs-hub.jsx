@@ -33,6 +33,7 @@ import {
   TeamSettingsPane,
 } from './docs-hub/teams.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
+import { folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from './docs-hub/search.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
@@ -233,8 +234,9 @@ function DocsToolbar({ query, onQuery, sort, onSort, children }) {
           type="search"
           value={query}
           onChange={(event) => onQuery(event.target.value)}
-          placeholder="Search title, slug, or preview"
+          placeholder="Search all docs · try title:roadmap"
           aria-label="Search docs"
+          aria-description="Searches every folder. Narrow a term with title, slug, preview, or path followed by a colon."
         />
       </label>
       <AppSelect
@@ -250,6 +252,9 @@ function DocsToolbar({ query, onQuery, sort, onSort, children }) {
         ]}
       />
       {children}
+      {query.trim() ? (
+        <p className="search-syntax">Searching every folder · narrow with <code>title:</code>, <code>preview:</code>, <code>path:</code>, or <code>slug:</code></p>
+      ) : null}
     </div>
   );
 }
@@ -599,14 +604,13 @@ export function DocsHub({ boot }) {
   const scopedRecent = hub.recent.filter(inActiveWorkspace);
   const scopedStarred = hub.starred.filter(inActiveWorkspace);
   const teamNeedle = hub.query.trim().toLowerCase();
-  const shownTeamDocs = allTeamDocs
-    .filter((doc) => (doc.folder || '') === teamFolder)
-    .filter((doc) => `${doc.title} ${doc.slug} ${doc.excerpt || ''}`.toLowerCase().includes(teamNeedle))
-    .sort((a, b) => {
-      if (hub.sort === 'title') return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
-      return String(b[hub.sort]).localeCompare(String(a[hub.sort]));
-    });
+  const teamSearching = Boolean(teamNeedle);
+  const teamPathForDoc = (doc) => folderPathLabel(doc.folder, teamFolderById);
+  const shownTeamDocs = sortCatalogDocs(allTeamDocs
+    .filter((doc) => teamSearching || (doc.folder || '') === teamFolder)
+    .filter((doc) => matchesCatalogQuery(doc, teamPathForDoc(doc), hub.query)), hub.sort);
   const shownTeamFolders = spaceFolders
+    .filter(() => !teamSearching)
     .filter((item) => (item.parent || '') === teamFolder)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   const teamFolderCounts = {};
@@ -846,7 +850,7 @@ export function DocsHub({ boot }) {
                     <FolderPlus size={15} /> New folder
                   </button>
                 </DocsToolbar>
-                {teamPath.length ? (
+                {!teamSearching && teamPath.length ? (
                   <nav className="crumbs" aria-label="Folder path">
                     <button className="crumb-root" type="button" onClick={() => setTeamFolder('')}>{team.name}</button>
                     {teamPath.map((item) => (
@@ -868,7 +872,16 @@ export function DocsHub({ boot }) {
                     />
                   ))}
                 </div>
-                <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} inFolder={!!teamFolder || shownTeamFolders.length > 0} layout={layout} />
+                <TeamPane
+                  team={team}
+                  docs={shownTeamDocs}
+                  viewer={viewer}
+                  menuFor={teamDocMenu}
+                  inFolder={!!teamFolder || shownTeamFolders.length > 0}
+                  layout={layout}
+                  empty={teamSearching ? 'No matches.' : undefined}
+                  pathForDoc={teamSearching ? teamPathForDoc : null}
+                />
               </>
             )}
           </>
@@ -891,7 +904,7 @@ export function DocsHub({ boot }) {
               ) : null}
             </DocsToolbar>
 
-            {hub.path.length ? (
+            {!hub.query.trim() && hub.path.length ? (
               <nav className="crumbs" aria-label="Folder path">
                 <button className="crumb-root" type="button" onClick={() => hub.setFolder('')}>My docs</button>
                 {hub.path.map((item) => (
@@ -954,6 +967,7 @@ export function DocsHub({ boot }) {
                     : null,
                   doc.folder ? `in ${hub.folderById.get(doc.folder)?.name || ''}` : null,
                 ].filter(Boolean).join(' · '),
+                path: hub.query.trim() ? hub.pathForDoc(doc) : '',
                 selection: { checked: hub.selected.has(doc.slug), onChange: () => hub.toggleSelected(doc.slug) },
                 starrable: capabilities.star,
                 onToggleStar: hub.toggleStar,

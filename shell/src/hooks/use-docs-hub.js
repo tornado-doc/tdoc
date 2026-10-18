@@ -10,6 +10,7 @@ import {
   updateFolderAccess,
   setDocumentStar,
 } from '../document/api.js';
+import { folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from '../docs-hub/search.js';
 
 const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
 
@@ -81,19 +82,16 @@ export function useDocsHub({ boot, onUnauthorized }) {
   }, [folder, folderById]);
 
   const shownDocs = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return docs
-      .filter((doc) => doc.folder === folder)
-      .filter((doc) => `${doc.title} ${doc.slug} ${doc.excerpt || ''}`.toLowerCase().includes(needle))
-      .sort((a, b) => {
-        if (sort === 'title') return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
-        return String(b[sort]).localeCompare(String(a[sort]));
-      });
-  }, [docs, folder, query, sort]);
+    const searching = Boolean(query.trim());
+    return sortCatalogDocs(docs
+      .filter((doc) => searching || doc.folder === folder)
+      .filter((doc) => matchesCatalogQuery(doc, folderPathLabel(doc.folder, folderById), query)), sort);
+  }, [docs, folder, folderById, query, sort]);
 
   const shownFolders = useMemo(() => folders
+    .filter(() => !query.trim())
     .filter((item) => item.parent === folder)
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })), [folders, folder]);
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })), [folders, folder, query]);
 
   const folderCounts = useMemo(() => {
     const counts = {};
@@ -254,6 +252,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     shownDocs,
     shownFolders,
     folderCounts,
+    pathForDoc: (doc) => folderPathLabel(doc.folder, folderById),
     query,
     setQuery,
     sort,

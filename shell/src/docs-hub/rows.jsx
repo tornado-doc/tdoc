@@ -57,6 +57,7 @@ export function StarButton({ doc, onToggle }) {
 export function DocRow({
   doc,
   meta,
+  path,
   selection,
   layout = 'list',
   starrable = true,
@@ -105,7 +106,10 @@ export function DocRow({
         />
       ) : null}
       <div className="doc-info">
-        <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
+        <div className="doc-title-line">
+          {path ? <span className="doc-path" title={path}>{path} ›</span> : null}
+          <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
+        </div>
         {doc.excerpt ? <div className="doc-preview-excerpt">{doc.excerpt}</div> : null}
         <div className="doc-meta">{meta}</div>
       </div>
