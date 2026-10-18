@@ -582,8 +582,9 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
       </ol>
       {backup?.enabled ? (
         <section className={`tm-backup-health ${backup.state === 'error' ? 'is-error' : ''}`}>
-          <div><b>{backup.state === 'syncing' ? (backup.initial_synced_at ? 'Full sync running' : 'Initial backup running') : backup.state === 'error' ? 'Backup needs attention' : 'Automatic backup active'}</b><span>{backup.endpoint}/{backup.bucket}/{backup.prefix}/{team.id}</span></div>
-          {backup.state === 'active' ? <span>Changes are copied automatically.</span> : null}
+          <div><b>{backup.paused ? 'Backup paused' : backup.state === 'syncing' ? (backup.initial_synced_at ? 'Full sync running' : 'Initial backup running') : backup.state === 'error' ? 'Backup needs attention' : 'Automatic backup active'}</b><span>{backup.endpoint}/{backup.bucket}/{backup.prefix}/{team.id}</span></div>
+          {backup.paused ? <span>The Team plan ended. Your settings are kept, and copying resumes when the plan is renewed.</span>
+            : backup.state === 'active' ? <span>Changes are copied automatically.</span> : null}
           {backup.last_synced_at ? <span>Last copy {backupTime(backup.last_synced_at)}</span> : null}
           {backup.last_error ? <span>{backup.last_error}</span> : null}
           <div className="tm-backup-health-actions">

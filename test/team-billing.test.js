@@ -247,6 +247,54 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     } finally { stripe.restore(); }
   });
 
+  await t('a folder bigger than the free room is refused whole, before any batch moves', async () => {
+    const stripe = stubStripe();
+    try {
+      const { env, admin, team, fill } = await setup({ ...STRIPE, TDOC_HOSTED_MAX_DOCS: '200' });
+      assert((await fill(10)).status === 200);
+      const folder = (await call(env, '/api/folders', { method: 'POST', token: admin.token, body: { name: 'Big' } })).body.folder;
+      const slugs = [];
+      for (let i = 0; i < 60; i++) {
+        const slug = `big-${i}`;
+        await call(env, '/api/upload', { method: 'POST', token: admin.token, body: { slug, version: 1, html: `<p>${slug}</p>` } });
+        slugs.push(slug);
+      }
+      for (let i = 0; i < slugs.length; i += 20) {
+        const filed = await call(env, '/api/folders/move', { method: 'POST', token: admin.token, body: { slugs: slugs.slice(i, i + 20), folder: folder.id } });
+        assert(filed.status === 200, `file ${filed.status} ${JSON.stringify(filed.body)}`);
+      }
+      const r = await call(env, '/api/folders/move-to-team', { method: 'POST', token: admin.token, body: { folder: folder.id, team: team.id } });
+      assert(r.status === 402 && r.body.error === 'team_plan_required', `${r.status} ${JSON.stringify(r.body)}`);
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.docs === 10, `docs moved before the refusal: ${plan.docs}`);
+    } finally { stripe.restore(); }
+  });
+
+  await t('a canceled plan pauses a configured backup; renewing resumes it with a full sync', async () => {
+    const stripe = stubStripe();
+    const sent = [];
+    try {
+      const { env, admin, team } = await setup({ ...STRIPE, BACKUP_QUEUE: { send: async (m) => { sent.push(m); } } });
+      stripe.subs.set('sub_5', subscription('sub_5', team.id, 1));
+      await webhook(env, { type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_5', metadata: { team_id: team.id } } } });
+      await env.META.put(`team-backup:${team.id}`, JSON.stringify({ v: 1, enabled: true, endpoint: 'https://acct.r2.cloudflarestorage.com', bucket: 'b', region: 'auto', prefix: 'p', state: 'active' }));
+      await webhook(env, { type: 'customer.subscription.deleted', data: { object: subscription('sub_5', team.id, 1, 'canceled') } });
+      sent.length = 0;
+      const got = (await call(env, `/api/team/backup?id=${team.id}`, { cookie: admin.cookie })).body.backup;
+      assert(got.enabled === true && got.paused === true, `backup not shown as paused: ${JSON.stringify(got)}`);
+      const resync = await call(env, '/api/team/backup', { method: 'POST', cookie: admin.cookie, headers: origin, body: { id: team.id } });
+      assert(resync.status === 402, `resync while paused ${resync.status}`);
+      await call(env, '/api/upload', { method: 'POST', token: admin.token, body: { slug: 'x-1', version: 1, html: '<p>x</p>' } });
+      await call(env, '/api/team/move', { method: 'POST', token: admin.token, body: { team: team.id, slugs: ['x-1'] } });
+      assert(sent.length === 0, `backup copied while paused: ${JSON.stringify(sent)}`);
+      stripe.subs.set('sub_6', subscription('sub_6', team.id, 1));
+      await webhook(env, { type: 'checkout.session.completed', data: { object: { mode: 'subscription', subscription: 'sub_6', metadata: { team_id: team.id } } } });
+      assert(sent.some((m) => m.kind === 'full' && m.team === team.id), `no catch-up after renewal: ${JSON.stringify(sent)}`);
+      const after = (await call(env, `/api/team/backup?id=${team.id}`, { cookie: admin.cookie })).body.backup;
+      assert(!after.paused, 'still paused after renewal');
+    } finally { stripe.restore(); }
+  });
+
   await t('without the webhook secret billing stays off, so nobody can pay for a plan that never turns on', async () => {
     const { env, admin, team } = await setup({ ...STRIPE, STRIPE_WEBHOOK_SECRET: '' });
     const plan = await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie });

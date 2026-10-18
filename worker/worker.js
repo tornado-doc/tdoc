@@ -3830,6 +3830,15 @@ async function moveFolderToTeam(env, session, team, body) {
     if (done.has(slug)) { delete personal.docs[slug]; personalChanged = true; continue; }
     pending.push([slug, fid]);
   }
+  // The whole folder is checked against the free plan on the first call,
+  // before anything moves: a folder must not land half in the team.
+  if (!done.size && stripeConfigured(env) && !teamBillingPaid(await loadTeamBilling(env, team.id))) {
+    const metas = await Promise.all(pending.map(([slug]) => loadDocMeta(env, slug)));
+    // Only the docs this call would actually move: the caller's own, not yet in any team.
+    const incoming = metas.filter((meta) => meta && !meta.workspace_id && meta.created_from !== 'feedback' && isDocOwnerSession(env, session, meta)).length;
+    const blockedAll = await teamPlanBlocksDocs(env, team, incoming);
+    if (blockedAll) return { ok: false, status: 402, body: blockedAll };
+  }
   const results = [];
   const writes = [];
   let entering = 0;
@@ -4229,6 +4238,14 @@ async function teamPlanBlocksDocs(env, team, adding = 1) {
     error: 'team_plan_required', limit: TEAM_FREE_DOCS, docs: count,
     message: `${team.name} is on the free plan, which holds ${TEAM_FREE_DOCS} docs. Ask an admin to upgrade to the Team plan to add more.`,
   };
+}
+// A team whose Team plan ended keeps its backup settings, but nothing is
+// copied until it subscribes again. A team that never had a plan (one that
+// set up backup before billing existed) is not affected.
+async function teamBackupPaused(env, teamId) {
+  if (!stripeConfigured(env)) return false;
+  const billing = await loadTeamBilling(env, teamId);
+  return !!billing && !teamBillingPaid(billing);
 }
 async function publicTeamBilling(env, team, billing) {
   const paid = teamBillingPaid(billing);
@@ -4799,6 +4816,7 @@ async function saveTeamBackupStatus(env, teamId, patch) {
 async function enqueueTeamBackup(env, job) {
   if (!env || !env.BACKUP_QUEUE || !job || !validTeamId(job.team)) return false;
   if (!(await loadTeamBackup(env, job.team))) return false;
+  if (await teamBackupPaused(env, job.team)) return false;
   try { await env.BACKUP_QUEUE.send({ v: 1, ...job }); return true; } catch (error) {
     console.error('[team-backup] queue failed (non-fatal):', error && error.message ? error.message : String(error));
     return false;
@@ -4907,6 +4925,7 @@ async function teamBackupJob(env, job) {
   if (!job || job.v !== 1 || !validTeamId(job.team)) return;
   const config = await loadTeamBackup(env, job.team, true);
   if (!config) return;
+  if (await teamBackupPaused(env, job.team)) return;
   const team = await loadTeam(env, job.team);
   if (!team) return;
   const writeJson = (name, value) => backupS3Put(config, team.id, name, JSON.stringify(value, null, 2), 'application/json; charset=utf-8');
@@ -12923,7 +12942,13 @@ export default {
       const team = await loadTeam(env, id);
       if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
       if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
-      if (method === 'GET') return json({ ok: true, backup: publicTeamBackup(await loadTeamBackup(env, team.id)) });
+      if (method === 'GET') {
+        const record = await loadTeamBackup(env, team.id);
+        return json({ ok: true, backup: { ...publicTeamBackup(record), ...(record && await teamBackupPaused(env, team.id) ? { paused: true } : {}) } });
+      }
+      if (method === 'POST' && await teamBackupPaused(env, team.id)) {
+        return json({ error: 'team_plan_required', message: 'Backup is paused because the Team plan ended. Renew it in Plan to resume.' }, { status: 402 });
+      }
       if (method === 'DELETE') {
         await env.META.delete(teamBackupKey(team.id));
         return json({ ok: true, backup: { enabled: false } });
@@ -13086,7 +13111,10 @@ export default {
       if (prev && prev.subscription && prev.subscription !== sub.id && teamBillingPaid(prev) && event.type !== 'checkout.session.completed') {
         return json({ received: true, ignored: true });
       }
-      await env.META.put(teamBillingKey(team.id), JSON.stringify(billingFromSubscription(sub, prev, event)));
+      const next = billingFromSubscription(sub, prev, event);
+      await env.META.put(teamBillingKey(team.id), JSON.stringify(next));
+      // Renewed after a lapse: the paused backup catches up in full.
+      if (prev && !teamBillingPaid(prev) && teamBillingPaid(next)) await enqueueTeamBackup(env, { kind: 'full', team: team.id });
       if (event.type === 'checkout.session.completed') await env.META.delete(teamCheckoutKey(team.id)).catch(() => {});
       // Members may have joined between Checkout and this event.
       await syncTeamSeats(env, team);
