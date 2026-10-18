@@ -8711,10 +8711,16 @@ async function recordContacts(env, actor, people, at) {
   const fresh = (people || []).filter((p) => p && p.login && p.login !== actor);
   if (!key || !fresh.length) return;
   const prev = await loadContacts(env, actor);
-  // Answering the same people again only refreshes `at`; within a day that
-  // cannot change who is offered after "@", so it is not worth a KV write.
-  const fresher = (p) => { const old = prev.find((x) => x.login === p.login); return old && Date.parse(at) - (Date.parse(old.at) || 0) < CONTACTS_REFRESH_MS; };
-  if (fresh.every(fresher)) return;
+  // Answering the people already at the front of the list again, within a
+  // day and with the same name and avatar, would only refresh `at`: the
+  // order stays the same, so it is not worth a KV write.
+  const front = prev.slice(0, new Set(fresh.map((p) => p.login)).size);
+  const unchanged = (p) => {
+    const old = front.find((x) => x.login === p.login);
+    return old && (!p.name || p.name === old.name) && (!p.avatar_url || p.avatar_url === old.avatar_url)
+      && Date.parse(at) - (Date.parse(old.at) || 0) < CONTACTS_REFRESH_MS;
+  };
+  if (fresh.every(unchanged)) return;
   const byLogin = new Map(prev.map((p) => [p.login, p]));
   for (const p of fresh) byLogin.set(p.login, { login: p.login, name: p.name || (byLogin.get(p.login) || {}).name || '', avatar_url: p.avatar_url || (byLogin.get(p.login) || {}).avatar_url || '', at });
   const next = [...byLogin.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, CONTACTS_MAX);

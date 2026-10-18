@@ -30,6 +30,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   const put = env.META.put.bind(env.META);
   env.META.put = (k, v, o) => { writes.push(k); return put(k, v, o); };
   async function run(r) {
+    await new Promise((resolve) => setTimeout(resolve, 5)); // distinct created times, as real posts have
     writes.length = 0;
     const res = await worker.fetch(r, env, ctx);
     await Promise.all(pending.splice(0));
@@ -44,6 +45,18 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   await t('answering the same person again writes only their inbox', async () => {
     const { keys } = await run(comment(owner.cookie, { parent_id: top.id, text: 'second answer' }));
     assert(keys.length === 1 && keys[0] === 'inbox:reader', `wrote ${JSON.stringify(keys)}`);
+  });
+
+  await t('answering A, then B, then A again puts A back at the front of @-contacts', async () => {
+    const other = await putSession(env, 'bob');
+    const b = await (await run(comment(other, { text: 'from bob', anchor: { kind: 'text', text: 'comment on' } }))).res.json();
+    await run(comment(owner.cookie, { parent_id: b.id, text: 'answer bob' }));
+    let contacts = JSON.parse(env.META.map.get('contacts:owner'));
+    assert(contacts[0].login === 'bob', `after B: ${contacts.map((c) => c.login)}`);
+    const { keys } = await run(comment(owner.cookie, { parent_id: top.id, text: 'back to reader' }));
+    contacts = JSON.parse(env.META.map.get('contacts:owner'));
+    assert(keys.includes('contacts:owner'), `A moved back without a write: ${JSON.stringify(keys)}`);
+    assert(contacts[0].login === 'reader' && contacts[1].login === 'bob', `after A: ${contacts.map((c) => c.login)}`);
   });
 
   await t('an agent pulling comments again does not re-stamp onboarding', async () => {
