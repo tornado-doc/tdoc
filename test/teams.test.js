@@ -127,7 +127,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(asDave.status === 403, `dave ${asDave.status}`);
   });
 
-  await t('every member edits a team doc; nobody sends it to an agent yet; outsiders cannot', async () => {
+  await t('every member edits a team doc; only admins can run their own local daemon; outsiders cannot', async () => {
     const html = '<!doctype html><html><head><title>plan</title></head><body><h1>plan</h1><p>bob was here</p></body></html>';
     const outsider = await call('/api/doc/versions', { method: 'POST', cookie: dave, body: { slug: 'plan', baseVersion: 1, html } });
     assert(outsider.status === 403 || outsider.status === 401, `outsider save ${outsider.status}`);
@@ -138,21 +138,42 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const boot = await (await worker.fetch(req('/d/plan/v/2', { cookie: bob }), env, {})).text();
     assert(/"canEdit":true/.test(boot), 'member gets the editor');
 
-    const agent = (name) => ({ provider: 'raft', server_id: 'srv', agent_sub: name, agent_name: name });
-    await env.META.put('account-notify:acct-alice', JSON.stringify([agent('alice-bot')]));
-    await env.META.put('account-notify:acct-bob', JSON.stringify([agent('bob-bot')]));
-    // Send to agent is off on team docs for now (Julie, 2026-10-03): no
-    // member, author included, hands a team doc's comments to an agent.
-    for (const who of [bob, alice, carol]) {
-      const targets = await call('/api/notify/targets?slug=plan', { cookie: who });
-      assert(targets.status === 200 && !targets.body.default && targets.body.reason === 'team_doc', `targets ${JSON.stringify(targets.body)}`);
-    }
+    const local = (device) => ({ provider: 'local', server_id: device, agent_sub: `${device}_claude`, device, cli: 'claude', agent_name: `claude on ${device}` });
+    const raft = { provider: 'raft', server_id: 'srv', agent_sub: 'alice-bot', agent_name: 'alice-bot' };
+    await env.META.put('account-notify:acct-alice', JSON.stringify([local('alice-mac'), raft]));
+    await env.META.put('account-notify:acct-bob', JSON.stringify([local('bob-mac')]));
+    await env.META.put('local-agents-seen:acct-alice', JSON.stringify({ 'alice-mac': new Date().toISOString() }));
+    const memberTargets = await call('/api/notify/targets?slug=plan', { cookie: bob });
+    assert(memberTargets.status === 200 && !memberTargets.body.default && memberTargets.body.reason === 'team_admin_only', `member targets ${JSON.stringify(memberTargets.body)}`);
+    const adminTargets = await call('/api/notify/targets?slug=plan', { cookie: alice });
+    assert(adminTargets.status === 200 && adminTargets.body.default?.provider === 'local' && adminTargets.body.default.server_id === 'alice-mac', `admin targets ${JSON.stringify(adminTargets.body)}`);
+    assert(!(adminTargets.body.candidates || []).some((x) => x.provider === 'raft'), 'team picker exposes only the admin local daemon');
     const outsiderTargets = await call('/api/notify/targets?slug=plan', { cookie: dave });
     assert(outsiderTargets.status === 403 || outsiderTargets.status === 401, `outsider targets ${outsiderTargets.status}`);
-    const steer = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: ['c1'], recipient: agent('alice-bot') } });
-    assert(steer.status === 403 && steer.body.error === 'team_docs_agent_disabled', `team handoff ${steer.status} ${JSON.stringify(steer.body)}`);
-    const handoffs = JSON.parse(await env.META.get('handoffs:plan') || '[]');
-    assert(!handoffs.length, 'a team handoff was recorded');
+    const memberSend = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: ['c1'], recipient: local('bob-mac') } });
+    assert(memberSend.status === 403 && memberSend.body.error === 'team_agent_admin_only', `member handoff ${memberSend.status} ${JSON.stringify(memberSend.body)}`);
+    const raftSend = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: ['c1'], recipient: raft } });
+    assert(raftSend.status === 400 && raftSend.body.error === 'team_local_agent_only', `raft handoff ${raftSend.status}`);
+    const sent = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: ['c1'], recipient: local('alice-mac') } });
+    assert(sent.status === 200 && sent.body.delivery.status === 'queued', `admin handoff ${sent.status} ${JSON.stringify(sent.body)}`);
+    assert(!JSON.parse(await env.META.get('meta:plan')).notify_agents, 'an admin daemon is not stored as a shared team-doc agent');
+    const pending = JSON.parse(await env.META.get('local-pending:acct-alice') || '[]');
+    assert(pending.length === 1 && pending[0].handoff_id === sent.body.handoff_id, `admin pending ${JSON.stringify(pending)}`);
+    const mint = async (value, accountId) => {
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      await env.META.put(`hosted-token:${hash}`, JSON.stringify({ account_id: accountId, github_login: accountId.slice(5) }));
+    };
+    await mint('alice-team-token', 'acct-alice');
+    await mint('bob-team-token', 'acct-bob');
+    const polled = await call('/api/notify/local/pending?device=alice-mac', { token: 'alice-team-token' });
+    assert(polled.status === 200 && polled.body.pending.length === 1, `admin daemon pending ${JSON.stringify(polled.body)}`);
+    const memberAck = await call('/api/notify/ack', { method: 'POST', token: 'bob-team-token', body: { slug: 'plan', handoff_id: sent.body.handoff_id } });
+    assert(memberAck.status === 403 && memberAck.body.error === 'not_handoff_sender', `member ack ${memberAck.status}`);
+    const adminAck = await call('/api/notify/ack', { method: 'POST', token: 'alice-team-token', body: { slug: 'plan', handoff_id: sent.body.handoff_id } });
+    assert(adminAck.status === 200 && adminAck.body.acked_at, `admin ack ${adminAck.status}`);
+    const done = await call('/api/notify/resolve', { method: 'POST', token: 'alice-team-token', body: { slug: 'plan', handoff_id: sent.body.handoff_id } });
+    assert(done.status === 200 && done.body.resolved === 1, `admin resolve ${done.status}`);
+    assert(JSON.parse(await env.META.get('local-pending:acct-alice') || '[]').length === 0, 'resolved team handoff leaves the daemon queue');
   });
 
   await t("a member's agent token publishes a version but cannot change sharing", async () => {

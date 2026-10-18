@@ -190,7 +190,7 @@ export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I ca
 // connected yet.
 // What a person pastes into Claude Code or Codex on their own computer: the
 // agent starts the daemon (bin/tdoc-daemon), which registers that computer.
-export const LOCAL_DAEMON_PROMPT = 'Let tdoc hand me comments on this computer: use the tdoc skill and run bin/tdoc-daemon start.';
+export const LOCAL_DAEMON_PROMPT = 'Set up the tdoc agent daemon on this computer so Claude Code or Codex stays available after login, without Raft: use the tdoc skill, run bin/tdoc-daemon install-launchd, then follow its printed commands to enable the LaunchAgent.';
 
 export const AGENT_CONNECTORS = [
   {
@@ -532,6 +532,30 @@ function noAgentBoundReason(reason) {
     : null;
 }
 
+function TeamDaemonView({ reason, onClose }) {
+  const admin = reason === 'no_team_daemon';
+  return (
+    <AppDialog
+      open
+      onOpenChange={(next) => { if (!next) onClose(); }}
+      title={admin ? 'Set up an always-on agent' : 'A team admin sends this'}
+      actions={<button type="button" onClick={onClose}>Close</button>}
+    >
+      {admin ? (
+        <>
+          <p>Connect Claude Code or Codex on your computer without Raft. Once its daemon is running, it appears here for team documents.</p>
+          <details className="tdoc-conn-alt" open>
+            <summary>Ask the agent to set it up</summary>
+            <code>{LOCAL_DAEMON_PROMPT}</code>
+            <CopyPromptButton text={LOCAL_DAEMON_PROMPT} />
+          </details>
+          <p className="manage-hint">You can also set it up under Workspace Settings → Always-on agent.</p>
+        </>
+      ) : <p>For safety, only a workspace admin can run an agent on their computer from a team document.</p>}
+    </AppDialog>
+  );
+}
+
 function defaultInstruction(commentIds) {
   const n = Array.isArray(commentIds) ? commentIds.filter(Boolean).length : 0;
   return n === 1 ? 'address this comment' : 'address my new comments';
@@ -667,6 +691,9 @@ export function NotifyHandoffPanel({
   // of a Send button that cannot go anywhere. A connected server whose Raft
   // directory lists agents is not this case: those are offered below.
   const refreshAll = async () => { await targets.refresh(); if (onTargetsChanged) await onTargetsChanged(); };
+  if (open && targets.ready && targets.available && (targets.reason === 'team_admin_only' || targets.reason === 'no_team_daemon')) {
+    return <TeamDaemonView reason={targets.reason} onClose={onClose} />;
+  }
   if (open && targets.ready && targets.available && !choices.length) {
     if (targets.raftServers.length) {
       return <RaftConnectedNoAgentView servers={targets.raftServers} onClose={onClose} onSaved={refreshAll} />;

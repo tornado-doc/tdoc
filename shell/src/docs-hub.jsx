@@ -7,6 +7,7 @@ import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
+import { DaemonSettingsCard } from './docs-hub/daemon-settings.jsx';
 import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
@@ -447,12 +448,10 @@ function AccountSettingsPane({ identity, profile }) {
           {profile?.handle ? 'Open public profile' : 'Claim public profile'}
         </a>
       </section>
+      <DaemonSettingsCard />
       <section className="tm-settings-card">
-        <div className="tm-settings-head"><div><h2>Agents</h2><p>Choose where comments go and which devices can access your account.</p></div></div>
-        <div className="tm-settings-links">
-          <a className="new-folder-btn" href="/me/agents?tab=send">Send comments to</a>
-          <a className="new-folder-btn" href="/me/agents?tab=access">Access</a>
-        </div>
+        <div className="tm-settings-head"><div><h2>Account access</h2><p>Review devices that can publish and edit with your account.</p></div></div>
+        <div className="tm-settings-links"><a className="new-folder-btn" href="/me/agents?tab=access">Manage access</a></div>
       </section>
     </section>
   );
