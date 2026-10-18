@@ -653,8 +653,10 @@ print mode with `--permission-mode dontAsk` and an allow-list of the tools the
 edit flow needs, codex in a `workspace-write` sandbox — because the comments
 and the handoff instruction are written by readers: the prompt names them as
 untrusted input about the document and nothing else. Only the doc owner —
-signed in, or with their own upload token — can queue work for a local
-agent: a feedback or site token, an invited editor or a team member cannot,
+signed in, or with their own upload token — can queue work for a local agent
+on a personal doc. On a team doc, a current team admin may queue only that
+admin's own local daemon; ordinary members cannot make an admin's computer
+run. A feedback or site token and an invited editor cannot queue local work,
 and the daemon runs only handoffs tdoc says that account queued.
 `--permission-mode bypassPermissions` and `--runner oar` (run through
 `@botiverse/oar`, which skips permissions) are explicit opt-ins. If you are the CLI the daemon
