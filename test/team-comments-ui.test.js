@@ -55,7 +55,7 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  async function open(width) {
+  async function open(width, query = '', expectedRows = 4) {
     const context = await browser.newContext({ viewport: { width, height: 780 } });
     const page = await context.newPage();
     const calls = [];
@@ -66,9 +66,9 @@ async function t(name, fn) {
         ? { ok: true, items: rows.slice(0, 3), next: 12, docs_scanned: 12, docs_total: 14 }
         : { ok: true, items: rows.slice(3), next: null, docs_scanned: 2, docs_total: 14 } });
     });
-    await page.goto(base);
+    await page.goto(`${base}${query}`);
     await page.waitForSelector('.tm-comment-row');
-    await page.waitForFunction(() => document.querySelectorAll('.tm-comment-row').length === 4);
+    await page.waitForFunction((expected) => document.querySelectorAll('.tm-comment-row').length === expected, expectedRows);
     return { context, page, calls };
   }
 
@@ -120,6 +120,22 @@ async function t(name, fn) {
       if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-comments-filters-desktop.png'), fullPage: true }); }
       await page.getByRole('button', { name: 'Done' }).click();
       assert.equal(await page.getByRole('button', { name: 'Filters · 2' }).count(), 1);
+      await context.close();
+    });
+
+    await t('paginates filtered results and keeps the page bounded', async () => {
+      const { context, page } = await open(1100, '?pageSize=2', 2);
+      assert.equal(await page.locator('.tm-comment-row').count(), 2);
+      assert.match(await page.getByRole('navigation', { name: 'Comment pages' }).textContent(), /1–2 of 4.*Page 1 of 2/);
+      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-comments-pagination.png'), fullPage: true }); }
+      await page.getByRole('button', { name: 'Next' }).click();
+      assert.equal(await page.locator('.tm-comment-row').count(), 2);
+      assert.match(await page.getByRole('navigation', { name: 'Comment pages' }).textContent(), /3–4 of 4.*Page 2 of 2/);
+      assert.equal(await page.getByRole('button', { name: 'Next' }).isDisabled(), true);
+      await page.getByRole('combobox', { name: 'Comment status' }).click();
+      await page.getByRole('option', { name: 'Resolved', exact: true }).click();
+      assert.equal(await page.locator('.tm-comment-row').count(), 1);
+      assert.equal(await page.getByRole('navigation', { name: 'Comment pages' }).count(), 0);
       await context.close();
     });
 

@@ -98,5 +98,13 @@ t('shared form styles live where every surface loads them', () => {
   assert(/ui\/ui\.css\?inline/.test(feedback) && /chrome\.css\?inline/.test(feedback), 'feedback overlay stopped loading the shared sheets');
 });
 
+t('advanced connector setup stays behind progressive disclosure', () => {
+  // The agent prompts are long operational instructions. Settings should lead
+  // with the normal product action and reveal raw commands only on request.
+  const src = fs.readFileSync(path.join(ROOT, 'shell/src/connectors-page.jsx'), 'utf8');
+  assert(!/<details className="tdoc-conn-alt" open>/.test(src), 'connector setup prompts expanded by default');
+  assert((src.match(/<details className="tdoc-conn-alt">/g) || []).length >= 3, 'connector advanced details are missing');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
