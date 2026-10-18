@@ -23,6 +23,7 @@ const OFFLINE = [
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
+  'comment-notification-failure.test.js', // inbox KV trouble never turns a saved comment into HTTP 500
   'event-convergence.test.js',// eid dedup convergence + fold ordering
   'reconcile.test.js',        // anchor reconcile branches + compaction
   'agent-status-emoji.test.js',// agent verdict emoji constant must exist (v>=2 folds)

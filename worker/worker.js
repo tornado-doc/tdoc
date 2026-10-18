@@ -9019,14 +9019,21 @@ async function deliverInbox(env, recipientLogin, ev) {
   });
   const at = ev.at || new Date().toISOString();
   for (const who of recips) {
-    const { key, inbox } = await loadInbox(env, who);
-    if (!key) continue;
-    const next = applyInboxEvent(inbox, {
-      ...ev,
-      id: ev.id || `n_${Date.now()}_${rand(4)}`,
-      at,
-    });
-    await env.META.put(key, JSON.stringify(next));
+    try {
+      const { key, inbox } = await loadInbox(env, who);
+      if (!key) continue;
+      const next = applyInboxEvent(inbox, {
+        ...ev,
+        id: ev.id || `n_${Date.now()}_${rand(4)}`,
+        at,
+      });
+      await env.META.put(key, JSON.stringify(next));
+    } catch (error) {
+      // The comment/reply/reaction is already committed in the document DO.
+      // A KV quota or transient inbox failure must not turn that success into
+      // HTTP 500 and invite the browser to submit the same words again.
+      console.error('[notifications] inbox delivery failed:', error && error.message ? error.message : error);
+    }
   }
 }
 
