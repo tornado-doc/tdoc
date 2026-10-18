@@ -64,7 +64,7 @@ async function t(name, fn) {
           access_key_hint: 'ACCE…1234', state: 'syncing', last_synced_at: null,
         } } });
       } else if (request.method() === 'POST') {
-        await route.fulfill({ json: { ok: true, backup: { enabled: true, state: 'syncing' } } });
+        await route.fulfill({ json: { ok: true, backup: { enabled: true, state: 'syncing', initial_synced_at: '2026-10-16T20:00:00Z' } } });
       } else {
         await route.fulfill({ json: { ok: true, backup: { enabled: false } } });
       }
@@ -96,9 +96,11 @@ async function t(name, fn) {
 
     await t('an active backup can be fully resynced or turned off without deletion', async () => {
       const { context, page, calls } = await open(1050, true);
-      assert.match(await page.locator('.tm-backup-health').textContent(), /Backup active.*Last copy/s);
-      await page.getByRole('button', { name: 'Sync everything now' }).click();
-      await page.getByText('Full backup queued. You can close this window.').waitFor();
+      assert.match(await page.locator('.tm-backup-health').textContent(), /Automatic backup active.*Changes are copied automatically.*Last copy.*Run full sync again.*Optional/s);
+      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-backup-active-desktop.png'), fullPage: true }); }
+      await page.getByRole('button', { name: 'Run full sync again' }).click();
+      await page.getByText('Full sync started. Automatic backups stay on.').waitFor();
+      await page.getByText('Full sync running').waitFor();
       assert.equal(calls.at(-1).method, 'POST');
       await page.getByRole('button', { name: 'Turn off' }).click();
       await page.getByText('Existing files in your bucket were not deleted.').waitFor();
@@ -107,16 +109,19 @@ async function t(name, fn) {
     });
 
     await t('phone form has 44px controls and no sideways overflow', async () => {
-      const { context, page } = await open(390);
+      const { context, page } = await open(390, true);
       const layout = await page.evaluate(() => ({
         width: innerWidth,
         scroll: document.documentElement.scrollWidth,
         inputs: [...document.querySelectorAll('.tm-backup-grid input')].map((element) => element.getBoundingClientRect().height),
         actions: [...document.querySelectorAll('.tdoc-modal .actions button')].map((element) => element.getBoundingClientRect().height),
+        healthActions: [...document.querySelectorAll('.tm-backup-health button')].map((element) => element.getBoundingClientRect().height),
       }));
       assert.ok(layout.scroll <= layout.width + 1, JSON.stringify(layout));
       assert.ok(layout.inputs.every((height) => height >= 44), JSON.stringify(layout.inputs));
       assert.ok(layout.actions.every((height) => height >= 44), JSON.stringify(layout.actions));
+      assert.ok(layout.healthActions.every((height) => height >= 44), JSON.stringify(layout.healthActions));
+      assert.match(await page.locator('.tm-backup-health').textContent(), /Automatic backup active.*Changes are copied automatically.*Run full sync again.*Optional/s);
       if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'team-backup-phone.png'), fullPage: true }); }
       await context.close();
     });

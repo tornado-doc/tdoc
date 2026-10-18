@@ -509,11 +509,11 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
   };
   const sync = async () => {
     setBusy(true);
-    setStatus('Starting a full backup…');
+    setStatus('Starting a full sync…');
     try {
       const result = await syncTeamBackup(team.id);
       setBackup(result.backup);
-      setStatus('Full backup queued. You can close this window.');
+      setStatus('Full sync started. Automatic backups stay on.');
     } catch (error) { setStatus(message(error)); }
     setBusy(false);
   };
@@ -558,11 +558,15 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
       </ol>
       {backup?.enabled ? (
         <section className={`tm-backup-health ${backup.state === 'error' ? 'is-error' : ''}`}>
-          <div><b>{backup.state === 'syncing' ? 'Initial backup running' : backup.state === 'error' ? 'Backup needs attention' : 'Backup active'}</b><span>{backup.endpoint}/{backup.bucket}/{backup.prefix}/{team.id}</span></div>
+          <div><b>{backup.state === 'syncing' ? (backup.initial_synced_at ? 'Full sync running' : 'Initial backup running') : backup.state === 'error' ? 'Backup needs attention' : 'Automatic backup active'}</b><span>{backup.endpoint}/{backup.bucket}/{backup.prefix}/{team.id}</span></div>
+          {backup.state === 'active' ? <span>Changes are copied automatically.</span> : null}
           {backup.last_synced_at ? <span>Last copy {backupTime(backup.last_synced_at)}</span> : null}
           {backup.last_error ? <span>{backup.last_error}</span> : null}
           <div className="tm-backup-health-actions">
-            <button type="button" className="tm-link-btn" onClick={sync} disabled={busy}><RefreshCw size={14} /> Sync everything now</button>
+            <div className="tm-backup-sync-action">
+              <button type="button" className="tm-text-btn" onClick={sync} disabled={busy}><RefreshCw size={14} /> Run full sync again</button>
+              <span>Optional. Use this only to re-copy all current data.</span>
+            </div>
             <button type="button" className="tm-text-btn tm-backup-off" onClick={remove} disabled={busy}>Turn off</button>
           </div>
         </section>
