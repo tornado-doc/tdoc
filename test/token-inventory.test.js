@@ -77,12 +77,9 @@ async function works(worker, env, token) {
     assert(JSON.stringify(labels) === JSON.stringify(['hawaii-trip', 'my-laptop-doc']), `labels ${labels}`);
     assert(list.every(x => x.created && /^[a-f0-9]{64}$/.test(x.id)), 'created/id missing');
     const legacy = await worker.fetch(req('/me/tokens', { cookie: mine.cookie }), env, {});
-    assert(legacy.status === 302 && legacy.headers.get('Location') === '/me/agents?tab=access', 'old /me/tokens link should land on the Access tab');
+    assert(legacy.status === 302 && legacy.headers.get('Location') === '/me?view=settings&agents=access#agent-access', 'old /me/tokens link should land on Agent access');
     const page = await worker.fetch(req('/me/agents?tab=access', { cookie: mine.cookie }), env, {});
-    assert(page.status === 200, `page ${page.status}`);
-    const html = await page.text();
-    assert(html.includes('"page":"agents"') && html.includes('hawaii-trip'), 'page boot missing the list');
-    assert(!html.includes('their-doc'), 'another account\'s credential leaked into the page');
+    assert(page.status === 302 && page.headers.get('Location') === '/me?view=settings&agents=access#agent-access', 'old Agents access link should land in workspace settings');
   });
 
   await t('a label resolves to its doc title only when the doc is yours', async () => {

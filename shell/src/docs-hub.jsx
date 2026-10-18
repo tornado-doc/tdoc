@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Folder, FolderPlus, Search, UsersRound, X } from 'lucide-react';
+import { Check, ChevronRight, Folder, FolderPlus, LayoutGrid, List, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSelect } from './ui/select.jsx';
@@ -7,7 +7,8 @@ import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
-import { DaemonSettingsCard } from './docs-hub/daemon-settings.jsx';
+import { ConnectorsBody } from './connectors-page.jsx';
+import { DevicesBody } from './tokens-page.jsx';
 import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
@@ -37,6 +38,7 @@ import './docs-hub.css';
 
 const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['settings', 'Settings']];
 const CURATE_WARN_KEY = 'tdoc.curateWarned';
+const CATALOG_LAYOUT_KEY = 'tdoc.catalogLayout';
 
 function needsCurateWarn() {
   try { return localStorage.getItem(CURATE_WARN_KEY) !== '1'; } catch { return true; }
@@ -420,20 +422,27 @@ function TeamInviteBanner({ invites }) {
   );
 }
 
-function FlatList({ docs, label, viewer, empty, onToggleStar }) {
+function CatalogLayoutToggle({ layout, onLayout }) {
+  return (
+    <div className="catalog-layout" role="group" aria-label="Document layout">
+      <button type="button" className={layout === 'grid' ? 'is-active' : ''} aria-label="Grid view" aria-pressed={layout === 'grid'} onClick={() => onLayout('grid')}><LayoutGrid size={17} /></button>
+      <button type="button" className={layout === 'list' ? 'is-active' : ''} aria-label="List view" aria-pressed={layout === 'list'} onClick={() => onLayout('list')}><List size={18} /></button>
+    </div>
+  );
+}
+
+function FlatList({ docs, label, viewer, empty, onToggleStar, layout }) {
   if (!docs.length) return <p className="empty">{empty}</p>;
   return (
-    <div className="doc-list">
-      {docs.map((doc) => (
-        <DocRow
-          key={doc.slug}
-          doc={doc}
-          className="flat-row"
-          meta={[ownerLabel(doc, viewer), `${label} ${day(doc.at)}`].filter(Boolean).join(' · ')}
-          onToggleStar={onToggleStar}
-        />
-      ))}
-    </div>
+    <DocList
+      docs={docs}
+      layout={layout}
+      rowProps={(doc) => ({
+        className: 'flat-row',
+        meta: [ownerLabel(doc, viewer), `${label} ${day(doc.at)}`].filter(Boolean).join(' · '),
+        onToggleStar,
+      })}
+    />
   );
 }
 
@@ -448,10 +457,13 @@ function AccountSettingsPane({ identity, profile }) {
           {profile?.handle ? 'Open public profile' : 'Claim public profile'}
         </a>
       </section>
-      <DaemonSettingsCard />
-      <section className="tm-settings-card">
-        <div className="tm-settings-head"><div><h2>Account access</h2><p>Review devices that can publish and edit with your account.</p></div></div>
-        <div className="tm-settings-links"><a className="new-folder-btn" href="/me/agents?tab=access">Manage access</a></div>
+      <section className="tm-settings-card" id="agents">
+        <div className="tm-settings-head"><div><h2>Agents</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
+        <ConnectorsBody returnTo="/me?view=settings#agents" />
+      </section>
+      <section className="tm-settings-card" id="agent-access">
+        <div className="tm-settings-head"><div><h2>Agent access</h2><p>Review computers and agents that can publish and edit with your account.</p></div></div>
+        <DevicesBody />
       </section>
     </section>
   );
@@ -540,8 +552,8 @@ export function DocsHub({ boot }) {
     // expired, and the route's own redirect is the sign-in path.
     onUnauthorized: () => { location.href = '/?notice=signin'; },
   });
-  // Every workspace uses the same navigation. Recent and Starred are
-  // deliberately account-wide; the other views follow the active workspace.
+  // Every workspace uses the same navigation; every view follows the active
+  // workspace, including Recent and Starred.
   // Keep old ?tab=feedback links working while moving to the unified ?view=.
   const [view, setView] = useState(() => {
     const params = new URLSearchParams(location.search);
@@ -558,6 +570,13 @@ export function DocsHub({ boot }) {
   const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
   const [teams, setTeams] = useState(() => boot.teams || []);
   const [teamDocs, setTeamDocs] = useState(() => boot.team_docs || []);
+  const [layout, setLayoutState] = useState(() => {
+    try { return localStorage.getItem(CATALOG_LAYOUT_KEY) === 'grid' ? 'grid' : 'list'; } catch { return 'list'; }
+  });
+  const setLayout = (next) => {
+    setLayoutState(next);
+    try { localStorage.setItem(CATALOG_LAYOUT_KEY, next); } catch { /* preference only */ }
+  };
   const [space, setSpace] = useState(() => {
     const initial = new URLSearchParams(location.search).get('team') || '';
     return (boot.teams || []).some((team) => team.id === initial) ? initial : '';
@@ -576,6 +595,9 @@ export function DocsHub({ boot }) {
   const teamPath = [];
   for (let cur = teamFolderById.get(teamFolder); cur && teamPath.length < 8; cur = teamFolderById.get(cur.parent)) teamPath.unshift(cur);
   const allTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id) : [];
+  const inActiveWorkspace = (doc) => (team ? doc.workspace_id === team.id : !doc.workspace_id);
+  const scopedRecent = hub.recent.filter(inActiveWorkspace);
+  const scopedStarred = hub.starred.filter(inActiveWorkspace);
   const teamNeedle = hub.query.trim().toLowerCase();
   const shownTeamDocs = allTeamDocs
     .filter((doc) => (doc.folder || '') === teamFolder)
@@ -773,15 +795,20 @@ export function DocsHub({ boot }) {
         ) : null}
         <div className="page-hd">
           <h1>{team ? team.name : 'My docs'}</h1>
-          {view === 'docs' ? (
-            <CreateMenu
-              create={hub.createDoc}
-              team={team ? team.id : ''}
-              canCreate={capabilities.create}
-              onAgent={openAgentRecipe}
-              onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
-              trigger={<button className="mk-btn" type="button">Create a doc</button>}
-            />
+          {['docs', 'recent', 'starred'].includes(view) ? (
+            <div className="page-hd-actions">
+              <CatalogLayoutToggle layout={layout} onLayout={setLayout} />
+              {view === 'docs' ? (
+                <CreateMenu
+                  create={hub.createDoc}
+                  team={team ? team.id : ''}
+                  canCreate={capabilities.create}
+                  onAgent={openAgentRecipe}
+                  onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
+                  trigger={<button className="mk-btn" type="button">Create a doc</button>}
+                />
+              ) : null}
+            </div>
           ) : null}
         </div>
         <div className="tabs" role="tablist" aria-label={`${team ? team.name : 'My docs'} views`}>
@@ -793,13 +820,11 @@ export function DocsHub({ boot }) {
         </div>
         {view === 'recent' ? (
           <section className="pane" id="pane-recent">
-            <p className="loc-hint muted">Across all workspaces.</p>
-            <FlatList docs={hub.recent} label="visited" viewer={viewer} empty="Docs you open show up here." onToggleStar={hub.toggleStar} />
+            <FlatList docs={scopedRecent} label="visited" viewer={viewer} empty={`Docs you open in ${team ? team.name : 'My docs'} show up here.`} onToggleStar={hub.toggleStar} layout={layout} />
           </section>
         ) : view === 'starred' ? (
           <section className="pane" id="pane-starred">
-            <p className="loc-hint muted">Across all workspaces.</p>
-            <FlatList docs={hub.starred} label="starred" viewer={viewer} empty="Star docs to find them again quickly." onToggleStar={hub.toggleStar} />
+            <FlatList docs={scopedStarred} label="starred" viewer={viewer} empty={`Star docs in ${team ? team.name : 'My docs'} to find them here.`} onToggleStar={hub.toggleStar} layout={layout} />
           </section>
         ) : team ? (
           <>
@@ -843,7 +868,7 @@ export function DocsHub({ boot }) {
                     />
                   ))}
                 </div>
-                <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} inFolder={!!teamFolder || shownTeamFolders.length > 0} />
+                <TeamPane team={team} docs={shownTeamDocs} viewer={viewer} menuFor={teamDocMenu} inFolder={!!teamFolder || shownTeamFolders.length > 0} layout={layout} />
               </>
             )}
           </>
@@ -918,6 +943,7 @@ export function DocsHub({ boot }) {
             </div>
             <DocList
               docs={hub.shownDocs}
+              layout={layout}
               selecting={hub.selected.size > 0}
               rowProps={(doc) => ({
                 meta: [

@@ -28,6 +28,10 @@ ok(hub.includes("${doc.title} ${doc.slug} ${doc.excerpt || ''}")
   'both spaces search title, slug, and preview');
 ok(rows.includes('className="doc-preview-excerpt"') && rows.includes('className="doc-preview-image"'),
   'the shared row renders cached excerpt and image previews');
+ok(rows.includes('doc-card-preview') && hub.includes('CatalogLayoutToggle') && teams.includes('layout={layout}'),
+  'personal and team catalogs share the persistent grid/list preview switch');
+ok(hub.includes('doc.workspace_id === team.id') && worker.includes("workspace_id: row.meta && row.meta.workspace_id"),
+  'Recent and Starred rows are scoped to the active workspace');
 ok(worker.includes('const rowPreview = (row) =>') && local.includes('preview.excerpt'),
   'hosted and local catalogs expose preview metadata without reading document content');
 

@@ -205,14 +205,14 @@ export const AGENT_CONNECTORS = [
     id: 'local',
     name: 'Local agent',
     blurb: 'Claude Code or Codex on your own computer. A small daemon picks up comments while it runs; nothing to host.',
-    action: { label: 'Set up', href: '/me/agents?tab=send' },
+    action: { label: 'Set up', href: '/me?view=settings#agents' },
     prompt: LOCAL_DAEMON_PROMPT,
   },
   {
     id: 'webhook',
     name: 'Webhook',
     blurb: 'Any bot or service that can receive an HTTPS POST. No Raft needed.',
-    action: { label: 'Add a webhook', href: '/me/agents?tab=send' },
+    action: { label: 'Add a webhook', href: '/me?view=settings#agents' },
   },
 ];
 
@@ -235,7 +235,7 @@ function newAttemptId() {
   crypto.getRandomValues(bytes);
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-export function RaftConnectButton({ label = 'Connect with Raft', onConnected = null, isConnected = null }) {
+export function RaftConnectButton({ label = 'Connect with Raft', onConnected = null, isConnected = null, startHref = '/api/me/connectors/raft/start' }) {
   const [phase, setPhase] = useState('idle');
   const [message, setMessage] = useState('');
   const stopRef = React.useRef(null);
@@ -246,7 +246,7 @@ export function RaftConnectButton({ label = 'Connect with Raft', onConnected = n
     if (phase === 'waiting') return;
     const attempt = newAttemptId();
     const popup = window.open(
-      tdocUrl(`/api/me/connectors/raft/start?popup=1&attempt=${attempt}`),
+      tdocUrl(`${startHref}${startHref.includes('?') ? '&' : '?'}popup=1&attempt=${attempt}`),
       'tdoc-raft-connect',
       'popup,width=560,height=720,resizable=yes,scrollbars=yes',
     );
@@ -442,7 +442,7 @@ function RaftConnectedNoAgentView({ servers, onClose, onSaved }) {
       <div className="tdoc-connectors">
         {canEdit
           ? servers.map((sv) => <RaftFallbackForm key={sv.server_id} server={sv} onSaved={onSaved} />)
-          : <a className="tdoc-connector-action" href={tdocUrl('/me/agents?tab=send')} target="_blank" rel="noreferrer">Choose an agent on the Agents page</a>}
+          : <a className="tdoc-connector-action" href={tdocUrl('/me?view=settings#agents')} target="_blank" rel="noreferrer">Choose an agent in workspace settings</a>}
         <p className="manage-hint">Or have the agent run the connect prompt itself:</p>
         <code>{CONNECT_AGENT_PROMPT}</code>
       </div>
@@ -475,7 +475,7 @@ function ConnectAgentView({ onClose, onConnected, isConnected }) {
             ) : null}
           </section>
         ))}
-        <p className="manage-hint">Manage connections any time on the <a href="/me/agents?tab=send">Agents</a> page.</p>
+        <p className="manage-hint">Manage connections any time in <a href="/me?view=settings#agents">workspace settings</a>.</p>
       </div>
     </AppDialog>
   );

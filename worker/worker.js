@@ -3023,7 +3023,11 @@ async function completeRaftConnect(env, req, { pending, tok, ret, clearState }) 
   await unremoveTargets(env, accountId, (k) => k === `raft-server:${server.id}` || k.startsWith(`raft:${server.id}:`));
   await setRaftConnectAttempt(env, attempt, accountId, 'connected', { server_slug: String(server.slug || '') });
   if (started.popup) return raftConnectPopupResponse(clearState);
-  return redirectTo(`${ret && ret.startsWith('/me/agents') ? ret : '/me/agents?tab=send'}&connected=raft`, [clearState]);
+  const destination = ret && /^\/me(?:[?#]|$)/.test(ret) ? ret : '/me?view=settings#agents';
+  const hashAt = destination.indexOf('#');
+  const base = hashAt >= 0 ? destination.slice(0, hashAt) : destination;
+  const hash = hashAt >= 0 ? destination.slice(hashAt) : '';
+  return redirectTo(`${base}${base.includes('?') ? '&' : '?'}connected=raft${hash}`, [clearState]);
 }
 
 async function completeRaftSignIn(env, { user, tok, stateless }) {
@@ -5380,6 +5384,10 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
   const publicRow = (row) => ({
     slug: row.slug,
     title: row.title,
+    // Recent and Starred are stored once per person, but presented inside
+    // the active workspace. Send the scope with each readable row so the
+    // client never has to guess from ownership/display names.
+    workspace_id: row.meta && row.meta.workspace_id ? row.meta.workspace_id : '',
     latest: row.latest,
     created: row.created,
     updated: row.updated,
@@ -9282,12 +9290,10 @@ function withoutLocalTargets(resolved) {
   return next;
 }
 const LOCAL_OWNER_ONLY = { error: 'local_agent_owner_only', message: 'Only the owner, signed in or with their own upload token, can send comments to an agent on their computer.' };
-const TEAM_ADMIN_AGENT_ONLY = { error: 'team_agent_admin_only', message: 'Only a team admin can run a local agent on a team document.' };
-const TEAM_LOCAL_AGENT_ONLY = { error: 'team_local_agent_only', message: 'Team documents can be sent only to a local daemon connected by the current admin.' };
-function teamLocalHandoffAllowed(actor, writeGate, handoff) {
+const TEAM_ADMIN_AGENT_ONLY = { error: 'team_agent_admin_only', message: 'Only a team admin can send a team document to an agent.' };
+function teamHandoffAllowed(actor, writeGate, handoff) {
   if (!(writeGate && writeGate.meta && writeGate.meta.workspace_id)) return true;
-  if (!(handoff && isLocalTarget(handoff.recipient))) return false;
-  return !!(writeGate.teamAdmin && handoff.by && sessionOwnsAccount(actor, handoff.by));
+  return !!(handoff && writeGate.teamAdmin && handoff.by && sessionOwnsAccount(actor, handoff.by));
 }
 
 async function loadLocalPending(env, accountId) {
@@ -9784,20 +9790,32 @@ async function resolveNotifyTargets(env, slug) {
   };
 }
 
-// A team admin may run only their own local daemon. This deliberately does
-// not make the admin's Raft/webhook connections team-wide, and an ordinary
-// member cannot cause code to run on an admin's computer.
+async function resolveAccountNotifyTargets(env, accountId) {
+  const own = await accountNotifyTargets(env, accountId);
+  const servers = await accountRaftServers(env, accountId);
+  const seen = [];
+  const directory = await accountDirectoryAgents(env, accountId, own, servers, seen);
+  const targets = own.map((t) => {
+    const d = seen.find((x) => x.status && sameRaftAgent(x, t));
+    return d ? { ...t, status: d.status } : t;
+  });
+  await decorateLocalSeen(env, accountId, [targets]);
+  const fallback = targets[0] || null;
+  return {
+    default: fallback ? { ...fallback, source: 'account' } : null,
+    candidates: [...targets.slice(1).map((t) => ({ ...t, source: 'account' })), ...directory],
+    fallback,
+    reason: fallback ? null : 'no_agent_bound',
+    ...(!fallback && servers.length ? { raft_servers: servers.map((sv) => ({ server_id: sv.server_id, server_slug: sv.server_slug })) } : {}),
+  };
+}
+
+// A team admin may use their own connections for this workspace. Connections
+// remain account-owned; they are never shared with ordinary team members.
 async function notifyTargetsFor(env, slug, gate, localDriver = null) {
   if (!(gate.meta && gate.meta.workspace_id)) return resolveNotifyTargets(env, slug);
   if (!localDriver) return { default: null, candidates: [], fallback: null, reason: 'team_admin_only' };
-  const own = (await accountNotifyTargets(env, localDriver)).filter(isLocalTarget);
-  await decorateLocalSeen(env, localDriver, [own]);
-  return {
-    default: own[0] ? { ...own[0], source: 'account' } : null,
-    candidates: own.slice(1).map(t => ({ ...t, source: 'account' })),
-    fallback: own[0] || null,
-    reason: own.length ? null : 'no_team_daemon',
-  };
+  return resolveAccountNotifyTargets(env, localDriver);
 }
 
 // ─────────────────────────── handoffs ───────────────────────────
@@ -10894,24 +10912,10 @@ export default {
 
     // One page, two tabs: where comments go (send) and what can act as you
     // (access). Its earlier addresses still land on the right tab.
-    if ((p === '/me/tokens' || p === '/me/devices') && method === 'GET') return redirectTo('/me/agents?tab=access');
-    if (p === '/me/connectors' && method === 'GET') return redirectTo('/me/agents?tab=send');
+    if ((p === '/me/tokens' || p === '/me/devices') && method === 'GET') return redirectTo('/me?view=settings&agents=access#agent-access');
+    if (p === '/me/connectors' && method === 'GET') return redirectTo('/me?view=settings#agents');
     if (p === '/me/agents' && method === 'GET') {
-      const who = await tokenPageSession(env, req);
-      if (!who) return redirectTo(`/api/auth/oidc/login?prompt=login&return=${encodeURIComponent('/me/agents' + url.search)}`);
-      const nonce = rand(16);
-      const s = who.session;
-      return html(SHELL.appHtml({
-        title: 'Agents · tdoc',
-        nonceAttr: ` nonce="${nonce}"`,
-        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
-        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
-        bootJson: safeJsonForScript({
-          page: 'agents',
-          identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
-          tokens: await accountTokenList(env, who.accountId),
-        }),
-      }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store' } });
+      return redirectTo(url.searchParams.get('tab') === 'access' ? '/me?view=settings&agents=access#agent-access' : '/me?view=settings#agents');
     }
     if (p === '/api/me/tokens' && method === 'GET') {
       const who = await tokenPageSession(env, req);
@@ -13617,9 +13621,11 @@ export default {
 
       if (p === '/api/me/connectors/raft/start' && method === 'GET') {
         const cfg = oidcProvider(env, 'raft');
-        if (!cfg) return redirectTo('/me/agents?tab=send&error=raft_not_configured');
+        const requestedReturn = String(url.searchParams.get('return') || '');
+        const connectorReturn = /^\/me(?:[?#]|$)/.test(requestedReturn) ? requestedReturn : '/me?view=settings#agents';
+        if (!cfg) return redirectTo(`${connectorReturn}${connectorReturn.includes('?') ? '&' : '?'}error=raft_not_configured`);
         const nonce = rand(16);
-        await env.META.put(`oauthstate:${cfg.id}:${nonce}`, '/me/agents?tab=send', { expirationTtl: 600 });
+        await env.META.put(`oauthstate:${cfg.id}:${nonce}`, connectorReturn, { expirationTtl: 600 });
         const attempt = String(url.searchParams.get('attempt') || '');
         await env.META.put(`raft-connect:${nonce}`, JSON.stringify({
           account_id: accountId,
@@ -13629,7 +13635,7 @@ export default {
         await setRaftConnectAttempt(env, attempt, accountId, 'waiting');
         let auth;
         try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
-        catch (e) { return redirectTo('/me/agents?tab=send&error=raft_unreachable'); }
+        catch (e) { return redirectTo(`${connectorReturn}${connectorReturn.includes('?') ? '&' : '?'}error=raft_unreachable`); }
         auth.searchParams.set('client_id', cfg.clientId);
         auth.searchParams.set('redirect_uri', `${url.origin}${cfg.callbackPath}`);
         auth.searchParams.set('response_type', 'code');
@@ -13890,7 +13896,6 @@ export default {
       const localDriver = await localDriverAccount(env, gate);
       if (gate.meta && gate.meta.workspace_id && !localDriver) return json(TEAM_ADMIN_AGENT_ONLY, { status: 403 });
       const asked = recipient ? normalizeNotifyTarget(recipient) : null;
-      if (gate.meta && gate.meta.workspace_id && asked && !isLocalTarget(asked)) return json(TEAM_LOCAL_AGENT_ONLY, { status: 400 });
       if (isLocalTarget(asked) && !localDriver) return json(LOCAL_OWNER_ONLY, { status: 403 });
       const resolvedAll = await notifyTargetsFor(env, slug, gate, localDriver);
       const resolved = localDriver ? resolvedAll : withoutLocalTargets(resolvedAll);
@@ -13915,7 +13920,7 @@ export default {
         recipient: target, publicHost: env.PUBLIC_HOST,
         // A local handoff records who queued it: the daemon re-checks that it
         // was the owner before running anything.
-        by: isLocalTarget(target) ? localDriver : (gate.meta && gate.meta.workspace_id && gate.session ? gate.session.account_id : null),
+        by: gate.meta && gate.meta.workspace_id ? localDriver : (isLocalTarget(target) ? localDriver : null),
       });
       // The first agent a person picks, when they had no default yet, is
       // their default from now on — so @agent has somewhere to go next time.
@@ -13961,7 +13966,7 @@ export default {
         commentIds: prev.comment_ids, instruction: prev.instruction, publicHost: env.PUBLIC_HOST,
       });
       const target = normalizeNotifyTarget(prev.recipient);
-      const localDriver = isLocalTarget(target) ? await localDriverAccount(env, gate) : null;
+      const localDriver = await localDriverAccount(env, gate);
       if (gate.meta && gate.meta.workspace_id && (!localDriver || prev.by !== localDriver)) {
         return json({ error: 'not_handoff_sender' }, { status: 403 });
       }
@@ -13998,7 +14003,7 @@ export default {
       if (!writeGate.ok) return writeGate.response;
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
-      if (!teamLocalHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
+      if (!teamHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
       // First ack wins. The useful fact is when work STARTED, not when an agent
       // last pinged, so a re-ack must not push the clock forward.
       if (prev.acked_at) {
@@ -14019,7 +14024,7 @@ export default {
       if (!writeGate.ok) return writeGate.response;
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
-      if (!teamLocalHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
+      if (!teamHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
       const asked = Array.isArray(comment_ids) ? comment_ids.filter(x => typeof x === 'string') : null;
       // Resolving without a list means "all of them"; a list resolves only
       // what it names, so an agent can report partial progress honestly.
@@ -14127,7 +14132,7 @@ export default {
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
       if (!prev.recipient || prev.recipient.provider !== 'local') return json({ error: 'not_a_local_handoff' }, { status: 400 });
-      if (!teamLocalHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
+      if (!teamHandoffAllowed(auth.actor, writeGate, prev)) return json({ error: 'not_handoff_sender' }, { status: 403 });
       const at = new Date().toISOString();
       const rec = await putHandoff(env, slug, {
         ...prev,

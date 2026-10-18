@@ -493,7 +493,7 @@ export function SetupGate({ boot, preview = null }) {
                     pinging the agent when comments come in. */}
                 {state === 'done' && step !== 'doc' ? (
                   <p className="sg-optional">
-                    <span>Optional</span> Want to send comments to your agent from tdoc (Send to agent, @agent)? <a href="/me/agents?tab=send">Set that up</a>.
+                    <span>Optional</span> Want to send comments to your agent from tdoc (Send to agent, @agent)? <a href="/me?view=settings#agents">Set that up</a>.
                   </p>
                 ) : null}
 
