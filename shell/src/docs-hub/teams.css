@@ -131,7 +131,10 @@
 .tm-backup-health b { color: var(--td-ink); font-size: 13px; }
 .tm-backup-health span { overflow-wrap: anywhere; }
 .tm-backup-health.is-error { border-color: var(--td-danger, #b42318); }
-.tm-backup-health-actions { display: flex; align-items: center; gap: 12px; }
+.tm-backup-health-actions { display: flex; align-items: end; gap: 12px; }
+.tm-backup-sync-action { display: grid; gap: 2px; }
+.tm-backup-sync-action .tm-text-btn { display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; width: fit-content; }
+.tm-backup-sync-action > span { color: var(--td-muted); font-size: 11px; }
 .tm-backup-off { color: var(--td-danger, #b42318); }
 .tm-backup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .tm-backup-grid .field { display: grid; gap: 5px; min-width: 0; }
@@ -147,7 +150,7 @@
   .tm-backup-grid { grid-template-columns: 1fr; }
   .tm-backup-wide { grid-column: auto; }
   .tm-backup-grid input, .tm-backup-health button { min-height: 44px; }
-  .tm-backup-health-actions { align-items: stretch; flex-direction: column; gap: 4px; }
+  .tm-backup-health-actions { align-items: stretch; flex-direction: column; gap: 8px; }
   .tm-daemon-command { flex-direction: column; }
   .tm-daemon-command .tdoc-copy-prompt { align-self: flex-start; min-height: 44px; }
 }
