@@ -100,7 +100,7 @@ function CommentAvatar({ author }) {
 // “what needs my attention”; this answers “what is everyone discussing across
 // this team?” and therefore intentionally includes comments not addressed to
 // the current viewer.
-export function TeamCommentsPane({ team }) {
+export function TeamCommentsPane({ team, pageSize = 25 }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadedDocs, setLoadedDocs] = useState(0);
@@ -113,6 +113,7 @@ export function TeamCommentsPane({ team }) {
   const [doc, setDoc] = useState('');
   const [since, setSince] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +166,13 @@ export function TeamCommentsPane({ team }) {
     .filter((item) => !doc || item.slug === doc)
     .filter((item) => !sinceMs || Date.parse(item.created || '') >= sinceMs)
     .sort((a, b) => String(b.created).localeCompare(String(a.created)));
+  const safePageSize = Math.max(1, Number(pageSize) || 25);
+  const pageCount = Math.max(1, Math.ceil(shown.length / safePageSize));
+  const visiblePage = Math.min(page, pageCount);
+  const pageStart = (visiblePage - 1) * safePageSize;
+  const pageItems = shown.slice(pageStart, pageStart + safePageSize);
+
+  useEffect(() => { setPage(1); }, [status, replyState, authorKind, person, doc, since, team.id]);
 
   return (
     <section className="pane tm-comments-pane" id="pane-team-comments">
@@ -265,7 +273,7 @@ export function TeamCommentsPane({ team }) {
         </div>
       ) : null}
       <div className="tm-comment-list">
-        {shown.map((item) => (
+        {pageItems.map((item) => (
           <a className={`tm-comment-row${item.resolved ? ' is-resolved' : ''}`} href={commentTarget(item)} key={`${item.slug}:${item.id}`}>
             <CommentAvatar author={item.author} />
             <span className="tm-comment-body">
@@ -282,6 +290,16 @@ export function TeamCommentsPane({ team }) {
           </a>
         ))}
       </div>
+      {shown.length > safePageSize ? (
+        <nav className="tm-comment-pagination" aria-label="Comment pages">
+          <span>{pageStart + 1}–{Math.min(pageStart + safePageSize, shown.length)} of {shown.length}</span>
+          <div>
+            <button type="button" disabled={visiblePage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>
+            <span>Page {visiblePage} of {pageCount}</span>
+            <button type="button" disabled={visiblePage === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</button>
+          </div>
+        </nav>
+      ) : null}
     </section>
   );
 }

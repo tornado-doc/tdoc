@@ -185,7 +185,7 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
                     </p>
                   ) : null}
                   <RaftConnectButton startHref={`/api/me/connectors/raft/start?return=${encodeURIComponent(returnTo)}`} label={connectors.some((x) => x.kind === 'raft') ? 'Connect another Raft server' : 'Connect with Raft'} />
-                  <details className="tdoc-conn-alt" open>
+                  <details className="tdoc-conn-alt">
                     <summary>Or let an agent connect itself</summary>
                     <code>{CONNECT_AGENT_PROMPT}</code>
                     <CopyPromptButton text={CONNECT_AGENT_PROMPT} />
@@ -198,7 +198,7 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
                   <pre className="tdoc-conn-pre">{`bash "$SKILL_DIR/bin/tdoc-daemon" start            # keeps polling
 bash "$SKILL_DIR/bin/tdoc-daemon" once             # one poll, for cron or launchd
 bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # prints a LaunchAgent plist`}</pre>
-                  <details className="tdoc-conn-alt" open>
+                  <details className="tdoc-conn-alt">
                     <summary>Or let the agent set it up</summary>
                     <code>{LOCAL_DAEMON_PROMPT}</code>
                     <CopyPromptButton text={LOCAL_DAEMON_PROMPT} />
