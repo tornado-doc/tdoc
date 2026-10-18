@@ -624,25 +624,47 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
   );
 }
 
-export function MoveToTeamDialog({ teams, count, skipped = 0, onMove, onClose }) {
+export function MoveToTeamDialog({
+  teams,
+  count,
+  skipped = 0,
+  onMove,
+  onClose,
+  includePersonal = false,
+  currentTeam = null,
+  loading = false,
+  busy = false,
+  error = '',
+  title = '',
+}) {
+  const destinations = [
+    ...(includePersonal ? [{ id: null, name: 'My docs', personal: true }] : []),
+    ...(teams || []),
+  ].filter((team) => team.id !== currentTeam);
   return (
     <AppDialog
       open
       onOpenChange={(open) => { if (!open) onClose(); }}
-      title={`Move ${count === 1 ? 'this doc' : `${count} docs`} to a team`}
+      title={title || `Move ${count === 1 ? 'this doc' : `${count} docs`} to a team`}
       actions={<button type="button" onClick={onClose}>Cancel</button>}
     >
       <div className="move-list">
-        {teams.map((team) => (
-          <button key={team.id} type="button" onClick={() => onMove(team)}>
-            <span className="tm-space-mark" aria-hidden="true" style={{ background: `hsl(${teamHue(team.id)} 55% 46%)` }}>
+        {destinations.map((team) => (
+          <button key={team.id || 'personal'} type="button" disabled={busy} onClick={() => onMove(team)}>
+            <span className="tm-space-mark" aria-hidden="true" style={{ background: team.personal ? 'var(--td-accent)' : `hsl(${teamHue(team.id)} 55% 46%)` }}>
               {String(team.name || '?').trim().slice(0, 1).toUpperCase()}
             </span>
             {team.name}
           </button>
         ))}
       </div>
-      <p className="manage-hint">The team becomes the owner and every member can open and comment. You stay the author.</p>
+      {loading ? <p className="manage-hint">Loading workspaces…</p> : null}
+      {busy ? <p className="manage-hint" role="status">Moving…</p> : null}
+      {!loading && !destinations.length ? <p className="empty">No other workspace is available. Create a team first.</p> : null}
+      {error ? <p className="status" role="alert">{error}</p> : null}
+      <p className="manage-hint">{includePersonal
+        ? 'A team owns docs moved into it; My docs returns the doc to your personal workspace. You stay the author.'
+        : 'The team becomes the owner and every member can open and comment. You stay the author.'}</p>
       {skipped ? (
         <p className="manage-hint">{skipped === 1 ? '1 selected doc is' : `${skipped} selected docs are`} not yours, so {skipped === 1 ? 'it stays' : 'they stay'} where {skipped === 1 ? 'it is' : 'they are'}. Only a doc&apos;s author can move it into a team.</p>
       ) : null}

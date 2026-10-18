@@ -366,6 +366,10 @@ export function createTeam(name, invites) {
   return teamRequest('/api/teams', 'POST', { name, invites });
 }
 
+export function listTeams() {
+  return request('/api/teams');
+}
+
 export function getTeam(id) {
   return request(`/api/team?${new URLSearchParams({ id })}`);
 }

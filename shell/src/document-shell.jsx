@@ -6,6 +6,8 @@ import {
   duplicateDocument,
   getAgentStatus,
   getOnboarding,
+  listTeams,
+  moveDocsToTeam,
   postOnboardingEvent,
   renameDocument,
   resendNotifyHandoff,
@@ -61,6 +63,7 @@ import { summarizeHandoffSurfaces } from './document/handoff-state.js';
 import { markThreadSeen, readSeenMap } from './document/thread-seen.js';
 import { DebugBar } from './debug-bar.jsx';
 import { VersionDiffView } from './document/version-diff.jsx';
+import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -202,6 +205,7 @@ export function DocumentShell({ boot, config }) {
     try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
     return { type: 'share' };
   });
+  const [moveState, setMoveState] = useState({ teams: [], loading: false, error: '', busy: false });
   // Connected-App notify panel (doc-level send). Separate from onboarding
   // copy-paste handoff below.
   const [notifyOpen, setNotifyOpen] = useState(false);
@@ -859,6 +863,27 @@ export function DocumentShell({ boot, config }) {
     }
   };
 
+  const openMoveDocument = async () => {
+    setDialog({ type: 'move-document' });
+    setMoveState({ teams: [], loading: true, error: '', busy: false });
+    try {
+      const result = await listTeams();
+      setMoveState({ teams: result.teams || [], loading: false, error: '', busy: false });
+    } catch (error) {
+      setMoveState({ teams: [], loading: false, error: error.message || 'Could not load workspaces.', busy: false });
+    }
+  };
+
+  const moveDocument = async (target) => {
+    setMoveState((current) => ({ ...current, busy: true, error: '' }));
+    try {
+      await moveDocsToTeam([config.slug], target.id);
+      location.href = `/d/${encodeURIComponent(config.slug)}`;
+    } catch (error) {
+      setMoveState((current) => ({ ...current, busy: false, error: error.message || 'Could not move this document.' }));
+    }
+  };
+
   const duplicate = async () => {
     try {
       const result = await duplicateDocument(config.slug, config.version);
@@ -1263,6 +1288,7 @@ export function DocumentShell({ boot, config }) {
             onDuplicate={duplicate}
             onDownload={download}
             onPrint={printPdf}
+            onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
             resolvedCount={resolvedCount}
             showResolved={showResolved}
@@ -1555,6 +1581,20 @@ export function DocumentShell({ boot, config }) {
         config={config}
         onOpenChange={(open) => !open && setDialog(null)}
       />
+      {dialog?.type === 'move-document' ? (
+        <MoveToTeamDialog
+          title="Move this document"
+          teams={moveState.teams}
+          count={1}
+          includePersonal={Boolean(config.teamManage?.team?.id)}
+          currentTeam={config.teamManage?.team?.id || null}
+          loading={moveState.loading}
+          busy={moveState.busy}
+          error={moveState.error}
+          onClose={() => { if (!moveState.busy) setDialog(null); }}
+          onMove={moveDocument}
+        />
+      ) : null}
       <MessageDialog
         message={dialog?.type === 'message' ? dialog : null}
         onOpenChange={(open) => !open && setDialog(null)}

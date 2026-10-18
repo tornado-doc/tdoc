@@ -7,6 +7,7 @@ import {
   CopyPlus,
   Download,
   FileDown,
+  FolderInput,
   History,
   Share2,
   Send,
@@ -176,6 +177,7 @@ export function DocumentOverflowActions({
   onDuplicate,
   onDownload,
   onPrint,
+  onMoveDocument,
   onDelete,
   resolvedCount,
   showResolved,
@@ -271,7 +273,12 @@ export function DocumentOverflowActions({
           <CopyPlus size={15} /> Duplicate
         </AppMenuItem>
       ) : null}
-      {config.ownerManage ? <AppMenuSeparator /> : null}
+      {onMoveDocument || config.ownerManage ? <AppMenuSeparator /> : null}
+      {onMoveDocument ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="move-document" onClick={onMoveDocument}>
+          <FolderInput size={15} /> Move document…
+        </AppMenuItem>
+      ) : null}
       {config.ownerManage ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="delete" tone="danger" onClick={onDelete}>
           <Trash2 size={15} /> Delete doc…
