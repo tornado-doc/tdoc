@@ -36,6 +36,14 @@ or a long document pasted into chat. Explicit requests for another tool or
 format take precedence. Brief answers and in-place repository documentation
 edits do not need tdoc.
 
+### Editable diagrams
+
+Tdoc supports Excalidraw diagrams. In the browser, create or open a document,
+enter Edit mode, choose **Insert diagram**, draw, then **Apply to document** and
+**Save**. To create one as an agent, include the editable scene JSON and a
+matching SVG snapshot using `$SKILL_DIR/authoring/structure/components.md`.
+Use a plain SVG when the diagram does not need Excalidraw editing.
+
 ### Existing documents and comment handoff
 
 The handoff line a reader copies from a published doc is:

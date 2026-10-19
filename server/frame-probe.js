@@ -134,10 +134,11 @@
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
-      'figure[data-tdoc-excalidraw]{position:relative;}' +
+      'figure[data-tdoc-artifact="Diagram"][aria-label="Diagram"][data-tdoc-excalidraw]{border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;}' +
       'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{position:absolute;top:12px;right:12px;z-index:2;display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:5px 10px;border:1px solid #e1e5ed;border-radius:999px;background:rgba(255,255,255,.96);box-shadow:0 2px 8px rgba(20,31,54,.08);color:#344054;font:500 12px/1.2 system-ui,sans-serif;cursor:pointer;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:hover{background:#f5f7fb;border-color:#cbd5e1;color:#1d2939;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;margin-bottom:4px;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:32px;padding:5px 8px;border:0;border-radius:6px;background:transparent;box-shadow:none;color:#667085;font:500 12px/1.2 system-ui,sans-serif;cursor:pointer;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:hover{background:#f2f4f7;color:#344054;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
       '@media print{figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:none!important;}}' +
@@ -171,7 +172,11 @@
         event.preventDefault(); event.stopPropagation();
         post({ type: 'tdoc:diagramOpen', id: figure.id, title: figure.getAttribute('aria-label') || 'Diagram', json: figure.getAttribute('data-tdoc-excalidraw') });
       });
-      figure.appendChild(button);
+      var tools = document.createElement('div');
+      tools.setAttribute('data-tdoc-provider', '');
+      tools.setAttribute('data-tdoc-diagram-tools', '');
+      tools.appendChild(button);
+      figure.insertBefore(tools, figure.firstChild);
     });
   }
   function applyDiagram(d) {
@@ -213,7 +218,7 @@
     figure.setAttribute('data-tdoc-editor-atomic', '');
     figure.setAttribute('data-tdoc-editor-original-editable', '__missing__');
     figure.setAttribute('contenteditable', 'false');
-    figure.style.cssText = 'display:block;max-width:100%;margin:1.5rem 0;padding:1rem;border:1px solid #e4e7ee;border-radius:12px;background:#fff';
+    figure.style.cssText = 'display:block;max-width:100%;margin:1.5rem 0';
     var snapshot = document.createElement('div');
     snapshot.setAttribute('data-tdoc-diagram-snapshot', '');
     snapshot.style.overflow = 'hidden';
