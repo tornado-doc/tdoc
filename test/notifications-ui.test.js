@@ -195,7 +195,7 @@ async function t(name, fn) {
 
     await t('the browser switch starts off, and once on, a new notification raises one desktop alert', async () => {
       const { context, page, dialog, state } = await open();
-      const sw = dialog.getByRole('switch', { name: 'Browser notifications' });
+      const sw = dialog.getByRole('switch', { name: 'Browser' });
       assert.equal(await sw.getAttribute('aria-checked'), 'false');
       assert.equal(await page.evaluate(() => window.__alerts.length), 0, 'alerted before being turned on');
       await sw.click();
@@ -210,11 +210,25 @@ async function t(name, fn) {
       await context.close();
     });
 
-    await t('the email switch starts on and turning it off tells the server', async () => {
+    await t('settings are one group, label left and switch right; email starts on and turning it off tells the server', async () => {
       const { context, dialog, state } = await open();
-      const email = dialog.getByRole('switch', { name: 'Email notifications' });
+      const email = dialog.getByRole('switch', { name: 'Email' });
       await email.waitFor();
       assert.equal(await email.getAttribute('aria-checked'), 'true');
+      // One settings group, label left and switch right, no explanatory copy.
+      const geo = await dialog.locator('.tdoc-notif-settings').evaluate((group) => {
+        const g = group.getBoundingClientRect();
+        return [...group.querySelectorAll('.tdoc-notif-setting')].map((row) => {
+          const label = row.querySelector('.tdoc-switch-label').getBoundingClientRect();
+          const track = row.querySelector('.tdoc-switch-track').getBoundingClientRect();
+          return { labelLeft: label.left - g.left, trackRight: g.right - track.right, labelBeforeTrack: label.right < track.left };
+        });
+      });
+      assert.equal(geo.length, 2, JSON.stringify(geo));
+      for (const row of geo) {
+        assert(row.labelBeforeTrack && row.labelLeft < 20 && row.trackRight < 20, JSON.stringify(row));
+      }
+      assert.equal(await dialog.locator('.tdoc-notif-settings .manage-hint, .tdoc-notif-settings p').count(), 0, 'settings carry explanatory small print');
       await email.click();
       for (let i = 0; i < 50 && await email.getAttribute('aria-checked') !== 'false'; i++) await new Promise((r) => setTimeout(r, 100));
       assert.equal(await email.getAttribute('aria-checked'), 'false');
@@ -226,7 +240,7 @@ async function t(name, fn) {
     // bumps count/at. It must alert again (review on #746).
     await t('a second reply folded into an unread row alerts again', async () => {
       const { context, page, dialog, state } = await open();
-      await dialog.getByRole('switch', { name: 'Browser notifications' }).click();
+      await dialog.getByRole('switch', { name: 'Browser' }).click();
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
       await page.waitForTimeout(800);
       assert.equal(await page.evaluate(() => window.__alerts.length), 1);
@@ -242,7 +256,7 @@ async function t(name, fn) {
     // must still alert.
     await t('a new notification arriving as another is read still alerts', async () => {
       const { context, page, dialog, state } = await open();
-      await dialog.getByRole('switch', { name: 'Browser notifications' }).click();
+      await dialog.getByRole('switch', { name: 'Browser' }).click();
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
       await page.waitForTimeout(800);
       state.items = [row('n5', 'comment', 0, { actor: { login: 'dan', name: 'Dan' }, preview: 'Looks good' }), ...state.items.map((i) => (i.id === 'n1' ? { ...i, read: true } : i))];
