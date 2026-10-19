@@ -764,7 +764,10 @@ async function chooseMode(page, label) {
         await dialog.waitFor({ state: 'hidden' });
         const diagramFrame = diagramPage.frames().find((candidate) => candidate.url().includes('/frame'));
         assert(diagramFrame, 'new document frame missing');
-        await diagramFrame.locator('figure[data-tdoc-excalidraw]').first().waitFor();
+        const inserted = diagramFrame.locator('figure[data-tdoc-excalidraw]').first();
+        await inserted.waitFor();
+        assert(await inserted.locator('figcaption').count() === 0, 'a generic Diagram caption was inserted');
+        assert(await inserted.getByRole('button', { name: 'Edit diagram' }).isVisible(), 'the compact edit action is missing');
 
         const id = 'diagram-12345678-1234-1234-1234-123456789abc';
         const scene = JSON.stringify({ type: 'excalidraw', version: 2, elements: [{ id: 'shape', type: 'rectangle', x: 0, y: 0, width: 120, height: 60 }], appState: {}, files: {} });
@@ -788,6 +791,7 @@ async function chooseMode(page, label) {
         assert(!stored.includes('<script>alert(1)</script>'), 'unsafe SVG script reached saved HTML');
         const savedFrame = diagramPage.frames().find((candidate) => candidate.url().includes('/frame'));
         await savedFrame.locator(`#${id} [data-tdoc-diagram-open]`).waitFor();
+        assert(await savedFrame.locator(`#${id}`).getByRole('button', { name: 'Edit diagram' }).isVisible(), 'the saved diagram lost its edit action');
       } finally {
         await diagramPage.close();
       }

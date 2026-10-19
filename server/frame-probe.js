@@ -134,6 +134,13 @@
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
+      'figure[data-tdoc-excalidraw]{position:relative;}' +
+      'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{position:absolute;top:12px;right:12px;z-index:2;display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:5px 10px;border:1px solid #e1e5ed;border-radius:999px;background:rgba(255,255,255,.96);box-shadow:0 2px 8px rgba(20,31,54,.08);color:#344054;font:500 12px/1.2 system-ui,sans-serif;cursor:pointer;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:hover{background:#f5f7fb;border-color:#cbd5e1;color:#1d2939;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
+      '@media print{figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:none!important;}}' +
       'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
@@ -151,13 +158,15 @@
   function prepareDiagrams() {
     Array.prototype.forEach.call(document.querySelectorAll('figure[data-tdoc-excalidraw]'), function (figure) {
       if (!figure.id || figure.querySelector('[data-tdoc-diagram-open]')) return;
+      var caption = figure.querySelector(':scope > figcaption');
+      if (caption && caption.textContent.trim() === 'Diagram') caption.setAttribute('data-tdoc-provider', '');
       var button = document.createElement('button');
       button.type = 'button';
-      button.textContent = 'Open diagram';
+      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4L16.5 3.5Z"/></svg><span>Edit</span>';
+      button.setAttribute('aria-label', 'Edit diagram');
       button.setAttribute('data-tdoc-provider', '');
       button.setAttribute('data-tdoc-diagram-open', '');
       button.setAttribute('contenteditable', 'false');
-      button.style.cssText = 'font:inherit;font-size:13px;border:1px solid #ccc;border-radius:6px;padding:6px 10px;background:#fff;color:#222;cursor:pointer;margin-top:8px';
       button.addEventListener('click', function (event) {
         event.preventDefault(); event.stopPropagation();
         post({ type: 'tdoc:diagramOpen', id: figure.id, title: figure.getAttribute('aria-label') || 'Diagram', json: figure.getAttribute('data-tdoc-excalidraw') });
@@ -209,10 +218,6 @@
     snapshot.setAttribute('data-tdoc-diagram-snapshot', '');
     snapshot.style.overflow = 'hidden';
     figure.appendChild(snapshot);
-    var caption = document.createElement('figcaption');
-    caption.textContent = 'Diagram';
-    caption.style.cssText = 'margin-top:.75rem;color:#666;font-size:.85em';
-    figure.appendChild(caption);
 
     var range = savedRange;
     if (!range && window.getSelection().rangeCount) range = window.getSelection().getRangeAt(0);
