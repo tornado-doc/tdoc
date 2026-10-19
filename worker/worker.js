@@ -3922,10 +3922,12 @@ async function moveFolderToTeam(env, session, team, body) {
   for (const f of removed) await deleteFolderShareIndex(env, f.share_id);
 
   const byId = new Map(teamState.folders.map((f) => [f.id, f]));
+  const planWarning = !remaining && entering ? await teamPlanWarning(env, team) : null;
   return {
     ok: true,
     body: {
       ok: true,
+      ...(planWarning ? { plan_warning: planWarning } : {}),
       team: { id: team.id, name: team.name },
       folder: twin.get(root.id),
       // Hand these back as `known` on the next call.
@@ -4256,6 +4258,22 @@ async function teamPlanBlocksDocs(env, team, adding = 1) {
     message: `${team.name} is on the free plan, which holds ${free} docs. Ask an admin to upgrade to the Team plan to add more.`,
   };
 }
+// Within TEAM_FREE_WARN_LEFT of the free limit an unpaid team is warned,
+// never stopped: the answer to a move or publish carries it, and so does
+// the Plan card. Null when there is nothing to say.
+const TEAM_FREE_WARN_LEFT = 5;
+async function teamPlanWarning(env, team) {
+  if (!team || !stripeConfigured(env)) return null;
+  if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
+  const free = teamFreeDocs(env);
+  const docs = await teamDocCount(env, team.id);
+  const left = free - docs;
+  if (left > TEAM_FREE_WARN_LEFT || left <= 0) return null;
+  return {
+    docs, limit: free, left,
+    message: `${team.name} has ${docs} of ${free} free docs; ${left} left before the Team plan is needed.`,
+  };
+}
 // A team whose Team plan ended keeps its backup settings, but nothing is
 // copied until it subscribes again. A team that never had a plan (one that
 // set up backup before billing existed) is not affected.
@@ -4282,6 +4300,7 @@ async function publicTeamBilling(env, team, billing) {
     cancel_at_period_end: !!(billing && billing.cancel_at_period_end),
     has_customer: !!(billing && billing.customer),
     at_limit: !paid && docs != null && docs >= teamFreeDocs(env),
+    near_limit: !paid && docs != null && docs < teamFreeDocs(env) && teamFreeDocs(env) - docs <= TEAM_FREE_WARN_LEFT,
   };
 }
 // Stripe takes form encoding with bracketed keys for nested values.
@@ -13311,7 +13330,8 @@ export default {
         next.access = policy;
         await putDocMetaJson(env, slug, JSON.stringify(next));
       }
-      return json({ ok: true, moved: slugs.length, team: team ? team.id : null });
+      const planWarning = team && metas.length ? await teamPlanWarning(env, team) : null;
+      return json({ ok: true, moved: slugs.length, team: team ? team.id : null, ...(planWarning ? { plan_warning: planWarning } : {}) });
     }
 
     // ---- hosted publish token bootstrap ----

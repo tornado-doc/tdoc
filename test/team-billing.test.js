@@ -135,6 +135,20 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     } finally { stripe.restore(); }
   });
 
+  await t('within 5 docs of the free limit a move succeeds with a warning', async () => {
+    const stripe = stubStripe();
+    try {
+      const { env, admin, team, fill } = await setup();
+      const early = await fill(14);
+      assert(early.status === 200 && !early.body.plan_warning, `warned too early: ${JSON.stringify(early.body)}`);
+      const near = await fill(2, 14);
+      assert(near.status === 200 && near.body.plan_warning && near.body.plan_warning.left === 4 && near.body.plan_warning.docs === 16, JSON.stringify(near.body));
+      assert(/16 of 20 free docs; 4 left/.test(near.body.plan_warning.message), near.body.plan_warning.message);
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.near_limit === true && plan.at_limit === false, JSON.stringify(plan));
+    } finally { stripe.restore(); }
+  });
+
   await t('a free team: unlimited members, 20 docs; the 21st doc in is refused, existing docs still publish', async () => {
     const stripe = stubStripe();
     try {

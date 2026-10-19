@@ -97,6 +97,13 @@ async function t(name, fn) {
       await context.close();
     });
 
+    await t('a team within 5 docs of the limit is warned, not stopped', async () => {
+      const { context, page } = await open(1050, { ...FREE, docs: 76, near_limit: true });
+      assert.match(await page.locator('.tm-plan-summary.is-warn').textContent(), /76 of 80 free docs used\. 4 left before the Team plan is needed\./);
+      await shot(page, 'team-billing-warn-desktop.png');
+      await context.close();
+    });
+
     await t('a paid team sees seats, period and renewal, and opens the Customer Portal', async () => {
       const { context, page, calls } = await open(1050, PAID);
       assert.equal(await page.locator('.tm-plan-badge').textContent(), 'Team');
