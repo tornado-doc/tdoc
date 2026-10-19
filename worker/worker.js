@@ -3922,10 +3922,12 @@ async function moveFolderToTeam(env, session, team, body) {
   for (const f of removed) await deleteFolderShareIndex(env, f.share_id);
 
   const byId = new Map(teamState.folders.map((f) => [f.id, f]));
+  const planWarning = !remaining && entering ? await teamPlanWarning(env, team) : null;
   return {
     ok: true,
     body: {
       ok: true,
+      ...(planWarning ? { plan_warning: planWarning } : {}),
       team: { id: team.id, name: team.name },
       folder: twin.get(root.id),
       // Hand these back as `known` on the next call.
@@ -4211,7 +4213,12 @@ async function joinTeamFromSession(env, team, s) {
 // (local, preview, self-hosted) behaves exactly as before: no limit, no plan.
 // Stripe is the source of truth; `team-billing:<id>` is its last webhook,
 // written only on checkout and subscription changes.
-const TEAM_FREE_DOCS = 20;
+const TEAM_FREE_DOCS = 80;
+// TDOC_TEAM_FREE_DOCS overrides it (tests, or a deploy with its own limit).
+function teamFreeDocs(env) {
+  const n = Number(env && env.TDOC_TEAM_FREE_DOCS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : TEAM_FREE_DOCS;
+}
 // What the plan card shows. The Stripe Prices behind STRIPE_PRICE_MONTHLY /
 // STRIPE_PRICE_YEARLY must charge these per seat (USD).
 const TEAM_SEAT_PRICE_USD = { month: 5, year: 50 };
@@ -4244,10 +4251,27 @@ async function teamPlanBlocksDocs(env, team, adding = 1) {
   if (!team || !stripeConfigured(env) || adding <= 0) return null;
   if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
   const count = await teamDocCount(env, team.id);
-  if (count + adding <= TEAM_FREE_DOCS) return null;
+  const free = teamFreeDocs(env);
+  if (count + adding <= free) return null;
   return {
-    error: 'team_plan_required', limit: TEAM_FREE_DOCS, docs: count,
-    message: `${team.name} is on the free plan, which holds ${TEAM_FREE_DOCS} docs. Ask an admin to upgrade to the Team plan to add more.`,
+    error: 'team_plan_required', limit: free, docs: count,
+    message: `${team.name} is on the free plan, which holds ${free} docs. Ask an admin to upgrade to the Team plan to add more.`,
+  };
+}
+// Within TEAM_FREE_WARN_LEFT of the free limit an unpaid team is warned,
+// never stopped: the answer to a move or publish carries it, and so does
+// the Plan card. Null when there is nothing to say.
+const TEAM_FREE_WARN_LEFT = 5;
+async function teamPlanWarning(env, team) {
+  if (!team || !stripeConfigured(env)) return null;
+  if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
+  const free = teamFreeDocs(env);
+  const docs = await teamDocCount(env, team.id);
+  const left = free - docs;
+  if (left > TEAM_FREE_WARN_LEFT || left <= 0) return null;
+  return {
+    docs, limit: free, left,
+    message: `${team.name} has ${docs} of ${free} free docs; ${left} left before the Team plan is needed.`,
   };
 }
 // A team whose Team plan ended keeps its backup settings, but nothing is
@@ -4264,7 +4288,7 @@ async function publicTeamBilling(env, team, billing) {
   const docs = configured ? await teamDocCount(env, team.id) : null;
   return {
     configured,
-    free_docs: TEAM_FREE_DOCS,
+    free_docs: teamFreeDocs(env),
     prices: TEAM_SEAT_PRICE_USD,
     docs,
     seats: team.members.length,
@@ -4275,7 +4299,8 @@ async function publicTeamBilling(env, team, billing) {
     current_period_end: (billing && billing.current_period_end) || null,
     cancel_at_period_end: !!(billing && billing.cancel_at_period_end),
     has_customer: !!(billing && billing.customer),
-    at_limit: !paid && docs != null && docs >= TEAM_FREE_DOCS,
+    at_limit: !paid && docs != null && docs >= teamFreeDocs(env),
+    near_limit: !paid && docs != null && docs < teamFreeDocs(env) && teamFreeDocs(env) - docs <= TEAM_FREE_WARN_LEFT,
   };
 }
 // Stripe takes form encoding with bracketed keys for nested values.
@@ -13305,7 +13330,8 @@ export default {
         next.access = policy;
         await putDocMetaJson(env, slug, JSON.stringify(next));
       }
-      return json({ ok: true, moved: slugs.length, team: team ? team.id : null });
+      const planWarning = team && metas.length ? await teamPlanWarning(env, team) : null;
+      return json({ ok: true, moved: slugs.length, team: team ? team.id : null, ...(planWarning ? { plan_warning: planWarning } : {}) });
     }
 
     // ---- hosted publish token bootstrap ----

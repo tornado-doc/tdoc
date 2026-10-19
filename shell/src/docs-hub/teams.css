@@ -183,6 +183,7 @@
 .tm-plan-badge.is-team { background: var(--td-accent); color: #fff; }
 .tm-plan-summary { margin: 0 0 12px; color: var(--td-ink); font-size: 14px; }
 .tm-plan-summary.is-error { color: var(--td-danger, #b42318); }
+.tm-plan-summary.is-warn { color: #9a5b00; }
 .tm-plan-choose { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; color: var(--td-muted); font-size: 13px; }
 .tm-plan-choose b { color: var(--td-ink); }
 .tm-plan-note { margin: 0; color: var(--td-muted); font-size: 12px; line-height: 1.45; }
