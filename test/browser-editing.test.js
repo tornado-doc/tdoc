@@ -792,6 +792,16 @@ async function chooseMode(page, label) {
         const savedFrame = diagramPage.frames().find((candidate) => candidate.url().includes('/frame'));
         await savedFrame.locator(`#${id} [data-tdoc-diagram-open]`).waitFor();
         assert(await savedFrame.locator(`#${id}`).getByRole('button', { name: 'Edit diagram' }).isVisible(), 'the saved diagram lost its edit action');
+        await diagramPage.goto(`${base}/d/${created.slug}/v/1`, { waitUntil: 'networkidle' });
+        await chooseMode(diagramPage, 'Read');
+        const readFrame = diagramPage.frames().find((candidate) => candidate.url().includes('/frame'));
+        const editAction = readFrame.locator(`#${id}`).getByRole('button', { name: 'Edit diagram' });
+        const expandAction = readFrame.getByRole('button', { name: 'View Diagram fullscreen' }).last();
+        await expandAction.waitFor();
+        const editBox = await editAction.boundingBox();
+        const expandBox = await expandAction.boundingBox();
+        assert(editBox && expandBox && editBox.height >= 40 && expandBox.width >= 40, 'diagram actions are too small');
+        assert(editBox.x + editBox.width + 2 <= expandBox.x, 'Edit diagram overlaps the fullscreen action');
       } finally {
         await diagramPage.close();
       }
