@@ -96,6 +96,13 @@ export function TopBar({
     notifications.load();
   };
 
+  // A notification email's "Turn these off" link lands on /me?notifications=1.
+  useEffect(() => {
+    if (!identity || new URLSearchParams(location.search).get('notifications') !== '1') return;
+    openNotifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(identity)]);
+
   const selectNotification = async (item) => {
     await notifications.markRead(item);
     setNotificationsOpen(false);

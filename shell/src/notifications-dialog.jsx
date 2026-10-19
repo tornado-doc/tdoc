@@ -70,6 +70,23 @@ function BrowserAlertsSetting({ notifications }) {
   );
 }
 
+// Shown only when this site can send email at all.
+function EmailAlertsSetting({ notifications }) {
+  const email = notifications.emailAlerts;
+  if (!email || !email.available) return null;
+  return (
+    <div className="tdoc-notif-setting">
+      <AppSwitch
+        id="tdoc-email-alerts"
+        checked={!!email.on}
+        onCheckedChange={(next) => notifications.setEmailAlerts(next)}
+        label="Email notifications"
+      />
+      <p className="manage-hint">An email when someone mentions you, replies to you, comments on your doc or asks for access. At most one per thread every 30 minutes.</p>
+    </div>
+  );
+}
+
 export function NotificationsDialog({ open, notifications, onOpenChange, onSelect }) {
   const unread = notifications.items.some((item) => !item.read);
   return (
@@ -90,6 +107,7 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
       )}
     >
       <BrowserAlertsSetting notifications={notifications} />
+      <EmailAlertsSetting notifications={notifications} />
       <div className="tdoc-notif-head">
         <span className="tdoc-notif-count">{notifications.unread ? `${notifications.unread} unread` : 'All caught up'}</span>
         {unread ? (
