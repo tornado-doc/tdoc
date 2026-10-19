@@ -13,7 +13,7 @@ function withBoot(html, update) {
 }
 const TEAMS = [{ id: 'tm_befreed', name: 'BeFreed', role: 'admin', member_count: 4 }, { id: 'tm_lab', name: 'Smrti Lab', role: 'member', member_count: 2 }];
 const PERSONAL = { slug: 'personal-plan', title: 'Personal plan', excerpt: 'Only in My docs', workspace_id: '', folder: '', mine: true, created: '2026-10-01', updated: '2026-10-02', at: '2026-10-03', starred: true };
-const TEAM_DOC = { slug: 'team-plan', title: 'Team plan', excerpt: 'Only in BeFreed', workspace_id: 'tm_befreed', team: 'tm_befreed', author: 'Alice', created: '2026-10-01', updated: '2026-10-02', at: '2026-10-03', starred: true, can_file: true, can_manage: true };
+const TEAM_DOC = { slug: 'team-plan', title: 'Team plan', excerpt: 'Only in BeFreed', workspace_id: 'tm_befreed', team: 'tm_befreed', author: 'Alice', mine: true, created: '2026-10-01', updated: '2026-10-02', at: '2026-10-03', starred: true, can_file: true, can_manage: true };
 const PERSONAL_FOLDERS = [{ id: 'f_research', name: 'Research', parent: '' }, { id: 'f_2027', name: '2027', parent: 'f_research' }];
 const NESTED_PERSONAL = { slug: 'revenue-plan', title: 'Revenue plan', excerpt: 'Expansion in Japan', workspace_id: '', folder: 'f_2027', mine: true, created: '2026-10-04', updated: '2026-10-05', at: '2026-10-05', starred: false };
 const TEAM_FOLDERS = [{ id: 'tf_strategy', name: 'Strategy', parent: '' }, { id: 'tf_launch', name: 'Launch', parent: 'tf_strategy' }];
@@ -30,7 +30,7 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
     const shell = await (await fetch(`${base}/me`)).text();
     const open = async (width, query) => {
       const page = await browser.newPage({ viewport: { width, height: 800 } });
-      await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, teams: TEAMS, docs: [PERSONAL, NESTED_PERSONAL], folders: PERSONAL_FOLDERS, recent: [PERSONAL, TEAM_DOC], starred: [PERSONAL, TEAM_DOC], team_docs: [TEAM_DOC, NESTED_TEAM], team_folders: { tm_befreed: TEAM_FOLDERS } })) }));
+      await page.route(`${base}/me*`, (r) => r.fulfill({ contentType: 'text/html', body: withBoot(shell, (boot) => ({ ...boot, capabilities: { ...boot.capabilities, folders: true }, teams: TEAMS, docs: [PERSONAL, NESTED_PERSONAL], folders: PERSONAL_FOLDERS, recent: [PERSONAL, TEAM_DOC], starred: [PERSONAL, TEAM_DOC], team_docs: [TEAM_DOC, NESTED_TEAM], team_folders: { tm_befreed: TEAM_FOLDERS } })) }));
       await page.route('**/api/me/connectors', (r) => r.fulfill({ json: {
         targets: [], available: [{ id: 'raft', ready: true }, { id: 'local', ready: true }, { id: 'webhook', ready: true }],
         connectors: [
@@ -199,6 +199,97 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await page.getByRole('menuitem', { name: 'BeFreed' }).click();
       await page.getByRole('heading', { name: 'BeFreed' }).waitFor();
       assert.match(page.url(), /team=tm_befreed/);
+      await page.close();
+    });
+    await t('moving to a team updates the list immediately, closes after success, and stays on My docs', async () => {
+      const page = await open(1280, '');
+      let finishMove;
+      await page.route('**/api/team/move', async (route) => {
+        await new Promise((resolve) => { finishMove = resolve; });
+        await route.fulfill({ json: { ok: true, moved: 1, team: 'tm_befreed' } });
+      });
+      await page.locator('.doc-row[data-slug="personal-plan"] .row-menu-btn').click();
+      await page.getByRole('menuitem', { name: 'Move to team' }).click();
+      await page.getByRole('dialog', { name: 'Move this doc to a team' }).getByRole('button', { name: 'BeFreed' }).click();
+      await page.waitForFunction(() => !document.querySelector('.doc-row[data-slug="personal-plan"]'));
+      assert.equal(page.url(), `${base}/me`);
+      finishMove();
+      await page.getByRole('dialog', { name: 'Move this doc to a team' }).waitFor({ state: 'detached' });
+      await page.locator('.tdoc-space-trigger').click();
+      await page.getByRole('menuitem', { name: 'BeFreed' }).click();
+      await page.locator('.doc-row[data-slug="personal-plan"]').waitFor();
+      await page.close();
+    });
+    await t('a failed team move restores the row and keeps the dialog open on a phone', async () => {
+      const page = await open(390, '');
+      await page.route('**/api/team/move', (route) => route.fulfill({ status: 403, json: { error: 'forbidden', message: 'Could not move this doc' } }));
+      await page.locator('.doc-row[data-slug="personal-plan"] .row-menu-btn').click();
+      await page.getByRole('menuitem', { name: 'Move to team' }).click();
+      await page.getByRole('dialog', { name: 'Move this doc to a team' }).getByRole('button', { name: 'BeFreed' }).click();
+      await page.locator('.doc-row[data-slug="personal-plan"]').waitFor();
+      assert.equal(await page.getByRole('dialog', { name: 'Move this doc to a team' }).count(), 1);
+      assert.equal(page.url(), `${base}/me`);
+      await page.close();
+    });
+    await t('moving a team doc back to My docs updates both lists without navigation', async () => {
+      const page = await open(390, '?team=tm_befreed');
+      let finishMove;
+      await page.route('**/api/team/move', async (route) => {
+        await new Promise((resolve) => { finishMove = resolve; });
+        await route.fulfill({ json: { ok: true, moved: 1, team: null } });
+      });
+      await page.locator('.doc-row[data-slug="team-plan"] .row-menu-btn').click();
+      await page.getByRole('menuitem', { name: /Move to My docs/ }).click();
+      await page.waitForFunction(() => !document.querySelector('.doc-row[data-slug="team-plan"]'));
+      assert.match(page.url(), /team=tm_befreed/);
+      finishMove();
+      await page.locator('.tdoc-space-trigger').click();
+      await page.getByRole('menuitem', { name: 'My docs' }).click();
+      await page.locator('.doc-row[data-slug="team-plan"]').waitFor();
+      await page.close();
+    });
+    await t('moving into a folder updates its list before the server replies', async () => {
+      const page = await open(1280, '');
+      let finishMove;
+      await page.route('**/api/folders/move', async (route) => {
+        await new Promise((resolve) => { finishMove = resolve; });
+        await route.fulfill({ json: { ok: true, moved: 1 } });
+      });
+      await page.locator('.doc-row[data-slug="personal-plan"] .row-menu-btn').click();
+      await page.locator('.ui-menu-popup .row-move').click();
+      await page.getByRole('dialog', { name: 'Move to folder' }).getByRole('button', { name: 'Research' }).click();
+      await page.waitForFunction(() => !document.querySelector('.doc-row[data-slug="personal-plan"]'));
+      assert.equal(page.url(), `${base}/me`);
+      finishMove();
+      await page.getByRole('dialog', { name: 'Move to folder' }).waitFor({ state: 'detached' });
+      await page.locator('.folder-row[data-folder-id="f_research"] .doc-title').click();
+      await page.locator('.doc-row[data-slug="personal-plan"]').waitFor();
+      await page.close();
+    });
+    await t('moving a folder to a team stays on the current page and refreshes both lists', async () => {
+      const page = await open(1280, '');
+      let finishMove;
+      await page.route('**/api/folders/move-to-team', async (route) => {
+        await new Promise((resolve) => { finishMove = resolve; });
+        await route.fulfill({ json: { ok: true, moved: 1, remaining: 0, skipped: [], results: [{ slug: 'revenue-plan', status: 'moved', folder: 'tf_strategy' }], folder: 'tf_strategy', folders: TEAM_FOLDERS } });
+      });
+      await page.route('**/api/me', (route) => route.fulfill({ json: {
+        ok: true, docs: [PERSONAL], folders: [], recent: [PERSONAL, TEAM_DOC], starred: [PERSONAL, TEAM_DOC],
+        team_docs: [TEAM_DOC, NESTED_TEAM, { ...NESTED_PERSONAL, team: 'tm_befreed', workspace_id: 'tm_befreed', folder: 'tf_strategy', can_manage: true, can_file: true }],
+        team_folders: { tm_befreed: TEAM_FOLDERS },
+      } }));
+      await page.locator('.folder-row[data-folder-id="f_research"] .row-menu-btn').click();
+      await page.getByRole('menuitem', { name: 'Move to team…' }).click();
+      await page.getByRole('dialog', { name: 'Move Research to a team' }).getByRole('button', { name: 'BeFreed' }).click();
+      await page.getByRole('button', { name: 'Move 1 doc' }).click();
+      await page.waitForFunction(() => !document.querySelector('.folder-row[data-folder-id="f_research"]'));
+      assert.equal(page.url(), `${base}/me`);
+      finishMove();
+      await page.getByRole('dialog', { name: /Move Research/ }).waitFor({ state: 'detached' });
+      await page.locator('.tdoc-space-trigger').click();
+      await page.getByRole('menuitem', { name: 'BeFreed' }).click();
+      await page.getByRole('searchbox', { name: 'Search docs' }).fill('Revenue plan');
+      await page.locator('.doc-row[data-slug="revenue-plan"]').waitFor();
       await page.close();
     });
   } finally { await browser.close(); await target.stop(); }

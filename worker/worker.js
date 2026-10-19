@@ -13700,6 +13700,20 @@ export default {
         next.access = policy;
         await putDocMetaJson(env, slug, JSON.stringify(next));
       }
+      // A workspace move places the doc at the destination root. Remove any
+      // old personal folder assignment so a later /me reload agrees with the
+      // list's immediate update, including a move back from a team.
+      if (metas.length) {
+        const folderState = await loadFolderState(env, actorKey(s));
+        let foldersChanged = false;
+        for (const [slug] of metas) {
+          if (folderState.docs[slug]) {
+            delete folderState.docs[slug];
+            foldersChanged = true;
+          }
+        }
+        if (foldersChanged) await saveFolderState(env, actorKey(s), folderState);
+      }
       const planWarning = team && metas.length ? await teamPlanWarning(env, team) : null;
       return json({ ok: true, moved: slugs.length, team: team ? team.id : null, ...(planWarning ? { plan_warning: planWarning } : {}) });
     }

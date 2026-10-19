@@ -105,6 +105,21 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(meta.hosted.account_id === 'acct-alice', 'author unchanged');
   });
 
+  await t('moving between workspaces clears old personal folder filing', async () => {
+    await seedDoc(env, 'folder-trip', 'alice');
+    const created = await call('/api/folders', { method: 'POST', cookie: alice, body: { name: 'Old folder' } });
+    assert(created.status === 200, `folder ${created.status}`);
+    const folder = created.body.folder.id;
+    const filed = await call('/api/folders/move', { method: 'POST', cookie: alice, body: { slugs: ['folder-trip'], folder } });
+    assert(filed.status === 200, `file ${filed.status}`);
+    const intoTeam = await call('/api/team/move', { method: 'POST', cookie: alice, body: { slugs: ['folder-trip'], team: team.id } });
+    assert(intoTeam.status === 200, `into team ${intoTeam.status}`);
+    const back = await call('/api/team/move', { method: 'POST', cookie: alice, body: { slugs: ['folder-trip'], team: null } });
+    assert(back.status === 200, `back ${back.status}`);
+    const me = await call('/api/me', { cookie: alice });
+    assert(me.body.docs.find((doc) => doc.slug === 'folder-trip')?.folder === '', 'doc returned to the My docs root');
+  });
+
   await t('a member creates a doc straight into the team; outsiders cannot', async () => {
     const outsider = await call('/api/doc/create', { method: 'POST', cookie: dave, body: { team: team.id } });
     assert(outsider.status === 403, `outsider ${outsider.status}`);

@@ -654,9 +654,14 @@ export function DocsHub({ boot }) {
     setTeamDocs((list) => list.map((doc) => (doc.team === team.id && doc.folder === item.id ? { ...doc, folder: up } : doc)));
     if (teamFolder === item.id) setTeamFolder(up);
   }));
-  const moveTeamDocs = (slugs, destination) => teamRun(moveDocsToFolder(slugs, destination, team.id).then(() => {
-    setTeamDocs((list) => list.map((doc) => (slugs.includes(doc.slug) ? { ...doc, folder: destination } : doc)));
-  }), `Moved ${slugs.length === 1 ? '1 doc' : `${slugs.length} docs`}`);
+  const moveTeamDocs = async (slugs, destination) => {
+    const moving = new Set(slugs);
+    const previous = new Map(teamDocs.filter((doc) => moving.has(doc.slug)).map((doc) => [doc.slug, doc]));
+    setTeamDocs((list) => list.map((doc) => (moving.has(doc.slug) ? { ...doc, folder: destination } : doc)));
+    const ok = await teamRun(moveDocsToFolder(slugs, destination, team.id), `Moved ${slugs.length === 1 ? '1 doc' : `${slugs.length} docs`}`);
+    if (!ok) setTeamDocs((list) => list.map((doc) => previous.get(doc.slug) || doc));
+    return ok;
+  };
 
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
@@ -753,6 +758,94 @@ export function DocsHub({ boot }) {
     else hub.notify(error.message || 'Request failed', true);
   };
 
+  const movingSlugs = useRef(new Set());
+  const folderMoveBefore = useRef(null);
+  const startFolderMove = (folder) => {
+    folderMoveBefore.current = { docs: hub.docs, folders: hub.folders };
+    const tree = new Set([folder.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const item of hub.folders) if (tree.has(item.parent) && !tree.has(item.id)) { tree.add(item.id); grew = true; }
+    }
+    hub.setDocs((items) => items.filter((doc) => !(doc.mine && tree.has(doc.folder))));
+    hub.setFolders((items) => items.filter((item) => !tree.has(item.id)));
+  };
+  const settleFolderMove = async () => {
+    try {
+      const response = await fetch('/api/me', { credentials: 'same-origin' });
+      if (!response.ok) throw new Error('Could not refresh the document list');
+      const current = await response.json();
+      hub.setDocs(current.docs || []);
+      hub.setFolders(current.folders || []);
+      hub.setRecent(current.recent || []);
+      hub.setStarred(current.starred || []);
+      setTeamDocs(current.team_docs || []);
+      setTeamFolders(current.team_folders || {});
+      folderMoveBefore.current = null;
+    } catch (error) {
+      if (folderMoveBefore.current) {
+        hub.setDocs(folderMoveBefore.current.docs);
+        hub.setFolders(folderMoveBefore.current.folders);
+        folderMoveBefore.current = null;
+      }
+      hub.notify(error.message || 'Could not refresh the document list', true);
+    }
+  };
+  const moveBetweenWorkspaces = async (slugs, targetId) => {
+    if (slugs.some((slug) => movingSlugs.current.has(slug))) return false;
+    slugs.forEach((slug) => movingSlugs.current.add(slug));
+    const moving = new Set(slugs);
+    const personalRows = hub.docs.filter((doc) => moving.has(doc.slug));
+    const teamRows = teamDocs.filter((doc) => moving.has(doc.slug));
+    const sourceRows = targetId ? personalRows : teamRows;
+    const targetTeam = teams.find((item) => item.id === targetId);
+    const movedRows = sourceRows.map((doc) => ({
+      ...doc,
+      folder: '',
+      workspace_id: targetId || null,
+      ...(targetId ? {
+        team: targetId,
+        author: doc.mine ? 'me' : doc.owner,
+        can_manage: true,
+        can_file: true,
+      } : {}),
+    }));
+    const updateSaved = (items, workspaceId) => items.map((doc) => (
+      moving.has(doc.slug) ? { ...doc, workspace_id: workspaceId, folder: '' } : doc
+    ));
+    hub.setDocs((items) => targetId
+      ? items.filter((doc) => !moving.has(doc.slug))
+      : [...items, ...movedRows.filter((doc) => doc.mine)]);
+    setTeamDocs((items) => targetId
+      ? [...items, ...movedRows]
+      : items.filter((doc) => !moving.has(doc.slug)));
+    hub.setRecent((items) => updateSaved(items, targetId));
+    hub.setStarred((items) => updateSaved(items, targetId));
+    try {
+      await moveDocsToTeam(slugs, targetId);
+      hub.setSelected(new Set());
+      hub.notify(`Moved ${slugs.length === 1 ? '1 doc' : `${slugs.length} docs`}${targetTeam ? ` to ${targetTeam.name}` : ' to My docs'}`);
+      return true;
+    } catch (error) {
+      hub.setDocs((items) => targetId
+        ? [...items, ...personalRows]
+        : items.filter((doc) => !moving.has(doc.slug)));
+      setTeamDocs((items) => targetId
+        ? items.filter((doc) => !moving.has(doc.slug))
+        : [...items, ...teamRows]);
+      const restoreSaved = (items) => items.map((doc) => {
+        const original = [...hub.recent, ...hub.starred].find((row) => row.slug === doc.slug);
+        return original && moving.has(doc.slug) ? original : doc;
+      });
+      hub.setRecent(restoreSaved);
+      hub.setStarred(restoreSaved);
+      teamFailed(error);
+      return false;
+    } finally {
+      slugs.forEach((slug) => movingSlugs.current.delete(slug));
+    }
+  };
+
   const teamDocMenu = (doc) => [
     { label: 'Open', onSelect: () => { location.href = `/d/${encodeURIComponent(doc.slug)}`; } },
     doc.can_file ? {
@@ -763,9 +856,7 @@ export function DocsHub({ boot }) {
     doc.can_manage ? {
       label: doc.mine ? 'Move to My docs' : "Move to author's My docs",
       className: 'row-move-personal',
-      onSelect: () => moveDocsToTeam([doc.slug], null)
-        .then(() => { location.href = '/me'; })
-        .catch(teamFailed),
+      onSelect: () => moveBetweenWorkspaces([doc.slug], null),
     } : null,
     doc.can_manage ? {
       label: 'Delete',
@@ -1012,9 +1103,7 @@ export function DocsHub({ boot }) {
           count={modal.slugs.length}
           skipped={modal.skipped || 0}
           onClose={closeModal}
-          onMove={(target) => moveDocsToTeam(modal.slugs, target.id)
-            .then(() => { location.href = `/me?team=${encodeURIComponent(target.id)}`; })
-            .catch(teamFailed)}
+          onMove={(target) => moveBetweenWorkspaces(modal.slugs, target.id).then((ok) => { if (ok) closeModal(); })}
         />
       ) : null}
       {modal?.type === 'move-folder-team' ? (
@@ -1030,6 +1119,8 @@ export function DocsHub({ boot }) {
             return hub.docs.filter((doc) => doc.mine !== false && tree.has(doc.folder)).length;
           })()}
           onClose={closeModal}
+          onStart={() => startFolderMove(modal.folder)}
+          onSettled={settleFolderMove}
         />
       ) : null}
       {modal?.type === 'delete-team-doc' ? (
