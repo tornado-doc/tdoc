@@ -112,7 +112,10 @@ t('document owners can move the open doc between workspaces', () => {
   const shell = fs.readFileSync(path.join(ROOT, 'shell/src/document-shell.jsx'), 'utf8');
   assert(/config\.mode === 'published' && config\.isOwner \? openMoveDocument : null/.test(shell), 'move action is not limited to the published doc owner');
   assert(/await moveDocsToTeam\(\[config\.slug\], target\.id\)/.test(shell), 'move action does not call the shared workspace move API');
-  assert(/includePersonal=\{Boolean\(config\.teamManage\?\.team\?\.id\)\}/.test(shell), 'team docs cannot return to My docs');
+  assert(/includePersonal=\{Boolean\(config\.workspaceId \|\| config\.teamManage\?\.team\?\.id\)\}/.test(shell), 'team docs cannot return to My docs when session team state is stale');
+  assert(/currentTeam=\{config\.workspaceId \|\| config\.teamManage\?\.team\?\.id \|\| null\}/.test(shell), 'move picker does not exclude the metadata-owned current team');
+  const worker = fs.readFileSync(path.join(ROOT, 'worker/worker.js'), 'utf8');
+  assert(/workspaceId: \(docMeta && docMeta\.workspace_id\) \|\| null/.test(worker), 'document boot config omits its metadata-owned workspace');
   const teams = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub/teams.jsx'), 'utf8');
   assert(/team\.id !== currentTeam/.test(teams), 'move dialog does not hide the current workspace');
 });
