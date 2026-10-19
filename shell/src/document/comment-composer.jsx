@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { MentionField } from './mention-field.jsx';
+import React, { useContext, useEffect, useState } from 'react';
+import { AgentMentionContext, MentionField, mentionsAgent, neutralizeAgentTag } from './mention-field.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
@@ -99,11 +99,15 @@ export function CommentComposer({
   // One submit at a time. ⌘+Enter and the buttons both land here, and a second
   // press while the first post is still in flight used to post a twin.
   const [busy, setBusy] = useState(false);
+  const agentName = useContext(AgentMentionContext);
+  const agentLabel = `@${agentName || 'agent'}`;
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
-      await onSubmit(text, { sendToAgent: canSendToAgent && sendToAgent });
+      // Tagging the doc's agent by name hands the comment to it, like the button.
+      const tagged = canSendToAgent && mentionsAgent(text, agentName);
+      await onSubmit(tagged ? neutralizeAgentTag(text, agentName) : text, { sendToAgent: canSendToAgent && (sendToAgent || tagged) });
     } finally {
       setBusy(false);
     }
@@ -145,7 +149,7 @@ export function CommentComposer({
         <span className="hint">
           {demo
             ? 'Demo — refresh clears it'
-            : (canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : '⌘+Enter to submit')}
+            : (canSendToAgent ? `⌘+Enter · ⌘⇧+Enter ${agentLabel}` : '⌘+Enter to submit')}
         </span>
         <div className="tdoc-composer-foot-actions">
           {!canSendToAgent && connectAgentPrompt ? (
@@ -165,9 +169,9 @@ export function CommentComposer({
               type="button"
               onClick={() => submit(true)}
               disabled={busy}
-              title={sendToAgentDisabledReason || 'Comment and hand to the following agent'}
+              title={sendToAgentDisabledReason || `Comment and hand to ${agentName || 'the agent'}`}
             >
-              {busy ? 'Posting…' : '@agent'}
+              {busy ? 'Posting…' : agentLabel}
             </button>
           ) : null}
           <button className="submit" type="button" onClick={() => submit(false)} disabled={busy}>

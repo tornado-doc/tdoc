@@ -56,7 +56,8 @@ import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
-import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffBanner } from './document/handoff-banner.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { summarizeHandoffSurfaces } from './document/handoff-state.js';
@@ -800,6 +801,11 @@ export function DocumentShell({ boot, config }) {
     && notifyTargets.reason !== 'no_agent_bound'
     && (notifyTargets.default || (notifyTargets.candidates || []).length || notifyTargets.fallback),
   );
+  // The name @-mentions and the @ button use for this doc's agent: whoever
+  // comments are handed to by default, else 'agent'. Empty when none can be.
+  const agentMentionName = canSendToAgent
+    ? (readableHandle(notifyTargets.default || (notifyTargets.candidates || [])[0] || notifyTargets.fallback).replace(/^@/, '').replace(/\s+/g, '') || 'agent')
+    : '';
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);
@@ -1235,6 +1241,7 @@ export function DocumentShell({ boot, config }) {
         setOpenCommentId(null);
       }}
     >
+      <AgentMentionContext.Provider value={agentMentionName}>
       <TopBar
         identity={config.identity}
         space={config.teamManage?.team?.id || ''}
@@ -1633,6 +1640,7 @@ export function DocumentShell({ boot, config }) {
           {toast.text}
         </div>
       ) : null}
+      </AgentMentionContext.Provider>
     </div>
   );
 }

@@ -1,10 +1,10 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
-import { MentionField, MentionText } from './mention-field.jsx';
+import { AgentMentionContext, MentionField, MentionText, mentionsAgent, neutralizeAgentTag } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 
@@ -141,14 +141,18 @@ function ReplyForm({
   // button share the lock, so a second press while the first reply is still
   // in flight does not post a twin.
   const [busy, setBusy] = useState(false);
+  const agentName = useContext(AgentMentionContext);
+  const agentLabel = `@${agentName || 'agent'}`;
 
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
+      // Tagging the doc's agent by name hands the reply to it, like the button.
+      const tagged = canSendToAgent && mentionsAgent(text, agentName);
       // onReply resolves false when the shell reported a failure; keep the draft.
-      const ok = await onReply(commentId, text, {
-        sendToAgent: canSendToAgent && sendToAgent,
+      const ok = await onReply(commentId, tagged ? neutralizeAgentTag(text, agentName) : text, {
+        sendToAgent: canSendToAgent && (sendToAgent || tagged),
         handoffCommentId: handoffCommentId || commentId,
       });
       if (ok !== false) setText('');
@@ -171,7 +175,7 @@ function ReplyForm({
       />
       <div className="tdoc-reply-form-foot">
         <span className="hint">
-          {canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
+          {canSendToAgent ? `⌘+Enter · ⌘⇧+Enter ${agentLabel}` : ''}
         </span>
         <div className="tdoc-reply-form-actions">
           {!canSendToAgent && agentSetupHref ? (
@@ -183,9 +187,9 @@ function ReplyForm({
               type="button"
               onClick={() => submit(true)}
               disabled={busy}
-              title="Reply and hand to the following agent"
+              title={`Reply and hand to ${agentName || 'the agent'}`}
             >
-              {busy ? 'Posting…' : '@agent'}
+              {busy ? 'Posting…' : agentLabel}
             </button>
           ) : null}
           <button className="tdoc-reply-submit" type="button" onClick={() => submit(false)} disabled={busy}>
