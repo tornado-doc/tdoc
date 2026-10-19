@@ -93,11 +93,17 @@ function NotificationSettings({ notifications }) {
 }
 
 export function NotificationsDialog({ open, notifications, onOpenChange, onSelect }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const unread = notifications.items.some((item) => !item.read);
+  const hasSettings = (!!notifications.browserAlerts && notifications.browserAlerts.permission !== 'unsupported') || !!notifications.emailAlerts?.available;
+  const changeOpen = (next) => {
+    if (!next) setSettingsOpen(false);
+    onOpenChange(next);
+  };
   return (
     <AppDialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={changeOpen}
       title="Notifications"
       className="tdoc-notif-dialog"
       actions={(
@@ -107,17 +113,24 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
               Load more
             </button>
           ) : null}
-          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
+          <button type="button" onClick={() => changeOpen(false)}>Close</button>
         </>
       )}
     >
-      <NotificationSettings notifications={notifications} />
       <div className="tdoc-notif-head">
         <span className="tdoc-notif-count">{notifications.unread ? `${notifications.unread} unread` : 'All caught up'}</span>
-        {unread ? (
-          <button type="button" className="tdoc-quiet-link" onClick={() => notifications.markAllRead()}>Mark all read</button>
-        ) : null}
+        <span className="tdoc-notif-head-actions">
+          {unread ? (
+            <button type="button" className="tdoc-quiet-link" onClick={() => notifications.markAllRead()}>Mark all read</button>
+          ) : null}
+          {hasSettings ? (
+            <button type="button" className="tdoc-quiet-link" aria-expanded={settingsOpen} aria-controls={settingsOpen ? 'tdoc-notif-settings' : undefined} onClick={() => setSettingsOpen((value) => !value)}>
+              {settingsOpen ? 'Hide settings' : 'Settings'}
+            </button>
+          ) : null}
+        </span>
       </div>
+      {settingsOpen && hasSettings ? <div id="tdoc-notif-settings"><NotificationSettings notifications={notifications} /></div> : null}
       {notifications.loading && !notifications.items.length ? <p className="muted">Loading…</p> : null}
       {!notifications.loading && !notifications.items.length ? <p className="muted">No notifications yet.</p> : null}
       <div className="tdoc-notification-list">
