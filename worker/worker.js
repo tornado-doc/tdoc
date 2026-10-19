@@ -2232,8 +2232,11 @@ async function loadOnboarding(env, accountId) {
 async function stampOnboardingFor(env, accountId, step, extra) {
   if (!env || !env.META || !accountId) return null;
   const at = new Date().toISOString();
-  const next = stampOnboarding(await loadOnboarding(env, accountId), step, at, extra);
-  await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+  const prev = await loadOnboarding(env, accountId);
+  const next = stampOnboarding(prev, step, at, extra);
+  // Steps stamp once. Most calls (every My docs load, every agent pull,
+  // every comment) find the step already there; KV writes are a daily quota.
+  if (JSON.stringify(next) !== JSON.stringify(prev)) await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
   return next;
 }
 // Is this doc the one FIRST-DOC.md produced? tdoc-write --first-doc marks the
@@ -3830,8 +3833,18 @@ async function moveFolderToTeam(env, session, team, body) {
     if (done.has(slug)) { delete personal.docs[slug]; personalChanged = true; continue; }
     pending.push([slug, fid]);
   }
+  // The whole folder is checked against the free plan on the first call,
+  // before anything moves: a folder must not land half in the team.
+  if (!done.size && stripeConfigured(env) && !teamBillingPaid(await loadTeamBilling(env, team.id))) {
+    const metas = await Promise.all(pending.map(([slug]) => loadDocMeta(env, slug)));
+    // Only the docs this call would actually move: the caller's own, not yet in any team.
+    const incoming = metas.filter((meta) => meta && !meta.workspace_id && meta.created_from !== 'feedback' && isDocOwnerSession(env, session, meta)).length;
+    const blockedAll = await teamPlanBlocksDocs(env, team, incoming);
+    if (blockedAll) return { ok: false, status: 402, body: blockedAll };
+  }
   const results = [];
   const writes = [];
+  let entering = 0;
   let reads = 0;
   let next = 0;
   for (; next < pending.length && reads < FOLDER_TEAM_MOVE_READS && writes.length < FOLDER_TEAM_MOVE_WRITES; next += 1) {
@@ -3870,6 +3883,7 @@ async function moveFolderToTeam(env, session, team, body) {
     // The same change /api/team/move makes, plus the folder.
     delete personal.docs[slug]; personalChanged = true;
     writes.push([slug, { ...meta, workspace_id: team.id, team_folder: target, access: { ...accessFromMeta(meta), team: true } }]);
+    entering += 1;
     results.push({ slug, status: 'moved', folder: target });
   }
   const remaining = pending.length - next;
@@ -3889,6 +3903,11 @@ async function moveFolderToTeam(env, session, team, body) {
       personalChanged = true;
     }
   }
+
+  // Checked before anything is written, so a refused batch leaves this
+  // call's docs where they were; batches already moved stay in the team.
+  const blocked = await teamPlanBlocksDocs(env, team, entering);
+  if (blocked) return { ok: false, status: 402, body: blocked };
 
   // Folders before the docs that point at them; My docs last, so a failure
   // midway leaves every doc either still in My docs or filed in the team.
@@ -4172,7 +4191,173 @@ async function joinTeamFromSession(env, team, s) {
   team.invites = (Array.isArray(team.invites) ? team.invites : []).filter((x) => !mine.includes(x));
   await saveTeam(env, team);
   await setAccountTeam(env, s.account_id, team.id, true);
+  await syncTeamSeats(env, team);
   return { ok: true };
+}
+
+// ─────────────────────────── Team plan (Stripe) ───────────────────────────
+// Members are never limited: collaboration is free. A free team holds up to
+// TEAM_FREE_DOCS docs; the next doc created in or moved into it, and turning
+// on Data backup, need the Team plan. Docs already there stay readable and
+// editable whatever the plan, and a backup already running keeps running.
+// The plan bills every admin and member per seat, monthly or yearly; agents
+// are not members, so they never take a seat. Nothing here runs until
+// STRIPE_SECRET_KEY, both price ids and STRIPE_WEBHOOK_SECRET are set, so an unconfigured deploy
+// (local, preview, self-hosted) behaves exactly as before: no limit, no plan.
+// Stripe is the source of truth; `team-billing:<id>` is its last webhook,
+// written only on checkout and subscription changes.
+const TEAM_FREE_DOCS = 20;
+// What the plan card shows. The Stripe Prices behind STRIPE_PRICE_MONTHLY /
+// STRIPE_PRICE_YEARLY must charge these per seat (USD).
+const TEAM_SEAT_PRICE_USD = { month: 5, year: 50 };
+const STRIPE_API = 'https://api.stripe.com/v1';
+const STRIPE_SIGNATURE_TOLERANCE_S = 300;
+// The webhook secret counts: without it a team could pay and never be told.
+function stripeConfigured(env) {
+  return !!(env && env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_MONTHLY && env.STRIPE_PRICE_YEARLY && env.STRIPE_WEBHOOK_SECRET);
+}
+function teamCheckoutKey(teamId) { return `team-checkout:${teamId}`; }
+function teamBillingKey(teamId) { return `team-billing:${teamId}`; }
+async function loadTeamBilling(env, teamId) {
+  try { const rec = JSON.parse(await env.META.get(teamBillingKey(teamId))); return rec && typeof rec === 'object' ? rec : null; } catch { return null; }
+}
+// past_due keeps the plan while Stripe retries the card; unpaid, canceled
+// and incomplete do not.
+function teamBillingPaid(billing) {
+  return !!(billing && ['active', 'trialing', 'past_due'].includes(billing.status));
+}
+// The team's docs as the team space lists them (feedback threads are not
+// docs). Index markers are advisory, so each is checked against its meta.
+async function teamDocCount(env, teamId) {
+  const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
+  const metas = await Promise.all(slugs.map((slug) => loadDocMeta(env, slug)));
+  return metas.filter((meta) => meta && meta.workspace_id === teamId && meta.created_from !== 'feedback').length;
+}
+// Can `adding` more docs go into this team? Returns null when yes, else the
+// 402 body to answer with.
+async function teamPlanBlocksDocs(env, team, adding = 1) {
+  if (!team || !stripeConfigured(env) || adding <= 0) return null;
+  if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
+  const count = await teamDocCount(env, team.id);
+  if (count + adding <= TEAM_FREE_DOCS) return null;
+  return {
+    error: 'team_plan_required', limit: TEAM_FREE_DOCS, docs: count,
+    message: `${team.name} is on the free plan, which holds ${TEAM_FREE_DOCS} docs. Ask an admin to upgrade to the Team plan to add more.`,
+  };
+}
+// A team whose Team plan ended keeps its backup settings, but nothing is
+// copied until it subscribes again. A team that never had a plan (one that
+// set up backup before billing existed) is not affected.
+async function teamBackupPaused(env, teamId) {
+  if (!stripeConfigured(env)) return false;
+  const billing = await loadTeamBilling(env, teamId);
+  return !!billing && !teamBillingPaid(billing);
+}
+async function publicTeamBilling(env, team, billing) {
+  const paid = teamBillingPaid(billing);
+  const configured = stripeConfigured(env);
+  const docs = configured ? await teamDocCount(env, team.id) : null;
+  return {
+    configured,
+    free_docs: TEAM_FREE_DOCS,
+    prices: TEAM_SEAT_PRICE_USD,
+    docs,
+    seats: team.members.length,
+    plan: paid ? 'team' : 'free',
+    status: (billing && billing.status) || null,
+    interval: (billing && billing.interval) || null,
+    quantity: (billing && billing.quantity) || null,
+    current_period_end: (billing && billing.current_period_end) || null,
+    cancel_at_period_end: !!(billing && billing.cancel_at_period_end),
+    has_customer: !!(billing && billing.customer),
+    at_limit: !paid && docs != null && docs >= TEAM_FREE_DOCS,
+  };
+}
+// Stripe takes form encoding with bracketed keys for nested values.
+function stripeForm(params, prefix = '', out = new URLSearchParams()) {
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v == null) continue;
+    const key = prefix ? `${prefix}[${k}]` : k;
+    if (typeof v === 'object') stripeForm(v, key, out);
+    else out.append(key, String(v));
+  }
+  return out;
+}
+async function stripeApi(env, method, path, params, idempotencyKey) {
+  const init = { method, headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` } };
+  if (idempotencyKey) init.headers['Idempotency-Key'] = idempotencyKey;
+  if (params && method !== 'GET') {
+    init.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    init.body = stripeForm(params).toString();
+  }
+  const r = await fetch(`${STRIPE_API}${path}`, init);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((body.error && body.error.message) || `Stripe ${r.status}`);
+  return body;
+}
+// Stripe-Signature: t=<unix>,v1=<hex>[,v1=...]; the signed payload is
+// "<t>.<raw body>". Stale timestamps are refused to stop replays.
+async function verifyStripeSignature(secret, payload, header, nowS = Math.floor(Date.now() / 1000)) {
+  if (!secret || !header) return false;
+  const parts = String(header).split(',').map((p) => p.trim().split('='));
+  const t = Number((parts.find(([k]) => k === 't') || [])[1]);
+  const sigs = parts.filter(([k]) => k === 'v1').map(([, v]) => v);
+  if (!Number.isFinite(t) || !sigs.length || Math.abs(nowS - t) > STRIPE_SIGNATURE_TOLERANCE_S) return false;
+  const expected = await hmacSha256Hex(secret, `${t}.${payload}`);
+  for (const s of sigs) if (await timingSafeEqual(s, expected)) return true;
+  return false;
+}
+function billingFromSubscription(sub, prev, event) {
+  const item = sub && sub.items && Array.isArray(sub.items.data) ? sub.items.data[0] : null;
+  const price = item && item.price;
+  return {
+    v: 1,
+    customer: typeof sub.customer === 'string' ? sub.customer : (sub.customer && sub.customer.id) || (prev && prev.customer) || null,
+    subscription: sub.id,
+    item: (item && item.id) || null,
+    status: sub.status,
+    interval: (price && price.recurring && price.recurring.interval) || null,
+    quantity: (item && item.quantity) || null,
+    // Newer API versions moved the period onto the item.
+    current_period_end: ((item && item.current_period_end) || sub.current_period_end)
+      ? new Date(((item && item.current_period_end) || sub.current_period_end) * 1000).toISOString() : null,
+    cancel_at_period_end: !!sub.cancel_at_period_end,
+    // The newest event applied; older ones arriving late are dropped.
+    event_created: Math.max(Number(event && event.created) || 0, Number(prev && prev.event_created) || 0),
+    event_id: (event && event.id) || (prev && prev.event_id) || null,
+    updated_at: new Date().toISOString(),
+  };
+}
+// Seats follow membership. Called after every join and removal; a no-op
+// without a live subscription or when the quantity already matches.
+// `verify` reads the subscription's real quantity from Stripe first (Plan
+// card, portal): a sync whose Stripe update landed but whose KV write did
+// not would otherwise look settled locally while Stripe bills another number.
+async function syncTeamSeats(env, team, { verify = false } = {}) {
+  if (!stripeConfigured(env)) return;
+  let billing = await loadTeamBilling(env, team.id);
+  if (!teamBillingPaid(billing) || !billing.subscription || !billing.item) return;
+  const seats = Math.max(1, team.members.length);
+  try {
+    if (verify) {
+      const live = await stripeApi(env, 'GET', `/subscriptions/${encodeURIComponent(billing.subscription)}`);
+      const fresh = billingFromSubscription(live, billing);
+      if (fresh.quantity !== billing.quantity || fresh.status !== billing.status) {
+        await env.META.put(teamBillingKey(team.id), JSON.stringify(fresh));
+      }
+      billing = fresh;
+      if (!teamBillingPaid(billing)) return;
+    }
+    if (billing.quantity === seats) return;
+    const sub = await stripeApi(env, 'POST', `/subscriptions/${encodeURIComponent(billing.subscription)}`, {
+      items: { 0: { id: billing.item, quantity: seats } },
+      proration_behavior: 'create_prorations',
+    }, `seats:${billing.subscription}:${billing.quantity}->${seats}:${Math.floor(Date.now() / 600000)}`);
+    await env.META.put(teamBillingKey(team.id), JSON.stringify(billingFromSubscription(sub, billing)));
+    return true;
+  } catch (error) {
+    console.error(`[billing] seat sync failed team=${team.id}: ${error.message || error}`);
+  }
 }
 
 function teamSummary(team, accountId) {
@@ -4650,6 +4835,7 @@ async function saveTeamBackupStatus(env, teamId, patch) {
 async function enqueueTeamBackup(env, job) {
   if (!env || !env.BACKUP_QUEUE || !job || !validTeamId(job.team)) return false;
   if (!(await loadTeamBackup(env, job.team))) return false;
+  if (await teamBackupPaused(env, job.team)) return false;
   try { await env.BACKUP_QUEUE.send({ v: 1, ...job }); return true; } catch (error) {
     console.error('[team-backup] queue failed (non-fatal):', error && error.message ? error.message : String(error));
     return false;
@@ -4758,6 +4944,7 @@ async function teamBackupJob(env, job) {
   if (!job || job.v !== 1 || !validTeamId(job.team)) return;
   const config = await loadTeamBackup(env, job.team, true);
   if (!config) return;
+  if (await teamBackupPaused(env, job.team)) return;
   const team = await loadTeam(env, job.team);
   if (!team) return;
   const writeJson = (name, value) => backupS3Put(config, team.id, name, JSON.stringify(value, null, 2), 'application/json; charset=utf-8');
@@ -6527,6 +6714,10 @@ function blankDocSlug(bytes) {
 // on the person's behalf. Ownership, quota and slug rules are the ones the
 // create-from-scratch path always had; `meta` and `version` are what differs.
 async function createDocForSession(env, req, session, { html, meta, version, team = null }) {
+  if (team) {
+    const blocked = await teamPlanBlocksDocs(env, await loadTeam(env, team), 1);
+    if (blocked) return { ok: false, response: json(blocked, { status: 402 }) };
+  }
   const ownerCreate = isOwnerSession(env, session);
   // Same door as /api/doc/duplicate: a self-hosted worker keeps writes to
   // its owner unless it has opted into hosted accounts. tdoc.dev is open.
@@ -8695,6 +8886,7 @@ function mentionableUsers({ ownerLogin, allowedUsers, participants, includeAllow
 //   teammate  — in the team that owns this doc, or in one of yours
 //   recent    — you tagged or answered them, or they tagged or answered you
 const CONTACTS_MAX = 40;
+const CONTACTS_REFRESH_MS = 24 * 3600 * 1000;
 function contactsKey(actor) { return actor ? `contacts:${actor}` : null; }
 async function loadContacts(env, actor) {
   const key = contactsKey(actor);
@@ -8707,6 +8899,16 @@ async function recordContacts(env, actor, people, at) {
   const fresh = (people || []).filter((p) => p && p.login && p.login !== actor);
   if (!key || !fresh.length) return;
   const prev = await loadContacts(env, actor);
+  // Answering the people already at the front of the list again, within a
+  // day and with the same name and avatar, would only refresh `at`: the
+  // order stays the same, so it is not worth a KV write.
+  const front = prev.slice(0, new Set(fresh.map((p) => p.login)).size);
+  const unchanged = (p) => {
+    const old = front.find((x) => x.login === p.login);
+    return old && (!p.name || p.name === old.name) && (!p.avatar_url || p.avatar_url === old.avatar_url)
+      && Date.parse(at) - (Date.parse(old.at) || 0) < CONTACTS_REFRESH_MS;
+  };
+  if (fresh.every(unchanged)) return;
   const byLogin = new Map(prev.map((p) => [p.login, p]));
   for (const p of fresh) byLogin.set(p.login, { login: p.login, name: p.name || (byLogin.get(p.login) || {}).name || '', avatar_url: p.avatar_url || (byLogin.get(p.login) || {}).avatar_url || '', at });
   const next = [...byLogin.values()].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, CONTACTS_MAX);
@@ -12770,10 +12972,21 @@ export default {
       const team = await loadTeam(env, id);
       if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
       if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
-      if (method === 'GET') return json({ ok: true, backup: publicTeamBackup(await loadTeamBackup(env, team.id)) });
+      if (method === 'GET') {
+        const record = await loadTeamBackup(env, team.id);
+        return json({ ok: true, backup: { ...publicTeamBackup(record), ...(record && await teamBackupPaused(env, team.id) ? { paused: true } : {}) } });
+      }
+      if (method === 'POST' && await teamBackupPaused(env, team.id)) {
+        return json({ error: 'team_plan_required', message: 'Backup is paused because the Team plan ended. Renew it in Plan to resume.' }, { status: 402 });
+      }
       if (method === 'DELETE') {
         await env.META.delete(teamBackupKey(team.id));
         return json({ ok: true, backup: { enabled: false } });
+      }
+      // Turning backup on is a Team plan feature; one already set up keeps
+      // running and can still be reconnected, re-synced or turned off.
+      if (method === 'PUT' && stripeConfigured(env) && !(await loadTeamBackup(env, team.id)) && !teamBillingPaid(await loadTeamBilling(env, team.id))) {
+        return json({ error: 'team_plan_required', message: 'Data backup is part of the Team plan. Upgrade in Plan to turn it on.' }, { status: 402 });
       }
       if (!env.BACKUP_QUEUE) return json({ error: 'backup_queue_unavailable' }, { status: 503 });
       if (method === 'POST') {
@@ -12830,6 +13043,124 @@ export default {
       return json({ ok: true, backup: publicTeamBackup(record) });
     }
 
+    // Team plan. Any member may see the plan; only a browser admin may open
+    // Checkout or the Customer Portal, since both act on the team's card.
+    if (p === '/api/team/billing' && (method === 'GET' || method === 'POST')) {
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      if (method === 'POST' && !sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      let body = {};
+      if (method === 'POST') { try { body = await req.json(); } catch {} }
+      const team = await loadTeam(env, method === 'GET' ? url.searchParams.get('id') : body.id);
+      if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      // A seat sync that failed earlier is retried here against Stripe's real
+      // quantity, so a missed update cannot leave the bill wrong for long.
+      await syncTeamSeats(env, team, { verify: true });
+      const billing = await loadTeamBilling(env, team.id);
+      if (method === 'GET') return json({ ok: true, billing: await publicTeamBilling(env, team, billing) });
+      if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      if (!stripeConfigured(env)) return json({ error: 'billing_unavailable' }, { status: 503 });
+      const back = `${url.origin}/me?team=${encodeURIComponent(team.id)}&view=settings`;
+      try {
+        if (body.action === 'portal') {
+          if (!billing || !billing.customer) return json({ error: 'no_billing_customer' }, { status: 409 });
+          const portal = await stripeApi(env, 'POST', '/billing_portal/sessions', { customer: billing.customer, return_url: `${back}#billing` });
+          return json({ ok: true, url: portal.url });
+        }
+        if (body.action === 'checkout') {
+          if (teamBillingPaid(billing)) return json({ error: 'already_subscribed' }, { status: 409 });
+          const interval = body.interval === 'year' ? 'year' : 'month';
+          const quantity = Math.max(1, team.members.length);
+          // One open Checkout per team: a double click, a retry or a second
+          // admin gets the same session, and a paid one that the webhook has
+          // not confirmed yet is not sold twice.
+          let pending = null;
+          try { pending = JSON.parse(await env.META.get(teamCheckoutKey(team.id))); } catch {}
+          if (pending && pending.id) {
+            const open = await stripeApi(env, 'GET', `/checkout/sessions/${encodeURIComponent(pending.id)}`).catch(() => null);
+            if (open && open.status === 'complete') return json({ error: 'checkout_completing', message: 'Payment went through. The Team plan turns on in a few seconds.' }, { status: 409 });
+            if (open && open.status === 'open' && open.url && pending.interval === interval && pending.quantity === quantity) return json({ ok: true, url: open.url });
+            if (open && open.status === 'open') await stripeApi(env, 'POST', `/checkout/sessions/${encodeURIComponent(pending.id)}/expire`).catch(() => null);
+          }
+          const price = interval === 'year' ? env.STRIPE_PRICE_YEARLY : env.STRIPE_PRICE_MONTHLY;
+          const checkout = await stripeApi(env, 'POST', '/checkout/sessions', {
+            mode: 'subscription',
+            line_items: { 0: { price, quantity } },
+            client_reference_id: team.id,
+            metadata: { team_id: team.id },
+            subscription_data: { metadata: { team_id: team.id } },
+            ...(billing && billing.customer ? { customer: billing.customer } : (gate.session.email ? { customer_email: gate.session.email } : {})),
+            allow_promotion_codes: 'true',
+            success_url: `${back}&billing=success#billing`,
+            cancel_url: `${back}&billing=canceled#billing`,
+          }, `checkout:${team.id}:${interval}:${quantity}:${(pending && pending.id) || 'none'}:${Math.floor(Date.now() / 600000)}`);
+          await env.META.put(teamCheckoutKey(team.id), JSON.stringify({ id: checkout.id, interval, quantity, at: new Date().toISOString() }));
+          return json({ ok: true, url: checkout.url });
+        }
+      } catch (error) {
+        return json({ error: 'stripe_failed', message: error.message || String(error) }, { status: 502 });
+      }
+      return json({ error: 'invalid_action' }, { status: 400 });
+    }
+
+    // Stripe webhook. No session: the signature over the raw body is the
+    // proof. Only subscription state is recorded; the team id rides in the
+    // metadata tdoc set at Checkout, so an event for anything else is ignored.
+    if (p === '/api/stripe/webhook' && method === 'POST') {
+      if (!stripeConfigured(env)) return json({ error: 'billing_unavailable' }, { status: 503 });
+      const payload = await req.text();
+      if (!(await verifyStripeSignature(env.STRIPE_WEBHOOK_SECRET, payload, req.headers.get('stripe-signature')))) {
+        return json({ error: 'bad_signature' }, { status: 400 });
+      }
+      let event = null;
+      try { event = JSON.parse(payload); } catch { return json({ error: 'bad_payload' }, { status: 400 }); }
+      const obj = (event && event.data && event.data.object) || {};
+      let sub = null;
+      let teamId = null;
+      if (event.type === 'checkout.session.completed' && obj.mode === 'subscription' && obj.subscription) {
+        teamId = (obj.metadata && obj.metadata.team_id) || obj.client_reference_id;
+        sub = await stripeApi(env, 'GET', `/subscriptions/${encodeURIComponent(obj.subscription)}`);
+      } else if (/^customer\.subscription\.(created|updated|deleted)$/.test(event.type || '')) {
+        teamId = obj.metadata && obj.metadata.team_id;
+        sub = obj;
+      }
+      const team = teamId ? await loadTeam(env, teamId) : null;
+      if (!team || !sub) return json({ received: true, ignored: true });
+      const prev = await loadTeamBilling(env, team.id);
+      // Stripe does not deliver in order and retries freely. An event already
+      // applied, or older than the last one applied, changes nothing: a late
+      // subscription.updated cannot bring back a plan a later deletion ended.
+      // checkout.session.completed reads the subscription live, so it is
+      // current whenever it arrives.
+      const created = Number(event.created) || 0;
+      if (prev && event.id && prev.event_id === event.id) return json({ received: true, duplicate: true });
+      const lastCreated = Number(prev && prev.event_created) || 0;
+      const sameSub = !!(prev && prev.subscription === sub.id);
+      // checkout.session.completed reads its subscription live, so for the
+      // subscription already on record it is current whenever it arrives.
+      // Every other case obeys event time and subscription identity.
+      const liveSame = event.type === 'checkout.session.completed' && sameSub;
+      if (prev && !liveSame) {
+        if (created && created < lastCreated) return json({ received: true, ignored: 'stale' });
+        // Stripe times are whole seconds. In a tie, an ending (canceled,
+        // unpaid, expired) beats a live state: never revive within the second.
+        if (sameSub && created && created === lastCreated && !teamBillingPaid(prev) && prev.status && teamBillingPaid({ status: sub.status })) {
+          return json({ received: true, ignored: 'stale' });
+        }
+        // An event about another subscription never replaces a paid one: a
+        // late completed Checkout A cannot overwrite the current plan B.
+        if (prev.subscription && !sameSub && teamBillingPaid(prev)) return json({ received: true, ignored: true });
+      }
+      const next = billingFromSubscription(sub, prev, event);
+      await env.META.put(teamBillingKey(team.id), JSON.stringify(next));
+      // Renewed after a lapse: the paused backup catches up in full.
+      if (prev && !teamBillingPaid(prev) && teamBillingPaid(next)) await enqueueTeamBackup(env, { kind: 'full', team: team.id });
+      if (event.type === 'checkout.session.completed') await env.META.delete(teamCheckoutKey(team.id)).catch(() => {});
+      // Members may have joined between Checkout and this event.
+      await syncTeamSeats(env, team);
+      return json({ received: true });
+    }
+
     // Role changes and removals share one invariant: a team always keeps at
     // least one admin. Leaving is removing yourself, so it obeys it too.
     if ((p === '/api/team/role' || p === '/api/team/remove') && method === 'POST') {
@@ -12858,6 +13189,7 @@ export default {
         team.members = team.members.filter((m) => m.account_id !== target.account_id);
         await saveTeam(env, team);
         await setAccountTeam(env, target.account_id, team.id, false);
+        await syncTeamSeats(env, team);
         if (self) return json({ ok: true, left: true });
       }
       return json({ ok: true, team: teamDetail(team, s.account_id, url.origin) });
@@ -12872,7 +13204,7 @@ export default {
       const team = await teamForInviteToken(env, body.token);
       if (!team) return json({ error: 'invite_invalid' }, { status: 404 });
       const joined = await joinTeamFromSession(env, team, s);
-      if (!joined.ok) return json({ error: joined.error, limit: joined.limit }, { status: 400 });
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: 400 });
       return json({ ok: true, team: teamSummary(team, s.account_id) });
     }
 
@@ -12889,7 +13221,7 @@ export default {
       if (!team) return json({ error: 'not_found' }, { status: 404 });
       if (!teamMember(team, s.account_id) && !pendingTeamInvite(team, s)) return json({ error: 'no_invite' }, { status: 403 });
       const joined = await joinTeamFromSession(env, team, s);
-      if (!joined.ok) return json({ error: joined.error, limit: joined.limit }, { status: 400 });
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: 400 });
       return json({ ok: true, team: teamSummary(team, s.account_id) });
     }
 
@@ -12910,7 +13242,7 @@ export default {
       if (!team) return json({ error: 'not_found' }, { status: 404 });
       if (!teamMember(team, s.account_id) && !pendingTeamInvite(team, s)) return json({ error: 'no_invite' }, { status: 403 });
       const joined = await joinTeamFromSession(env, team, s);
-      if (!joined.ok) return json({ error: joined.error, limit: joined.limit }, { status: 400 });
+      if (!joined.ok) return json({ error: joined.error, limit: joined.limit, ...(joined.message ? { message: joined.message } : {}) }, { status: 400 });
       return json({ ok: true, team: teamSummary(team, s.account_id), next: `/d/${encodeURIComponent(slug)}` });
     }
 
@@ -12941,6 +13273,10 @@ export default {
         if (meta && team && meta.workspace_id === team.id) continue;
         if (!meta || !isDocOwnerSession(env, s, meta)) return json({ error: 'not_owner', slug }, { status: 403 });
         metas.push([slug, meta]);
+      }
+      if (team) {
+        const blocked = await teamPlanBlocksDocs(env, team, metas.length);
+        if (blocked) return json(blocked, { status: 402 });
       }
       for (const [slug, meta] of metas) {
         const next = { ...meta };

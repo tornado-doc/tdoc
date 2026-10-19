@@ -167,6 +167,7 @@ jobs:
         env:
           TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
           PREVIEW_HOST: ${{ steps.upload.outputs.host }}
+          PREVIEW_KV_ID: ${{ steps.ns.outputs.kv_id }}
         run: |
           set -euo pipefail
           BASE="https://${PREVIEW_HOST}"
@@ -182,6 +183,36 @@ jobs:
             echo "preview host never answered /api/ping: $BASE" >&2
             exit 1
           fi
+
+          # A pushed commit always needs a new Worker version, but almost never
+          # needs another copy of the same fixture data. The old delete-then-
+          # reseed path spent roughly 40-60 KV writes on every push, enough for
+          # ordinary PR churn to exhaust the Free plan's 1,000 daily writes.
+          # Keep one 14-day fingerprint beside each PR's 14-day fixtures and
+          # make the common rerun read-only. Bump SEED_SCHEMA when the upload
+          # transformation changes in a way that requires re-baking stored HTML.
+          SEED_SCHEMA=preview-seed-v2
+          FIXTURE_FINGERPRINT="$({
+            printf '%s\n' "$SEED_SCHEMA"
+            find \
+              landing/tornado-doc \
+              test/fixtures/excalidraw \
+              test/fixtures/tdocs/sample-doc \
+              test/fixtures/tdocs/version-diff \
+              test/fixtures/tdocs/custom-design \
+              test/fixtures/tdocs/visual-viewer \
+              test/fixtures/tdocs/reply-activity \
+              -type f -print0 | sort -z | xargs -0 sha256sum
+            sha256sum test/fixtures/resolved-visibility-comments.json bin/tdoc-landing-release
+          } | sha256sum | cut -d' ' -f1)"
+          FIXTURE_MARKER="preview-fixtures:pr-${{ github.event.pull_request.number }}"
+          STORED_FINGERPRINT="$(wrangler kv key get "$FIXTURE_MARKER" \
+            --namespace-id "$PREVIEW_KV_ID" --text --remote 2>/dev/null || true)"
+          if [ "$STORED_FINGERPRINT" = "$FIXTURE_FINGERPRINT" ]; then
+            echo "preview fixtures unchanged; skipping KV delete/reseed"
+            exit 0
+          fi
+
           # A PR reuses its alias and preview storage across pushes. Clear the
           # two deterministic fixtures before reseeding so an older preview
           # cannot reject v1 as a stale write (or keep serving old PR code).
@@ -316,6 +347,8 @@ jobs:
             --data-binary @/tmp/tdoc-preview-landing.json \
             | tee /tmp/tdoc-preview-landing-resp.json
           jq -e '.ok == true' /tmp/tdoc-preview-landing-resp.json >/dev/null
+          wrangler kv key put "$FIXTURE_MARKER" "$FIXTURE_FINGERPRINT" \
+            --namespace-id "$PREVIEW_KV_ID" --remote --ttl 1209600
           echo "seeded landing"
 
       - name: Sticky preview comment
