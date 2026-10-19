@@ -47,7 +47,7 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  const FREE = { configured: true, free_docs: 20, prices: { month: 5, year: 50 }, docs: 12, seats: 3, plan: 'free', status: null, interval: null, quantity: null, current_period_end: null, cancel_at_period_end: false, has_customer: false, at_limit: false };
+  const FREE = { configured: true, free_docs: 80, prices: { month: 5, year: 50 }, docs: 12, seats: 3, plan: 'free', status: null, interval: null, quantity: null, current_period_end: null, cancel_at_period_end: false, has_customer: false, at_limit: false };
   const PAID = { ...FREE, docs: 53, seats: 5, plan: 'team', status: 'active', interval: 'year', quantity: 5, current_period_end: '2027-10-18T00:00:00Z', has_customer: true };
 
   async function open(width, billing, query = '') {
@@ -77,7 +77,7 @@ async function t(name, fn) {
 
     await t('a free team sees its docs used, the price for both periods, and upgrades through Checkout', async () => {
       const { context, page, calls } = await open(1050, FREE);
-      assert.match(await page.locator('#billing').textContent(), /Free for 20 docs and any number of members.*unlimited docs and Data backup.*\$5 per member a month, or \$50 a year.*12 of 20 free docs used/s);
+      assert.match(await page.locator('#billing').textContent(), /Free for 80 docs and any number of members.*unlimited docs and Data backup.*\$5 per member a month, or \$50 a year.*12 of 80 free docs used/s);
       assert.equal(await page.locator('.tm-plan-badge').textContent(), 'Free');
       assert.match(await page.locator('.tm-plan-choose').textContent(), /3 × \$5 = \$15 \/ month/);
       await page.getByRole('radio', { name: 'Yearly' }).click();
@@ -91,9 +91,16 @@ async function t(name, fn) {
     });
 
     await t('a team at the free limit is told new docs need the plan and existing ones stay editable', async () => {
-      const { context, page } = await open(1050, { ...FREE, docs: 53, seats: 5, at_limit: true });
-      assert.match(await page.locator('.tm-plan-summary.is-error').textContent(), /53 docs\. The free plan holds 20; upgrade to add more\. Existing docs stay editable\./);
+      const { context, page } = await open(1050, { ...FREE, docs: 85, seats: 5, at_limit: true });
+      assert.match(await page.locator('.tm-plan-summary.is-error').textContent(), /85 docs\. The free plan holds 80; upgrade to add more\. Existing docs stay editable\./);
       await shot(page, 'team-billing-limit-desktop.png');
+      await context.close();
+    });
+
+    await t('a team within 5 docs of the limit is warned, not stopped', async () => {
+      const { context, page } = await open(1050, { ...FREE, docs: 76, near_limit: true });
+      assert.match(await page.locator('.tm-plan-summary.is-warn').textContent(), /76 of 80 free docs used\. 4 left before the Team plan is needed\./);
+      await shot(page, 'team-billing-warn-desktop.png');
       await context.close();
     });
 

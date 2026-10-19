@@ -1,5 +1,6 @@
-// Team plan (#48): members are free and unlimited; a free team holds 20 docs.
-// The 21st doc in, or turning on Data backup, needs the Team plan ($8/seat).
+// Team plan (#48): members are free and unlimited; a free team holds 80 docs
+// (TDOC_TEAM_FREE_DOCS=20 here, so the cases stay small).
+// The 21st doc in, or turning on Data backup, needs the Team plan ($5/seat).
 //
 // Drives the real routes through worker.js with fake bindings and a stubbed
 // api.stripe.com, so Checkout, the Customer Portal, the signed webhook and
@@ -16,7 +17,7 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e && e.message ? e.message :
 async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-const STRIPE = { STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_PRICE_MONTHLY: 'price_month', STRIPE_PRICE_YEARLY: 'price_year', STRIPE_WEBHOOK_SECRET: 'whsec_test' };
+const STRIPE = { TDOC_TEAM_FREE_DOCS: '20', STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_PRICE_MONTHLY: 'price_month', STRIPE_PRICE_YEARLY: 'price_year', STRIPE_WEBHOOK_SECRET: 'whsec_test' };
 
 // A fake Stripe: records calls, keeps one subscription per id.
 function stubStripe() {
@@ -122,6 +123,31 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     assert(plan.status === 200 && plan.body.billing.configured === false, JSON.stringify(plan.body));
     const co = await call(env, '/api/team/billing', { method: 'POST', cookie: admin.cookie, headers: origin, body: { id: team.id, action: 'checkout' } });
     assert(co.status === 503, `checkout without Stripe ${co.status}`);
+  });
+
+  await t('the free team limit is 80 docs unless a deploy overrides it', async () => {
+    const stripe = stubStripe();
+    try {
+      const { TDOC_TEAM_FREE_DOCS, ...live } = STRIPE;
+      const { env, admin, team } = await setup(live);
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.free_docs === 80 && plan.at_limit === false, JSON.stringify(plan));
+    } finally { stripe.restore(); }
+  });
+
+  await t('within 5 docs of the free limit a move succeeds with a warning', async () => {
+    const stripe = stubStripe();
+    try {
+      const { env, admin, team, fill } = await setup();
+      const early = await fill(14);
+      assert(early.status === 200 && !early.body.plan_warning, `warned too early: ${JSON.stringify(early.body)}`);
+      // The band starts exactly at limit - 5 (75 of 80; 15 of 20 here).
+      const near = await fill(1, 14);
+      assert(near.status === 200 && near.body.plan_warning && near.body.plan_warning.left === 5 && near.body.plan_warning.docs === 15, JSON.stringify(near.body));
+      assert(/15 of 20 free docs; 5 left/.test(near.body.plan_warning.message), near.body.plan_warning.message);
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.near_limit === true && plan.at_limit === false, JSON.stringify(plan));
+    } finally { stripe.restore(); }
   });
 
   await t('a free team: unlimited members, 20 docs; the 21st doc in is refused, existing docs still publish', async () => {
