@@ -65,7 +65,7 @@ function teamHue(id) {
   for (const ch of String(id || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return h;
 }
-export function TeamPane({ team, docs, viewer, menuFor, inFolder = false, layout = 'list' }) {
+export function TeamPane({ team, docs, viewer, menuFor, inFolder = false, layout = 'list', empty, pathForDoc }) {
   return (
     <section className="pane" id="pane-team">
       <DocList
@@ -77,10 +77,11 @@ export function TeamPane({ team, docs, viewer, menuFor, inFolder = false, layout
             day(doc.updated) ? `updated ${day(doc.updated)}` : null,
           ].filter(Boolean).join(' · '),
           starrable: false,
+          path: pathForDoc ? pathForDoc(doc) : '',
           menuItems: menuFor(doc),
           data: { created: doc.created, updated: doc.updated, author: doc.author || viewer },
         })}
-        empty={!inFolder ? `No docs in ${team.name} yet. Create one, or move one here from My docs.` : null}
+        empty={empty ?? (!inFolder ? `No docs in ${team.name} yet. Create one, or move one here from My docs.` : null)}
       />
     </section>
   );

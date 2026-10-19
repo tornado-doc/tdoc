@@ -55,6 +55,7 @@ const OFFLINE = [
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
   'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
   'docs-hub-unified.test.js',   // My docs + team use one toolbar/list and cached previews
+  'catalog-search.test.js',      // all-folder document search + field prefixes + nested paths
   'folder-move-to-team.test.js', // a whole My docs folder into a team: batches, re-runs, stale reads
   'team-backup.test.js',         // customer-owned S3/R2 mirror: encryption, queue, retries, tombstones
   'backup-cli.test.js',          // open-format portability copy download + checksum verification
