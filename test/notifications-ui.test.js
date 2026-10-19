@@ -87,6 +87,15 @@ async function t(name, fn) {
       state.items = state.items.map((i) => (body.all || (body.ids || []).includes(i.id) ? { ...i, read: true } : i));
       return r.fulfill({ json: { ok: true, unread: unread() } });
     });
+    state.email = { available: true, on: true };
+    await page.route('**/api/notifications/email', (r) => {
+      if (r.request().method() === 'POST') {
+        const body = JSON.parse(r.request().postData());
+        state.posts.push({ email: body });
+        state.email = { ...state.email, on: body.on };
+      }
+      return r.fulfill({ json: state.email });
+    });
     await page.route('**/api/notifications?*', (r) => r.fulfill({ json: { items: state.items, unread: unread(), has_more: false } }));
     await page.route('**/api/doc/access-request', (r) => {
       const body = JSON.parse(r.request().postData());
@@ -198,6 +207,18 @@ async function t(name, fn) {
       assert.equal(alerts.length, 2, JSON.stringify(alerts));
       assert.equal(alerts[1].title, 'Claire mentioned you on Q3 plan');
       assert.equal(alerts[1].body, 'Please check the numbers');
+      await context.close();
+    });
+
+    await t('the email switch starts on and turning it off tells the server', async () => {
+      const { context, dialog, state } = await open();
+      const email = dialog.getByRole('switch', { name: 'Email notifications' });
+      await email.waitFor();
+      assert.equal(await email.getAttribute('aria-checked'), 'true');
+      await email.click();
+      for (let i = 0; i < 50 && await email.getAttribute('aria-checked') !== 'false'; i++) await new Promise((r) => setTimeout(r, 100));
+      assert.equal(await email.getAttribute('aria-checked'), 'false');
+      assert.deepEqual(state.posts.filter((p) => p.email), [{ email: { on: false } }]);
       await context.close();
     });
 

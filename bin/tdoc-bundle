@@ -24,6 +24,9 @@ const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
 // The shell builder runs server-side in the worker; the framework-free probe is
 // injected into isolated author frames.
 const shellMod = fs.readFileSync(path.join(skill, 'server/shell.js'), 'utf8');
+// An ES module inlined into the worker module: its `export`s become plain
+// declarations there.
+const notificationText = fs.readFileSync(path.join(skill, 'shell/src/notification-text.js'), 'utf8').replace(/^export /gm, '');
 const frameProbe = require(path.join(skill, 'server/frame-probe-source.js'))();
 const readerCss = fs.readFileSync(path.join(skill, 'server/reader.css'), 'utf8');
 const runtimeManifest = JSON.parse(fs.readFileSync(path.join(skill, 'server/runtime/manifest.json'), 'utf8'));
@@ -69,7 +72,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs].join('\0'));
+const bundleSha = sha([worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -91,6 +94,7 @@ function mustReplace(hay, needle, sub, label) {
   return out;
 }
 replaced = mustReplace(replaced, '/* __TDOC_SHELL_MODULE__ */', shellMod, 'SHELL_MODULE');
+replaced = mustReplace(replaced, '/* __TDOC_NOTIFICATION_TEXT__ */', notificationText, 'NOTIFICATION_TEXT');
 replaced = mustReplace(replaced, /const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(frameProbe) + ';', 'PROBE_JS');
 replaced = mustReplace(replaced, /const READER_CSS = `__TDOC_READER_CSS__`;/, 'const READER_CSS = ' + JSON.stringify(readerCss) + ';', 'READER_CSS');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RUNTIME_JS_PATH__";/, 'const SHELL_RUNTIME_JS_PATH = ' + JSON.stringify(runtimeJsPath) + ';', 'SHELL_RUNTIME_JS_PATH');

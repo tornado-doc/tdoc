@@ -19,13 +19,13 @@ const bundler = read('bin/tdoc-bundle');
   console.log('React worker shell architecture\n');
 
   await t('bundle embeds only the shell builder, frame probe, reader CSS, Vite runtime, feedback client, and push worker', async () => {
-    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__', '__TDOC_FEEDBACK_JS__', '__TDOC_PUSH_SW_JS__']) {
+    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__', '__TDOC_FEEDBACK_JS__', '__TDOC_PUSH_SW_JS__', '__TDOC_NOTIFICATION_TEXT__']) {
       if (!bundler.includes(marker)) throw new Error(`missing ${marker}`);
     }
     for (const retired of ['CHROME_MODULE', 'CHROME_JS', 'MANAGE_JS', 'SIGNIN_JS', 'ONBOARD_JS']) {
       if (bundler.includes(retired)) throw new Error(`legacy bundle input remains: ${retired}`);
     }
-    if (!bundler.includes('sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs]')) {
+    if (!bundler.includes('sha([worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs]')) {
       throw new Error('bundle hash does not cover the complete runtime input set');
     }
   });

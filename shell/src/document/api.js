@@ -279,6 +279,19 @@ export function answerAccessRequest({ slug, requester, action }) {
   });
 }
 
+// Notification email (#772): { available, on } for the signed-in person.
+export function getEmailNotifications() {
+  return request('/api/notifications/email');
+}
+
+export function setEmailNotifications(on) {
+  return request('/api/notifications/email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on }),
+  });
+}
+
 // Web push (#771): this browser's subscription for the bell.
 export function getPushKey() {
   return request('/api/push/key');

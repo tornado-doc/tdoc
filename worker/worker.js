@@ -16,6 +16,9 @@
 // Cross-origin shell builder is inlined as code. The frame probe remains a
 // framework-free string injected only into isolated author frames.
 /* __TDOC_SHELL_MODULE__ */
+// How a notification reads and where it leads (shell/src/notification-text.js),
+// inlined so a notification email says exactly what the bell and the alert say.
+/* __TDOC_NOTIFICATION_TEXT__ */
 const PROBE_JS = `__TDOC_PROBE_JS__`;
 const READER_CSS = `__TDOC_READER_CSS__`;
 const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RUNTIME_JS_PATH__";
@@ -9243,22 +9246,29 @@ async function loadInbox(env, login) {
 }
 
 // Every inbox row is written here, so every row also leaves the building:
-// web push to the browsers the recipient turned alerts on in (#771). The
-// push runs after the row is stored and never fails the write.
-async function writeInboxEvent(env, who, ev, ctx = null) {
+// web push to the browsers the recipient turned alerts on in (#771) and an
+// email (#772). Both run after the row is stored and never fail the write.
+// `origin` is the site the event happened on, for the links in an email.
+async function writeInboxEvent(env, who, ev, { ctx = null, origin = '' } = {}) {
   const { key, inbox } = await loadInbox(env, who);
   if (!key) return null;
   const next = applyInboxEvent(inbox, { id: `n_${Date.now()}_${rand(4)}`, ...ev, at: ev.at || new Date().toISOString() });
   await env.META.put(key, JSON.stringify(next));
   const row = next.items[0];
-  const out = pushInboxRow(env, key.slice('inbox:'.length), row).catch((error) => {
-    console.error('[push] fan-out failed:', error && error.message ? error.message : error);
-  });
+  const recipient = key.slice('inbox:'.length);
+  const out = Promise.all([
+    pushInboxRow(env, recipient, row).catch((error) => {
+      console.error('[push] fan-out failed:', error && error.message ? error.message : error);
+    }),
+    emailInboxRow(env, recipient, row, origin).catch((error) => {
+      console.error('[email] notification failed:', error && error.message ? error.message : error);
+    }),
+  ]);
   if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(out); else await out;
   return row;
 }
 
-async function deliverInbox(env, recipientLogin, ev, ctx = null) {
+async function deliverInbox(env, recipientLogin, ev, delivery = {}) {
   const recips = inboxRecipients({
     kind: ev.kind,
     actorLogin: ev.actor && ev.actor.login,
@@ -9271,7 +9281,7 @@ async function deliverInbox(env, recipientLogin, ev, ctx = null) {
   const at = ev.at || new Date().toISOString();
   for (const who of recips) {
     try {
-      await writeInboxEvent(env, who, { ...ev, at }, ctx);
+      await writeInboxEvent(env, who, { ...ev, at }, delivery);
     } catch (error) {
       // The comment/reply/reaction is already committed in the document DO.
       // A KV quota or transient inbox failure must not turn that success into
@@ -9487,6 +9497,94 @@ async function pushInboxRow(env, who, row) {
     }
     if (result === 'gone') await removePushEndpoint(env, who, sub.endpoint);
   }));
+}
+
+// ---- notification email (#772) ---------------------------------------------
+// The bell only helps someone already on tdoc, and a push needs a browser
+// that said yes. An email reaches the person who was tagged and does not know
+// it. Same pipe and same stinginess as invitations (deliverEmail above): the
+// sending domain's reputation is shared by everything tdoc sends.
+//   - only what is addressed to you: a mention, a reply to you, a comment on
+//     your doc, a request for access to it -- never reactions
+//   - one email per thread per cooldown: a busy thread is one email, and
+//     the bell holds the rest
+//   - a per-address daily cap bounds the worst case
+//   - the permanent opt-out (email-optout:<addr>) and the per-person switch
+//     in Notifications (notify-email-off:<actor key>) are checked first
+//   - no sender configured: nothing, and not an error
+const EMAIL_NOTIFY_KINDS = new Set(['mention', 'reply', 'comment', 'access_request']);
+const EMAIL_NOTIFY_COOLDOWN_S = 30 * 60;
+const EMAIL_NOTIFY_DAILY_CAP = 30;
+
+async function emailNotificationsOff(env, keys) {
+  for (const who of keys) if (await env.META.get(`notify-email-off:${who}`)) return true;
+  return false;
+}
+
+async function notificationAddress(env, who) {
+  if (who.startsWith('email:')) return normalizeEmail(who.slice('email:'.length));
+  return resolveInviteeAddress(env, who);
+}
+
+function notificationEmailBodies({ label, preview, link, optoutUrl, settingsUrl }) {
+  const text = [
+    label,
+    ...(preview ? ['', ...String(preview).split('\n').map((line) => `> ${line}`)] : []),
+    '',
+    `Open it: ${link}`,
+    '',
+    '—',
+    'tdoc · prompt-native documents',
+    `Turn these off in Notifications: ${settingsUrl}`,
+    `No more emails from tdoc: ${optoutUrl}`,
+  ].join('\n');
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const html = [
+    '<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;color:#1a1a1a;max-width:34em;margin:2em auto;padding:0 1em">',
+    `<p>${esc(label)}</p>`,
+    preview ? `<blockquote style="margin:0 0 1em;padding:0.5em 1em;border-left:3px solid #ddd;color:#333;white-space:pre-wrap">${esc(preview)}</blockquote>` : '',
+    `<p><a href="${esc(link)}">Open it on tdoc</a></p>`,
+    `<p style="color:#999;font-size:0.85em;border-top:1px solid #eee;padding-top:1em">tdoc · prompt-native documents · <a href="${esc(settingsUrl)}" style="color:#999">Turn these off</a> · <a href="${esc(optoutUrl)}" style="color:#999">No more emails from tdoc</a></p>`,
+    '</body></html>',
+  ].join('');
+  return { text, html };
+}
+
+async function emailInboxRow(env, who, row, origin) {
+  if (!row || !EMAIL_NOTIFY_KINDS.has(row.kind) || !origin || !emailSenderAvailable(env)) return false;
+  if (await emailNotificationsOff(env, [who])) return false;
+  let addr = null;
+  try { addr = await notificationAddress(env, who); } catch {}
+  if (!addr) return false;
+  if (await env.META.get(`email-optout:${addr}`)) return false;
+  const coolKey = `notify-email-sent:${addr}:${row.group_key}`;
+  if (await env.META.get(coolKey)) return false;
+  const capKey = `notify-email-cap:${addr}:${new Date().toISOString().slice(0, 10)}`;
+  const sentToday = Number(await env.META.get(capKey)) || 0;
+  if (sentToday >= EMAIL_NOTIFY_DAILY_CAP) return false;
+  let host = 'tdoc.dev';
+  try { host = new URL(origin).hostname; } catch {}
+  const tok = rand(16);
+  const label = notificationLabel(row);
+  const { text, html: htmlBody } = notificationEmailBodies({
+    label,
+    preview: String(row.preview || '').slice(0, 600),
+    link: `${origin}${notificationTarget(row)}`,
+    optoutUrl: `${origin}/email/optout?t=${tok}`,
+    settingsUrl: `${origin}/me?notifications=1`,
+  });
+  // Claim the thread before sending: two replies landing together are one email.
+  await env.META.put(coolKey, '1', { expirationTtl: EMAIL_NOTIFY_COOLDOWN_S });
+  await env.META.put(`email-optout-token:${tok}`, addr, { expirationTtl: 60 * 60 * 24 * 30 });
+  await deliverEmail(env, {
+    to: addr,
+    from: { email: String(env.TDOC_EMAIL_FROM || '').trim() || `notifications@${host}`, name: 'tdoc' },
+    subject: label,
+    text,
+    html: htmlBody,
+  });
+  await env.META.put(capKey, String(sentToday + 1), { expirationTtl: 60 * 60 * 24 * 2 });
+  return true;
 }
 
 // ===========================================================================
@@ -12841,6 +12939,24 @@ export default {
       return json({ ok: true, unread: inboxUnread(mergeInboxes(parts)) });
     }
 
+    // ---- notification email (#772): the person's own on/off switch ----
+    // `available` is false when this site has no sender; the switch hides.
+    if (p === '/api/notifications/email' && (method === 'GET' || method === 'POST')) {
+      const s = await getSession(env, req);
+      const keys = actorKeys(s);
+      if (!keys.length) return json({ error: 'sign_in_required' }, { status: 401 });
+      if (method === 'POST') {
+        let body = {};
+        try { body = await req.json(); } catch {}
+        // Off is recorded under every key, so a mention to any of them is quiet.
+        for (const who of keys) {
+          if (body.on === false) await env.META.put(`notify-email-off:${who}`, '1');
+          else await env.META.delete(`notify-email-off:${who}`);
+        }
+      }
+      return json({ available: emailSenderAvailable(env), on: !(await emailNotificationsOff(env, keys)) });
+    }
+
     // ---- web push (#771): this browser's subscription for the bell ----
     if (p === '/api/push/key' && method === 'GET') {
       const { publicKey } = await vapidKeys(env);
@@ -13981,7 +14097,7 @@ export default {
             kind: 'mention', slug, version: V, comment_id: commentId,
             thread_id: threadId, target_id: commentId, mentions,
             actor: author, preview: commentText, title, at: created,
-          }, ctx);
+          }, { ctx, origin: url.origin });
         }
         if (!parent_id) {
           const owner = positionalRecipient(ownerLogin, mentions);
@@ -13989,7 +14105,7 @@ export default {
             await deliverInbox(env, owner, {
               kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
               actor: author, preview: commentText, title, at: created,
-            }, ctx);
+            }, { ctx, origin: url.origin });
           }
         } else {
           const parentA = recordAuthor(priorList, parent_id);
@@ -13999,7 +14115,7 @@ export default {
               kind: 'reply', slug, version: V, comment_id: op.reply_id,
               thread_id: res.body && res.body.thread_id, target_id: parent_id,
               actor: author, preview: commentText, title, at: created,
-            }, ctx);
+            }, { ctx, origin: url.origin });
           }
         }
       }
@@ -14192,7 +14308,7 @@ export default {
           thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
           actor: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
           title: (meta && meta.title) || slug, emoji,
-        }, ctx);
+        }, { ctx, origin: url.origin });
       }
       return json(res.body, { status: res.status });
     }
@@ -15346,7 +15462,7 @@ export default {
             requester: asker,
             at: new Date().toISOString(),
             actor: { login: asker, name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
-        }, ctx);
+        }, { ctx, origin: url.origin });
       }
       await env.META.put(dedupeKey, '1', { expirationTtl: 7 * 24 * 60 * 60 });
       return json({ ok: true, requested: true });
@@ -15370,7 +15486,7 @@ export default {
         docTitle: 'tdoc - email preferences',
         title: done ? 'You are unsubscribed' : 'This link has expired',
         message: done
-          ? 'This address will not receive invitation emails from this site again.'
+          ? 'This address will not receive invitation or notification emails from this site again.'
           : 'The unsubscribe link is single-use and time-limited. If you still receive unwanted email, reply to it and the operator will remove you.',
         error: !done,
       });
@@ -15409,7 +15525,7 @@ export default {
           actor: approver
             ? { login: actorKey(approver), name: actorDisplayName(approver), avatar_url: approver.avatar_url || '' }
             : null,
-        }, ctx);
+        }, { ctx, origin: url.origin });
       }
       // A later request from the same person is a new question.
       await env.META.delete(`access-req:${slug}:${who}`);

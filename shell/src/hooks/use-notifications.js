@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   answerAccessRequest as answerAccessRequestApi,
+  getEmailNotifications,
   getUnreadNotificationCount,
   listNotifications,
   markAllNotificationsRead,
   markNotificationsRead,
+  setEmailNotifications,
 } from '../document/api.js';
 import { notificationLabel, notificationTarget } from '../notifications-dialog.jsx';
 import {
@@ -57,9 +59,13 @@ export function useNotifications(enabled) {
     }
   }, [enabled]);
 
+  // { available, on } from the server; null until the dialog first opens.
+  const [emailAlerts, setEmailAlertsState] = useState(null);
+
   const load = useCallback(async ({ append = false } = {}) => {
     if (!enabled) return;
     setLoading(true);
+    if (!append) getEmailNotifications().then(setEmailAlertsState).catch(() => {});
     try {
       const offset = append ? items.length : 0;
       const result = await listNotifications(offset);
@@ -100,6 +106,11 @@ export function useNotifications(enabled) {
     return permission;
   }, [items]);
 
+  const setEmailAlerts = useCallback(async (on) => {
+    setEmailAlertsState((current) => (current ? { ...current, on } : current));
+    try { setEmailAlertsState(await setEmailNotifications(on)); } catch { /* the next open re-reads it */ }
+  }, []);
+
   const dismissAlertsPrompt = useCallback(() => {
     snoozeBrowserNotificationPrompt();
     setPromptRevision((value) => value + 1);
@@ -135,5 +146,5 @@ export function useNotifications(enabled) {
   }, [refreshUnread]);
 
   const browserPrompt = browserNotificationPromptEligible(unread);
-  return { items, unread, hasMore, loading, load, markRead, markAllRead, answerAccessRequest, browserAlerts, browserPrompt, setAlerts, dismissAlertsPrompt };
+  return { items, unread, hasMore, loading, load, markRead, markAllRead, answerAccessRequest, browserAlerts, browserPrompt, setAlerts, dismissAlertsPrompt, emailAlerts, setEmailAlerts };
 }
