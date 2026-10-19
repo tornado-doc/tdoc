@@ -69,6 +69,20 @@ function b64urlBytes(buffer) {
   return window.btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
+// A browser's push registration can fail transiently (seen on a fresh Chrome
+// profile whose push service is still checking in: the same call succeeds
+// seconds later). A refusal is final; anything else gets two more tries.
+async function subscribeWithRetry(registration, key) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytesFromB64url(key) });
+    } catch (error) {
+      if (attempt >= 2 || error?.name === 'NotAllowedError') throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt ? 6000 : 2000));
+    }
+  }
+}
+
 // Subscribe this browser (or re-confirm it) and hand the subscription to the
 // server under the signed-in account. Idempotent, so it also runs on every
 // page load with alerts on: that re-homes a browser after a sign-in as
@@ -87,10 +101,14 @@ export async function ensureWebPush() {
       await subscription.unsubscribe();
       subscription = null;
     }
-    if (!subscription) {
-      subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytesFromB64url(key) });
-    }
+    if (!subscription) subscription = await subscribeWithRetry(registration, key);
     await savePushSubscription(subscription.toJSON());
+    // Switched off while this was in flight (the page-load re-sync racing the
+    // switch): undo, or the server keeps pushing to a browser that said no.
+    if (!browserNotificationsEnabled()) {
+      await dropWebPush();
+      return false;
+    }
     window.localStorage.setItem(PUSH_KEY, key);
     return true;
   } catch {
