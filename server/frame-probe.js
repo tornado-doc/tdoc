@@ -136,11 +136,12 @@
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
       'figure[data-tdoc-artifact="Diagram"][aria-label="Diagram"][data-tdoc-excalidraw]{border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;}' +
       'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;margin-bottom:4px;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:32px;padding:5px 8px;border:0;border-radius:6px;background:transparent;box-shadow:none;color:#667085;font:500 12px/1.2 system-ui,sans-serif;cursor:pointer;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:hover{background:#f2f4f7;color:#344054;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;box-sizing:border-box;padding-right:52px;margin-bottom:4px;}' +
+      'html[data-tdoc-interaction-mode="edit"] figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{padding-right:0;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 13px;border:1px solid #c8d7fc;border-radius:999px;background:#f3f7ff;box-shadow:none;color:#1652f0;font:600 13px/1.2 system-ui,sans-serif;cursor:pointer;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:hover{background:#e8f0ff;border-color:#a9c0f8;color:#1244c5;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
       '@media print{figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:none!important;}}' +
       'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
@@ -163,7 +164,7 @@
       if (caption && caption.textContent.trim() === 'Diagram') caption.setAttribute('data-tdoc-provider', '');
       var button = document.createElement('button');
       button.type = 'button';
-      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4L16.5 3.5Z"/></svg><span>Edit</span>';
+      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4L16.5 3.5Z"/></svg><span>Edit diagram</span>';
       button.setAttribute('aria-label', 'Edit diagram');
       button.setAttribute('data-tdoc-provider', '');
       button.setAttribute('data-tdoc-diagram-open', '');
