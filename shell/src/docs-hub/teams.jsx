@@ -666,7 +666,9 @@ export function TeamBillingCard({ team }) {
       : `${billing.quantity || seats} ${(billing.quantity || seats) === 1 ? 'seat' : 'seats'}, billed ${billing.interval === 'year' ? 'yearly' : 'monthly'}.${renews ? ` ${billing.cancel_at_period_end ? 'Ends' : 'Renews'} ${renews}.` : ''}`
     : billing.at_limit
       ? `${billing.docs} docs. The free plan holds ${billing.free_docs}; upgrade to add more. Existing docs stay editable.`
-      : `${billing.docs} of ${billing.free_docs} free docs used.`;
+      : billing.near_limit
+        ? `${billing.docs} of ${billing.free_docs} free docs used. ${billing.free_docs - billing.docs} left before the Team plan is needed.`
+        : `${billing.docs} of ${billing.free_docs} free docs used.`;
 
   return (
     <section className="tm-settings-card" id="billing" aria-labelledby="tm-billing-heading">
@@ -677,7 +679,7 @@ export function TeamBillingCard({ team }) {
         </div>
         <span className={`tm-plan-badge${paid ? ' is-team' : ''}`}>{paid ? 'Team' : 'Free'}</span>
       </div>
-      <p className={`tm-plan-summary${billing.status === 'past_due' || billing.at_limit ? ' is-error' : ''}`}>{summary}</p>
+      <p className={`tm-plan-summary${billing.status === 'past_due' || billing.at_limit ? ' is-error' : billing.near_limit ? ' is-warn' : ''}`}>{summary}</p>
       {paid ? null : (
         <div className="tm-plan-choose">
           <SegmentedControl

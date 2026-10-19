@@ -170,11 +170,15 @@ if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
   case "$(printf '%s' "$resp" | json_get error)" in
     not_owner) echo "[tdoc] cannot move $(printf '%s' "$resp" | json_get slug): only its author (personal doc) or a team admin (team doc) can move it." >&2 ;;
     team_not_found) echo "[tdoc] you are not a member of that team." >&2 ;;
+    team_plan_required) echo "[tdoc] $(printf '%s' "$resp" | json_get message)" >&2 ;;
     *) echo "[tdoc] move failed: $resp" >&2 ;;
   esac
   exit 1
 fi
 if [ -n "$TEAM" ]; then echo "[tdoc] in team $TEAM: ${SLUGS[*]}"; else echo "[tdoc] back in My docs: ${SLUGS[*]}"; fi
+# Near the free team's doc limit: a warning, never a stop.
+warn="$(printf '%s' "$resp" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const w=JSON.parse(s).plan_warning;if(w&&w.message)process.stdout.write(w.message)}catch{}})')"
+if [ -n "$warn" ]; then echo "[tdoc] warning: $warn" >&2; fi
 if [ -n "$FOLDER" ]; then
   # Filing is idempotent and makes the folder on first use, so a daily
   # report can pass the same --folder on every run.

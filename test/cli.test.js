@@ -969,6 +969,30 @@ t('tdoc-move resolves a team by name and moves; unknown team fails without movin
   }
 });
 
+t('tdoc-move prints the free-plan warning near the limit and the upgrade message past it', () => {
+  const bin = path.join(BIN, 'tdoc-move');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-move-plan-'));
+  const stub = startStub(
+    `(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
+    `s.writeHead(q.url==='/api/team/move'&&b.includes('over')?402:200,{'content-type':'application/json'});` +
+    `if(q.url==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_bf',name:'BeFreed',role:'member'}]}));` +
+    `if(b.includes('over'))return s.end(JSON.stringify({error:'team_plan_required',message:'BeFreed is on the free plan, which holds 80 docs. Ask an admin to upgrade to the Team plan to add more.'}));` +
+    `s.end(JSON.stringify({ok:true,moved:1,plan_warning:{docs:77,limit:80,left:3,message:'BeFreed has 77 of 80 free docs; 3 left before the Team plan is needed.'}}));});}`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${stub.port}`, upload_token: 'tok-1' }));
+    const env = { ...process.env, HOME: home };
+    const near = spawnSync(bin, ['--team', 'befreed', 'near-doc'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(near.status === 0, `a warning must not fail the move: ${near.stderr}`);
+    assert(/warning: BeFreed has 77 of 80 free docs; 3 left/.test(near.stderr), `no warning: ${near.stderr}`);
+    const over = spawnSync(bin, ['--team', 'befreed', 'over-doc'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(over.status !== 0 && /free plan, which holds 80 docs\. Ask an admin to upgrade/.test(over.stderr), `over: ${over.status} ${over.stderr}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 t('tdoc-folder resolves team + folder names, creates idempotently, files docs; tdoc-move --folder files after moving', () => {
   const bin = path.join(BIN, 'tdoc-folder');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-folder-home-'));
