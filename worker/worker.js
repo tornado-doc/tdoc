@@ -4211,7 +4211,12 @@ async function joinTeamFromSession(env, team, s) {
 // (local, preview, self-hosted) behaves exactly as before: no limit, no plan.
 // Stripe is the source of truth; `team-billing:<id>` is its last webhook,
 // written only on checkout and subscription changes.
-const TEAM_FREE_DOCS = 20;
+const TEAM_FREE_DOCS = 80;
+// TDOC_TEAM_FREE_DOCS overrides it (tests, or a deploy with its own limit).
+function teamFreeDocs(env) {
+  const n = Number(env && env.TDOC_TEAM_FREE_DOCS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : TEAM_FREE_DOCS;
+}
 // What the plan card shows. The Stripe Prices behind STRIPE_PRICE_MONTHLY /
 // STRIPE_PRICE_YEARLY must charge these per seat (USD).
 const TEAM_SEAT_PRICE_USD = { month: 5, year: 50 };
@@ -4244,10 +4249,11 @@ async function teamPlanBlocksDocs(env, team, adding = 1) {
   if (!team || !stripeConfigured(env) || adding <= 0) return null;
   if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
   const count = await teamDocCount(env, team.id);
-  if (count + adding <= TEAM_FREE_DOCS) return null;
+  const free = teamFreeDocs(env);
+  if (count + adding <= free) return null;
   return {
-    error: 'team_plan_required', limit: TEAM_FREE_DOCS, docs: count,
-    message: `${team.name} is on the free plan, which holds ${TEAM_FREE_DOCS} docs. Ask an admin to upgrade to the Team plan to add more.`,
+    error: 'team_plan_required', limit: free, docs: count,
+    message: `${team.name} is on the free plan, which holds ${free} docs. Ask an admin to upgrade to the Team plan to add more.`,
   };
 }
 // A team whose Team plan ended keeps its backup settings, but nothing is
@@ -4264,7 +4270,7 @@ async function publicTeamBilling(env, team, billing) {
   const docs = configured ? await teamDocCount(env, team.id) : null;
   return {
     configured,
-    free_docs: TEAM_FREE_DOCS,
+    free_docs: teamFreeDocs(env),
     prices: TEAM_SEAT_PRICE_USD,
     docs,
     seats: team.members.length,
@@ -4275,7 +4281,7 @@ async function publicTeamBilling(env, team, billing) {
     current_period_end: (billing && billing.current_period_end) || null,
     cancel_at_period_end: !!(billing && billing.cancel_at_period_end),
     has_customer: !!(billing && billing.customer),
-    at_limit: !paid && docs != null && docs >= TEAM_FREE_DOCS,
+    at_limit: !paid && docs != null && docs >= teamFreeDocs(env),
   };
 }
 // Stripe takes form encoding with bracketed keys for nested values.

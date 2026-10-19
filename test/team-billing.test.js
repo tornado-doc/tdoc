@@ -1,4 +1,5 @@
-// Team plan (#48): members are free and unlimited; a free team holds 20 docs.
+// Team plan (#48): members are free and unlimited; a free team holds 80 docs
+// (TDOC_TEAM_FREE_DOCS=20 here, so the cases stay small).
 // The 21st doc in, or turning on Data backup, needs the Team plan ($8/seat).
 //
 // Drives the real routes through worker.js with fake bindings and a stubbed
@@ -16,7 +17,7 @@ function bad(n, e) { console.log(`  ✗ ${n}\n    ${e && e.message ? e.message :
 async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
 function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
-const STRIPE = { STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_PRICE_MONTHLY: 'price_month', STRIPE_PRICE_YEARLY: 'price_year', STRIPE_WEBHOOK_SECRET: 'whsec_test' };
+const STRIPE = { TDOC_TEAM_FREE_DOCS: '20', STRIPE_SECRET_KEY: 'sk_test_x', STRIPE_PRICE_MONTHLY: 'price_month', STRIPE_PRICE_YEARLY: 'price_year', STRIPE_WEBHOOK_SECRET: 'whsec_test' };
 
 // A fake Stripe: records calls, keeps one subscription per id.
 function stubStripe() {
@@ -122,6 +123,16 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
     assert(plan.status === 200 && plan.body.billing.configured === false, JSON.stringify(plan.body));
     const co = await call(env, '/api/team/billing', { method: 'POST', cookie: admin.cookie, headers: origin, body: { id: team.id, action: 'checkout' } });
     assert(co.status === 503, `checkout without Stripe ${co.status}`);
+  });
+
+  await t('the free team limit is 80 docs unless a deploy overrides it', async () => {
+    const stripe = stubStripe();
+    try {
+      const { TDOC_TEAM_FREE_DOCS, ...live } = STRIPE;
+      const { env, admin, team } = await setup(live);
+      const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
+      assert(plan.free_docs === 80 && plan.at_limit === false, JSON.stringify(plan));
+    } finally { stripe.restore(); }
   });
 
   await t('a free team: unlimited members, 20 docs; the 21st doc in is refused, existing docs still publish', async () => {
