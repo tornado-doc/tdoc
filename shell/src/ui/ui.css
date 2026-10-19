@@ -404,11 +404,17 @@ a.ui-menu-item:visited {
 /* Notifications dialog: the browser-alert switch, a count line, then one
    row per notification -- avatar, who did what on which doc, the comment's
    own words, and when. Unread rows carry the accent tint and a dot. */
-.tdoc-notif-setting { padding: 0 0 12px; margin: 0 0 4px; border-bottom: 1px solid var(--td-line); }
-.tdoc-notif-setting .tdoc-switch { padding-left: 0; height: auto; }
-.tdoc-notif-setting .tdoc-switch:hover { border-color: transparent; background: none; }
-.tdoc-notif-setting .tdoc-switch-label { font-size: 14px; color: var(--td-ink); }
-.tdoc-notif-setting .manage-hint { margin: 4px 0 0 36px; }
+/* Settings: one inset group, a row per channel, label left and switch right. */
+.tdoc-notif-settings { margin: 2px 0 14px; border-radius: 12px; background: color-mix(in srgb, var(--td-ink) 4%, transparent); overflow: hidden; }
+.tdoc-notif-setting { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 14px; box-sizing: border-box; }
+.tdoc-notif-setting + .tdoc-notif-setting { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-ink) 9%, transparent); }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch { flex: 1; flex-direction: row-reverse; justify-content: space-between; height: 48px; margin: 0 -14px; padding: 0 14px; border: 0; border-radius: 0; }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch:hover { border-color: transparent; background: none; }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch-label, .tdoc-notif-settings .tdoc-notif-setting > .tdoc-switch-label { font-size: 15px; color: var(--td-ink); }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch-track { width: 40px; height: 24px; }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch-thumb { top: 2px; left: 2px; width: 20px; height: 20px; }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch-track[data-checked] .tdoc-switch-thumb { transform: translateX(16px); }
+.tdoc-notif-setting-value { font-size: 15px; color: var(--td-muted); }
 .tdoc-notif-prompt {
   position: fixed; top: 58px; right: 18px; z-index: 1000001;
   display: grid; gap: 14px; width: min(380px, calc(100vw - 24px)); box-sizing: border-box;

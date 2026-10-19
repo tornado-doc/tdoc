@@ -50,39 +50,44 @@ export function BrowserAlertsPrompt({ notifications }) {
   );
 }
 
-function BrowserAlertsSetting({ notifications }) {
-  const { on, permission, mode, pushable } = notifications.browserAlerts || {};
-  if (permission === 'unsupported') return null;
-  const reachesClosed = on ? mode === 'push' : pushable;
-  const hint = permission === 'denied'
-    ? 'Blocked for tdoc in this browser. Allow notifications in the site settings, then turn this on.'
-    : `A desktop alert when someone comments, mentions you or replies, ${reachesClosed ? 'even when tdoc is closed.' : 'while tdoc is open in a tab.'}`;
-  return (
-    <div className="tdoc-notif-setting">
-      <AppSwitch
-        id="tdoc-browser-alerts"
-        checked={!!on}
-        onCheckedChange={(next) => notifications.setAlerts(next)}
-        label="Browser notifications"
-      />
-      <p className="manage-hint">{hint}</p>
-    </div>
-  );
-}
-
-// Shown only when this site can send email at all.
-function EmailAlertsSetting({ notifications }) {
+// The two channels as one settings group: label left, switch right, no
+// explanations -- "Browser" and "Email" under "Notifications" say it. The
+// only extra word is a browser block, which the switch cannot undo.
+function NotificationSettings({ notifications }) {
+  const { on, permission } = notifications.browserAlerts || {};
   const email = notifications.emailAlerts;
-  if (!email || !email.available) return null;
+  const showBrowser = permission !== 'unsupported';
+  const showEmail = !!(email && email.available);
+  if (!showBrowser && !showEmail) return null;
   return (
-    <div className="tdoc-notif-setting">
-      <AppSwitch
-        id="tdoc-email-alerts"
-        checked={!!email.on}
-        onCheckedChange={(next) => notifications.setEmailAlerts(next)}
-        label="Email notifications"
-      />
-      <p className="manage-hint">An email when someone mentions you, replies to you, comments on your doc or asks for access. At most one per thread every 30 minutes.</p>
+    <div className="tdoc-notif-settings">
+      {showBrowser ? (
+        <div className="tdoc-notif-setting">
+          {permission === 'denied' ? (
+            <>
+              <span className="tdoc-switch-label">Browser</span>
+              <span className="tdoc-notif-setting-value">Blocked</span>
+            </>
+          ) : (
+            <AppSwitch
+              id="tdoc-browser-alerts"
+              checked={!!on}
+              onCheckedChange={(next) => notifications.setAlerts(next)}
+              label="Browser"
+            />
+          )}
+        </div>
+      ) : null}
+      {showEmail ? (
+        <div className="tdoc-notif-setting">
+          <AppSwitch
+            id="tdoc-email-alerts"
+            checked={!!email.on}
+            onCheckedChange={(next) => notifications.setEmailAlerts(next)}
+            label="Email"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -106,8 +111,7 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
         </>
       )}
     >
-      <BrowserAlertsSetting notifications={notifications} />
-      <EmailAlertsSetting notifications={notifications} />
+      <NotificationSettings notifications={notifications} />
       <div className="tdoc-notif-head">
         <span className="tdoc-notif-count">{notifications.unread ? `${notifications.unread} unread` : 'All caught up'}</span>
         {unread ? (
