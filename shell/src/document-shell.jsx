@@ -1338,10 +1338,10 @@ export function DocumentShell({ boot, config }) {
             const id = crypto.randomUUID();
             const timer = setTimeout(() => { diagramApplyRef.current = null; reject(new Error('The document did not respond. Try again.')); }, 5000);
             diagramApplyRef.current = { id, timer, resolve, reject };
-            bridge.send({ type: 'tdoc:diagramApply', requestId: id, id: diagram.id, json, svg });
+            bridge.send({ type: diagram.isNew ? 'tdoc:diagramInsert' : 'tdoc:diagramApply', requestId: id, id: diagram.id, json, svg });
           });
           setDiagram(null);
-          showToast('Diagram applied. Save the document to publish a new version.');
+          showToast(`${diagram.isNew ? 'Diagram inserted' : 'Diagram applied'}. Save the document to publish a new version.`);
         }} />
       <div className="tdoc-reader-surface" hidden={comparing}>
       <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
@@ -1392,6 +1392,12 @@ export function DocumentShell({ boot, config }) {
             if (command === 'createLink') setDialog({ type: 'link' });
             else editor.format(command, value);
           }}
+          onInsertDiagram={() => setDiagram({
+            id: `diagram-${crypto.randomUUID()}`,
+            title: 'Draw a diagram',
+            isNew: true,
+            scene: { type: 'excalidraw', version: 2, elements: [], appState: { viewBackgroundColor: '#ffffff' }, files: {} },
+          })}
           onDiscard={editor.discard}
           onSave={requestSave}
         />
