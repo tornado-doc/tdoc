@@ -1,6 +1,6 @@
 // Team plan (#48): members are free and unlimited; a free team holds 80 docs
 // (TDOC_TEAM_FREE_DOCS=20 here, so the cases stay small).
-// The 21st doc in, or turning on Data backup, needs the Team plan ($8/seat).
+// The 21st doc in, or turning on Data backup, needs the Team plan ($5/seat).
 //
 // Drives the real routes through worker.js with fake bindings and a stubbed
 // api.stripe.com, so Checkout, the Customer Portal, the signed webhook and
@@ -141,9 +141,10 @@ function signed(event, secret = STRIPE.STRIPE_WEBHOOK_SECRET, t = Math.floor(Dat
       const { env, admin, team, fill } = await setup();
       const early = await fill(14);
       assert(early.status === 200 && !early.body.plan_warning, `warned too early: ${JSON.stringify(early.body)}`);
-      const near = await fill(2, 14);
-      assert(near.status === 200 && near.body.plan_warning && near.body.plan_warning.left === 4 && near.body.plan_warning.docs === 16, JSON.stringify(near.body));
-      assert(/16 of 20 free docs; 4 left/.test(near.body.plan_warning.message), near.body.plan_warning.message);
+      // The band starts exactly at limit - 5 (75 of 80; 15 of 20 here).
+      const near = await fill(1, 14);
+      assert(near.status === 200 && near.body.plan_warning && near.body.plan_warning.left === 5 && near.body.plan_warning.docs === 15, JSON.stringify(near.body));
+      assert(/15 of 20 free docs; 5 left/.test(near.body.plan_warning.message), near.body.plan_warning.message);
       const plan = (await call(env, `/api/team/billing?id=${team.id}`, { cookie: admin.cookie })).body.billing;
       assert(plan.near_limit === true && plan.at_limit === false, JSON.stringify(plan));
     } finally { stripe.restore(); }
