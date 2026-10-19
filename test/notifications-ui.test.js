@@ -195,6 +195,7 @@ async function t(name, fn) {
 
     await t('the browser switch starts off, and once on, a new notification raises one desktop alert', async () => {
       const { context, page, dialog, state } = await open();
+      await dialog.getByRole('button', { name: 'Settings' }).click();
       const sw = dialog.getByRole('switch', { name: 'Browser' });
       assert.equal(await sw.getAttribute('aria-checked'), 'false');
       assert.equal(await page.evaluate(() => window.__alerts.length), 0, 'alerted before being turned on');
@@ -211,7 +212,10 @@ async function t(name, fn) {
     });
 
     await t('settings are one group, label left and switch right; email starts on and turning it off tells the server', async () => {
-      const { context, dialog, state } = await open();
+      const { context, page, dialog, state } = await open();
+      assert.equal(await dialog.locator('.tdoc-notif-settings').count(), 0, 'the inbox should open on activity');
+      await dialog.getByRole('button', { name: 'Settings' }).click();
+      await shot(page, 'settings');
       const email = dialog.getByRole('switch', { name: 'Email' });
       await email.waitFor();
       assert.equal(await email.getAttribute('aria-checked'), 'true');
@@ -240,6 +244,7 @@ async function t(name, fn) {
     // bumps count/at. It must alert again (review on #746).
     await t('a second reply folded into an unread row alerts again', async () => {
       const { context, page, dialog, state } = await open();
+      await dialog.getByRole('button', { name: 'Settings' }).click();
       await dialog.getByRole('switch', { name: 'Browser' }).click();
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
       await page.waitForTimeout(800);
@@ -256,6 +261,7 @@ async function t(name, fn) {
     // must still alert.
     await t('a new notification arriving as another is read still alerts', async () => {
       const { context, page, dialog, state } = await open();
+      await dialog.getByRole('button', { name: 'Settings' }).click();
       await dialog.getByRole('switch', { name: 'Browser' }).click();
       await page.waitForFunction(() => document.querySelector('[role="switch"]').getAttribute('aria-checked') === 'true');
       await page.waitForTimeout(800);
