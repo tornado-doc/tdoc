@@ -1586,8 +1586,8 @@ export function DocumentShell({ boot, config }) {
           title="Move this document"
           teams={moveState.teams}
           count={1}
-          includePersonal={Boolean(config.teamManage?.team?.id)}
-          currentTeam={config.teamManage?.team?.id || null}
+          includePersonal={Boolean(config.workspaceId || config.teamManage?.team?.id)}
+          currentTeam={config.workspaceId || config.teamManage?.team?.id || null}
           loading={moveState.loading}
           busy={moveState.busy}
           error={moveState.error}

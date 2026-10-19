@@ -18,6 +18,9 @@ const config = {
   version: 3,
   versions: [{ n: 1 }, { n: 2 }, { n: 3 }],
   slug: 'quarterly-plan',
+  // The workspace comes from document metadata even when session-derived
+  // teamManage is temporarily absent (for example immediately after joining).
+  workspaceId: 'tm_current',
 };
 
 function Harness() {

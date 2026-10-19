@@ -1930,6 +1930,11 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     isCatalog: !!isCatalog,
     ownerManage: isOwner ? (ownerManage || null) : null,
     teamManage: (oidc && oidc.teamManage) || null,
+    // The document's actual workspace is metadata, not session-derived UI
+    // manage state. A newly joined/stale cookie can legitimately have no
+    // teamManage yet; the move picker still must offer My docs and hide the
+    // current team instead of looking like a personal document.
+    workspaceId: (docMeta && docMeta.workspace_id) || null,
     authConfigured: true,
     webAuth: !!webAuth,
     // The provider seat, so the doc shell's sign-in goes through the same
