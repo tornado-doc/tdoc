@@ -184,11 +184,63 @@
       var snapshot = figure.querySelector('[data-tdoc-diagram-snapshot]');
       if (!snapshot) return;
       if (interactionMode !== 'edit') setInteractionMode('edit');
+      svg.style.maxWidth = '100%';
+      svg.style.height = 'auto';
       snapshot.replaceChildren(document.importNode(svg, true));
       figure.setAttribute('data-tdoc-excalidraw', d.json);
       onEditInput();
       return true;
     } catch (error) { return false; }
+  }
+  function insertDiagram(d) {
+    if (interactionMode !== 'edit' || typeof d.id !== 'string' || !/^diagram-[a-f0-9-]{36}$/i.test(d.id) || document.getElementById(d.id)) return false;
+    var root = findEditRoot();
+    if (!root) return false;
+    var figure = document.createElement('figure');
+    figure.id = d.id;
+    figure.setAttribute('data-tdoc-artifact', 'Diagram');
+    figure.setAttribute('data-tdoc-excalidraw', '');
+    figure.setAttribute('aria-label', 'Diagram');
+    figure.setAttribute('data-tdoc-editor-atomic', '');
+    figure.setAttribute('data-tdoc-editor-original-editable', '__missing__');
+    figure.setAttribute('contenteditable', 'false');
+    figure.style.cssText = 'display:block;max-width:100%;margin:1.5rem 0;padding:1rem;border:1px solid #e4e7ee;border-radius:12px;background:#fff';
+    var snapshot = document.createElement('div');
+    snapshot.setAttribute('data-tdoc-diagram-snapshot', '');
+    snapshot.style.overflow = 'hidden';
+    figure.appendChild(snapshot);
+    var caption = document.createElement('figcaption');
+    caption.textContent = 'Diagram';
+    caption.style.cssText = 'margin-top:.75rem;color:#666;font-size:.85em';
+    figure.appendChild(caption);
+
+    var range = savedRange;
+    if (!range && window.getSelection().rangeCount) range = window.getSelection().getRangeAt(0);
+    var node = range && range.startContainer;
+    if (node && node.nodeType !== 1) node = node.parentNode;
+    while (node && node !== root && node.parentNode !== root) node = node.parentNode;
+    if (node && node.parentNode === root) node.after(figure);
+    else root.appendChild(figure);
+    if (!applyDiagram(d)) { figure.remove(); return false; }
+    prepareDiagrams();
+    var after = figure.nextElementSibling;
+    if (!after) {
+      after = document.createElement('p');
+      after.appendChild(document.createElement('br'));
+      figure.after(after);
+      onEditInput();
+    }
+    try {
+      root.focus({ preventScroll: true });
+      var caret = document.createRange();
+      caret.selectNodeContents(after);
+      caret.collapse(true);
+      var selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(caret);
+      savedRange = caret.cloneRange();
+    } catch (e) {}
+    return true;
   }
 
   // --- selection capture ---------------------------------------------------
@@ -1490,6 +1542,7 @@
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode, d);
     else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:diagramApply') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!applyDiagram(d) });
+    else if (d.type === 'tdoc:diagramInsert') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!insertDiagram(d) });
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
     else if (d.type === 'tdoc:editRestore') {
       var restoreRoot = findEditRoot();

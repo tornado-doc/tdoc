@@ -17,6 +17,7 @@ import {
   Redo2,
   RotateCcw,
   Save,
+  Shapes,
   Undo2,
 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
@@ -93,9 +94,9 @@ function ToolButton({ label, icon, command, value, onFormat }) {
   );
 }
 
-export function EditorToolbar({ dirty, checking, saving, onFormat, onDiscard, onSave }) {
+export function EditorToolbar({ dirty, checking, saving, onFormat, onInsertDiagram, onDiscard, onSave }) {
   return (
-    <div className="tdoc-editor-toolbar" role="toolbar" aria-label="Text formatting">
+    <div className="tdoc-editor-toolbar" role="toolbar" aria-label="Document editing">
       <div className="tdoc-editor-tools">
         <ToolButton label="Bold" icon={<Bold size={16} />} command="bold" onFormat={onFormat} />
         <ToolButton label="Italic" icon={<Italic size={16} />} command="italic" onFormat={onFormat} />
@@ -108,6 +109,9 @@ export function EditorToolbar({ dirty, checking, saving, onFormat, onDiscard, on
         <ToolButton label="Quote" icon={<Quote size={16} />} command="formatBlock" value="blockquote" onFormat={onFormat} />
         <ToolButton label="Inline code" icon={<Code size={16} />} command="code" onFormat={onFormat} />
         <ToolButton label="Add link" icon={<Link size={16} />} command="createLink" onFormat={onFormat} />
+        <button type="button" title="Insert diagram" aria-label="Insert diagram" onClick={onInsertDiagram}>
+          <Shapes size={17} />
+        </button>
         <span className="tdoc-editor-divider" />
         <ToolButton label="Undo" icon={<Undo2 size={16} />} command="undo" onFormat={onFormat} />
         <ToolButton label="Redo" icon={<Redo2 size={16} />} command="redo" onFormat={onFormat} />

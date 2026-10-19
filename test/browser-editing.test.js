@@ -14,6 +14,7 @@ let pass = 0, fail = 0;
 function ok(name) { console.log(`  ✓ ${name}`); pass++; }
 function bad(name, error) { console.log(`  ✗ ${name}\n    ${error.message || error}`); fail++; }
 async function test(name, operation) {
+  if (process.env.TDOC_TEST_FILTER && !name.includes(process.env.TDOC_TEST_FILTER)) return;
   try { await operation(); ok(name); } catch (error) { bad(name, error); }
 }
 function assert(condition, message) { if (!condition) throw new Error(message); }
@@ -746,6 +747,50 @@ async function chooseMode(page, label) {
       }, anchorSlug);
       assert(anchors.includes('hotel'),
         `Move anchor did not land: anchors are ${JSON.stringify(anchors)}`);
+    });
+
+    await test('a new doc can insert an editable diagram and save its scene with its SVG', async () => {
+      const base = `http://127.0.0.1:${port}`;
+      const createdResponse = await context.request.post(`${base}/api/doc/create`, { headers: { Origin: base }, data: {} });
+      assert(createdResponse.ok(), `blank doc create failed: ${createdResponse.status()}`);
+      const created = await createdResponse.json();
+      const diagramPage = await context.newPage();
+      try {
+        await diagramPage.goto(`${base}${created.url}`, { waitUntil: 'networkidle' });
+        await diagramPage.getByRole('button', { name: 'Insert diagram' }).click();
+        const dialog = diagramPage.getByRole('dialog', { name: 'Draw a diagram' });
+        await dialog.getByRole('button', { name: 'Apply to document' }).waitFor();
+        await dialog.getByRole('button', { name: 'Apply to document' }).click();
+        await dialog.waitFor({ state: 'hidden' });
+        const diagramFrame = diagramPage.frames().find((candidate) => candidate.url().includes('/frame'));
+        assert(diagramFrame, 'new document frame missing');
+        await diagramFrame.locator('figure[data-tdoc-excalidraw]').first().waitFor();
+
+        const id = 'diagram-12345678-1234-1234-1234-123456789abc';
+        const scene = JSON.stringify({ type: 'excalidraw', version: 2, elements: [{ id: 'shape', type: 'rectangle', x: 0, y: 0, width: 120, height: 60 }], appState: {}, files: {} });
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60"><rect width="120" height="60" fill="white"/><script>alert(1)</script></svg>';
+        await diagramPage.evaluate((data) => {
+          document.querySelector('iframe.tdoc-doc-frame').contentWindow.postMessage({ source: 'tdoc-shell', type: 'tdoc:diagramInsert', requestId: 'insert-test', ...data }, '*');
+        }, { id, json: scene, svg });
+        const figure = diagramFrame.locator(`#${id}`);
+        await figure.waitFor();
+        assert(await figure.locator('[data-tdoc-diagram-snapshot] svg').count() === 1, 'SVG preview was not inserted');
+        assert(await figure.locator('script').count() === 0, 'active SVG content survived sanitization');
+        await diagramPage.getByRole('button', { name: 'Save', exact: true }).click();
+        const confirmation = diagramPage.getByRole('button', { name: 'Save and publish' });
+        if (await confirmation.isVisible()) await confirmation.click();
+        const storedPath = path.join(root, created.slug, 'v1', 'index.html');
+        await diagramPage.waitForFunction(() => document.querySelector('.tdoc-editor-status')?.textContent === 'No changes');
+        const stored = fs.readFileSync(storedPath, 'utf8');
+        assert(stored.includes('data-tdoc-excalidraw='), 'saved version lost editable scene');
+        assert(stored.includes('data-tdoc-diagram-snapshot'), 'saved version lost SVG preview');
+        assert(!stored.includes('data-tdoc-diagram-open'), 'provider button leaked into saved HTML');
+        assert(!stored.includes('<script>alert(1)</script>'), 'unsafe SVG script reached saved HTML');
+        const savedFrame = diagramPage.frames().find((candidate) => candidate.url().includes('/frame'));
+        await savedFrame.locator(`#${id} [data-tdoc-diagram-open]`).waitFor();
+      } finally {
+        await diagramPage.close();
+      }
     });
   } finally {
     if (browser) await browser.close();
