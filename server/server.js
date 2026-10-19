@@ -1342,6 +1342,19 @@ const server = http.createServer(async (req, res) => {
 
   // ---- product feedback (#564), the local twin: identity is TDOC_E2E_USER,
   // the "token" just names the space, and a space is a doc dir like any other.
+  // The push service worker (#771). The local server never sends a push, so
+  // /api/push/key is absent and the page keeps its open-tab alerts; the
+  // worker script is still served so the shell's registration path is real.
+  if (p === '/tdoc-sw.js' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const file = path.join(__dirname, 'runtime', 'tdoc-sw.js');
+    if (!fs.existsSync(file)) return send(res, 404, 'push worker is not built: npm run build:sw');
+    return send(res, 200, req.method === 'HEAD' ? '' : fs.readFileSync(file), {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Service-Worker-Allowed': '/',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
   if (p === '/feedback.js' && (req.method === 'GET' || req.method === 'HEAD')) {
     const file = path.join(__dirname, 'runtime', 'feedback.js');
     if (!fs.existsSync(file)) return send(res, 404, 'feedback client is not built: npm run build:feedback');

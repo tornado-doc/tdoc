@@ -12,7 +12,7 @@ const sources = [
   'server/frame-probe.js',
   'shell/src/document/model.js',
   'shell/src/sign-in-dialog.jsx',
-  'shell/src/notifications-dialog.jsx',
+  'shell/src/notification-text.js',
   'shell/src/document-shell.jsx',
 ].map((file) => fs.readFileSync(path.join(root, file), 'utf8'));
 const combined = sources.join('\n');

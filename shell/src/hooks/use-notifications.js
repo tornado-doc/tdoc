@@ -9,11 +9,14 @@ import {
 import { notificationLabel, notificationTarget } from '../notifications-dialog.jsx';
 import {
   alertNewNotifications,
+  browserNotificationMode,
   browserNotificationPromptEligible,
   browserNotificationPermission,
   browserNotificationsEnabled,
+  ensureWebPush,
   setBrowserNotifications,
   snoozeBrowserNotificationPrompt,
+  webPushSupported,
 } from './browser-notifications.js';
 
 export function useNotifications(enabled) {
@@ -25,6 +28,8 @@ export function useNotifications(enabled) {
   const [browserAlerts, setBrowserAlerts] = useState(() => ({
     on: browserNotificationsEnabled(),
     permission: browserNotificationPermission(),
+    mode: browserNotificationMode(),
+    pushable: webPushSupported(),
   }));
 
   // With desktop alerts on, any unread at all fetches the newest page and
@@ -90,7 +95,7 @@ export function useNotifications(enabled) {
 
   const setAlerts = useCallback(async (on) => {
     const permission = await setBrowserNotifications(on, items);
-    setBrowserAlerts({ on: on && permission === 'granted', permission });
+    setBrowserAlerts({ on: on && permission === 'granted', permission, mode: browserNotificationMode(), pushable: webPushSupported() });
     setPromptRevision((value) => value + 1);
     return permission;
   }, [items]);
@@ -99,6 +104,25 @@ export function useNotifications(enabled) {
     snoozeBrowserNotificationPrompt();
     setPromptRevision((value) => value + 1);
   }, []);
+
+  // With alerts on, re-confirm this browser's push subscription once per
+  // page: it follows a sign-in as someone else and a rotated server key.
+  useEffect(() => {
+    if (!enabled || !browserNotificationsEnabled()) return undefined;
+    let live = true;
+    ensureWebPush().then(() => {
+      if (live) setBrowserAlerts((current) => ({ ...current, mode: browserNotificationMode() }));
+    });
+    return () => { live = false; };
+  }, [enabled]);
+
+  // A push for this person just arrived: refresh the bell now.
+  useEffect(() => {
+    if (!enabled || typeof navigator === 'undefined' || !navigator.serviceWorker) return undefined;
+    const onMessage = (event) => { if (event.data?.type === 'tdoc-push') refreshUnread(); };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [enabled, refreshUnread]);
 
   useEffect(() => {
     refreshUnread();
