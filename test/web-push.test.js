@@ -178,6 +178,48 @@ async function seedDoc(env, slug, owner) {
     assert(await env.META.get('push-subs:alice'), 'a transient failure dropped the subscription');
   });
 
+  await t('an access request pushes to the owner, and approving it pushes to the asker', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await env.META.put('meta:private', JSON.stringify({
+      slug: 'private', title: 'Board memo', hosted: { github_login: 'olivia' }, versions: [{ n: 1, created: '2026-10-19T00:00:00Z' }],
+      access: { visibility: 'private', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
+    }));
+    const olivia = await putSession(env, 'olivia');
+    const petra = await putSession(env, 'petra');
+    const ownerBrowser = await fakeBrowser('https://fcm.googleapis.com/fcm/send/owner');
+    const askerBrowser = await fakeBrowser('https://updates.push.services.mozilla.com/wpush/v2/asker');
+    await worker.fetch(req('/api/push/subscribe', { method: 'POST', cookie: olivia, body: { subscription: ownerBrowser.subscription } }), env, {});
+    await worker.fetch(req('/api/push/subscribe', { method: 'POST', cookie: petra, body: { subscription: askerBrowser.subscription } }), env, {});
+    const cap = capturePushes();
+    try {
+      const ask = await worker.fetch(req('/api/doc/request-access', { method: 'POST', cookie: petra, body: { slug: 'private' } }), env, {});
+      assert(ask.status === 200, `ask ${ask.status}`);
+      const ok = await worker.fetch(req('/api/doc/access-request', { method: 'POST', cookie: olivia, body: { slug: 'private', requester: 'petra', action: 'approve' } }), env, {});
+      assert(ok.status === 200, `approve ${ok.status}`);
+    } finally { cap.restore(); }
+    assert(cap.sent.length === 2, `expected 2 pushes, got ${cap.sent.length}`);
+    const toOwner = await ownerBrowser.open(cap.sent.find((p) => p.url.includes('/owner')).body);
+    const toAsker = await askerBrowser.open(cap.sent.find((p) => p.url.includes('/asker')).body);
+    assert(toOwner.item.kind === 'access_request' && toOwner.item.slug === 'private', JSON.stringify(toOwner.item));
+    assert(toAsker.item.kind === 'access_granted', JSON.stringify(toAsker.item));
+  });
+
+  await t('reactions do not push', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await seedDoc(env, 'react', 'alice');
+    const alice = await putSession(env, 'alice');
+    const browser = await fakeBrowser(ENDPOINT);
+    await worker.fetch(req('/api/push/subscribe', { method: 'POST', cookie: alice, body: { subscription: browser.subscription } }), env, {});
+    const { id } = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: alice, body: { slug: 'react', version: 1, text: 'mine', anchor: null } }), env, {})).json();
+    const cap = capturePushes();
+    try {
+      await worker.fetch(req('/api/reactions', { method: 'POST', cookie: await putSession(env, 'bob'), body: { slug: 'react', version: 1, comment_id: id, emoji: '👍' } }), env, {});
+    } finally { cap.restore(); }
+    const inbox = JSON.parse(await env.META.get('inbox:alice') || '{"items":[]}');
+    assert(inbox.items.some((i) => i.kind === 'reaction'), 'the reaction never reached the inbox, so this proves nothing');
+    assert(cap.sent.length === 0, `pushed ${cap.sent.length}`);
+  });
+
   await t('only real push services are accepted as endpoints', async () => {
     const env = makeEnv(mod.CommentsStore);
     const alice = await putSession(env, 'alice');
