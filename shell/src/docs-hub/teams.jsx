@@ -2,14 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { DatabaseBackup, Link2, MessageSquareText, RefreshCw, SlidersHorizontal, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppSelect } from '../ui/select.jsx';
+import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
 import { copyText } from '../document/model.js';
 import {
   createTeam,
   getTeamBackup,
+  getTeamBilling,
   getTeam,
   listTeamComments,
   moveFolderToTeam,
+  openTeamBilling,
   removeTeamBackup,
   removeTeamMember,
   saveTeamBackup,
@@ -30,6 +33,9 @@ const ERRORS = {
   backup_queue_failed: 'The bucket is connected, but tdoc could not queue the backup. Try Sync everything again.',
   backup_connection_failed: 'tdoc could not write to that bucket. Check the endpoint, bucket, region and keys.',
   backup_encryption_unavailable: 'This deployment needs its Data Mirror encryption key configured.',
+  billing_unavailable: 'Billing is not set up on this deployment.',
+  already_subscribed: 'This team already has the Team plan. Use Manage billing.',
+  no_billing_customer: 'There is no billing account yet. Upgrade first.',
 };
 const message = (error) => ERRORS[error?.body?.error] || error?.message || 'Request failed';
 
@@ -59,7 +65,7 @@ function teamHue(id) {
   for (const ch of String(id || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return h;
 }
-export function TeamPane({ team, docs, viewer, menuFor, inFolder = false, layout = 'list' }) {
+export function TeamPane({ team, docs, viewer, menuFor, inFolder = false, layout = 'list', empty, pathForDoc }) {
   return (
     <section className="pane" id="pane-team">
       <DocList
@@ -71,10 +77,11 @@ export function TeamPane({ team, docs, viewer, menuFor, inFolder = false, layout
             day(doc.updated) ? `updated ${day(doc.updated)}` : null,
           ].filter(Boolean).join(' · '),
           starrable: false,
+          path: pathForDoc ? pathForDoc(doc) : '',
           menuItems: menuFor(doc),
           data: { created: doc.created, updated: doc.updated, author: doc.author || viewer },
         })}
-        empty={!inFolder ? `No docs in ${team.name} yet. Create one, or move one here from My docs.` : null}
+        empty={empty ?? (!inFolder ? `No docs in ${team.name} yet. Create one, or move one here from My docs.` : null)}
       />
     </section>
   );
@@ -576,8 +583,9 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
       </ol>
       {backup?.enabled ? (
         <section className={`tm-backup-health ${backup.state === 'error' ? 'is-error' : ''}`}>
-          <div><b>{backup.state === 'syncing' ? (backup.initial_synced_at ? 'Full sync running' : 'Initial backup running') : backup.state === 'error' ? 'Backup needs attention' : 'Automatic backup active'}</b><span>{backup.endpoint}/{backup.bucket}/{backup.prefix}/{team.id}</span></div>
-          {backup.state === 'active' ? <span>Changes are copied automatically.</span> : null}
+          <div><b>{backup.paused ? 'Backup paused' : backup.state === 'syncing' ? (backup.initial_synced_at ? 'Full sync running' : 'Initial backup running') : backup.state === 'error' ? 'Backup needs attention' : 'Automatic backup active'}</b><span>{backup.endpoint}/{backup.bucket}/{backup.prefix}/{team.id}</span></div>
+          {backup.paused ? <span>The Team plan ended. Your settings are kept, and copying resumes when the plan is renewed.</span>
+            : backup.state === 'active' ? <span>Changes are copied automatically.</span> : null}
           {backup.last_synced_at ? <span>Last copy {backupTime(backup.last_synced_at)}</span> : null}
           {backup.last_error ? <span>{backup.last_error}</span> : null}
           <div className="tm-backup-health-actions">
@@ -605,6 +613,94 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
   );
 }
 
+function billingDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// Team plan. Members are always free; a free team holds `free_docs` docs.
+// The Team plan (unlimited docs, Data backup) bills every member per seat
+// through Stripe. Hidden on a deployment without Stripe.
+export function TeamBillingCard({ team }) {
+  const [billing, setBilling] = useState(null);
+  const [period, setPeriod] = useState('month');
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+  const returned = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('billing') : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    let tries = 0;
+    const load = () => getTeamBilling(team.id).then((result) => {
+      if (cancelled) return;
+      setBilling(result.billing);
+      // Stripe confirms by webhook a moment after Checkout returns.
+      if (returned === 'success' && result.billing.plan !== 'team' && tries++ < 5) setTimeout(load, 2000);
+    }).catch((error) => { if (!cancelled) setStatus(message(error)); });
+    load();
+    if (returned === 'success') setStatus('Payment received. The Team plan turns on in a few seconds.');
+    if (returned === 'canceled') setStatus('Checkout was canceled. Nothing was charged.');
+    return () => { cancelled = true; };
+  }, [team.id]);
+
+  if (!billing || !billing.configured) return null;
+  const go = async (action) => {
+    setBusy(true);
+    setStatus(action === 'portal' ? 'Opening Stripe…' : 'Opening checkout…');
+    try {
+      const result = await openTeamBilling(team.id, action, action === 'checkout' ? period : undefined);
+      location.assign(result.url);
+    } catch (error) {
+      setStatus(message(error));
+      setBusy(false);
+    }
+  };
+  const prices = billing.prices;
+  const paid = billing.plan === 'team';
+  const seats = billing.seats;
+  const renews = billingDate(billing.current_period_end);
+  const summary = paid
+    ? billing.status === 'past_due'
+      ? 'The last payment failed. Update the card to keep the Team plan.'
+      : `${billing.quantity || seats} ${(billing.quantity || seats) === 1 ? 'seat' : 'seats'}, billed ${billing.interval === 'year' ? 'yearly' : 'monthly'}.${renews ? ` ${billing.cancel_at_period_end ? 'Ends' : 'Renews'} ${renews}.` : ''}`
+    : billing.at_limit
+      ? `${billing.docs} docs. The free plan holds ${billing.free_docs}; upgrade to add more. Existing docs stay editable.`
+      : `${billing.docs} of ${billing.free_docs} free docs used.`;
+
+  return (
+    <section className="tm-settings-card" id="billing" aria-labelledby="tm-billing-heading">
+      <div className="tm-settings-head">
+        <div>
+          <h2 id="tm-billing-heading">Plan</h2>
+          <p>Free for {billing.free_docs} docs and any number of members. The Team plan adds unlimited docs and Data backup for ${prices.month} per member a month, or ${prices.year} a year.</p>
+        </div>
+        <span className={`tm-plan-badge${paid ? ' is-team' : ''}`}>{paid ? 'Team' : 'Free'}</span>
+      </div>
+      <p className={`tm-plan-summary${billing.status === 'past_due' || billing.at_limit ? ' is-error' : ''}`}>{summary}</p>
+      {paid ? null : (
+        <div className="tm-plan-choose">
+          <SegmentedControl
+            ariaLabel="Billing period"
+            value={period}
+            onChange={setPeriod}
+            options={[{ value: 'month', label: 'Monthly' }, { value: 'year', label: 'Yearly' }]}
+          />
+          <span>{seats} × ${prices[period]} = <b>${seats * prices[period]}</b> / {period === 'year' ? 'year' : 'month'}</span>
+        </div>
+      )}
+      <p className="tm-plan-note">Every admin and member is a seat; agents never are. Seats follow the member list, and changes are prorated.</p>
+      {status ? <p className="status" role="status">{status}</p> : null}
+      <div className="tm-settings-actions">
+        {paid || billing.has_customer ? (
+          <button type="button" className={paid ? 'primary' : 'tm-link-btn'} onClick={() => go('portal')} disabled={busy}>Manage billing</button>
+        ) : null}
+        {paid ? null : <button type="button" className="primary" onClick={() => go('checkout')} disabled={busy}>Upgrade to Team</button>}
+      </div>
+    </section>
+  );
+}
+
 export function TeamSettingsPane({ team, onChanged, onLeave }) {
   return (
     <section className="tm-settings" aria-label={`${team.name} workspace settings`}>
@@ -612,6 +708,7 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
         <h2>Workspace settings</h2>
         <p>Manage this workspace in one place.</p>
       </div>
+      {team.role === 'admin' ? <TeamBillingCard team={team} /> : null}
       <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} />
       <section className="tm-settings-card" id="agents">
         <div className="tm-settings-head"><div><h2>Agents</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>

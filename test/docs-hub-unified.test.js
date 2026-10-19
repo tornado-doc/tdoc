@@ -23,9 +23,9 @@ ok((hub.match(/<DocsToolbar\b/g) || []).length === 2,
   'personal and team spaces render the same DocsToolbar component');
 ok(hub.includes('<DocList\n              docs={hub.shownDocs}') && teams.includes('<DocList'),
   'personal and team spaces render the same DocList component');
-ok(hub.includes("${doc.title} ${doc.slug} ${doc.excerpt || ''}")
-  && fs.readFileSync(path.join(root, 'shell/src/hooks/use-docs-hub.js'), 'utf8').includes("${doc.title} ${doc.slug} ${doc.excerpt || ''}"),
-  'both spaces search title, slug, and preview');
+ok(hub.includes('matchesCatalogQuery(doc, teamPathForDoc(doc), hub.query)')
+  && fs.readFileSync(path.join(root, 'shell/src/hooks/use-docs-hub.js'), 'utf8').includes('matchesCatalogQuery(doc, folderPathLabel(doc.folder, folderById), query)'),
+  'both spaces use the same all-folder field-aware search');
 ok(rows.includes('className="doc-preview-excerpt"') && rows.includes('className="doc-preview-image"'),
   'the shared row renders cached excerpt and image previews');
 ok(rows.includes('doc-card-preview') && hub.includes('CatalogLayoutToggle') && teams.includes('layout={layout}'),

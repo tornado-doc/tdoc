@@ -394,6 +394,16 @@ export function removeTeamBackup(id) {
   return teamRequest('/api/team/backup', 'DELETE', { id });
 }
 
+export function getTeamBilling(id) {
+  return request(`/api/team/billing?${new URLSearchParams({ id })}`);
+}
+
+// Returns a Stripe-hosted URL: Checkout (`interval` month|year) or the
+// Customer Portal.
+export function openTeamBilling(id, action, interval) {
+  return teamRequest('/api/team/billing', 'POST', { id, action, ...(interval ? { interval } : {}) });
+}
+
 export function setTeamRole(id, accountId, role) {
   return teamRequest('/api/team/role', 'POST', { id, account_id: accountId, role });
 }

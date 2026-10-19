@@ -56,6 +56,7 @@ const OFFLINE = [
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
   'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
   'docs-hub-unified.test.js',   // My docs + team use one toolbar/list and cached previews
+  'catalog-search.test.js',      // all-folder document search + field prefixes + nested paths
   'folder-move-to-team.test.js', // a whole My docs folder into a team: batches, re-runs, stale reads
   'team-backup.test.js',         // customer-owned S3/R2 mirror: encryption, queue, retries, tombstones
   'backup-cli.test.js',          // open-format portability copy download + checksum verification
@@ -111,6 +112,8 @@ const OFFLINE = [
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
   'comment-ops.test.js',      // #34 DO-serialized mutation ops
   'agent-reply-once.test.js', // #349 the agent answers once per human turn
+  'kv-write-budget.test.js', // repeat actions spend no extra KV writes (daily quota)
+  'team-billing.test.js', // #48 Team plan: Stripe checkout, portal, signed webhook, seat sync
   'reply-activity.test.js', // old versions see live reply status without rewriting their snapshot
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
@@ -153,6 +156,7 @@ const BROWSER = [
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout
   'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
+  'team-billing-ui.test.js', // #48 Team plan card: free seats, upgrade, paid summary, portal, phone
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
 ];
 

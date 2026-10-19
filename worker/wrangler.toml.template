@@ -123,3 +123,15 @@ RAFT_INSTALLATION_IDS = '{"1ed923e0-27a4-47ff-b09a-ea27efe06877":"b3177b35-c920-
 # sign-in exactly as before.
 # Secret: OIDC_CLIENT_SECRET — `wrangler secret put OIDC_CLIENT_SECRET`.
 #   The issuer must accept https://<host>/auth/oidc/callback as a redirect URI.
+# Team plan billing (#48). Off until the key and both prices are set: a
+# deploy without them has no doc limit and shows no plan card. Members are
+# always free; a free team holds 20 docs. The Team plan (unlimited docs, Data
+# backup) bills every admin and member per seat.
+# Secret: STRIPE_SECRET_KEY      — `wrangler secret put STRIPE_SECRET_KEY` (sk_live_… / rk_live_…)
+# Secret: STRIPE_PRICE_MONTHLY   — the $5 / seat / month recurring Price id (price_…)
+# Secret: STRIPE_PRICE_YEARLY    — the $50 / seat / year recurring Price id (price_…)
+# Secret: STRIPE_WEBHOOK_SECRET  — signing secret (whsec_…) of a Stripe webhook endpoint at
+#   https://<host>/api/stripe/webhook listening for checkout.session.completed and
+#   customer.subscription.created / .updated / .deleted.
+# Enable the Customer Portal in Stripe (Settings → Billing → Customer portal) so
+# admins can change cards, switch period and cancel.
