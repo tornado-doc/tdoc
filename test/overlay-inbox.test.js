@@ -11,15 +11,19 @@ const hook = fs.readFileSync(path.join(root, 'shell/src/hooks/use-notifications.
 const browserAlerts = fs.readFileSync(path.join(root, 'shell/src/hooks/browser-notifications.js'), 'utf8');
 const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
 const topBar = fs.readFileSync(path.join(root, 'shell/src/top-bar.jsx'), 'utf8');
+const text = fs.readFileSync(path.join(root, 'shell/src/notification-text.js'), 'utf8');
+const pushWorker = fs.readFileSync(path.join(root, 'shell/src/push-sw.js'), 'utf8');
 
 console.log('React notifications and deep links');
 
 t('notificationTarget is the single encoded destination builder', () => {
-  assert(dialog.includes('export function notificationTarget'), 'destination builder missing');
-  assert(dialog.includes('if (!item?.slug) return'), 'empty slug guard missing');
-  assert(dialog.includes('encodeURIComponent(item.slug)'), 'slug encoding missing');
-  assert(dialog.includes('encodeURIComponent(target)'), 'comment encoding missing');
+  assert(text.includes('export function notificationTarget'), 'destination builder missing');
+  assert(text.includes('if (!item?.slug) return'), 'empty slug guard missing');
+  assert(text.includes('encodeURIComponent(item.slug)'), 'slug encoding missing');
+  assert(text.includes('encodeURIComponent(target)'), 'comment encoding missing');
   assert(topBar.includes('notificationTarget(item)'), 'TopBar bypasses destination builder');
+  // The push service worker opens the same place a dialog row does.
+  assert(pushWorker.includes("import { notificationLabel, notificationTarget } from './notification-text.js'"), 'push worker bypasses destination builder');
 });
 
 t('opening Notifications loads rows and selecting one marks it read', () => {
@@ -63,9 +67,11 @@ t('the document soft ask waits for unread value, requests permission only on cli
   assert(shell.includes('notificationPrompt={!config.isLanding}'), 'soft ask is not scoped to document pages');
 });
 
-t('approval sends a proof alert and says the open-tab limit plainly', () => {
-  assert(browserAlerts.includes("new window.Notification('Browser notifications are on'"), 'proof alert missing');
+t('approval sends a proof alert and says plainly whether a tab must stay open', () => {
+  assert(browserAlerts.includes("new window.Notification('Browser notifications are on'"), 'tab proof alert missing');
+  assert(browserAlerts.includes(".showNotification('Browser notifications are on'"), 'push proof alert missing');
   assert(dialog.includes('Keep a tdoc tab open for alerts.'), 'success state hides the open-tab limit');
+  assert(dialog.includes('even with tdoc closed'), 'soft ask hides that push reaches a closed tdoc');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

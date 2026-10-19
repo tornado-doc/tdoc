@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSwitch } from './ui/switch.jsx';
+import { actorName, joiner, notificationAction, notificationLabel, notificationTarget } from './notification-text.js';
+
+export { notificationLabel, notificationTarget };
 
 function relativeTime(iso) {
   const t = Date.parse(iso || '');
@@ -10,40 +13,6 @@ function relativeTime(iso) {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
-}
-
-function actorName(item) {
-  return item.actor?.name || item.actor?.login || 'Someone';
-}
-
-// What happened, without the actor (the row sets the actor in bold).
-function notificationAction(item) {
-  const count = Number(item.count) || 1;
-  if (item.kind === 'reaction') return `reacted ${item.emoji || ''}${count > 1 ? ` and ${count - 1} more` : ''}`;
-  if (item.kind === 'mention') return 'mentioned you';
-  if (item.kind === 'reply') return `replied${count > 1 ? ` and ${count - 1} more replied` : ''}`;
-  if (item.kind === 'access_request') return 'asked for access to';
-  if (item.kind === 'access_granted') return 'gave you access to';
-  return `commented${count > 1 ? ` and ${count - 1} more commented` : ''}`;
-}
-
-// One line, for a desktop alert's title.
-function joiner(item) {
-  return item.kind === 'access_request' || item.kind === 'access_granted' ? '' : ' on';
-}
-
-export function notificationLabel(item) {
-  return `${actorName(item)} ${notificationAction(item)}${joiner(item)} ${item.title || item.slug}`;
-}
-
-export function notificationTarget(item) {
-  if (!item?.slug) return '';
-  // Access is about the document, not a comment: open its latest version.
-  if (item.kind === 'access_request' || item.kind === 'access_granted') return `/d/${encodeURIComponent(item.slug)}`;
-  const version = Math.max(1, Number(item.version) || 1);
-  const target = item.comment_id || item.thread_id;
-  const query = target ? `?comment=${encodeURIComponent(target)}` : '';
-  return `/d/${encodeURIComponent(item.slug)}/v/${version}${query}`;
 }
 
 // A product-level soft ask before Chrome's permission prompt. It is shown on
@@ -61,16 +30,17 @@ export function BrowserAlertsPrompt({ notifications }) {
   };
   const granted = result === 'granted';
   const blocked = result === 'denied' || result === 'default';
+  const { mode, pushable } = notifications.browserAlerts || {};
 
   return (
     <aside className="tdoc-notif-prompt" role="dialog" aria-label="Turn on browser notifications">
       <div className="tdoc-notif-prompt-copy">
         <strong>{granted ? 'Test alert sent' : blocked ? 'Notifications weren’t enabled' : 'Don’t miss replies'}</strong>
         <span>{granted
-          ? 'If you didn’t see it, allow Chrome notifications in your system settings. Keep a tdoc tab open for alerts.'
+          ? `If you didn’t see it, allow browser notifications in your system settings.${mode === 'push' ? '' : ' Keep a tdoc tab open for alerts.'}`
           : blocked
-            ? 'You can allow tdoc in Chrome’s site settings and turn it on later from Notifications.'
-            : 'Get a Chrome alert when someone comments, mentions you, or replies. tdoc needs to stay open in a tab.'}</span>
+            ? 'You can allow tdoc in the browser’s site settings and turn it on later from Notifications.'
+            : `Get a browser alert when someone comments, mentions you, or replies${pushable ? ', even with tdoc closed.' : '. tdoc needs to stay open in a tab.'}`}</span>
       </div>
       <div className="tdoc-notif-prompt-actions">
         {!result ? <button type="button" className="primary" onClick={enable}>Turn on</button> : null}
@@ -81,11 +51,12 @@ export function BrowserAlertsPrompt({ notifications }) {
 }
 
 function BrowserAlertsSetting({ notifications }) {
-  const { on, permission } = notifications.browserAlerts || {};
+  const { on, permission, mode, pushable } = notifications.browserAlerts || {};
   if (permission === 'unsupported') return null;
+  const reachesClosed = on ? mode === 'push' : pushable;
   const hint = permission === 'denied'
     ? 'Blocked for tdoc in this browser. Allow notifications in the site settings, then turn this on.'
-    : 'A desktop alert when someone comments, mentions you or replies, while tdoc is open in a tab.';
+    : `A desktop alert when someone comments, mentions you or replies, ${reachesClosed ? 'even when tdoc is closed.' : 'while tdoc is open in a tab.'}`;
   return (
     <div className="tdoc-notif-setting">
       <AppSwitch

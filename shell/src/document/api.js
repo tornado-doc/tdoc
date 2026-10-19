@@ -279,6 +279,27 @@ export function answerAccessRequest({ slug, requester, action }) {
   });
 }
 
+// Web push (#771): this browser's subscription for the bell.
+export function getPushKey() {
+  return request('/api/push/key');
+}
+
+export function savePushSubscription(subscription) {
+  return request('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+export function dropPushSubscription(endpoint) {
+  return request('/api/push/unsubscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
 export function markAllNotificationsRead() {
   return request('/api/notifications/read', {
     method: 'POST',

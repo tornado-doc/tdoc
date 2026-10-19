@@ -48,6 +48,13 @@ if (!fs.existsSync(feedbackJsFile)) {
   process.exit(1);
 }
 const feedbackJs = fs.readFileSync(feedbackJsFile, 'utf8');
+// The push service worker (shell/src/push-sw.js), served whole at /tdoc-sw.js.
+const pushSwFile = path.join(skill, 'server/runtime/tdoc-sw.js');
+if (!fs.existsSync(pushSwFile)) {
+  console.error('bundle: server/runtime/tdoc-sw.js is missing; run npm run build:sw');
+  process.exit(1);
+}
+const pushSwJs = fs.readFileSync(pushSwFile, 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -62,7 +69,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs].join('\0'));
+const bundleSha = sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -91,6 +98,7 @@ replaced = mustReplace(replaced, /const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";/, 'const SHELL_RUNTIME_CSS_PATH = ' + JSON.stringify(runtimeCssPath) + ';', 'SHELL_RUNTIME_CSS_PATH');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;/, 'const SHELL_RUNTIME_CSS = ' + JSON.stringify(runtimeCss) + ';', 'SHELL_RUNTIME_CSS');
 replaced = mustReplace(replaced, /const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;/, 'const FEEDBACK_JS = ' + JSON.stringify(feedbackJs) + ';', 'FEEDBACK_JS');
+replaced = mustReplace(replaced, /const PUSH_SW_JS = `__TDOC_PUSH_SW_JS__`;/, 'const PUSH_SW_JS = ' + JSON.stringify(pushSwJs) + ';', 'PUSH_SW_JS');
 
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";/, 'const SHELL_RUNTIME_EXTRA_ASSETS = ' + JSON.stringify(extraAssets) + ';', 'SHELL_RUNTIME_EXTRA_ASSETS');
 

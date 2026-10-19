@@ -26,6 +26,9 @@ const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";
 // The in-page feedback client (feedback/src/main.jsx → server/runtime/feedback.js),
 // served at /feedback.js for the one-line install and the bookmarklet.
 const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;
+// The push service worker (shell/src/push-sw.js → server/runtime/tdoc-sw.js),
+// served at /tdoc-sw.js. See "web push" below.
+const PUSH_SW_JS = `__TDOC_PUSH_SW_JS__`;
 const SHELL = (typeof globalThis !== 'undefined' && globalThis.TDOC_SHELL_BUILDER) || null;
 
 // Small, public remote-use contract for agents that encounter a tdoc.dev URL
@@ -9214,7 +9217,23 @@ async function loadInbox(env, login) {
   }
 }
 
-async function deliverInbox(env, recipientLogin, ev) {
+// Every inbox row is written here, so every row also leaves the building:
+// web push to the browsers the recipient turned alerts on in (#771). The
+// push runs after the row is stored and never fails the write.
+async function writeInboxEvent(env, who, ev, ctx = null) {
+  const { key, inbox } = await loadInbox(env, who);
+  if (!key) return null;
+  const next = applyInboxEvent(inbox, { id: `n_${Date.now()}_${rand(4)}`, ...ev, at: ev.at || new Date().toISOString() });
+  await env.META.put(key, JSON.stringify(next));
+  const row = next.items[0];
+  const out = pushInboxRow(env, key.slice('inbox:'.length), row).catch((error) => {
+    console.error('[push] fan-out failed:', error && error.message ? error.message : error);
+  });
+  if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(out); else await out;
+  return row;
+}
+
+async function deliverInbox(env, recipientLogin, ev, ctx = null) {
   const recips = inboxRecipients({
     kind: ev.kind,
     actorLogin: ev.actor && ev.actor.login,
@@ -9227,14 +9246,7 @@ async function deliverInbox(env, recipientLogin, ev) {
   const at = ev.at || new Date().toISOString();
   for (const who of recips) {
     try {
-      const { key, inbox } = await loadInbox(env, who);
-      if (!key) continue;
-      const next = applyInboxEvent(inbox, {
-        ...ev,
-        id: ev.id || `n_${Date.now()}_${rand(4)}`,
-        at,
-      });
-      await env.META.put(key, JSON.stringify(next));
+      await writeInboxEvent(env, who, { ...ev, at }, ctx);
     } catch (error) {
       // The comment/reply/reaction is already committed in the document DO.
       // A KV quota or transient inbox failure must not turn that success into
@@ -9242,6 +9254,214 @@ async function deliverInbox(env, recipientLogin, ev) {
       console.error('[notifications] inbox delivery failed:', error && error.message ? error.message : error);
     }
   }
+}
+
+// ---- web push (#771) -------------------------------------------------------
+// Browser notifications used to be raised by the page itself, so they only
+// arrived while a tdoc tab was open. A push reaches the browser's push
+// service instead, and our service worker (/tdoc-sw.js) shows it with tdoc
+// closed. Standard Web Push: a VAPID-signed request (RFC 8292) carrying the
+// inbox row encrypted to the subscription's keys (RFC 8291, aes128gcm).
+//
+// Subscriptions live at `push-subs:<actor key>` under EVERY key of the
+// person who turned alerts on, because a mention is delivered to whichever
+// key its author typed. `push-endpoint:<hash>` remembers whose lists hold an
+// endpoint, so a browser handed to another account stops alerting the first.
+//
+// VAPID keys: VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY (base64url raw P-256)
+// when the operator sets them, else generated once and kept in KV. Zero
+// setup either way; rotating them only means browsers re-subscribe on their
+// next visit (the client compares the key it subscribed with).
+const PUSH_SUBS_MAX = 10;
+const PUSH_TTL_S = 24 * 60 * 60;
+const PUSH_PREVIEW_MAX = 280;
+const PUSH_KINDS = new Set(['comment', 'mention', 'reply', 'access_request', 'access_granted']);
+// The worker POSTs to whatever endpoint a subscription names, so only the
+// browsers' own push services are accepted -- never an arbitrary URL.
+const PUSH_HOSTS = [
+  /^fcm\.googleapis\.com$/,
+  /^updates\.push\.services\.mozilla\.com$/,
+  /(^|\.)push\.apple\.com$/,
+  /(^|\.)notify\.windows\.com$/,
+];
+
+function pushEndpointAllowed(endpoint) {
+  let u;
+  try { u = new URL(String(endpoint || '')); } catch { return false; }
+  return u.protocol === 'https:' && !u.port && !u.username && PUSH_HOSTS.some((re) => re.test(u.hostname));
+}
+
+function cleanPushSubscription(raw) {
+  if (!raw || typeof raw !== 'object' || !pushEndpointAllowed(raw.endpoint)) return null;
+  const p256dh = String((raw.keys && raw.keys.p256dh) || '');
+  const auth = String((raw.keys && raw.keys.auth) || '');
+  try {
+    const pub = bytesFromB64url(p256dh);
+    if (pub.length !== 65 || pub[0] !== 4 || bytesFromB64url(auth).length !== 16) return null;
+  } catch { return null; }
+  return { endpoint: String(raw.endpoint), keys: { p256dh, auth } };
+}
+
+function concatBytes(...parts) {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
+let vapidCache = null;
+async function vapidKeys(env) {
+  if (vapidCache) return vapidCache;
+  const fromEnv = String(env.VAPID_PUBLIC_KEY || '').trim();
+  const privEnv = String(env.VAPID_PRIVATE_KEY || '').trim();
+  let rec = null;
+  if (fromEnv && privEnv) {
+    rec = { publicKey: fromEnv, d: privEnv };
+  } else {
+    try { rec = JSON.parse(await env.META.get('push-vapid') || 'null'); } catch { rec = null; }
+    if (!rec || !rec.publicKey || !rec.d) {
+      const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+      const jwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
+      const pub = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+      await env.META.put('push-vapid', JSON.stringify({ publicKey: b64urlBytes(pub), d: jwk.d }));
+      // Two first requests can race; both converge on whichever write won.
+      rec = JSON.parse(await env.META.get('push-vapid'));
+    }
+  }
+  const pub = bytesFromB64url(rec.publicKey);
+  const jwk = { kty: 'EC', crv: 'P-256', x: b64urlBytes(pub.slice(1, 33)), y: b64urlBytes(pub.slice(33, 65)), d: rec.d, ext: true };
+  const signKey = await crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+  vapidCache = { publicKey: rec.publicKey, signKey };
+  return vapidCache;
+}
+
+async function vapidAuthorization(env, endpoint, origin) {
+  const { publicKey, signKey } = await vapidKeys(env);
+  const enc = (obj) => b64urlBytes(new TextEncoder().encode(JSON.stringify(obj)));
+  // Apple rejects a token without a reachable contact; an https origin is one.
+  const sub = String(env.TDOC_PUSH_CONTACT || '').trim()
+    || (/^https:\/\//.test(origin || '') ? origin : 'mailto:push@tdoc.dev');
+  const unsigned = `${enc({ typ: 'JWT', alg: 'ES256' })}.${enc({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60, sub })}`;
+  // WebCrypto's ECDSA signature is already the raw r||s that JWS wants.
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, signKey, new TextEncoder().encode(unsigned)));
+  return `vapid t=${unsigned}.${b64urlBytes(sig)}, k=${publicKey}`;
+}
+
+async function hkdfBytes(salt, ikm, info, length) {
+  const key = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info }, key, length * 8));
+}
+
+// RFC 8291: one aes128gcm record, keyed by ECDH with the browser's key and
+// salted with its auth secret, so only that browser can read the row.
+async function encryptPushPayload(sub, plaintext) {
+  const te = new TextEncoder();
+  const uaPublic = bytesFromB64url(sub.keys.p256dh);
+  const authSecret = bytesFromB64url(sub.keys.auth);
+  const local = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const asPublic = new Uint8Array(await crypto.subtle.exportKey('raw', local.publicKey));
+  const uaKey = await crypto.subtle.importKey('raw', uaPublic, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: uaKey }, local.privateKey, 256));
+  const ikm = await hkdfBytes(authSecret, shared, concatBytes(te.encode('WebPush: info\0'), uaPublic, asPublic), 32);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdfBytes(salt, ikm, te.encode('Content-Encoding: aes128gcm\0'), 16);
+  const nonce = await hkdfBytes(salt, ikm, te.encode('Content-Encoding: nonce\0'), 12);
+  const aes = await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['encrypt']);
+  // 0x02 marks the last (only) record.
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, aes, concatBytes(plaintext, Uint8Array.of(2))));
+  const rs = Uint8Array.of(0, 0, 16, 0); // record size 4096, big-endian
+  return concatBytes(salt, rs, Uint8Array.of(asPublic.length), asPublic, sealed);
+}
+
+// Returns 'ok', 'gone' (the browser dropped it: forget the subscription) or
+// 'failed'.
+async function sendWebPush(env, sub, payload, origin) {
+  const body = await encryptPushPayload(sub, new TextEncoder().encode(JSON.stringify(payload)));
+  const r = await fetch(sub.endpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': await vapidAuthorization(env, sub.endpoint, origin),
+      'Content-Encoding': 'aes128gcm',
+      'Content-Type': 'application/octet-stream',
+      'TTL': String(PUSH_TTL_S),
+      'Urgency': 'normal',
+    },
+    body,
+  });
+  if (r.status === 404 || r.status === 410) return 'gone';
+  if (!r.ok) {
+    console.error('[push] send failed:', r.status, new URL(sub.endpoint).hostname);
+    return 'failed';
+  }
+  return 'ok';
+}
+
+async function loadPushSubs(env, who) {
+  try {
+    const list = JSON.parse(await env.META.get(`push-subs:${who}`) || '[]');
+    return Array.isArray(list) ? list.filter((s) => s && pushEndpointAllowed(s.endpoint)) : [];
+  } catch { return []; }
+}
+
+async function pushEndpointId(endpoint) {
+  return hexBytes(await sha256Bytes(endpoint)).slice(0, 32);
+}
+
+async function removePushEndpoint(env, who, endpoint) {
+  const subs = await loadPushSubs(env, who);
+  const next = subs.filter((s) => s.endpoint !== endpoint);
+  if (next.length === subs.length) return;
+  if (next.length) await env.META.put(`push-subs:${who}`, JSON.stringify(next));
+  else await env.META.delete(`push-subs:${who}`);
+}
+
+// This browser now belongs to `keys` (the signed-in person's actor keys).
+// `origin` is the site it subscribed on: the VAPID contact for its pushes.
+async function savePushSubscription(env, keys, sub, origin) {
+  const idKey = `push-endpoint:${await pushEndpointId(sub.endpoint)}`;
+  let owners = [];
+  try { owners = JSON.parse(await env.META.get(idKey) || '[]'); } catch { owners = []; }
+  for (const who of owners) if (!keys.includes(who)) await removePushEndpoint(env, who, sub.endpoint);
+  for (const who of keys) {
+    const subs = (await loadPushSubs(env, who)).filter((s) => s.endpoint !== sub.endpoint);
+    subs.unshift({ ...sub, origin, at: new Date().toISOString() });
+    await env.META.put(`push-subs:${who}`, JSON.stringify(subs.slice(0, PUSH_SUBS_MAX)));
+  }
+  await env.META.put(idKey, JSON.stringify(keys));
+}
+
+async function dropPushSubscription(env, keys, endpoint) {
+  const idKey = `push-endpoint:${await pushEndpointId(endpoint)}`;
+  let owners = [];
+  try { owners = JSON.parse(await env.META.get(idKey) || '[]'); } catch { owners = []; }
+  for (const who of new Set([...owners, ...keys])) await removePushEndpoint(env, who, endpoint);
+  await env.META.delete(idKey);
+}
+
+// The row the service worker renders with the dialog's own label/target.
+function pushRow(row) {
+  const clip = (s, n) => { const t = String(s || ''); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+  return {
+    id: row.id, kind: row.kind, slug: row.slug, version: row.version,
+    comment_id: row.comment_id, thread_id: row.thread_id,
+    actor: row.actor ? { login: row.actor.login, name: clip(row.actor.name, 80) } : null,
+    preview: clip(row.preview, PUSH_PREVIEW_MAX), title: clip(row.title, 120),
+    count: row.count, emoji: row.emoji || null, at: row.at,
+  };
+}
+
+async function pushInboxRow(env, who, row) {
+  if (!row || !PUSH_KINDS.has(row.kind)) return;
+  const subs = await loadPushSubs(env, who);
+  if (!subs.length) return;
+  const payload = { v: 1, item: pushRow(row) };
+  await Promise.all(subs.map(async (sub) => {
+    let result = 'failed';
+    try { result = await sendWebPush(env, sub, payload, sub.origin); } catch (error) {
+      console.error('[push] send threw:', error && error.message ? error.message : error);
+    }
+    if (result === 'gone') await removePushEndpoint(env, who, sub.endpoint);
+  }));
 }
 
 // ===========================================================================
@@ -11874,6 +12094,17 @@ export default {
     // meta record. The browser had no way to make a document before this; edit
     // mode could only ever change one that already existed.
     // ---- product feedback (#564): the client, its pages, and the token door ----
+    if (p === '/tdoc-sw.js' && (method === 'GET' || method === 'HEAD')) {
+      return new Response(method === 'HEAD' ? null : PUSH_SW_JS, {
+        headers: {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          // The browser re-checks a service worker on navigation; let it see a fix.
+          'Cache-Control': 'no-cache',
+          'Service-Worker-Allowed': '/',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     if (p === '/feedback.js' && (method === 'GET' || method === 'HEAD')) {
       return new Response(method === 'HEAD' ? null : FEEDBACK_JS, {
         headers: {
@@ -12583,6 +12814,29 @@ export default {
         await env.META.put(part.key, JSON.stringify(next));
       }
       return json({ ok: true, unread: inboxUnread(mergeInboxes(parts)) });
+    }
+
+    // ---- web push (#771): this browser's subscription for the bell ----
+    if (p === '/api/push/key' && method === 'GET') {
+      const { publicKey } = await vapidKeys(env);
+      return json({ key: publicKey });
+    }
+    if ((p === '/api/push/subscribe' || p === '/api/push/unsubscribe') && method === 'POST') {
+      const s = await getSession(env, req);
+      const keys = actorKeys(s);
+      if (!keys.length) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      if (p === '/api/push/unsubscribe') {
+        const endpoint = body && body.endpoint;
+        if (!pushEndpointAllowed(endpoint)) return json({ error: 'invalid_endpoint' }, { status: 400 });
+        await dropPushSubscription(env, keys, endpoint);
+        return json({ ok: true });
+      }
+      const sub = cleanPushSubscription(body && body.subscription);
+      if (!sub) return json({ error: 'invalid_subscription' }, { status: 400 });
+      await savePushSubscription(env, keys, sub, url.origin);
+      return json({ ok: true });
     }
 
     // ---- personal docs state (stars / folders) ----
@@ -13701,7 +13955,7 @@ export default {
             kind: 'mention', slug, version: V, comment_id: commentId,
             thread_id: threadId, target_id: commentId, mentions,
             actor: author, preview: commentText, title, at: created,
-          });
+          }, ctx);
         }
         if (!parent_id) {
           const owner = positionalRecipient(ownerLogin, mentions);
@@ -13709,7 +13963,7 @@ export default {
             await deliverInbox(env, owner, {
               kind: 'comment', slug, version: V, comment_id: op.id, thread_id: op.id,
               actor: author, preview: commentText, title, at: created,
-            });
+            }, ctx);
           }
         } else {
           const parentA = recordAuthor(priorList, parent_id);
@@ -13719,7 +13973,7 @@ export default {
               kind: 'reply', slug, version: V, comment_id: op.reply_id,
               thread_id: res.body && res.body.thread_id, target_id: parent_id,
               actor: author, preview: commentText, title, at: created,
-            });
+            }, ctx);
           }
         }
       }
@@ -13912,7 +14166,7 @@ export default {
           thread_id: thread && thread.root && thread.root.id, target_id: comment_id,
           actor: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
           title: (meta && meta.title) || slug, emoji,
-        });
+        }, ctx);
       }
       return json(res.body, { status: res.status });
     }
@@ -15056,10 +15310,7 @@ export default {
       if (await env.META.get(dedupeKey)) return json({ ok: true, requested: true });
       const owner = ownerActorKey(meta, env);
       if (owner && owner !== asker) {
-        const { key, inbox } = await loadInbox(env, owner);
-        if (key) {
-          const next = applyInboxEvent(inbox, {
-            id: `n_${Date.now()}_${rand(4)}`,
+        await writeInboxEvent(env, owner, {
             kind: 'access_request',
             slug,
             title: meta.title || slug,
@@ -15069,9 +15320,7 @@ export default {
             requester: asker,
             at: new Date().toISOString(),
             actor: { login: asker, name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
-          });
-          await env.META.put(key, JSON.stringify(next));
-        }
+        }, ctx);
       }
       await env.META.put(dedupeKey, '1', { expirationTtl: 7 * 24 * 60 * 60 });
       return json({ ok: true, requested: true });
@@ -15127,19 +15376,14 @@ export default {
           await putDocMetaJson(env, slug, JSON.stringify(next.meta));
         }
         const approver = auth.session || null;
-        const { key, inbox } = await loadInbox(env, who);
-        if (key) {
-          await env.META.put(key, JSON.stringify(applyInboxEvent(inbox, {
-            id: `n_${Date.now()}_${rand(4)}`,
-            kind: 'access_granted',
-            slug,
-            title,
-            at: new Date().toISOString(),
-            actor: approver
-              ? { login: actorKey(approver), name: actorDisplayName(approver), avatar_url: approver.avatar_url || '' }
-              : null,
-          })));
-        }
+        await writeInboxEvent(env, who, {
+          kind: 'access_granted',
+          slug,
+          title,
+          actor: approver
+            ? { login: actorKey(approver), name: actorDisplayName(approver), avatar_url: approver.avatar_url || '' }
+            : null,
+        }, ctx);
       }
       // A later request from the same person is a new question.
       await env.META.delete(`access-req:${slug}:${who}`);

@@ -30,7 +30,8 @@ function loadRuntimeAssets() {
       // one-year immutable cache. Its own route (/feedback.js) serves it with
       // a short one; otherwise an app with the one-line install keeps the
       // version from the day it first loaded, forever.
-      if (path.relative(RUNTIME_DIR, file) === 'feedback.js') return [];
+      // tdoc-sw.js likewise: a service worker's URL is its identity.
+      if (['feedback.js', 'tdoc-sw.js'].includes(path.relative(RUNTIME_DIR, file))) return [];
       return type ? [{ path: '/' + path.relative(RUNTIME_DIR, file).split(path.sep).join('/'), file, type }] : [];
     });
   }
