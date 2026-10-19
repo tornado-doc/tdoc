@@ -35,6 +35,7 @@ const OFFLINE = [
   'ui-primitives.test.js',    // product UI uses shell/src/ui primitives; no native <select>
   'notifications-merge.test.js', // the bell reads every linked actor key (handle + email)
   'email-notifications.test.js', // #772 mention/reply/comment emails: cooldown, cap, opt-out, switch
+  'push-sw.test.js',           // #771 the shipped service worker: show, click opens the comment, no fetch handler
   'web-push.test.js',          // #771 a comment pushes to subscribed browsers (RFC 8291/8292, decrypted)
   'access-request-actions.test.js', // access requests answered from the notification: approve / ignore
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
