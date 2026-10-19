@@ -157,6 +157,7 @@ const BROWSER = [
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout
   'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
   'team-billing-ui.test.js', // #48 Team plan card: free seats, upgrade, paid summary, portal, phone
+  'agent-mention-ui.test.js', // @ offers the doc's agent by name; tagging it hands the comment over
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
 ];
 

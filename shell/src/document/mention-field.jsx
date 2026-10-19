@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGithubUserSearch } from './github-user-search.js';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
@@ -15,6 +15,28 @@ import { parseRichText } from './rich-text.js';
 // the textarea it fits on.
 const MENU_MAX_HEIGHT = 184;
 
+// The agent this doc's comments go to, by name ("Claude", "devin"), or '' when
+// no agent can be handed comments here. Typing @ offers it first; a comment
+// that tags it is handed to it, exactly like the @agent button.
+export const AgentMentionContext = createContext('');
+
+function agentTagPattern(name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|\\s)@(${escaped}|agent)(?=$|[\\s.,!?;:])`, 'gi');
+}
+
+export function mentionsAgent(text, name) {
+  return Boolean(name) && agentTagPattern(name).test(String(text || ''));
+}
+
+// The tag stays readable ("@Claude") but must not reach the server as a
+// person: an owner's @mention invites that GitHub login to the doc. A word
+// joiner after the @ keeps it out of the server's mention pattern.
+export function neutralizeAgentTag(text, name) {
+  if (!name) return text;
+  return String(text || '').replace(agentTagPattern(name), (_m, lead, tag) => `${lead}@\u2060${tag}`);
+}
+
 export function MentionField({
   value,
   onChange,
@@ -28,7 +50,11 @@ export function MentionField({
   const caretAfterInsert = useRef(null);
   const [query, setQuery] = useState(null);
   const [active, setActive] = useState(0);
+  const agentName = useContext(AgentMentionContext);
 
+  const q = query ? query.query.toLowerCase() : '';
+  const agentOption = query && agentName && (agentName.toLowerCase().startsWith(q) || 'agent'.startsWith(q))
+    ? { login: agentName, name: '', agent: true } : null;
   const localMatches = query ? matchMentionable(people, query.query) : [];
   // Typing an address is already a complete tag — asking GitHub's user search
   // about "dana@corp.com" offers strangers and leaks the address upstream.
@@ -37,13 +63,13 @@ export function MentionField({
   });
   const matches = useMemo(() => {
     const seen = new Set(localMatches.map((person) => String(person.login).toLowerCase()));
-    return localMatches.concat(remote
+    return (agentOption ? [agentOption] : []).concat(localMatches.filter((person) => !agentOption || String(person.login).toLowerCase() !== agentName.toLowerCase())).concat(remote
       .filter((user) => user.login && !seen.has(String(user.login).toLowerCase()))
       .map((user) => ({ login: user.login, name: '', avatar_url: user.avatar_url, remote: true })))
       .slice(0, 6);
     // localMatches/remote are derived arrays; identity churn only costs a cheap
     // concat, and recomputing keeps the highlighted row in step with the query.
-  }, [JSON.stringify(localMatches), remote]);
+  }, [JSON.stringify(localMatches), remote, agentOption ? agentName : '']);
   const open = Boolean(query) && matches.length > 0;
 
   // Restore the caret after an insertion: React re-renders with the new value
@@ -162,7 +188,7 @@ export function MentionField({
         <div className="tdoc-mention-menu" id="tdoc-mention-menu" role="listbox" style={menuBox}>
           {matches.map((person, index) => (
             <button
-              key={person.login}
+              key={`${person.agent ? 'agent:' : ''}${person.login}`}
               type="button"
               role="option"
               aria-selected={index === active}
@@ -177,7 +203,8 @@ export function MentionField({
               {person.name && person.name.toLowerCase() !== person.login ? (
                 <span className="tdoc-mention-name">{person.name}</span>
               ) : null}
-              {person.remote ? <span className="tdoc-mention-source">GitHub</span>
+              {person.agent ? <span className="tdoc-mention-source">Agent · gets this comment</span>
+                : person.remote ? <span className="tdoc-mention-source">GitHub</span>
                 : mentionReason(person) ? <span className="tdoc-mention-source">{mentionReason(person)}</span> : null}
             </button>
           ))}
