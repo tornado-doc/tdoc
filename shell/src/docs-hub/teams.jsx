@@ -772,8 +772,8 @@ export function MoveToTeamDialog({
 }
 
 // A My docs folder, with its subfolders and your docs, into a team: pick the
-// team, confirm, watch it go, land on the folder in the team.
-export function MoveFolderToTeamDialog({ folder, teams, docCount, onClose }) {
+// team, confirm, watch it go, then stay on the current list.
+export function MoveFolderToTeamDialog({ folder, teams, docCount, onClose, onStart, onSettled }) {
   const [target, setTarget] = useState(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -782,15 +782,17 @@ export function MoveFolderToTeamDialog({ folder, teams, docCount, onClose }) {
   const run = async () => {
     setBusy(true);
     setStatus('Moving…');
+    onStart();
     try {
       const result = await moveFolderToTeam(folder.id, target.id, ({ moved, remaining }) => {
         if (remaining) setStatus(`Moving… ${moved} of ${moved + remaining}`);
       });
-      const href = `/me?team=${encodeURIComponent(target.id)}&folder=${encodeURIComponent(result.folder || '')}`;
-      if (!result.skipped.length) { location.href = href; return; }
-      setLeft({ href, count: result.skipped.length });
+      await onSettled();
+      if (!result.skipped.length) { onClose(); return; }
+      setLeft({ count: result.skipped.length });
       setStatus('');
     } catch (error) {
+      await onSettled();
       setStatus(message(error));
     }
     setBusy(false);
@@ -802,7 +804,7 @@ export function MoveFolderToTeamDialog({ folder, teams, docCount, onClose }) {
         open
         onOpenChange={(open) => { if (!open) close(); }}
         title={`Moved to ${target.name}`}
-        actions={<button type="button" onClick={() => { location.href = left.href; }}>Open in {target.name}</button>}
+        actions={<button type="button" onClick={close}>Close</button>}
       >
         <p>{left.count === 1 ? '1 doc was' : `${left.count} docs were`} not yours to move, so {left.count === 1 ? 'it stays' : 'they stay'} in {folder.name} in My docs.</p>
       </AppDialog>

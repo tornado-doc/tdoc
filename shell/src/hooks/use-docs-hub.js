@@ -179,15 +179,21 @@ export function useDocsHub({ boot, onUnauthorized }) {
   }, [paintStar, run]);
 
   const moveDocs = useCallback(async (slugs, destination) => {
+    const moved = new Set(slugs);
+    const previous = docs.filter((item) => moved.has(item.slug));
+    setDocs((items) => items.map((item) => (moved.has(item.slug) ? { ...item, folder: destination } : item)));
     const ok = await run(
       () => moveDocsToFolder(slugs, destination),
       `Moved ${plural(slugs.length, 'doc')}`,
     );
-    if (!ok) return false;
-    setDocs((items) => items.map((item) => (slugs.includes(item.slug) ? { ...item, folder: destination } : item)));
+    if (!ok) {
+      const bySlug = new Map(previous.map((item) => [item.slug, item]));
+      setDocs((items) => items.map((item) => bySlug.get(item.slug) || item));
+      return false;
+    }
     setSelected(new Set());
     return true;
-  }, [run]);
+  }, [docs, run]);
 
   const deleteDocs = useCallback(async (slugs) => {
     const ok = await run(
@@ -242,9 +248,13 @@ export function useDocsHub({ boot, onUnauthorized }) {
 
   return {
     docs,
+    setDocs,
     recent,
+    setRecent,
     starred,
+    setStarred,
     folders,
+    setFolders,
     folder,
     setFolder,
     folderById,
@@ -258,6 +268,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     sort,
     setSort,
     selected,
+    setSelected,
     toggleSelected,
     selectAll,
     toast,
