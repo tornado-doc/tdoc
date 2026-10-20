@@ -47,6 +47,11 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+# Under the local agent daemon a reply may only go to the doc it is running.
+if [ -n "${TDOC_DAEMON_SLUG:-}" ] && [ "$PRINT_IDENTITY" != "1" ] && [ "$SLUG" != "$TDOC_DAEMON_SLUG" ]; then
+  echo "[tdoc] the daemon may only reply on \"$TDOC_DAEMON_SLUG\"." >&2
+  exit 2
+fi
 
 detect_login() {
   if [ -n "${GROK_AGENT:-}${GROK_SESSION_ID:-}${GROK_BUILD:-}${XAI_AGENT:-}" ]; then echo grok; return; fi
