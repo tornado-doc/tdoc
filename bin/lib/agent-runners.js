@@ -35,15 +35,34 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const CLAUDE_ALLOWED_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash(bash:*)', 'Bash(node:*)', 'Bash(curl:*)'];
+// The tdoc edit flow needs four scripts and file edits in its own folders,
+// nothing else. Each script is allowed only by its absolute path (bare, or
+// via bash, quoted or not), so a comment cannot talk the agent into running
+// `bash -c …` or `node -e …`; and Edit/Write reach only the writable folders,
+// never the skill checkout, so it cannot rewrite an allowed script either.
+const TDOC_SCRIPTS = ['tdoc-pull', 'tdoc-write', 'tdoc-publish', 'tdoc-agent-reply'];
+const BIN_DIR = path.resolve(__dirname, '..');
+function claudeAllowedTools({ binDir = BIN_DIR, writeDirs = [] } = {}) {
+  const tools = ['Read', 'Glob', 'Grep'];
+  for (const dir of writeDirs.filter(Boolean)) {
+    const abs = `//${path.resolve(dir).replace(/^\/+/, '')}/**`;
+    // Edit(path) covers every file-editing tool; Claude ignores Write(path).
+    tools.push(`Edit(${abs})`);
+  }
+  for (const script of TDOC_SCRIPTS) {
+    const full = path.join(binDir, script);
+    tools.push(`Bash(${full}:*)`, `Bash(bash ${full}:*)`, `Bash(bash "${full}":*)`);
+  }
+  return tools;
+}
 
 const RUNNERS = {
   claude: {
     bin: 'claude',
     label: 'Claude Code',
-    args({ cwd, permissionMode, allowedTools, addDirs }) {
+    args({ cwd, permissionMode, allowedTools, addDirs, writeDirs }) {
       const argv = ['-p', '--output-format', 'text', '--permission-mode', permissionMode || 'dontAsk'];
-      const tools = allowedTools || CLAUDE_ALLOWED_TOOLS;
+      const tools = allowedTools || claudeAllowedTools({ writeDirs: writeDirs || [cwd] });
       if (tools.length && permissionMode !== 'bypassPermissions') argv.push('--allowedTools', tools.join(','));
       for (const d of addDirs || []) if (d && d !== cwd) argv.push('--add-dir', d);
       return argv;
@@ -52,13 +71,16 @@ const RUNNERS = {
   codex: {
     bin: 'codex',
     label: 'Codex',
-    args({ cwd, permissionMode, addDirs }) {
+    args({ cwd, permissionMode, addDirs, writeDirs }) {
       // permissionMode maps onto the sandbox: the default is workspace-write;
       // 'bypassPermissions' is the explicit way to turn the sandbox off.
+      // Codex has no per-command allow-list, so the sandbox is the boundary:
+      // writable roots are only the doc folders (--add-dir in codex means
+      // writable), never the skill checkout whose scripts the flow runs.
       const argv = ['exec', '--skip-git-repo-check', '-C', cwd];
       if (permissionMode === 'bypassPermissions') argv.push('--dangerously-bypass-approvals-and-sandbox');
       else argv.push('--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true');
-      for (const d of addDirs || []) if (d && d !== cwd) argv.push('--add-dir', d);
+      for (const d of (writeDirs || addDirs || [])) if (d && d !== cwd) argv.push('--add-dir', d);
       return argv;
     },
   },
@@ -88,12 +110,12 @@ function detectClis(env = process.env) {
 // Run one CLI on one prompt in `cwd`; resolves when it exits, never rejects.
 // `onLine` (optional) sees each output line; the whole output also goes to
 // `logPath` when given. `tail` keeps the last few KB for an error message.
-function runAgent({ cli, prompt, cwd, env = process.env, timeoutMs = 30 * 60 * 1000, logPath = null, permissionMode = null, allowedTools = null, addDirs = [], onLine = null }) {
+function runAgent({ cli, prompt, cwd, env = process.env, timeoutMs = 30 * 60 * 1000, logPath = null, permissionMode = null, allowedTools = null, addDirs = [], writeDirs = null, onLine = null }) {
   const runner = RUNNERS[cli];
   if (!runner) return Promise.resolve({ ok: false, code: null, signal: null, timedOut: false, error: `unknown cli: ${cli}`, tail: '', durationMs: 0 });
   const bin = findOnPath(runner.bin, env);
   if (!bin) return Promise.resolve({ ok: false, code: null, signal: null, timedOut: false, error: `${runner.bin} is not on PATH`, tail: '', durationMs: 0 });
-  const argv = runner.args({ cwd, permissionMode, allowedTools, addDirs });
+  const argv = runner.args({ cwd, permissionMode, allowedTools, addDirs, writeDirs });
   const started = Date.now();
   return new Promise((resolve) => {
     let tail = '';
@@ -204,4 +226,4 @@ function runAgentVia(opts) {
   return (opts.runner || process.env.TDOC_DAEMON_RUNNER || 'cli') === 'oar' ? runAgentWithOar(opts) : runAgent(opts);
 }
 
-module.exports = { RUNNERS, CLAUDE_ALLOWED_TOOLS, OAR_DISALLOWED_TOOLS, runAgent, runAgentWithOar, runAgentVia, loadOar, findOnPath, detectClis, knownClis };
+module.exports = { RUNNERS, TDOC_SCRIPTS, claudeAllowedTools, OAR_DISALLOWED_TOOLS, runAgent, runAgentWithOar, runAgentVia, loadOar, findOnPath, detectClis, knownClis };

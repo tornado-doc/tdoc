@@ -33,7 +33,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { runAgentVia, detectClis, knownClis, findOnPath, RUNNERS } = require('./agent-runners.js');
+const { runAgentVia, detectClis, knownClis, findOnPath, RUNNERS, claudeAllowedTools } = require('./agent-runners.js');
 
 const HOME = process.env.HOME || os.homedir();
 const SKILL_DIR = process.env.TDOC_SKILL_DIR || path.resolve(__dirname, '..', '..');
@@ -159,8 +159,9 @@ function buildPrompt({ handoff, device }) {
     '',
     `You are running unattended as the tdoc local agent daemon on "${device}" (handoff ${handoff.handoff_id}).`,
     `Use the tdoc skill at ${path.join(SKILL_DIR, 'SKILL.md')} and follow its "/tdoc edit" flow for the slug "${handoff.slug}":`,
-    `pull the comments with \`bash "${BIN_DIR}/tdoc-pull" ${handoff.slug}\`, write the new version with bin/tdoc-write,`,
-    'publish it with bin/tdoc-publish, and reply on every comment with bin/tdoc-agent-reply. Then stop; the daemon marks the handoff resolved.',
+    `pull the comments with \`bash ${path.join(BIN_DIR, 'tdoc-pull')} ${handoff.slug}\`, write the new version with \`bash ${path.join(BIN_DIR, 'tdoc-write')}\`,`,
+    `publish it with \`bash ${path.join(BIN_DIR, 'tdoc-publish')}\`, and reply on every comment with \`bash ${path.join(BIN_DIR, 'tdoc-agent-reply')}\`. Then stop; the daemon marks the handoff resolved.`,
+    'Only those four scripts can run here, each by that exact path; edit files with your file tools, not shell commands.',
     '',
     `This handoff covers comment ids: ${ids || '(none listed)'}. Other open comments may be addressed too, but these come first.`,
   ];
@@ -236,7 +237,7 @@ async function runHandoff(cfg, st, state, h, accountIds) {
     TDOC_AGENT: `local/${h.recipient.device}/${h.recipient.agent_sub}`,
   };
   const started = Date.now();
-  const res = await runAgentVia({ runner: st.runner, cli, prompt, cwd, env, timeoutMs: st.timeoutMs, logPath: runLog, permissionMode: st.permissionMode, addDirs: [TDOC_DIR, SKILL_DIR] });
+  const res = await runAgentVia({ runner: st.runner, cli, prompt, cwd, env, timeoutMs: st.timeoutMs, logPath: runLog, permissionMode: st.permissionMode, addDirs: [TDOC_DIR, SKILL_DIR], writeDirs: [cwd, TDOC_DIR], allowedTools: cli === 'claude' ? claudeAllowedTools({ binDir: BIN_DIR, writeDirs: [cwd, TDOC_DIR] }) : null });
   const run = { handoff_id: key, slug: h.slug, cli, started: new Date(started).toISOString(), ended: new Date().toISOString(), ok: res.ok, code: res.code, error: res.error, log: runLog };
   state.runs = [run, ...(state.runs || [])].slice(0, 30);
   if (res.ok) {
