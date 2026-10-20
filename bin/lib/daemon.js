@@ -219,6 +219,12 @@ async function runHandoff(cfg, st, state, h, accountIds) {
     if (e.status === 403 || e.status === 404) { state.attempts[key] = MAX_ATTEMPTS; saveState(state); }
     return;
   }
+  // The slug becomes two paths and an env value; anything but a plain slug
+  // (a "../", a slash) could point the run's folders outside where they belong.
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(String(h.slug || ''))) {
+    log(`skip ${key}: not a plain slug: ${JSON.stringify(h.slug)}`);
+    return;
+  }
   const cwd = path.join(st.workdir, h.slug);
   ensureDir(cwd);
   // The one doc this run may touch: its folder is the only writable part of
