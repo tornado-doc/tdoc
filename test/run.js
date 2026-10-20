@@ -117,6 +117,7 @@ const OFFLINE = [
   'agent-reply-once.test.js', // #349 the agent answers once per human turn
   'kv-write-budget.test.js', // repeat actions spend no extra KV writes (daily quota)
   'team-billing.test.js', // #48 Team plan: Stripe checkout, portal, signed webhook, seat sync
+  'logout-provider.test.js', // #58 logout also ends the Clerk session
   'reply-activity.test.js', // old versions see live reply status without rewriting their snapshot
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
