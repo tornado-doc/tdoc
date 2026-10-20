@@ -12902,7 +12902,13 @@ export default {
     if (p === '/api/auth/logout' && method === 'POST') {
       const sid = parseCookie(req);
       if (sid) await env.META.delete(`session:${sid}`);
-      return json({ ok: true }, { headers: { 'Set-Cookie': 'tdoc_sid=; Path=/; Max-Age=0' } });
+      // Clerk remembers its own session and ignores prompt=login, so signing
+      // in again went straight back to the same account. The browser ends that
+      // session too: Clerk's frontend API allows tdoc's origin with
+      // credentials, and only the browser holds Clerk's cookie.
+      const issuer = String(env.OIDC_ISSUER || '').replace(/\/+$/, '');
+      const providerSignout = /^https:\/\/clerk\./.test(issuer) ? `${issuer}/v1/client/sessions` : null;
+      return json({ ok: true, ...(providerSignout ? { provider_signout: providerSignout } : {}) }, { headers: { 'Set-Cookie': 'tdoc_sid=; Path=/; Max-Age=0' } });
     }
 
     // ---- inbox (signed-in, this host, all docs) ----

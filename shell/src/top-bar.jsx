@@ -87,7 +87,16 @@ export function TopBar({
   };
 
   const signOut = async () => {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    const r = await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    const body = await r.json().catch(() => ({}));
+    // End the sign-in provider's session as well, or the next sign-in comes
+    // straight back as this account. Best effort, and never a long wait.
+    if (body.provider_signout) {
+      await Promise.race([
+        fetch(body.provider_signout, { method: 'DELETE', credentials: 'include', mode: 'cors' }).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
+    }
     location.href = '/';
   };
 

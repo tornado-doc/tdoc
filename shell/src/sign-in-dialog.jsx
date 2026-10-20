@@ -113,6 +113,7 @@ export function SignInDialog({ open, onOpenChange, onSuccess, preview = null }) 
         <span className="tds-n">3</span>
         <span className={`tds-status${error ? ' tds-err' : ''}`}>{error || status}</span>
       </div>
+      <p className="manage-hint">Signing in as a different GitHub account? Sign out on github.com first; GitHub remembers the last one.</p>
     </AppDialog>
   );
 }
