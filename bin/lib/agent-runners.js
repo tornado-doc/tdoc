@@ -42,13 +42,14 @@ const { spawn } = require('child_process');
 // never the skill checkout, so it cannot rewrite an allowed script either.
 const TDOC_SCRIPTS = ['tdoc-pull', 'tdoc-write', 'tdoc-publish', 'tdoc-agent-reply'];
 const BIN_DIR = path.resolve(__dirname, '..');
-function claudeAllowedTools({ binDir = BIN_DIR, writeDirs = [] } = {}) {
-  const tools = ['Read', 'Glob', 'Grep'];
-  for (const dir of writeDirs.filter(Boolean)) {
-    const abs = `//${path.resolve(dir).replace(/^\/+/, '')}/**`;
-    // Edit(path) covers every file-editing tool; Claude ignores Write(path).
-    tools.push(`Edit(${abs})`);
-  }
+function claudeAllowedTools({ binDir = BIN_DIR, writeDirs = [], readDirs = [] } = {}) {
+  // Read(path) covers Read, Glob and Grep; Edit(path) every file-editing tool.
+  // Unscoped reads would let a comment have the agent read ~/.tdoc (the upload
+  // token) or ~/.ssh and publish it as doc text.
+  const abs = (dir) => `//${path.resolve(dir).replace(/^\/+/, '')}/**`;
+  const tools = [];
+  for (const dir of [...new Set([...writeDirs, ...readDirs].filter(Boolean))]) tools.push(`Read(${abs(dir)})`);
+  for (const dir of writeDirs.filter(Boolean)) tools.push(`Edit(${abs(dir)})`);
   for (const script of TDOC_SCRIPTS) {
     const full = path.join(binDir, script);
     tools.push(`Bash(${full}:*)`, `Bash(bash ${full}:*)`, `Bash(bash "${full}":*)`);
@@ -77,6 +78,10 @@ const RUNNERS = {
       // Codex has no per-command allow-list, so the sandbox is the boundary:
       // writable roots are only the doc folders (--add-dir in codex means
       // writable), never the skill checkout whose scripts the flow runs.
+      // It does NOT stop exfiltration: workspace-write still reads the whole
+      // disk and the network is on (the flow talks to tdoc), so a poisoned
+      // comment could get ~/.tdoc read and sent. Prefer --cli claude for docs
+      // strangers can comment on.
       const argv = ['exec', '--skip-git-repo-check', '-C', cwd];
       if (permissionMode === 'bypassPermissions') argv.push('--dangerously-bypass-approvals-and-sandbox');
       else argv.push('--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true');

@@ -156,6 +156,15 @@ if [ "$SIGNIN_ONLY" = "1" ]; then
 elif [ -z "$SLUG" ]; then
   usage
 fi
+# Under the local agent daemon the run belongs to one doc: publishing any
+# other slug, signing in, or switching platform (which rewrites config and can
+# deploy) is refused, whatever a comment talked the agent into.
+if [ -n "${TDOC_DAEMON_SLUG:-}" ]; then
+  if [ "$SLUG" != "$TDOC_DAEMON_SLUG" ] || [ -n "$PLATFORM_FLAG" ] || [ "$SIGNIN_ONLY" = "1" ]; then
+    echo "[tdoc] the daemon may only publish \"$TDOC_DAEMON_SLUG\" (no --platform, no sign-in)." >&2
+    exit 2
+  fi
+fi
 
 # Keep one canonical retry command for interruptions during hosted sign-in.
 # The sign-in-only flow has no document yet; a normal publish must preserve

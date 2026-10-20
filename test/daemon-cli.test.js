@@ -57,6 +57,24 @@ t('the claude allow-list never lets the agent rewrite the skill it runs, or run 
   assert(bash.length === runners.TDOC_SCRIPTS.length * 3 && bash.every((t) => t.includes('/skill/bin/tdoc-')), `bash rules: ${bash}`);
 });
 
+t('claude reads only the doc folders and the skill, never home secrets', () => {
+  const tools = runners.claudeAllowedTools({ binDir: '/skill/bin', writeDirs: ['/w', '/tdocs/q3'], readDirs: ['/skill'] });
+  assert(!tools.some((t) => /^(Read|Glob|Grep)$/.test(t)), `unscoped read: ${tools}`);
+  assert(['Read(//w/**)', 'Read(//tdocs/q3/**)', 'Read(//skill/**)'].every((r) => tools.includes(r)), `read scope: ${tools}`);
+  assert(tools.includes('Edit(//tdocs/q3/**)') && !tools.some((t) => t === 'Edit(//tdocs/**)'), `writes limited to the one doc: ${tools}`);
+});
+
+t('under the daemon, publish and reply refuse any other slug and --platform', () => {
+  const { spawnSync } = require('child_process');
+  const env = { ...process.env, TDOC_DAEMON_SLUG: 'q3-plan', HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-guard-')) };
+  const other = spawnSync('bash', [path.join(BIN, 'tdoc-publish'), 'someone-else'], { env, encoding: 'utf8' });
+  assert(other.status === 2 && /may only publish "q3-plan"/.test(other.stderr), `other slug: ${other.status} ${other.stderr}`);
+  const plat = spawnSync('bash', [path.join(BIN, 'tdoc-publish'), 'q3-plan', '--platform', 'cloudflare'], { env, encoding: 'utf8' });
+  assert(plat.status === 2 && /no --platform/.test(plat.stderr), `platform: ${plat.status} ${plat.stderr}`);
+  const reply = spawnSync('bash', [path.join(BIN, 'tdoc-agent-reply'), '--slug', 'other', '--parent', 'c1', '--text', 'x'], { env, encoding: 'utf8' });
+  assert(reply.status === 2 && /may only reply on "q3-plan"/.test(reply.stderr), `reply: ${reply.status} ${reply.stderr}`);
+});
+
 t('codex never gets the skill checkout as a writable root', () => {
   const argv = runners.RUNNERS.codex.args({ cwd: '/w', addDirs: ['/tdocs', '/skill'], writeDirs: ['/w', '/tdocs'] });
   assert(argv.includes('/tdocs') && !argv.includes('/skill'), argv.join(' '));

@@ -161,7 +161,7 @@ function buildPrompt({ handoff, device }) {
     `Use the tdoc skill at ${path.join(SKILL_DIR, 'SKILL.md')} and follow its "/tdoc edit" flow for the slug "${handoff.slug}":`,
     `pull the comments with \`bash ${path.join(BIN_DIR, 'tdoc-pull')} ${handoff.slug}\`, write the new version with \`bash ${path.join(BIN_DIR, 'tdoc-write')}\`,`,
     `publish it with \`bash ${path.join(BIN_DIR, 'tdoc-publish')}\`, and reply on every comment with \`bash ${path.join(BIN_DIR, 'tdoc-agent-reply')}\`. Then stop; the daemon marks the handoff resolved.`,
-    'Only those four scripts can run here, each by that exact path; edit files with your file tools, not shell commands.',
+    `Only those four scripts can run here, each by that exact path, and only for the slug "${handoff.slug}"; edit files with your file tools, only inside ${path.join(TDOC_DIR, handoff.slug)} and the current directory.`,
     '',
     `This handoff covers comment ids: ${ids || '(none listed)'}. Other open comments may be addressed too, but these come first.`,
   ];
@@ -221,6 +221,10 @@ async function runHandoff(cfg, st, state, h, accountIds) {
   }
   const cwd = path.join(st.workdir, h.slug);
   ensureDir(cwd);
+  // The one doc this run may touch: its folder is the only writable part of
+  // ~/tdocs, and the scripts refuse any other slug (TDOC_DAEMON_SLUG).
+  const docDir = path.join(TDOC_DIR, h.slug);
+  ensureDir(docDir);
   const runLog = path.join(DAEMON_DIR, 'runs', `${key}.log`);
   const prompt = buildPrompt({ handoff: h, device: st.device });
   state.attempts[key] = attempts + 1;
@@ -232,12 +236,13 @@ async function runHandoff(cfg, st, state, h, accountIds) {
     TDOC_SKILL_DIR: SKILL_DIR,
     TDOC_DIR,
     TDOC_DAEMON: '1',
+    TDOC_DAEMON_SLUG: h.slug,
     // tdoc-agent-reply / tdoc-publish forward this as X-Tdoc-Agent so the
     // reply wears this agent's mark and it takes the doc's follow-up seat.
     TDOC_AGENT: `local/${h.recipient.device}/${h.recipient.agent_sub}`,
   };
   const started = Date.now();
-  const res = await runAgentVia({ runner: st.runner, cli, prompt, cwd, env, timeoutMs: st.timeoutMs, logPath: runLog, permissionMode: st.permissionMode, addDirs: [TDOC_DIR, SKILL_DIR], writeDirs: [cwd, TDOC_DIR], allowedTools: cli === 'claude' ? claudeAllowedTools({ binDir: BIN_DIR, writeDirs: [cwd, TDOC_DIR] }) : null });
+  const res = await runAgentVia({ runner: st.runner, cli, prompt, cwd, env, timeoutMs: st.timeoutMs, logPath: runLog, permissionMode: st.permissionMode, addDirs: [docDir, SKILL_DIR], writeDirs: [cwd, docDir], allowedTools: cli === 'claude' ? claudeAllowedTools({ binDir: BIN_DIR, writeDirs: [cwd, docDir], readDirs: [SKILL_DIR] }) : null });
   const run = { handoff_id: key, slug: h.slug, cli, started: new Date(started).toISOString(), ended: new Date().toISOString(), ok: res.ok, code: res.code, error: res.error, log: runLog };
   state.runs = [run, ...(state.runs || [])].slice(0, 30);
   if (res.ok) {
