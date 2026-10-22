@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — pricing</title>
+<meta name="description" content="tdoc is free for your own docs and for teams up to 80 docs. The Team plan is $5 per member a month. You bring the AI, so there is no AI bill from tdoc.">
+<link rel="canonical" href="https://tdoc.dev/pricing">
+<meta property="og:title" content="tdoc pricing">
+<meta property="og:description" content="Free for your own docs and for teams up to 80 docs. The Team plan is $5 per member a month.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+body { background:#fff; }
+  .wrap { font-family:"Inter",system-ui,-apple-system,sans-serif; color:#0a0a0a; font-size:17px; line-height:1.65; }
+  .wrap h1 { font-weight:600; font-size:clamp(34px,5vw,48px); letter-spacing:-.03em; line-height:1.08; margin:0 0 10px; }
+  .wrap h2 { font-weight:600; letter-spacing:-.015em; font-size:24px; margin:44px 0 10px; }
+  .sub { color:#555; font-size:19px; margin:0 0 26px; }
+  .note { border-top:1px solid #e5e5e5; padding-top:12px; margin:22px 0; color:#555; font-size:15px; }
+  .wrap a { color:rgba(10,10,10,.6); text-decoration:none; border-bottom:1px solid rgba(10,10,10,.2); }
+.plans { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; margin:28px 0; }
+.plan { border:1px solid #e5e7eb; border-radius:12px; padding:20px 20px 22px; display:flex; flex-direction:column; background:#fff; }
+.plan.paid { border-color:#0a0a0a; }
+.plan h3 { font-size:15.5px; font-weight:600; letter-spacing:-.01em; margin:0 0 4px; }
+.plan .who { font-size:13.5px; color:#6b7280; margin:0 0 14px; line-height:1.5; }
+.plan .price { font-size:34px; font-weight:600; letter-spacing:-.02em; line-height:1.1; font-variant-numeric:tabular-nums; }
+.plan .per { font-size:13.5px; color:#6b7280; margin:4px 0 16px; line-height:1.5; }
+.plan ul { list-style:none; padding:0; margin:0 0 20px; font-size:14.5px; line-height:1.55; }
+.plan li { padding:7px 0; border-top:1px solid #f0f1f2; }
+.plan .actions { margin-top:auto; }
+.plan .btn { display:inline-flex; align-items:center; justify-content:center; font:600 13px/1 system-ui,-apple-system,sans-serif; height:36px; padding:0 14px; border-radius:8px; text-decoration:none; box-sizing:border-box; white-space:nowrap; border:1px solid #d5d7db; background:#fff; color:#374151; }
+.plan .btn:hover { background:#f7f8f9; border-color:#a9adb3; }
+.plan.paid .btn { background:#0a0a0a; color:#fff; border-color:#0a0a0a; }
+.plan.paid .btn:hover { background:#262626; }
+.wrap a.back { display:inline-flex; align-items:center; gap:6px; margin:0 0 26px; font-size:13.5px; font-weight:600; color:#555; text-decoration:none; border-bottom:none; }
+.wrap a.back:hover { color:#0a0a0a; }
+.back svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+.faq { border-top:1px solid #eee; padding:14px 0; }
+.faq h3 { font-size:16px; font-weight:600; margin:0 0 4px; }
+.faq p { margin:0; font-size:15.5px; color:#333; }
+</style>
+</head><body>
+<div class="wrap">
+<a class="back" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tdoc</a>
+<h1>Pricing</h1>
+<p class="sub">Free for your own docs, and for teams up to 80 docs. You bring the AI: tdoc works with the Claude Code or Codex you already use, so there is no AI bill from tdoc.</p>
+
+<div class="plans">
+  <section class="plan" data-tdoc-artifact="Personal plan">
+    <h3>Personal</h3>
+    <p class="who">For your own docs</p>
+    <div class="price">$0</div>
+    <p class="per">Free, no card</p>
+    <ul>
+      <li>50 docs, and up to 200 on request from the app, still free</li>
+      <li>Every version kept</li>
+      <li>Anyone you share with can comment</li>
+      <li>Send comments to your own agent to write the next version</li>
+    </ul>
+    <div class="actions"><a class="btn" href="/start">Get started</a></div>
+  </section>
+
+  <section class="plan" data-tdoc-artifact="Free team">
+    <h3>Team</h3>
+    <p class="who">For a team trying tdoc together</p>
+    <div class="price">$0</div>
+    <p class="per">Free, no card</p>
+    <ul>
+      <li>Any number of members</li>
+      <li>80 team docs</li>
+      <li>Shared folders and team agents</li>
+      <li>Move docs in from My docs at any time</li>
+    </ul>
+    <div class="actions"><a class="btn" href="/start">Get started</a></div>
+  </section>
+
+  <section class="plan paid" data-tdoc-artifact="Team plan">
+    <h3>Team plan</h3>
+    <p class="who">For a team that writes a lot</p>
+    <div class="price">$5</div>
+    <p class="per">per member a month, or $50 per member a year</p>
+    <ul>
+      <li>Unlimited team docs</li>
+      <li>Data backup to storage your team owns</li>
+      <li>Agents are free; only people take a seat</li>
+      <li>Change or cancel any time from Manage billing</li>
+    </ul>
+    <div class="actions"><a class="btn" href="/start">Start free, upgrade later</a></div>
+  </section>
+</div>
+
+<p class="note">An admin upgrades from the team's Settings, under Plan. Seats follow the member list, so adding or removing someone changes the next bill.</p>
+
+<h2>Questions</h2>
+
+<div class="faq">
+  <h3>Do I pay for the AI?</h3>
+  <p>Not to tdoc. tdoc hands your doc and its comments to the Claude Code or Codex you already have, and that plan covers the writing.</p>
+</div>
+<div class="faq">
+  <h3>Who counts as a member?</h3>
+  <p>The people in the team, admins included. Connected agents never take a seat.</p>
+</div>
+<div class="faq">
+  <h3>What happens when a free team reaches 80 docs?</h3>
+  <p>Every doc already there stays readable and editable and can get new versions. Making an 81st doc in the team, or moving one in, needs the Team plan. Admins see a warning at 75.</p>
+</div>
+<div class="faq">
+  <h3>What if we stop paying?</h3>
+  <p>Docs stay where they are and stay readable. New docs past 80 wait until the plan is renewed, and Data backup pauses, then copies everything again when it comes back.</p>
+</div>
+<div class="faq">
+  <h3>Can we get our docs out?</h3>
+  <p>Yes. Data backup copies every team doc to your own bucket, and any doc can be downloaded as HTML.</p>
+</div>
+
+</div>
+</body></html>
