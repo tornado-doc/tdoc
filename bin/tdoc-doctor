@@ -66,11 +66,24 @@ esac
 # not let that implementation detail turn into two shell errors and exit 0.
 # Keep TDOC_MOCK_NO_NODE below as a report-level mock: tests and consumers can
 # still inspect the ordinary JSON shape on a machine where Node is installed.
+# `brew install node` only helps somebody who already has Homebrew, and a
+# fresh Mac does not: the fix then needs a second installer and a sudo
+# password. Without brew, point at the one-click installer from nodejs.org.
+if command -v brew >/dev/null 2>&1; then
+  node_install_kind="install"
+  node_install_cmd="brew install node"
+  node_install_hint="brew install node"
+else
+  node_install_kind="click"
+  node_install_cmd="https://nodejs.org/en/download"
+  node_install_hint="download the installer from https://nodejs.org/en/download, open it, then open a new terminal"
+fi
+
 if ! command -v node >/dev/null 2>&1; then
   printf '%s\n' \
     '[tdoc] Node 18+ is required.' \
     'Detected: Node is not installed or is not available on PATH.' \
-    'Install: brew install node' \
+    "Install: $node_install_hint" \
     'Next: re-run tdoc-doctor.' >&2
   exit 1
 fi
@@ -250,7 +263,7 @@ steps=""
 add_step() { steps="${steps}${1}	${2}	${3}	${4}
 "; }
 
-$node_ok || add_step node "Install Node 18+" install "brew install node"
+$node_ok || add_step node "Install Node 18+" "$node_install_kind" "$node_install_cmd"
 $curl_ok || add_step curl "Install curl" install "brew install curl"
 
 # A credential that exists but cannot be used. Publish already refuses these

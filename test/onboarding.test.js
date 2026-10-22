@@ -238,10 +238,20 @@ function getStep(report, id) {
       });
       if (r.status === 0) throw new Error('missing Node must exit non-zero');
       const message = `${r.stdout}${r.stderr}`;
-      for (const text of ['Node 18+ is required', 'brew install node', 're-run tdoc-doctor']) {
+      // No brew on this PATH either, which is a fresh Mac: the fix is the
+      // nodejs.org installer, not a second installer the machine lacks.
+      for (const text of ['Node 18+ is required', 'nodejs.org', 're-run tdoc-doctor']) {
         if (!message.includes(text)) throw new Error(`missing "${text}" in: ${message}`);
       }
+      if (message.includes('brew install node')) throw new Error(`suggested brew on a machine without it: ${message}`);
       if (/command not found/.test(message)) throw new Error(`leaked shell failure: ${message}`);
+      // With brew present, brew is still the one-line fix.
+      fs.symlinkSync(bash, path.join(dir, 'brew'));
+      const withBrew = spawnSync(DOCTOR, [], {
+        env: { ...process.env, PATH: dir, TDOC_PLATFORM: '', TDOC_MOCK_NOT_PUBLISHED: '1' },
+        encoding: 'utf8',
+      });
+      if (!`${withBrew.stdout}${withBrew.stderr}`.includes('brew install node')) throw new Error('brew is on PATH but not suggested');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

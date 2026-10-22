@@ -79,10 +79,22 @@ t('only the record moves the gate, and `paired` counts', () => {
   assert(gate.includes('const POLL_MS = 3000'), 'it asks the server, it does not wait for a reload');
 });
 
-t('the prompt names the command that pairs', () => {
-  // ONBOARDING.md only reaches the connection inside its first-doc step, which
-  // this page does not ask for — so the line has to name it.
-  assert(/signin-only/.test(gate), 'installing is not connecting');
+t('the prompt is the one line /start shows, and that line connects first', () => {
+  // One paste everywhere. FIRST-DOC.md signs the machine in (its Step 1b)
+  // before it reads anything, so the gate still sees the agent turn up early.
+  assert(gate.includes('export const SETUP_PROMPT = FIRST_DOC_LINE;'), '/setup has its own line again');
+  assert(copy.includes('export const FIRST_DOC_LINE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;'), 'the shared line drifted');
+  const firstDoc = read('FIRST-DOC.md');
+  const connect = firstDoc.indexOf('## Step 1b — connect first');
+  assert(connect > 0 && connect < firstDoc.indexOf('## The clock') && firstDoc.includes('--signin-only'), 'installing is not connecting');
+});
+
+t('works with: Claude Code and Codex only', () => {
+  assert(gate.includes('<span className="sg-sr">Claude Code and Codex</span>'), 'the screen-reader list still names other apps');
+  assert(!/ChatGPT|Grok/.test(gate.slice(gate.indexOf('function WorksWith'), gate.indexOf('function ChatWindow'))), 'works with still names ChatGPT or Grok');
+  const marks = read('shell/src/agent-marks.jsx');
+  const cluster = marks.slice(marks.indexOf('export function AgentMarks'));
+  assert(cluster.includes('<ClaudeMark') && cluster.includes('<OpenAIMark') && !cluster.includes('<GrokMark'), 'the cluster is not Claude Code + Codex');
 });
 
 t('a refused clipboard says so instead of doing nothing', () => {
@@ -95,7 +107,8 @@ t('the gate reuses the wizard’s copy, it does not fork it', () => {
 });
 
 t('the landing CTA is the door, and the pop-up stopped opening itself', () => {
-  assert(shell.includes("location.href = config.identity && done ? '/me' : '/setup';"), 'unconnected to the gate, connected to their docs');
+  assert(shell.includes("href === '/start' && !message.blank && config.identity)") && shell.includes("location.href = done ? '/me' : '/setup';"),
+    'signed in: unconnected to the gate, connected to their docs; signed out falls through to /start');
   assert(!/setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell), 'no second journey beside the real one');
 });
 

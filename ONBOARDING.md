@@ -141,7 +141,7 @@ Otherwise, iterate over `missing_steps` **in order**. Each step has a `kind`:
 
 Always re-run `bin/tdoc-doctor --json` between steps. State changes — what was missing in iteration N may be resolved in N+1.
 
-`click` steps only ever appear on the self-host path. If you are seeing one on the hosted default, something is wrong — re-read `.target` before sending anyone to a dashboard.
+`click` steps only ever appear on the self-host path, with one exception: on a machine without Homebrew, the `node` step is a `click` to the nodejs.org installer. Tell the human to download it, open it, and open a new terminal. Any other `click` on the hosted default means something is wrong — re-read `.target` before sending anyone to a dashboard.
 
 ## Step 5 — Build their first doc
 
