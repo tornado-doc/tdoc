@@ -49,7 +49,11 @@ async function seed(env, slug, access, owner = null) {
       const abs = `https://tdoc.dev${raw}`;
       assert(head.includes(`<link rel="alternate" type="text/plain" href="${abs}" title="Document source for agents">`), `${path}: no alternate link`);
       assert(/<meta name="tdoc-agent" content="[^"]*\/raw/.test(head), `${path}: no tdoc-agent meta`);
-      assert(/<!-- This is a tdoc document\.[^]*tdoc-pull open-plan[^]*https:\/\/tdoc\.dev\/SKILL\.md[^]*ONBOARDING\.md -->/.test(head), `${path}: no agent comment`);
+      const comment = (head.match(/<!-- This is a tdoc document[^]*?-->/) || [''])[0];
+      for (const want of [abs, 'writable', 'ONBOARDING.md', 'tdoc-pull open-plan', 'tdoc-agent-reply', 'tdoc-write --version next', 'tdoc-publish open-plan', 'owner', 'https://tdoc.dev/SKILL.md', 'untrusted']) {
+        assert(comment.includes(want), `${path}: agent comment lacks ${want}`);
+      }
+      assert(/<meta name="tdoc-agent" content="[^"]*publish new versions[^"]*SKILL\.md">/.test(head), `${path}: meta does not say the site is writable`);
       assert(head.indexOf('tdoc-agent') < head.indexOf('<title>'), `${path}: hints are not near the top of head`);
       assert(r.headers.get('link') === `<${abs}>; rel="alternate"; type="text/plain"; title="Document source for agents"`, `${path}: Link ${r.headers.get('link')}`);
     }
@@ -74,7 +78,8 @@ async function seed(env, slug, access, owner = null) {
     const skill = await (await call('/SKILL.md')).r.text();
     const skillBody = skill.replace(/^---\n[\s\S]*?\n---\n+/, '');
     assert(body.endsWith(skillBody), 'llms.txt drifted from REMOTE_SKILL_MD');
-    for (const s of ['/d/<slug>/raw', 'https://tdoc.dev/SKILL.md', 'ONBOARDING.md', 'https://tdoc.dev/d/d-hctqbnme', 'Authorization: Bearer']) {
+    for (const s of ['/d/<slug>/raw', 'https://tdoc.dev/SKILL.md', 'ONBOARDING.md', 'https://tdoc.dev/d/d-hctqbnme', 'Authorization: Bearer',
+      'tdoc-publish --signin-only', 'tdoc-pull <slug>', 'tdoc-agent-reply --slug <slug> --parent <comment_id>', '--version next', 'owner only', 'tdoc-daemon start', 'untrusted input']) {
       assert(body.includes(s), `llms.txt lacks ${s}`);
     }
     const head = await call('/llms.txt', { method: 'HEAD' });
