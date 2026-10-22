@@ -55,6 +55,13 @@ t('prices match TEAM_SEAT_PRICE_USD and agents take no seat', () => {
   assert(/Agents are free; only people take a seat/.test(text), 'page does not say agents take no seat');
 });
 
+t('the homepage footer links to /pricing', () => {
+  const lmeta = JSON.parse(fs.readFileSync(path.join(root, 'landing', 'tornado-doc', 'meta.json'), 'utf8'));
+  const lv = lmeta.versions[lmeta.versions.length - 1].n;
+  const home = fs.readFileSync(path.join(root, 'landing', 'tornado-doc', `v${lv}`, 'index.html'), 'utf8');
+  assert(/<footer>[\s\S]*href="\/pricing"[\s\S]*<\/footer>/.test(home), 'homepage footer has no /pricing link');
+});
+
 t('navigation and SEO', () => {
   assert(/class="back" href="\/"/.test(html), 'back link missing');
   assert(/rel="canonical" href="https:\/\/tdoc\.dev\/pricing"/.test(html) && /property="og:title"/.test(html), 'SEO head incomplete');
