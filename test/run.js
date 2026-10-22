@@ -146,6 +146,7 @@ const BROWSER = [
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments
+  'profile-picks-ui.test.js', // /@handle owner removes picks: card control + Undo, every pin in the picker, errors shown
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior

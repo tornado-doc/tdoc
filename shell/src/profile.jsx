@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutGrid, Rows3, Share2, UserRoundPen, PencilLine } from 'lucide-react';
+import { LayoutGrid, Rows3, Share2, UserRoundPen, PencilLine, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import {
@@ -36,6 +36,21 @@ function readPickView() {
 
 function writePickView(view) {
   try { localStorage.setItem(PICK_VIEW_KEY, view); } catch { /* ignore */ }
+}
+
+function pinErrorMessage(error, pinned) {
+  if (error === 'team_doc') return 'That doc belongs to a team now, so it cannot be a personal pick.';
+  if (error === 'not_found') return 'That doc no longer exists.';
+  if (error === 'forbidden') return 'Only the author can change this pick.';
+  if (error === 'sign_in_required') return 'Sign in again to change your picks.';
+  const verb = pinned ? 'add this pick' : 'remove this pick';
+  return error ? `Could not ${verb} (${error}).` : `Could not ${verb}.`;
+}
+
+function catalogNote(row) {
+  if (row.status === 'team') return 'Moved to a team · uncheck to remove';
+  if (row.status === 'deleted') return 'Deleted · uncheck to remove';
+  return day(row.created || row.updated) ? `Published ${day(row.created || row.updated)}` : row.slug;
 }
 
 function day(iso) {
@@ -134,6 +149,8 @@ export function Profile({ boot }) {
   const [pickView, setPickView] = useState(readPickView);
   const [shareStatus, setShareStatus] = useState('');
   const [posterFontsReady, setPosterFontsReady] = useState(false);
+  // { message, error?, undo? } — pick add/remove feedback, undo for take-downs.
+  const [notice, setNotice] = useState(null);
   const [posterArrow, setPosterArrow] = useState(true);
   const [posterAnnotation, setPosterAnnotation] = useState(() => DEFAULT_ANNOTATION_LINES.join('\n'));
   const identity = boot.identity || null;
@@ -154,6 +171,12 @@ export function Profile({ boot }) {
     if (!open) open = consumeShareAfterNav();
     if (open) setModal('share');
   }, [mine]);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(null), notice.error ? 6000 : 8000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,24 +201,15 @@ export function Profile({ boot }) {
     }
   };
 
-  const refreshDocsFromCatalog = (nextCatalog) => {
-    const pinned = nextCatalog.filter((row) => row.on_profile);
-    setDocs(pinned.map((row) => ({
-      slug: row.slug,
-      title: row.title,
-      visibility: row.visibility,
-      published: row.published || row.created || '',
-      excerpt: row.excerpt || '',
-      image: row.image || '',
-      url: `/d/${encodeURIComponent(row.slug)}`,
-    })));
-  };
-
-  const togglePin = async (slug, pinned, { confirmed = false } = {}) => {
+  // restore: the card to put back without a reload (Undo of a take-down).
+  const togglePin = async (slug, pinned, { confirmed = false, restore = null } = {}) => {
     if (pinned && !confirmed && needsCurateWarn()) {
       setModal({ type: 'curate-warn', slug });
       return false;
     }
+    const row = catalog.find((item) => item.slug === slug);
+    const card = docs.find((doc) => doc.slug === slug);
+    const title = (card && card.title) || (row && row.title) || slug;
     setBusy(true);
     try {
       const r = await fetch('/api/me/profile/pin', {
@@ -204,24 +218,40 @@ export function Profile({ boot }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slug, pinned }),
       });
-      if (!r.ok) return false;
       const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setNotice({ error: true, message: pinErrorMessage(body.error, pinned) });
+        return false;
+      }
       if (pinned) markCurateWarned();
-      const next = catalog.map((row) => (
-        row.slug === slug
-          ? {
-            ...row,
-            on_profile: pinned,
-            visibility: body.visibility || (pinned ? 'public' : row.visibility),
-          }
-          : row
-      ));
-      setCatalog(next);
-      refreshDocsFromCatalog(next);
-      // Reload so new picks get server-side excerpts.
-      if (pinned) location.reload();
+      setCatalog((cur) => cur
+        // A pick whose doc moved to a team or was deleted cannot come back.
+        .filter((item) => pinned || item.slug !== slug || !item.status)
+        .map((item) => (
+          item.slug === slug
+            ? {
+              ...item,
+              on_profile: pinned,
+              visibility: body.visibility || (pinned ? 'public' : item.visibility),
+            }
+            : item
+        )));
+      if (!pinned) {
+        setDocs((cur) => cur.filter((doc) => doc.slug !== slug));
+        setNotice({
+          message: `Removed “${title}” from your profile.`,
+          undo: row && row.status ? null : (card || { slug, title, url: `/d/${encodeURIComponent(slug)}` }),
+        });
+      } else if (restore) {
+        setDocs((cur) => [restore, ...cur.filter((doc) => doc.slug !== slug)]);
+        setNotice(null);
+      } else {
+        // Reload so new picks get server-side excerpts.
+        location.reload();
+      }
       return true;
     } catch {
+      setNotice({ error: true, message: pinErrorMessage('', pinned) });
       return false;
     } finally {
       setBusy(false);
@@ -280,6 +310,26 @@ export function Profile({ boot }) {
       setBusy(false);
     }
   };
+
+  // inline: inside the Public picks dialog, under its hint, instead of a toast.
+  const pickNotice = (inline) => (notice ? (
+    <div
+      className={`${inline ? 'profile-pick-notice is-inline' : 'tdoc-toast profile-pick-notice'}${notice.error ? ' error' : ''}`}
+      role="status"
+    >
+      <span>{notice.message}</span>
+      {notice.undo ? (
+        <button
+          type="button"
+          className="text-btn"
+          disabled={busy}
+          onClick={() => togglePin(notice.undo.slug, true, { confirmed: true, restore: notice.undo })}
+        >
+          Undo
+        </button>
+      ) : null}
+    </div>
+  ) : null);
 
   return (
     <div className="tdoc-app docs-hub">
@@ -379,30 +429,21 @@ export function Profile({ boot }) {
           <section className={`profile-picks is-${pickView}`}>
             {docs.map((doc) => {
               const isPreview = pickView === 'preview';
-              if (!isPreview) {
-                return (
-                  <a
-                    key={doc.slug}
-                    className="profile-pick-card"
-                    href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
-                  >
-                    <span className="profile-pick-body">
-                      <span className="profile-pick-title">{doc.title || doc.slug}</span>
-                      <span className="profile-pick-meta">
-                        {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
-                      </span>
+              const href = doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`;
+              const published = day(doc.published || doc.updated);
+              const card = !isPreview ? (
+                <a className="profile-pick-card" href={href}>
+                  <span className="profile-pick-body">
+                    <span className="profile-pick-title">{doc.title || doc.slug}</span>
+                    <span className="profile-pick-meta">
+                      {published ? `Published ${published}` : ''}
                     </span>
-                  </a>
-                );
-              }
-              // Preview = title + lead inside the card. No auto-picked graphics
-              // (inline SVGs / task icons were unreliable).
-              return (
-                <a
-                  key={doc.slug}
-                  className="profile-pick-card has-preview"
-                  href={doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`}
-                >
+                  </span>
+                </a>
+              ) : (
+                // Preview = title + lead inside the card. No auto-picked graphics
+                // (inline SVGs / task icons were unreliable).
+                <a className="profile-pick-card has-preview" href={href}>
                   <span className="profile-pick-surface">
                     <span className="profile-pick-copy">
                       <span className="profile-pick-title">{doc.title || doc.slug}</span>
@@ -412,9 +453,26 @@ export function Profile({ boot }) {
                     </span>
                   </span>
                   <span className="profile-pick-meta">
-                    {day(doc.published || doc.updated) ? `Published ${day(doc.published || doc.updated)}` : ''}
+                    {published ? `Published ${published}` : ''}
                   </span>
                 </a>
+              );
+              return (
+                <div key={doc.slug} className="profile-pick-item">
+                  {card}
+                  {mine ? (
+                    <button
+                      type="button"
+                      className="profile-icon-btn profile-pick-remove"
+                      title="Remove from profile"
+                      aria-label={`Remove ${doc.title || doc.slug} from profile`}
+                      disabled={busy}
+                      onClick={() => togglePin(doc.slug, false)}
+                    >
+                      <X size={15} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
               );
             })}
           </section>
@@ -564,6 +622,7 @@ export function Profile({ boot }) {
           <p className="manage-hint">
             Curating a doc makes it public on your profile. Take it down to restore the previous access.
           </p>
+          {pickNotice(true)}
           {!catalog.length ? (
             <p className="muted">No docs in your catalog yet.</p>
           ) : (
@@ -578,11 +637,7 @@ export function Profile({ boot }) {
                   />
                   <span>
                     <b>{row.title || row.slug}</b>
-                    <em>
-                      {day(row.created || row.updated)
-                        ? `Published ${day(row.created || row.updated)}`
-                        : row.slug}
-                    </em>
+                    <em>{catalogNote(row)}</em>
                   </span>
                 </label>
               ))}
@@ -590,6 +645,9 @@ export function Profile({ boot }) {
           )}
         </ProfileDialog>
       ) : null}
+
+      {/* Inside the dialog while it is open: a modal makes the page behind it inert. */}
+      {modal !== 'picks' ? pickNotice(false) : null}
     </div>
   );
 }

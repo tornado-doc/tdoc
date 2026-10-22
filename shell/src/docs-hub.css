@@ -162,8 +162,35 @@
     gap: 2px;
     padding: 13px 0;
   }
-  .profile-pick-card:last-child { border-bottom: none; padding-bottom: 0; }
-  .profile-picks.is-compact .profile-pick-card:last-child { padding-bottom: 13px; }
+  .profile-pick-item:last-child .profile-pick-card { border-bottom: none; padding-bottom: 0; }
+  .profile-picks.is-compact .profile-pick-item:last-child .profile-pick-card { padding-bottom: 13px; }
+  /* Owner-only take-down, over the card's top-right corner. */
+  .profile-pick-item { position: relative; }
+  .profile-pick-remove {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: #fff;
+    opacity: .72;
+  }
+  .profile-picks.is-compact .profile-pick-remove { top: 50%; right: 0; transform: translateY(-50%); background: transparent; }
+  .profile-picks.is-compact .profile-pick-item .profile-pick-card { padding-right: 36px; }
+  .profile-pick-item:hover .profile-pick-remove,
+  .profile-pick-remove:focus-visible { opacity: 1; }
+  .profile-pick-remove:disabled { cursor: default; opacity: .4; }
+  .profile-pick-notice .text-btn { color: inherit; font-weight: 600; text-decoration: underline; }
+  .profile-pick-notice.is-inline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    background: var(--td-accent-tint);
+    color: var(--td-ink);
+  }
+  .profile-pick-notice.is-inline.error { background: var(--td-danger); color: #fff; }
   /* One bordered surface = the doc preview (title + lead inside, not outside). */
   .profile-pick-surface {
     display: flex;

@@ -438,6 +438,126 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(metaRestored.access.visibility === 'private', 'visibility restored');
   });
 
+  // A pin can outlive the doc's ownership; the owner must still be able to
+  // take it down, and the picker must offer it.
+  async function pinnedOwner() {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'owner', 'acct-owner');
+    for (const slug of ['kept', 'moved', 'gone']) {
+      await seedDoc(env, slug, { owner: 'owner', accountId, access: { visibility: 'private' } });
+    }
+    const cookie = await putSession(env, { login: 'owner', account_id: accountId });
+    await worker.fetch(req('/api/me/handle', { method: 'POST', cookie, body: { handle: 'owner' } }), env, {});
+    for (const slug of ['gone', 'moved', 'kept']) {
+      const pin = await worker.fetch(req('/api/me/profile/pin', {
+        method: 'POST', cookie, body: { slug, pinned: true },
+      }), env, {});
+      assert(pin.status === 200, `pin ${slug} ${pin.status}`);
+    }
+    const unpin = (slug) => worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug, pinned: false },
+    }), env, {});
+    const pins = async () => JSON.parse(await env.META.get('account-profile:acct-owner')).pins;
+    return { env, cookie, unpin, pins };
+  }
+
+  await t('take-down of a pick whose doc moved to a team succeeds and leaves team access alone', async () => {
+    const { env, unpin, pins } = await pinnedOwner();
+    const meta = JSON.parse(await env.META.get('meta:moved'));
+    await env.META.put('meta:moved', JSON.stringify({ ...meta, workspace_id: 'team-1' }));
+    const r = await unpin('moved');
+    assert(r.status === 200, `unpin team-moved ${r.status} ${await r.clone().text()}`);
+    const body = await r.json();
+    assert(body.on_profile === false && !body.pins.includes('moved'), JSON.stringify(body));
+    assert((await pins()).join(',') === 'kept,gone', `pins ${await pins()}`);
+    const after = JSON.parse(await env.META.get('meta:moved'));
+    assert(after.access.visibility === 'public' && after.profile, 'team doc meta is not rewritten by a personal take-down');
+    const page = await worker.fetch(req('/@owner'), env, {});
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(!boot.docs.some((d) => d.slug === 'moved'), 'gone from the public profile');
+  });
+
+  await t('take-down of a pick whose doc was deleted succeeds', async () => {
+    const { env, unpin, pins } = await pinnedOwner();
+    await env.META.delete('meta:gone');
+    const r = await unpin('gone');
+    assert(r.status === 200, `unpin deleted ${r.status} ${await r.clone().text()}`);
+    const body = await r.json();
+    assert(body.visibility === null && body.on_profile === false, JSON.stringify(body));
+    assert((await pins()).join(',') === 'kept,moved', `pins ${await pins()}`);
+    assert(await env.META.get('meta:gone') === null, 'a deleted doc is not resurrected as meta');
+  });
+
+  await t('normal take-down restores the visibility the doc had before it was picked', async () => {
+    const { env, unpin, pins } = await pinnedOwner();
+    assert(JSON.parse(await env.META.get('meta:kept')).access.visibility === 'public', 'picked = public');
+    const r = await unpin('kept');
+    assert(r.status === 200, `unpin ${r.status}`);
+    assert((await r.json()).visibility === 'private', 'restored private');
+    const meta = JSON.parse(await env.META.get('meta:kept'));
+    assert(meta.access.visibility === 'private' && !meta.profile, JSON.stringify(meta));
+    assert((await pins()).join(',') === 'moved,gone', `pins ${await pins()}`);
+  });
+
+  await t('blocked docs that are not pinned still refuse take-down and pinning', async () => {
+    const { env, cookie, unpin } = await pinnedOwner();
+    await seedDoc(env, 'team-only', { owner: 'owner', accountId: 'acct-owner' });
+    const meta = JSON.parse(await env.META.get('meta:team-only'));
+    await env.META.put('meta:team-only', JSON.stringify({ ...meta, workspace_id: 'team-1' }));
+    assert((await unpin('team-only')).status === 409, 'unpinned team doc keeps 409');
+    assert((await unpin('never-existed')).status === 404, 'unknown slug keeps 404');
+    const moved = JSON.parse(await env.META.get('meta:moved'));
+    await env.META.put('meta:moved', JSON.stringify({ ...moved, workspace_id: 'team-1' }));
+    const repin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug: 'moved', pinned: true },
+    }), env, {});
+    assert(repin.status === 409, `pinning a team doc stays refused, got ${repin.status}`);
+  });
+
+  await t('another account cannot take down someone else\'s pick', async () => {
+    const { env } = await pinnedOwner();
+    await seedAccount(env, 'guest', 'acct-guest');
+    const guest = await putSession(env, { login: 'guest', account_id: 'acct-guest' });
+    const r = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie: guest, body: { slug: 'kept', pinned: false },
+    }), env, {});
+    assert(r.status === 403, `guest take-down must 403, got ${r.status}`);
+    assert(JSON.parse(await env.META.get('account-profile:acct-owner')).pins.includes('kept'), 'owner pin intact');
+  });
+
+  await t('the owner\'s picker lists every pin, including team-moved and deleted docs', async () => {
+    const { env, cookie } = await pinnedOwner();
+    const meta = JSON.parse(await env.META.get('meta:moved'));
+    await env.META.put('meta:moved', JSON.stringify({ ...meta, workspace_id: 'team-1' }));
+    await env.META.delete('meta:gone');
+    const r = await worker.fetch(req('/@owner', { cookie, accept: 'application/json' }), env, {});
+    const data = await r.json();
+    const bySlug = Object.fromEntries(data.catalog.map((row) => [row.slug, row]));
+    for (const slug of ['kept', 'moved', 'gone']) assert(bySlug[slug] && bySlug[slug].on_profile, `${slug} in picker: ${JSON.stringify(data.catalog)}`);
+    assert(bySlug.gone.status === 'deleted', JSON.stringify(bySlug.gone));
+  });
+
+  await t('a session on a linked, non-canonical account edits the canonical pins', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const canonical = await seedAccount(env, 'owner', 'acct-owner');
+    const group = JSON.stringify({ canonical, ids: [canonical, 'acct-alt'] });
+    await env.META.put(`account-group:${canonical}`, group);
+    await env.META.put('account-group:acct-alt', group);
+    await seedDoc(env, 'shared', { owner: 'owner', accountId: canonical, access: { visibility: 'unlisted' } });
+    await seedPins(env, canonical, ['shared'], { handle: 'owner' });
+    await seedPins(env, 'acct-alt', ['shared']);
+    await env.META.put('hosted-handle:owner', JSON.stringify({ account_id: canonical }));
+    const alt = await putSession(env, { login: 'owner', account_id: 'acct-alt' });
+    const r = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie: alt, body: { slug: 'shared', pinned: false },
+    }), env, {});
+    assert(r.status === 200, `linked take-down ${r.status} ${await r.clone().text()}`);
+    assert(JSON.parse(await env.META.get(`account-profile:${canonical}`)).pins.length === 0, 'canonical pin removed');
+    assert(JSON.parse(await env.META.get('account-profile:acct-alt')).pins.length === 0, 'member pin removed too');
+    const boot = bootData(await (await worker.fetch(req('/@owner'), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(boot.docs.length === 0, `profile empty after take-down: ${JSON.stringify(boot.docs)}`);
+  });
+
   await t('non-author cannot curate', async () => {
     const env = makeEnv(mod.CommentsStore);
     const ownerId = await seedAccount(env, 'owner', 'acct-owner');

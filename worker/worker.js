@@ -7834,56 +7834,92 @@ async function refreshDocPreview(env, slug, meta) {
   }
 }
 
+// Pins live on the account group's canonical profile record: that is the one
+// /@handle reads (profileData). A session can be signed in as a linked,
+// non-canonical member, so every pin read and write goes through here.
+async function profilePinsHome(env, accountId) {
+  const group = await accountGroup(env, accountId);
+  const canonical = group.canonical || accountId;
+  const ids = [canonical, ...group.ids.filter((id) => id !== canonical)];
+  if (!ids.includes(accountId)) ids.push(accountId);
+  return { canonical, ids };
+}
+
+async function accountProfilePins(env, accountId) {
+  if (!accountId) return [];
+  const { canonical } = await profilePinsHome(env, accountId);
+  return normalizeProfilePins(await accountProfile(env, canonical));
+}
+
 // Curate = author-only doc flag (meta.profile.curated). Pinning sets the doc
 // public and remembers the prior visibility; take-down restores it.
+// Taking a doc down that is already in the owner's pins always succeeds: a
+// pin can outlive the doc's ownership (moved to a team, deleted, meta lost),
+// and the owner must still be able to clear it from the profile. Visibility is
+// only restored when the doc is still a personal doc this session owns.
 async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {}) {
   if (!accountId || !isValidSlug(slug)) return { error: 'invalid_slug', status: 400 };
   if (!meta) {
     try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { meta = null; }
   }
-  if (!meta) return { error: 'not_found', status: 404 };
   // Author only — collaborators / folder guests cannot curate someone else's doc.
-  if (meta.workspace_id) return { error: 'team_doc', status: 409 };
-  if (!isDocOwnerSession(env, session, meta)) return { error: 'forbidden', status: 403 };
+  const blocked = !meta ? { error: 'not_found', status: 404 }
+    : meta.workspace_id ? { error: 'team_doc', status: 409 }
+    : !isDocOwnerSession(env, session, meta) ? { error: 'forbidden', status: 403 }
+    : null;
 
-  const access = accessFromMeta(meta);
-  let nextMeta = { ...meta };
+  const home = await profilePinsHome(env, accountId);
+  const profiles = await Promise.all(home.ids.map((id) => accountProfile(env, id)));
+  const memberPins = profiles.map((rec) => normalizeProfilePins(rec));
+  const listed = memberPins.some((list) => list.includes(slug));
+  if (blocked && (pinned || !listed)) return blocked;
 
-  if (pinned) {
-    const prior = (nextMeta.profile && nextMeta.profile.restore_visibility)
-      || access.visibility;
-    nextMeta.profile = {
-      curated: true,
-      restore_visibility: ACCESS_VISIBILITIES.has(prior) ? prior : 'unlisted',
-    };
-    nextMeta.access = { ...access, visibility: 'public' };
-    // Refresh preview on every curate so old double-title caches get fixed
-    // and first-graphic stays in sync with the latest published HTML.
-    nextMeta = await refreshDocPreview(env, slug, nextMeta);
-  } else {
-    const restore = (nextMeta.profile && nextMeta.profile.restore_visibility) || access.visibility;
-    const { profile: _drop, ...withoutProfile } = nextMeta;
-    nextMeta = withoutProfile;
-    nextMeta.access = {
-      ...access,
-      visibility: ACCESS_VISIBILITIES.has(restore) ? restore : access.visibility,
-    };
+  let nextMeta = meta;
+  if (!blocked) {
+    const access = accessFromMeta(meta);
+    nextMeta = { ...meta };
+    if (pinned) {
+      const prior = (nextMeta.profile && nextMeta.profile.restore_visibility)
+        || access.visibility;
+      nextMeta.profile = {
+        curated: true,
+        restore_visibility: ACCESS_VISIBILITIES.has(prior) ? prior : 'unlisted',
+      };
+      nextMeta.access = { ...access, visibility: 'public' };
+      // Refresh preview on every curate so old double-title caches get fixed
+      // and first-graphic stays in sync with the latest published HTML.
+      nextMeta = await refreshDocPreview(env, slug, nextMeta);
+    } else {
+      const restore = (nextMeta.profile && nextMeta.profile.restore_visibility) || access.visibility;
+      const { profile: _drop, ...withoutProfile } = nextMeta;
+      nextMeta = withoutProfile;
+      nextMeta.access = {
+        ...access,
+        visibility: ACCESS_VISIBILITIES.has(restore) ? restore : access.visibility,
+      };
+    }
+    await putDocMetaJson(env, slug, JSON.stringify(nextMeta));
   }
-  await putDocMetaJson(env, slug, JSON.stringify(nextMeta));
 
-  const prev = await accountProfile(env, accountId);
-  let pins = normalizeProfilePins(prev);
+  let pins = memberPins[0];
   if (pinned) {
     if (!pins.includes(slug)) pins = [slug, ...pins].slice(0, PROFILE_PINS_MAX);
   } else {
     pins = pins.filter((s) => s !== slug);
+    // A linked member can still carry the pin from before the accounts were
+    // merged; leave none behind for a later merge to bring back.
+    await Promise.all(home.ids.slice(1).map((id, i) => (
+      memberPins[i + 1].includes(slug)
+        ? putAccountProfile(env, id, { pins: memberPins[i + 1].filter((s) => s !== slug) })
+        : null
+    )));
   }
-  await putAccountProfile(env, accountId, { pins });
+  await putAccountProfile(env, home.canonical, { pins });
   return {
     ok: true,
     pins,
     on_profile: pins.includes(slug),
-    visibility: accessFromMeta(nextMeta).visibility,
+    visibility: nextMeta ? accessFromMeta(nextMeta).visibility : null,
   };
 }
 
@@ -8020,7 +8056,7 @@ async function profileBootForSession(env, session) {
   const claimed = normalizeGithubLogin(rec && rec.handle);
   const login = sessionLogin(session);
   const suggested = claimed || login || suggestHandleFromEmail(session && session.email) || null;
-  return { handle: claimed, suggested, pins: normalizeProfilePins(rec) };
+  return { handle: claimed, suggested, pins: await accountProfilePins(env, accountId) };
 }
 
 // Claim / publish mint an account; bare sign-in does not (spectators stay
@@ -11727,7 +11763,8 @@ export default {
       let catalog = [];
       if (mine && session) {
         const data = await indexData(env, session, url.origin);
-        const pinned = new Set((stored && normalizeProfilePins(stored)) || []);
+        const pinList = account.account_id ? await accountProfilePins(env, account.account_id) : [];
+        const pinned = new Set(pinList);
         catalog = (data.docs || [])
           .filter((row) => row.mine)
           .map((row) => ({
@@ -11735,6 +11772,21 @@ export default {
             title: row.title,
             on_profile: pinned.has(row.slug),
           }));
+        // Every pin must be in the picker so it can be taken down, including
+        // ones My docs no longer lists: moved to a team, deleted, or stamped
+        // with an older account id.
+        const listed = new Set(catalog.map((row) => row.slug));
+        const strays = await Promise.all(pinList.filter((slug) => !listed.has(slug)).map(async (slug) => {
+          let meta = null;
+          try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch {}
+          return {
+            slug,
+            title: (meta && meta.title) || slug,
+            on_profile: true,
+            ...(!meta ? { status: 'deleted' } : meta.workspace_id ? { status: 'team' } : {}),
+          };
+        }));
+        catalog = [...strays, ...catalog];
       }
       const wantsJson = (req.headers.get('accept') || '').includes('application/json');
       if (wantsJson) {

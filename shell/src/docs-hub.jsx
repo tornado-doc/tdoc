@@ -690,12 +690,17 @@ export function DocsHub({ boot }) {
       const body = await r.json().catch(() => ({}));
       if (!r.ok) {
         setPins(previous);
+        hub.notify(next
+          ? `Could not show on profile${body.error ? ` (${body.error})` : ''}`
+          : `Could not remove from profile${body.error ? ` (${body.error})` : ''}`, true);
         return;
       }
       if (next) markCurateWarned();
       if (Array.isArray(body.pins)) setPins(new Set(body.pins));
+      hub.notify(next ? 'Shown on your profile' : 'Removed from your profile');
     } catch {
       setPins(previous);
+      hub.notify(next ? 'Could not show on profile' : 'Could not remove from profile', true);
     }
   };
 
