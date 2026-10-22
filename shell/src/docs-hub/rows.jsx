@@ -135,7 +135,14 @@ export function DocList({ docs, rowProps, selecting = false, empty = null, layou
   );
 }
 
-export function FolderRow({ folder, count, onOpen, menuItems = [] }) {
+function folderMeta({ folders = 0, docs = 0 } = {}) {
+  const parts = [];
+  if (folders) parts.push(`${folders} ${folders === 1 ? 'folder' : 'folders'}`);
+  if (docs || !folders) parts.push(`${docs} ${docs === 1 ? 'doc' : 'docs'}`);
+  return parts.join(' · ');
+}
+
+export function FolderRow({ folder, contents, onOpen, menuItems = [] }) {
   return (
     <div
       className="doc-row folder-row"
@@ -150,7 +157,7 @@ export function FolderRow({ folder, count, onOpen, menuItems = [] }) {
       <span className="folder-ico"><Folder size={18} /></span>
       <div className="doc-info" onClick={onOpen}>
         <span className="doc-title">{folder.name}</span>
-        <div className="doc-meta">{count} {count === 1 ? 'doc' : 'docs'}</div>
+        <div className="doc-meta">{folderMeta(contents)}</div>
       </div>
       <div className="row-actions">
         <RowMenu label="Folder actions" items={menuItems} />

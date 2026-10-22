@@ -10,7 +10,7 @@ import {
   updateFolderAccess,
   setDocumentStar,
 } from '../document/api.js';
-import { folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from '../docs-hub/search.js';
+import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from '../docs-hub/search.js';
 
 const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
 
@@ -93,11 +93,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     .filter((item) => item.parent === folder)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })), [folders, folder, query]);
 
-  const folderCounts = useMemo(() => {
-    const counts = {};
-    for (const doc of docs) counts[doc.folder] = (counts[doc.folder] || 0) + 1;
-    return counts;
-  }, [docs]);
+  const folderCounts = useMemo(() => folderContents(folders, docs), [folders, docs]);
 
   const toggleSelected = useCallback((slug) => setSelected((current) => {
     const next = new Set(current);
