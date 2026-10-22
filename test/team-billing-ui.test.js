@@ -117,6 +117,37 @@ async function t(name, fn) {
       await context.close();
     });
 
+    await t('an AppSumo lifetime team sees its seat cap, no renewal, and no Checkout or portal', async () => {
+      const { context, page } = await open(1050, { ...FREE, plan: 'team', seats: 4, lifetime: { source: 'appsumo', tier: 1, seats: 5 } }, '?appsumo=applied');
+      assert.equal(await page.locator('.tm-plan-badge').textContent(), 'Team');
+      assert.match(await page.locator('.tm-plan-summary').textContent(), /Lifetime license from AppSumo\. 4 of 5 seats used\. It does not renew\./);
+      assert.match(await page.locator('.tm-plan-note').textContent(), /upgrade the license on AppSumo/);
+      await page.getByText('Your AppSumo license is on. This team has the Team plan.').waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Upgrade to Team' }).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Manage billing' }).count(), 0);
+      assert.equal(await page.locator('.tm-plan-choose').count(), 0);
+      await shot(page, 'team-billing-lifetime-desktop.png');
+      await context.close();
+    });
+
+    await t('a lifetime team over its seats after a downgrade, or also paying by card, is told what to do', async () => {
+      let { context, page } = await open(1050, { ...FREE, plan: 'team', seats: 6, lifetime: { source: 'appsumo', tier: 1, seats: 5 } });
+      assert.match(await page.locator('.tm-plan-summary.is-warn').textContent(), /6 members on 5 seats: everyone stays, but nobody new can join/);
+      await context.close();
+      ({ context, page } = await open(1050, { ...FREE, plan: 'team', seats: 3, has_customer: true, double_billed: true, lifetime: { source: 'appsumo', tier: 1, seats: 5 } }));
+      assert.match(await page.locator('.tm-plan-summary.is-error').textContent(), /also pays by card\. Cancel the card plan in Manage billing/);
+      assert.equal(await page.getByRole('button', { name: 'Manage billing' }).count(), 1);
+      await context.close();
+    });
+
+    await t('phone: the lifetime card fits without sideways scrolling', async () => {
+      const { context, page } = await open(390, { ...FREE, plan: 'team', seats: 4, lifetime: { source: 'appsumo', tier: 1, seats: 5 } });
+      const layout = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth }));
+      assert.ok(layout.scroll <= layout.width + 1, JSON.stringify(layout));
+      await shot(page, 'team-billing-lifetime-phone.png');
+      await context.close();
+    });
+
     await t('a failed payment is called out in the summary', async () => {
       const { context, page } = await open(1050, { ...PAID, status: 'past_due' });
       assert.match(await page.locator('.tm-plan-summary.is-error').textContent(), /last payment failed/);

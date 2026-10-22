@@ -641,6 +641,7 @@ export function TeamBillingCard({ team }) {
     load();
     if (returned === 'success') setStatus('Payment received. The Team plan turns on in a few seconds.');
     if (returned === 'canceled') setStatus('Checkout was canceled. Nothing was charged.');
+    if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('appsumo') === 'applied') setStatus('Your AppSumo license is on. This team has the Team plan.');
     return () => { cancelled = true; };
   }, [team.id]);
 
@@ -658,9 +659,17 @@ export function TeamBillingCard({ team }) {
   };
   const prices = billing.prices;
   const paid = billing.plan === 'team';
+  const lifetime = billing.lifetime;
   const seats = billing.seats;
   const renews = billingDate(billing.current_period_end);
-  const summary = paid
+  const overSeats = !!lifetime && seats > lifetime.seats;
+  const summary = lifetime
+    ? billing.double_billed
+      ? 'This team has an AppSumo lifetime license and also pays by card. Cancel the card plan in Manage billing; the license already covers the team.'
+      : overSeats
+        ? `Lifetime license from AppSumo. ${seats} members on ${lifetime.seats} seats: everyone stays, but nobody new can join until someone leaves or the license is upgraded.`
+        : `Lifetime license from AppSumo. ${seats} of ${lifetime.seats} seats used. It does not renew.`
+    : paid
     ? billing.status === 'past_due'
       ? 'The last payment failed. Update the card to keep the Team plan.'
       : `${billing.quantity || seats} ${(billing.quantity || seats) === 1 ? 'seat' : 'seats'}, billed ${billing.interval === 'year' ? 'yearly' : 'monthly'}.${renews ? ` ${billing.cancel_at_period_end ? 'Ends' : 'Renews'} ${renews}.` : ''}`
@@ -679,7 +688,7 @@ export function TeamBillingCard({ team }) {
         </div>
         <span className={`tm-plan-badge${paid ? ' is-team' : ''}`}>{paid ? 'Team' : 'Free'}</span>
       </div>
-      <p className={`tm-plan-summary${billing.status === 'past_due' || billing.at_limit ? ' is-error' : billing.near_limit ? ' is-warn' : ''}`}>{summary}</p>
+      <p className={`tm-plan-summary${billing.status === 'past_due' || billing.at_limit || billing.double_billed ? ' is-error' : billing.near_limit || overSeats ? ' is-warn' : ''}`}>{summary}</p>
       {paid ? null : (
         <div className="tm-plan-choose">
           <SegmentedControl
@@ -691,11 +700,13 @@ export function TeamBillingCard({ team }) {
           <span>{seats} × ${prices[period]} = <b>${seats * prices[period]}</b> / {period === 'year' ? 'year' : 'month'}</span>
         </div>
       )}
-      <p className="tm-plan-note">Every admin and member is a seat; agents never are. Seats follow the member list, and changes are prorated.</p>
+      <p className="tm-plan-note">{lifetime
+        ? 'Every admin and member is a seat; agents never are. For more seats, upgrade the license on AppSumo.'
+        : 'Every admin and member is a seat; agents never are. Seats follow the member list, and changes are prorated.'}</p>
       {status ? <p className="status" role="status">{status}</p> : null}
       <div className="tm-settings-actions">
-        {paid || billing.has_customer ? (
-          <button type="button" className={paid ? 'primary' : 'tm-link-btn'} onClick={() => go('portal')} disabled={busy}>Manage billing</button>
+        {(paid && !lifetime) || billing.has_customer ? (
+          <button type="button" className={paid && !lifetime ? 'primary' : 'tm-link-btn'} onClick={() => go('portal')} disabled={busy}>Manage billing</button>
         ) : null}
         {paid ? null : <button type="button" className="primary" onClick={() => go('checkout')} disabled={busy}>Upgrade to Team</button>}
       </div>
