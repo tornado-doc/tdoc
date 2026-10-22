@@ -2318,6 +2318,8 @@ const START_SLUG = 'tdoc-start';
 // `/templates` — the template gallery: pick a look, copy a prompt, hand it to
 // your agent. Same landing-doc mechanism as `/start`.
 const TEMPLATES_SLUG = 'tdoc-templates';
+// `/pricing` — the public plans page. Same landing-doc mechanism.
+const PRICING_SLUG = 'tdoc-pricing';
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -11219,6 +11221,10 @@ export default {
     // modal (TEMPLATES_SLUG is intentionally not in the withOnboard gate).
     if (p === '/templates' && (method === 'GET' || method === 'HEAD')) {
       return landingResponse(env, req, TEMPLATES_SLUG);
+    }
+
+    if (p === '/pricing' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, PRICING_SLUG);
     }
 
     // Web OAuth callback. With a `code` this is the redirect flow: exchange it
