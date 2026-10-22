@@ -160,9 +160,26 @@
     return out;
   }
 
+  // An agent handed a doc link fetches this shell, not the document (that
+  // lives in the sandboxed frame), so the head says where the readable source
+  // is and that a tdoc skill exists. Nothing here renders for people. URLs go
+  // through esc(), so none can close the comment early.
+  function agentHeadHtml(d) {
+    const a = d && d.agent;
+    if (!a || !a.raw) return '';
+    const raw = esc(a.raw);
+    const skill = esc(a.skill || '');
+    return '<!-- This is a tdoc document. Agents: read the plain source at ' + raw +
+      ' (text/plain, the exact stored HTML). Agents with the tdoc skill can pull it with its comments via `tdoc-pull ' + esc(a.slug || '<slug>') + '`.' +
+      ' Remote skill: ' + skill + ' . Install the full skill: ' + esc(a.onboarding || '') + ' -->\n' +
+      '<meta name="tdoc-agent" content="tdoc document. Read the source at ' + raw + ' ; tdoc skill: ' + skill + '">\n' +
+      '<link rel="alternate" type="text/plain" href="' + raw + '" title="Document source for agents">\n';
+  }
+
   function shellHtml(d) {
     return '<!doctype html><html lang="en"><head>\n' +
 '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+agentHeadHtml(d) +
 /* One declaration for every shell page. The icon file carries its own fills
    rather than currentColor: a tab strip is browser chrome, so there is no
    surrounding text to inherit from and no tdoc theme toggle reaching it. See
@@ -189,6 +206,7 @@ seoBodyHtml(d) +
   function appHtml(d) {
     return '<!doctype html><html lang="en"><head>\n' +
       '<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+      agentHeadHtml(d) +
       '<link rel="icon" href="/favicon.svg" type="image/svg+xml">\n' +
       '<link rel="apple-touch-icon" href="/apple-touch-icon-v3.png">\n' +
       '<link rel="manifest" href="/site.webmanifest">\n' +
