@@ -44,3 +44,20 @@ export function sortCatalogDocs(docs, sort) {
     return String(b[sort]).localeCompare(String(a[sort]));
   });
 }
+
+// What a folder row says it holds: its direct subfolders, and every doc in it
+// or anywhere below it. A folder holding only folders is not empty.
+export function folderContents(folders, docs) {
+  const parentOf = new Map(folders.map((item) => [item.id, item.parent || '']));
+  const stats = {};
+  for (const item of folders) stats[item.id] = { folders: 0, docs: 0 };
+  for (const item of folders) if (stats[item.parent || '']) stats[item.parent].folders += 1;
+  for (const doc of docs) {
+    const seen = new Set();
+    for (let id = doc.folder || ''; stats[id] && !seen.has(id); id = parentOf.get(id)) {
+      seen.add(id);
+      stats[id].docs += 1;
+    }
+  }
+  return stats;
+}

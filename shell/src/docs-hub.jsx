@@ -33,7 +33,7 @@ import {
   TeamSettingsPane,
 } from './docs-hub/teams.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
-import { folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from './docs-hub/search.js';
+import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from './docs-hub/search.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
@@ -613,8 +613,7 @@ export function DocsHub({ boot }) {
     .filter(() => !teamSearching)
     .filter((item) => (item.parent || '') === teamFolder)
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-  const teamFolderCounts = {};
-  for (const doc of allTeamDocs) teamFolderCounts[doc.folder || ''] = (teamFolderCounts[doc.folder || ''] || 0) + 1;
+  const teamFolderCounts = folderContents(spaceFolders, allTeamDocs);
   const pickSpace = (id) => { setTeamFolder(''); setSpace(id); };
 
   useEffect(() => {
@@ -957,7 +956,7 @@ export function DocsHub({ boot }) {
                     <FolderRow
                       key={item.id}
                       folder={item}
-                      count={teamFolderCounts[item.id] || 0}
+                      contents={teamFolderCounts[item.id]}
                       onOpen={() => setTeamFolder(item.id)}
                       menuItems={teamFolderMenu(item)}
                     />
@@ -1039,7 +1038,7 @@ export function DocsHub({ boot }) {
                 <FolderRow
                   key={item.id}
                   folder={item}
-                  count={hub.folderCounts[item.id] || 0}
+                  contents={hub.folderCounts[item.id]}
                   onOpen={() => hub.setFolder(item.id)}
                   menuItems={folderMenu(item)}
                 />
