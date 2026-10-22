@@ -41,6 +41,7 @@ const OFFLINE = [
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
+  'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
   'shell-scan-cap.test.js',     // big docs: the page scans only the head (Cloudflare 1102)
@@ -97,6 +98,7 @@ const OFFLINE = [
   'landing-republish.test.js', // #458 the homepage is one v1, re-shipped in place with `replace`
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
+  'tdoc-pricing.test.js', // public /pricing page matches the limits the worker enforces
   'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader
   'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it
   'web-oauth.test.js',        // web redirect flow: sanitizeReturn open-redirect guard + flow wiring + device fallback
