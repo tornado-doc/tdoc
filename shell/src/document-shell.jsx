@@ -463,12 +463,16 @@ export function DocumentShell({ boot, config }) {
     'tdoc:navigate': (message) => {
       const href = String(message.href || '');
       if (!/^https?:\/\//i.test(href) && !/^\/(?!\/)/.test(href)) return;
-      if (config.onboarding && href === '/start' && !message.blank) {
+      if (config.onboarding && href === '/start' && !message.blank && config.identity) {
         // Connected already — an agent on this account has a token — means the
-        // gate has nothing to ask, so it is not shown. Everyone else starts
-        // there, signed in or not; /setup handles the sign-in itself.
+        // gate has nothing to ask, so it is not shown. Signed in and not yet
+        // connected starts at the gate. Signed out falls through to /start
+        // itself: sending a first-time visitor to /setup put a sign-in wall
+        // ("Welcome back!") in front of somebody who had not yet seen what to
+        // paste, or where. /start shows the line first; the account is asked
+        // for only when the agent's sign-in link is opened.
         const done = Boolean(onboardingRecord?.agent_connected || onboardingRecord?.published_first);
-        location.href = config.identity && done ? '/me' : '/setup';
+        location.href = done ? '/me' : '/setup';
         return;
       }
       if (message.blank) window.open(href, '_blank', 'noopener');

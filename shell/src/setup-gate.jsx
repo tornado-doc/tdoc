@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
-import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
+import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_LINE, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
 import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
 import { DebugBar } from './debug-bar.jsx';
@@ -29,11 +29,12 @@ import { DebugBar } from './debug-bar.jsx';
 // gate that state means handing out a per-account setup link and having the
 // CLI fetch it. That is a real change to the prompt, not a UI tweak.
 
-// ONBOARDING.md only reaches the connection in its step 5, as a side effect of
-// building a first doc -- which this page deliberately no longer asks for. So
-// the line names the command that pairs, and stops there.
-
-export const SETUP_PROMPT = 'Install tdoc from https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md, then connect it to my account by running: bin/tdoc-publish --signin-only';
+// The same line /start shows. It used to be a second one -- ONBOARDING.md plus
+// a shell command to pair -- because ONBOARDING.md only connects as a side
+// effect of its first-doc step. FIRST-DOC.md connects first (its Step 1b),
+// before it reads anything, so this page still sees the agent turn up early,
+// and a newcomer is handed one line everywhere instead of two.
+export const SETUP_PROMPT = FIRST_DOC_LINE;
 // The second ask, on the same route, and the one place in the whole journey
 // where there is a choice to make. Everybody being marched through the same
 // "what AI knows about you" is what made the old version feel like a
@@ -67,7 +68,7 @@ export const replaySlugFor = (choice, subject) => {
   const words = String(subject || '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/[\s-]+/).filter(Boolean);
   return words.slice(0, 4).join('-') || 'my-first-doc';
 };
-// FIRST_DOC_RECIPE opens with "Set up tdoc and", which is true on the landing
+// FIRST_DOC_LINE opens with "Set up tdoc and", which is true on the landing
 // page and false here: by the time anyone reads this screen the skill is
 // installed and the account is connected. Same recipe, without the preamble.
 export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;
@@ -111,7 +112,7 @@ function WorksWith() {
       {/* The same 21px the create menu uses. At 17 the three marks were a
           smudge -- Claude's line art in particular needs the diameter. */}
       <AgentMarks size={21} />
-      <span className="sg-sr">Claude Code, ChatGPT and Grok</span>
+      <span className="sg-sr">Claude Code and Codex</span>
     </p>
   );
 }
@@ -445,7 +446,7 @@ export function SetupGate({ boot, preview = null }) {
                     </>
                   ) : (
                     <>
-                      <li>Paste into your agent.</li>
+                      <li>Paste into Claude Code or Codex on your computer.</li>
                       <li>Approve the request in your browser.</li>
                       <li>Connection status updates automatically.</li>
                     </>

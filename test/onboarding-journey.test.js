@@ -341,8 +341,8 @@ t('resuming reads the record, not localStorage', () => {
   // mid-journey — that is a second journey beside the real one.
   assert(!/OnboardingDialog|onboardingOpen|onboardingDoor/.test(shell),
     'there is no landing pop-up left to open itself');
-  assert(shell.includes("location.href = config.identity && done ? '/me' : '/setup';"),
-    'the landing CTA sends the unconnected to the gate and everyone else to their docs');
+  assert(shell.includes("href === '/start' && !message.blank && config.identity)") && shell.includes("location.href = done ? '/me' : '/setup';"),
+    'the landing CTA sends the signed-in unconnected to the gate, the connected to their docs, and a signed-out visitor to /start');
   assert(!shell.includes('setOnboardingResume') && !shell.includes('resume={onboardingResume}'), 'the shell never forces the question');
   assert(!shell.includes("get('onboard')"), 'and no URL can reopen one');
   // Coming back is not a question any more, because there is no jump to make:

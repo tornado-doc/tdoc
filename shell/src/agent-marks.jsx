@@ -50,14 +50,17 @@ export function RaftMark({ size = 16 }) {
   );
 }
 
-// The three, as one cluster: each in a disc of its own, overlapped like a
-// stack of avatars. The discs are what make it work -- three marks drawn at
-// three different weights, dropped straight onto a row, read as a jumble --
+// The two apps tdoc runs in -- Claude Code and Codex -- as one cluster: each
+// in a disc of its own, overlapped like a stack of avatars. The discs are what
+// make it work -- marks drawn at different weights, dropped straight onto a row, read as a jumble --
 // and they are all light, so the marks sit on them at one size rather than
 // one of them arriving as a black coin.
 //
 // One component and one stylesheet rule, so every place that claims "works
-// with" agrees with every other, and a fourth agent is one line here.
+// with" agrees with every other, and another app is one line here. Grok is
+// detected and gets an avatar on its replies, but it is not somewhere a
+// newcomer can install tdoc today, so it is not in the "works with" row: a
+// mark here reads as "you can run it there".
 // Drawn at one number the three marks do not read at one size, because none
 // of them fills its own viewBox the same way: Claude's ink spans 95% of its
 // box, OpenAI's only 59% across, and Grok's spans the full width but as two
@@ -72,9 +75,8 @@ export function AgentMarks({ size = 22 }) {
   const at = (k) => Math.round(size * OPTICAL[k]);
   return (
     <span className="agent-marks" style={{ '--am': `${size}px` }}>
-      <i><ClaudeMark size={at('claude')} /></i>
-      <i><OpenAIMark size={at('openai')} /></i>
-      <i><GrokMark size={at('grok')} /></i>
+      <i title="Claude Code"><ClaudeMark size={at('claude')} /></i>
+      <i title="Codex"><OpenAIMark size={at('openai')} /></i>
     </span>
   );
 }

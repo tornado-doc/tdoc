@@ -48,8 +48,16 @@ t('the local /start alias reuses the latest tdoc-start document route', () => {
   assert(/req\.method === 'GET' \|\| req\.method === 'HEAD'/.test(route[0]), 'local /start is not GET/HEAD safe');
 });
 
-t('the tutorial keeps its own link, and opens no pop-up', () => {
-  assert(/href="\/start"/.test(html), 'tutorial CTA missing');
+t('Copy the line copies the line, and opens no pop-up', () => {
+  // It used to be a link to /start, which bounced a signed-out visitor to the
+  // sign-in wall: a button that did something other than what it said.
+  assert(!/href="\/start"[^>]*>Copy the line/.test(html), 'Copy the line is a link again');
+  assert(/<button[^>]*data-tdoc-copy="#first-line"[^>]*data-tdoc-copy-done="Copied"[^>]*>Copy the line<\/button>/.test(html),
+    'Copy the line is not wired to the copy trigger');
+  assert(/<span id="first-line">Set up tdoc and make my first doc: https:\/\/github\.com\/tornado-doc\/tdoc\/blob\/main\/FIRST-DOC\.md<\/span>/.test(html),
+    'the copied element is not exactly the line');
+  assert(/\.term-bd \{[^}]*user-select:all/.test(html) && /click the line above to select it/.test(text),
+    'no hand-copy fallback when the clipboard refuses');
   assert(/config\.onboarding/.test(documentShell) && /href === '\/start'/.test(documentShell),
     'frame navigation is not intercepted for onboarding');
   // The five-step wizard this used to mount is gone. Setup is a route and the
@@ -67,8 +75,25 @@ t('mobile onboarding actions keep names and 44px touch targets', () => {
 t('the short prompt points to FIRST-DOC and never embeds a credential', () => {
   assert(/FIRST-DOC\.md/.test(dialog), 'FIRST-DOC link missing');
   assert(!/token\s*(is|=)|Authorization|Bearer/.test(dialog), 'credential leaked into the prompt');
+  assert(dialog.includes('export const SETUP_PROMPT = FIRST_DOC_LINE;'), '/setup and /start hand out different lines');
+  assert(dialog.includes('FIRST_DOC_LINE = `Set up tdoc and make my first doc: ${RECIPE_URL}`')
+    && html.includes('Set up tdoc and make my first doc: https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md'),
+    'the /start line is not FIRST_DOC_LINE');
   assert(/copyText\(prompt\)/.test(dialog) && /PORTRAIT_PROMPT = `Make my first doc: \$\{RECIPE_URL\}`/.test(dialog),
     'copy is wired to the line the gate composed');
+});
+
+t('a newcomer is told what to have before pasting', () => {
+  assert(/Before you start/.test(text), 'no Before you start box');
+  assert(/href="https:\/\/code\.claude\.com\/docs\/en\/overview"/.test(html), 'no Claude Code install link');
+  assert(/Open\s+Terminal/.test(text) && /<code>claude<\/code>/.test(html), 'does not say where to paste');
+  assert(/nodejs\.org/.test(html) && !/brew install/.test(html), 'Node is not offered as the nodejs.org installer');
+  assert(/not work in the claude\.ai or ChatGPT chat/.test(text), 'does not say which chats are unsupported');
+});
+
+t('commenting sign-in names every method, not only GitHub', () => {
+  assert(!/GitHub sign in/.test(text) && !/signs you in with GitHub once/.test(text), 'still GitHub-only copy');
+  assert(/email, Google, or GitHub/.test(text), 'missing email, Google, or GitHub');
 });
 
 t('the tutorial promises the same private personal AI portrait as FIRST-DOC', () => {
