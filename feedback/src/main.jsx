@@ -175,6 +175,15 @@ ${uiCss}
       if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
     }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['open', 'inert', 'aria-hidden'] });
     document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
+    // A dialog removed without closing (a React unmount) takes the layer with it.
+    new MutationObserver(() => { if (!host.isConnected) place(); }).observe(document.documentElement, { childList: true, subtree: true });
+    // Script-driven modals (Base UI, Radix, Headless UI) close on a press
+    // outside them and pull focus back inside. Presses and focus on the layer
+    // stay on the layer, so commenting on a modal neither closes it nor loses
+    // the typing.
+    ['pointerdown', 'mousedown', 'touchstart', 'focusin', 'focusout'].forEach((type) => {
+      host.addEventListener(type, (e) => e.stopPropagation());
+    });
   })();
 
   // Where we came from is where the comments go: the worker that served this
