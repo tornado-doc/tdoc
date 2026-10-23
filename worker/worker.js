@@ -3891,7 +3891,7 @@ async function moveFolderToTeam(env, session, team, body) {
   }
   // The whole folder is checked against the free plan on the first call,
   // before anything moves: a folder must not land half in the team.
-  if (!done.size && stripeConfigured(env) && !teamBillingPaid(await loadTeamBilling(env, team.id))) {
+  if (!done.size && stripeConfigured(env) && !(await teamPlanPaid(env, team.id))) {
     const metas = await Promise.all(pending.map(([slug]) => loadDocMeta(env, slug)));
     // Only the docs this call would actually move: the caller's own, not yet in any team.
     const incoming = metas.filter((meta) => meta && !meta.workspace_id && meta.created_from !== 'feedback' && isDocOwnerSession(env, session, meta)).length;
@@ -4243,6 +4243,8 @@ function pendingTeamInvite(team, session) {
 async function joinTeamFromSession(env, team, s) {
   if (teamMember(team, s.account_id)) return { ok: true };
   if (team.members.length >= TEAM_MEMBERS_MAX) return { error: 'team_full', limit: TEAM_MEMBERS_MAX };
+  const cap = await teamSeatCap(env, team);
+  if (cap && team.members.length >= cap) return { error: 'team_full', limit: cap };
   if ((s.team_ids || []).length >= TEAMS_PER_ACCOUNT_MAX) return { error: 'team_limit', limit: TEAMS_PER_ACCOUNT_MAX };
   team.members.push(teamMemberFromSession(s, 'member'));
   const mine = [sessionLogin(s), normalizeEmail(s.email)].filter(Boolean);
@@ -4300,7 +4302,7 @@ async function teamDocCount(env, teamId) {
 // 402 body to answer with.
 async function teamPlanBlocksDocs(env, team, adding = 1) {
   if (!team || !stripeConfigured(env) || adding <= 0) return null;
-  if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
+  if (await teamPlanPaid(env, team.id)) return null;
   const count = await teamDocCount(env, team.id);
   const free = teamFreeDocs(env);
   if (count + adding <= free) return null;
@@ -4315,7 +4317,7 @@ async function teamPlanBlocksDocs(env, team, adding = 1) {
 const TEAM_FREE_WARN_LEFT = 5;
 async function teamPlanWarning(env, team) {
   if (!team || !stripeConfigured(env)) return null;
-  if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
+  if (await teamPlanPaid(env, team.id)) return null;
   const free = teamFreeDocs(env);
   const docs = await teamDocCount(env, team.id);
   const left = free - docs;
@@ -4330,11 +4332,14 @@ async function teamPlanWarning(env, team) {
 // set up backup before billing existed) is not affected.
 async function teamBackupPaused(env, teamId) {
   if (!stripeConfigured(env)) return false;
-  const billing = await loadTeamBilling(env, teamId);
-  return !!billing && !teamBillingPaid(billing);
+  const [billing, lifetime] = await Promise.all([loadTeamBilling(env, teamId), loadTeamLifetime(env, teamId)]);
+  if (teamBillingPaid(billing) || teamLifetimeActive(lifetime)) return false;
+  return !!billing || !!lifetime;
 }
 async function publicTeamBilling(env, team, billing) {
-  const paid = teamBillingPaid(billing);
+  const lifetime = await loadTeamLifetime(env, team.id);
+  const lifetimeOn = teamLifetimeActive(lifetime);
+  const paid = teamBillingPaid(billing) || lifetimeOn;
   const configured = stripeConfigured(env);
   const docs = configured ? await teamDocCount(env, team.id) : null;
   return {
@@ -4350,6 +4355,10 @@ async function publicTeamBilling(env, team, billing) {
     current_period_end: (billing && billing.current_period_end) || null,
     cancel_at_period_end: !!(billing && billing.cancel_at_period_end),
     has_customer: !!(billing && billing.customer),
+    // An AppSumo lifetime license: a Team plan with a seat cap, no renewal.
+    lifetime: lifetimeOn ? { source: 'appsumo', tier: lifetime.tier, seats: lifetime.seats } : null,
+    // A card plan that completed on top of a license: the admin should cancel it.
+    double_billed: lifetimeOn && teamBillingPaid(billing),
     at_limit: !paid && docs != null && docs >= teamFreeDocs(env),
     near_limit: !paid && docs != null && docs < teamFreeDocs(env) && teamFreeDocs(env) - docs <= TEAM_FREE_WARN_LEFT,
   };
@@ -4439,6 +4448,255 @@ async function syncTeamSeats(env, team, { verify = false } = {}) {
   } catch (error) {
     console.error(`[billing] seat sync failed team=${team.id}: ${error.message || error}`);
   }
+}
+
+// ─────────────────────── AppSumo lifetime licenses (#61) ───────────────────────
+// A buyer pays AppSumo once. AppSumo reports each license by signed webhook
+// (purchase, activate, upgrade, downgrade, deactivate) and sends the buyer to
+// /appsumo/activate, where tdoc reads their license key over OAuth and puts it
+// on one team. A team holding an active license has the Team plan, capped at
+// the tier's seats, with no renewal. A refund arrives as `deactivate` and ends
+// it; an upgrade or downgrade arrives as a new key that takes over the team
+// and retires the old one. Nothing here runs until APPSUMO_API_KEY,
+// APPSUMO_CLIENT_ID and APPSUMO_CLIENT_SECRET are set.
+//
+// Three records, each with one writer, so a webhook and an activation landing
+// at the same moment cannot erase each other:
+//   appsumo-license:<key>  AppSumo's view (status, tier); written by webhooks
+//                          and the Licensing API read.
+//   appsumo-binding:<key>  which team holds the key; written when the buyer
+//                          applies it (and carried to the new key on upgrade).
+//   team-lifetime:<team>   the team's pointer to its key.
+// A team counts as lifetime only when all three agree: its pointer names a
+// key, that key's binding names this team, and AppSumo has not ended the key.
+// Two tabs applying one key to two teams therefore leave exactly one team on
+// the plan: the binding's last writer.
+const APPSUMO_TIER_SEATS = { 1: 5, 2: 15, 3: 40 };
+// AppSumo's webhook object documents event_timestamp as "Time at which the
+// webhook was sent. It changes when retrying to deliver the webhook", so a
+// retry carries a fresh timestamp and the window only covers clock skew and
+// slow delivery. The same fact means event time cannot order a retry against
+// a later event; that is why a refunded or replaced key is terminal below.
+const APPSUMO_SIGNATURE_TOLERANCE_MS = 60 * 60 * 1000;
+const APPSUMO_CLAIM_TTL_S = 60 * 60;
+const APPSUMO_LICENSING_API = 'https://api.licensing.appsumo.com/v2';
+const APPSUMO_OAUTH = 'https://appsumo.com/openid';
+const APPSUMO_ENDED = ['deactivated', 'superseded'];
+function appsumoConfigured(env) {
+  return !!(env && env.APPSUMO_API_KEY && env.APPSUMO_CLIENT_ID && env.APPSUMO_CLIENT_SECRET);
+}
+function appsumoLicenseRecordKey(key) { return `appsumo-license:${key}`; }
+function appsumoBindingKey(key) { return `appsumo-binding:${key}`; }
+function appsumoClaimKey(nonce) { return `appsumo-claim:${nonce}`; }
+function teamLifetimeKey(teamId) { return `team-lifetime:${teamId}`; }
+function validAppsumoKey(key) { return typeof key === 'string' && /^[0-9a-f-]{36}$/i.test(key); }
+function appsumoSeats(tier) { return APPSUMO_TIER_SEATS[Number(tier)] || null; }
+async function readJsonKey(env, key) {
+  try { const v = JSON.parse(await env.META.get(key)); return v && typeof v === 'object' ? v : null; } catch { return null; }
+}
+// The team's pointer, with `active` worked out from all three records.
+async function loadTeamLifetime(env, teamId) {
+  const rec = teamId ? await readJsonKey(env, teamLifetimeKey(teamId)) : null;
+  if (!rec || !rec.license_key) return rec;
+  const [binding, license] = await Promise.all([
+    readJsonKey(env, appsumoBindingKey(rec.license_key)),
+    readJsonKey(env, appsumoLicenseRecordKey(rec.license_key)),
+  ]);
+  const active = !rec.ended_at && !!rec.seats && !!binding && binding.team_id === teamId
+    && !!license && !APPSUMO_ENDED.includes(license.status);
+  return { ...rec, active };
+}
+function teamLifetimeActive(rec) { return !!(rec && rec.active); }
+// The plan, whichever way it was paid for.
+async function teamPlanPaid(env, teamId) {
+  const [billing, lifetime] = await Promise.all([loadTeamBilling(env, teamId), loadTeamLifetime(env, teamId)]);
+  return teamBillingPaid(billing) || teamLifetimeActive(lifetime);
+}
+// A lifetime team without a card subscription stops at its tier's seats.
+// After a downgrade below the member count, everyone stays; nobody new joins
+// until someone leaves or the license is upgraded again.
+async function teamSeatCap(env, team) {
+  const lifetime = await loadTeamLifetime(env, team.id);
+  if (!teamLifetimeActive(lifetime)) return null;
+  if (teamBillingPaid(await loadTeamBilling(env, team.id))) return null;
+  return lifetime.seats;
+}
+// X-Appsumo-Signature is hex HMAC-SHA256 of `${X-Appsumo-Timestamp}${raw body}`
+// under the partner API key. The timestamp is in milliseconds.
+async function verifyAppsumoSignature(apiKey, timestamp, payload, signature, nowMs = Date.now()) {
+  if (!apiKey || !timestamp || !signature) return false;
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts)) return false;
+  const ms = ts < 1e12 ? ts * 1000 : ts;
+  if (Math.abs(nowMs - ms) > APPSUMO_SIGNATURE_TOLERANCE_MS) return false;
+  const expected = await hmacSha256Hex(apiKey, `${timestamp}${payload}`);
+  return timingSafeEqual(String(signature).trim().toLowerCase(), expected);
+}
+// Point a team at a key. Refuses a tier tdoc has no seat count for, so an
+// unknown tier can never mean "no cap".
+async function setTeamLifetime(env, teamId, key, tier, by) {
+  const seats = appsumoSeats(tier);
+  if (!seats) {
+    console.error(`[appsumo] unknown tier ${tier} for ${key}; team ${teamId} not changed`);
+    return null;
+  }
+  const prev = await loadTeamLifetime(env, teamId);
+  const rec = {
+    v: 1,
+    source: 'appsumo',
+    license_key: key,
+    tier: Number(tier),
+    seats,
+    attached_at: (prev && prev.attached_at) || new Date().toISOString(),
+    attached_by: by || (prev && prev.attached_by) || null,
+    updated_at: new Date().toISOString(),
+  };
+  await env.META.put(teamLifetimeKey(teamId), JSON.stringify(rec));
+  if (!teamBillingPaid(await loadTeamBilling(env, teamId))) {
+    // A plan coming back copies everything again, as a renewed card does.
+    if (prev && prev.license_key && !teamLifetimeActive(prev)) await enqueueTeamBackup(env, { kind: 'full', team: teamId });
+    // A card Checkout opened before the license must not complete on top of it.
+    await expireTeamCheckout(env, teamId);
+  }
+  return rec;
+}
+async function expireTeamCheckout(env, teamId) {
+  if (!stripeConfigured(env)) return;
+  const pending = await readJsonKey(env, teamCheckoutKey(teamId));
+  if (!pending || !pending.id) return;
+  try { await stripeApi(env, 'POST', `/checkout/sessions/${encodeURIComponent(pending.id)}/expire`); } catch {}
+  await env.META.delete(teamCheckoutKey(teamId));
+}
+async function endTeamLifetime(env, teamId, key) {
+  const raw = await readJsonKey(env, teamLifetimeKey(teamId));
+  if (!raw || raw.license_key !== key || raw.ended_at) return;
+  const at = new Date().toISOString();
+  await env.META.put(teamLifetimeKey(teamId), JSON.stringify({ ...raw, ended_at: at, updated_at: at }));
+}
+// Apply one webhook. AppSumo retries and does not promise order, so each key
+// keeps the newest event time it has applied and ignores anything older.
+async function applyAppsumoEvent(env, ev) {
+  const key = String(ev.license_key || '');
+  if (!validAppsumoKey(key)) return { ignored: 'bad_key' };
+  const event = String(ev.event || '');
+  if (!['purchase', 'activate', 'upgrade', 'downgrade', 'deactivate'].includes(event)) return { ignored: 'event' };
+  const at = Number(ev.event_timestamp) || 0;
+  const prev = await readJsonKey(env, appsumoLicenseRecordKey(key));
+  if (prev && at && prev.event_timestamp && at < prev.event_timestamp) return { ignored: 'stale' };
+  if (prev && at && prev.event_timestamp === at && prev.last_event === event) return { duplicate: true };
+  const rec = {
+    ...(prev || {}),
+    v: 1,
+    key,
+    tier: Number(ev.tier) || (prev && prev.tier) || null,
+    event_timestamp: Math.max(at, (prev && prev.event_timestamp) || 0),
+    last_event: event,
+    updated_at: new Date().toISOString(),
+  };
+  const from = (event === 'upgrade' || event === 'downgrade') && validAppsumoKey(ev.prev_license_key) ? ev.prev_license_key : null;
+  // Refunded and replaced keys are terminal. A retried activate or purchase
+  // arrives with a newer timestamp than the refund, so time alone would let
+  // it reopen a refunded license.
+  if (prev && APPSUMO_ENDED.includes(prev.status)) rec.status = prev.status;
+  else if (event === 'purchase') rec.status = (prev && prev.status) || 'purchased';
+  else if (event === 'activate') rec.status = 'active';
+  else if (from) { rec.status = 'active'; rec.prev_key = from; }
+  else if (event === 'deactivate') rec.status = 'deactivated';
+  else rec.status = 'active';
+  await env.META.put(appsumoLicenseRecordKey(key), JSON.stringify(rec));
+
+  // A new key on a tier tdoc has no seat count for does not retire the old
+  // one: the buyer keeps the seats they had rather than dropping to free.
+  if (from && !appsumoSeats(rec.tier)) {
+    console.error(`[appsumo] ${event} to unknown tier ${ev.tier}: ${from} -> ${key}; team kept on the old key`);
+    return { ignored: 'unknown_tier' };
+  }
+  if (from) {
+    const old = await readJsonKey(env, appsumoLicenseRecordKey(from));
+    await env.META.put(appsumoLicenseRecordKey(from), JSON.stringify({
+      ...(old || { v: 1, key: from }),
+      status: 'superseded', superseded_by: key, updated_at: new Date().toISOString(),
+    }));
+    // The new key inherits the team the old one was bound to.
+    const oldBinding = await readJsonKey(env, appsumoBindingKey(from));
+    if (oldBinding && oldBinding.team_id && !(await readJsonKey(env, appsumoBindingKey(key)))) {
+      await env.META.put(appsumoBindingKey(key), JSON.stringify({ ...oldBinding, from_key: from, at: new Date().toISOString() }));
+    }
+  }
+
+  const binding = await readJsonKey(env, appsumoBindingKey(key));
+  if (!binding || !binding.team_id) return { ok: true };
+  if (rec.status === 'active') {
+    const current = await readJsonKey(env, teamLifetimeKey(binding.team_id));
+    // An upgrade takes the team over from the key it replaces; nothing else
+    // displaces a different key the team holds.
+    const takes = !current || !current.license_key || current.license_key === key || current.license_key === from || !!current.ended_at;
+    if (takes) await setTeamLifetime(env, binding.team_id, key, rec.tier, binding.account_id);
+  } else if (APPSUMO_ENDED.includes(rec.status)) {
+    await endTeamLifetime(env, binding.team_id, key);
+  }
+  return { ok: true };
+}
+// OAuth code -> the buyer's license key.
+async function appsumoLicenseFromCode(env, code, redirectUri) {
+  const form = new URLSearchParams({
+    client_id: env.APPSUMO_CLIENT_ID, client_secret: env.APPSUMO_CLIENT_SECRET,
+    code, redirect_uri: redirectUri, grant_type: 'authorization_code',
+  });
+  const tok = await fetch(`${APPSUMO_OAUTH}/token/`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString() });
+  const token = await tok.json().catch(() => ({}));
+  if (!tok.ok || !token.access_token) throw new Error(token.error || `token ${tok.status}`);
+  const lic = await fetch(`${APPSUMO_OAUTH}/license_key/?access_token=${encodeURIComponent(token.access_token)}`);
+  const body = await lic.json().catch(() => ({}));
+  if (!lic.ok || !validAppsumoKey(body.license_key)) throw new Error(`license ${lic.status}`);
+  return body.license_key;
+}
+// The license as tdoc should treat it. Anything short of active with a tier
+// is checked with the Licensing API, so a buyer is not stuck when the
+// activate webhook is late or lost. A key tdoc retired stays retired.
+async function appsumoLicense(env, key) {
+  let rec = await readJsonKey(env, appsumoLicenseRecordKey(key));
+  if (rec && APPSUMO_ENDED.includes(rec.status)) return rec;
+  if (rec && rec.status === 'active' && rec.tier) return rec;
+  try {
+    const r = await fetch(`${APPSUMO_LICENSING_API}/licenses/${encodeURIComponent(key)}`, { headers: { 'X-AppSumo-Licensing-Key': env.APPSUMO_API_KEY } });
+    const live = await r.json().catch(() => ({}));
+    if (r.ok && live && live.license_key === key) {
+      // Re-read just before writing: a refund webhook may have landed while
+      // the API answered, and a terminal status is never overwritten.
+      const latest = await readJsonKey(env, appsumoLicenseRecordKey(key));
+      if (latest && APPSUMO_ENDED.includes(latest.status)) return latest;
+      rec = { ...(latest || {}), v: 1, key, tier: Number(live.tier) || (latest && latest.tier) || null, status: live.status || (latest && latest.status) || null, updated_at: new Date().toISOString() };
+      await env.META.put(appsumoLicenseRecordKey(key), JSON.stringify(rec));
+    }
+  } catch {}
+  return rec;
+}
+// Put a claimed license on `team`. Returns { ok } or { error, message }.
+async function applyAppsumoLicense(env, team, key, accountId) {
+  const license = await appsumoLicense(env, key);
+  if (!license || license.status !== 'active' || !appsumoSeats(license.tier)) {
+    return { error: 'license_inactive', message: 'AppSumo has not confirmed this license yet. Open it again from your AppSumo account in a minute.' };
+  }
+  const binding = await readJsonKey(env, appsumoBindingKey(key));
+  if (binding && binding.team_id && binding.team_id !== team.id) {
+    const other = await loadTeam(env, binding.team_id);
+    if (other && teamLifetimeActive(await loadTeamLifetime(env, other.id))) return { error: 'license_used', message: `This license is already on ${other.name}.`, team: other };
+  }
+  if (teamBillingPaid(await loadTeamBilling(env, team.id))) {
+    return { error: 'already_subscribed', message: `${team.name} already pays by card. Cancel that in Manage billing first, or pick another team.` };
+  }
+  const current = await loadTeamLifetime(env, team.id);
+  if (teamLifetimeActive(current) && current.license_key !== key) {
+    return { error: 'team_has_license', message: `${team.name} already has an AppSumo license.` };
+  }
+  const seats = appsumoSeats(license.tier);
+  if (team.members.length > seats) {
+    return { error: 'team_seats_full', message: `${team.name} has ${team.members.length} members; this license covers ${seats}. Pick a smaller team or upgrade on AppSumo.` };
+  }
+  await env.META.put(appsumoBindingKey(key), JSON.stringify({ team_id: team.id, account_id: accountId, at: new Date().toISOString() }));
+  await setTeamLifetime(env, team.id, key, license.tier, accountId);
+  return { ok: true };
 }
 
 function teamSummary(team, accountId) {
@@ -13516,7 +13774,7 @@ export default {
       }
       // Turning backup on is a Team plan feature; one already set up keeps
       // running and can still be reconnected, re-synced or turned off.
-      if (method === 'PUT' && stripeConfigured(env) && !(await loadTeamBackup(env, team.id)) && !teamBillingPaid(await loadTeamBilling(env, team.id))) {
+      if (method === 'PUT' && stripeConfigured(env) && !(await loadTeamBackup(env, team.id)) && !(await teamPlanPaid(env, team.id))) {
         return json({ error: 'team_plan_required', message: 'Data backup is part of the Team plan. Upgrade in Plan to turn it on.' }, { status: 402 });
       }
       if (!env.BACKUP_QUEUE) return json({ error: 'backup_queue_unavailable' }, { status: 503 });
@@ -13599,7 +13857,7 @@ export default {
           return json({ ok: true, url: portal.url });
         }
         if (body.action === 'checkout') {
-          if (teamBillingPaid(billing)) return json({ error: 'already_subscribed' }, { status: 409 });
+          if (await teamPlanPaid(env, team.id)) return json({ error: 'already_subscribed' }, { status: 409 });
           const interval = body.interval === 'year' ? 'year' : 'month';
           const quantity = Math.max(1, team.members.length);
           // One open Checkout per team: a double click, a retry or a second
@@ -13632,6 +13890,123 @@ export default {
         return json({ error: 'stripe_failed', message: error.message || String(error) }, { status: 502 });
       }
       return json({ error: 'invalid_action' }, { status: 400 });
+    }
+
+    // AppSumo license webhook (#61). No session: the HMAC over the timestamp
+    // and raw body is the proof. AppSumo needs `{ event, success: true }` to
+    // mark the license active or deactivated on its side, test events included.
+    if (p === '/api/appsumo/webhook' && method === 'POST') {
+      if (!appsumoConfigured(env)) return json({ error: 'appsumo_unavailable' }, { status: 503 });
+      const payload = await req.text();
+      if (!(await verifyAppsumoSignature(env.APPSUMO_API_KEY, req.headers.get('x-appsumo-timestamp'), payload, req.headers.get('x-appsumo-signature')))) {
+        return json({ error: 'bad_signature' }, { status: 401 });
+      }
+      let ev = null;
+      try { ev = JSON.parse(payload); } catch { return json({ error: 'bad_payload' }, { status: 400 }); }
+      const done = { event: String((ev && ev.event) || ''), success: true };
+      // Add-ons are not sold; their events are acknowledged and dropped.
+      if (!ev || ev.test || ev.parent_license_key) return json(done);
+      await applyAppsumoEvent(env, ev);
+      return json(done);
+    }
+
+    // AppSumo's OAuth redirect: the buyer clicked Activate. Exchange the code
+    // for their license key, park it under a one-hour claim, and continue at
+    // /appsumo/claim, which needs a signed-in tdoc account. AppSumo validates
+    // this URL with a bare GET, which gets a plain 200.
+    if (p === '/appsumo/activate' && method === 'GET') {
+      if (!appsumoConfigured(env)) return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'AppSumo is not set up here', message: 'This tdoc does not take AppSumo licenses.', error: true, status: 503 });
+      const code = url.searchParams.get('code');
+      if (!code) return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'Activate from AppSumo', message: 'Open your tdoc license from your AppSumo account and click Activate.' });
+      let key = null;
+      try { key = await appsumoLicenseFromCode(env, code, `${url.origin}/appsumo/activate`); }
+      catch (error) {
+        console.error(`[appsumo] activate failed: ${error.message || error}`);
+        return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'AppSumo could not confirm the license', message: 'Open your tdoc license from your AppSumo account and click Activate again.', error: true, status: 502 });
+      }
+      const nonce = rand(16);
+      await env.META.put(appsumoClaimKey(nonce), JSON.stringify({ license_key: key, at: new Date().toISOString() }), { expirationTtl: APPSUMO_CLAIM_TTL_S });
+      return redirectTo(`/appsumo/claim?c=${nonce}`);
+    }
+
+    // Put a claimed license on a team. One admin team: it goes there. None:
+    // a new team is made. Several: the buyer picks (`team`), and `team=new`
+    // makes one. The claim is bound to the first account that opens it.
+    if ((p === '/appsumo/claim' || p === '/appsumo/apply') && method === 'GET') {
+      if (!appsumoConfigured(env)) return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'AppSumo is not set up here', message: 'This tdoc does not take AppSumo licenses.', error: true, status: 503 });
+      const nonce = url.searchParams.get('c') || '';
+      const claimKey = /^[a-f0-9]{16,64}$/.test(nonce) ? appsumoClaimKey(nonce) : null;
+      const claim = claimKey ? await readJsonKey(env, claimKey) : null;
+      if (!claim || !validAppsumoKey(claim.license_key)) {
+        return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'This activation link expired', message: 'Open your tdoc license from your AppSumo account and click Activate again.', error: true, status: 410 });
+      }
+      const here = `/appsumo/claim?c=${nonce}`;
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) {
+        const actions = [];
+        if (oidcConfig(env)) actions.push({ label: `Sign in with ${(oidcConfig(env) || {}).label || 'email'}`, href: `/api/auth/oidc/login?return=${encodeURIComponent(here)}`, primary: true });
+        if (env.GITHUB_CLIENT_SECRET) actions.push({ label: 'Sign in with GitHub', href: `/api/auth/web/login?return=${encodeURIComponent(here)}`, primary: !actions.length });
+        return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'Sign in to use your AppSumo license', message: 'New to tdoc? Signing in creates your account. The license then turns on the Team plan for your team.', actions });
+      }
+      await ensureSessionAccount(env, session, url.origin);
+      if (!session.account_id) return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'No tdoc account', message: 'This sign-in has no tdoc account to put the license on.', error: true, status: 403 });
+      if (claim.account_id && claim.account_id !== session.account_id) {
+        return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'This license was claimed by another account', message: 'Sign in with the account that opened it first, or activate again from AppSumo.', error: true, status: 403 });
+      }
+      if (!claim.account_id) await env.META.put(claimKey, JSON.stringify({ ...claim, account_id: session.account_id }), { expirationTtl: APPSUMO_CLAIM_TTL_S });
+      const settings = (team) => `/me?team=${encodeURIComponent(team.id)}&view=settings&appsumo=applied#billing`;
+      // Already on a team: its members are sent there; nobody else gets to move it.
+      const known = await readJsonKey(env, appsumoBindingKey(claim.license_key));
+      const holder = known && known.team_id ? await loadTeam(env, known.team_id) : null;
+      const held = holder ? await loadTeamLifetime(env, holder.id) : null;
+      if (holder && teamLifetimeActive(held) && held.license_key === claim.license_key) {
+        if (teamMember(holder, session.account_id)) { await env.META.delete(claimKey); return redirectTo(settings(holder)); }
+        return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'The license was not applied', message: `This license is already on ${holder.name}.`, error: true, status: 409 });
+      }
+      const teams = (await Promise.all((session.team_ids || []).map((id) => loadTeam(env, id))))
+        .filter((team) => team && teamRole(team, session.account_id) === 'admin');
+      let team = null;
+      const pick = url.searchParams.get('team');
+      if (p === '/appsumo/apply' && pick && pick !== 'new') team = teams.find((x) => x.id === pick) || null;
+      else if (p === '/appsumo/claim' && teams.length === 1) team = teams[0];
+      if (!team && ((p === '/appsumo/apply' && pick === 'new') || (p === '/appsumo/claim' && !teams.length))) {
+        if ((session.team_ids || []).length >= TEAMS_PER_ACCOUNT_MAX) {
+          return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'Too many teams', message: `An account can be in ${TEAMS_PER_ACCOUNT_MAX} teams. Leave one, then activate again.`, error: true, status: 400 });
+        }
+        team = {
+          id: `t_${rand(8)}`,
+          name: validTeamName(`${(session.name || session.login || 'My').split(/\s+/)[0]}'s team`) || 'My team',
+          created: new Date().toISOString(),
+          created_by: session.account_id,
+          members: [teamMemberFromSession(session, 'admin')],
+          invites: [],
+        };
+        await rotateTeamInvite(env, team);
+        await claimTeamHandle(env, team);
+        await saveTeam(env, team);
+        await setAccountTeam(env, session.account_id, team.id, true);
+      }
+      if (!team) {
+        return statusPageResponse({
+          docTitle: 'tdoc - AppSumo', title: 'Which team gets the license?',
+          message: 'The license turns on the Team plan for one team you run.',
+          actions: [
+            ...teams.map((x) => ({ label: x.name, href: `/appsumo/apply?c=${nonce}&team=${encodeURIComponent(x.id)}` })),
+            { label: 'Make a new team', href: `/appsumo/apply?c=${nonce}&team=new` },
+          ],
+        });
+      }
+      const applied = await applyAppsumoLicense(env, team, claim.license_key, session.account_id);
+      if (applied.error === 'license_used' && applied.team && teamMember(applied.team, session.account_id)) return redirectTo(settings(applied.team));
+      if (applied.error) {
+        return statusPageResponse({
+          docTitle: 'tdoc - AppSumo', title: 'The license was not applied', message: applied.message, error: true, status: 409,
+          actions: teams.length > 1 || applied.error !== 'license_inactive' ? [{ label: 'Choose another team', href: `/appsumo/apply?c=${nonce}` }] : null,
+          retry: applied.error === 'license_inactive' ? here : null,
+        });
+      }
+      await env.META.delete(claimKey);
+      return redirectTo(settings(team));
     }
 
     // Stripe webhook. No session: the signature over the raw body is the

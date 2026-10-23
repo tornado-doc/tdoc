@@ -135,3 +135,10 @@ RAFT_INSTALLATION_IDS = '{"1ed923e0-27a4-47ff-b09a-ea27efe06877":"b3177b35-c920-
 #   customer.subscription.created / .updated / .deleted.
 # Enable the Customer Portal in Stripe (Settings → Billing → Customer portal) so
 # admins can change cards, switch period and cancel.
+# AppSumo lifetime licenses (#61). Off until all three are set. Tier 1 / 2 / 3
+# covers 5 / 15 / 40 seats (APPSUMO_TIER_SEATS). In the AppSumo Partner Portal:
+#   Webhook URL        https://<host>/api/appsumo/webhook
+#   OAuth Redirect URL https://<host>/appsumo/activate
+# Secret: APPSUMO_API_KEY        — the product's Licensing API key; also signs webhooks
+# Secret: APPSUMO_CLIENT_ID      — OAuth client id, shown once both URLs validate
+# Secret: APPSUMO_CLIENT_SECRET  — OAuth client secret
