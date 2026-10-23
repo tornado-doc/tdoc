@@ -15570,11 +15570,11 @@ export default {
         const accountHandle = auth.actor.account_id
           ? (await accountClaimedHandle(env, auth.actor.account_id)) || auth.actor.github_login || ''
           : '';
-        // Where it runs, for the hover card only: the Raft server, the
-        // daemon's computer, the webhook's host.
-        let location = replyTarget.provider === 'raft' ? replyTarget.server_slug || ''
+        // Where it runs, for the hover card only: the Raft server or the
+        // daemon's computer. A webhook's host is left out: readers of a public
+        // doc would see the owner's endpoint.
+        const location = replyTarget.provider === 'raft' ? replyTarget.server_slug || ''
           : replyTarget.provider === 'local' ? replyTarget.device || '' : '';
-        if (replyTarget.provider === 'webhook') { try { location = new URL(replyTarget.url).host; } catch {} }
         agent = {
           ...agent,
           provider: replyTarget.provider,
