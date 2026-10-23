@@ -76,7 +76,11 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
           assert(/Make this a number|shorten the title/.test(await card.textContent()));
         }
         assert.equal(await frame.locator('html[data-tdoc-presenting]').count(), 1, 'still presenting');
-        if (width < 700) { await page.keyboard.press('Escape'); await card.waitFor({ state: 'hidden' }); }
+        if (width < 700) {
+          await card.focus().catch(() => {});
+          await page.keyboard.press('Escape');
+          await card.waitFor({ state: 'hidden' });
+        }
         await frame.getByRole('button', { name: 'Comment on this slide', exact: true }).click();
         const popup = page.locator('.tdoc-popup');
         await popup.waitFor();
@@ -84,6 +88,11 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         assert(pb && pb.y >= 0 && pb.y + 40 < 820, `composer visible while presenting: ${JSON.stringify(pb)}`);
         if (process.env.TDOC_TEST_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.TDOC_TEST_SCREENSHOTS, `present-comment-${width}.png`) });
         await popup.getByRole('button', { name: 'Close' }).click();
+        // Switching to Read mode while presenting hides Comment; back shows it.
+        await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({ source: 'tdoc-shell', type: 'tdoc:mode', mode: 'read' }, '*'));
+        await frame.getByRole('button', { name: 'Comment on this slide', exact: true }).waitFor({ state: 'hidden' });
+        await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({ source: 'tdoc-shell', type: 'tdoc:mode', mode: 'comment' }, '*'));
+        await frame.getByRole('button', { name: 'Comment on this slide', exact: true }).waitFor();
         // Give the keyboard back to the slides (focus moved to the shell's composer).
         await frame.locator('.tdoc-present-bar output').click();
         await page.keyboard.press('Home');

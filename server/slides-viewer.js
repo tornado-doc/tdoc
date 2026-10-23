@@ -211,7 +211,7 @@
     // Same rule as the page: commenting is offered only in Comment mode.
     commentBtn.hidden = document.documentElement.getAttribute('data-tdoc-interaction-mode') !== 'comment';
     document.body.appendChild(stage); document.body.appendChild(bar);
-    active = { list: list, stage: stage, bar: bar, prev: prev, next: next, counter: counter, close: close, view: view, threads: [], threadAt: 0, index: -1, current: null, scrollX: scrollX, scrollY: scrollY };
+    active = { list: list, stage: stage, bar: bar, prev: prev, next: next, counter: counter, close: close, view: view, commentBtn: commentBtn, threads: [], threadAt: 0, index: -1, current: null, scrollX: scrollX, scrollY: scrollY };
     document.documentElement.setAttribute('data-tdoc-presenting', '');
     stage.showPopover();
     go(index || 0);
@@ -258,10 +258,16 @@
   });
   document.addEventListener('pointercancel', function () { swipe = null; });
   window.addEventListener('resize', function () { if (active && active.current) active.current.fit(); else placeButton(); });
-  window.addEventListener('scroll', function () { if (!active) placeButton(); }, { passive: true });
+  // No scroll handler: the button and numbers sit in document coordinates, so
+  // only a resize or a content change (ResizeObserver below) moves them.
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent || e.data?.source !== 'tdoc-shell') return;
-    if (e.data.type === 'tdoc:mode') { if (active && !canPresent()) stop(); placeButton(); }
+    if (e.data.type === 'tdoc:mode') {
+      if (active && !canPresent()) stop();
+      // Comment follows the page's mode while presenting.
+      if (active) active.commentBtn.hidden = document.documentElement.getAttribute('data-tdoc-interaction-mode') !== 'comment';
+      placeButton();
+    }
     if (e.data.type === 'tdoc:present') present(Number(e.data.index) || 0, null);
   });
   new ResizeObserver(placeButton).observe(document.body);
