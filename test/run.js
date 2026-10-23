@@ -54,7 +54,8 @@ const OFFLINE = [
   'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
-  'local-agent.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
+  'local-agent.test.js',
+  'daemon-onboarding.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
   'daemon-cli.test.js',         // bin/tdoc-daemon once-mode end to end against a stub worker + fake claude
   'handoff-state.test.js',      // handoff classifier: waiting → stale at 5 min, expired past Raft's expiresAt
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
@@ -169,6 +170,7 @@ const BROWSER = [
   'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
   'team-billing-ui.test.js', // #48 Team plan card: free seats, upgrade, paid summary, portal, phone
   'agent-mention-ui.test.js', // @ lists real agents above people; picking one hands the comment to it
+  'daemon-onboarding-browser.test.js',
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
 ];
 

@@ -14393,12 +14393,59 @@ export default {
       let paired = false;
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
       const record = await loadOnboarding(env, accountId);
+      let local_agents;
+      if (url.searchParams.get('daemon') === '1') {
+        const targets = (await accountNotifyTargets(env, accountId)).filter(isLocalTarget);
+        const seen = await localSeenMap(env, accountId);
+        const ready = new Map();
+        for (const t of targets) {
+          if (!ready.has(t.device)) {
+            try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${t.device}`)); ready.set(t.device, Array.isArray(value) ? value : []); } catch { ready.set(t.device, []); }
+          }
+        }
+        local_agents = targets.map((t) => ({ ...withLocalSeen(t, seen), ready: ready.get(t.device).includes(t.cli) }));
+      }
       // `?docs=1` costs a catalog walk, so only the page that waits for a doc
       // to appear asks for it. The connect gate's own poll stays two reads.
       if (url.searchParams.get('docs') === '1') {
         return json({ record, paired, newest_doc: await newestDocFor(env, accountId) });
       }
-      return json({ record, paired });
+      return json({ record, paired, ...(local_agents ? { local_agents } : {}) }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (p === '/api/onboarding/practice' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'account_required' }, { status: 403 });
+      let body = {}; try { body = await req.json(); } catch {}
+      const current = await accountNotifyTargets(env, accountId);
+      const target = current.find((t) => t.provider === 'local' && t.device === body.device && t.cli === body.cli);
+      if (!target) return json({ error: 'local_agent_required' }, { status: 409 });
+      const seen = await localSeenMap(env, accountId);
+      let ready = []; try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${target.device}`)); ready = Array.isArray(value) ? value : []; } catch {}
+      if (withLocalSeen(target, seen).status !== 'active' || !ready.includes(target.cli)) return json({ error: 'computer_not_ready' }, { status: 409 });
+      const record = await loadOnboarding(env, accountId);
+      let slug = record.daemon_practice_doc;
+      if (slug) {
+        const meta = await loadDocMeta(env, slug);
+        if (!(meta && meta.hosted && meta.hosted.account_id === accountId)) slug = null;
+      }
+      if (!slug) {
+        const made = await createDocForSession(env, req, session, {
+          html: '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Your first tdoc</title><style>body{background:#fff}</style></head><body><div class="wrap"><h1>Your first tdoc</h1><p>A good project update tells readers what changed, what is next, and where help is needed.</p><h2>Try a change</h2><p>Highlight the sentence above and leave a comment, such as “Make this shorter.” Then use Send to agent to ask your AI to revise it.</p><h2>Keep working here</h2><p>Your AI publishes a new version at this same link and replies to your comment. You can review earlier versions whenever you need them.</p></div></body></html>',
+          meta: { title: 'Your first tdoc', created_from: 'daemon-practice', access: { visibility: 'private', commenting: 'owner', history_visibility: 'owner' } },
+          version: { prompt: 'Practice commenting and revising with your connected AI' },
+        });
+        if (!made.ok) return made.response;
+        slug = made.slug;
+        await adoptFirstDocFor(env, accountId, slug);
+        const next = await loadOnboarding(env, accountId);
+        await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({ ...next, daemon_practice_doc: slug }));
+      }
+      // An explicit choice, scoped to this practice doc. Other docs keep their agent.
+      await touchDocAgent(env, slug, target);
+      return json({ ok: true, slug, url: `/d/${slug}?step=comment` });
     }
     // Puts the caller's own onboarding record into a named state, so the
     // journey's branches can be walked without hand-editing storage. The body
@@ -15436,6 +15483,17 @@ export default {
       // started the daemon on again is back.
       await unremoveTargets(env, accountId, (k) => wanted.some((w) => notifyKey(w) === k));
       await localTouchSeen(env, accountId, device);
+      // Sent only after a CLI answered the installer's harmless connection check.
+      // Missing on older daemons: registering a binary alone is not proof it can run.
+      const readyClis = Array.isArray(body.ready_clis) ? clis.filter((c) => body.ready_clis.includes(c)) : [];
+      const readyKey = `local-agent-ready:${accountId}:${device}`;
+      const priorReady = await env.META.get(readyKey);
+      if (JSON.stringify(readyClis) !== priorReady) await env.META.put(readyKey, JSON.stringify(readyClis));
+      if (readyClis.length) {
+        await stampOnboardingFor(env, accountId, 'started');
+        await stampOnboardingFor(env, accountId, 'agent_connected');
+        await stampOnboardingFor(env, accountId, 'daemon_connected');
+      }
       return json({ ok: true, device, account_id: accountId, targets: wanted, added: missing.length }, { headers: { 'Cache-Control': 'no-store' } });
     }
 

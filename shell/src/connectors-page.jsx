@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, LOCAL_DAEMON_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, localSeenText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
+import { SETUP_PROMPT } from './setup-gate.jsx';
 import './docs-hub.css';
 
 // Where this account's comments go when someone presses Send to agent or
@@ -194,10 +195,10 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
               ) : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>) : null}
               {conn.id === 'local' ? (
                 <>
-                  <p className="muted tdoc-conn-note">Needs the tdoc skill signed in on that computer (<code>tdoc-publish --signin-only</code>). Then, in a terminal or from the agent itself:</p>
-                  <pre className="tdoc-conn-pre">{`bash "$SKILL_DIR/bin/tdoc-daemon" start            # keeps polling
-bash "$SKILL_DIR/bin/tdoc-daemon" once             # one poll, for cron or launchd
-bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # prints a LaunchAgent plist`}</pre>
+                  <p className="muted tdoc-conn-note">Connect the computer where you use Claude Code or Codex. The installer adds the tdoc skill, checks your AI, and starts the background service.</p>
+                  <pre className="tdoc-conn-pre">{SETUP_PROMPT}</pre>
+                  <CopyPromptButton text={SETUP_PROMPT} />
+                  <p className="muted tdoc-conn-note"><a href="/setup">Open guided setup</a>. Runs while your computer is awake and signed in. Pause with <code>~/.local/bin/tdoc stop</code>; reconnect with <code>~/.local/bin/tdoc setup</code>.</p>
                   <details className="tdoc-conn-alt">
                     <summary>Or let the agent set it up</summary>
                     <code>{LOCAL_DAEMON_PROMPT}</code>

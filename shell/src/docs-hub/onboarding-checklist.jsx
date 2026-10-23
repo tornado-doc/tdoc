@@ -49,17 +49,17 @@ function rememberOpen(value) {
 export function onboardingSteps(record, firstDocHref) {
   const r = record || {};
   const steps = [
-    { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
+    { id: 'connect', label: 'Connect your computer', done: Boolean(r.daemon_connected), href: '/setup' },
     // Every row opens the page for its own step, finished or not -- the page
     // is where that step's state is written, and a finished one should say so
     // rather than being a dead line or a detour somewhere else.
-    { id: 'create', label: 'Create your first tdoc', done: Boolean(r.first_doc), href: '/setup?step=doc' },
+    { id: 'create', label: 'Open your first doc', done: Boolean(r.first_doc), href: firstDocHref || '/setup' },
     // Both rows open the same doc, and each says which of its two things it
     // came for: the question already on the page, or the card carrying the
     // line for the agent. Landing on the bare URL left the last two rows
     // pointing at the same wall of text.
     { id: 'comment', label: 'Comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref && `${firstDocHref}?step=comment` },
-    { id: 'revise', label: 'Ask your agent to fix comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
+    { id: 'revise', label: 'Send comments to your AI', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
   ];
   // The stamps above are what the server saw. Detection misses real
   // completions -- a skill set up on another machine, a doc made before the
@@ -275,14 +275,6 @@ export function OnboardingChecklist({ record: initial, docs }) {
           );
         })}
       </ol>
-      {/* Not a step: tdoc already works without it. Shown with the full list
-          so the person learns the other direction exists — tdoc pinging their
-          agent — without it counting against "done". */}
-      {open ? (
-        <p className="onb-optional">
-          <span>Optional</span> Send comments straight to your agent from tdoc. <a href="/me?view=settings#agents">Set up an agent</a>
-        </p>
-      ) : null}
     </section>
   );
 }

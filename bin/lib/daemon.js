@@ -13,6 +13,8 @@
 //                     [--runner cli|oar]
 //   tdoc-daemon once  [same flags]      one poll, for cron or launchd
 //   tdoc-daemon status                  what is registered, running, pending
+//   tdoc-daemon setup [--cli claude,codex] sign in, verify AI, start at login
+//   tdoc-daemon stop | uninstall         pause / remove the background service
 //   tdoc-daemon install-launchd [flags] print a LaunchAgent plist (not loaded)
 //
 // Credentials: the account's upload token in ~/.tdoc/published.json, the one
@@ -33,6 +35,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { setup, uninstall, stopService, readSetup } = require('./daemon-setup.js');
 const { runAgentVia, detectClis, knownClis, findOnPath, RUNNERS, claudeAllowedTools } = require('./agent-runners.js');
 
 const HOME = process.env.HOME || os.homedir();
@@ -64,7 +67,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  const lines = fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 17);
+  const lines = fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 20);
   return lines.map((l) => l.replace(/^\/\/ ?/, '')).join('\n');
 }
 
@@ -182,7 +185,9 @@ function buildPrompt({ handoff, device }) {
 let stopping = false; // set by SIGINT/SIGTERM in `start`; the current run finishes
 
 async function register(cfg, st) {
-  const r = await api(cfg, 'POST', '/api/notify/local/register', { device: st.device, clis: st.clis });
+  const installed = readSetup();
+  const ready = Array.isArray(installed?.clis) ? installed.clis : [];
+  const r = await api(cfg, 'POST', '/api/notify/local/register', { device: st.device, clis: st.clis, ready_clis: ready.filter((cli) => st.clis.includes(cli)) });
   log(`registered ${st.clis.map((c) => `${c} on ${st.device}`).join(', ')} at ${new URL(cfg.base).host}${r.added ? ` (${r.added} new)` : ''}`);
   return r;
 }
@@ -401,7 +406,10 @@ ${argv.map((a) => `    <string>${esc(a)}</string>`).join('\n')}
   const cmd = args._[0];
   if (args.help || !cmd) { console.log(usage()); process.exit(cmd ? 0 : 2); }
   try {
-    if (cmd === 'start') await cmdStart(args);
+    if (cmd === 'setup') await setup(args);
+    else if (cmd === 'stop') { stopService(); console.log('Background service paused. Resume with tdoc setup.'); }
+    else if (cmd === 'uninstall') uninstall();
+    else if (cmd === 'start') await cmdStart(args);
     else if (cmd === 'once') await cmdOnce(args);
     else if (cmd === 'status') await cmdStatus(args);
     else if (cmd === 'install-launchd') cmdInstallLaunchd(args);

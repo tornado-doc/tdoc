@@ -204,3 +204,21 @@
   transform-origin: 50% 92%;
   will-change: opacity, transform;
 }
+
+/* The same desktop framing, with the app the installer actually uses. */
+.rp-terminal { height: 100%; border-radius: 12px; background: #202124; color: #f4f4f5; overflow: hidden; }
+.rp-terminal-bar { height: 36px; display: flex; align-items: center; gap: 55px; padding: 0 14px; background: #353638; color: #ddd; font-size: 13px; }
+.rp-terminal-bar span { color: #e9b6a7; letter-spacing: 4px; }
+.rp-terminal pre { margin: 0; padding: 25px 22px; font: 15px/1.85 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rp-terminal-icon { color: #fff; font: 24px ui-monospace, monospace; }
+.rp-practice { background: #fff; border-radius: 12px; overflow: hidden; color: #1a1a1a; }
+.rp-practice-bar { height: 48px; border-bottom: 1px solid #e5e5e7; display: flex; align-items: center; gap: 14px; padding: 0 18px; font-size: 14px; }
+.rp-practice-bar span { margin-left: auto; }
+.rp-practice-page { padding: 38px 32px; width: 370px; box-sizing: border-box; font: 17px/1.65 system-ui, sans-serif; }
+.rp-practice-page h2 { font-size: 28px; line-height: 1.15; margin: 0 0 24px; }
+.rp-practice-page h3 { font-size: 20px; }
+.rp-practice-page mark { background: transparent; color: inherit; }
+.rp-practice-page mark.selected { background: #fff7d0; }
+.rp-practice-comment { position: absolute; top: 120px; left: 375px; width: 220px; box-sizing: border-box; padding: 14px; border: 1px solid #e8eaed; border-radius: 12px; box-shadow: 0 1px 3px rgba(60,64,67,.15), 0 4px 8px rgba(60,64,67,.08); font: 13px/1.5 system-ui, sans-serif; }
+.rp-practice-comment p { margin: 10px 0; }
+.rp-practice-comment button { background: #1652f0; color: #fff; border: 0; border-radius: 6px; padding: 8px 12px; font: inherit; }

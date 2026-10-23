@@ -45,7 +45,11 @@ export function getOnboarding(options) {
   // `docs` asks the server to also name the newest doc this account owns. It
   // costs a catalog walk, so only the page that waits for a doc to appear
   // asks for it.
-  return request(options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
+  return request(options?.daemon ? '/api/onboarding?daemon=1' : options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
+}
+
+export function createOnboardingPractice(target) {
+  return request('/api/onboarding/practice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target) });
 }
 
 export function postOnboardingEvent(action, doc) {
