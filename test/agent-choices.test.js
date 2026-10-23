@@ -24,21 +24,23 @@ const workerSrc = read('worker/worker.js');
 const reLine = workerSrc.slice(workerSrc.indexOf('const MENTION_RE ='), workerSrc.indexOf('\n', workerSrc.indexOf('const MENTION_RE =')));
 vm.runInContext(`${reLine}\nthis.MENTION_RE = MENTION_RE;`, box);
 
-const raft = (sub, name, extra = {}) => ({ provider: 'raft', server_id: 'S1', server_slug: 'acme', agent_sub: sub, agent_name: name, ...extra });
-const local = (device, cli) => ({ provider: 'local', server_id: device, device, cli, agent_sub: `${device}_${cli}`, agent_name: `${cli} on ${device}` });
+// The worker stamps who each connection belongs to; here, julie.
+const owner = { key: 'julie', display: 'julie' };
+const raft = (sub, name, extra = {}) => ({ provider: 'raft', server_id: 'S1', server_slug: 'acme', agent_sub: sub, agent_name: name, owner, ...extra });
+const local = (device, cli) => ({ provider: 'local', server_id: device, device, cli, agent_sub: `${device}_${cli}`, agent_name: `${cli} on ${device}`, owner });
 const doc = raft('a', 'xiaocc', { source: 'doc' });
 const targets = {
   default: doc,
   candidates: [raft('a', 'xiaocc'), local('juliesmac', 'claude'), local('juliesmac', 'codex'), raft('b', 'devin')],
   fallback: raft('b', 'devin'),
 };
-const names = (list) => JSON.stringify(list.map((x) => box.agentDisplayName(x)));
+const names = (list) => JSON.stringify(list.map((x) => box.agentDisplayName(x, list)));
 
 console.log('agent choices');
 
 t('default, then candidates, then fallback — each agent once', () => {
   const list = box.orderedAgentChoices(targets);
-  assert(names(list) === JSON.stringify(['xiaocc · acme', 'Claude Code · juliesmac', 'Codex · juliesmac', 'devin · acme']), names(list));
+  assert(names(list) === JSON.stringify(['xiaocc · julie', 'Claude Code · julie', 'Codex · julie', 'devin · julie']), names(list));
   assert(box.orderedAgentChoices({ default: null, candidates: [], fallback: raft('z', 'zed') }).length === 1);
   assert(box.orderedAgentChoices(null).length === 0, 'no targets offers nobody');
 });
@@ -55,35 +57,68 @@ t('the dropdown and the picker read the same helper', () => {
 
 t('nothing typed: the first two agents only', () => {
   const list = box.orderedAgentChoices(targets);
-  assert(names(box.matchAgentChoices(list, '')) === JSON.stringify(['xiaocc · acme', 'Claude Code · juliesmac']));
+  assert(names(box.matchAgentChoices(list, '')) === JSON.stringify(['xiaocc · julie', 'Claude Code · julie']));
 });
 
 t('typing searches every agent, not just the first two', () => {
   const list = box.orderedAgentChoices(targets);
-  assert(names(box.matchAgentChoices(list, 'dev')) === JSON.stringify(['devin · acme']));
-  assert(names(box.matchAgentChoices(list, 'codex')) === JSON.stringify(['Codex · juliesmac']));
+  const found = (q) => JSON.stringify(box.matchAgentChoices(list, q).map((x) => box.agentDisplayName(x, list)));
+  assert(found('dev') === JSON.stringify(['devin · julie']));
+  assert(found('codex') === JSON.stringify(['Codex · julie']));
   // A prefix hit ranks above a word hit: "cod" is Codex first, then Claude Code.
-  assert(names(box.matchAgentChoices(list, 'cod')) === JSON.stringify(['Codex · juliesmac', 'Claude Code · juliesmac']));
-  // The machine name finds both of its agents, in the dropdown's order.
-  assert(names(box.matchAgentChoices(list, 'julies')) === JSON.stringify(['Claude Code · juliesmac', 'Codex · juliesmac']));
+  assert(found('cod') === JSON.stringify(['Codex · julie', 'Claude Code · julie']));
+  // The machine name finds both of its agents, though the label leaves it out.
+  assert(found('julies') === JSON.stringify(['Claude Code · julie', 'Codex · julie']));
+  // The Raft server too.
+  assert(found('acme') === JSON.stringify(['xiaocc · julie', 'devin · julie']));
   // The stored name ("claude on juliesmac") still matches.
-  assert(names(box.matchAgentChoices(list, 'claude')) === JSON.stringify(['Claude Code · juliesmac']));
+  assert(found('claude') === JSON.stringify(['Claude Code · julie']));
   assert(box.matchAgentChoices(list, 'nobody').length === 0);
 });
 
-t('labels say which agent and where it runs', () => {
-  assert(box.agentDisplayName(local('studio', 'claude')) === 'Claude Code · studio');
-  assert(box.agentDisplayName(local('studio', 'codex')) === 'Codex · studio');
-  assert(box.agentDisplayName(raft('c', 'bot — writes docs')) === 'bot · acme');
+t('every agent reads "<name> · <owner>", whatever runs it', () => {
+  assert(box.agentDisplayName(local('studio', 'claude')) === 'Claude Code · julie');
+  assert(box.agentDisplayName(local('studio', 'codex')) === 'Codex · julie');
+  assert(box.agentDisplayName(raft('c', 'bot — writes docs')) === 'bot · julie');
+  // The Raft server is where it runs, not who it acts for.
+  assert(box.agentDisplayName(raft('c', 'smarter-tdoc-claw', { server_slug: 'julie', owner: { display: 'yayashuxue' } })) === 'smarter-tdoc-claw · yayashuxue');
   // An opaque id is no name: say which kind of agent it is instead.
-  assert(box.agentDisplayName(raft('0f0e3a4c-1111-2222-3333-444455556666', '')) === 'Raft agent · acme');
+  assert(box.agentDisplayName(raft('0f0e3a4c-1111-2222-3333-444455556666', '')) === 'Raft agent · julie');
+  const hook = { provider: 'webhook', server_id: 'webhook', agent_sub: 'wh_0123456789abcdef', agent_name: '', url: 'https://hooks.example.com/x', owner };
+  assert(box.agentDisplayName(hook) === 'Webhook · julie', box.agentDisplayName(hook));
+  // A server that sent no owner: the name alone, never a guess.
+  assert(box.agentDisplayName({ ...local('studio', 'claude'), owner: undefined }) === 'Claude Code');
+});
+
+t('where it runs is added only to tell two otherwise identical agents apart', () => {
+  const two = [local('juliesmac', 'claude'), local('mac-mini', 'claude'), local('juliesmac', 'codex')];
+  assert(names(two) === JSON.stringify(['Claude Code · julie · juliesmac', 'Claude Code · julie · mac-mini', 'Codex · julie']), names(two));
+  const servers = [raft('a', 'devin'), raft('b', 'devin', { server_id: 'S2', server_slug: 'beta' })];
+  assert(names(servers) === JSON.stringify(['devin · julie · acme', 'devin · julie · beta']), names(servers));
+  // Another owner is already a different label.
+  const owners = [local('juliesmac', 'claude'), { ...local('bobmac', 'claude'), owner: { display: 'bob' } }];
+  assert(names(owners) === JSON.stringify(['Claude Code · julie', 'Claude Code · bob']), names(owners));
+});
+
+t('the hover card lists all five facts', () => {
+  const facts = box.agentFacts({ ...raft('c', 'smarter-tdoc-claw', { server_slug: 'acme' }), scope: 'personal' });
+  assert(JSON.stringify(facts.map((f) => `${f.label}=${f.value}`)) === JSON.stringify(['Name=smarter-tdoc-claw', 'Acts for=julie', 'Program=Raft', 'Location=acme', 'Scope=Personal']), JSON.stringify(facts));
+  // An agent reply as the worker stamps it.
+  const reply = { kind: 'agent', login: 'claude', name: 'Claude', provider: 'local', cli: 'claude', location: 'juliesmac', owner, scope: 'team' };
+  assert(box.agentDisplayName(reply) === 'Claude Code · julie');
+  assert(JSON.stringify(box.agentFacts(reply).map((f) => f.value)) === JSON.stringify(['Claude Code', 'julie', 'Claude Code', 'juliesmac', 'Team']));
+  const raftReply = { kind: 'agent', login: 'claude', name: 'Claude', provider: 'raft', handle: '@smarter-tdoc-claw', location: 'julie', owner: { display: 'yayashuxue' }, principal: { display: '@yayashuxue', terminal: 'Claude' } };
+  assert(box.agentDisplayName(raftReply) === 'smarter-tdoc-claw · yayashuxue');
+  assert(box.agentFacts(raftReply)[2].value === 'Raft (Claude)');
 });
 
 t('the inserted tag names the agent and is never read as a GitHub login', () => {
   const tag = `@${box.AGENT_TAG_JOINER}${box.agentMentionName(local('juliesmac', 'claude'))}`;
   const text = `please fix ${tag} thanks`;
   assert(!new RegExp(box.MENTION_RE.source, 'g').test(text), 'server would parse the tag as @login');
-  assert(text.replace(box.AGENT_TAG_JOINER, '') === 'please fix @Claude Code · juliesmac thanks');
+  assert(text.replace(box.AGENT_TAG_JOINER, '') === 'please fix @Claude Code · julie thanks');
+  const raw = `@${box.AGENT_TAG_JOINER}${box.agentMentionName(raft('c', 'smarter-tdoc-claw'))}`;
+  assert(!new RegExp(box.MENTION_RE.source, 'g').test(`see ${raw}`), 'a handle-named tag reads as @login');
 });
 
 t('a posted text hands itself to the first agent it tags', () => {
@@ -96,6 +131,14 @@ t('a posted text hands itself to the first agent it tags', () => {
   assert(box.taggedAgent(`fix ${tag(list[2])}`, []) === null, 'no agents on offer, no handoff');
   const bare = { provider: 'raft', server_id: 'S2', agent_sub: 'd2', agent_name: 'devin' };
   assert(box.taggedAgent(`fix ${tag(list[3])}`, [bare, ...list]) === list[3], 'a shorter name took the longer tag');
+});
+
+t('a tag with the location suffix hands itself to the right twin', () => {
+  const two = [local('juliesmac', 'claude'), local('mac-mini', 'claude')];
+  const tag = (x) => `@${box.AGENT_TAG_JOINER}${box.agentMentionName(x, two)}`;
+  assert(tag(two[1]).endsWith('Claude Code · julie · mac-mini'), tag(two[1]));
+  assert(box.taggedAgent(`fix ${tag(two[1])}`, two) === two[1], 'the suffixed tag went to the other machine');
+  assert(box.taggedAgent(`fix ${tag(two[0])} now`, two) === two[0]);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

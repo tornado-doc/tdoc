@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGithubUserSearch } from './github-user-search.js';
-import { AGENT_TAG_JOINER, agentMentionName, matchAgentChoices, targetKey } from './agent-choices.js';
+import { AGENT_TAG_JOINER, agentFacts, agentMentionName, matchAgentChoices, targetKey } from './agent-choices.js';
 import { ProviderMark, recipientOption } from './notify-handoff.jsx';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
 import { parseRichText } from './rich-text.js';
@@ -41,8 +41,8 @@ export function MentionField({
   // typed, every one whose name matches once something is.
   const agentMatches = query
     ? matchAgentChoices(agentsOnOffer.choices, query.query, {
-      labelOf: (t) => recipientOption(t, agentsOnOffer.preselected).label,
-    }).map((t) => ({ agent: t, key: `agent:${targetKey(t)}`, ...recipientOption(t, agentsOnOffer.preselected) }))
+      labelOf: (t) => recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices).label,
+    }).map((t) => ({ agent: t, key: `agent:${targetKey(t)}`, ...recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices) }))
     : [];
   const localMatches = query ? matchMentionable(people, query.query) : [];
   // Typing an address is already a complete tag — asking GitHub's user search
@@ -117,7 +117,7 @@ export function MentionField({
   const pick = (person) => {
     if (person.agent) {
       // "@\u2060claude": reads as the agent's name, never parsed as a login.
-      const next = insertMention(value, query, `${AGENT_TAG_JOINER}${agentMentionName(person.agent)}`);
+      const next = insertMention(value, query, `${AGENT_TAG_JOINER}${agentMentionName(person.agent, agentsOnOffer.choices)}`);
       caretAfterInsert.current = next.caret;
       setQuery(null);
       onChange(next.text);
@@ -192,6 +192,7 @@ export function MentionField({
               role="option"
               aria-selected={index === active}
               className={`tdoc-mention-option tdoc-mention-agent${index === active ? ' active' : ''}`}
+              title={agentFacts(row.agent).map((f) => `${f.label}: ${f.value}`).join('\n')}
               onMouseDown={(event) => event.preventDefault()}
               onMouseEnter={() => setActive(index)}
               onClick={() => pick(row)}
