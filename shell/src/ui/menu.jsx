@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
+import { usePortalContainer } from './portal.js';
 import { isPlainNavigationClick, startNavigationProgress } from '../nav-progress.js';
 
 export function AppMenu({
@@ -13,7 +14,7 @@ export function AppMenu({
   return (
     <Menu.Root open={open} onOpenChange={onOpenChange}>
       <Menu.Trigger render={trigger} />
-      <Menu.Portal>
+      <Menu.Portal container={usePortalContainer()}>
         <Menu.Positioner align={align} sideOffset={sideOffset} className="ui-menu-positioner">
           <Menu.Popup className="ui-menu-popup">{children}</Menu.Popup>
         </Menu.Positioner>
@@ -100,7 +101,7 @@ export function AppSubmenu({
       <Menu.SubmenuTrigger className={`ui-menu-item ${className}`.trim()}>
         {trigger}
       </Menu.SubmenuTrigger>
-      <Menu.Portal>
+      <Menu.Portal container={usePortalContainer()}>
         <Menu.Positioner
           side={side}
           align={align}

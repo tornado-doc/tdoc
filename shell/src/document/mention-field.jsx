@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { usePortalContainer } from '../ui/portal.js';
 import { useGithubUserSearch } from './github-user-search.js';
 import { AGENT_TAG_JOINER, agentFacts, agentMentionName, matchAgentChoices, targetKey } from './agent-choices.js';
 import { ProviderMark, recipientOption } from './notify-handoff.jsx';
@@ -82,6 +83,7 @@ export function MentionField({
   // textarea keep it whole and keep it glued to the field while that container
   // scrolls; it flips above the box when there is more room up there.
   const [menuBox, setMenuBox] = useState(null);
+  const portalContainer = usePortalContainer();
   useLayoutEffect(() => {
     if (!open) {
       setMenuBox(null);
@@ -228,7 +230,7 @@ export function MentionField({
             );
           })}
         </div>
-      ), document.body) : null}
+      ), portalContainer || document.body) : null}
     </div>
   );
 }

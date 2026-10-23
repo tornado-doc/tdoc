@@ -1,5 +1,6 @@
 import React from 'react';
 import { Select } from '@base-ui/react/select';
+import { usePortalContainer } from './portal.js';
 
 // The one dropdown. A native <select> lets the operating system draw the open
 // list, so it never looks like tdoc; this draws both halves itself. The closed
@@ -21,7 +22,7 @@ export function AppSelect({ value, onChange, options, id, ariaLabel, className =
       <Select.Trigger id={id} aria-label={ariaLabel} className={[plain ? null : 'tdoc-select', 'ui-select-trigger', className].filter(Boolean).join(' ')}>
         <Select.Value className="ui-select-value" />
       </Select.Trigger>
-      <Select.Portal>
+      <Select.Portal container={usePortalContainer()}>
         <Select.Positioner className="ui-menu-positioner ui-select-positioner" sideOffset={4} alignItemWithTrigger={false}>
           <Select.Popup className="ui-menu-popup ui-select-popup">
             {options.map((o) => (

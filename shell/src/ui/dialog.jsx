@@ -1,5 +1,6 @@
 import React from 'react';
 import { Dialog } from '@base-ui/react/dialog';
+import { usePortalContainer } from './portal.js';
 
 // The one modal surface. Visuals come from chrome.css's `.tdoc-modal` rules —
 // the same sheet the rest of the reader chrome uses — so a dialog looks the
@@ -17,9 +18,10 @@ export function AppDialog({
   hideTitle = false,
   className = '',
 }) {
+  const container = usePortalContainer();
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
+      <Dialog.Portal container={container}>
         <Dialog.Backdrop className="ui-dialog-backdrop" />
         <Dialog.Viewport className="ui-dialog-viewport">
           <Dialog.Popup className={`ui-dialog-popup tdoc-modal${className ? ` ${className}` : ''}`}>

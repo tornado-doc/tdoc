@@ -5,6 +5,7 @@ import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { usePortalContainer } from '../ui/portal.js';
 import { AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner, taggedAgent } from './agent-choices.js';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
@@ -35,7 +36,7 @@ function AgentAuthorName({ author }) {
       <PreviewCard.Trigger render={<span className="login tdoc-agent-name" tabIndex={0} />} delay={300}>
         {authorLine(author)}
       </PreviewCard.Trigger>
-      <PreviewCard.Portal>
+      <PreviewCard.Portal container={usePortalContainer()}>
         <PreviewCard.Positioner side="bottom" align="start" sideOffset={6} collisionPadding={8}
           positionMethod="fixed" className="tdoc-picker-positioner">
           <PreviewCard.Popup className="tdoc-agent-card">
@@ -101,7 +102,7 @@ function ReactionPicker({ onPick }) {
       <Popover.Trigger className="tdoc-react-add" title="Add reaction">
         <SmilePlus size={14} />
       </Popover.Trigger>
-      <Popover.Portal>
+      <Popover.Portal container={usePortalContainer()}>
         {/* Legacy placement: under the button, left edges aligned, flipped or
             shifted to stay on screen. positionMethod="fixed" because the card
             it opens from is itself fixed to the viewport. */}

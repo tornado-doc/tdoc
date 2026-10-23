@@ -7,6 +7,7 @@ import { avatarFor } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText } from '../../shell/src/document/notify-handoff.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from '../../shell/src/document/handoff-state.js';
 import { resendNotifyHandoff, setApiTransport } from '../../shell/src/document/api.js';
+import { PortalContainerContext } from '../../shell/src/ui/portal.js';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
 // controls keep the browser's default button look on foreign pages.
@@ -22,8 +23,10 @@ ${uiCss}
     /* The feedback layer is injected into arbitrary products. Put its single
        stacking context at the browser maximum and append it last, so even a
        host nav using an extreme z-index cannot cover comments or the drawer. */
-    #tdoc-feedback-root { position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; isolation: isolate; }
+    #tdoc-feedback-root { position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; isolation: isolate;
+      margin: 0; padding: 0; border: 0; background: none; color: inherit; width: auto; height: auto; max-width: none; max-height: none; overflow: visible; }
     #tdoc-feedback-root * { box-sizing: border-box; }
+    #tdoc-feedback-root .tdoc-fb-portals { pointer-events: auto; }
     #tdoc-feedback-root .tdoc-hover-outline { position: fixed; }
     #tdoc-feedback-root .tdoc-pin { position: fixed; z-index: 2147483642; }
     #tdoc-feedback-root .tdoc-popup,
@@ -139,15 +142,15 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-agent p { margin: 0 0 8px; }
     #tdoc-feedback-root .tdoc-fb-agent code { display: block; margin: 0 0 8px; padding: 8px; border-radius: 6px; background: #fff; border: 1px solid #e8e7e3; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
     #tdoc-feedback-root .tdoc-fb-agent button { appearance: none; border: 0; border-radius: 8px; padding: 6px 12px; background: #1652f0; color: #fff; font: 600 12px system-ui, sans-serif; cursor: pointer; }
-    .ui-dialog-backdrop, .ui-dialog-viewport { z-index: 2147483647 !important; }
-    /* Dialogs render outside our root, where the host app's own button and
-       text rules reach them. Pin the few that matter. */
-    .ui-dialog-popup.tdoc-modal { color: #1a1a1a; font: 14px/1.45 system-ui, -apple-system, sans-serif; text-align: left; }
-    .ui-dialog-popup.tdoc-modal button { font: 600 13px/1.2 system-ui, -apple-system, sans-serif; text-transform: none; letter-spacing: normal; box-shadow: none; }
-    .ui-dialog-popup.tdoc-modal .actions button:not(.primary):not(.danger) { background: #fff !important; color: #1a1a1a !important; border: 1px solid #d9d8d4 !important; }
-    .ui-dialog-popup.tdoc-modal .actions button.primary { background: #1652f0 !important; color: #fff !important; border: 1px solid #1652f0 !important; }
-    .ui-dialog-popup.tdoc-modal textarea { color: #1a1a1a; background: #fff; }
-    .ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu {
+    #tdoc-feedback-root .ui-dialog-backdrop, #tdoc-feedback-root .ui-dialog-viewport { z-index: 2147483647 !important; }
+    /* The host app's own button and text rules still reach our dialogs.
+       Pin the few that matter. */
+    #tdoc-feedback-root .ui-dialog-popup.tdoc-modal { color: #1a1a1a; font: 14px/1.45 system-ui, -apple-system, sans-serif; text-align: left; }
+    #tdoc-feedback-root .ui-dialog-popup.tdoc-modal button { font: 600 13px/1.2 system-ui, -apple-system, sans-serif; text-transform: none; letter-spacing: normal; box-shadow: none; }
+    #tdoc-feedback-root .ui-dialog-popup.tdoc-modal .actions button:not(.primary):not(.danger) { background: #fff !important; color: #1a1a1a !important; border: 1px solid #d9d8d4 !important; }
+    #tdoc-feedback-root .ui-dialog-popup.tdoc-modal .actions button.primary { background: #1652f0 !important; color: #fff !important; border: 1px solid #1652f0 !important; }
+    #tdoc-feedback-root .ui-dialog-popup.tdoc-modal textarea { color: #1a1a1a; background: #fff; }
+    #tdoc-feedback-root :is(.ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu) {
       z-index: 2147483647 !important;
     }
   `;
@@ -156,6 +159,57 @@ ${uiCss}
   const host = document.createElement('div');
   host.id = 'tdoc-feedback-root';
   document.documentElement.appendChild(host);
+
+  // A host's modal <dialog> sits in the top layer and makes everything
+  // outside it inert, so the feedback layer ends up underneath and
+  // unclickable: nobody could comment on a modal. While a modal is open the
+  // layer moves inside it, and goes back when it closes. Inside, it opens as
+  // a popover: that puts it in the top layer above the dialog, over the whole
+  // viewport, where a dialog's transform or overflow cannot shrink or clip
+  // it. A modal library's inert/aria-hidden on the layer is removed as well.
+  (function followModals() {
+    const lift = () => {
+      if (!host.showPopover || host.matches(':popover-open')) return;
+      host.popover = 'manual';
+      try { host.showPopover(); } catch (_) {}
+    };
+    const lower = () => {
+      if (!host.hasAttribute('popover')) return;
+      try { host.hidePopover(); } catch (_) {}
+      host.removeAttribute('popover');
+    };
+    const place = () => {
+      const modal = [...document.querySelectorAll('dialog[open]')].reverse().find((d) => { try { return d.matches(':modal'); } catch (_) { return false; } });
+      if (modal) {
+        if (host.parentNode !== modal) { lower(); modal.appendChild(host); }
+        lift();
+      } else if (host.parentNode !== document.documentElement) {
+        lower();
+        document.documentElement.appendChild(host);
+      }
+    };
+    new MutationObserver((records) => {
+      if (records.some((r) => r.target !== host && r.target.localName === 'dialog')) place();
+      if (host.hasAttribute('inert')) host.removeAttribute('inert');
+      if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
+    }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['open', 'inert', 'aria-hidden'] });
+    document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
+    // A dialog removed without closing (a React unmount) takes the layer with it.
+    new MutationObserver(() => { if (!host.isConnected) place(); }).observe(document.documentElement, { childList: true, subtree: true });
+    // Script-driven modals (Base UI, Radix, Headless UI) close on a press
+    // outside them and pull focus back inside. Presses and focus on the layer
+    // stay on the layer, so commenting on a modal neither closes it nor loses
+    // the typing.
+    ['pointerdown', 'mousedown', 'touchstart', 'focusin', 'focusout'].forEach((type) => {
+      host.addEventListener(type, (e) => e.stopPropagation());
+    });
+    // Focus leaving the modal for the layer is announced on the modal's own
+    // field, before the layer sees it; focus traps (Radix, Headless UI) take
+    // that as an escape and pull focus back. Stop it on the way down.
+    window.addEventListener('focusout', (e) => {
+      if (e.relatedTarget instanceof Node && host.contains(e.relatedTarget)) e.stopImmediatePropagation();
+    }, true);
+  })();
 
   // Where we came from is where the comments go: the worker that served this
   // script. The bookmarklet and the one-line install both load it by URL.
@@ -777,7 +831,7 @@ ${uiCss}
       if (!picking && !reanchorId) return undefined;
       const priorCursor = document.documentElement.style.cursor;
       document.documentElement.style.cursor = 'crosshair';
-      const isTdocUi = (target) => target.closest?.('#tdoc-feedback-root, .ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu, .ui-dialog-viewport, .ui-dialog-backdrop');
+      const isTdocUi = (target) => target.closest?.('#tdoc-feedback-root');
       const move = (event) => {
         if (selected || isTdocUi(event.target)) return;
         setHovered(event.target instanceof Element ? event.target : null);
@@ -817,10 +871,12 @@ ${uiCss}
         else if (openId) setOpenId(null);
         else if (panelOpen) setPanelOpen(false);
         else return;
+        // Ours alone: a modal underneath must not close on the same press.
         event.preventDefault();
+        event.stopImmediatePropagation();
       };
-      document.addEventListener('keydown', keydown, true);
-      return () => document.removeEventListener('keydown', keydown, true);
+      window.addEventListener('keydown', keydown, true);
+      return () => window.removeEventListener('keydown', keydown, true);
     }, [shown, selected, picking, reanchorId, openId, panelOpen]);
 
     // Double-tap Option: start a comment from anywhere.
@@ -1064,5 +1120,12 @@ ${uiCss}
     );
   }
 
-  createRoot(host).render(<FeedbackApp />);
+  // The app and its popups each get a box inside the layer: popups stay on
+  // the layer (above the page, never mistaken for the page's own) and follow
+  // it into a modal.
+  const appBox = document.createElement('div');
+  const portals = document.createElement('div');
+  portals.className = 'tdoc-fb-portals';
+  host.append(appBox, portals);
+  createRoot(appBox).render(<PortalContainerContext.Provider value={portals}><FeedbackApp /></PortalContainerContext.Provider>);
 }
