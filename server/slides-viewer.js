@@ -41,6 +41,7 @@
   function updateCount() {
     if (!active) return;
     var ids = threadsOn(active.list[active.index]);
+    if (ids.join() !== (active.threads || []).join()) active.threadAt = 0;
     active.threads = ids;
     active.view.hidden = !ids.length;
     active.view.textContent = ids.length === 1 ? '1 comment' : ids.length + ' comments';
@@ -71,6 +72,7 @@
     // zoomed to the reading column, like a presentation app's normal view.
     // zoom (not transform) keeps layout, selection and comment anchors real.
     'html[data-tdoc-slides]:not([data-tdoc-presenting]) [data-tdoc-slide]{width:960px!important;max-width:none!important;aspect-ratio:16/9;height:auto!important;box-sizing:border-box!important;overflow:hidden!important;zoom:var(--tdoc-slide-zoom,1);margin-left:auto!important;margin-right:auto!important;margin-bottom:calc(36px / var(--tdoc-slide-zoom,1))!important;}' +
+    '.tdoc-slide-num.is-over{color:#b42318;}' +
     '.tdoc-slide-num{position:absolute;z-index:1;font:12px/1 system-ui;color:#667085;font-variant-numeric:tabular-nums;pointer-events:none;}' +
     'html[data-tdoc-presenting] .tdoc-slide-num{display:none!important;}' +
     'html[data-tdoc-interaction-mode="edit"] .tdoc-slide-num{display:none!important;}' +
@@ -98,7 +100,10 @@
     list.forEach(function (el, i) {
       var n = numbers[i];
       if (!n) { n = provider(document.createElement('div')); n.className = 'tdoc-slide-num'; n.setAttribute('aria-hidden', 'true'); document.body.appendChild(n); numbers[i] = n; }
-      n.textContent = (i + 1) + ' / ' + list.length;
+      // Content past the 16:9 box is cut off when presenting: say so here.
+      var over = el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2;
+      n.textContent = (i + 1) + ' / ' + list.length + (over ? ' · content is cut off' : '');
+      n.classList.toggle('is-over', over);
       var r = el.getBoundingClientRect();
       n.style.top = (r.bottom + window.scrollY + 8) + 'px';
       n.style.left = (r.right + window.scrollX - n.offsetWidth) + 'px';
@@ -194,12 +199,19 @@
     // slide's far corner.
     commentBtn.addEventListener('click', function (e) { e.stopPropagation(); document.dispatchEvent(new CustomEvent('tdoc:comment-element', { detail: { el: active.list[active.index], rect: commentBtn.getBoundingClientRect() } })); });
     var view = document.createElement('button'); view.type = 'button'; view.hidden = true;
-    view.addEventListener('click', function (e) { e.stopPropagation(); if (active && active.threads && active.threads.length) postShell({ type: 'tdoc:anchorClick', id: active.threads[0] }); });
+    // Each press opens the slide's next thread, wrapping round.
+    view.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (!active || !active.threads || !active.threads.length) return;
+      var i = active.threadAt % active.threads.length;
+      active.threadAt = i + 1;
+      postShell({ type: 'tdoc:anchorClick', id: active.threads[i] });
+    });
     notes.appendChild(commentBtn); notes.appendChild(view);
     // Same rule as the page: commenting is offered only in Comment mode.
     commentBtn.hidden = document.documentElement.getAttribute('data-tdoc-interaction-mode') !== 'comment';
     document.body.appendChild(stage); document.body.appendChild(bar);
-    active = { list: list, stage: stage, bar: bar, prev: prev, next: next, counter: counter, close: close, view: view, threads: [], index: -1, current: null, scrollX: scrollX, scrollY: scrollY };
+    active = { list: list, stage: stage, bar: bar, prev: prev, next: next, counter: counter, close: close, view: view, threads: [], threadAt: 0, index: -1, current: null, scrollX: scrollX, scrollY: scrollY };
     document.documentElement.setAttribute('data-tdoc-presenting', '');
     stage.showPopover();
     go(index || 0);

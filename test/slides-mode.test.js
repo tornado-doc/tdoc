@@ -32,7 +32,7 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         assert.equal(view.layoutWidth, 960, 'slides are laid out at 960px');
         assert(Math.abs(view.w / view.h - 16 / 9) < 0.02, `16:9 card: ${view.w}x${view.h}`);
         assert(view.w <= view.room + 1, `card fits the column: ${view.w} > ${view.room}`);
-        assert.deepEqual(view.nums, ['1 / 3', '2 / 3', '3 / 3']);
+        assert.deepEqual(view.nums, ['1 / 3', '2 / 3', '3 / 3 · content is cut off'], 'overflowing slide is flagged');
         assert(view.overflow <= 1, `no sideways overflow in slide view: ${view.overflow}`);
         if (process.env.TDOC_TEST_SCREENSHOTS) {
           fs.mkdirSync(process.env.TDOC_TEST_SCREENSHOTS, { recursive: true });
@@ -60,14 +60,21 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         // on the bar and opens the card above the full-screen frame.
         await page.keyboard.press('Home');
         await page.keyboard.press('ArrowRight');
-        await frame.getByRole('button', { name: 'Show 1 comment on this slide' }).click();
+        await frame.getByRole('button', { name: 'Show 2 comments on this slide' }).click();
         // Desktop opens the floating card, a phone the comment drawer; both
         // above the full-screen frame.
         const card = width < 700 ? page.locator('#tdoc-comment-layer.open') : page.locator('.tdoc-floating-open');
         await card.waitFor();
         const cb = await card.boundingBox();
         assert(cb && cb.width > 0 && cb.y >= 0 && cb.y < 820, `comment card visible while presenting: ${JSON.stringify(cb)}`);
-        assert.match(await card.textContent(), /Make this a number/);
+        const first = await card.textContent();
+        assert(/Make this a number|shorten the title/.test(first), first);
+        if (width >= 700) {
+          // A second press opens the slide's other thread.
+          await frame.getByRole('button', { name: 'Show 2 comments on this slide' }).click();
+          await page.waitForFunction((f) => { const c = document.querySelector('.tdoc-floating-open'); return c && c.textContent !== f; }, first);
+          assert(/Make this a number|shorten the title/.test(await card.textContent()));
+        }
         assert.equal(await frame.locator('html[data-tdoc-presenting]').count(), 1, 'still presenting');
         if (width < 700) { await page.keyboard.press('Escape'); await card.waitFor({ state: 'hidden' }); }
         await frame.getByRole('button', { name: 'Comment on this slide', exact: true }).click();
