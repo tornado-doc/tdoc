@@ -1534,6 +1534,9 @@
     cleanEditorAttributes(clone);
     clone.removeAttribute('data-tdoc-theme');
     clone.removeAttribute('data-tdoc-editing');
+    clone.removeAttribute('data-tdoc-slides');
+    clone.removeAttribute('data-tdoc-presenting');
+    clone.removeAttribute('data-tdoc-visual-open');
     return '<!doctype html>\n' + clone.outerHTML;
   }
 

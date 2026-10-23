@@ -20,6 +20,24 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         const frame = page.frameLocator('iframe[aria-label="Document content"]');
         await frame.locator('html[data-tdoc-interaction-mode]').waitFor();
         const before = await frame.locator('#s2').getAttribute('style');
+        // Slide view: each slide is a 960px 16:9 card zoomed to the column,
+        // numbered underneath, and the page does not scroll sideways.
+        await frame.locator('.tdoc-slide-num').first().waitFor();
+        const view = await frame.locator('html').evaluate(() => {
+          const s = document.querySelector('#s1'), r = s.getBoundingClientRect();
+          return { layoutWidth: s.offsetWidth, w: r.width, h: r.height, room: s.parentElement.clientWidth,
+            nums: Array.from(document.querySelectorAll('.tdoc-slide-num')).map((n) => n.textContent),
+            overflow: document.documentElement.scrollWidth - innerWidth };
+        });
+        assert.equal(view.layoutWidth, 960, 'slides are laid out at 960px');
+        assert(Math.abs(view.w / view.h - 16 / 9) < 0.02, `16:9 card: ${view.w}x${view.h}`);
+        assert(view.w <= view.room + 1, `card fits the column: ${view.w} > ${view.room}`);
+        assert.deepEqual(view.nums, ['1 / 3', '2 / 3', '3 / 3']);
+        assert(view.overflow <= 1, `no sideways overflow in slide view: ${view.overflow}`);
+        if (process.env.TDOC_TEST_SCREENSHOTS) {
+          fs.mkdirSync(process.env.TDOC_TEST_SCREENSHOTS, { recursive: true });
+          await page.screenshot({ path: path.join(process.env.TDOC_TEST_SCREENSHOTS, `slide-view-${width}.png`), fullPage: true });
+        }
         await frame.getByRole('button', { name: 'Present slides' }).click();
         await page.locator('[data-visual-open]').waitFor();
         await frame.locator('html[data-tdoc-presenting]').waitFor();

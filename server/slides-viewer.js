@@ -31,13 +31,46 @@
     '.tdoc-present-bar output{min-width:64px;text-align:center;font-variant-numeric:tabular-nums;}' +
     '.tdoc-present-bar .tdoc-present-close{position:absolute;right:max(12px,env(safe-area-inset-right));}' +
     'html[data-tdoc-presenting]{overflow:hidden!important;}' +
+    // Slide view: every slide is laid out at the deck width (960px, 16:9) and
+    // zoomed to the reading column, like a presentation app's normal view.
+    // zoom (not transform) keeps layout, selection and comment anchors real.
+    'html[data-tdoc-slides]:not([data-tdoc-presenting]) [data-tdoc-slide]{width:960px!important;max-width:none!important;aspect-ratio:16/9;height:auto!important;box-sizing:border-box!important;overflow:hidden!important;zoom:var(--tdoc-slide-zoom,1);margin-left:auto!important;margin-right:auto!important;margin-bottom:calc(36px / var(--tdoc-slide-zoom,1))!important;}' +
+    '.tdoc-slide-num{position:absolute;z-index:1;font:12px/1 system-ui;color:#667085;font-variant-numeric:tabular-nums;pointer-events:none;}' +
+    'html[data-tdoc-presenting] .tdoc-slide-num{display:none!important;}' +
+    'html[data-tdoc-interaction-mode="edit"] .tdoc-slide-num{display:none!important;}' +
     'html[data-tdoc-presenting] .tdoc-present-open,html[data-tdoc-presenting] .tdoc-visual-open{display:none!important;}' +
     'html[data-tdoc-theme="dark"][data-tdoc-presenting]{filter:none!important;}';
   document.head.appendChild(style);
 
-  var openButton = null;
+  var openButton = null, numbers = [];
+  var zoomStyle = provider(document.createElement('style'));
+  document.head.appendChild(zoomStyle);
+  // Zoom the slides to the column they sit in, and number them underneath.
+  function layoutSlides(list) {
+    var root = document.documentElement;
+    if (!list.length) { root.removeAttribute('data-tdoc-slides'); zoomStyle.textContent = ''; numbers.forEach(function (n) { n.remove(); }); numbers = []; return; }
+    root.setAttribute('data-tdoc-slides', '');
+    var parent = list[0].parentElement || document.body;
+    var cs = getComputedStyle(parent);
+    var room = parent.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+    var zoom = Math.max(.2, Math.min(1, room / 960));
+    // In a provider <style>, not on <html>: nothing here may be saved into the
+    // author's document by Edit mode.
+    var rule = ':root{--tdoc-slide-zoom:' + zoom + '}';
+    if (zoomStyle.textContent !== rule) zoomStyle.textContent = rule;
+    while (numbers.length > list.length) numbers.pop().remove();
+    list.forEach(function (el, i) {
+      var n = numbers[i];
+      if (!n) { n = provider(document.createElement('div')); n.className = 'tdoc-slide-num'; n.setAttribute('aria-hidden', 'true'); document.body.appendChild(n); numbers[i] = n; }
+      n.textContent = (i + 1) + ' / ' + list.length;
+      var r = el.getBoundingClientRect();
+      n.style.top = (r.bottom + window.scrollY + 8) + 'px';
+      n.style.left = (r.right + window.scrollX - n.offsetWidth) + 'px';
+    });
+  }
   function placeButton() {
     var list = slides();
+    if (!active) layoutSlides(list);
     if (!list.length || active) { if (openButton) openButton.hidden = true; return; }
     if (!openButton) {
       openButton = provider(document.createElement('button'));
