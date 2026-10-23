@@ -3667,7 +3667,10 @@ async function buildFolderShareListing(env, req, shareId) {
   const state = await loadFolderState(env, index.owner_key);
   const folder = state.folders.find((f) => f.id === index.folder_id);
   if (!folder || folder.share_id !== shareId) return { ok: false, status: 404 };
-  const session = await getViewerSession(env, req);
+  // A team-scoped token is a stranger to every personal folder: it sees one
+  // only if anyone with the link could.
+  const viewer = await getViewerSession(env, req);
+  const session = viewer && viewer.scope_team ? null : viewer;
   if (!canAccessSharedFolder(folder, session, index.owner_key)) {
     if (!sessionPrincipal(session)) {
       return { ok: false, status: 401 };
@@ -3701,7 +3704,9 @@ async function buildTeamFolderShareListing(env, req, shareId, index) {
   const state = await loadTeamFolders(env, team.id);
   const folder = state.folders.find((f) => f.id === index.folder_id);
   if (!folder || folder.share_id !== shareId) return { ok: false, status: 404 };
-  const session = await getViewerSession(env, req);
+  // A token scoped to another team is a stranger here, member or not.
+  const viewer = await getViewerSession(env, req);
+  const session = viewer && viewer.scope_team && viewer.scope_team !== team.id ? null : viewer;
   if (!canAccessSharedFolder(folder, session, '', team)) {
     return { ok: false, status: sessionPrincipal(session) ? 404 : 401 };
   }
@@ -8572,7 +8577,8 @@ const SCOPED_TOKEN_ROUTES = new Set([
   '/api/upload', '/api/comments', '/api/agent/reply', '/api/me', '/api/teams',
   '/api/team/move', '/api/team/comments', '/api/hosted/whoami', '/api/hosted/token/scoped',
   '/api/doc', '/api/doc/access',
-  '/api/folders', '/api/folders/move', '/api/folders/shared', '/api/folders/move-to-team',
+  // Not /api/folders/move-to-team: it reads and empties a personal folder.
+  '/api/folders', '/api/folders/move', '/api/folders/shared',
 ]);
 async function scopedTokenActorFromReq(env, req) {
   const m = (req.headers.get('authorization') || '').match(/^Bearer\s+(tdoc_[A-Za-z0-9_-]+)$/i);
@@ -8727,6 +8733,9 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
       const bytes = await docBytesExist(env, slug);
       if (!bytes.ok) return { ok: false, response: bytes.response };
       if (bytes.exists) {
+        // Bytes with no record are an older personal doc; filing them into a
+        // team from a scoped token would show its history to the team.
+        if (actor.scope_team) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
         const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
         if (verified.ok) return { ok: true, meta: null };
         // Orphan / other-owner bytes are "slug taken" (409), not "not doc

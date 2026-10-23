@@ -113,6 +113,40 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status >= 400, `comments of another team's doc: ${r.status} ${r.text.slice(0, 160)}`);
   });
 
+  await t('review: shared folder links of another team, or of the person, show the scoped token nothing private', async () => {
+    const share = async (team) => {
+      const made = await call(env, '/api/folders', { method: 'POST', token: julie.token, body: { name: `secret-${team ? 'team' : 'mine'}`, ...(team ? { team } : {}) } });
+      assert(made.status === 200, `folder ${made.status} ${made.text}`);
+      const id = made.body.folder.id;
+      const slug = team ? 'abby-secret' : 'personal-notes';
+      const mv = await call(env, '/api/folders/move', { method: 'POST', token: julie.token, body: { slugs: [slug], folder: id, ...(team ? { team } : {}) } });
+      assert(mv.status === 200, `file ${mv.status} ${mv.text}`);
+      const sh = await call(env, '/api/folders', { method: 'PATCH', token: julie.token, body: { id, visibility: 'private', allowed_users: ['julie'], ...(team ? { team } : {}) } });
+      const shareId = sh.body && sh.body.folder && sh.body.folder.share_id;
+      assert(shareId, `no share link: ${sh.status} ${sh.text}`);
+      return { shareId, slug };
+    };
+    for (const team of [abby.id, null]) {
+      const { shareId, slug } = await share(team);
+      const full = await call(env, `/api/folders/shared?id=${shareId}`, { token: julie.token });
+      assert(full.status === 200 && JSON.stringify(full.body).includes(slug), `account token lost the folder: ${full.status}`);
+      const r = await call(env, `/api/folders/shared?id=${shareId}&team=${befreed.id}`, { token: scoped });
+      assert(!JSON.stringify(r.body || {}).includes(slug) && !r.text.includes('secret-'), `${team ? 'team' : 'personal'} folder leaked: ${r.status} ${r.text.slice(0, 200)}`);
+    }
+  });
+
+  await t('review: the scoped token cannot touch a personal folder through move-to-team', async () => {
+    const made = await call(env, '/api/folders', { method: 'POST', token: julie.token, body: { name: 'private-stuff' } });
+    const r = await call(env, '/api/folders/move-to-team', { method: 'POST', token: scoped, body: { folder: made.body.folder.id, team: befreed.id } });
+    assert(r.status === 403 && r.body.error === 'token_scope', `${r.status} ${r.text.slice(0, 200)}`);
+  });
+
+  await t('review: an old personal slug with bytes but no record is not filed into the team', async () => {
+    await env.DOCS.put('docs/orphan-notes/v1/index.html', '<p>old personal words</p>');
+    const r = await upload(scoped, 'orphan-notes', 2);
+    assert(r.status === 409, `${r.status} ${r.text}`);
+  });
+
   await t('the account token keeps working everywhere', async () => {
     const me = await call(env, '/api/me', { token: julie.token });
     const all = JSON.stringify(me.body);
