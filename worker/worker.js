@@ -268,7 +268,10 @@ async function sessionFromHostedBearer(env, req) {
   const actor = await hostedTokenActor(env, token);
   if (!actor) return null;
   const group = await accountGroup(env, actor.account_id);
-  const teamIds = await loadAccountTeamIds(env, group.canonical);
+  const allTeamIds = await loadAccountTeamIds(env, group.canonical);
+  // A team-scoped token sees one team and nothing else: not the account's
+  // other teams, not its personal docs (see tokenScopeAllows).
+  const teamIds = actor.scope_team ? allTeamIds.filter((id) => id === actor.scope_team) : allTeamIds;
   return {
     id: null,
     login: actor.github_login || '',
@@ -279,6 +282,7 @@ async function sessionFromHostedBearer(env, req) {
     team_ids: teamIds,
     team_admin_ids: await loadAdminTeamIds(env, actor.account_id, teamIds),
     bearer: true,
+    ...(actor.scope_team ? { scope_team: actor.scope_team } : {}),
   };
 }
 
@@ -492,7 +496,16 @@ function sessionTeamAdmin(session, teamId) {
 // The owner manages a doc: sharing, delete, rename, moving it. A personal doc
 // is owned by its author; a team doc by the team, i.e. its current admins.
 // The byline (meta.hosted) is display only and grants nothing on a team doc.
+// A team-scoped token (or the session built from one) reaches only docs in
+// its team. Everything else, personal docs included, is as if it were a
+// stranger: it can still open a public or unlisted link, like anyone can.
+function tokenScopeAllows(who, meta) {
+  if (!who || !who.scope_team) return true;
+  return !!(meta && meta.workspace_id === who.scope_team);
+}
+
 function isDocOwnerSession(env, session, meta) {
+  if (!tokenScopeAllows(session, meta)) return false;
   if (meta && meta.workspace_id) return sessionTeamAdmin(session, meta.workspace_id);
   // account_id is the canonical identity (phase 1), so compare it first —
   // this is what makes a doc published through an email-keyed account
@@ -620,6 +633,7 @@ function applyAccessPatch(meta, patch) {
 }
 
 function isAllowlisted(access, session, env, meta) {
+  if (!tokenScopeAllows(session, meta)) return false;
   if (isDocOwnerSession(env, session, meta)) return true;
   if (access.team && meta && sessionInTeam(session, meta.workspace_id)) return true;
   const allowed = access.allowed_users || [];
@@ -812,6 +826,7 @@ async function docOwnerToken(env, req, meta) {
   }
   const actor = await hostedTokenActor(env, token);
   if (!actor) return null;
+  if (!tokenScopeAllows(actor, meta)) return null;
   const ownerId = meta && meta.hosted && meta.hosted.account_id;
   if (!ownerId || !sessionOwnsAccount(actor, ownerId)) return null;
   return actor;
@@ -2645,6 +2660,7 @@ async function accountTokenList(env, accountId) {
         last_used: typeof rec.last_used === 'string' ? rec.last_used : '',
         label,
         doc,
+        ...(validTeamId(rec.scope_team) ? { scope_team: rec.scope_team } : {}),
         ...tokenClientInfo(rec),
       });
     }
@@ -5018,6 +5034,7 @@ function teamCommentRows(slug, meta, list) {
 async function teamCommentsPage(env, session, teamId, offset = 0) {
   const team = await loadTeam(env, teamId);
   if (!team || !session || !teamMember(team, session.account_id)) return null;
+  if (session.scope_team && session.scope_team !== teamId) return null;
   const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
   slugs.sort();
   const start = Math.max(0, Number(offset) || 0);
@@ -8544,6 +8561,52 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
   return { token, record };
 }
 
+// ───────────────────── Team-scoped upload tokens (#65) ─────────────────────
+// An account token reaches everything its person can: every team, every
+// personal doc. A team-scoped token reaches one team's docs only, so an agent
+// on a shared machine (a team's reporting bot) cannot read, list or post
+// another team's docs even though its person is a member there. It is minted
+// from an existing token or a browser session and can only narrow: a scoped
+// token cannot mint a token for another team or an unscoped one.
+const SCOPED_TOKEN_ROUTES = new Set([
+  '/api/upload', '/api/comments', '/api/agent/reply', '/api/me', '/api/teams',
+  '/api/team/move', '/api/team/comments', '/api/hosted/whoami', '/api/hosted/token/scoped',
+  '/api/doc', '/api/doc/access',
+  '/api/folders', '/api/folders/move', '/api/folders/shared', '/api/folders/move-to-team',
+]);
+async function scopedTokenActorFromReq(env, req) {
+  const m = (req.headers.get('authorization') || '').match(/^Bearer\s+(tdoc_[A-Za-z0-9_-]+)$/i);
+  if (!m) return null;
+  const actor = await hostedTokenActor(env, m[1]);
+  return actor && actor.scope_team ? actor : null;
+}
+async function scopedTokenRefusal(env, req, url) {
+  const p = url.pathname;
+  if (!p.startsWith('/api/')) return null;
+  const actor = await scopedTokenActorFromReq(env, req);
+  if (!actor) return null;
+  const refuse = () => json({ error: 'token_scope', message: 'This token is limited to one team.' }, { status: 403 });
+  if (!SCOPED_TOKEN_ROUTES.has(p)) return refuse();
+  // Routes that name a team must name this one; personal folders and moving
+  // a doc out of the team are not this token's business.
+  let body = null;
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    try { body = await req.clone().json(); } catch { body = {}; }
+  }
+  const named = (body && (body.team != null ? body.team : body.id)) ?? url.searchParams.get('team') ?? url.searchParams.get('id');
+  if (p === '/api/teams' && req.method !== 'GET') return refuse();
+  if (p === '/api/team/move' && String(body && body.team) !== actor.scope_team) return refuse();
+  if (p === '/api/team/comments' && named !== actor.scope_team) return refuse();
+  if (p.startsWith('/api/folders') && String(named || '') !== actor.scope_team) return refuse();
+  return null;
+}
+async function resolveMemberTeam(env, accountId, teamIds, wanted) {
+  const want = String(wanted || '').trim();
+  if (!want) return null;
+  const teams = (await Promise.all((teamIds || []).map((id) => loadTeam(env, id)))).filter((t) => t && teamMember(t, accountId));
+  return teams.find((t) => t.id === want) || teams.find((t) => String(t.name).toLowerCase() === want.toLowerCase()) || null;
+}
+
 async function hostedTokenActor(env, token) {
   if (!env || !env.META) return null;
   const tokenHash = await sha256Hex(token);
@@ -8573,6 +8636,7 @@ async function hostedTokenActor(env, token) {
     token_hash: tokenHash,
     github_login,
     email: normalizeEmail(record.email),
+    ...(validTeamId(record.scope_team) ? { scope_team: record.scope_team } : {}),
   };
 }
 
@@ -8652,6 +8716,11 @@ async function teamWriteAccess(env, actor, meta) {
 async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   const meta = await loadDocMeta(env, slug);
   if (!actor || actor.kind === 'admin') return { ok: true, meta };
+  // A team-scoped token writes only its team's docs. A new slug is allowed:
+  // the upload route files it straight into the team.
+  if (actor.scope_team && meta && meta.workspace_id !== actor.scope_team) {
+    return { ok: false, response: json({ error: 'token_scope', message: 'This token is limited to one team and cannot change docs outside it.' }, { status: 403 }) };
+  }
   const accountId = meta && meta.hosted && meta.hosted.account_id;
   if (opts.create) {
     if (!meta) {
@@ -11362,6 +11431,13 @@ export default {
     if (feedbackTokenFrom(req) && !FEEDBACK_TOKEN_PATHS.has(p)) {
       return json({ error: 'feedback_token_scope' }, { status: 403 });
     }
+    // A team-scoped token (#65) gets the routes a publishing agent needs, and
+    // each one that names a team must name its own. Per-doc checks then run
+    // through tokenScopeAllows; this is the outer wall.
+    {
+      const refused = await scopedTokenRefusal(env, req, url);
+      if (refused) return refused;
+    }
 
     if ((p === '/SKILL.md' || p === '/SKILLS.md') && (method === 'GET' || method === 'HEAD')) {
       return remoteSkillResponse(method);
@@ -11697,15 +11773,24 @@ export default {
       return json({
         ok: true,
         identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
-        docs: (data.docs || []).map((row) => ({ ...row, on_profile: pinSet.has(row.slug) })),
-        folders: data.folders,
-        recent: data.recent,
-        starred: data.starred,
-        feedback: data.feedback,
-        teams: data.teams,
-        team_docs: data.team_docs,
-        team_folders: data.team_folders || {},
-        team_invites: data.team_invites || [],
+        ...(s.scope_team ? {
+          // A team-scoped token sees its team and nothing of the person's own.
+          docs: [], folders: [], recent: [], starred: [], feedback: [], team_invites: [],
+          teams: (data.teams || []).filter((t) => t.id === s.scope_team),
+          team_docs: (data.team_docs || []).filter((row) => row.team === s.scope_team),
+          team_folders: { [s.scope_team]: (data.team_folders || {})[s.scope_team] || [] },
+          scope_team: s.scope_team,
+        } : {
+          docs: (data.docs || []).map((row) => ({ ...row, on_profile: pinSet.has(row.slug) })),
+          folders: data.folders,
+          recent: data.recent,
+          starred: data.starred,
+          feedback: data.feedback,
+          teams: data.teams,
+          team_docs: data.team_docs,
+          team_folders: data.team_folders || {},
+          team_invites: data.team_invites || [],
+        }),
         ...(profile ? { profile } : {}),
       });
     }
@@ -14234,7 +14319,38 @@ export default {
       if (!bearer) return json({ error: 'token_required' }, { status: 401 });
       const actor = await hostedTokenActor(env, bearer);
       if (!actor) return json({ error: 'invalid_token' }, { status: 401 });
-      return json({ ok: true, account_id: actor.account_id, github_login: actor.github_login || null });
+      return json({ ok: true, account_id: actor.account_id, github_login: actor.github_login || null, ...(actor.scope_team ? { scope_team: actor.scope_team } : {}) });
+    }
+
+    // Narrow a credential to one team (#65). From a Bearer token (an agent
+    // swapping its own account token for a team one) or a same-origin browser
+    // session. The new token is returned once; the old one is untouched.
+    if (p === '/api/hosted/token/scoped' && method === 'POST') {
+      const cookie = await getSession(env, req);
+      if (cookie && !sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const s = (sessionPrincipal(cookie) && !cookie.feedback ? cookie : null) || await sessionFromHostedBearer(env, req);
+      if (!sessionPrincipal(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      await ensureSessionAccount(env, s, url.origin);
+      if (!s.account_id) return json({ error: 'account_required' }, { status: 403 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const team = await resolveMemberTeam(env, s.account_id, s.team_ids, body.team);
+      if (!team) return json({ error: 'team_not_found', message: 'Name a team this account belongs to (id or exact name).' }, { status: 404 });
+      if (s.scope_team && s.scope_team !== team.id) return json({ error: 'token_scope' }, { status: 403 });
+      const token = `tdoc_${rand(24)}`;
+      const tokenHash = await sha256Hex(token);
+      const record = {
+        account_id: s.account_id,
+        ...(sessionLogin(s) ? { github_login: sessionLogin(s) } : {}),
+        ...(!sessionLogin(s) && normalizeEmail(s.email) ? { email: normalizeEmail(s.email) } : {}),
+        created: new Date().toISOString(),
+        scope_team: team.id,
+        label: (typeof body.label === 'string' && body.label.trim() ? body.label.trim() : `${team.name} only`).slice(0, 80),
+        ...tokenClientInfo(body),
+      };
+      await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record), { metadata: { account_id: record.account_id } });
+      productEvent(env, 'token_minted', { auth_path: 'scoped' });
+      return json({ ok: true, token, account_id: record.account_id, scope: { team_id: team.id, team_name: team.name }, base: url.origin });
     }
 
     if (p === '/api/hosted/token' && method === 'POST') {
@@ -15584,6 +15700,14 @@ export default {
         if (size > maxBytes) {
           return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
         }
+        if (!writeGate.meta && auth.actor.scope_team) {
+          const team = await loadTeam(env, auth.actor.scope_team);
+          if (!sessionAccountIds(auth.actor).some((id) => teamMember(team, id))) {
+            return json({ error: 'token_scope', message: 'This token is limited to a team this account is no longer in.' }, { status: 403 });
+          }
+          const blocked = await teamPlanBlocksDocs(env, team, 1);
+          if (blocked) return json(blocked, { status: 402 });
+        }
         if (!writeGate.meta) {
           const limit = await hostedMaxDocsFor(env, auth.actor.account_id);
           const used = await countHostedDocs(env, auth.actor.account_id);
@@ -15612,12 +15736,15 @@ export default {
         // Team placement is moved only through /api/team/move; a publish
         // neither sets it nor drops it, and keeps the team share flag unless
         // the client says otherwise.
-        const prevTeam = prev && prev.workspace_id;
+        // A team-scoped token's new doc goes straight into its team, so it
+        // never exists as a personal doc the token could not see again.
+        const prevTeam = (prev && prev.workspace_id) || (!prev && auth.actor && auth.actor.scope_team) || null;
         if (prevTeam) incoming.workspace_id = prevTeam;
         else delete incoming.workspace_id;
         if (incoming.access) {
           const clientSaysTeam = meta && meta.access && typeof meta.access === 'object' && 'team' in meta.access;
-          if (prevTeam && !clientSaysTeam && prev.access && prev.access.team === true) incoming.access.team = true;
+          if (prevTeam && !clientSaysTeam && prev && prev.access && prev.access.team === true) incoming.access.team = true;
+          if (prevTeam && !prev) incoming.access.team = true;
           if (!prevTeam) delete incoming.access.team;
         }
         incoming = stampHostedOwnership(incoming, auth.actor);
