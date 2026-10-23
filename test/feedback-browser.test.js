@@ -210,6 +210,22 @@ const APP_HTML = `<!doctype html>
         `feedback list shifted the host app: ${JSON.stringify({ before, overlay })}`);
       assert(overlay.panel.top === 0 && overlay.panel.right === 1200 && overlay.topRightIsPanel,
         `feedback list is not a top-layer right overlay: ${JSON.stringify(overlay)}`);
+      // The header wraps instead of overflowing: the close button is inside
+      // the viewport and is what a click there hits.
+      const close = await page.evaluate(() => {
+        const x = document.querySelector('#tdoc-feedback-root .tdoc-fb-panel .x');
+        const r = x.getBoundingClientRect();
+        return { r: r.toJSON(), vw: document.documentElement.clientWidth, hit: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === x };
+      });
+      assert(close.r.right <= close.vw && close.r.left >= 0 && close.hit, `panel close button is cut off or covered: ${JSON.stringify(close)}`);
+      // The composer stacks above the panel.
+      const order = await page.evaluate(() => {
+        const z = (sel) => Number(getComputedStyle(document.querySelector(sel) || document.body).zIndex) || 0;
+        const probe = document.createElement('div'); probe.className = 'tdoc-popup'; document.getElementById('tdoc-feedback-root').appendChild(probe);
+        const out = { popup: Number(getComputedStyle(probe).zIndex), panel: z('#tdoc-feedback-root .tdoc-fb-panel') };
+        probe.remove(); return out;
+      });
+      assert(order.popup > order.panel, `composer is under the comments panel: ${JSON.stringify(order)}`);
       const items = page.locator('#tdoc-feedback-root .tdoc-fb-item');
       assert((await items.count()) >= 1, 'list is empty');
       assert((await items.first().innerText()).includes('This button does nothing'), 'list item lacks the comment');

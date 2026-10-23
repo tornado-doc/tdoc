@@ -187,9 +187,13 @@ ${WC}
     #tdoc-feedback-root .tdoc-pin { position: fixed; z-index: 2147483642; }
     #tdoc-feedback-root .tdoc-popup,
     #tdoc-feedback-root .tdoc-margin-comment { pointer-events: auto; }
+    /* Inside the root the order is: composer > open comment > banner > dock >
+       comments panel. chrome.css gives the composer 999998, which put it under
+       the panel and the "click anything" banner. */
+    #tdoc-feedback-root .tdoc-popup { z-index: 2147483646; max-width: calc(100vw - 16px); }
     #tdoc-feedback-root .tdoc-margin-comment.tdoc-floating-open {
       position: fixed; max-height: calc(100vh - 24px); overflow-y: auto;
-      overscroll-behavior: contain; z-index: 2147483643;
+      overscroll-behavior: contain; z-index: 2147483645;
     }
     #tdoc-feedback-root .tdoc-feedback-mode {
       position: fixed !important; right: 18px !important; bottom: 18px !important;
@@ -252,9 +256,14 @@ ${WC}
     }
     @keyframes tdoc-fb-panel-in { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
     @media (prefers-reduced-motion: reduce) { #tdoc-feedback-root .tdoc-fb-panel { animation: none; } }
+    /* The header wraps instead of running past the panel: title, refresh and
+       close stay on the first row (close always visible), filters below. */
     #tdoc-feedback-root .tdoc-fb-panel header {
-      display: flex; align-items: center; gap: 8px; padding: 14px 10px 12px 14px; border-bottom: 1px solid #efeeea;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 10px 12px 14px; border-bottom: 1px solid #efeeea;
     }
+    #tdoc-feedback-root .tdoc-fb-panel header strong { flex: 1 1 auto; min-width: 0; }
+    #tdoc-feedback-root .tdoc-fb-panel header .tdoc-fb-filter { order: 3; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }
+    #tdoc-feedback-root .tdoc-fb-panel header .tdoc-fb-filter button { flex: 1 1 0; }
     #tdoc-feedback-root .tdoc-fb-panel header strong { font-size: 15px; }
     #tdoc-feedback-root .tdoc-fb-filter { display: inline-flex; gap: 2px; margin-left: auto; background: #f3f3f1; border-radius: 8px; padding: 2px; }
     #tdoc-feedback-root .tdoc-fb-filter button { appearance: none; border: 0; background: transparent; border-radius: 6px; padding: 4px 6px; font: 600 11.5px system-ui, sans-serif; color: #6b6a66; cursor: pointer; }
