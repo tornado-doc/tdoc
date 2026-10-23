@@ -44,6 +44,17 @@ enter Edit mode, choose **Insert diagram**, draw, then **Apply to document** and
 matching SVG snapshot using `$SKILL_DIR/authoring/structure/components.md`.
 Use a plain SVG when the diagram does not need Excalidraw editing.
 
+### Slides
+
+When the user asks for slides, a deck or a presentation ("做成幻灯片", "PPT"),
+write one doc whose pages are `<section data-tdoc-slide>` elements, each a
+16:9 card (`aspect-ratio:16/9`). The reader shows a **Present** button for such
+docs: one slide at a time, full screen, arrow keys or swipe to move, Esc to
+leave. Every slide stays commentable like any other block. Size slide text
+from the card (`container-type:inline-size` and `cqw` units) so a slide reads
+the same on a phone. Structure: `$SKILL_DIR/authoring/structure/components.md`
+(Slide).
+
 ### Existing documents and comment handoff
 
 The handoff line a reader copies from a published doc is:

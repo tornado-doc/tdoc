@@ -12,6 +12,8 @@ module.exports = function frameProbeSource() {
     + '\n'
     + fs.readFileSync(path.join(__dirname, 'visual-viewer.js'), 'utf8')
     + '\n'
+    + fs.readFileSync(path.join(__dirname, 'slides-viewer.js'), 'utf8')
+    + '\n'
     + fs.readFileSync(path.join(__dirname, 'version-diff.js'), 'utf8')
     + '\n'
     + fs.readFileSync(path.join(__dirname, 'frame-compare.js'), 'utf8');
