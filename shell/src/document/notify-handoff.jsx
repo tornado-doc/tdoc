@@ -18,45 +18,9 @@ import {
   setRaftFallbackAgent,
   tdocUrl,
 } from './api.js';
+import { agentDisplayName, orderedAgentChoices, providerMeta, readableHandle, sameTarget, targetKey } from './agent-choices.js';
 
-function opaqueAgentId(s) {
-  if (!s) return true;
-  // Raft `sub` is often a UUID / long hex — fine as a key, useless as a label.
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
-  if (/^[0-9a-f]{24,}$/i.test(s)) return true;
-  return false;
-}
-
-function shortAgentName(name) {
-  // "handle — bio…" / "handle - bio…" → keep the handle side.
-  const cut = name.split(/\s+[—–-]\s+/)[0].trim();
-  return (cut || name).slice(0, 48);
-}
-
-// Readable agent handle when we have one. Empty is fine — the UI falls back
-// to the provider line so we never render "Hand to " with a blank.
-export function readableHandle(t) {
-  if (!t) return '';
-  const name = (t.agent_name || '').trim();
-  const sub = (t.agent_sub || '').trim();
-  if (name && !opaqueAgentId(name)) return shortAgentName(name);
-  if (sub && !opaqueAgentId(sub)) return sub;
-  return '';
-}
-
-export function providerMeta(t) {
-  const p = String(t?.provider || 'raft').trim().toLowerCase();
-  if (p === 'raft') {
-    return { key: 'raft', label: 'Raft', mark: 'raft' };
-  }
-  if (p === 'webhook') {
-    return { key: 'webhook', label: 'Webhook', mark: 'webhook' };
-  }
-  if (p === 'local') {
-    return { key: 'local', label: 'Local', mark: 'local' };
-  }
-  return { key: p || 'agent', label: p ? p[0].toUpperCase() + p.slice(1) : 'agent', mark: '' };
-}
+export { providerMeta, readableHandle };
 
 // What the reader needs: where this goes (provider), not which UUID. Handle is
 // secondary detail when we have a readable one.
@@ -72,17 +36,13 @@ function recipientPrimary(t) {
 // One row of an agent picker: the name to search by, and on the right why it
 // is near the top -- it is this doc's agent, the default, or it was used
 // recently. Directory agents that never worked with tdoc carry no note.
-function recipientOption(t, preselected) {
-  const { label } = providerMeta(t);
-  const who = readableHandle(t) || `${label} agent`;
-  // A local agent's name already says where it is ("claude on juliesmac").
-  const where = t.provider === 'raft' && t.server_slug ? ` · ${t.server_slug}` : (t.provider === 'raft' || t.provider === 'local' ? '' : ` · ${label}`);
+export function recipientOption(t, preselected) {
   const why = agentDown(t)
     ? (t.provider === 'local' ? localSeenText(t) : `${t.status} in Raft`)
     : sameTarget(t, preselected)
       ? (t.source === 'doc' ? "this doc's agent" : 'default')
       : (t.last_touched ? `used ${sinceText(t.last_touched)}` : '');
-  return { value: targetKey(t), label: `${who}${where}`, hint: why };
+  return { value: targetKey(t), label: agentDisplayName(t), hint: why };
 }
 
 // Raft's directory says this agent is not running (worker raftDirectoryAgents,
@@ -113,18 +73,6 @@ function sinceText(iso) {
   if (min < 60) return `${min} min ago`;
   const h = Math.round(min / 60);
   return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
-}
-
-function targetKey(t) {
-  if (!t) return '';
-  return `${t.provider}:${t.server_id}:${t.agent_sub}`;
-}
-
-function sameTarget(a, b) {
-  if (!a || !b) return false;
-  return a.provider === b.provider
-    && a.server_id === b.server_id
-    && a.agent_sub === b.agent_sub;
 }
 
 export function ProviderMark({ target, size = 18 }) {
@@ -614,14 +562,8 @@ export function NotifyHandoffPanel({
     return () => { cancelled = true; };
   }, [open, slug, targets.available]);
 
-  const choices = [];
-  if (targets.default) choices.push(targets.default);
-  for (const c of targets.candidates) {
-    if (!choices.some((x) => sameTarget(x, c))) choices.push(c);
-  }
-  if (targets.fallback && !choices.some((x) => sameTarget(x, targets.fallback))) {
-    choices.push(targets.fallback);
-  }
+  // The same list, in the same order, the @ picker offers (agent-choices.js).
+  const choices = orderedAgentChoices(targets);
 
   const ids = Array.isArray(commentIds) ? commentIds.filter(Boolean) : [];
   const boundHint = noAgentBoundReason(targets.reason);
@@ -819,10 +761,13 @@ export function NotifyHandoffPanel({
   );
 }
 
-export async function sendOneCommentToAgent(slug, commentId) {
+// `recipient`: the agent the comment tagged after @; without one the worker
+// sends to this doc's default, as the @agent button does.
+export async function sendOneCommentToAgent(slug, commentId, recipient = null) {
   return postNotifyHandoff({
     slug,
     comment_ids: [commentId],
     instruction: 'address this comment',
+    recipient: recipient || undefined,
   });
 }

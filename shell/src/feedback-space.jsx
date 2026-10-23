@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Link2, Send } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
 import { CommentCard } from './document/comment-card.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { orderedAgentChoices } from './document/agent-choices.js';
+import { AgentMentionContext } from './document/mention-field.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from './document/handoff-state.js';
 import {
   createComment, listComments, listMentionableUsers, removeComment,
@@ -35,6 +37,11 @@ export function FeedbackSpace({ boot }) {
   const notify = useNotifyTargets(slug, Boolean(isOwner));
   const canSendToAgent = Boolean(isOwner && notify.ready && notify.available && notify.reason !== 'no_agent_bound'
     && (notify.default || (notify.candidates || []).length || notify.fallback));
+  // Replies here use the same @ picker: the owner's agents, as in the document.
+  const agentMentions = useMemo(() => (canSendToAgent
+    ? { choices: orderedAgentChoices(notify), preselected: notify.default }
+    : { choices: [], preselected: null }
+  ), [canSendToAgent, notify.default, notify.candidates, notify.fallback]);
 
   const refresh = useCallback(async () => {
     try {
@@ -87,6 +94,7 @@ export function FeedbackSpace({ boot }) {
   const repliedCount = live.filter((c) => threadPhase(c) === 'replied').length;
 
   return (
+    <AgentMentionContext.Provider value={agentMentions}>
     <div className="tdoc-app docs-hub tdoc-fbspace">
       <TopBar identity={identity} />
       <main className="wrap">
@@ -166,7 +174,7 @@ export function FeedbackSpace({ boot }) {
                     const ok = await act(async () => { made = await createComment({ slug, version, text, parent_id: parentId }); });
                     if (ok && opts.sendToAgent && canSendToAgent) {
                       const target = opts.handoffCommentId || (made && made.id);
-                      if (target) await act(() => sendOneCommentToAgent(slug, target));
+                      if (target) await act(() => sendOneCommentToAgent(slug, target, opts.recipient));
                     }
                     return ok;
                   }}
@@ -187,5 +195,6 @@ export function FeedbackSpace({ boot }) {
         <NotifyHandoffPanel slug={slug} open commentIds={notifyIds} onClose={() => setNotifyIds(null)} onSent={() => refresh()} onTargetsChanged={notify.refresh} />
       ) : null}
     </div>
+    </AgentMentionContext.Provider>
   );
 }
