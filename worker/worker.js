@@ -7429,6 +7429,18 @@ const FEEDBACK_PAGE_CSS = `
     border-radius: 12px; background: #fafafa; }
   .script-path h2 { margin-top: 0; }
   .script-path pre { margin: 0; }
+  /* A code snippet with its Copy button: one grey box, the code scrolls, the
+     button stays put. Same outlined button as the setup gate's prompt copy. */
+  .code-copy { display: flex; align-items: center; gap: .5rem; background: #f3f3f6; border-radius: 6px;
+    padding-right: .5rem; }
+  .code-copy pre { flex: 1 1 auto; min-width: 0; margin: 0; background: transparent; }
+  .code-copy .copy-btn { flex: 0 0 auto; height: 30px; padding: 0 14px; border: 1px solid var(--td-accent);
+    border-radius: 9px; background: #fff; color: var(--td-accent); cursor: pointer;
+    font: 600 13px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
+    transition: background .12s, color .12s, border-color .12s; }
+  .code-copy .copy-btn:hover { background: var(--td-accent-tint); }
+  .code-copy .copy-btn.copied { border-color: #1a7340; color: #1a7340; background: #fff; }
+  .code-copy .copy-btn.failed { border-color: #b3261e; color: #b3261e; background: #fff; }
   @media (max-width: 720px) {
     .phone-only { display: block; }
     .install-desktop { display: none !important; }
@@ -7576,7 +7588,7 @@ ${feedbackTopBar(identity, '/feedback')}
   <div class="script-path" id="scriptPath">
     <h2>Or one line in the app</h2>
     <p>Add this once in your HTML (dev and preview builds). Anyone who opens that build — including on a phone — gets the comment button. You still add the line from a computer.</p>
-    <pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre>
+    <div class="code-copy"><pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre><button type="button" class="copy-btn" aria-label="Copy code">Copy</button></div>
   </div>
   </div>
 
@@ -7602,6 +7614,50 @@ ${feedbackTopBar(identity, '/feedback')}
 </div>
 
 <script nonce="${nonce}">
+(function () {
+  // Copy buttons on the code snippets: the text is the snippet's own, never the label.
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return fallbackCopy(text); });
+    }
+    return Promise.resolve(fallbackCopy(text));
+  }
+  var boxes = document.querySelectorAll('.code-copy');
+  Array.prototype.forEach.call(boxes, function (box) {
+    var pre = box.querySelector('pre');
+    var b = box.querySelector('.copy-btn');
+    if (!pre || !b) return;
+    var timer = null;
+    b.addEventListener('click', function () {
+      copyText(pre.textContent).then(function (ok) {
+        b.textContent = ok ? 'Copied' : 'Press ⌘C';
+        b.classList.toggle('copied', !!ok);
+        b.classList.toggle('failed', !ok);
+        if (!ok) {
+          var range = document.createRange();
+          range.selectNodeContents(pre);
+          var sel = window.getSelection();
+          sel.removeAllRanges(); sel.addRange(range);
+        }
+        clearTimeout(timer);
+        timer = setTimeout(function () { b.textContent = 'Copy'; b.classList.remove('copied', 'failed'); }, 1600);
+      });
+    });
+  });
+})();
 (function () {
   var btn = document.getElementById('bookmarklet');
   var coach = document.getElementById('coach');

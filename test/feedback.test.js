@@ -329,6 +329,8 @@ const APP = 'http://localhost:3000';
     const html = await page.text();
     assert(page.status === 200 && html.includes('href="javascript:') && html.includes('https://tdoc.dev/feedback.js'), 'bookmarklet missing');
     assert(html.includes('&lt;script src="https://tdoc.dev/feedback.js"&gt;'), 'one-line install missing');
+    assert(/<div class="code-copy"><pre><code>&lt;script src="https:\/\/tdoc.dev\/feedback.js"&gt;&lt;\/script&gt;<\/code><\/pre><button type="button" class="copy-btn"[^>]*>Copy<\/button><\/div>/.test(html), 'one-line install has no Copy button beside it');
+    assert(html.includes('navigator.clipboard') && html.includes("execCommand('copy')"), 'Copy button has no clipboard code or fallback');
     assert(/Content-Security-Policy/.test([...page.headers.keys()].join(',')) === false || page.headers.get('Content-Security-Policy').includes('nonce-'), 'page CSP is not nonced');
 
     const anon = await worker.fetch(req(`/feedback/connect?origin=${encodeURIComponent(APP)}`), env, {});
