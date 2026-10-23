@@ -145,6 +145,7 @@ const OFFLINE = [
 
 // These run against local fixtures and require the development browser.
 const BROWSER = [
+  'diagram-controls-ui.test.js', // authored map SVG sizing cannot stretch provider controls
   'reply-activity-ui.test.js', // v2 receives v3 reply status without navigation or pulsing
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
