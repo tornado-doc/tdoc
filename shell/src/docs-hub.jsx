@@ -98,6 +98,7 @@ function FolderShareDialog({ folder, team = '', onClose, onAccess }) {
   const [shareId, setShareId] = useState(folder.share_id || '');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [minting, setMinting] = useState(!folder.share_id);
   const savedRef = useRef({
     visibility: folder.visibility === 'private' ? 'private' : 'unlisted',
     allowed_users: folder.allowed_users || [],
@@ -120,14 +121,14 @@ function FolderShareDialog({ folder, team = '', onClose, onAccess }) {
       ? `Only ${team ? `${team} members` : 'you'} and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open this folder. Docs keep their own access.`
       : `Only ${team ? `${team} members` : 'you'} can open this folder. Add people below to invite them.`;
 
-  const save = async (patch) => {
+  const save = async (patch, { quiet = false } = {}) => {
     const previous = { visibility, allowedUsers, shareId };
     const nextVisibility = patch.visibility ?? visibility;
     const nextAllowed = patch.allowed_users ?? allowedUsers;
     setVisibility(nextVisibility);
     setAllowedUsers(nextAllowed);
     setBusy(true);
-    setStatus('Saving…');
+    if (!quiet) setStatus('Saving…');
     const saved = await onAccess(patch.share === false ? { share: false } : { visibility: nextVisibility, allowed_users: nextAllowed });
     setBusy(false);
     if (!saved) {
@@ -146,8 +147,18 @@ function FolderShareDialog({ folder, team = '', onClose, onAccess }) {
     setVisibility(next.visibility);
     setAllowedUsers(next.allowed_users);
     setShareId(next.share_id);
-    setStatus(patch.share === false ? 'Link turned off.' : 'Saved.');
+    setStatus(quiet ? '' : patch.share === false ? 'Link turned off.' : 'Saved.');
   };
+
+  // A folder only gets its link the first time its access is saved, so one
+  // still on its default access ("the team and people I invite") had nothing
+  // to copy. Saving the current access as the dialog opens mints the link;
+  // the link still opens only for people who already have access.
+  useEffect(() => {
+    if (savedRef.current.share_id) { setMinting(false); return; }
+    setMinting(true);
+    save({}, { quiet: true }).finally(() => setMinting(false));
+  }, [folder.id]);
 
   return (
     <HubDialog
@@ -177,7 +188,7 @@ function FolderShareDialog({ folder, team = '', onClose, onAccess }) {
         </>
       ) : (
         <p className="muted" style={{ marginTop: 0 }}>
-          Choose who has access to mint a share link.
+          {minting ? 'Getting the link…' : 'Choose who has access to mint a share link.'}
         </p>
       )}
       <p className="muted" style={{ margin: '8px 0 0' }}>
