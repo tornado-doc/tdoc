@@ -53,6 +53,7 @@ vm.runInContext([
   fn(src, 'normalizeEmail'),
   fn(src, 'normalizeActorKey'),
   fn(src, 'parseMentionLogins'),
+  fn(src, 'isNonHumanAuthor'),
   fn(src, 'commentParticipants'),
   fn(src, 'mentionableUsers'),
   fn(src, 'mentionCandidates'),
@@ -131,6 +132,19 @@ t('participants come off the event log, deleted comments included', () => {
   const people = box.commentParticipants(list);
   assert(JSON.stringify(people.map(p => p.login)) === '["bo","cy"]', JSON.stringify(people));
   assert(people[0].name === 'Bo Chen' && people[0].avatar_url === 'bo.png');
+});
+
+t('agents and the tdoc note are not participants; people keep their order', () => {
+  const people = box.commentParticipants([
+    { id: 'c0', author: { login: 'tdoc', name: 'tdoc', kind: 'system' } },
+    {
+      id: 'c1', author: { login: 'bo' },
+      replies: [{ author: { login: 'claude', kind: 'agent' } }, { author: { login: 'cy' } }],
+      events: [{ kind: 'reply_added', reply: { author: { login: 'codex', kind: 'agent' } } }],
+    },
+    { id: 'c2', author: { login: 'dee', kind: 'human' } },
+  ]);
+  assert(JSON.stringify(people.map(p => p.login)) === '["bo","cy","dee"]', JSON.stringify(people));
 });
 
 t('the mentionable set is owner + allowlist + participants, deduped', () => {

@@ -129,6 +129,8 @@
     var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 2 2, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');
+    // Author figure rules also match our SVG icons. Protect the provider's
+    // fixed icon geometry from ID-scoped map sizing and reader image margins.
     s.textContent =
       '.tdoc-hover-outline{position:absolute;pointer-events:none;z-index:2147483644;border:2px dashed ' + COMMENT_ACCENT + ';border-radius:4px;background:rgba(22,82,240,.06);box-sizing:border-box;}' +
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
@@ -138,10 +140,10 @@
       'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;box-sizing:border-box;padding-right:52px;margin-bottom:4px;}' +
       'html[data-tdoc-interaction-mode="edit"] figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{padding-right:0;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 13px;border:1px solid #c8d7fc;border-radius:999px;background:#f3f7ff;box-shadow:none;color:#1652f0;font:600 13px/1.2 system-ui,sans-serif;cursor:pointer;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 13px;border:1px solid #c8d7fc;border-radius:999px;background:#f3f7ff;box-shadow:none;color:#1652f0;font:600 13px/1.2 system-ui,sans-serif;white-space:nowrap;cursor:pointer;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:hover{background:#e8f0ff;border-color:#a9c0f8;color:#1244c5;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:16px!important;min-width:16px!important;max-width:16px!important;height:16px!important;min-height:16px!important;max-height:16px!important;margin:0!important;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
       '@media print{figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:none!important;}}' +
       'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +

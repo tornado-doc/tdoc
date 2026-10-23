@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { MentionField } from './mention-field.jsx';
+import React, { useContext, useEffect, useState } from 'react';
+import { AgentMentionContext, MentionField } from './mention-field.jsx';
+import { taggedAgent } from './agent-choices.js';
 import { TOP_BAR_HEIGHT } from './model.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
@@ -99,11 +100,14 @@ export function CommentComposer({
   // One submit at a time. ⌘+Enter and the buttons both land here, and a second
   // press while the first post is still in flight used to post a twin.
   const [busy, setBusy] = useState(false);
+  const agents = useContext(AgentMentionContext);
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
-      await onSubmit(text, { sendToAgent: canSendToAgent && sendToAgent });
+      // An agent picked after @ gets this comment, as if chosen in Send to agent.
+      const recipient = canSendToAgent ? taggedAgent(text, agents.choices) : null;
+      await onSubmit(text, { sendToAgent: canSendToAgent && (sendToAgent || Boolean(recipient)), recipient });
     } finally {
       setBusy(false);
     }

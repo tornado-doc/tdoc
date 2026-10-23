@@ -1,18 +1,23 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
+import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { usePortalContainer } from '../ui/portal.js';
-import { MentionField, MentionText } from './mention-field.jsx';
+import { AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
+import { agentFacts, agentName, agentOwner, taggedAgent } from './agent-choices.js';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 
 function authorLine(author) {
   if (!author) return 'anonymous';
   if (author.kind === 'agent') {
-    // §4: brand stays on the avatar; the text line is handle · principal.
+    // Brand stays on the avatar; the text line is name · owner, the owner
+    // being the account whose token posted it (stamped by the server).
+    if (agentOwner(author)) return `${agentName(author)} · ${agentOwner(author)}`;
+    // Older replies, from before the owner was stamped: handle · principal.
     const handle = author.handle || null;
     const principal = author.principal?.display || null;
     if (handle && principal) return `${handle} · ${principal}`;
@@ -22,7 +27,32 @@ function authorLine(author) {
   return author.name || author.login || 'anonymous';
 }
 
-function Author({ author, timestamp }) {
+// An agent's name with the five facts behind it on hover: name, who it acts
+// for, program, where it runs, and scope. Only for replies that carry an
+// owner; older ones keep their plain line.
+function AgentAuthorName({ author }) {
+  return (
+    <PreviewCard.Root>
+      <PreviewCard.Trigger render={<span className="login tdoc-agent-name" tabIndex={0} />} delay={300}>
+        {authorLine(author)}
+      </PreviewCard.Trigger>
+      <PreviewCard.Portal container={usePortalContainer()}>
+        <PreviewCard.Positioner side="bottom" align="start" sideOffset={6} collisionPadding={8}
+          positionMethod="fixed" className="tdoc-picker-positioner">
+          <PreviewCard.Popup className="tdoc-agent-card">
+            <dl>
+              {agentFacts(author).map((f) => (
+                <React.Fragment key={f.label}><dt>{f.label}</dt><dd>{f.value}</dd></React.Fragment>
+              ))}
+            </dl>
+          </PreviewCard.Popup>
+        </PreviewCard.Positioner>
+      </PreviewCard.Portal>
+    </PreviewCard.Root>
+  );
+}
+
+export function Author({ author, timestamp }) {
   if (!author) {
     return (
       <div className="author">
@@ -39,7 +69,8 @@ function Author({ author, timestamp }) {
   const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
     && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
     ? author.profile_url : null;
-  const title = author.kind === 'agent' && author.principal?.terminal
+  const hoverCard = author.kind === 'agent' && !!agentOwner(author);
+  const title = author.kind === 'agent' && !hoverCard && author.principal?.terminal
     ? author.principal.terminal
     : undefined;
   return (
@@ -58,7 +89,7 @@ function Author({ author, timestamp }) {
         </a>
       ) : <img src={avatar} alt="" />) : null}
       <span className="tdoc-cc-who">
-        <span className="login">{authorLine(author)}</span>
+        {hoverCard ? <AgentAuthorName author={author} /> : <span className="login">{authorLine(author)}</span>}
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
       </span>
     </div>
@@ -142,14 +173,18 @@ function ReplyForm({
   // button share the lock, so a second press while the first reply is still
   // in flight does not post a twin.
   const [busy, setBusy] = useState(false);
+  const agents = useContext(AgentMentionContext);
 
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
+      // An agent picked after @ gets the thread, as if chosen in Send to agent.
+      const recipient = canSendToAgent ? taggedAgent(text, agents.choices) : null;
       // onReply resolves false when the shell reported a failure; keep the draft.
       const ok = await onReply(commentId, text, {
-        sendToAgent: canSendToAgent && sendToAgent,
+        sendToAgent: canSendToAgent && (sendToAgent || Boolean(recipient)),
+        recipient,
         handoffCommentId: handoffCommentId || commentId,
       });
       if (ok !== false) setText('');

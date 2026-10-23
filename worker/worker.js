@@ -9264,9 +9264,19 @@ function ownerActorKey(meta, env) {
   return hostedGithubLogin(meta) || stamped || (env && env.TDOC_OWNER) || '';
 }
 
+// An agent's reply or the seeded tdoc note is not a person: its login
+// ("claude", "codex") names nobody on GitHub, so offering it after "@" would
+// tag a stranger and reach no agent.
+function isNonHumanAuthor(author) {
+  if (!author) return false;
+  return author.kind === 'agent' || author.kind === 'system'
+    || String(author.login || '').toLowerCase() === 'tdoc';
+}
+
 function commentParticipants(list) {
   const byLogin = new Map();
   const push = (author) => {
+    if (isNonHumanAuthor(author)) return;
     const login = normalizeActorKey(author && author.login);
     if (!login) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
@@ -9327,7 +9337,7 @@ async function loadContacts(env, actor) {
 // One write per post that named or answered someone; nothing for a plain note.
 async function recordContacts(env, actor, people, at) {
   const key = contactsKey(actor);
-  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor);
+  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor && !isNonHumanAuthor(p));
   if (!key || !fresh.length) return;
   const prev = await loadContacts(env, actor);
   // Answering the people already at the front of the list again, within a
@@ -9353,9 +9363,17 @@ async function mentionDirectory(env, s, meta, access, list) {
   const me = actorKey(s);
   const byLogin = new Map();
   let order = 0;
+  // Logins this doc only knows as agents. Contacts saved before agents were
+  // filtered carry no kind, so an answered "claude" would come back as recent.
+  const humans = new Set([normalizeActorKey(ownerActorKey(meta, env)), ...commentParticipants(list).map((p) => p.login)]);
+  const agents = new Set();
+  for (const c of (Array.isArray(list) ? list : [])) {
+    const authors = [c && c.author, ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply && e.reply.author), ...((c && c.replies) || []).map((r) => r && r.author)];
+    for (const a of authors) if (isNonHumanAuthor(a)) agents.add(normalizeActorKey(a.login));
+  }
   const add = (entry, tag, at) => {
     const login = normalizeActorKey(entry && entry.login);
-    if (!login || login === me) return;
+    if (!login || login === me || (agents.has(login) && !humans.has(login))) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '', tags: [], at: '', order: order++ };
     if (!prev.name && entry.name) prev.name = entry.name;
     if (!prev.avatar_url && entry.avatar_url) prev.avatar_url = entry.avatar_url;
@@ -9375,7 +9393,7 @@ async function mentionDirectory(env, s, meta, access, list) {
   }
   const [contacts, inbox] = await Promise.all([loadContacts(env, me), loadInbox(env, me).then((r) => r.inbox.items || []).catch(() => [])]);
   for (const c of contacts) add(c, 'recent', c.at);
-  for (const item of inbox) if (item && item.actor) add(item.actor, 'recent', item.at);
+  for (const item of inbox) if (item && item.actor && !isNonHumanAuthor(item.actor)) add(item.actor, 'recent', item.at);
   const weight = (p) => (p.tags.includes('doc') ? 0 : p.tags.includes('teammate') ? 1 : p.tags.includes('recent') ? 2 : 3);
   return [...byLogin.values()]
     .sort((a, b) => (weight(a) - weight(b)) || String(b.at || '').localeCompare(String(a.at || '')) || (a.order - b.order))
@@ -10765,9 +10783,47 @@ async function resolveAccountNotifyTargets(env, accountId) {
 // A team admin may use their own connections for this workspace. Connections
 // remain account-owned; they are never shared with ordinary team members.
 async function notifyTargetsFor(env, slug, gate, localDriver = null) {
-  if (!(gate.meta && gate.meta.workspace_id)) return resolveNotifyTargets(env, slug);
+  if (!(gate.meta && gate.meta.workspace_id)) {
+    const hosted = (gate.meta && gate.meta.hosted) || {};
+    const owner = await agentOwner(env, hosted.account_id, hosted.owner_key || hosted.github_login);
+    return withTargetOwner(await resolveNotifyTargets(env, slug), owner, 'personal');
+  }
   if (!localDriver) return { default: null, candidates: [], fallback: null, reason: 'team_admin_only' };
-  return resolveAccountNotifyTargets(env, localDriver);
+  // localDriverAccount only returns one of the caller's own accounts, so the
+  // caller's credential names the account these connections belong to.
+  const owner = await agentOwner(env, localDriver, credentialKey(gate.session || gate.actor));
+  return withTargetOwner(await resolveAccountNotifyTargets(env, localDriver), owner, 'team');
+}
+
+// The account an agent acts for, as its rows and replies name it: the
+// account's claimed handle, else its GitHub login, else its email's local
+// part (never the address). Always built from a credential or a stored
+// connection, never from anything the agent sends.
+async function agentOwner(env, accountId, key) {
+  const k = String(key || '').trim().toLowerCase();
+  const handle = accountId ? await accountClaimedHandle(env, accountId) : null;
+  const display = handle || (k.startsWith('email:') ? k.slice(6).split('@')[0] : k);
+  return display ? { ...(k ? { key: k } : {}), display } : null;
+}
+
+// The actor key a session or upload token speaks for. A hosted token carries
+// its GitHub login as github_login, not login (see stampHostedOwnership).
+function credentialKey(actor) {
+  return (actor && normalizeGithubLogin(actor.github_login)) || actorKey(actor);
+}
+
+// Every connection is account-owned, so every row of one answer has the same
+// owner; stamped on each row so the client never has to guess it. `scope` is
+// the space the agent would act in (a team doc, or the owner's own).
+function withTargetOwner(resolved, owner, scope) {
+  if (!resolved) return resolved;
+  const stamp = (t) => (t ? { ...t, ...(owner ? { owner } : {}), scope } : t);
+  return {
+    ...resolved,
+    default: stamp(resolved.default),
+    candidates: (resolved.candidates || []).map(stamp),
+    fallback: stamp(resolved.fallback),
+  };
 }
 
 // ─────────────────────────── handoffs ───────────────────────────
@@ -15504,17 +15560,31 @@ export default {
         const handoff = (await loadHandoffs(env, slug)).find((h) => h && Array.isArray(h.comment_ids) && h.comment_ids.includes(parent.id));
         replyTarget = normalizeNotifyTarget(handoff && handoff.recipient);
       }
+      // Who the agent acts for is the account whose token posted this, read
+      // off the credential: an agent cannot name its own owner.
+      const owner = auth.actor.kind === 'hosted'
+        ? await agentOwner(env, auth.actor.account_id, credentialKey(auth.actor))
+        : null;
+      if (owner) agent = { ...agent, owner };
       if (replyTarget) {
         const accountHandle = auth.actor.account_id
           ? (await accountClaimedHandle(env, auth.actor.account_id)) || auth.actor.github_login || ''
           : '';
+        // Where it runs, for the hover card only: the Raft server or the
+        // daemon's computer. A webhook's host is left out: readers of a public
+        // doc would see the owner's endpoint.
+        const location = replyTarget.provider === 'raft' ? replyTarget.server_slug || ''
+          : replyTarget.provider === 'local' ? replyTarget.device || '' : '';
         agent = {
           ...agent,
           provider: replyTarget.provider,
-          handle: replyTarget.agent_name ? `@${replyTarget.agent_name.replace(/^@/, '')}` : '',
+          handle: replyTarget.agent_name && replyTarget.provider !== 'local' ? `@${replyTarget.agent_name.replace(/^@/, '')}` : '',
+          ...(replyTarget.provider === 'local' ? { cli: replyTarget.cli } : {}),
+          ...(location ? { location } : {}),
           ...(accountHandle ? { principal: { display: `@${accountHandle}`, terminal: agent.name } } : {}),
         };
       }
+      agent = { ...agent, scope: writeGate.meta && writeGate.meta.workspace_id ? 'team' : 'personal' };
       if (replyingAgent) {
         try {
           await touchDocAgent(env, slug, replyingAgent);

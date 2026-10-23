@@ -1,7 +1,9 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePortalContainer } from '../ui/portal.js';
 import { useGithubUserSearch } from './github-user-search.js';
+import { AGENT_TAG_JOINER, agentFacts, agentMentionName, matchAgentChoices, targetKey } from './agent-choices.js';
+import { ProviderMark, recipientOption } from './notify-handoff.jsx';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
 import { parseRichText } from './rich-text.js';
 
@@ -16,6 +18,11 @@ import { parseRichText } from './rich-text.js';
 // the textarea it fits on.
 const MENU_MAX_HEIGHT = 184;
 
+// The agents this viewer can hand comments to, in the Send to agent
+// dropdown's order (orderedAgentChoices), and the one it preselects. Empty
+// unless the shell lets this viewer send to agents: a reader sees people only.
+export const AgentMentionContext = createContext({ choices: [], preselected: null });
+
 export function MentionField({
   value,
   onChange,
@@ -29,7 +36,15 @@ export function MentionField({
   const caretAfterInsert = useRef(null);
   const [query, setQuery] = useState(null);
   const [active, setActive] = useState(0);
+  const agentsOnOffer = useContext(AgentMentionContext);
 
+  // Agents are their own group above people: the first two with nothing
+  // typed, every one whose name matches once something is.
+  const agentMatches = query
+    ? matchAgentChoices(agentsOnOffer.choices, query.query, {
+      labelOf: (t) => recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices).label,
+    }).map((t) => ({ agent: t, key: `agent:${targetKey(t)}`, ...recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices) }))
+    : [];
   const localMatches = query ? matchMentionable(people, query.query) : [];
   // Typing an address is already a complete tag — asking GitHub's user search
   // about "dana@corp.com" offers strangers and leaks the address upstream.
@@ -45,7 +60,8 @@ export function MentionField({
     // localMatches/remote are derived arrays; identity churn only costs a cheap
     // concat, and recomputing keeps the highlighted row in step with the query.
   }, [JSON.stringify(localMatches), remote]);
-  const open = Boolean(query) && matches.length > 0;
+  const rows = agentMatches.concat(matches);
+  const open = Boolean(query) && rows.length > 0;
 
   // Restore the caret after an insertion: React re-renders with the new value
   // and would otherwise leave it at the end of the textarea.
@@ -94,13 +110,21 @@ export function MentionField({
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
     };
-  }, [open, matches.length]);
+  }, [open, rows.length]);
 
   const syncQuery = (element) => {
     setQuery(mentionQueryAt(element.value, element.selectionStart));
   };
 
   const pick = (person) => {
+    if (person.agent) {
+      // "@\u2060claude": reads as the agent's name, never parsed as a login.
+      const next = insertMention(value, query, `${AGENT_TAG_JOINER}${agentMentionName(person.agent, agentsOnOffer.choices)}`);
+      caretAfterInsert.current = next.caret;
+      setQuery(null);
+      onChange(next.text);
+      return;
+    }
     // An email participant's key is "email:<addr>"; the text form of the tag
     // is the bare address (the parser reads "@addr" back into the key).
     const key = String(person.login || '');
@@ -114,17 +138,17 @@ export function MentionField({
     if (open) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        setActive((i) => (i + 1) % matches.length);
+        setActive((i) => (i + 1) % rows.length);
         return;
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault();
-        setActive((i) => (i - 1 + matches.length) % matches.length);
+        setActive((i) => (i - 1 + rows.length) % rows.length);
         return;
       }
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault();
-        pick(matches[active] || matches[0]);
+        pick(rows[active] || rows[0]);
         return;
       }
       if (event.key === 'Escape') {
@@ -162,27 +186,49 @@ export function MentionField({
       />
       {open && menuBox ? createPortal((
         <div className="tdoc-mention-menu" id="tdoc-mention-menu" role="listbox" style={menuBox}>
-          {matches.map((person, index) => (
+          {agentMatches.length ? <div className="tdoc-mention-group" role="presentation">Agents</div> : null}
+          {agentMatches.map((row, index) => (
             <button
-              key={person.login}
+              key={row.key}
               type="button"
               role="option"
               aria-selected={index === active}
-              className={`tdoc-mention-option${index === active ? ' active' : ''}`}
-              // Keep the caret: a blur would close the menu before the click.
+              className={`tdoc-mention-option tdoc-mention-agent${index === active ? ' active' : ''}`}
+              title={agentFacts(row.agent).map((f) => `${f.label}: ${f.value}`).join('\n')}
               onMouseDown={(event) => event.preventDefault()}
               onMouseEnter={() => setActive(index)}
-              onClick={() => pick(person)}
+              onClick={() => pick(row)}
             >
-              {person.avatar_url ? <img src={person.avatar_url} alt="" /> : <span className="tdoc-mention-anon" />}
-              <span className="tdoc-mention-login">@{String(person.login).startsWith('email:') ? String(person.login).slice(6) : person.login}</span>
-              {person.name && person.name.toLowerCase() !== person.login ? (
-                <span className="tdoc-mention-name">{person.name}</span>
-              ) : null}
-              {person.remote ? <span className="tdoc-mention-source">GitHub</span>
-                : mentionReason(person) ? <span className="tdoc-mention-source">{mentionReason(person)}</span> : null}
+              <span className="tdoc-mention-agent-mark"><ProviderMark target={row.agent} size={14} /></span>
+              <span className="tdoc-mention-login">{row.label}</span>
+              {row.hint ? <span className="tdoc-mention-source">{row.hint}</span> : null}
             </button>
           ))}
+          {agentMatches.length && matches.length ? <div className="tdoc-mention-group" role="presentation">People</div> : null}
+          {matches.map((person, i) => {
+            const index = agentMatches.length + i;
+            return (
+              <button
+                key={person.login}
+                type="button"
+                role="option"
+                aria-selected={index === active}
+                className={`tdoc-mention-option${index === active ? ' active' : ''}`}
+                // Keep the caret: a blur would close the menu before the click.
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActive(index)}
+                onClick={() => pick(person)}
+              >
+                {person.avatar_url ? <img src={person.avatar_url} alt="" /> : <span className="tdoc-mention-anon" />}
+                <span className="tdoc-mention-login">@{String(person.login).startsWith('email:') ? String(person.login).slice(6) : person.login}</span>
+                {person.name && person.name.toLowerCase() !== person.login ? (
+                  <span className="tdoc-mention-name">{person.name}</span>
+                ) : null}
+                {person.remote ? <span className="tdoc-mention-source">GitHub</span>
+                  : mentionReason(person) ? <span className="tdoc-mention-source">{mentionReason(person)}</span> : null}
+              </button>
+            );
+          })}
         </div>
       ), portalContainer || document.body) : null}
     </div>

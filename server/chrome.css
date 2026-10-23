@@ -282,6 +282,12 @@
   .tdoc-agent-provider-mark { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #fff; flex-shrink: 0; }
   .tdoc-reply .tdoc-agent-provider-mark { width: 18px; height: 18px; }
   .tdoc-agent-provider-mark svg { width: 72%; height: 72%; }
+  /* Hover card on an agent's name: the five facts its one-line label leaves out. */
+  .tdoc-agent-name { cursor: default; }
+  .tdoc-agent-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); font: 12px/1.4 system-ui, sans-serif; color: #111; max-width: 280px; }
+  .tdoc-agent-card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+  .tdoc-agent-card dt { color: #777; }
+  .tdoc-agent-card dd { margin: 0; overflow-wrap: anywhere; }
   .tdoc-agent-reply { background: #fafafb; border-left: 3px solid #111; padding-left: 8px; }
   .tdoc-agent-status { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; margin: 0 0 6px; font-weight: 600; }
   .tdoc-agent-status-applied { background: #e8f5ed; color: #1a7340; }
@@ -647,6 +653,11 @@
   /* Marks a row that came from GitHub's search rather than from this doc — the
      difference between answering someone here and pulling in a newcomer. */
   .tdoc-mention-source { margin-left: auto; flex: none; color: var(--td-muted); font-size: 11px; border: 1px solid var(--td-line); border-radius: 4px; padding: 0 4px; }
+  /* Agents get their own small group above people: tagging one hands the
+     comment to it, which is a different act from notifying a person. */
+  .tdoc-mention-group { padding: 4px 8px 2px; color: var(--td-muted); font: 600 11px system-ui, sans-serif; }
+  .tdoc-mention-agent-mark { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--td-muted); }
+  .tdoc-mention-agent .tdoc-mention-login { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Modal (sign-in) */
   .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }

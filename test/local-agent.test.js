@@ -241,6 +241,9 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     }), env, {});
     const body = await r.json();
     assert(r.status === 200 && body.author && body.author.provider === 'local', JSON.stringify(body.author));
+    // No name of its own: the program and the computer, and whose token it is.
+    assert(body.author.cli === 'codex' && !body.author.handle && body.author.location === 'juliesmac', JSON.stringify(body.author));
+    assert(body.author.owner && body.author.owner.display === owner.login, JSON.stringify(body.author.owner));
     const targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
     assert(targets.default.source === 'doc' && targets.default.cli === 'codex', `seat: ${JSON.stringify(targets.default)}`);
     const unknown = await worker.fetch(req('/api/agent/reply', {
