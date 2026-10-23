@@ -15,13 +15,15 @@ name: PR preview
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # Refresh the fixed workers.dev host from main, independently of PR aliases.
+  workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: write
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-${{ github.event.pull_request.number || 'stable' }}
   cancel-in-progress: true
 
 jobs:
@@ -29,13 +31,17 @@ jobs:
     name: publish PR preview
     if: >
       github.repository == 'tornado-doc/tdoc' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Dispatch may use a workflow branch; deploy only main's product code.
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
@@ -97,7 +103,7 @@ jobs:
           TDOC_GENERATED_BY: tdoc-preview
           TDOC_SOURCE_SHA: ${{ github.sha }}
           TDOC_PREVIEW: '1'
-        run: node bin/tdoc-bundle
+        run: TDOC_SOURCE_SHA="$(git rev-parse HEAD)" node bin/tdoc-bundle
 
       - name: Guard preview bundle
         run: |
@@ -140,6 +146,9 @@ jobs:
         run: |
           set -euo pipefail
           ALIAS="pr-${{ github.event.pull_request.number }}"
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            ALIAS=stable
+          fi
           # Alias + worker name must stay within the 63-char DNS label.
           # Capture and print Wrangler's diagnostics even when upload fails.
           # A substitution under `set -e` used to exit before `echo "$OUT"`,
@@ -161,9 +170,38 @@ jobs:
             exit 1
           fi
           echo "host=$HOST" >> "$GITHUB_OUTPUT"
+          VERSION_ID="$(printf '%s\n' "$OUT" | sed -n 's/^Worker Version ID: //p' | head -1)"
+          test -n "$VERSION_ID" || { echo "could not parse uploaded version ID" >&2; exit 1; }
+          echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
           echo "Preview host: $HOST"
 
+      - name: Deploy and verify fixed preview from main
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: worker
+        env:
+          VERSION_ID: ${{ steps.upload.outputs.version_id }}
+          ALIAS_HOST: ${{ steps.upload.outputs.host }}
+        run: |
+          set -euo pipefail
+          # Uploading a version updates its alias, not the fixed workers.dev host.
+          wrangler versions deploy "${VERSION_ID}@100" --name tdoc-preview \
+            -c wrangler.preview.toml --yes --message "Refresh fixed preview from main $(git rev-parse HEAD)"
+          BASE="https://${ALIAS_HOST/#stable-tdoc-preview./tdoc-preview.}"
+          EXPECTED_SHA="$(git rev-parse --short=12 HEAD)"
+          for attempt in {1..12}; do
+            if curl -fsS --max-time 10 "$BASE/api/runtime?refresh=$GITHUB_RUN_ID" \
+              | jq -e --arg sha "$EXPECTED_SHA" '.ok == true and .runtime.source_sha == $sha and .runtime.source_dirty == false'; then
+              curl -fsS --max-time 15 "$BASE/api/ping" | jq -e '.service == "tdoc"'
+              echo "Fixed preview verified at $BASE ($EXPECTED_SHA)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "fixed preview never served expected main runtime $EXPECTED_SHA" >&2
+          exit 1
+
       - name: Seed demo doc conway-life v1 + v2
+        if: github.event_name == 'pull_request'
         env:
           TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
           PREVIEW_HOST: ${{ steps.upload.outputs.host }}
@@ -352,6 +390,7 @@ jobs:
           echo "seeded landing"
 
       - name: Sticky preview comment
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PREVIEW_HOST: ${{ steps.upload.outputs.host }}
