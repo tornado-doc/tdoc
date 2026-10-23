@@ -4,6 +4,7 @@ import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { usePortalContainer } from '../ui/portal.js';
 import { MentionField, MentionText } from './mention-field.jsx';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
@@ -70,7 +71,7 @@ function ReactionPicker({ onPick }) {
       <Popover.Trigger className="tdoc-react-add" title="Add reaction">
         <SmilePlus size={14} />
       </Popover.Trigger>
-      <Popover.Portal>
+      <Popover.Portal container={usePortalContainer()}>
         {/* Legacy placement: under the button, left edges aligned, flipped or
             shifted to stay on screen. positionMethod="fixed" because the card
             it opens from is itself fixed to the viewport. */}

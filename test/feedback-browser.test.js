@@ -298,6 +298,123 @@ const APP_HTML = `<!doctype html>
       if (await pick.evaluate((b) => b.classList.contains('on'))) await pick.click();
     });
 
+    await test('a transformed, clipped modal <dialog> does not shrink the layer; removing it without close brings the layer back', async () => {
+      const dockAt = () => page.evaluate(() => { const b = document.querySelector('#tdoc-feedback-root .tdoc-feedback-dock').getBoundingClientRect(); return [b.x, b.y, b.width, b.height].join(); });
+      const dockBefore = await dockAt();
+      await page.evaluate(() => {
+        const d = document.createElement('dialog'); d.id = 'td';
+        d.style.cssText = 'position:fixed;left:50%;top:50%;margin:0;transform:translate(-50%,-50%);overflow:hidden;width:420px;padding:24px';
+        d.innerHTML = '<h2>Transformed share</h2><button>Done</button>';
+        document.body.appendChild(d); d.showModal();
+      });
+      await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'td');
+      const layout = await page.evaluate(() => {
+        const r = document.getElementById('tdoc-feedback-root').getBoundingClientRect();
+        const dock = document.querySelector('#tdoc-feedback-root .tdoc-feedback-dock').getBoundingClientRect();
+        const hit = document.elementFromPoint(dock.x + dock.width / 2, dock.y + dock.height / 2);
+        return { r: [r.x, r.y, r.width, r.height], vw: innerWidth, vh: innerHeight, dockHit: Boolean(hit && hit.closest('#tdoc-feedback-root')) };
+      });
+      assert(layout.r[0] === 0 && layout.r[1] === 0 && layout.r[2] === layout.vw && layout.r[3] === layout.vh, `layer shrank to the dialog: ${layout.r}`);
+      assert(layout.dockHit && (await dockAt()) === dockBefore, `dock moved or is covered inside the dialog: ${JSON.stringify(layout)} vs ${dockBefore}`);
+      const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+      if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
+      await page.locator('#td h2').click();
+      const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+      await c.click();
+      await page.keyboard.type('Heading is vague');
+      assert((await c.inputValue()) === 'Heading is vague', 'typing in the composer over a transformed modal failed');
+      // A React unmount: gone from the DOM, no close event.
+      await page.evaluate(() => document.getElementById('td').remove());
+      await page.waitForFunction(() => {
+        const host = document.getElementById('tdoc-feedback-root');
+        return host && host.parentElement === document.documentElement && !host.hasAttribute('popover');
+      });
+      assert(await page.locator('#tdoc-feedback-root .tdoc-feedback-dock').isVisible(), 'the dock did not come back');
+      await page.keyboard.press('Escape');
+      if (await pick.evaluate((b) => b.classList.contains('on'))) await pick.click();
+    });
+
+    await test('a script modal with a focus trap and Escape/outside-press dismissal stays open while you comment on it', async () => {
+      // How Radix and Headless UI behave: focus leaving the dialog is pulled
+      // back, Escape and a press outside close it.
+      await page.evaluate(() => {
+        const d = document.createElement('div');
+        d.id = 'sm'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true');
+        d.style.cssText = 'position:fixed;top:120px;left:200px;padding:24px;background:#fff;border:1px solid #ccc;z-index:10';
+        d.innerHTML = '<h2>Share with team</h2><input id="sm-email" value="a@b.c">';
+        document.body.appendChild(d);
+        const close = () => { window.__smClosed = true; d.remove(); };
+        document.addEventListener('focusout', (e) => { if (d.isConnected && e.relatedTarget && !d.contains(e.relatedTarget)) d.querySelector('input').focus(); });
+        document.addEventListener('focusin', (e) => { if (d.isConnected && !d.contains(e.target)) d.querySelector('input').focus(); });
+        document.addEventListener('keydown', (e) => { if (d.isConnected && e.key === 'Escape') close(); }, true);
+        document.addEventListener('pointerdown', (e) => { if (d.isConnected && !d.contains(e.target)) close(); });
+        d.querySelector('input').focus();
+      });
+      await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
+      await page.locator('#sm h2').click();
+      const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+      await c.click();
+      await page.keyboard.type('Say who gets access');
+      assert((await c.inputValue()) === 'Say who gets access', `typing was pulled back into the dialog (active: ${await page.evaluate(() => document.activeElement.id || document.activeElement.nodeName)})`);
+      await page.keyboard.press('Escape');
+      await page.locator('#tdoc-feedback-root .tdoc-popup').waitFor({ state: 'detached' });
+      assert(await page.evaluate(() => !window.__smClosed && Boolean(document.getElementById('sm'))), 'the dialog closed while commenting on it');
+      await page.evaluate(() => document.getElementById('sm').remove());
+      const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+      if (await pick.evaluate((b) => b.classList.contains('on'))) await pick.click();
+    });
+
+    await test("tdoc's own Base UI dialog on My docs can be commented on: it stays open, the composer keeps the typing", async () => {
+      const slug = 'quarterly-plan';
+      fs.mkdirSync(path.join(root, slug, 'v1'), { recursive: true });
+      fs.writeFileSync(path.join(root, slug, 'v1', 'index.html'), '<!doctype html><title>Quarterly plan</title><h1>Quarterly plan</h1>');
+      fs.writeFileSync(path.join(root, slug, 'meta.json'), JSON.stringify({ slug, title: 'Quarterly plan', versions: [{ n: 1, created: new Date().toISOString() }] }));
+      fs.writeFileSync(path.join(root, slug, 'comments.json'), '[]');
+      const me = await context.newPage();
+      const errors = [];
+      me.on('pageerror', (error) => errors.push(error.message));
+      try {
+        await me.goto(`${tdocBase}/me`);
+        await me.getByText('Quarterly plan').first().hover();
+        await me.locator('button[aria-label="More actions"]').last().click({ force: true });
+        await me.getByRole('menuitem', { name: /rename/i }).click();
+        const dialog = me.locator('.ui-dialog-popup');
+        await dialog.waitFor();
+        await me.evaluate((src) => {
+          const s = document.createElement('script');
+          s.src = src; s.setAttribute('data-tdoc-open', '1');
+          document.documentElement.appendChild(s);
+        }, `${tdocBase}/feedback.js`);
+        await me.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor();
+        const pick = me.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+        if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
+        // The dialog uses the same classes as the layer's own dialogs; it is
+        // still the page, so a click on it starts a comment.
+        await dialog.locator('h3').click();
+        const c = me.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+        await c.waitFor({ timeout: 4000 });
+        await c.click();
+        await me.keyboard.type('Rename title is vague');
+        assert((await c.inputValue()) === 'Rename title is vague', 'typing in the composer over the Rename dialog failed');
+        assert(await dialog.isVisible(), 'the Rename dialog closed when the composer took focus');
+        await me.keyboard.press('Escape');
+        await me.locator('#tdoc-feedback-root .tdoc-popup').waitFor({ state: 'detached' });
+        assert(await dialog.isVisible(), 'Escape in the composer also closed the Rename dialog');
+        await dialog.locator('h3').click();
+        await c.waitFor();
+        await c.fill('Rename title is vague');
+        await me.locator('#tdoc-feedback-root .tdoc-popup button.submit').click();
+        await me.locator('#tdoc-feedback-root .tdoc-pin').first().waitFor({ timeout: 5000 });
+        assert(await dialog.isVisible(), 'posting the comment closed the Rename dialog');
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await dialog.waitFor({ state: 'detached' });
+        assert(await me.locator('#tdoc-feedback-root .tdoc-feedback-dock').isVisible(), 'the dock went away with the dialog');
+        assert(errors.length === 0, errors.join('\n'));
+      } finally {
+        await me.close();
+      }
+    });
+
     await test('a comment follows its element when the page is rebuilt with a card above it', async () => {
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
       const heading = page.locator('main > section.card h2', { hasText: 'Weekly active users' });
