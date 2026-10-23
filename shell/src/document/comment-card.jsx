@@ -1,10 +1,11 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
-import { MentionField, MentionText } from './mention-field.jsx';
+import { AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
+import { taggedAgent } from './agent-choices.js';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 
@@ -141,14 +142,18 @@ function ReplyForm({
   // button share the lock, so a second press while the first reply is still
   // in flight does not post a twin.
   const [busy, setBusy] = useState(false);
+  const agents = useContext(AgentMentionContext);
 
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
+      // An agent picked after @ gets the thread, as if chosen in Send to agent.
+      const recipient = canSendToAgent ? taggedAgent(text, agents.choices) : null;
       // onReply resolves false when the shell reported a failure; keep the draft.
       const ok = await onReply(commentId, text, {
-        sendToAgent: canSendToAgent && sendToAgent,
+        sendToAgent: canSendToAgent && (sendToAgent || Boolean(recipient)),
+        recipient,
         handoffCommentId: handoffCommentId || commentId,
       });
       if (ok !== false) setText('');

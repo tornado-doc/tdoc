@@ -9264,9 +9264,19 @@ function ownerActorKey(meta, env) {
   return hostedGithubLogin(meta) || stamped || (env && env.TDOC_OWNER) || '';
 }
 
+// An agent's reply or the seeded tdoc note is not a person: its login
+// ("claude", "codex") names nobody on GitHub, so offering it after "@" would
+// tag a stranger and reach no agent.
+function isNonHumanAuthor(author) {
+  if (!author) return false;
+  return author.kind === 'agent' || author.kind === 'system'
+    || String(author.login || '').toLowerCase() === 'tdoc';
+}
+
 function commentParticipants(list) {
   const byLogin = new Map();
   const push = (author) => {
+    if (isNonHumanAuthor(author)) return;
     const login = normalizeActorKey(author && author.login);
     if (!login) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '' };
@@ -9327,7 +9337,7 @@ async function loadContacts(env, actor) {
 // One write per post that named or answered someone; nothing for a plain note.
 async function recordContacts(env, actor, people, at) {
   const key = contactsKey(actor);
-  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor);
+  const fresh = (people || []).filter((p) => p && p.login && p.login !== actor && !isNonHumanAuthor(p));
   if (!key || !fresh.length) return;
   const prev = await loadContacts(env, actor);
   // Answering the people already at the front of the list again, within a
@@ -9353,9 +9363,17 @@ async function mentionDirectory(env, s, meta, access, list) {
   const me = actorKey(s);
   const byLogin = new Map();
   let order = 0;
+  // Logins this doc only knows as agents. Contacts saved before agents were
+  // filtered carry no kind, so an answered "claude" would come back as recent.
+  const humans = new Set([normalizeActorKey(ownerActorKey(meta, env)), ...commentParticipants(list).map((p) => p.login)]);
+  const agents = new Set();
+  for (const c of (Array.isArray(list) ? list : [])) {
+    const authors = [c && c.author, ...((c && c.events) || []).map((e) => e && e.kind === 'reply_added' && e.reply && e.reply.author), ...((c && c.replies) || []).map((r) => r && r.author)];
+    for (const a of authors) if (isNonHumanAuthor(a)) agents.add(normalizeActorKey(a.login));
+  }
   const add = (entry, tag, at) => {
     const login = normalizeActorKey(entry && entry.login);
-    if (!login || login === me) return;
+    if (!login || login === me || (agents.has(login) && !humans.has(login))) return;
     const prev = byLogin.get(login) || { login, name: '', avatar_url: '', tags: [], at: '', order: order++ };
     if (!prev.name && entry.name) prev.name = entry.name;
     if (!prev.avatar_url && entry.avatar_url) prev.avatar_url = entry.avatar_url;
@@ -9375,7 +9393,7 @@ async function mentionDirectory(env, s, meta, access, list) {
   }
   const [contacts, inbox] = await Promise.all([loadContacts(env, me), loadInbox(env, me).then((r) => r.inbox.items || []).catch(() => [])]);
   for (const c of contacts) add(c, 'recent', c.at);
-  for (const item of inbox) if (item && item.actor) add(item.actor, 'recent', item.at);
+  for (const item of inbox) if (item && item.actor && !isNonHumanAuthor(item.actor)) add(item.actor, 'recent', item.at);
   const weight = (p) => (p.tags.includes('doc') ? 0 : p.tags.includes('teammate') ? 1 : p.tags.includes('recent') ? 2 : 3);
   return [...byLogin.values()]
     .sort((a, b) => (weight(a) - weight(b)) || String(b.at || '').localeCompare(String(a.at || '')) || (a.order - b.order))

@@ -55,6 +55,24 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(a && a.tags.includes('doc'), JSON.stringify(r.body.users));
   });
 
+  await t('an agent that replied is not offered as a person, and answering it records no contact', async () => {
+    const posted = await call('/api/comments', { method: 'POST', cookie: carol.cookie, headers: origin, body: { slug: 'notes', version: 1, text: 'unclear', anchor: { kind: 'text', text: 'notes' } } });
+    assert(posted.status === 200, `comment ${posted.status}`);
+    const agent = await call('/api/agent/reply', { method: 'POST', token: alice.token, body: { slug: 'notes', parent_id: posted.body.id, text: 'Rewrote it.', status: 'applied', applied_in: 1, agent_login: 'claude' } });
+    assert(agent.status === 200, `agent reply ${agent.status} ${JSON.stringify(agent.body)}`);
+    // Answering the agent's reply is what used to save "claude" as a contact.
+    const answered = await call('/api/comments', { method: 'POST', cookie: alice.cookie, headers: origin, body: { slug: 'notes', version: 1, text: 'thanks', parent_id: agent.body.id } });
+    assert(answered.status === 200, `reply ${answered.status} ${JSON.stringify(answered.body)}`);
+    for (const [who, slug] of [[alice, 'notes'], [alice, 'plan'], [carol, 'notes']]) {
+      const r = await call(`/api/mentions?slug=${slug}`, { cookie: who.cookie });
+      assert(r.status === 200, `status ${r.status}`);
+      assert(!r.body.users.some((u) => u.login === 'claude' || u.login === 'tdoc'), `agent offered on ${slug}: ${JSON.stringify(r.body.users)}`);
+    }
+    // People keep their place: carol (in the doc) is still offered to alice.
+    const r = await call('/api/mentions?slug=notes', { cookie: alice.cookie });
+    assert(r.body.users.some((u) => u.login === 'carol'), JSON.stringify(r.body.users));
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
