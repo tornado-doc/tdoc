@@ -40,6 +40,13 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         assert.equal(await frame.getByRole('button', { name: 'Next slide' }).isDisabled(), true);
         await page.keyboard.press('Home');
         assert.equal(await counter.textContent(), '1 / 3');
+        // Laid out at presentation width, then scaled: on a phone the slide
+        // keeps its desktop layout (the box is wider than the reading column).
+        assert(await frame.locator('#s1').evaluate((el) => el.offsetWidth >= 960), 'slide laid out at presentation width');
+        await page.keyboard.press('ArrowRight');
+        await frame.getByRole('button', { name: 'Previous slide' }).focus();
+        await page.keyboard.press(' ');
+        assert.equal(await counter.textContent(), '1 / 3', 'space on the previous button goes back');
         if (process.env.TDOC_TEST_SCREENSHOTS) {
           fs.mkdirSync(process.env.TDOC_TEST_SCREENSHOTS, { recursive: true });
           await page.screenshot({ path: path.join(process.env.TDOC_TEST_SCREENSHOTS, `slides-${width}.png`) });

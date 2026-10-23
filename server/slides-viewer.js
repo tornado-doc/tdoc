@@ -55,18 +55,24 @@
 
   // Put one slide on the stage: fixed at its laid-out size, centered, scaled
   // to fit above the control bar. Everything temporary is recorded and undone.
+  // A slide is laid out at a presentation width (at least 960px) before it
+  // is scaled down, so a phone shows the deck's desktop layout, not the
+  // narrow reading column blown up. Its own aspect ratio sets the height.
+  var STAGE_WIDTH = 960;
   function mount(el) {
     var r = el.getBoundingClientRect();
-    var rec = { el: el, style: el.getAttribute('style'), popover: el.getAttribute('popover'), width: r.width, height: r.height };
+    var width = Math.max(r.width, STAGE_WIDTH);
+    var rec = { el: el, style: el.getAttribute('style'), popover: el.getAttribute('popover'), width: width, height: r.height * width / r.width };
     var original = getComputedStyle(el);
     var css = { position: 'fixed', inset: 'auto', left: '50%', top: 'calc(50% - 32px)', margin: '0',
-      width: r.width + 'px', height: r.height + 'px', 'max-width': 'none', 'max-height': 'none',
+      width: width + 'px', height: (getComputedStyle(el).aspectRatio !== 'auto' ? 'auto' : rec.height + 'px'), 'max-width': 'none', 'max-height': 'none',
       'box-sizing': 'border-box', 'transform-origin': 'center',
       'background-color': original.backgroundColor === 'rgba(0, 0, 0, 0)' ? '#fff' : original.backgroundColor };
     if (document.documentElement.getAttribute('data-tdoc-theme') === 'dark') css.filter = 'invert(1) hue-rotate(180deg)';
     Object.keys(css).forEach(function (key) { el.style.setProperty(key, css[key], 'important'); });
     el.setAttribute('popover', 'manual');
     el.showPopover();
+    rec.height = el.offsetHeight || rec.height;
     rec.fit = function () {
       var scale = Math.min((innerWidth - 24) / rec.width, (innerHeight - 88) / rec.height);
       el.style.setProperty('transform', 'translate(-50%,-50%) scale(' + scale + ')', 'important');
@@ -143,7 +149,9 @@
     if (!active) return;
     var k = e.key;
     if (k === 'Escape') { e.preventDefault(); stop(); }
-    else if (k === 'ArrowRight' || k === 'PageDown' || k === ' ' || k === 'Enter' && e.target === document.body) { e.preventDefault(); go(active.index + 1); }
+    // Space and Enter on a focused control press that control.
+    else if ((k === ' ' || k === 'Enter') && e.target.closest && e.target.closest('button,a,input,textarea,select')) return;
+    else if (k === 'ArrowRight' || k === 'PageDown' || k === ' ' || k === 'Enter') { e.preventDefault(); go(active.index + 1); }
     else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); go(active.index - 1); }
     else if (k === 'Home') { e.preventDefault(); go(0); }
     else if (k === 'End') { e.preventDefault(); go(active.list.length - 1); }
