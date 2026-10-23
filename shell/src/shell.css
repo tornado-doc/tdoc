@@ -55,6 +55,14 @@ body,
 /* The viewer applies its own theme inside the sandbox. An invert/counter-
    invert pair in the shell clips saturated image colors even when it cancels. */
 html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
+/* Presenting slides keeps commenting: the composer and the open comment card
+   stay above the full-screen frame. Pins stay hidden; the presenter's own bar
+   counts the threads on the slide shown. */
+.tdoc-document-app[data-presenting] .tdoc-reader-surface > .tdoc-popup,
+.tdoc-document-app[data-presenting] .tdoc-reader-surface > .tdoc-floating-open {
+  display: block !important;
+  z-index: 1001 !important;
+}
 
 .tdoc-bar button.tdoc-mode-trigger {
   box-sizing: border-box;

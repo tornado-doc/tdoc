@@ -12,7 +12,40 @@
   var active = null, trigger = null;
   function slides() { return Array.from(document.querySelectorAll(SLIDE)).filter(function (el) { return el instanceof HTMLElement; }); }
   function canPresent() { return document.documentElement.getAttribute('data-tdoc-interaction-mode') !== 'edit'; }
-  function post(open) { window.parent.postMessage({ source: 'tdoc-frame', type: 'tdoc:visualState', open: open }, '*'); }
+  function post(open) {
+    window.parent.postMessage({ source: 'tdoc-frame', type: 'tdoc:visualState', open: open }, '*');
+    // Presenting keeps commenting: the shell keeps its composer and comment
+    // card above the full-screen frame.
+    window.parent.postMessage({ source: 'tdoc-frame', type: 'tdoc:presentState', open: open }, '*');
+  }
+  function postShell(msg) { msg.source = 'tdoc-frame'; window.parent.postMessage(msg, '*'); }
+  // Threads per slide, from the probe's latest anchor resolution.
+  var anchors = { targets: {}, ids: [] };
+  document.addEventListener('tdoc:anchors-resolved', function (e) {
+    var d = e.detail || {};
+    anchors = { targets: d.targets || {}, ids: Array.isArray(d.comments) ? d.comments : [] };
+    if (active) updateCount();
+  });
+  function threadsOn(el) {
+    return anchors.ids.filter(function (id) {
+      var t = anchors.targets[id];
+      if (!t) return false;
+      if (t.element) return el.contains(t.element) || t.element.contains(el) && t.element === el;
+      // A text anchor can end just past its block (at the next slide's start),
+      // so the slide that holds its first character owns it.
+      var node = t.range && t.range.startContainer;
+      if (node && node.nodeType === 1 && node.childNodes[t.range.startOffset]) node = node.childNodes[t.range.startOffset];
+      return !!node && el.contains(node.nodeType === 1 ? node : node.parentNode);
+    });
+  }
+  function updateCount() {
+    if (!active) return;
+    var ids = threadsOn(active.list[active.index]);
+    active.threads = ids;
+    active.view.hidden = !ids.length;
+    active.view.textContent = ids.length === 1 ? '1 comment' : ids.length + ' comments';
+    active.view.setAttribute('aria-label', 'Show ' + active.view.textContent + ' on this slide');
+  }
   function provider(el) { el.setAttribute('data-tdoc-provider', ''); return el; }
   function restoreAttr(el, name, value) { if (value === null) el.removeAttribute(name); else el.setAttribute(name, value); }
 
@@ -30,14 +63,50 @@
     '.tdoc-present-bar button:focus-visible,.tdoc-present-open:focus-visible{outline:2px solid #8fb0ff;outline-offset:2px;}' +
     '.tdoc-present-bar output{min-width:64px;text-align:center;font-variant-numeric:tabular-nums;}' +
     '.tdoc-present-bar .tdoc-present-close{position:absolute;right:max(12px,env(safe-area-inset-right));}' +
+    '.tdoc-present-bar .tdoc-present-notes{position:absolute;left:max(12px,env(safe-area-inset-left));display:flex;gap:8px;}' +
+    '.tdoc-present-bar [hidden]{display:none!important;}' +
+    '@media (max-width:560px){.tdoc-present-bar{flex-wrap:wrap;}.tdoc-present-bar .tdoc-present-notes{position:static;width:100%;justify-content:center;}.tdoc-present-bar .tdoc-present-close{position:static;}}' +
     'html[data-tdoc-presenting]{overflow:hidden!important;}' +
+    // Slide view: every slide is laid out at the deck width (960px, 16:9) and
+    // zoomed to the reading column, like a presentation app's normal view.
+    // zoom (not transform) keeps layout, selection and comment anchors real.
+    'html[data-tdoc-slides]:not([data-tdoc-presenting]) [data-tdoc-slide]{width:960px!important;max-width:none!important;aspect-ratio:16/9;height:auto!important;box-sizing:border-box!important;overflow:hidden!important;zoom:var(--tdoc-slide-zoom,1);margin-left:auto!important;margin-right:auto!important;margin-bottom:calc(36px / var(--tdoc-slide-zoom,1))!important;}' +
+    '.tdoc-slide-num{position:absolute;z-index:1;font:12px/1 system-ui;color:#667085;font-variant-numeric:tabular-nums;pointer-events:none;}' +
+    'html[data-tdoc-presenting] .tdoc-slide-num{display:none!important;}' +
+    'html[data-tdoc-interaction-mode="edit"] .tdoc-slide-num{display:none!important;}' +
     'html[data-tdoc-presenting] .tdoc-present-open,html[data-tdoc-presenting] .tdoc-visual-open{display:none!important;}' +
     'html[data-tdoc-theme="dark"][data-tdoc-presenting]{filter:none!important;}';
   document.head.appendChild(style);
 
-  var openButton = null;
+  var openButton = null, numbers = [];
+  var zoomStyle = provider(document.createElement('style'));
+  document.head.appendChild(zoomStyle);
+  // Zoom the slides to the column they sit in, and number them underneath.
+  function layoutSlides(list) {
+    var root = document.documentElement;
+    if (!list.length) { root.removeAttribute('data-tdoc-slides'); zoomStyle.textContent = ''; numbers.forEach(function (n) { n.remove(); }); numbers = []; return; }
+    root.setAttribute('data-tdoc-slides', '');
+    var parent = list[0].parentElement || document.body;
+    var cs = getComputedStyle(parent);
+    var room = parent.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+    var zoom = Math.max(.2, Math.min(1, room / 960));
+    // In a provider <style>, not on <html>: nothing here may be saved into the
+    // author's document by Edit mode.
+    var rule = ':root{--tdoc-slide-zoom:' + zoom + '}';
+    if (zoomStyle.textContent !== rule) zoomStyle.textContent = rule;
+    while (numbers.length > list.length) numbers.pop().remove();
+    list.forEach(function (el, i) {
+      var n = numbers[i];
+      if (!n) { n = provider(document.createElement('div')); n.className = 'tdoc-slide-num'; n.setAttribute('aria-hidden', 'true'); document.body.appendChild(n); numbers[i] = n; }
+      n.textContent = (i + 1) + ' / ' + list.length;
+      var r = el.getBoundingClientRect();
+      n.style.top = (r.bottom + window.scrollY + 8) + 'px';
+      n.style.left = (r.right + window.scrollX - n.offsetWidth) + 'px';
+    });
+  }
   function placeButton() {
     var list = slides();
+    if (!active) layoutSlides(list);
     if (!list.length || active) { if (openButton) openButton.hidden = true; return; }
     if (!openButton) {
       openButton = provider(document.createElement('button'));
@@ -74,7 +143,8 @@
     el.showPopover();
     rec.height = el.offsetHeight || rec.height;
     rec.fit = function () {
-      var scale = Math.min((innerWidth - 24) / rec.width, (innerHeight - 88) / rec.height);
+      var barH = active && active.bar ? active.bar.offsetHeight : 64;
+      var scale = Math.min((innerWidth - 24) / rec.width, (innerHeight - barH - 24) / rec.height);
       el.style.setProperty('transform', 'translate(-50%,-50%) scale(' + scale + ')', 'important');
     };
     rec.fit();
@@ -93,8 +163,9 @@
     active.index = i;
     active.current = mount(list[i]);
     // The newest popover is drawn on top: re-show the bar above the slide.
-    if (active.bar.matches(':popover-open')) { active.bar.hidePopover(); active.bar.showPopover(); }
+    if (active.bar.matches(':popover-open')) { active.bar.hidePopover(); active.bar.showPopover(); active.current.fit(); }
     active.counter.value = (i + 1) + ' / ' + list.length;
+    updateCount();
     active.prev.disabled = i === 0; active.next.disabled = i === list.length - 1;
     list[i].setAttribute('aria-current', 'page');
     list.forEach(function (el, k) { if (k !== i) el.removeAttribute('aria-current'); });
@@ -116,13 +187,24 @@
     var counter = document.createElement('output'); counter.setAttribute('aria-live', 'polite'); bar.appendChild(counter);
     var next = button('›', 'Next slide', function () { go(active.index + 1); });
     var close = button('×', 'Stop presenting', stop, 'tdoc-present-close');
+    var notes = document.createElement('div'); notes.className = 'tdoc-present-notes'; bar.insertBefore(notes, bar.firstChild);
+    var commentBtn = document.createElement('button'); commentBtn.type = 'button'; commentBtn.textContent = 'Comment';
+    commentBtn.setAttribute('aria-label', 'Comment on this slide');
+    // The composer opens next to this button, above the bar, not at the
+    // slide's far corner.
+    commentBtn.addEventListener('click', function (e) { e.stopPropagation(); document.dispatchEvent(new CustomEvent('tdoc:comment-element', { detail: { el: active.list[active.index], rect: commentBtn.getBoundingClientRect() } })); });
+    var view = document.createElement('button'); view.type = 'button'; view.hidden = true;
+    view.addEventListener('click', function (e) { e.stopPropagation(); if (active && active.threads && active.threads.length) postShell({ type: 'tdoc:anchorClick', id: active.threads[0] }); });
+    notes.appendChild(commentBtn); notes.appendChild(view);
+    // Same rule as the page: commenting is offered only in Comment mode.
+    commentBtn.hidden = document.documentElement.getAttribute('data-tdoc-interaction-mode') !== 'comment';
     document.body.appendChild(stage); document.body.appendChild(bar);
-    active = { list: list, stage: stage, bar: bar, prev: prev, next: next, counter: counter, close: close, index: -1, current: null, scrollX: scrollX, scrollY: scrollY };
+    active = { list: list, stage: stage, bar: bar, prev: prev, next: next, counter: counter, close: close, view: view, threads: [], index: -1, current: null, scrollX: scrollX, scrollY: scrollY };
     document.documentElement.setAttribute('data-tdoc-presenting', '');
-    document.documentElement.setAttribute('data-tdoc-visual-open', '');
     stage.showPopover();
     go(index || 0);
     bar.showPopover();
+    active.current.fit();
     next.focus({ preventScroll: true });
     post(true);
   }
@@ -135,7 +217,6 @@
     if (a.bar.matches(':popover-open')) a.bar.hidePopover();
     a.stage.remove(); a.bar.remove();
     document.documentElement.removeAttribute('data-tdoc-presenting');
-    document.documentElement.removeAttribute('data-tdoc-visual-open');
     post(false);
     requestAnimationFrame(function () {
       var shown = a.list[a.index];
