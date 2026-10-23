@@ -90,6 +90,22 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(body.author.provider === 'raft' && body.author.handle === '@xiaocc', JSON.stringify(body.author));
   });
 
+  await t('an agent reply names the account whose token posted it, not one the agent claims', async () => {
+    const { env, slug, token, commentId } = await seed('owner-reply');
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: { ...target, server_slug: 'julie' } });
+    const response = await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token,
+      body: { slug, parent_id: commentId, text: 'handled', status: 'answered', agent_login: 'claude', owner: { key: 'mallory', display: 'mallory' } },
+    }), env, {});
+    const body = await response.json();
+    const a = body.author;
+    assert(a.owner && a.owner.key === 'owner' && a.owner.display === 'owner', JSON.stringify(a));
+    // The Raft server is where the agent runs, never who it acts for.
+    assert(a.location === 'julie' && a.scope === 'personal', JSON.stringify(a));
+    const [c] = await listComments(env, slug);
+    assert(c.replies[0].author.owner.display === 'owner', 'the owner is kept on the stored reply');
+  });
+
   await t('an unconfigured provider fails the delivery but still records the handoff', async () => {
     const { env, slug, token, commentId } = await seed();
     const body = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
@@ -473,6 +489,8 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const t2 = await (await worker.fetch(req('/api/notify/targets?slug=follow-doc', { token: tok.token }), env, {})).json();
     assert(t2.default && t2.default.source === 'doc', `expected a doc-level agent, got ${JSON.stringify(t2.default)}`);
     assert(t2.default.agent_sub === 'uuid-a', `wrong agent: ${t2.default.agent_sub}`);
+    // Each row says whose connection it is, from the doc owner's record.
+    assert(t2.default.owner && t2.default.owner.display === 'owner', `owner: ${JSON.stringify(t2.default.owner)}`);
   });
 
   await t('answering a comment does the same', async () => {

@@ -10783,9 +10783,47 @@ async function resolveAccountNotifyTargets(env, accountId) {
 // A team admin may use their own connections for this workspace. Connections
 // remain account-owned; they are never shared with ordinary team members.
 async function notifyTargetsFor(env, slug, gate, localDriver = null) {
-  if (!(gate.meta && gate.meta.workspace_id)) return resolveNotifyTargets(env, slug);
+  if (!(gate.meta && gate.meta.workspace_id)) {
+    const hosted = (gate.meta && gate.meta.hosted) || {};
+    const owner = await agentOwner(env, hosted.account_id, hosted.owner_key || hosted.github_login);
+    return withTargetOwner(await resolveNotifyTargets(env, slug), owner, 'personal');
+  }
   if (!localDriver) return { default: null, candidates: [], fallback: null, reason: 'team_admin_only' };
-  return resolveAccountNotifyTargets(env, localDriver);
+  // localDriverAccount only returns one of the caller's own accounts, so the
+  // caller's credential names the account these connections belong to.
+  const owner = await agentOwner(env, localDriver, credentialKey(gate.session || gate.actor));
+  return withTargetOwner(await resolveAccountNotifyTargets(env, localDriver), owner, 'team');
+}
+
+// The account an agent acts for, as its rows and replies name it: the
+// account's claimed handle, else its GitHub login, else its email's local
+// part (never the address). Always built from a credential or a stored
+// connection, never from anything the agent sends.
+async function agentOwner(env, accountId, key) {
+  const k = String(key || '').trim().toLowerCase();
+  const handle = accountId ? await accountClaimedHandle(env, accountId) : null;
+  const display = handle || (k.startsWith('email:') ? k.slice(6).split('@')[0] : k);
+  return display ? { ...(k ? { key: k } : {}), display } : null;
+}
+
+// The actor key a session or upload token speaks for. A hosted token carries
+// its GitHub login as github_login, not login (see stampHostedOwnership).
+function credentialKey(actor) {
+  return (actor && normalizeGithubLogin(actor.github_login)) || actorKey(actor);
+}
+
+// Every connection is account-owned, so every row of one answer has the same
+// owner; stamped on each row so the client never has to guess it. `scope` is
+// the space the agent would act in (a team doc, or the owner's own).
+function withTargetOwner(resolved, owner, scope) {
+  if (!resolved) return resolved;
+  const stamp = (t) => (t ? { ...t, ...(owner ? { owner } : {}), scope } : t);
+  return {
+    ...resolved,
+    default: stamp(resolved.default),
+    candidates: (resolved.candidates || []).map(stamp),
+    fallback: stamp(resolved.fallback),
+  };
 }
 
 // ─────────────────────────── handoffs ───────────────────────────
@@ -15522,17 +15560,31 @@ export default {
         const handoff = (await loadHandoffs(env, slug)).find((h) => h && Array.isArray(h.comment_ids) && h.comment_ids.includes(parent.id));
         replyTarget = normalizeNotifyTarget(handoff && handoff.recipient);
       }
+      // Who the agent acts for is the account whose token posted this, read
+      // off the credential: an agent cannot name its own owner.
+      const owner = auth.actor.kind === 'hosted'
+        ? await agentOwner(env, auth.actor.account_id, credentialKey(auth.actor))
+        : null;
+      if (owner) agent = { ...agent, owner };
       if (replyTarget) {
         const accountHandle = auth.actor.account_id
           ? (await accountClaimedHandle(env, auth.actor.account_id)) || auth.actor.github_login || ''
           : '';
+        // Where it runs, for the hover card only: the Raft server or the
+        // daemon's computer. A webhook's host is left out: readers of a public
+        // doc would see the owner's endpoint.
+        const location = replyTarget.provider === 'raft' ? replyTarget.server_slug || ''
+          : replyTarget.provider === 'local' ? replyTarget.device || '' : '';
         agent = {
           ...agent,
           provider: replyTarget.provider,
-          handle: replyTarget.agent_name ? `@${replyTarget.agent_name.replace(/^@/, '')}` : '',
+          handle: replyTarget.agent_name && replyTarget.provider !== 'local' ? `@${replyTarget.agent_name.replace(/^@/, '')}` : '',
+          ...(replyTarget.provider === 'local' ? { cli: replyTarget.cli } : {}),
+          ...(location ? { location } : {}),
           ...(accountHandle ? { principal: { display: `@${accountHandle}`, terminal: agent.name } } : {}),
         };
       }
+      agent = { ...agent, scope: writeGate.meta && writeGate.meta.workspace_id ? 'team' : 'personal' };
       if (replyingAgent) {
         try {
           await touchDocAgent(env, slug, replyingAgent);

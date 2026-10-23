@@ -71,7 +71,7 @@ async function t(name, fn) {
         await box.type('please fix @');
         await page.locator('.tdoc-mention-option').first().waitFor();
         const empty = await rows(page);
-        assert.deepEqual(empty.slice(0, 3), ['# Agents', "xiaocc · acmethis doc's agent", 'Claude Code · juliesmac'], JSON.stringify(empty));
+        assert.deepEqual(empty.slice(0, 3), ['# Agents', "xiaocc · juliethis doc's agent", 'Claude Code · julie'], JSON.stringify(empty));
         assert.equal(empty[3], '# People', JSON.stringify(empty));
         assert.ok(empty[4].startsWith('@dana'), JSON.stringify(empty));
         assert.ok(!empty.some((r) => /^@claude\b/i.test(r)), 'a fake @claude person is offered');
@@ -80,9 +80,9 @@ async function t(name, fn) {
         await box.type('cod');
         await page.waitForFunction(() => document.querySelectorAll('.tdoc-mention-agent').length === 2);
         const typed = await rows(page);
-        assert.deepEqual(typed, ['# Agents', 'Codex · juliesmac', 'Claude Code · juliesmac'], JSON.stringify(typed));
+        assert.deepEqual(typed, ['# Agents', 'Codex · julie', 'Claude Code · julie'], JSON.stringify(typed));
         await page.keyboard.press('Enter');
-        assert.equal(await box.inputValue(), `please fix @${JOINER}Codex · juliesmac `);
+        assert.equal(await box.inputValue(), `please fix @${JOINER}Codex · julie `);
         await page.getByRole('button', { name: 'Comment', exact: true }).click();
         await page.waitForFunction(() => window.__posts.length === 1);
         const post = await page.evaluate(() => window.__posts[0]);
@@ -99,7 +99,7 @@ async function t(name, fn) {
       await box.click();
       await box.type('@dev');
       await page.locator('.tdoc-mention-agent').first().waitFor();
-      assert.deepEqual((await rows(page)).slice(0, 2), ['# Agents', 'devin · acme']);
+      assert.deepEqual((await rows(page)).slice(0, 2), ['# Agents', 'devin · julie']);
       await context.close();
     });
 
@@ -111,6 +111,20 @@ async function t(name, fn) {
       const post = await page.evaluate(() => window.__posts[0]);
       assert.equal(post.opts.sendToAgent, false);
       assert.equal(post.opts.recipient, null);
+      await context.close();
+    });
+
+    await t('an agent reply reads "<name> · <owner>" and its hover card lists all five facts', async () => {
+      const { context, page } = await open(1050, '?view=authors');
+      const lines = await page.locator('.author .login').allTextContents();
+      assert.deepEqual(lines, ['smarter-tdoc-claw · yayashuxue', 'Codex · julie', '@smarter-tdoc-claw · @julie'], JSON.stringify(lines));
+      await page.locator('.tdoc-agent-name').first().hover();
+      await page.locator('.tdoc-agent-card').waitFor();
+      const card = (await page.locator('.tdoc-agent-card').textContent()).replace(/\s+/g, ' ');
+      assert.equal(card, 'Namesmarter-tdoc-clawActs foryayashuxueProgramRaft (Claude)LocationjulieScopePersonal');
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'agent-author-card.png') });
+      // A local agent wears its program's mark, not a generic terminal.
+      assert.equal(await page.locator('.tdoc-agent-provider-mark').nth(1).locator('svg[viewBox="0 0 180 180"]').count(), 1);
       await context.close();
     });
 
