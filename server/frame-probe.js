@@ -654,14 +654,14 @@
     hoverPill.style.left = (r.right + sx - 34) + 'px'; hoverPill.style.top = (r.top + sy + 6) + 'px';
   }
   function hideHover() { hoverEl = null; if (hoverOutline) hoverOutline.style.display = 'none'; if (hoverPill) hoverPill.style.display = 'none'; }
-  function commentOnElement(el) {
+  function commentOnElement(el, near) {
     var r = clipRect(el);   // visible box — the raw rect of a scroll-container child can be miles wide
     var label = el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('data-tdoc-artifact') || el.tagName.toLowerCase();
     // Anchor the composer to the PILL the user just clicked (element top-right),
     // not the element box — a tall section would otherwise park the composer
     // below the whole box, far from the click.
     var pr = (hoverPill && hoverPill.style.display !== 'none') ? hoverPill.getBoundingClientRect() : null;
-    var ar = pr && (pr.width || pr.height) ? pr : { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
+    var ar = near || (pr && (pr.width || pr.height) ? pr : null) || { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
     post({
       type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: cssPath(el),
       text: '', context_before: '', context_after: '',
@@ -669,6 +669,13 @@
     });
     hideHover();
   }
+  // The slides presenter's "Comment on this slide" asks for a whole-element
+  // comment the same way the hover pill does.
+  document.addEventListener('tdoc:comment-element', function (e) {
+    var d = e.detail || {};
+    if (!d.el || !d.el.isConnected) return;
+    hideHover(); commentOnElement(d.el, d.rect || null);
+  });
   document.addEventListener('mousemove', function (e) {
     if (interactionMode !== 'comment' || !elementComment || visualViewerOpen()) { if (hoverEl) hideHover(); return; }
     var t = e.target;
@@ -1136,6 +1143,8 @@
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
     setActiveAnchor(_activeAnchorId, false);
+    // Frame-local: the slides presenter counts the threads on the slide shown.
+    try { document.dispatchEvent(new CustomEvent('tdoc:anchors-resolved', { detail: { targets: _anchorTargets, comments: (comments || []).filter(function (c) { return c && !c.hidden && !c.deleted; }).map(function (c) { return c.id; }) } })); } catch (x) {}
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
 
