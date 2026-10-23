@@ -277,6 +277,27 @@ const APP_HTML = `<!doctype html>
       await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length === n, before);
     });
 
+    await test('a native modal <dialog> can be commented on; the layer goes back when it closes', async () => {
+      await page.evaluate(() => {
+        const d = document.createElement('dialog'); d.id = 'nd';
+        d.innerHTML = '<h2>Share this doc</h2><button id="nd-done">Done</button>';
+        document.body.appendChild(d); d.showModal();
+      });
+      await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'nd');
+      const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+      if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
+      await page.locator('#nd h2').click();
+      const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]').first();
+      await c.click();
+      await page.keyboard.type('Share title is vague');
+      assert((await c.inputValue().catch(() => c.innerText())).includes('Share title is vague'), 'typing in the composer over a modal failed');
+      await page.keyboard.press('Escape');
+      await page.evaluate(() => { const d = document.getElementById('nd'); if (d.open) d.close(); d.remove(); });
+      await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
+      // Leave the dock as the next case expects it: not picking.
+      if (await pick.evaluate((b) => b.classList.contains('on'))) await pick.click();
+    });
+
     await test('a comment follows its element when the page is rebuilt with a card above it', async () => {
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
       const heading = page.locator('main > section.card h2', { hasText: 'Weekly active users' });

@@ -157,6 +157,26 @@ ${uiCss}
   host.id = 'tdoc-feedback-root';
   document.documentElement.appendChild(host);
 
+  // A host's modal <dialog> sits in the top layer and makes everything
+  // outside it inert, so the feedback layer ends up underneath and
+  // unclickable: nobody could comment on a modal. While a modal is open the
+  // layer moves inside it (still position:fixed over the viewport), and goes
+  // back when it closes. A modal library's inert/aria-hidden on the layer is
+  // removed as well.
+  (function followModals() {
+    const home = () => { if (host.parentNode !== document.documentElement) document.documentElement.appendChild(host); };
+    const place = () => {
+      const modal = [...document.querySelectorAll('dialog[open]')].reverse().find((d) => { try { return d.matches(':modal'); } catch (_) { return false; } });
+      if (modal) { if (host.parentNode !== modal) modal.appendChild(host); } else home();
+    };
+    new MutationObserver((records) => {
+      if (records.some((r) => r.target !== host && r.target.localName === 'dialog')) place();
+      if (host.hasAttribute('inert')) host.removeAttribute('inert');
+      if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
+    }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['open', 'inert', 'aria-hidden'] });
+    document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
+  })();
+
   // Where we came from is where the comments go: the worker that served this
   // script. The bookmarklet and the one-line install both load it by URL.
   const base = (() => {
