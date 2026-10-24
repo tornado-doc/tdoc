@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Link2, Send } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
+import { Bookmarklet } from './feedback-install.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
 import { CommentCard } from './document/comment-card.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
@@ -131,7 +132,7 @@ export function FeedbackSpace({ boot }) {
           <details className="tdoc-fbspace-how" open={!isOwner && !live.length}>
             <summary>How to comment on the app</summary>
             <ol>
-              <li>Drag this to your bookmarks bar (skip if you have it): <a className="tdoc-fbspace-bm" href={bookmarklet} draggable="true" onClick={(e) => e.preventDefault()}>🌪️ tdoc</a> No bar? ⌘⇧B.</li>
+              <li>Drag this to your bookmarks bar (skip if you have it): <Bookmarklet className="tdoc-fbspace-bm" href={bookmarklet} /> No bar? ⌘⇧B.</li>
               <li>Open <a href={origin} target="_blank" rel="noopener noreferrer">{host}</a> and click the bookmark, then <strong>+ Comment</strong>.</li>
             </ol>
           </details>

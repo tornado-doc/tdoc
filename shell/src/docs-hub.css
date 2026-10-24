@@ -884,3 +884,7 @@
   background: var(--td-surface); color: var(--td-ink); font-size: 12.5px; line-height: 1.5;
   white-space: pre-wrap; word-break: break-all;
 }
+
+/* /f/<share>: the folder icon sits on the title's baseline. */
+.tdoc-folder-share-icon { vertical-align: -4px; margin-right: 8px; }
+.tdoc-folder-share-meta { margin-top: 0; }
