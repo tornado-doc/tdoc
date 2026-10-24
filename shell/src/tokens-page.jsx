@@ -2,11 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Laptop } from 'lucide-react';
 import { AppDialog } from './ui/dialog.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from './agent-marks.jsx';
+import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx';
 import './docs-hub.css';
 
 // Devices & agents: every computer or agent the person approved (one
-// credential each). Each can publish, edit and delete their docs, so the page
-// exists to answer "is there one here I don't recognise?" and remove it.
+// credential each). Each acts as the person in the workspaces it reaches --
+// all of them, or the ones left ticked when it was allowed -- so the page
+// answers "is there one here I don't recognise?" and "what can each one
+// see?", and lets the person change the workspaces or remove it.
 
 function when(iso) {
   const t = Date.parse(iso || '');
@@ -29,11 +32,14 @@ function ClientMark({ client }) {
   return <Laptop size={18} aria-hidden="true" />;
 }
 
-export function DevicesBody({ tokens: given }) {
-  const initial = (Array.isArray(given) ? given : [])
-    .slice()
-    .sort((a, b) => String(b.last_used || b.created || '').localeCompare(String(a.last_used || a.created || '')));
-  const [tokens, setTokens] = useState(initial);
+const byRecent = (list) => list.slice().sort((a, b) => String(b.last_used || b.created || '').localeCompare(String(a.last_used || a.created || '')));
+
+export function DevicesBody({ tokens: given, workspaces: givenWorkspaces }) {
+  const [tokens, setTokens] = useState(() => byRecent(Array.isArray(given) ? given : []));
+  // My docs and each team: what a connection can be given.
+  const [workspaces, setWorkspaces] = useState(Array.isArray(givenWorkspaces) ? givenWorkspaces : []);
+  // { token, picked } while the Change dialog is open.
+  const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -42,7 +48,10 @@ export function DevicesBody({ tokens: given }) {
     if (Array.isArray(given)) return;
     fetch('/api/me/tokens', { credentials: 'same-origin' })
       .then((r) => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
-      .then((body) => setTokens((body.tokens || []).slice().sort((a, b) => String(b.last_used || b.created || '').localeCompare(String(a.last_used || a.created || '')))))
+      .then((body) => {
+        setTokens(byRecent(body.tokens || []));
+        if (Array.isArray(body.workspaces)) setWorkspaces(body.workspaces);
+      })
       .catch(() => setNotice('Could not load agent access. Reload and try again.'));
   }, [given]);
 
@@ -66,6 +75,36 @@ export function DevicesBody({ tokens: given }) {
       setConfirm(null);
     }
   };
+
+  // The server answers with what the connection now reaches (null: all of
+  // them); its very next request runs under that.
+  const saveWorkspaces = async () => {
+    const { token: target, picked } = editing;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/me/tokens/workspaces', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: target.id, workspaces: picked }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      const body = await r.json();
+      const next = body.workspaces === undefined ? picked : body.workspaces;
+      setTokens((list) => list.map((t) => (t.id === target.id ? { ...t, workspaces: next } : t)));
+      setNotice(`Saved. ${deviceName(target)} can now reach ${Array.isArray(next) ? workspaceSummary(workspaces, next) : 'all your workspaces'}.`);
+      setEditing(null);
+    } catch {
+      setNotice('Could not change that connection. Reload and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Someone with no team has one workspace and nothing to choose: no line,
+  // no Change button (the access model: they never see the ticks).
+  const choosing = workspaces.length > 1;
+  const reach = (t) => (Array.isArray(t.workspaces) ? workspaceSummary(workspaces, t.workspaces) : 'All workspaces');
 
   const revokeAll = async () => {
     setBusy(true);
@@ -92,7 +131,7 @@ export function DevicesBody({ tokens: given }) {
     <>
         <div className="tdoc-access-intro">
           <p className="muted">
-            Every computer or agent you approved can publish, edit and delete your docs. Remove any you don’t recognise; it will need your approval to come back.
+            Every computer or agent you approved can open, publish and edit docs as you, in the workspaces it can reach. Remove any you don’t recognise; it will need your approval to come back.
           </p>
           {tokens.length ? <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirmAll(true)}>Remove all access</button> : null}
         </div>
@@ -113,8 +152,22 @@ export function DevicesBody({ tokens: given }) {
                     ].join(' · ')}
                     {t.doc ? <> · first published <a href={`/d/${encodeURIComponent(t.doc.slug)}`}>{t.doc.title}</a></> : t.label ? <> · first published {t.label}</> : null}
                   </div>
+                  {choosing || Array.isArray(t.workspaces) ? (
+                    <div className="doc-meta tdoc-dev-reach">Can reach: <b>{reach(t)}</b></div>
+                  ) : null}
                 </div>
-                <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirm(t)}>Remove</button>
+                <div className="tdoc-dev-actions">
+                  {choosing ? (
+                    <button
+                      type="button"
+                      className="tdoc-fbspace-btn"
+                      onClick={() => setEditing({ token: t, picked: Array.isArray(t.workspaces) ? t.workspaces.filter((id) => workspaces.some((w) => w.id === id)) : workspaces.map((w) => w.id) })}
+                    >
+                      Change
+                    </button>
+                  ) : null}
+                  <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirm(t)}>Remove</button>
+                </div>
               </div>
             ))}
           </section>
@@ -137,6 +190,32 @@ export function DevicesBody({ tokens: given }) {
             {confirm.doc ? <>, which first published “{confirm.doc.title}”,</> : null} will stop working immediately.
             Nothing it already published is removed.
           </p>
+        </AppDialog>
+      ) : null}
+
+      {editing ? (
+        <AppDialog
+          open
+          onOpenChange={(open) => { if (!open && !busy) setEditing(null); }}
+          title="Which workspaces can it reach?"
+          actions={(
+            <>
+              <button type="button" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+              <button type="button" className="primary" disabled={busy || !editing.picked.length} onClick={saveWorkspaces}>Save</button>
+            </>
+          )}
+        >
+          <p>
+            <b>{deviceName(editing.token)}</b>{editing.token.client ? ` (${editing.token.client})` : ''} can open, publish and edit docs in the workspaces you tick. The change applies to its next request.
+          </p>
+          <WorkspaceChecklist
+            workspaces={workspaces}
+            picked={editing.picked}
+            onChange={(picked) => setEditing((e) => ({ ...e, picked }))}
+            disabled={busy}
+            label="Workspaces this connection can reach"
+          />
+          {!editing.picked.length ? <p className="muted tdoc-dev-pick-hint">Tick at least one. To stop it entirely, remove it instead.</p> : null}
         </AppDialog>
       ) : null}
 

@@ -123,6 +123,7 @@ const OFFLINE = [
   'kv-write-budget.test.js', // repeat actions spend no extra KV writes (daily quota)
   'team-billing.test.js', // #48 Team plan: Stripe checkout, portal, signed webhook, seat sync
   'team-scoped-token.test.js', // #65 a token narrowed to one team cannot read, list or write outside it
+  'workspace-scoped-token.test.js', // agent connections reach only the workspaces ticked for them; change and remove take effect at once
   'appsumo-licensing.test.js', // #61 AppSumo lifetime licenses: signed webhook, OAuth claim, seat cap, refund
   'logout-provider.test.js', // #58 logout also ends the Clerk session
   'reply-activity.test.js', // old versions see live reply status without rewriting their snapshot
@@ -168,6 +169,7 @@ const BROWSER = [
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
+  'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold

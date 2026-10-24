@@ -98,6 +98,12 @@ build_payload() {
       meta: JSON.parse(fs.readFileSync(metaPath, "utf8")),
     };
     if (commentsPath) out.comments = JSON.parse(fs.readFileSync(commentsPath, "utf8"));
+    // Where a NEW doc should land. Only an agent connection limited to some
+    // workspaces reads these (it files the doc there at once); any other
+    // credential publishes to My docs and the move below places it. --team
+    // is a demand (refused if unreachable); the default team is a preference.
+    if (process.env.TDOC_UPLOAD_TEAM) out.team = process.env.TDOC_UPLOAD_TEAM;
+    if (process.env.TDOC_UPLOAD_TEAM_DEFAULT) out.team_default = process.env.TDOC_UPLOAD_TEAM_DEFAULT;
     const widgets = JSON.parse(widgetsJson || "{}");
     if (Object.keys(widgets).length) out.widgets = widgets;
     process.stdout.write(JSON.stringify(out));
@@ -116,6 +122,7 @@ PERSONAL_FLAG=0
 FOLDER_FLAG=""
 UP_NEW_DOC=0
 UP_TEAM=""
+UP_SCOPED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --platform)   PLATFORM_FLAG="${2:-}"; [ -n "$PLATFORM_FLAG" ] || usage; shift 2 ;;
@@ -606,6 +613,10 @@ hosted_pair_signin() {
       _who="$(printf '%s' "$payload" | json_get identity.login)"
       finish_signin_wait
       echo "[tdoc] Signed in as ${_who:-your account}" >&2
+      # Unticked workspaces on the Allow page: say so, once, here.
+      if [ -n "$(printf '%s' "$payload" | json_get workspaces)" ]; then
+        echo "[tdoc] This connection reaches only the workspaces you ticked. Change them in Settings → Agents: $base/me?view=settings#agent-access" >&2
+      fi
       clear_pending_signin
       trap - INT
       if [ -n "$PAIR_TOKEN" ] && [ -n "$PAIR_ACCOUNT_ID" ]; then return 0; fi
@@ -1674,6 +1685,7 @@ upload_version() {
     # Where the doc is: a first publish may be placed in the default team
     # below, and every publish ends by saying where it landed.
     [ "$(printf '%s' "$resp" | json_get new_doc)" = "true" ] && UP_NEW_DOC=1
+    [ "$(printf '%s' "$resp" | json_get scoped)" = "true" ] && UP_SCOPED=1
     UP_TEAM="$(printf '%s' "$resp" | json_get team)"
     merged="$(printf '%s' "$resp" | json_get mergedComments)"; merged="${merged:-0}"
     if [ "$merged" != "0" ] && [ "$merged" != "null" ]; then
@@ -1698,6 +1710,18 @@ EOF
     # Same teach-in the API puts on the 403 body — but as people-words, not a
     # dumped JSON blob. Failures land here (CLI publish), not in the web dialog.
     _qerr="$(printf '%s' "$resp" | json_get error)"
+    # An agent connection limited to some workspaces reached outside them,
+    # or has more than one team and was not told which. Say it in words and
+    # where the person changes it; never retry around it.
+    if [ "$_qerr" = "token_scope" ] || [ "$_qerr" = "team_required" ]; then
+      _smsg="$(printf '%s' "$resp" | json_get message)"
+      echo "[tdoc] Not published: ${_smsg:-this agent connection cannot reach that workspace.}" >&2
+      case "$_smsg" in
+        *http*) ;;
+        *) [ "$_qerr" = "token_scope" ] && echo "[tdoc] Change which workspaces it reaches: $UPLOAD_BASE/me?view=settings#agent-access" >&2 ;;
+      esac
+      return 1
+    fi
     if [ "$_qerr" = "quota_docs" ]; then
       _qlimit="$(printf '%s' "$resp" | json_get limit)"
       _qused="$(printf '%s' "$resp" | json_get used)"
@@ -1747,6 +1771,14 @@ LOCAL_VERSIONS="$(node -e '
   process.stdout.write(vs.join("\n"));
 ' "$META_FILE")"
 echo "[tdoc] uploading $SLUG versions: $(echo "$LOCAL_VERSIONS" | tr '\n' ' ')"
+# The team a new doc is headed for (--team, else the default team), so a
+# connection limited to some workspaces can file it there directly.
+TDOC_UPLOAD_TEAM="$TEAM_FLAG"
+TDOC_UPLOAD_TEAM_DEFAULT=""
+if [ -z "$TDOC_UPLOAD_TEAM" ] && [ "$PERSONAL_FLAG" != "1" ] && [ "$PLATFORM" = "hosted" ]; then
+  TDOC_UPLOAD_TEAM_DEFAULT="$("$(cd "$(dirname "$0")" && pwd)/tdoc-move" --default-id 2>/dev/null || true)"
+fi
+export TDOC_UPLOAD_TEAM TDOC_UPLOAD_TEAM_DEFAULT
 # Older versions are best-effort: a transient failure on an OLD version must NOT
 # abort the publish before the LATEST version + meta land (otherwise meta
 # advertises a version whose R2 object 404s). We collect older-version failures
@@ -1769,7 +1801,9 @@ fi
 TDOC_MOVE="$(cd "$(dirname "$0")" && pwd)/tdoc-move"
 # The default team applies to a doc's FIRST publish only: an existing doc is
 # wherever someone put it, and a default must never move it.
-if [ -z "$TEAM_FLAG" ] && [ "$UP_NEW_DOC" = "1" ] && [ "$PERSONAL_FLAG" != "1" ] && [ "$PLATFORM" = "hosted" ]; then
+# A connection limited to some workspaces has already been placed by the
+# server (the default team if it reaches it), so no default move on top.
+if [ -z "$TEAM_FLAG" ] && [ "$UP_NEW_DOC" = "1" ] && [ "$UP_SCOPED" != "1" ] && [ "$PERSONAL_FLAG" != "1" ] && [ "$PLATFORM" = "hosted" ]; then
   # Nearest first: this agent, this project, this machine (tdoc-move --default).
   TEAM_FLAG="$("$TDOC_MOVE" --default-id 2>/dev/null || true)"
 fi
