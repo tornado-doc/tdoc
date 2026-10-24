@@ -195,9 +195,10 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
               {conn.id === 'local' ? (
                 <>
                   <p className="muted tdoc-conn-note">Needs the tdoc skill signed in on that computer (<code>tdoc-publish --signin-only</code>). Then, in a terminal or from the agent itself:</p>
-                  <pre className="tdoc-conn-pre">{`bash "$SKILL_DIR/bin/tdoc-daemon" start            # keeps polling
-bash "$SKILL_DIR/bin/tdoc-daemon" once             # one poll, for cron or launchd
-bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # prints a LaunchAgent plist`}</pre>
+                  <pre className="tdoc-conn-pre">{`bash "$SKILL_DIR/bin/tdoc-daemon" install          # macOS: runs now and at login
+bash "$SKILL_DIR/bin/tdoc-daemon" uninstall        # turns it off
+bash "$SKILL_DIR/bin/tdoc-daemon" start            # in a terminal (Linux)
+bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # only prints a LaunchAgent plist`}</pre>
                   <details className="tdoc-conn-alt">
                     <summary>Or let the agent set it up</summary>
                     <code>{LOCAL_DAEMON_PROMPT}</code>

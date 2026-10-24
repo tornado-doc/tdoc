@@ -657,14 +657,21 @@ handoff resolved. Needs `~/.tdoc/published.json` (sign in with
 `tdoc-publish --signin-only` first).
 
 When a person asks to set it up ("let tdoc hand me comments on this
-computer"), run it; do not start it in the background on your own:
+computer"), or says yes to the one question in FIRST-DOC.md Step 1c, run it.
+Never start it, in the background or otherwise, without that yes — not
+silently, not "to be helpful":
 
 ```bash
-bash "$SKILL_DIR/bin/tdoc-daemon" start [--cli claude,codex] [--interval 60]
-bash "$SKILL_DIR/bin/tdoc-daemon" once             # one poll: cron, launchd
+bash "$SKILL_DIR/bin/tdoc-daemon" install          # macOS: LaunchAgent, starts now and at login; re-run replaces
+bash "$SKILL_DIR/bin/tdoc-daemon" uninstall        # stop it and remove the LaunchAgent
+bash "$SKILL_DIR/bin/tdoc-daemon" start [--cli claude,codex] [--interval 60]   # foreground; Linux: the only way
+bash "$SKILL_DIR/bin/tdoc-daemon" once             # one poll: cron
 bash "$SKILL_DIR/bin/tdoc-daemon" status
 bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # prints a LaunchAgent plist; loads nothing
 ```
+
+`tdoc-doctor --json` reports it under `.daemon` (installed / loaded /
+running) and, when it is off, as an optional `ask` step — never a blocking one.
 
 State and logs live under `~/.tdoc/daemon/` (one log per run in `runs/`).
 One handoff runs at a time, in a scratch workdir per doc, with a timeout
@@ -1243,8 +1250,10 @@ Remote storage holds optional `meta.access`:
 - **Access only ever tightens by omission.** A flag left out keeps what is
   already stored — the CLI leaves an existing `meta.access` alone, and the
   worker carries the stored block forward when an upload names none. A publish
-  that means to OPEN a doc must say so (`--visibility public`); this is why
-  FIRST-DOC.md names the policy instead of publishing flagless.
+  that means to OPEN a doc must say so (`--visibility public`), and a
+  re-publish that must stay closed is safest saying so too; this is why
+  FIRST-DOC.md names the policy (`--visibility private --history owner`)
+  instead of publishing flagless.
 - Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
 - `tdoc-publish --team <name|id>` puts the doc in a team workspace the account belongs to (hosted). Safe to pass on every publish; once the doc is there it is a no-op. Use it for recurring docs that belong to a team (daily reports), so they never land in My docs.
 - `tdoc-move --team <name|id> <slug>...` / `tdoc-move --personal <slug>...` moves existing docs in or out of a team; `tdoc-move --teams` lists yours; `tdoc-move --create-team <name>` (or `--create` / publish `--create-team` alongside `--team`) makes one with you as admin. Inviting people stays on the web. Same rules as the web: the author moves a personal doc in; a team doc is moved by the team's admins.

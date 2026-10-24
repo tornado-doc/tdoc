@@ -13,6 +13,8 @@
 //     and the untrusted-input frame
 //   - a failing CLI is retried once, then the handoff is reported failed
 //   - install-launchd prints a plist and loads nothing
+//   - install / uninstall drive launchctl (a fake one here) under a temp HOME,
+//     and tdoc-doctor reports the helper as an optional step
 //   - the runner adapters: conservative argv, bypass only when asked
 //
 // Run with: node test/daemon-cli.test.js
@@ -294,6 +296,102 @@ try {
     assert(fs.existsSync(path.join(DAEMON_DIR, 'dev.tdoc.daemon.plist')), 'written');
     assert(/launchctl load -w/.test(r.stderr) && !/loaded/.test(r.stdout), 'tells how to load; does not load');
     assert(apiCalls() === before, 'no network for install-launchd');
+  });
+
+  // ---- install / uninstall: a fake launchctl on PATH, a temp HOME. Nothing
+  // here touches the real ~/Library/LaunchAgents or the real launchd.
+  fs.writeFileSync(path.join(FAKEBIN, 'launchctl'), `#!/usr/bin/env bash
+echo "$*" >> "$RECORD/launchctl.txt"
+case "$1" in
+  print) [ -f "$RECORD/launchd-loaded" ] ;;
+  bootstrap) if [ "\${FAKE_BOOTSTRAP_FAIL:-0}" = 1 ]; then echo "Bootstrap failed: 5" >&2; exit 5; fi; touch "$RECORD/launchd-loaded" ;;
+  load) touch "$RECORD/launchd-loaded" ;;
+  bootout|unload) rm -f "$RECORD/launchd-loaded" ;;
+esac
+`);
+  fs.chmodSync(path.join(FAKEBIN, 'launchctl'), 0o755);
+  const LA = path.join(HOME, 'Library', 'LaunchAgents', 'dev.tdoc.daemon.plist');
+  const lctl = () => { try { return fs.readFileSync(path.join(RECORD, 'launchctl.txt'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const darwin = { TDOC_DAEMON_OS: 'darwin', TDOC_DAEMON_INSTALL_WAIT_MS: '0' };
+
+  t('install writes the LaunchAgent under HOME, bootstraps it, and prints status', () => {
+    try { fs.unlinkSync(path.join(RECORD, 'launchctl.txt')); } catch {}
+    const r = daemon(['install', '--cli', 'claude'], darwin);
+    assert(r.status === 0, `exit ${r.status}: ${r.stderr}`);
+    assert(fs.existsSync(LA), 'plist in ~/Library/LaunchAgents');
+    const plist = fs.readFileSync(LA, 'utf8');
+    assert(plist.includes(`<string>${process.execPath}</string>`), 'absolute node path');
+    const PATHv = (plist.match(/<key>PATH<\/key><string>([^<]*)<\/string>/) || [])[1] || '';
+    assert(PATHv.split(':')[0] === path.dirname(process.execPath), `node dir first: ${PATHv}`);
+    assert(PATHv.split(':').includes(FAKEBIN), `the claude dir is on the job's PATH: ${PATHv}`);
+    assert(/<string>start<\/string>\s*<string>--cli<\/string>\s*<string>claude<\/string>/.test(plist), 'runs start');
+    const calls = lctl();
+    const uidN = process.getuid();
+    assert(calls.includes(`bootstrap gui/${uidN} ${LA}`), `bootstrapped: ${calls}`);
+    assert(/Installed dev\.tdoc\.daemon/.test(r.stdout) && /running:/.test(r.stdout) && /pending:/.test(r.stdout), r.stdout);
+  });
+
+  t('install again replaces the job: boots out the old one first', () => {
+    try { fs.unlinkSync(path.join(RECORD, 'launchctl.txt')); } catch {}
+    const r = daemon(['install', '--cli', 'claude', '--interval', '90'], darwin);
+    assert(r.status === 0, `exit ${r.status}: ${r.stderr}`);
+    const calls = lctl();
+    const bo = calls.findIndex((c) => c.startsWith('bootout '));
+    const bs = calls.findIndex((c) => c.startsWith('bootstrap '));
+    assert(bo >= 0 && bs > bo, `bootout before bootstrap: ${calls}`);
+    assert(/Reinstalled/.test(r.stdout), r.stdout);
+    assert(/<string>90<\/string>/.test(fs.readFileSync(LA, 'utf8')), 'new flags written');
+  });
+
+  t('tdoc-doctor reports the helper as installed, and offers no optional step', () => {
+    const r = spawnSync('bash', [path.join(BIN, 'tdoc-doctor'), '--json'], { encoding: 'utf8', env: { ...process.env, HOME, PATH: `${FAKEBIN}${path.delimiter}${process.env.PATH}`, RECORD, TDOC_DAEMON_DIR: DAEMON_DIR, ...darwin } });
+    const j = JSON.parse(r.stdout);
+    assert(j.daemon && j.daemon.supported === true && j.daemon.installed === true && j.daemon.loaded === true, JSON.stringify(j.daemon));
+    assert(Array.isArray(j.optional_steps) && !j.optional_steps.some((s) => s.id === 'daemon'), JSON.stringify(j.optional_steps));
+    assert(!j.missing_steps.some((s) => s.id === 'daemon'), 'never a blocking step');
+  });
+
+  t('bootstrap refused: falls back to load -w', () => {
+    daemon(['uninstall'], darwin);
+    try { fs.unlinkSync(path.join(RECORD, 'launchctl.txt')); } catch {}
+    const r = daemon(['install', '--cli', 'claude'], { ...darwin, FAKE_BOOTSTRAP_FAIL: '1' });
+    assert(r.status === 0, `exit ${r.status}: ${r.stderr}`);
+    assert(lctl().includes(`load -w ${LA}`), `fallback: ${lctl()}`);
+  });
+
+  t('uninstall boots it out and removes the plist; twice is a no-op', () => {
+    try { fs.unlinkSync(path.join(RECORD, 'launchctl.txt')); } catch {}
+    const r = daemon(['uninstall'], darwin);
+    assert(r.status === 0 && /Uninstalled/.test(r.stdout), `${r.status} ${r.stdout} ${r.stderr}`);
+    assert(!fs.existsSync(LA), 'plist removed');
+    assert(lctl().some((c) => c.startsWith('bootout gui/')), `booted out: ${lctl()}`);
+    const again = daemon(['uninstall'], darwin);
+    assert(again.status === 0 && /not installed/.test(again.stdout), again.stdout);
+  });
+
+  t('tdoc-doctor: helper off is an optional "ask" step, not a missing one', () => {
+    const r = spawnSync('bash', [path.join(BIN, 'tdoc-doctor'), '--json'], { encoding: 'utf8', env: { ...process.env, HOME, PATH: `${FAKEBIN}${path.delimiter}${process.env.PATH}`, RECORD, TDOC_DAEMON_DIR: DAEMON_DIR, ...darwin } });
+    const j = JSON.parse(r.stdout);
+    assert(j.daemon.installed === false && j.daemon.running === false, JSON.stringify(j.daemon));
+    const step = j.optional_steps.find((s) => s.id === 'daemon');
+    assert(step && step.kind === 'ask' && /tdoc-daemon install/.test(step.cmd), JSON.stringify(j.optional_steps));
+    assert(!j.missing_steps.some((s) => s.id === 'daemon'), 'never a blocking step');
+  });
+
+  t('install with no sign-in says so and loads nothing', () => {
+    const empty = path.join(world, 'empty-home2');
+    fs.mkdirSync(empty, { recursive: true });
+    try { fs.unlinkSync(path.join(RECORD, 'launchctl.txt')); } catch {}
+    const r = daemon(['install', '--cli', 'claude'], { ...darwin, HOME: empty });
+    assert(r.status === 1 && /sign in first/.test(r.stderr), `${r.status} ${r.stderr}`);
+    assert(!lctl().some((c) => /^(bootstrap|load)/.test(c)), 'nothing loaded');
+  });
+
+  t('Linux: install and uninstall say not supported yet, and how to run it instead', () => {
+    for (const cmd of ['install', 'uninstall']) {
+      const r = daemon([cmd], { TDOC_DAEMON_OS: 'linux' });
+      assert(r.status === 0 && /macOS only for now/.test(r.stdout) && /tdoc-daemon" start/.test(r.stdout), `${cmd}: ${r.stdout} ${r.stderr}`);
+    }
   });
 
   t('no published.json: says to sign in, exits 1', () => {

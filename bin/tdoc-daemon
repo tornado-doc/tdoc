@@ -11,6 +11,9 @@
 #   tdoc-daemon start [--cli claude,codex] [--interval 60] [--workdir DIR]
 #   tdoc-daemon once                  # one poll, for cron or launchd
 #   tdoc-daemon status
+#   tdoc-daemon install               # macOS: run it at login (LaunchAgent), then status
+#   tdoc-daemon uninstall             # stop it and remove the LaunchAgent
+#   tdoc-daemon state                 # local state as JSON (for tdoc-doctor)
 #   tdoc-daemon install-launchd       # prints a LaunchAgent plist; does not load it
 set -euo pipefail
 TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"

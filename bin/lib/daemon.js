@@ -13,6 +13,9 @@
 //                     [--runner cli|oar]
 //   tdoc-daemon once  [same flags]      one poll, for cron or launchd
 //   tdoc-daemon status                  what is registered, running, pending
+//   tdoc-daemon install [flags]         macOS: run it at login (LaunchAgent)
+//   tdoc-daemon uninstall               stop it and remove the LaunchAgent
+//   tdoc-daemon state                   local state as JSON, no network
 //   tdoc-daemon install-launchd [flags] print a LaunchAgent plist (not loaded)
 //
 // Credentials: the account's upload token in ~/.tdoc/published.json, the one
@@ -64,7 +67,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  const lines = fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 17);
+  const lines = fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 20);
   return lines.map((l) => l.replace(/^\/\/ ?/, '')).join('\n');
 }
 
@@ -354,9 +357,35 @@ async function cmdStatus(args) {
   } catch (e) { console.log(`pending:     unknown (${e.message})`); }
 }
 
-function cmdInstallLaunchd(args) {
+// ---- running it in the background (macOS launchd) ---------------------------
+const LABEL = 'dev.tdoc.daemon';
+const { spawnSync } = require('child_process');
+function launchAgentsDir() { return path.join(HOME, 'Library', 'LaunchAgents'); }
+function plistPath() { return path.join(launchAgentsDir(), `${LABEL}.plist`); }
+// TDOC_DAEMON_OS lets the tests see the Linux branch on a Mac.
+function hostOs() { return process.env.TDOC_DAEMON_OS || process.platform; }
+function uid() { return typeof process.getuid === 'function' ? process.getuid() : Number(process.env.UID || 0); }
+function launchctl(args) {
+  const r = spawnSync('launchctl', args, { encoding: 'utf8', timeout: 30000 });
+  return { ok: r.status === 0, out: `${r.stdout || ''}${r.stderr || ''}`.trim(), error: r.error };
+}
+// Whether launchd has the job loaded. `print` is read-only.
+function launchdLoaded() { return launchctl(['print', `gui/${uid()}/${LABEL}`]).ok; }
+
+// PATH for the job. launchd starts it with a bare /usr/bin:/bin, and the CLIs
+// live wherever the person installed them (npm prefix, ~/.local/bin, brew), so
+// the dirs of node, claude and codex as found right now come first, then the
+// rest of this shell's PATH, then the usual system dirs.
+function launchdPath() {
+  const dirs = [path.dirname(process.execPath)];
+  for (const c of knownClis()) { const f = findOnPath(RUNNERS[c].bin); if (f) dirs.push(path.dirname(f)); }
+  dirs.push(...String(process.env.PATH || '').split(path.delimiter));
+  dirs.push('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin');
+  return [...new Set(dirs.filter((d) => d && path.isAbsolute(d)))].join(path.delimiter);
+}
+
+function buildPlist(args) {
   const st = settings(args);
-  const node = process.execPath;
   const extra = [];
   if (args.cli) extra.push('--cli', st.clis.join(','));
   if (args.interval) extra.push('--interval', String(st.interval));
@@ -364,36 +393,113 @@ function cmdInstallLaunchd(args) {
   if (args.device) extra.push('--device', st.device);
   if (args['permission-mode']) extra.push('--permission-mode', st.permissionMode);
   if (args.runner) extra.push('--runner', st.runner);
-  // PATH as this shell sees it: launchd gives a bare one, and the CLIs live
-  // wherever the person installed them.
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const argv = [node, __filename, 'start', ...extra];
+  // Absolute node: launchd's PATH may not have it, and a version manager's
+  // shim may not resolve outside an interactive shell.
+  const argv = [process.execPath, __filename, 'start', ...extra];
+  const env = { PATH: launchdPath(), HOME, TDOC_SKILL_DIR: SKILL_DIR };
+  for (const k of ['TDOC_DIR', 'TDOC_CONFIG', 'TDOC_DAEMON_DIR']) if (process.env[k]) env[k] = process.env[k];
+  // KeepAlive only on a crash: `start` exits 0 when it is told to stop or the
+  // sign-in is revoked, and restarting it then would only fill the log.
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>dev.tdoc.daemon</string>
+  <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key>
   <array>
 ${argv.map((a) => `    <string>${esc(a)}</string>`).join('\n')}
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>${esc(process.env.PATH || '/usr/local/bin:/usr/bin:/bin')}</string>
-    <key>HOME</key><string>${esc(HOME)}</string>
+${Object.entries(env).map(([k, v]) => `    <key>${k}</key><string>${esc(v)}</string>`).join('\n')}
   </dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>60</integer>
   <key>StandardOutPath</key><string>${esc(path.join(DAEMON_DIR, 'launchd.out.log'))}</string>
   <key>StandardErrorPath</key><string>${esc(path.join(DAEMON_DIR, 'launchd.err.log'))}</string>
 </dict>
 </plist>
 `;
+  return { plist, st };
+}
+
+function cmdInstallLaunchd(args) {
+  const { plist } = buildPlist(args);
   ensureDir(DAEMON_DIR);
-  const file = path.join(DAEMON_DIR, 'dev.tdoc.daemon.plist');
+  const file = path.join(DAEMON_DIR, `${LABEL}.plist`);
   fs.writeFileSync(file, plist);
   process.stdout.write(plist);
-  console.error(`\nWritten to ${file} (not loaded). To run it at login:\n  cp "${file}" ~/Library/LaunchAgents/\n  launchctl load -w ~/Library/LaunchAgents/dev.tdoc.daemon.plist\nTo stop: launchctl unload -w ~/Library/LaunchAgents/dev.tdoc.daemon.plist`);
+  console.error(`\nWritten to ${file} (not loaded). To install and start it in one step: tdoc-daemon install\nBy hand:\n  cp "${file}" ~/Library/LaunchAgents/\n  launchctl load -w ~/Library/LaunchAgents/${LABEL}.plist\nTo stop: tdoc-daemon uninstall`);
+}
+
+function notSupported(what) {
+  console.log(`tdoc-daemon ${what}: running in the background is supported on macOS only for now.\nOn this computer, run \`bash "${path.join(BIN_DIR, 'tdoc-daemon')}" start\` in a terminal and leave it open.`);
+}
+
+// Stop the loaded job, if any. bootout is the current verb; unload is the
+// one older macOS understands.
+function unloadJob() {
+  if (!launchdLoaded()) return false;
+  if (!launchctl(['bootout', `gui/${uid()}/${LABEL}`]).ok) launchctl(['unload', '-w', plistPath()]);
+  return true;
+}
+
+async function cmdInstall(args) {
+  if (hostOs() !== 'darwin') { notSupported('install'); return; }
+  readConfig(); // signed in, or say how
+  const { plist, st } = buildPlist(args);
+  if (!st.clis.length) throw new Error(`no CLI found on PATH (looked for ${knownClis().join(', ')}); install Claude Code or Codex first, or pass --cli`);
+  // Re-install replaces: stop the old job before its plist changes under it.
+  const replaced = unloadJob();
+  // A daemon started by hand in a terminal holds the pid file; the job would
+  // exit at once and launchd would keep restarting it.
+  const deadline = Date.now() + 5000;
+  while (runningPid() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 250));
+  const other = runningPid();
+  if (other) throw new Error(`a tdoc-daemon is already running (pid ${other}), probably in a terminal; stop it (Ctrl-C) and run install again`);
+  ensureDir(launchAgentsDir());
+  ensureDir(DAEMON_DIR);
+  fs.writeFileSync(plistPath(), plist);
+  let r = launchctl(['bootstrap', `gui/${uid()}`, plistPath()]);
+  if (!r.ok) {
+    const legacy = launchctl(['load', '-w', plistPath()]);
+    if (!legacy.ok) throw new Error(`launchctl could not load ${plistPath()}: ${r.out || (r.error && r.error.message) || 'bootstrap failed'}; ${legacy.out || 'load failed'}`);
+  }
+  console.log(`${replaced ? 'Reinstalled' : 'Installed'} ${LABEL}: ${st.clis.map((c) => `${c} on ${st.device}`).join(', ')} will pick up comments sent to them, now and after every login.`);
+  console.log(`plist:       ${plistPath()}`);
+  console.log(`logs:        ${DAEMON_DIR}`);
+  console.log(`turn off:    bash "${path.join(BIN_DIR, 'tdoc-daemon')}" uninstall`);
+  // Give the job a moment to write its pid, so status is not "no" by a hair.
+  const wait = Number(process.env.TDOC_DAEMON_INSTALL_WAIT_MS ?? 5000);
+  const until = Date.now() + wait;
+  while (!runningPid() && Date.now() < until) await new Promise((res) => setTimeout(res, 250));
+  console.log('');
+  await cmdStatus(args);
+}
+
+function cmdUninstall() {
+  if (hostOs() !== 'darwin') { notSupported('uninstall'); return; }
+  const wasLoaded = unloadJob();
+  const had = fs.existsSync(plistPath());
+  if (had) fs.unlinkSync(plistPath());
+  console.log(wasLoaded || had ? `Uninstalled ${LABEL}: comments sent to this computer's agents will wait until a daemon runs again.` : `${LABEL} was not installed; nothing to do.`);
+}
+
+// What is set up here, without the network: for tdoc-doctor.
+function localState() {
+  const supported = hostOs() === 'darwin';
+  const pid = runningPid();
+  return {
+    supported,
+    installed: supported && fs.existsSync(plistPath()),
+    loaded: supported ? launchdLoaded() : false,
+    running: Boolean(pid),
+    pid: pid || null,
+    plist: supported ? plistPath() : null,
+    last_poll: loadState().last_poll || null,
+  };
 }
 
 (async () => {
@@ -405,6 +511,9 @@ ${argv.map((a) => `    <string>${esc(a)}</string>`).join('\n')}
     else if (cmd === 'once') await cmdOnce(args);
     else if (cmd === 'status') await cmdStatus(args);
     else if (cmd === 'install-launchd') cmdInstallLaunchd(args);
+    else if (cmd === 'install') await cmdInstall(args);
+    else if (cmd === 'uninstall') cmdUninstall();
+    else if (cmd === 'state') console.log(JSON.stringify(localState()));
     else { console.error(`unknown command: ${cmd}\n\n${usage()}`); process.exit(2); }
   } catch (e) {
     console.error(`tdoc-daemon: ${e.message}`);

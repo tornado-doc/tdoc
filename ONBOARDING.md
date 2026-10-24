@@ -18,8 +18,17 @@ The first doc a new user gets is specified in [FIRST-DOC.md](FIRST-DOC.md); this
 
 First check whether the user has already installed via the plugin marketplace. The marketplace install is a separate path the user runs themselves (`/plugin marketplace add tornado-doc/tdoc`) and does NOT need you to clone anything.
 
+**Pick the skill directory for the agent you are.** Claude Code reads skills from `~/.claude/skills/`; Codex reads them from `~/.codex/skills/` (`~/.agents/skills/` is the shared location both resolve, see "Setup check" in SKILL.md). Use the one that matches you:
+
 ```bash
-ls ~/.claude/skills/tdoc/SKILL.md 2>/dev/null && echo "already installed"
+# Claude Code
+SKILL_DIR="$HOME/.claude/skills/tdoc"
+# Codex
+SKILL_DIR="$HOME/.codex/skills/tdoc"
+```
+
+```bash
+ls "$SKILL_DIR/SKILL.md" 2>/dev/null && echo "already installed"
 ```
 
 If that prints "already installed" → skip to Step 2.
@@ -27,14 +36,16 @@ If that prints "already installed" → skip to Step 2.
 Otherwise, the user reached this doc via Option B or Option C and you need to clone:
 
 ```bash
-git clone https://github.com/tornado-doc/tdoc ~/.claude/skills/tdoc
+git clone https://github.com/tornado-doc/tdoc "$SKILL_DIR"
 ```
 
-If the user already has `~/.claude/skills/tdoc/` from a prior install, update instead:
+If the user already has that directory from a prior install, update instead:
 
 ```bash
-cd ~/.claude/skills/tdoc && git pull --ff-only origin main
+cd "$SKILL_DIR" && git pull --ff-only origin main
 ```
+
+The rest of this file writes `~/.claude/skills/tdoc/...`; on Codex read it as `~/.codex/skills/tdoc/...` (that is, `$SKILL_DIR/...`).
 
 **Important about the plugin marketplace path:** if the user said they want the "one-line marketplace install," that's a direct slash-command they run themselves in Claude Code — NOT an agent task. The two commands are:
 
@@ -107,6 +118,15 @@ The JSON has these fields you care about:
   "missing_steps": [
     { "id": "...", "label": "...", "kind": "install|login|click", "cmd": "..." }
   ],
+  "optional_steps": [          // never block readiness
+    { "id": "daemon", "label": "...", "kind": "ask", "cmd": "bin/tdoc-daemon install" }
+  ],
+  "daemon": {                  // the background helper that runs "Send to agent" here
+    "supported": true/false,   // macOS only for now
+    "installed": true/false,   // LaunchAgent plist present
+    "loaded": true/false,      // launchd has the job
+    "running": true/false
+  },
   "update": {
     "ok": true/false,
     "checked": true/false,
@@ -116,6 +136,11 @@ The JSON has these fields you care about:
   }
 }
 ```
+
+`.optional_steps` and `.daemon` are informational too. `kind: "ask"` means
+ask the human first and run `cmd` only on a yes — the one place that question
+is asked is FIRST-DOC.md Step 1c. Never run it unasked, and do not count it in
+the readiness line.
 
 `.update` is informational (this skill checkout vs `origin/main`), not a
 `missing_step`. If `ok` is false and the checkout has not diverged, suggest
@@ -163,8 +188,8 @@ Two things from that file are easy to skip and must not be:
 - **Say the scan line before scanning.** Enumerating someone's assistant
   folders unannounced, on first run, is the fastest way to lose them.
 - **Publish it privately, and hand over the real URL.** This one is about them,
-  so it goes up as `--visibility private` — a real `tdoc.dev` link, on their
-  account, that nobody else can open. Do not end on a `localhost` URL; that is
+  so it goes up as `--visibility private --history owner` — a real `tdoc.dev`
+  link, on their account, that nobody else can open. Do not end on a `localhost` URL; that is
   the failure the localhost rule in SKILL.md exists to prevent.
 
 If the machine has no history to read, FIRST-DOC.md says what to do instead —
@@ -231,7 +256,8 @@ re-ask on a later run. A declined offer is a decision, not a pending task.
 
 Tell the user:
 
-- They can now run `/tdoc new <prompt>` for any new doc
+- They can now run `/tdoc new <prompt>` for any new doc (FIRST-DOC.md's
+  wrap-up already told them the two ways to have comments fixed)
 - Run `/tdoc update` to pull the latest skill code anytime
 - Run `/tdoc doctor` if anything feels off
 - Visit `https://github.com/tornado-doc/tdoc` for the source, issues, contributions
