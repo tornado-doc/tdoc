@@ -97,6 +97,7 @@ record the calling skill in `meta.json`.
   <slug>/
     meta.json          # { title, created, versions: [...] }
     v1/index.html
+    v1/preview.svg     # optional 1200×630 share card, rasterized on publish
     v1/widgets/<name>.html  # optional; sandboxed JS island, served at /widget/<name>
     v2/index.html
     comments.json      # [{ id, version, anchor, text, status }]
@@ -312,13 +313,13 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
      programmatic callers must make that exception visible with
      `--custom-template`.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
-4. **Hand the HTML to `bin/tdoc-write`. Do not write into `~/tdocs` yourself.**
+4. **Hand the HTML to `bin/tdoc-write`.** Before that, make the share card for a substantive document: copy `$SKILL_DIR/authoring/preview-card.svg` to a temporary file, replace its title and conclusion with this document's words, and replace the sample `42%` panel with a real key result or remove it. Keep text inside the card at 1200×630; escape XML characters. Use colors that fit the document. Do not insert scripts, external images, CSS, or links. The server makes a title-and-excerpt card if none is supplied. Do not write into `~/tdocs` yourself.
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-write" \
      --slug <slug> --title "<title>" --style <selected-style> \
      --prompt "<the user's request, one line>" \
-     --html-file /tmp/<slug>.html
+     --html-file /tmp/<slug>.html --preview-file /tmp/<slug>-preview.svg
    ```
 
    One call does everything a version needs: validates the host, bakes the
@@ -441,6 +442,7 @@ TDOC_NEW_CALLER=document-release \
 - `--widgets-dir <path>` — optional directory of sandboxed widget HTML files.
   Each `<name>.html` is stored as `v1/widgets/<name>.html`; JavaScript belongs
   there, never in the host HTML.
+- `--preview-file <path>` — optional 1200×630 SVG share card stored with the version and rendered as PNG on publish.
 - `--prompt "<one-line>"` — prompt-of-record in `meta.json` (defaults
   to `Imported via tdoc-new by <caller>`).
 - `--publish` — also run `tdoc-publish` so a shareable URL is returned.
@@ -534,13 +536,13 @@ silently is the #1 source of regression complaints.
    - `anchor.context_before` / `anchor.context_after` — surrounding text
      (~60 chars each side) for disambiguation when the same text appears
      multiple times
-5. **Hand it to `bin/tdoc-write --version next`. Do not write `v<n+1>/` yourself.**
+5. **Hand it to `bin/tdoc-write --version next`.** Update the share card to match the new version, using `authoring/preview-card.svg` as a starting point. Do not write `v<n+1>/` yourself.
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-write" \
      --slug <slug> --title "<existing title>" --style <the doc's style> \
      --prompt "<what this revision changes, one line>" \
-     --html-file /tmp/<slug>-next.html --version next
+     --html-file /tmp/<slug>-next.html --preview-file /tmp/<slug>-preview.svg --version next
    ```
 
    Same gateway as `/tdoc new`, so a new version gets the same treatment a

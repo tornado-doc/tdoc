@@ -23,6 +23,8 @@
 #   --html-stdin               read HTML for v1 from stdin
 #   --widgets-dir <path>       optional directory of sandboxed widget HTML
 #                              files; copied to v1/widgets/<name>.html.
+#   --preview-file <path>      optional 1200×630 SVG share card; copied to
+#                              v<n>/preview.svg and uploaded with the version.
 #
 # Optional:
 #   --prompt "<one-line>"      prompt-of-record stored in meta.json (defaults
@@ -70,6 +72,7 @@ TITLE=""
 HTML_FILE=""
 HTML_STDIN=0
 WIDGETS_DIR=""
+PREVIEW_FILE=""
 PROMPT=""
 PUBLISH=0
 OPEN_URL=0
@@ -95,6 +98,7 @@ while [ $# -gt 0 ]; do
     --html-file)  HTML_FILE="${2:-}"; shift 2 ;;
     --html-stdin) HTML_STDIN=1; shift ;;
     --widgets-dir) WIDGETS_DIR="${2:-}"; shift 2 ;;
+    --preview-file) PREVIEW_FILE="${2:-}"; shift 2 ;;
     --prompt)     PROMPT="${2:-}"; shift 2 ;;
     --publish)    PUBLISH=1; shift ;;
     --open)       OPEN_URL=1; shift ;;
@@ -141,6 +145,9 @@ if [ -n "$HTML_FILE" ] && [ ! -f "$HTML_FILE" ]; then
 fi
 if [ -n "$WIDGETS_DIR" ] && [ ! -d "$WIDGETS_DIR" ]; then
   die "--widgets-dir not found: $WIDGETS_DIR"
+fi
+if [ -n "$PREVIEW_FILE" ] && [ ! -f "$PREVIEW_FILE" ]; then
+  die "--preview-file not found: $PREVIEW_FILE"
 fi
 case "$STYLE" in
   default|technical|editorial|paper) ;;
@@ -233,6 +240,20 @@ if [ -n "$WIDGETS_DIR" ]; then
   done < <(find "$WIDGETS_DIR" -maxdepth 1 -type f -name '*.html' -print | sort)
   [ "$WIDGET_COUNT" -gt 0 ] || die "--widgets-dir contains no .html files"
   [ "$WIDGET_COUNT" -le 32 ] || die "--widgets-dir contains more than 32 widgets"
+fi
+if [ -n "$PREVIEW_FILE" ]; then
+  [ "$(wc -c < "$PREVIEW_FILE" | tr -d ' ')" -le 131072 ] || die "--preview-file exceeds 128 KB"
+  cp "$PREVIEW_FILE" "$STAGE_DIR/v$VERSION_N/preview.svg" || die "could not read --preview-file '$PREVIEW_FILE'"
+  python3 - "$STAGE_DIR/v$VERSION_N/preview.svg" <<'PY' || die "--preview-file must be a valid 1200×630 SVG"
+import sys
+import xml.etree.ElementTree as ET
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+    assert root.tag == '{http://www.w3.org/2000/svg}svg'
+    assert root.attrib.get('width') == '1200' and root.attrib.get('height') == '630'
+except (ET.ParseError, AssertionError):
+    sys.exit(1)
+PY
 fi
 
 if [ ! -s "$STAGE_HTML" ]; then

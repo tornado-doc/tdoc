@@ -26,6 +26,11 @@ const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`;
 const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";
 const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;
 const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";
+// Lazy SVG rasterizer and CJK font, inlined by bin/tdoc-bundle.
+const PREVIEW_RENDERER = "__TDOC_PREVIEW_RENDERER__";
+const PREVIEW_WASM_B64 = "__TDOC_PREVIEW_WASM_B64__";
+const PREVIEW_FONTS_B64 = "__TDOC_PREVIEW_FONTS_B64__";
+const PREVIEW_FONT_COVERAGE = "__TDOC_PREVIEW_FONT_COVERAGE__";
 // The in-page feedback client (feedback/src/main.jsx → server/runtime/feedback.js),
 // served at /feedback.js for the one-line install and the bookmarklet.
 const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;
@@ -2866,25 +2871,23 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   const access = accessFromMeta(docMeta || {});
   // The description stored at publish is used only for the version it was
   // computed from; any other version's page still scans its own head. The
-  // image candidate from the head is only computed when no image was stored
-  // -- each scan is a few regex passes over 96KB, and both used to run on
-  // every view.
+  // A version's card URL is unique so social crawlers do not pin an older
+  // image. Nonpublic documents never expose their title in OG imagery.
   const preview = docMeta && docMeta.preview && typeof docMeta.preview === 'object' ? docMeta.preview : null;
   const description = (preview && typeof preview.description === 'string' && Number(preview.description_v) === Number(version))
     ? preview.description
     : ((SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180)) || '');
-  const cachedImage = preview && typeof preview.image === 'string' ? preview.image : '';
-  const fromHtml = cachedImage ? '' : ((SHELL.previewFromHtml && SHELL.previewFromHtml(scanHtml, {
-    slug, version, maxLen: 180,
-  }).image) || '');
-  let shareImage = cachedImage || fromHtml || '';
+  let shareImage = docIndexable(access)
+    ? (Number(preview && preview.image_v) === Number(version) && preview.image === previewCardUrl(slug, version)
+      ? previewCardUrl(slug, version) : '/tdoc_logo-v2.png')
+    : '/tdoc_logo-v2.png';
   if (shareImage && shareImage.startsWith('/') && origin) shareImage = origin + shareImage;
-  // -v2 cache-busts Apple/iMessage OG caches that pin the old tornado PNG URL.
-  if (!shareImage && origin) shareImage = `${origin}/tdoc_logo-v2.png`;
   // Homepage share cards: never use the slug title or the first inline SVG
   // (brand mark) — crawlers only see the shell SEO, not the framed landing.
-  let seoTitle = title;
-  let seoDescription = description || (isLanding ? 'Docs that fix themselves.' : `A tdoc by ${author || 'tdoc'}.`);
+  let seoTitle = docIndexable(access) ? title : 'tdoc document';
+  let seoDescription = docIndexable(access)
+    ? (description || `A tdoc by ${author || 'tdoc'}.`)
+    : 'A document shared on tdoc.';
   if (isLanding) {
     seoTitle = 'Tornado: AI Native Docs';
     seoDescription = 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.';
@@ -2899,7 +2902,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     robots: docIndexable(access) ? '' : 'noindex, nofollow',
   } : null;
   return SHELL.shellHtml({
-    title: isLanding ? seoTitle : title,
+    title: seoTitle,
     nonceAttr,
     cfgJson: safeJsonForScript(cfg),
     bootJson: safeJsonForScript({
@@ -7031,16 +7034,16 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
     const key = normalizeActorKey(row.meta && row.meta.hosted && row.meta.hosted.owner_key);
     return key && key.startsWith('email:') ? key.slice(6).split('@')[0] : '';
   };
-  // The list's preview: the excerpt and first image cached on meta at
-  // publish (docPreviewFromHtml). The meta is already in hand for every
+  // The list's preview: the card cached on meta at publish. The meta is already in hand for every
   // row, so this costs nothing per row -- never a content read here. Images
   // ride along only as a URL: an inline SVG data URL can run to 60KB and
   // would make the boot payload grow with the pictures in people's docs.
   const rowPreview = (row) => {
     const preview = row.meta && row.meta.preview && typeof row.meta.preview === 'object' ? row.meta.preview : null;
-    if (!preview) return { excerpt: '', image: '' };
+    if (!preview) return { excerpt: '', image: '/preview-card-placeholder.svg' };
     const excerpt = typeof preview.excerpt === 'string' && preview.excerpt ? preview.excerpt : (typeof preview.description === 'string' ? preview.description : '');
-    const image = typeof preview.image === 'string' && /^(?:https?:\/\/|\/)/i.test(preview.image) ? preview.image : '';
+    const image = Number(preview.image_v) === Number(row.latest) && preview.image === previewCardUrl(row.slug, row.latest)
+      ? preview.image : '/preview-card-placeholder.svg';
     return { excerpt: excerpt.slice(0, 220), image };
   };
   const publicRow = (row) => ({
@@ -7152,35 +7155,12 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     const latest = versions[versions.length - 1]?.n || 1;
     const published = versions[0]?.created || meta.created || '';
     const updated = versions[versions.length - 1]?.created || published;
-    // Prefer cached meta.preview. Backfill when excerpt/image missing, or when
-    // image is a tiny SVG data URL (checkbox icon mistakenly cached earlier).
-    let cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
-    let excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
-    let image = cached && typeof cached.image === 'string' ? cached.image : '';
-    const weakSvg = typeof image === 'string'
-      && image.startsWith('data:image/svg')
-      && image.length < 2000;
-    if (!excerpt || !image || weakSvg) {
-      const refreshed = await refreshDocPreview(env, slug, meta);
-      if (refreshed && refreshed.preview && typeof refreshed.preview === 'object') {
-        const next = refreshed.preview;
-        const nextExcerpt = typeof next.excerpt === 'string' ? next.excerpt : '';
-        const nextImage = typeof next.image === 'string' ? next.image : '';
-        const nextExcerptUse = excerpt || nextExcerpt;
-        const nextImageUse = (weakSvg || !image) ? (nextImage || image) : image;
-        const changed = nextExcerptUse !== excerpt || nextImageUse !== image;
-        excerpt = nextExcerptUse;
-        image = nextImageUse;
-        if (changed) {
-          try {
-            await putDocMetaJson(env, slug, JSON.stringify({
-              ...refreshed,
-              preview: { excerpt, image },
-            }));
-          } catch { /* best-effort */ }
-        }
-      }
-    }
+    // Reading a profile never renders a card or fetches the source document.
+    // Older pins get the same-size placeholder until the explicit backfill.
+    const cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
+    const excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
+    const image = Number(cached && cached.image_v) === Number(latest) && cached.image === previewCardUrl(slug, latest)
+      ? cached.image : '/preview-card-placeholder.svg';
     docs.push({
       slug,
       title: meta.title || slug,
@@ -8302,6 +8282,7 @@ async function createDocForSession(env, req, session, { html, meta, version, tea
   }
   const verify = await env.DOCS.head(r2Key);
   if (!verify) return { ok: false, response: json({ error: 'r2_write_lost' }, { status: 500 }) };
+  incoming.preview = await buildDocPreview(env, stampedHtml, { slug: newSlug, version: 1, title: incoming.title || newSlug });
   await putDocMetaJson(env, newSlug, JSON.stringify(incoming));
   return { ok: true, slug: newSlug, actor, meta: incoming };
 }
@@ -9060,6 +9041,9 @@ function docPreviewFromHtml(html, { slug, version, title } = {}) {
     return { excerpt: '', image: '' };
   }
   const preview = SHELL.previewFromHtml(html, { slug, version, title, maxLen: 220, skipHeading: true });
+  // Images inside the document are not share cards. The publisher supplies a
+  // card or the server makes one from these words below.
+  preview.image = '';
   // The doc page's share description, computed here once instead of on
   // every view: the same call over the same head of the same bytes that
   // the page would make (shellDocumentWorker), so the card does not change.
@@ -9074,6 +9058,103 @@ function docPreviewFromHtml(html, { slug, version, title } = {}) {
   return preview;
 }
 
+const PREVIEW_CARD_MAX_BYTES = 128 * 1024;
+const PREVIEW_CARD_TAGS = new Set(['svg', 'g', 'defs', 'linearGradient', 'radialGradient', 'stop', 'rect', 'circle', 'ellipse', 'line', 'path', 'polygon', 'polyline', 'text', 'tspan']);
+function previewCardUrl(slug, version) {
+  return `/d/${encodeURIComponent(slug)}/preview/v${Number(version)}.png`;
+}
+function previewCardKey(slug, version) {
+  return `docs/${slug}/v${Number(version)}/preview.png`;
+}
+function xmlCardText(value) {
+  return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+function cardLines(value, maxUnits, maxLines) {
+  const words = Array.from(String(value || '').replace(/\s+/g, ' ').trim());
+  const lines = [];
+  let line = '', width = 0;
+  for (const char of words) {
+    const units = /[\x00-\x7f]/.test(char) ? (char === ' ' ? 0.4 : 0.57) : 1;
+    if (width + units > maxUnits && line) {
+      lines.push(line.trim()); line = ''; width = 0;
+      if (lines.length === maxLines) break;
+    }
+    line += char; width += units;
+  }
+  if (lines.length < maxLines && line.trim()) lines.push(line.trim());
+  if (lines.length === maxLines && words.join('').length > lines.join('').length) lines[maxLines - 1] = lines[maxLines - 1].slice(0, -1) + '…';
+  return lines;
+}
+function defaultPreviewSvg(title, excerpt) {
+  const titleSvg = cardLines(title || 'Untitled', 22, 2).map((line, i) => `<text x="92" y="${252 + i * 76}" font-size="60" font-weight="700" fill="#132b28">${xmlCardText(line)}</text>`).join('');
+  const excerptSvg = cardLines(excerpt, 46, 2).map((line, i) => `<text x="94" y="${424 + i * 38}" font-size="28" fill="#42635b">${xmlCardText(line)}</text>`).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><rect width="1200" height="630" fill="#f3f8f4"/><rect x="42" y="42" width="1116" height="546" rx="34" fill="#fff"/><rect x="42" y="42" width="12" height="546" rx="6" fill="#198052"/><circle cx="1080" cy="132" r="92" fill="#e1f4e8"/><circle cx="1080" cy="132" r="49" fill="#bce4ca"/><text x="92" y="129" font-size="26" font-weight="700" fill="#198052">tdoc</text>${titleSvg}${excerptSvg}<line x1="92" y1="532" x2="1108" y2="532" stroke="#dce9df" stroke-width="2"/><text x="94" y="569" font-size="20" fill="#729385">tdoc.dev</text></svg>`;
+}
+function validatePreviewSvg(svg) {
+  if (typeof svg !== 'string' || !svg.startsWith('<svg') || utf8ByteLength(svg) > PREVIEW_CARD_MAX_BYTES) return 'invalid_preview_svg';
+  const root = svg.match(/^<svg\b([^>]*)>/);
+  if (!root || !/\bwidth=["']1200["']/.test(root[1]) || !/\bheight=["']630["']/.test(root[1])) return 'invalid_preview_dimensions';
+  const withoutNamespace = svg.replace(/\bxmlns=["']http:\/\/www\.w3\.org\/2000\/svg["']/, '');
+  if (/<\s*[!?]/.test(svg) || /\b(?:on[a-z]+|href|style|filter|mask)\s*=/i.test(withoutNamespace) || /(?:url\s*\(|data:|https?:|&#|&(?!(?:amp|lt|gt|quot|apos);))/i.test(withoutNamespace)) return 'unsafe_preview_svg';
+  const tags = [...svg.matchAll(/<\/?\s*([A-Za-z][\w:-]*)\b/g)];
+  if (!tags.length || tags.some((match) => !PREVIEW_CARD_TAGS.has(match[1]))) return 'unsafe_preview_svg';
+  return null;
+}
+let previewRendererReady = null;
+let previewFontBytes = null;
+let previewSupportedGlyphs = null;
+function previewDecodeBase64(value) {
+  return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+}
+function previewTextWithFallback(svg) {
+  if (!Array.isArray(PREVIEW_FONT_COVERAGE)) return svg;
+  if (!previewSupportedGlyphs) previewSupportedGlyphs = new Set(PREVIEW_FONT_COVERAGE);
+  const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('und', { granularity: 'grapheme' }) : null;
+  return svg.replace(/<[^>]*>|[^<]+/g, (part) => {
+    if (part.startsWith('<')) return part;
+    const clusters = segmenter ? [...segmenter.segment(part)].map((item) => item.segment) : Array.from(part);
+    return clusters.map((cluster) => [...cluster].every((char) => /\s/.test(char) || previewSupportedGlyphs.has(char.codePointAt(0))) ? cluster : '★').join('');
+  });
+}
+async function renderPreviewPng(svg) {
+  if (!PREVIEW_RENDERER || typeof PREVIEW_RENDERER !== 'object') throw new Error('preview_renderer_unavailable');
+  if (!previewRendererReady) previewRendererReady = PREVIEW_RENDERER.initWasm(previewDecodeBase64(PREVIEW_WASM_B64));
+  await previewRendererReady;
+  if (!previewFontBytes) previewFontBytes = PREVIEW_FONTS_B64.map(previewDecodeBase64);
+  const renderer = new PREVIEW_RENDERER.Resvg(previewTextWithFallback(svg), {
+    background: '#ffffff',
+    font: { fontBuffers: previewFontBytes, defaultFontFamily: 'tdoc Preview CJK' },
+  });
+  try {
+    if (renderer.width !== 1200 || renderer.height !== 630) throw new Error('invalid_preview_dimensions');
+    const image = renderer.render();
+    try { return image.asPng(); } finally { image.free(); }
+  } finally { renderer.free(); }
+}
+async function buildDocPreview(env, html, { slug, version, title, svg = null, png = null } = {}) {
+  const preview = docPreviewFromHtml(html, { slug, version, title });
+  // The unbundled source is used by in-process tests; only the deploy bundle
+  // carries the renderer. This path is also a safe fallback for a bad build.
+  if (!PREVIEW_RENDERER || typeof PREVIEW_RENDERER !== 'object') {
+    preview.image = '/tdoc_logo-v2.png';
+    return preview;
+  }
+  const card = svg || defaultPreviewSvg(title, preview.excerpt || preview.description);
+  try {
+    const reason = validatePreviewSvg(card);
+    if (reason) throw new Error(reason);
+    const bytes = png || await renderPreviewPng(card);
+    await env.DOCS.put(previewCardKey(slug, version), bytes, { httpMetadata: { contentType: 'image/png' } });
+    preview.image = previewCardUrl(slug, version);
+    preview.image_v = Number(version);
+  } catch (error) {
+    if (svg || png) throw error;
+    console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
+    preview.image = '/tdoc_logo-v2.png';
+  }
+  return preview;
+}
+
 async function refreshDocPreview(env, slug, meta) {
   if (!meta || typeof meta !== 'object' || !env || !env.DOCS) return meta;
   const versions = Array.isArray(meta.versions) ? meta.versions : [];
@@ -9081,7 +9162,7 @@ async function refreshDocPreview(env, slug, meta) {
   try {
     const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
     if (!obj) return meta;
-    const preview = docPreviewFromHtml(await obj.text(), {
+    const preview = await buildDocPreview(env, await obj.text(), {
       slug,
       version: latest,
       title: meta.title || slug,
@@ -12597,7 +12678,7 @@ export class CommentsStore {
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions,
-        preview: docPreviewFromHtml(stamped.html, {
+        preview: await buildDocPreview(this.env, stamped.html, {
           slug,
           version: reservation.next,
           title: nextTitle || meta.title || slug,
@@ -13853,6 +13934,15 @@ const tdocHandlers = {
         },
       });
     }
+    if (p === '/preview-card-placeholder.svg' && (method === 'GET' || method === 'HEAD')) {
+      return new Response(method === 'HEAD' ? null : defaultPreviewSvg('Document preview', ''), {
+        headers: {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'Cache-Control': 'public, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     if (p === '/grok_logo.svg' && method === 'GET') {
       return new Response(GROK_LOGO_SVG, {
         headers: {
@@ -14715,6 +14805,49 @@ const tdocHandlers = {
         });
       }
       return folderSharePageResponse(env, listing, appIdentity(await getSession(env, req)));
+    }
+
+    // A card is versioned for social crawlers, but checked against CURRENT
+    // visibility on every read. Public docs can later become private.
+    const previewImageMatch = p.match(/^\/d\/([^/]+)\/preview\/v(\d+)\.png$/);
+    if (previewImageMatch && (method === 'GET' || method === 'HEAD')) {
+      const slug = previewImageMatch[1];
+      const version = Number(previewImageMatch[2]);
+      if (!isValidSlug(slug) || !Number.isInteger(version) || version < 1) return text('not found', { status: 404 });
+      const gate = await enforceDocAccess(env, req, slug, version);
+      if (!gate.ok) return text('not found', { status: 404 });
+      const latest = latestVersionNumber(gate.meta) || 1;
+      if (gate.meta && !(Array.isArray(gate.meta.versions) ? gate.meta.versions : []).some((item) => Number(item && item.n) === version)) {
+        return text('not found', { status: 404 });
+      }
+      if (version !== latest && !gate.ownerToken && !canSeeHistory(gate.access, gate.session, env, gate.meta)) {
+        return text('not found', { status: 404 });
+      }
+      let obj = await env.DOCS.get(previewCardKey(slug, version));
+      if (!obj) {
+        const source = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+        if (!source) return text('not found', { status: 404 });
+        const preview = await buildDocPreview(env, await source.text(), {
+          slug, version, title: (gate.meta && gate.meta.title) || slug,
+        });
+        if (preview.image === previewCardUrl(slug, version)) {
+          obj = await env.DOCS.get(previewCardKey(slug, version));
+          if (gate.meta && latestVersionNumber(gate.meta) === version) {
+            const current = await loadDocMeta(env, slug);
+            if (current && latestVersionNumber(current) === version) {
+              try { await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview })); } catch { /* image is already stored */ }
+            }
+          }
+        }
+      }
+      const bytes = obj ? await obj.arrayBuffer() : previewDecodeBase64(TDOC_LOGO_PNG_B64);
+      return new Response(method === 'HEAD' ? null : bytes, {
+        headers: {
+          'Content-Type': 'image/png',
+          'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
     }
 
     // ---- interactive island (sandboxed widget) ----
@@ -18619,6 +18752,46 @@ const tdocHandlers = {
       return json(result.body, { status: result.status });
     }
 
+    // Admin-only, cursor-paged backfill. Dry-run is the default and never
+    // mutates R2 or KV; the CLI loops pages and reports aggregate counts.
+    if (p === '/api/admin/preview-cards/backfill' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      if (!auth.actor || auth.actor.kind !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const dryRun = body.apply !== true;
+      const limit = Math.max(1, Math.min(10, Number(body.limit) || 5));
+      const page = await env.META.list({ prefix: 'meta:', limit, ...(body.cursor ? { cursor: String(body.cursor) } : {}) });
+      let scanned = 0, eligible = 0, updated = 0, failed = 0;
+      for (const item of page.keys || []) {
+        const slug = String(item.name || '').slice(5);
+        if (!isValidSlug(slug)) continue;
+        scanned++;
+        const meta = await loadDocMeta(env, slug);
+        if (!meta || !docIndexable(accessFromMeta(meta))) continue;
+        const version = latestVersionNumber(meta) || 1;
+        const image = meta.preview && meta.preview.image;
+        if (Number(meta.preview && meta.preview.image_v) === version && image === previewCardUrl(slug, version)) continue;
+        eligible++;
+        if (dryRun) continue;
+        try {
+          const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+          if (!obj) { failed++; continue; }
+          const preview = await buildDocPreview(env, await obj.text(), { slug, version, title: meta.title || slug });
+          if (preview.image !== previewCardUrl(slug, version)) { failed++; continue; }
+          const current = await loadDocMeta(env, slug);
+          if (!current || latestVersionNumber(current) !== version) { failed++; continue; }
+          await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview }));
+          updated++;
+        } catch (error) {
+          failed++;
+          console.error('[preview-card] backfill failed:', slug, error && error.message || String(error));
+        }
+      }
+      return json({ ok: true, dry_run: dryRun, scanned, eligible, updated, failed, cursor: page.list_complete ? null : page.cursor });
+    }
+
     // ---- admin upload (from `tdoc publish`) ----
     if (p === '/api/upload' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
@@ -18636,6 +18809,13 @@ const tdocHandlers = {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      let suppliedPreviewPng = null;
+      if (body.preview_svg != null) {
+        const reason = validatePreviewSvg(body.preview_svg);
+        if (reason) return json({ error: reason }, { status: 400 });
+        try { suppliedPreviewPng = await renderPreviewPng(body.preview_svg); }
+        catch { return json({ error: 'invalid_preview_svg_render' }, { status: 400 }); }
+      }
       const mediaRefusal = inlineMediaRejection(doc);
       if (mediaRefusal) return mediaRefusal;
       // `replace: true` asks to rewrite the doc's LATEST version in place
@@ -18916,10 +19096,12 @@ const tdocHandlers = {
             ...(currentMeta || {}),
             ...incoming,
             versions: mergedVersions,
-            preview: docPreviewFromHtml(stampedHtml, {
+            preview: await buildDocPreview(env, stampedHtml, {
               slug,
               version: verNum,
               title: (incoming && incoming.title) || (currentMeta && currentMeta.title) || slug,
+              svg: body.preview_svg || null,
+              png: suppliedPreviewPng,
             }),
           }));
         } catch (e) {

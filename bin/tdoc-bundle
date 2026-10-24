@@ -58,6 +58,17 @@ if (!fs.existsSync(pushSwFile)) {
   process.exit(1);
 }
 const pushSwJs = fs.readFileSync(pushSwFile, 'utf8');
+// The renderer and font are lazy: parsing the Worker never instantiates WASM
+// or decodes the font. Keep them vendored so BYOK publishes need no npm install.
+const previewDir = path.join(skill, 'server/preview');
+const previewRendererJs = fs.readFileSync(path.join(previewDir, 'resvg.mjs'), 'utf8')
+  .replace(/export\s*\{\s*Resvg2 as Resvg,\s*initWasm\s*\};?\s*$/, 'return { Resvg: Resvg2, initWasm };');
+if (!previewRendererJs.includes('return { Resvg: Resvg2, initWasm };')) {
+  throw new Error('bundle: preview renderer exports changed');
+}
+const previewWasm = fs.readFileSync(path.join(previewDir, 'resvg.wasm'), 'base64');
+const previewFonts = ['Regular', 'Bold'].map((weight) => fs.readFileSync(path.join(previewDir, `NotoSansSC-${weight}.ttf`), 'base64'));
+const previewCoverage = JSON.parse(fs.readFileSync(path.join(previewDir, 'coverage.json'), 'utf8'));
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -72,7 +83,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha([worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs].join('\0'));
+const bundleSha = sha([worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewWasm, ...previewFonts, JSON.stringify(previewCoverage)].join('\0'));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -105,6 +116,14 @@ replaced = mustReplace(replaced, /const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;/, 
 replaced = mustReplace(replaced, /const PUSH_SW_JS = `__TDOC_PUSH_SW_JS__`;/, 'const PUSH_SW_JS = ' + JSON.stringify(pushSwJs) + ';', 'PUSH_SW_JS');
 
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";/, 'const SHELL_RUNTIME_EXTRA_ASSETS = ' + JSON.stringify(extraAssets) + ';', 'SHELL_RUNTIME_EXTRA_ASSETS');
+replaced = mustReplace(replaced, /const PREVIEW_RENDERER = "__TDOC_PREVIEW_RENDERER__";/,
+  'const PREVIEW_RENDERER = (() => {\n' + previewRendererJs + '\n})();', 'PREVIEW_RENDERER');
+replaced = mustReplace(replaced, /const PREVIEW_WASM_B64 = "__TDOC_PREVIEW_WASM_B64__";/,
+  'const PREVIEW_WASM_B64 = ' + JSON.stringify(previewWasm) + ';', 'PREVIEW_WASM_B64');
+replaced = mustReplace(replaced, /const PREVIEW_FONTS_B64 = "__TDOC_PREVIEW_FONTS_B64__";/,
+  'const PREVIEW_FONTS_B64 = ' + JSON.stringify(previewFonts) + ';', 'PREVIEW_FONTS_B64');
+replaced = mustReplace(replaced, /const PREVIEW_FONT_COVERAGE = "__TDOC_PREVIEW_FONT_COVERAGE__";/,
+  'const PREVIEW_FONT_COVERAGE = ' + JSON.stringify(previewCoverage) + ';', 'PREVIEW_FONT_COVERAGE');
 
 let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,

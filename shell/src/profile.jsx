@@ -437,15 +437,12 @@ export function Profile({ boot }) {
                   </span>
                 </a>
               ) : (
-                // Preview = title + lead inside the card. No auto-picked graphics
-                // (inline SVGs / task icons were unreliable).
-                <a className="profile-pick-card has-preview" href={href}>
+                <a className={`profile-pick-card has-preview${doc.image ? ' has-image' : ''}`} href={href} aria-label={doc.title || doc.slug}>
                   <span className="profile-pick-surface">
+                    {doc.image ? <span className="profile-pick-media"><img src={doc.image} alt="" loading="lazy" /></span> : null}
                     <span className="profile-pick-copy">
                       <span className="profile-pick-title">{doc.title || doc.slug}</span>
-                      {doc.excerpt ? (
-                        <span className="profile-pick-excerpt">{doc.excerpt}</span>
-                      ) : null}
+                      {doc.excerpt ? <span className="profile-pick-excerpt">{doc.excerpt}</span> : null}
                     </span>
                   </span>
                   <span className="profile-pick-meta">

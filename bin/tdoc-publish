@@ -84,13 +84,13 @@ json_get() {
 }
 json_str() { node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$1"; }
 
-# build_payload <slug> <version> <html-file> <meta-file> <widgets-json> [comments-file]
+# build_payload <slug> <version> <html-file> <meta-file> <widgets-json> [comments-file] [preview-file]
 # Node reads the files itself: an entire HTML document, images and all, never
 # has to survive a shell round trip.
 build_payload() {
   node -e '
     const fs = require("fs");
-    const [slug, version, htmlPath, metaPath, widgetsJson, commentsPath] = process.argv.slice(1);
+    const [slug, version, htmlPath, metaPath, widgetsJson, commentsPath, previewPath] = process.argv.slice(1);
     const out = {
       slug,
       version: Number(version),
@@ -98,6 +98,11 @@ build_payload() {
       meta: JSON.parse(fs.readFileSync(metaPath, "utf8")),
     };
     if (commentsPath) out.comments = JSON.parse(fs.readFileSync(commentsPath, "utf8"));
+    if (previewPath) {
+      const svg = fs.readFileSync(previewPath, "utf8");
+      if (Buffer.byteLength(svg) > 128 * 1024) throw new Error("preview.svg exceeds 128 KB");
+      out.preview_svg = svg;
+    }
     // Where a NEW doc should land. Only an agent connection limited to some
     // workspaces reads these (it files the doc there at once); any other
     // credential publishes to My docs and the move below places it. --team
@@ -107,7 +112,7 @@ build_payload() {
     const widgets = JSON.parse(widgetsJson || "{}");
     if (Object.keys(widgets).length) out.widgets = widgets;
     process.stdout.write(JSON.stringify(out));
-  ' "$1" "$2" "$3" "$4" "$5" "${6:-}"
+  ' "$1" "$2" "$3" "$4" "$5" "${6:-}" "${7:-}"
 }
 
 PLATFORM_FLAG="${TDOC_PLATFORM:-}"
@@ -1623,6 +1628,8 @@ upload_version() {
   # comments) and the merge is idempotent, so sending them on each version
   # upload is safe. Default to [] when there's no local comments.json.
   local comments_file="$DOC_DIR/comments.json"
+  local preview_file="$DOC_DIR/v${v}/preview.svg"
+  [ -f "$preview_file" ] || preview_file=""
   local payload
   local widgets_json="{}"
   local wdir="$DOC_DIR/v${v}/widgets"
@@ -1640,9 +1647,9 @@ upload_version() {
     done
   fi
   if [ -f "$comments_file" ] && node -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(Array.isArray(a)&&a.length?0:1)' "$comments_file" >/dev/null 2>&1; then
-    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json" "$comments_file")" || return 1
+    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json" "$comments_file" "$preview_file")" || return 1
   else
-    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json")" || return 1
+    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json" "" "$preview_file")" || return 1
   fi
   # Pass the payload via a temp file, not an argument — docs with embedded
   # images exceed ARG_MAX as a curl argument (curl: Argument list too long).
