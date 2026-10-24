@@ -447,7 +447,7 @@ function wrapBareTablesReference(html) {
     env.DOCS.get = origGet;
     assert(page.status === 200, `page ${page.status}`);
     const docRead = calls.find(([k]) => k === 'docs/cached/v1/index.html');
-    assert(docRead && docRead[1] && docRead[1].range && docRead[1].range.length === 96 * 1024, `not a range read: ${JSON.stringify(docRead && docRead[1])}`);
+    assert(docRead && docRead[1] && docRead[1].range && docRead[1].range.length === 256 * 1024, `not a range read: ${JSON.stringify(docRead && docRead[1])}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
