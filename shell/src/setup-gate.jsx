@@ -5,6 +5,7 @@ import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_LINE, NOTHING_YET, RECIPE_
 import { AgentMarks } from './agent-marks.jsx';
 import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
 import { DebugBar } from './debug-bar.jsx';
+import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -258,9 +259,13 @@ export function SetupGate({ boot, preview = null }) {
   // The clock starts when this page starts waiting, not when somebody presses
   // a button. It is the same wait either way.
   if (loaded && signedIn && state !== 'done' && !waitingSince.current) waitingSince.current = Date.now();
+  // A reader who pressed "Connect my agent" on somebody's doc goes back to
+  // that doc, where the question they were asking waits for the new agent
+  // (document/my-agent.js).
+  const [pendingAsk] = useState(() => peekPendingAsk());
   const onward = step === 'doc' && ownDoc
     ? `/d/${encodeURIComponent(ownDoc)}?step=comment`
-    : '/me';
+    : pendingAsk ? `/d/${encodeURIComponent(pendingAsk.slug)}` : '/me';
   // Both steps are one layout with a status line under it. Swapping the doc
   // step into a second, emptier face when its doc arrived made a page out of a
   // sentence: whoever landed on it was told their first tdoc is live and
@@ -499,9 +504,11 @@ export function SetupGate({ boot, preview = null }) {
                 ) : null}
 
                 <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
-                  {step === 'doc' ? 'Open doc' : 'Continue'}
+                  {step === 'doc' ? 'Open doc' : pendingAsk ? 'Back to the doc' : 'Continue'}
                 </a>
-                <p className="sg-account"><a href="/me">Later</a></p>
+                {/* Later is a way out of the question too: dismissed, the
+                    setup page stops leading back to that doc. */}
+                <p className="sg-account"><a href="/me" onClick={() => { if (pendingAsk) clearPendingAsk(); }}>Later</a></p>
               </>
             ) : (
               <>

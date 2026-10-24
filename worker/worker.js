@@ -873,6 +873,17 @@ async function deleteDocEverywhere(env, slug) {
   // legacy KV value goes too, as cleanup.
   await mutateComments(env, slug, { kind: 'wipe' });
   await env.META.delete(`comments:${slug}`);
+  // Handoffs and readers' questions belong to this doc too: a slug published
+  // again later must not inherit them.
+  await env.META.delete(`handoffs:${slug}`);
+  try {
+    let kvCursor;
+    do {
+      const r = await env.META.list({ prefix: `agent-asks:${slug}:`, cursor: kvCursor });
+      for (const k of r.keys) await env.META.delete(k.name);
+      kvCursor = r.list_complete ? undefined : r.cursor;
+    } while (kvCursor);
+  } catch {}
   // Free the hosted slug reservation so it can be republished. Data is already
   // gone; this goes last. If COMMENTS is absent (Vercel) there was never a
   // hostedOwner key -- the caller ignores the 503.
@@ -10754,17 +10765,25 @@ async function localPendingAdd(env, meta, slug, record) {
   const accountId = await localPendingAccount(env, meta, record);
   const t = record && record.recipient;
   if (!accountId || !t || t.provider !== 'local') return false;
-  const list = await loadLocalPending(env, accountId);
-  const entry = { slug, handoff_id: record.handoff_id, device: t.device, agent_sub: t.agent_sub, at: record.at };
-  const next = [...list.filter((e) => e.handoff_id !== record.handoff_id), entry].slice(-LOCAL_PENDING_MAX);
-  await env.META.put(`local-pending:${accountId}`, JSON.stringify(next));
-  return true;
+  return localPendingPut(env, accountId, { slug, handoff_id: record.handoff_id, device: t.device, agent_sub: t.agent_sub, at: record.at });
 }
 async function localPendingRemove(env, meta, record) {
   const accountId = await localPendingAccount(env, meta, record);
+  return localPendingDrop(env, accountId, record.handoff_id);
+}
+// The index itself, by account. A reader's question (kind 'ask') goes into
+// the asker's own index; a handoff into the doc owner's (or team admin's).
+async function localPendingPut(env, accountId, entry) {
   if (!accountId) return false;
   const list = await loadLocalPending(env, accountId);
-  const next = list.filter((e) => e.handoff_id !== record.handoff_id);
+  const next = [...list.filter((e) => e.handoff_id !== entry.handoff_id), entry].slice(-LOCAL_PENDING_MAX);
+  await env.META.put(`local-pending:${accountId}`, JSON.stringify(next));
+  return true;
+}
+async function localPendingDrop(env, accountId, id) {
+  if (!accountId) return false;
+  const list = await loadLocalPending(env, accountId);
+  const next = list.filter((e) => e.handoff_id !== id);
   if (next.length === list.length) return false;
   await env.META.put(`local-pending:${accountId}`, JSON.stringify(next));
   return true;
@@ -12182,6 +12201,261 @@ async function handleAsk(env, req, url, slug) {
     return json({ error: 'ask_failed' }, { status: 502 });
   }
   return json({ answer: out.answer, remaining: Math.max(0, cfg.limit - used - 1), limit: cfg.limit });
+}
+
+// ─────────────────────── a reader's own agent ───────────────────────
+// "Send to my agent": any signed-in reader who can view a doc may hand a
+// question about it to an agent connected to THEIR OWN account -- never the
+// owner's, never anyone else's. Nothing here reads the doc's agents or the
+// owner's connections: the only targets are the reader's account list. The
+// reply comes back on the reader's own upload token and is shown to that
+// reader alone until they post it as a comment themselves.
+//
+// GET  /api/docs/<slug>/my-agent  -> { tier, agent, agents, asks }
+// POST /api/docs/<slug>/my-agent  { question, passage?, recipient? } -> { ask }
+// POST /api/agent/ask-ack         { slug, ask_id }              picked up
+// POST /api/agent/ask-reply       { slug, ask_id, text }        the answer
+// POST /api/agent/ask-done        { slug, ask_id, error? }      a daemon run ended
+//
+// tier: 'none' (nothing connected: Connect my agent), 'online' (an agent that
+// can be reached now: Send to my agent), 'offline' (connected, but the only
+// way in is a daemon that is not running, or a terminal that can publish and
+// cannot be woken: Copy for my agent).
+//
+// Stored per doc AND asker (agent-asks:<slug>:<account>): one reader's
+// questions can neither push out nor race another's.
+const AGENT_ASK_MAX = 50;          // kept per reader per doc
+const AGENT_ASK_LIST = 10;         // shown to the reader
+const AGENT_ASK_OPEN_MAX = 5;      // unanswered at once, per reader per doc
+const AGENT_ASK_RATE = 20;         // sent per reader per hour, all docs
+const AGENT_ASK_ANSWER_CHARS = 20000;
+const AGENT_HELPER_HREF = '/me?view=settings#agents';
+
+function agentAsksKey(slug, accountId) {
+  return `agent-asks:${slug}:${accountId}`;
+}
+
+async function loadAgentAsks(env, slug, accountId) {
+  if (!accountId) return [];
+  try {
+    const list = JSON.parse((await env.META.get(agentAsksKey(slug, accountId))) || '[]');
+    return Array.isArray(list) ? list.filter((a) => a && typeof a.ask_id === 'string') : [];
+  } catch { return []; }
+}
+
+async function putAgentAsk(env, slug, rec) {
+  const list = await loadAgentAsks(env, slug, rec.by);
+  const next = [rec, ...list.filter((a) => a.ask_id !== rec.ask_id)].slice(0, AGENT_ASK_MAX);
+  await env.META.put(agentAsksKey(slug, rec.by), JSON.stringify(next));
+  return rec;
+}
+
+// Answered, or the run gave up: nothing left for a daemon.
+function agentAskDone(a) {
+  return !a || !!a.answer || !!(a.delivery && a.delivery.status === 'failed');
+}
+
+// The reader's own connections and whether any can be reached now. A local
+// agent counts only while its daemon checks in; Raft and webhooks are pushed
+// to, so they count as soon as they are connected.
+async function readerAgentState(env, accountId) {
+  const group = await accountGroup(env, accountId);
+  const own = await accountNotifyTargets(env, accountId);
+  await decorateLocalSeen(env, accountId, [own]);
+  const reachable = own.filter((t) => t.provider !== 'local' || t.status === 'active');
+  let paired = false;
+  if (!own.length) {
+    for (const id of group.ids) {
+      try { if (await env.META.get(`account-terminal:${id}`)) { paired = true; break; } } catch {}
+    }
+  }
+  const tier = reachable.length ? 'online' : (own.length || paired) ? 'offline' : 'none';
+  return { group, own, reachable, tier };
+}
+
+function agentAskTargetView(t) {
+  if (!t) return null;
+  const { url: _url, last_touched: _touched, ...rest } = t;
+  return rest;
+}
+
+// What the asker sees of one question. The record never leaves through any
+// other route: not the comment list, not the owner's handoff list.
+function agentAskView(a) {
+  return {
+    ask_id: a.ask_id,
+    at: a.at,
+    question: a.question,
+    passage: a.passage || null,
+    recipient: agentAskTargetView(a.recipient),
+    delivery: a.delivery ? { status: a.delivery.status, error: a.delivery.error || null } : null,
+    acked_at: a.acked_at || null,
+    answer: a.answer ? { text: a.answer.text, at: a.answer.at, agent: a.answer.agent || null } : null,
+  };
+}
+
+// Only the fields an anchor is rebuilt from, each cut to size: this is what
+// a later "Post as comment" anchors the answer to.
+function agentAskPassage(p) {
+  if (!p || typeof p !== 'object') return null;
+  const text = askCut(p.text, ASK_SELECTION_CHARS);
+  if (!text) return null;
+  const out = { text };
+  if (typeof p.context_before === 'string') out.context_before = p.context_before.slice(-200);
+  if (typeof p.context_after === 'string') out.context_after = p.context_after.slice(0, 200);
+  if (Number.isInteger(p.occurrence) && p.occurrence >= 0) out.occurrence = p.occurrence;
+  if (Number.isInteger(p.occurrences) && p.occurrences >= 0) out.occurrences = p.occurrences;
+  return out;
+}
+
+// The line a person would paste into the agent themselves (the shell's
+// "Copy for my agent" builds the same), plus how to answer privately.
+function agentAskLine(url, question, passage) {
+  return `Read ${url} and answer: ${question}${passage ? `\n\nAbout this passage: "${passage}"` : ''}`;
+}
+
+function agentAskEvent({ slug, docTitle, askId, question, passage, publicHost }) {
+  const url = `https://${publicHost || 'tdoc.dev'}/d/${slug}`;
+  return {
+    kind: 'notification',
+    summary: `tdoc: a question for you about "${docTitle || slug}"`,
+    externalEventId: `tdoc:${slug}:${askId}`,
+    ttlSeconds: 86400,
+    payload: {
+      source: 'tdoc',
+      kind: 'ask',
+      slug,
+      ask_id: askId,
+      question,
+      selection: passage || '',
+      url,
+      instruction: `${agentAskLine(url, question, passage)}\n\nAnswer only the person who asked, with the tdoc skill: bin/tdoc-agent-reply --slug ${slug} --ask ${askId} --text "<answer>". Do not edit the document or post a comment.`,
+    },
+  };
+}
+
+async function handleMyAgent(env, req, url, slug) {
+  if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+  // The reader in their browser. An agent's token asks its own account's
+  // agents through the CLI, not through here.
+  if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
+  if (!sameOrigin(req, url)) return json({ error: 'cross_origin' }, { status: 403 });
+  // Sending makes an agent run, so it must provably come from this site: an
+  // Origin of ours, or a browser that says same-origin. A missing Origin is
+  // not taken as one.
+  if (req.method === 'POST' && req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
+    return json({ error: 'cross_origin' }, { status: 403 });
+  }
+  const session = await getSession(env, req);
+  if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+  const meta = await loadDocMeta(env, slug);
+  if (!meta) return json({ error: 'not_found' }, { status: 404 });
+  // The reader's own read gate, exactly as the page applies it.
+  const gate = await enforceDocAccess(env, req, slug, latestVersionNumber(meta) || 1);
+  if (!gate.ok || gate.ownerToken || gate.bearerSession) {
+    return json({ error: 'access_denied' }, { status: gate.ok ? 403 : (gate.response && gate.response.status === 401 ? 401 : 403) });
+  }
+  const accountId = await sessionAccountId(env, session);
+  const state = accountId ? await readerAgentState(env, accountId) : { group: { ids: [], canonical: null }, own: [], reachable: [], tier: 'none' };
+  const asker = state.group.canonical || accountId;
+  if (req.method === 'GET') {
+    const asks = accountId ? (await loadAgentAsks(env, slug, asker)).slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
+    return json({
+      tier: state.tier,
+      agent: agentAskTargetView(state.reachable[0] || null),
+      agents: state.own.map(agentAskTargetView),
+      asks,
+      helper_href: AGENT_HELPER_HREF,
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const question = askCut(body && body.question, ASK_QUESTION_CHARS);
+  if (!question) return json({ error: 'question_required' }, { status: 400 });
+  if (!accountId) return json({ error: 'agent_not_connected', tier: 'none' }, { status: 409 });
+  // Only one of the reader's own agents, and only one that can be reached.
+  // A recipient that is not on the reader's account is somebody else's.
+  const asked = body && body.recipient ? normalizeNotifyTarget(body.recipient) : null;
+  if (body && body.recipient && (!asked || !state.own.some((t) => sameNotifyTarget(t, asked)))) {
+    return json({ error: 'not_your_agent', message: 'You can only send to an agent connected to your own account.' }, { status: 403 });
+  }
+  const target = asked ? state.reachable.find((t) => sameNotifyTarget(t, asked)) : state.reachable[0];
+  if (!target) return json({ error: state.tier === 'none' ? 'agent_not_connected' : 'agent_offline', tier: state.tier }, { status: 409 });
+  // Each send is writes and an outbound call: a few open at once per doc,
+  // and a budget per hour.
+  const open = (await loadAgentAsks(env, slug, asker)).filter((a) => !agentAskDone(a)).length;
+  if (open >= AGENT_ASK_OPEN_MAX) return json({ error: 'too_many_open_questions', message: 'Your agent has not answered your earlier questions on this doc yet.' }, { status: 429 });
+  if (await rateLimited(env, `myagent:${asker}`, AGENT_ASK_RATE, 3600)) return json({ error: 'rate_limited', message: 'Too many questions sent to your agent; try again later.' }, { status: 429 });
+  const passage = agentAskPassage(body && body.passage);
+  const askId = `q_${Date.now()}_${rand(3)}`;
+  const event = agentAskEvent({ slug, docTitle: meta.title, askId, question, passage: passage && passage.text, publicHost: env.PUBLIC_HOST });
+  const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
+  const at = new Date().toISOString();
+  const rec = await putAgentAsk(env, slug, {
+    ask_id: askId,
+    at,
+    by: asker,
+    question,
+    ...(passage ? { passage } : {}),
+    recipient: target,
+    delivery: { ...delivery, at },
+  });
+  // A local agent is not pushed to: the reader's own daemon finds it in the
+  // reader's own pending index, never the doc owner's.
+  if (target.provider === 'local') {
+    await localPendingPut(env, rec.by, { slug, handoff_id: askId, kind: 'ask', by: rec.by, device: target.device, agent_sub: target.agent_sub, at });
+  }
+  return json({ ok: true, ask: agentAskView(rec) });
+}
+
+// The asker's agent, on the asker's own upload token. The token's account
+// must be the one that asked, and must still be able to read the doc.
+async function handleAgentAsk(env, req, action) {
+  const auth = await requireUploadAuth(req, env);
+  if (!auth.ok) return auth.response;
+  if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) return json({ error: 'account_token_required' }, { status: 403 });
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const { slug, ask_id: askId } = body || {};
+  if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+  if (typeof askId !== 'string' || !askId) return json({ error: 'ask_id required' }, { status: 400 });
+  // Only the asking account's own questions are even looked at: somebody
+  // else's token finds nothing to answer.
+  const group = await accountGroup(env, auth.actor.account_id);
+  const prev = (await loadAgentAsks(env, slug, group.canonical)).find((a) => a.ask_id === askId);
+  if (!prev) return json({ error: 'ask_not_found' }, { status: 404 });
+  if (!prev.by || !group.ids.includes(prev.by)) return json({ error: 'not_your_question', message: 'Only the account that asked can answer this question.' }, { status: 403 });
+  const at = new Date().toISOString();
+  // Closing a run needs no read access: an asker who lost it must still be
+  // able to take the question off their own queue.
+  if (action !== 'done') {
+    const meta = await loadDocMeta(env, slug);
+    if (meta && !tokenScopeAllows(auth.actor, meta)) return json(tokenScopeBody(new URL(req.url).origin), { status: 403 });
+    const gate = meta ? await enforceDocAccess(env, req, slug, latestVersionNumber(meta) || 1) : { ok: false };
+    if (!gate.ok) return json({ error: 'access_denied' }, { status: 403 });
+  }
+  if (action === 'ack') {
+    if (prev.acked_at) return json({ ok: true, ask_id: askId, acked_at: prev.acked_at, already: true });
+    await putAgentAsk(env, slug, { ...prev, acked_at: at });
+    return json({ ok: true, ask_id: askId, acked_at: at, already: false });
+  }
+  if (action === 'reply') {
+    const text = askCut(body.text, AGENT_ASK_ANSWER_CHARS);
+    if (!text) return json({ error: 'text required' }, { status: 400 });
+    const clean = (s) => (typeof s === 'string' ? s.trim().slice(0, 60) : '');
+    const agent = { login: clean(body.agent_login), name: clean(body.agent_name) };
+    const rec = await putAgentAsk(env, slug, { ...prev, acked_at: prev.acked_at || at, answer: { text, at, agent } });
+    if (prev.recipient && prev.recipient.provider === 'local') await localPendingDrop(env, prev.by, askId);
+    return json({ ok: true, ask_id: askId, answered_at: rec.answer.at });
+  }
+  // done: a daemon run ended. Answered already is the good ending; anything
+  // else is recorded as failed so the asker is told rather than left waiting.
+  if (!prev.answer) {
+    const error = String(body.error || 'finished without an answer').slice(0, 300);
+    await putAgentAsk(env, slug, { ...prev, delivery: { status: 'failed', error: 'agent_run_failed', at }, run: { status: 'failed', at, error } });
+  }
+  await localPendingDrop(env, prev.by, askId);
+  return json({ ok: true, ask_id: askId, answered: !!prev.answer });
 }
 
 export default {
@@ -15434,6 +15708,11 @@ const tdocHandlers = {
     {
       const askMatch = p.match(/^\/api\/docs\/([^/]+)\/ask\/?$/);
       if (askMatch && (method === 'POST' || method === 'GET')) return handleAsk(env, req, url, askMatch[1]);
+      // Send to my agent: the reader's own agents only (see handleMyAgent).
+      const myAgentMatch = p.match(/^\/api\/docs\/([^/]+)\/my-agent\/?$/);
+      if (myAgentMatch && (method === 'POST' || method === 'GET')) return handleMyAgent(env, req, url, myAgentMatch[1]);
+      const agentAskMatch = p.match(/^\/api\/agent\/ask-(ack|reply|done)$/);
+      if (agentAskMatch && method === 'POST') return handleAgentAsk(env, req, agentAskMatch[1]);
     }
 
     if (p === '/api/comments' && method === 'GET') {
@@ -16103,7 +16382,8 @@ const tdocHandlers = {
     // Gated by authorizeDocEdit, which is the whole permission model: driving
     // an agent needs the doc owner's session or upload token, or current
     // membership of the doc's team, so a reader who can comment still cannot
-    // make somebody's agent do work.
+    // make somebody's agent do work. A reader's OWN agents are a separate
+    // door with its own record (handleMyAgent); nothing there reaches these.
     if (p === '/api/notify/targets' && method === 'GET') {
       const slug = url.searchParams.get('slug');
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
@@ -16347,6 +16627,45 @@ const tdocHandlers = {
         const keep = [];
         for (const e of list) {
           if (!isValidSlug(e.slug)) continue;
+          // A question this account asked about somebody's doc: same rules,
+          // its own record (see handleMyAgent). Answered privately, never
+          // with an edit or a comment.
+          if (e.kind === 'ask') {
+            const askKey = `ask:${e.slug}:${e.by || id}`;
+            if (!cache.has(askKey)) cache.set(askKey, await loadAgentAsks(env, e.slug, e.by || id));
+            const a = cache.get(askKey).find((x) => x.ask_id === e.handoff_id);
+            if (agentAskDone(a)) continue;
+            if (!a.by || !accountIds.includes(a.by)) continue;
+            // A doc that is gone, or that this account can no longer read (or
+            // this token may not reach): nothing to answer, and not kept, so
+            // the queue never sticks on it.
+            const readKey = `read:${e.slug}`;
+            if (!cache.has(readKey)) {
+              const m = await loadDocMeta(env, e.slug);
+              cache.set(readKey, !!m && tokenScopeAllows(auth.actor, m) && (await enforceDocAccess(env, req, e.slug, latestVersionNumber(m) || 1)).ok);
+            }
+            if (!cache.get(readKey)) {
+              await putAgentAsk(env, e.slug, { ...a, delivery: { status: 'failed', error: 'access_lost', at: new Date().toISOString() } });
+              continue;
+            }
+            keep.push(e);
+            if (device && e.device !== device) continue;
+            pending.push({
+              kind: 'ask',
+              slug: e.slug,
+              handoff_id: a.ask_id,
+              ask_id: a.ask_id,
+              at: a.at,
+              by: a.by,
+              acked_at: a.acked_at || null,
+              comment_ids: [],
+              question: a.question,
+              selection: (a.passage && a.passage.text) || '',
+              recipient: { provider: 'local', device: a.recipient.device, cli: a.recipient.cli, agent_sub: a.recipient.agent_sub },
+              url: `https://${env.PUBLIC_HOST || 'tdoc.dev'}/d/${e.slug}`,
+            });
+            continue;
+          }
           if (!cache.has(e.slug)) cache.set(e.slug, await loadHandoffs(env, e.slug));
           const h = cache.get(e.slug).find((x) => x && x.handoff_id === e.handoff_id);
           if (localHandoffDone(h)) continue;

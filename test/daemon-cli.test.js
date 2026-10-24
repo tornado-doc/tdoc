@@ -12,6 +12,8 @@
 //   - the prompt carries the handoff line, the comment ids, the instruction,
 //     and the untrusted-input frame
 //   - a failing CLI is retried once, then the handoff is reported failed
+//   - a reader's own question (Send to my agent) is answered with --ask, never
+//     an edit, and closed through the ask routes
 //   - install-launchd prints a plist and loads nothing
 //   - install / uninstall drive launchctl (a fake one here) under a temp HOME,
 //     and tdoc-doctor reports the helper as an optional step
@@ -133,13 +135,24 @@ const stub = startStub(`(() => {
       const send = (code, obj) => { s.writeHead(code, { 'Content-Type': 'application/json' }); s.end(JSON.stringify(obj)); };
       if (u.pathname === '/__log') return send(200, log);
       if (u.pathname === '/__reset') { pending = [{ ...pending[0] || {}, slug: 'q3-plan', handoff_id: 'h_' + (json && json.n || 2), comment_ids: ['c_a'], instruction: '', recipient: { provider: 'local', device: 'testbox', cli: 'claude', agent_sub: 'testbox_claude' }, url: 'https://tdoc.dev/d/q3-plan', at: '2026-10-13T10:00:00.000Z', by: json && 'by' in json ? json.by : 'acct-owner', acked_at: null }]; return send(200, { ok: true }); }
+      // A reader's own question (Send to my agent): no comments, answered
+      // privately through the ask routes.
+      // A handoff whose ack the worker refuses (403): the daemon stops trying,
+      // then gives up on the next poll -- without crashing the queue.
+      if (u.pathname === '/__forbid') { pending = [{ slug: 'q3-plan', handoff_id: 'h_403', at: '2026-10-13T09:00:00.000Z', by: 'acct-owner', acked_at: null, comment_ids: ['c_a'], instruction: '', recipient: { provider: 'local', device: 'testbox', cli: 'claude', agent_sub: 'testbox_claude' }, url: 'https://tdoc.dev/d/q3-plan' }]; return send(200, { ok: true }); }
+      if (u.pathname === '/__ask_codex') { pending = [{ kind: 'ask', slug: 'their-doc', handoff_id: 'q_2', ask_id: 'q_2', at: '2026-10-13T11:00:00.000Z', by: 'acct-owner', acked_at: null, comment_ids: [], question: 'q', selection: '', recipient: { provider: 'local', device: 'testbox', cli: 'codex', agent_sub: 'testbox_codex' }, url: 'https://tdoc.dev/d/their-doc' }]; return send(200, { ok: true }); }
+      if (u.pathname === '/__ask') { pending = [{ kind: 'ask', slug: 'their-doc', handoff_id: 'q_1', ask_id: 'q_1', at: '2026-10-13T11:00:00.000Z', by: 'acct-owner', acked_at: null, comment_ids: [], question: 'What ships first?', selection: 'Billing ships first', recipient: { provider: 'local', device: 'testbox', cli: 'claude', agent_sub: 'testbox_claude' }, url: 'https://tdoc.dev/d/their-doc' }]; return send(200, { ok: true }); }
       if ((q.headers.authorization || '') !== 'Bearer tok-1') return send(401, { error: 'unauthorized' });
       if (u.pathname === '/api/notify/local/register') return send(200, { ok: true, device: json.device, added: 1, targets: [] });
       if (u.pathname === '/api/notify/local/pending') return send(200, { ok: true, account_ids: ['acct-owner'], pending: pending.filter((h) => !u.searchParams.get('device') || h.recipient.device === u.searchParams.get('device')) });
+      if (u.pathname === '/api/notify/ack' && json.handoff_id === 'h_403') return send(403, { error: 'not_handoff_sender' });
       if (u.pathname === '/api/notify/ack') { pending = pending.map((h) => h.handoff_id === json.handoff_id ? { ...h, acked_at: new Date().toISOString() } : h); return send(200, { ok: true, handoff_id: json.handoff_id, acked_at: 'now' }); }
       if (u.pathname === '/api/notify/resolve') { pending = pending.filter((h) => h.handoff_id !== json.handoff_id); return send(200, { ok: true, resolved: 2, of: 2 }); }
       if (u.pathname === '/api/notify/local/fail') { pending = pending.filter((h) => h.handoff_id !== json.handoff_id); return send(200, { ok: true }); }
       if (u.pathname === '/api/agent/reply') return send(200, { ok: true, id: 'r_1', author: { kind: 'agent', login: json.agent_login } });
+      if (u.pathname === '/api/agent/ask-ack') return send(200, { ok: true, ask_id: json.ask_id });
+      if (u.pathname === '/api/agent/ask-reply') return send(200, { ok: true, ask_id: json.ask_id });
+      if (u.pathname === '/api/agent/ask-done') { pending = pending.filter((h) => h.ask_id !== json.ask_id); return send(200, { ok: true, answered: true }); }
       send(404, { error: 'not_found' });
     });
   };
@@ -155,7 +168,11 @@ printf '%s\\n' "$@" > "$RECORD/args.txt"
 pwd > "$RECORD/cwd.txt"
 env | grep -E '^TDOC_' | sort > "$RECORD/env.txt"
 cat > "$RECORD/prompt.txt"
-bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug q3-plan --parent c_a --text "tightened" --status applied --login claude >/dev/null
+if [ "\${FAKE_ASK:-0}" = 1 ]; then
+  bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug their-doc --ask q_1 --text "Billing ships first." --login claude >/dev/null
+else
+  bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug q3-plan --parent c_a --text "tightened" --status applied --login claude >/dev/null
+fi
 if [ "\${FAKE_FAIL:-0}" = 1 ]; then echo "simulated failure" >&2; exit 1; fi
 echo "all done"
 `);
@@ -268,6 +285,71 @@ try {
     state = JSON.parse(fs.readFileSync(path.join(DAEMON_DIR, 'state.json'), 'utf8'));
     assert(!state.attempts.h_2, 'reported, so the counter is cleared');
     assert(!stubLog().some((c) => c.path === '/api/notify/resolve' && c.body.handoff_id === 'h_2'), 'a failed run is never resolved');
+  });
+
+  t('a reader question: ask-ack → the CLI answers privately with --ask → ask-done; nothing is edited or resolved', () => {
+    execFileSync('curl', ['-sS', '--max-time', '5', '-X', 'POST', `${stub.base}/__ask`]);
+    const before = stubLog().length;
+    const r = daemon(['once', '--cli', 'claude', '--device', 'testbox'], { FAKE_ASK: '1' });
+    assert(r.status === 0, `exit ${r.status}: ${r.stderr}`);
+    const calls = stubLog().slice(before).filter((c) => c.path.startsWith('/api/')).map((c) => c.path);
+    const want = ['/api/notify/local/register', '/api/notify/local/pending', '/api/agent/ask-ack', '/api/agent/ask-reply', '/api/agent/ask-done'];
+    assert(JSON.stringify(calls) === JSON.stringify(want), `calls: ${calls.join(' → ')}`);
+    const reply = stubLog().find((c) => c.path === '/api/agent/ask-reply');
+    assert(reply.body.ask_id === 'q_1' && reply.body.slug === 'their-doc' && reply.body.text === 'Billing ships first.' && !('parent_id' in reply.body), JSON.stringify(reply.body));
+    const prompt = fs.readFileSync(path.join(RECORD, 'prompt.txt'), 'utf8');
+    assert(prompt.startsWith('Read https://tdoc.dev/d/their-doc and answer: What ships first?'), prompt.split('\n')[0]);
+    assert(/Billing ships first/.test(prompt) && /--ask q_1/.test(prompt) && /Do not edit, publish or comment/.test(prompt) && /UNTRUSTED/.test(prompt), prompt);
+    assert(/run q_1 on their-doc with claude \(a question/.test(r.stdout), r.stdout);
+    // Its own, smaller allow-list: read the doc, pull it, post the answer.
+    const args = fs.readFileSync(path.join(RECORD, 'args.txt'), 'utf8').trim().split('\n');
+    const tools = args[args.indexOf('--allowedTools') + 1];
+    assert(args[args.indexOf('--permission-mode') + 1] === 'dontAsk', 'conservative mode');
+    assert(!/Edit\(|Write\(/.test(tools), `a question run may edit: ${tools}`);
+    assert(!/tdoc-write|tdoc-publish/.test(tools), `a question run may write or publish: ${tools}`);
+    assert(/tdoc-pull/.test(tools) && /tdoc-agent-reply/.test(tools), tools);
+    const env = fs.readFileSync(path.join(RECORD, 'env.txt'), 'utf8');
+    assert(/^TDOC_DAEMON_ASK=q_1$/m.test(env) && /^TDOC_DAEMON_SLUG=their-doc$/m.test(env), env);
+  });
+
+  t('a question addressed to codex is not run (no allow-list there): reported done with a reason', () => {
+    execFileSync('curl', ['-sS', '--max-time', '5', '-X', 'POST', `${stub.base}/__ask_codex`]);
+    fs.writeFileSync(path.join(FAKEBIN, 'codex'), '#!/usr/bin/env bash\ntouch "$RECORD/codex-ran"\n');
+    fs.chmodSync(path.join(FAKEBIN, 'codex'), 0o755);
+    const before = stubLog().length;
+    const r = daemon(['once', '--cli', 'codex', '--device', 'testbox']);
+    assert(r.status === 0, `exit ${r.status}: ${r.stderr}`);
+    const calls = stubLog().slice(before).filter((c) => c.path.startsWith('/api/agent/'));
+    assert(calls.length === 1 && calls[0].path === '/api/agent/ask-done' && /--cli claude/.test(calls[0].body.error), JSON.stringify(calls));
+    assert(!fs.existsSync(path.join(RECORD, 'codex-ran')), 'codex ran a question');
+    fs.rmSync(path.join(FAKEBIN, 'codex'), { force: true });
+  });
+
+  t('under a question run, publish and write refuse, reply needs that --ask, pull only that doc', () => {
+    const env = { ...process.env, TDOC_DAEMON_SLUG: 'their-doc', TDOC_DAEMON_ASK: 'q_1', HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-askguard-')) };
+    const run = (script, args) => spawnSync('bash', [path.join(BIN, script), ...args], { env, encoding: 'utf8' });
+    const pub = run('tdoc-publish', ['their-doc']);
+    assert(pub.status === 2 && /cannot publish/.test(pub.stderr), `publish: ${pub.status} ${pub.stderr}`);
+    const write = run('tdoc-write', ['--slug', 'their-doc', '--title', 't', '--html-file', '/dev/null']);
+    assert(write.status === 2 && /cannot write/.test(write.stderr), `write: ${write.status} ${write.stderr}`);
+    const parent = run('tdoc-agent-reply', ['--slug', 'their-doc', '--parent', 'c1', '--text', 'x']);
+    assert(parent.status === 2 && /may only answer question "q_1"/.test(parent.stderr), `reply --parent: ${parent.status} ${parent.stderr}`);
+    const otherAsk = run('tdoc-agent-reply', ['--slug', 'their-doc', '--ask', 'q_9', '--text', 'x']);
+    assert(otherAsk.status === 2, `another question: ${otherAsk.status}`);
+    const pull = run('tdoc-pull', ['someone-else']);
+    assert(pull.status === 2 && /may only pull "their-doc"/.test(pull.stderr), `pull: ${pull.status} ${pull.stderr}`);
+  });
+
+  t('a handoff whose ack is refused is given up on the next poll, without crashing the queue', () => {
+    execFileSync('curl', ['-sS', '--max-time', '5', '-X', 'POST', `${stub.base}/__forbid`]);
+    let r = daemon(['once', '--cli', 'claude', '--device', 'testbox']);
+    assert(r.status === 0 && /not running h_403/.test(r.stdout), `first poll: ${r.status} ${r.stdout} ${r.stderr}`);
+    const before = stubLog().length;
+    r = daemon(['once', '--cli', 'claude', '--device', 'testbox']);
+    assert(r.status === 0, `second poll crashed: ${r.status}\n${r.stderr}`);
+    assert(/giving up on h_403/.test(r.stdout), r.stdout);
+    const fail = stubLog().slice(before).find((c) => c.path === '/api/notify/local/fail');
+    assert(fail && fail.body.handoff_id === 'h_403' && /gave up after 2 attempts/.test(fail.body.error), JSON.stringify(fail));
   });
 
   t('a revoked token stops the daemon with a sign-in hint, not a stack trace', () => {

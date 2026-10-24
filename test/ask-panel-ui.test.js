@@ -1,7 +1,8 @@
 // Ask this doc, in a real browser: the bar entry (desktop) and the ⋯ entry
 // (phone) open the side panel / bottom sheet; a slow answer shows a thinking
 // state; the answer renders as text; Post as comment labels it as AI; the
-// last free question turns into the connect-your-agent line.
+// last free question turns into the connect-your-agent line. The same panel
+// as Send to my agent (private answer, posted anchored) and Copy for my agent.
 const assert = require('assert/strict');
 const fs = require('fs');
 const os = require('os');
@@ -112,6 +113,55 @@ export default defineConfig({ plugins: [react()], logLevel: 'error', build: { ou
       const post = dialog.getByRole('button', { name: 'Post as comment' });
       assert.ok((await post.boundingBox()).height >= 28);
       await shot(page, 'ask-phone-limit.png');
+      await page.close();
+    });
+
+    await t('Send to my agent (desktop): the popover question goes at once, waits, then the private answer posts anchored', async () => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.goto(`${base}/?mode=agent&selection=Billing%20ships%20first&question=${encodeURIComponent('Why billing first?')}`);
+      await page.getByRole('button', { name: 'Ask AI about this doc' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Send to my agent' });
+      await dialog.getByText(/Goes to Claude Code on sams-mac, your own agent/).waitFor();
+      await dialog.getByText(/Sent to Claude Code on sams-mac · waiting for the answer…/).waitFor({ timeout: 5000 });
+      assert.deepEqual(await page.evaluate(() => window.__agentCalls.map((c) => [c.question, c.passage && c.passage.text, c.passage && c.passage.context_after])), [['Why billing first?', 'Billing ships first', '. Then']]);
+      assert.match(await dialog.locator('.tdoc-ask-result .tdoc-ask-focus').first().textContent(), /Billing ships first/);
+      await shot(page, 'agent-desktop-waiting.png');
+      // Picked up on the next read, answered on the one after (5 s polls).
+      await dialog.getByText(/is working on it/).waitFor({ timeout: 8000 });
+      await dialog.locator('.tdoc-ask-answer-text').waitFor({ timeout: 8000 });
+      await dialog.getByText(/Answer from Claude Code on sams-mac · only you can see this/).waitFor();
+      assert.equal(await dialog.locator('.tdoc-ask-answer-text strong').textContent(), 'first');
+      await shot(page, 'agent-desktop-answer.png');
+      await dialog.getByRole('button', { name: 'Post as comment' }).click();
+      await dialog.getByRole('button', { name: 'Posted as comment' }).waitFor();
+      assert.match(await page.locator('#posted').textContent(), /^Q: Why billing first\?\n\nAnswer from my agent \(Claude Code on sams-mac\): Billing ships/);
+      const anchor = await page.evaluate(() => window.__postedAnchor);
+      assert.equal(anchor && anchor.text, 'Billing ships first', 'the posted answer is anchored to the passage');
+      // The panel and the comment composer share the question box's look.
+      const border = await dialog.locator('textarea.tdoc-ask-input').evaluate((n) => getComputedStyle(n).borderTopColor);
+      assert.equal(border, 'rgb(22, 82, 240)');
+      await page.close();
+    });
+
+    await t('Copy for my agent (phone): one click copies the line with the link and the passage, and offers the helper', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true });
+      await page.goto(`${base}/?mode=copy&selection=Billing%20ships%20first`);
+      await page.getByRole('button', { name: 'More actions' }).click();
+      await page.getByRole('menuitem', { name: 'Ask AI' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Copy for my agent' });
+      await dialog.getByRole('textbox', { name: 'Your question' }).fill('Who owns billing?');
+      await dialog.getByRole('button', { name: 'Copy for my agent' }).click();
+      await dialog.getByText('Copied. Paste it into your agent.').waitFor();
+      assert.deepEqual(await page.evaluate(() => window.__copied), ['Read https://tdoc.dev/d/launch-plan and answer: Who owns billing?\n\nAbout this passage: "Billing ships first"']);
+      const helper = dialog.getByRole('link', { name: /Turn on the background helper/ });
+      assert.equal(await helper.getAttribute('href'), '/me?view=settings#agents');
+      const box = await dialog.boundingBox();
+      assert.ok(Math.abs(box.width - 390) < 1, JSON.stringify(box));
+      const lines = await dialog.getByRole('button', { name: 'Copy for my agent' }).evaluate((n) => { const r = document.createRange(); r.selectNodeContents(n); return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size; });
+      assert.equal(lines, 1, 'the button label wrapped');
+      const layout = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
+      assert.ok(layout.scrollWidth <= layout.width + 1, JSON.stringify(layout));
+      await shot(page, 'copy-phone.png');
       await page.close();
     });
 
