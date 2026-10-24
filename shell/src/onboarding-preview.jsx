@@ -34,7 +34,10 @@ function TutorialPreview({ state }) {
 // The original components and markup, with local sample state only.
 // This gallery is served only by the PR preview Worker, never production.
 export default function OnboardingPreview() {
-  const [state, setState] = useState('Approved');
+  const [state, setState] = useState(() => {
+    const screen = new URLSearchParams(location.search).get('screen');
+    return states.includes(screen) ? screen : 'Connect agent';
+  });
   const [dialogOpen, setDialogOpen] = useState(true);
   const [notice, setNotice] = useState('');
   let screen;
@@ -61,7 +64,7 @@ export default function OnboardingPreview() {
     }
   };
   return <div className="op-preview" onClickCapture={keepInPreview}>
-    <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding preview</strong><span>Original UI · sample data</span></div><label>Screen <AppSelect ariaLabel="Screen" value={state} onChange={next => {setState(next);setDialogOpen(true);setNotice('');}} options={states.map(value => ({value,label:value}))} /></label></nav>
+    <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding preview</strong><span>Original UI · sample data</span></div><label>Screen <AppSelect ariaLabel="Screen" value={state} onChange={next => {setState(next);setDialogOpen(true);setNotice('');const url=new URL(location.href);url.searchParams.set('screen',next);history.replaceState(null,'',url);}} options={states.map(value => ({value,label:value}))} /></label></nav>
     {notice ? <p className="op-notice" role="status">{notice}</p> : null}
     {screen}
   </div>;

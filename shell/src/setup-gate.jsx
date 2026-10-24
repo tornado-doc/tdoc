@@ -90,33 +90,29 @@ export function SetupGate({ boot, preview = null }) {
       <section className="sg-pane-form">
         <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><img src="/tdoc_logo.svg" alt="" width="28" height="28" data-tdoc-dark="invert" /></a>
         <div className="sg-mid"><div className="sg-col">
-          <p className="sg-eyebrow"><span className="sg-step-n">{connected ? 2 : 1}</span>Connect · Choose your AI · Try a comment</p>
+          <p className="sg-eyebrow"><span className="sg-step-n">{connected ? 2 : 1}</span>{connected ? 'Step 2 of 2' : 'Step 1 of 2'}</p>
           <h1 className="sg-h1">{connected ? 'Choose your AI' : 'Connect your computer'}</h1>
           {!signedIn ? <>
             <p>Use the AI on your computer to revise docs from your comments.</p>
             <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
             <p className="sg-account">{boot?.oidcAuth ? 'New here? Signing in creates your account.' : 'Sign-in is not configured on this host.'}</p>
           </> : !loaded ? <p role="status">Checking your computers…</p> : connected ? <>
-            <p>Your computer is connected. Choose the AI that will work on your practice doc.</p>
+            <p>Choose an AI, then try editing a doc with a comment.</p>
             <AppSelect ariaLabel="Your connected AI" value={keyOf(chosen)} onChange={setSelected} options={available.map((a) => ({ value: keyOf(a), label: labelOf(a) }))} disabled={busy} />
             <div className="sg-status done" role="status"><b>{error.startsWith('This computer is offline') ? 'Connection needs attention' : `Connected · ${labelOf(chosen)}`}</b></div>
-            <ol className="sg-steps"><li>Open your private practice doc.</li><li>Select a sentence and leave a comment.</li><li>Send it to your AI and watch a new version arrive.</li></ol>
             <button type="button" className="sg-primary" onClick={practice} disabled={busy}>{busy ? 'Opening your doc…' : 'Try a comment'}</button>
-            <p className="sg-account">Your AI runs a new document task using its existing account. Your current chat stays yours.</p>
             <a className="sg-account" href="/me?view=settings#agents">Manage connected computers</a>
           </> : <>
-            <p>Install tdoc once. Then send comments to your AI without copying them back to a chat.</p>
+            <p>Run this in {platform === 'windows' ? 'your WSL terminal' : 'Terminal'}, then approve in your browser.</p>
             <SegmentedControl value={platform} onChange={setPlatform} ariaLabel="Your computer" options={[{ value: 'unix', label: 'macOS / Linux' }, { value: 'windows', label: 'Windows (WSL)' }]} />
             <div className="sg-prompt"><p className="sg-prompt-text" ref={promptRef}>{SETUP_PROMPT}</p><button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
             <p className="sg-works"><span>Works with</span><AgentMarks size={21} /><span className="sg-sr">Claude Code and Codex</span></p>
-            <ol className="sg-steps"><li>Paste into {platform === 'windows' ? 'your WSL terminal' : 'Terminal'} on the computer where you use your AI.</li><li>Approve the sign-in in your browser.</li><li>tdoc checks your AI and connects this page automatically.</li></ol>
-            <p className="sg-account">Installs a background service and the tdoc skill. Uses your AI account for a small connection check. Runs while your computer is awake and you are signed in.</p>
             <div className="sg-status-slot" aria-live="polite">
               <div className={`sg-status${state === 'stuck' ? ' stuck' : ''}`}>
                 {state === 'stuck' ? <><div>Still waiting? Check Terminal for a sign-in or installation error.</div><div className="sg-doctor"><code>{DOCTOR_PROMPT}</code><button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy status command</button></div><a href="https://nodejs.org/">Node.js 18+ is required</a></> : <><span className="sg-spin" aria-hidden="true" />{copyFailed ? COPY_FALLBACK : 'Waiting for your computer…'}</>}
               </div>
             </div>
-            <p className="sg-account">Already installed? Run <code>~/.local/bin/tdoc setup</code>. Pause with <code>~/.local/bin/tdoc stop</code>.</p>
+            <details className="sg-help sg-account"><summary>Installation details</summary><p>Installs tdoc in the background and checks your AI using its existing account. Keep this computer awake to receive tasks.</p><p>Already installed? Run <code>~/.local/bin/tdoc setup</code>. Pause with <code>~/.local/bin/tdoc stop</code>.</p></details>
           </>}
           {error ? <p className="sg-status stuck" role="alert">{error}</p> : null}
           {signedIn ? <p className="sg-account"><a href="/me">Later</a></p> : null}
