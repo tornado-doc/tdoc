@@ -1019,12 +1019,11 @@ async function docOwnerToken(env, req, meta) {
   return actor;
 }
 
-// `joinInvite`: the HTML doc view (GET) asks the gate to accept a pending
-// team invite first, so an invitee who opens any of the team's docs joins
-// (joinInvitedTeamOnView) and a team-private doc then simply opens.
-// `joined`: a team this same request already joined (the /d/<slug> route
-// gates twice); counted without re-reading KV, which may not show it yet.
-async function enforceDocAccess(env, req, slug, version, { joinInvite = false, joined = null } = {}) {
+// Opening a doc never joins a team. A pending invitee to the team that owns
+// a team-private doc gets the invitation page below and joins only by
+// clicking Accept (/api/team/accept); a doc they can read anyway (public,
+// link, allowlist) simply opens and leaves the invite pending (#711).
+async function enforceDocAccess(env, req, slug, version) {
   const meta = await loadDocMeta(env, slug);
   // No meta yet (orphan R2 object) — treat as public so legacy uploads still work.
   const access = accessFromMeta(meta || {});
@@ -1032,12 +1031,8 @@ async function enforceDocAccess(env, req, slug, version, { joinInvite = false, j
   // denial -- carries noindex unless the doc is Public (see withDocRobots).
   if (!docIndexable(access) && req && typeof req === 'object') NOINDEX_REQUESTS.add(req);
   let session = await getSession(env, req);
-  if (joined && sessionPrincipal(session) && !sessionInTeam(session, joined.id)) {
-    session.team_ids = [...(session.team_ids || []), joined.id];
-  }
-  const joinedTeam = joinInvite ? await joinInvitedTeamOnView(env, req, session, meta) : null;
   if (canReadDoc(access, session, env, meta)) {
-    return { ok: true, access, session, meta, ...(joinedTeam ? { joinedTeam } : {}) };
+    return { ok: true, access, session, meta };
   }
   // Without this the owner is denied their own private doc from their own
   // terminal: /tdoc pull is the documented pre-step to /tdoc edit, and
@@ -2206,8 +2201,6 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     // Ask this doc: shown only where the server has a model key. Only the
     // availability and the allowance size reach the page, never the key.
     ask: (oidc && oidc.ask && oidc.ask.available && !isLanding) ? { available: true, limit: oidc.ask.limit } : null,
-    // Set only on the view that accepted a team invite (one-time notice).
-    joinedTeam: (oidc && oidc.joinedTeam) ? { name: oidc.joinedTeam.name } : null,
     mode: 'published',
     versions: vlist,
     stars: stars || null,
@@ -2605,10 +2598,9 @@ async function fetchStars(env) {
   }
 }
 
-async function serveDocVersion(env, req, slug, version, isLanding, { head = false, joinedTeam = null } = {}) {
-  const gate = await enforceDocAccess(env, req, slug, version, { joinInvite: !isLanding && req.method === 'GET', joined: joinedTeam });
+async function serveDocVersion(env, req, slug, version, isLanding, { head = false } = {}) {
+  const gate = await enforceDocAccess(env, req, slug, version);
   if (!gate.ok) return { ok: false, response: gate.response };
-  joinedTeam = gate.joinedTeam || joinedTeam;
   // The shell page reads only the head of the document (share excerpt,
   // share image, onboarding CTA -- see SHELL_SCAN_BYTES; the text copy for
   // agents -- AGENT_READ_BYTES, past a head of inline fonts and styles), so
@@ -2715,7 +2707,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, joinedTeam, agent, agentView, ask: askConfig(env), debug: await isDebugAccount(env, session) }, pageUrl), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), debug: await isDebugAccount(env, session) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce), 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
     }),
   };
@@ -5096,29 +5088,6 @@ async function ensureSessionAccount(env, session, origin) {
       session.team_admin_ids = await loadAdminTeamIds(env, acct.account_id, session.team_ids);
     }
   } catch {}
-}
-
-// Opening a team's doc while invited to that team accepts the invite: the
-// invitation is the consent, and the doc is where people arrive from it.
-// Browser cookie sessions only (never a bearer or feedback token), only for
-// a doc that belongs to a team the session is not already in. One team read
-// per such view; writes only when someone actually joins. Returns the team
-// joined, or null.
-async function joinInvitedTeamOnView(env, req, session, meta) {
-  const teamId = meta && meta.workspace_id;
-  if (!teamId || !sessionPrincipal(session) || session.feedback || sessionInTeam(session, teamId)) return null;
-  let team = null;
-  try { team = await loadTeam(env, teamId); } catch { return null; }
-  if (!team || !pendingTeamInvite(team, session)) return null;
-  if (session.account_id && teamMember(team, session.account_id)) return null;
-  await ensureSessionAccount(env, session, requestOrigin(req));
-  if (!session.account_id) return null;
-  try {
-    const joined = await joinTeamFromSession(env, team, session);
-    if (!joined.ok) return null;
-  } catch { return null; }
-  session.team_ids = [...(session.team_ids || []).filter((id) => id !== team.id), team.id];
-  return { id: team.id, name: team.name || 'your team' };
 }
 
 async function teamManageFor(env, session, meta, access, isOwner) {
@@ -8060,7 +8029,21 @@ function feedbackConnectPage({ base, origin, nonce, identity, doors, error, spac
       body: JSON.stringify(Object.assign({ origin: origin }, space ? { space: space } : {}, body || {})),
     }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
       .then(function (r) {
-        if (!r.ok) { say((r.body && (r.body.message || r.body.error)) || 'Could not connect', true); return; }
+        if (!r.ok) {
+          say((r.body && (r.body.message || r.body.error)) || 'Could not connect', true);
+          // Invited to the team that owns this space: its page is the
+          // invitation, and Accept there joins (#711).
+          if (status && r.body && r.body.accept_url) {
+            var link = document.createElement('a');
+            link.href = r.body.accept_url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = 'Open the invitation';
+            status.appendChild(document.createTextNode(' '));
+            status.appendChild(link);
+          }
+          return;
+        }
         deliver(r.body);
       })
       .catch(function (e) { say(String(e && e.message || e), true); });
@@ -13505,7 +13488,7 @@ const tdocHandlers = {
       // is this same head URL, and an unauthorized probe learns nothing —
       // not even the version count. On success the gate's own meta yields
       // the redirect target (one KV read, not two).
-      const gate = await enforceDocAccess(env, req, slug, null, { joinInvite: method === 'GET' });
+      const gate = await enforceDocAccess(env, req, slug, null);
       if (!gate.ok) return gate.response;
       const latest = latestVersionNumber(gate.meta);
       // The query rides along. Everything that deep-links into a doc without
@@ -13518,7 +13501,7 @@ const tdocHandlers = {
       // the link people share, and it stays the address bar's URL, so the
       // same link always shows the newest version. /v/<n> is for a person
       // who wants one version on purpose.
-      if (latest > 0) docRoute = { slug, vStr: String(latest), head: true, joinedTeam: gate.joinedTeam || null };
+      if (latest > 0) docRoute = { slug, vStr: String(latest), head: true };
       // Unknown slug → the existing not-found landing redirect below.
     }
 
@@ -13567,7 +13550,7 @@ const tdocHandlers = {
           }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store', 'Link': docAgentLinkHeader(agent) } });
         }
       }
-      const res = await serveDocVersion(env, req, slug, Number(vStr), false, { head: docRoute.head, joinedTeam: docRoute.joinedTeam || null });
+      const res = await serveDocVersion(env, req, slug, Number(vStr), false, { head: docRoute.head });
       // Google-Docs-style recents: remember the visit — owned or not — for
       // the signed-in viewer's /me Recent tab. Only successful reads count
       // (the access gate already passed), HEAD probes and anonymous readers
@@ -13918,15 +13901,27 @@ const tdocHandlers = {
       if (body.space) {
         // A site's own space (the SDK): only on the origins it was bound to,
         // and only for people the space doc's own access admits, exactly as
-        // on the doc page. Like opening a team doc, a pending invite to the
-        // space's team is accepted here (joinInvitedTeamOnView).
+        // on the doc page. A pending invite to the space's team is never
+        // accepted here: the invitee is sent to the space's page, whose
+        // invitation joins on an explicit Accept (#711).
         if (!isValidSlug(body.space)) return json({ error: 'invalid_space' }, { status: 400 });
         meta = await loadDocMeta(env, body.space);
         if (!meta || !meta.site) return json({ error: 'space_not_found', message: 'This site has no tdoc comment space.' }, { status: 404 });
         if (!siteServesOrigin(meta, origin)) return json({ error: 'origin_not_allowed', message: `This comment space is not enabled for ${origin}.` }, { status: 403 });
         const access = accessFromMeta(meta);
         const admitted = () => canReadDoc(access, s, env, meta) && canCommentOnDoc(access, s, env, meta);
-        if (!admitted() && !(await joinInvitedTeamOnView(env, req, s, meta) && admitted())) {
+        if (!admitted()) {
+          let team = null;
+          if (access.team && meta.workspace_id) { try { team = await loadTeam(env, meta.workspace_id); } catch {} }
+          if (team && pendingTeamInvite(team, s)) {
+            const name = team.name || 'a team';
+            return json({
+              error: 'team_invite_pending',
+              team_name: name,
+              accept_url: `/d/${encodeURIComponent(body.space)}`,
+              message: `You’re invited to ${name}, which owns this site's comments. Accept the invite on tdoc, then try again.`,
+            }, { status: 403 });
+          }
           return json({ error: 'not_invited', message: 'This site\'s comments are not shared with you. Ask its owner to share them with you.' }, { status: 403 });
         }
         const token = await mintFeedbackToken(env, s, body.space, origin, { site: true });

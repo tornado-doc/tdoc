@@ -72,7 +72,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 403 && r.body.error === 'origin_not_allowed', `${r.status}`);
   });
 
-  await t('a team space: members comment, outsiders are refused, a pending invitee joins on connect', async () => {
+  await t('a team space: members comment, outsiders are refused, a pending invitee is sent to Accept, not joined', async () => {
     const made = await call('/api/teams', { method: 'POST', cookie: owner.cookie, headers: home, body: { name: 'Acme', invites: ['mate', 'newbie'] } });
     assert(made.status === 200, `team ${made.status} ${JSON.stringify(made.body)}`);
     const teamId = made.body.team.id;
@@ -87,8 +87,20 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(posted.status === 200, `member comment ${posted.status}`);
     const out = await connectAs(visitor);
     assert(out.status === 403 && out.body.error === 'not_invited', `outsider ${out.status}`);
+    // A pending invitee is not joined by connecting: they are sent to the
+    // space's page, whose invitation joins on Accept (#711).
     const n = await connectAs(newbie);
-    assert(n.status === 200 && n.body.token, `invitee ${n.status} ${JSON.stringify(n.body)}`);
+    assert(n.status === 403 && n.body.error === 'team_invite_pending' && n.body.team_name === 'Acme' && n.body.accept_url === `/d/${slug}` && !n.body.token,
+      `invitee ${n.status} ${JSON.stringify(n.body)}`);
+    const pending = await call(`/api/team?id=${teamId}`, { cookie: newbie.cookie, headers: home });
+    assert(pending.status !== 200 || (pending.body.team.invites || []).includes('newbie'), `connect joined the team ${pending.status} ${JSON.stringify(pending.body)}`);
+    const page = await worker.fetch(req(n.body.accept_url, { cookie: newbie.cookie }), env, {});
+    const pageHtml = await page.text();
+    assert(page.status === 403 && pageHtml.includes('You’re invited to Acme') && pageHtml.includes('acceptInvite'), `invite page ${page.status}`);
+    const acc = await call('/api/team/accept', { method: 'POST', cookie: newbie.cookie, headers: home, body: { slug } });
+    assert(acc.status === 200, `accept ${acc.status} ${JSON.stringify(acc.body)}`);
+    const n2 = await connectAs(newbie);
+    assert(n2.status === 200 && n2.body.token, `after Accept ${n2.status} ${JSON.stringify(n2.body)}`);
     const team = await call(`/api/team?id=${teamId}`, { cookie: newbie.cookie, headers: home });
     assert(team.status === 200 && !(team.body.team.invites || []).includes('newbie'), `invitee did not join ${team.status} ${JSON.stringify(team.body)}`);
     // Back out of the team so the next cases see a personal space again.
