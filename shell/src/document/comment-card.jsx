@@ -369,7 +369,7 @@ function descendantsOf(replies, parentId, rootId) {
 // neither belongs on screen.
 function replyName(author) {
   const login = String(author?.login || '');
-  if (login && !login.includes(':') && !login.includes('@')) return login;
+  if (login && login !== 'email-hidden' && !login.includes(':') && !login.includes('@')) return login;
   return String(author?.name || '').split('@')[0] || 'someone';
 }
 

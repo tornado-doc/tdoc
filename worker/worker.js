@@ -244,7 +244,7 @@ function publicAuthorName(a) {
     return owner ? `${name} · ${owner}` : name;
   }
   const login = String(a.login || '');
-  if (login.startsWith(EMAIL_ALIAS_PREFIX)) return noAddress(a.name) || 'someone';
+  if (login.startsWith(EMAIL_ALIAS_PREFIX) || login === EMAIL_HIDDEN_KEY) return noAddress(a.name) || 'someone';
   if (!login || login.startsWith('email:') || login.includes('@')) return noAddress(a.name) || noAddress(login) || 'someone';
   return `@${login}`;
 }
@@ -8456,6 +8456,7 @@ const EMAIL_KEY_RE = /^email:([^\s@]+@[^\s@]+\.[^\s@]+)$/i;
 const BARE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_TAG_RE = /(^|[^A-Za-z0-9_@/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
 const EMAIL_ALIAS_PREFIX = 'email-alias:';
+const EMAIL_HIDDEN_KEY = 'email-hidden';
 
 async function emailPrivacyFor(env, session, slug, meta) {
   const reveal = new Set();
@@ -8472,7 +8473,10 @@ async function emailPrivacyFor(env, session, slug, meta) {
       if (team && teamMember(team, session.account_id)) for (const m of team.members || []) addEmail(m.key);
     }
   }
-  const secret = String((env && (env.TDOC_DATA_MIRROR_KEY || env.TDOC_UPLOAD_TOKEN || env.GITHUB_CLIENT_SECRET)) || '');
+  // A dedicated secret; the others only stand in for it. With none at all,
+  // an HMAC under a known key could be matched against a list of addresses,
+  // so no alias is made (see redactCommentEmails).
+  const secret = String((env && (env.TDOC_EMAIL_ALIAS_SECRET || env.TDOC_DATA_MIRROR_KEY || env.TDOC_UPLOAD_TOKEN || env.GITHUB_CLIENT_SECRET)) || '');
   return { reveal, slug: String(slug || ''), secret, mine: new Set([...(session ? actorKeys(session) : [])].map((k) => String(k).toLowerCase())) };
 }
 
@@ -8497,6 +8501,7 @@ async function redactCommentEmails(value, privacy) {
   if (!hidden.length) return value;
   const alias = new Map();
   await Promise.all(hidden.map(async (email) => {
+    if (!privacy.secret) { alias.set(email, EMAIL_HIDDEN_KEY); return; }
     const mac = await hmacBytes(`tdoc-email-alias-v1\0${privacy.secret}`, `${privacy.slug}\0${email}`);
     alias.set(email, EMAIL_ALIAS_PREFIX + [...mac.slice(0, 6)].map((b) => b.toString(16).padStart(2, '0')).join(''));
   }));

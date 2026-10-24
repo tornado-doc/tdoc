@@ -21,6 +21,7 @@ const DAVE = 'dave.reader@example.org';
   const mod = await loadWorker();
   const worker = mod.default;
   const env = makeEnv(mod.CommentsStore);
+  env.TDOC_EMAIL_ALIAS_SECRET = 'test-alias-secret';
   const call = async (p, o = {}) => {
     const r = await worker.fetch(req(p, o), env, {});
     const text = await r.text();
@@ -107,6 +108,17 @@ const DAVE = 'dave.reader@example.org';
     assert(mentions.status === 200, `mentions ${mentions.status}`);
     assert(!leaks(mentions.text, CAROL, DAVE).length, 'mention list offers an address');
     assert(mentions.body.users.some((u) => u.login === 'alice'), 'mention list lost the GitHub owner');
+  });
+
+  await t('with no secret configured there is no alias to match: every hidden address is the same placeholder', async () => {
+    delete env.TDOC_EMAIL_ALIAS_SECRET;
+    const r = await call('/api/comments?slug=open');
+    assert(!leaks(r.text, CAROL, DAVE).length, 'leaks without a secret');
+    assert(r.body[0].author.login === 'email-hidden' && r.body[0].replies[0].author.login === 'email-hidden', `placeholder ${r.body[0].author.login}`);
+    assert(r.body[0].author.name === 'carol.writer', 'display name lost');
+    const own = await call('/api/comments?slug=open', { cookie: carol });
+    assert(own.body[0].author.login === `email:${CAROL}`, 'the commenter lost their own key');
+    env.TDOC_EMAIL_ALIAS_SECRET = 'test-alias-secret';
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
