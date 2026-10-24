@@ -74,7 +74,7 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
     });
     await t('every workspace has the same tabs and Recent/Starred follow the workspace', async () => {
       const page = await open(1280, '');
-      assert.deepEqual(await page.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Settings']);
+      assert.deepEqual(await page.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Trash', 'Settings']);
       await page.getByRole('tab', { name: 'Recent' }).click();
       await page.getByRole('link', { name: 'Personal plan' }).waitFor();
       assert.equal(await page.getByRole('link', { name: 'Team plan' }).count(), 0);
@@ -133,7 +133,7 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await admin.locator('.tdoc-space-trigger').click();
       await admin.getByRole('menuitem', { name: 'Workspace settings' }).click();
       await admin.getByRole('heading', { name: 'Workspace settings' }).waitFor();
-      assert.deepEqual(await admin.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Settings']);
+      assert.deepEqual(await admin.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Trash', 'Settings']);
       await admin.getByRole('heading', { name: 'Members' }).waitFor();
       await admin.getByRole('heading', { name: 'Agents' }).waitFor();
       const agents = await admin.locator('#agents').textContent();

@@ -212,6 +212,29 @@ export function deleteDocument(slug) {
   return request(`/api/doc?${query}`, { method: 'DELETE' });
 }
 
+// Trash. Delete moves a doc (or a folder with its docs) here for 30 days;
+// `target` is { slug } for a doc, { folder, team? } for a folder.
+export function listTrash(team) {
+  const query = team ? `?${new URLSearchParams({ team })}` : '';
+  return request(`/api/trash${query}`);
+}
+
+export function restoreFromTrash(target) {
+  return request('/api/trash/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(target),
+  });
+}
+
+export function deleteForever(target) {
+  return request('/api/trash/purge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(target),
+  });
+}
+
 export function listNotifications(offset = 0) {
   const query = new URLSearchParams({ offset: String(offset) });
   return request(`/api/notifications?${query}`);

@@ -21,8 +21,10 @@ import {
   moveDocsToTeam,
   removeTeamMember,
   renameFolder,
+  restoreFromTrash,
   updateFolderAccess,
 } from './document/api.js';
+import { TrashPane } from './docs-hub/trash.jsx';
 import {
   LeaveTeamDialog,
   MoveFolderToTeamDialog,
@@ -37,7 +39,7 @@ import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs }
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
-const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['settings', 'Settings']];
+const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['trash', 'Trash'], ['settings', 'Settings']];
 const CATALOG_LAYOUT_KEY = 'tdoc.catalogLayout';
 
 // A profile lists only Public docs, and pinning one makes it Public. Say so
@@ -653,14 +655,44 @@ export function DocsHub({ boot }) {
       setSpaceFolders((list) => [...list, { ...folder, parent: folder.parent || '' }]);
     }));
   };
-  const deleteTeamFolder = (item) => teamRun(deleteFolderRequest(item.id, team.id).then(() => {
+  // A team folder goes to the team's Trash with its subfolders and the docs
+  // this person could delete; the rest move up a level. Undo puts it back.
+  const deleteTeamFolder = (item) => teamRun(deleteFolderRequest(item.id, team.id).then((result) => {
     const up = item.parent || '';
-    setSpaceFolders((list) => list
-      .filter((candidate) => candidate.id !== item.id)
-      .map((candidate) => (candidate.parent === item.id ? { ...candidate, parent: up } : candidate)));
-    setTeamDocs((list) => list.map((doc) => (doc.team === team.id && doc.folder === item.id ? { ...doc, folder: up } : doc)));
-    if (teamFolder === item.id) setTeamFolder(up);
+    const owner = team;
+    const before = { folders: spaceFolders, docs: teamDocs };
+    const tree = new Set([item.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const candidate of spaceFolders) if (tree.has(candidate.parent) && !tree.has(candidate.id)) { tree.add(candidate.id); grew = true; }
+    }
+    const trashed = new Set((result && result.docs) || []);
+    setSpaceFolders((list) => list.filter((candidate) => !tree.has(candidate.id)));
+    setTeamDocs((list) => list
+      .filter((doc) => !trashed.has(doc.slug))
+      .map((doc) => (doc.team === owner.id && tree.has(doc.folder) ? { ...doc, folder: up } : doc)));
+    if (tree.has(teamFolder)) setTeamFolder(up);
+    hub.notify(`Moved “${item.name}”${trashed.size ? ` and ${trashed.size === 1 ? '1 doc' : `${trashed.size} docs`}` : ''} to Trash`, false, {
+      label: 'Undo',
+      run: () => restoreFromTrash({ folder: item.id, team: owner.id }).then(() => {
+        setTeamFolders((all) => ({ ...all, [owner.id]: before.folders }));
+        setTeamDocs(before.docs);
+        hub.notify(`Restored “${item.name}”`);
+      }).catch(teamFailed),
+    });
   }));
+  // Delete a team doc: to the team's Trash, with Undo on the toast.
+  const deleteTeamDoc = (doc) => deleteDocument(doc.slug).then(() => {
+    setTeamDocs((list) => list.filter((row) => row.slug !== doc.slug));
+    closeModal();
+    hub.notify('Moved to Trash', false, {
+      label: 'Undo',
+      run: () => restoreFromTrash({ slug: doc.slug }).then(() => {
+        setTeamDocs((list) => [doc, ...list.filter((row) => row.slug !== doc.slug)]);
+        hub.notify(`Restored “${doc.title}”`);
+      }).catch(teamFailed),
+    });
+  }).catch(teamFailed);
   const moveTeamDocs = async (slugs, destination) => {
     const moving = new Set(slugs);
     const previous = new Map(teamDocs.filter((doc) => moving.has(doc.slug)).map((doc) => [doc.slug, doc]));
@@ -669,6 +701,22 @@ export function DocsHub({ boot }) {
     if (!ok) setTeamDocs((list) => list.map((doc) => previous.get(doc.slug) || doc));
     return ok;
   };
+
+  // Deleted from the doc page, which lands here with ?trashed=<slug>: say
+  // where it went and offer the way back to the doc.
+  const [trashedFromDoc] = useState(() => {
+    const slug = new URLSearchParams(location.search).get('trashed') || '';
+    return /^[a-z0-9][a-z0-9-]{0,63}$/.test(slug) ? slug : '';
+  });
+  useEffect(() => {
+    if (!trashedFromDoc) return;
+    hub.notify('Moved to Trash', false, {
+      label: 'Undo',
+      run: () => restoreFromTrash({ slug: trashedFromDoc })
+        .then(() => { location.href = `/d/${encodeURIComponent(trashedFromDoc)}`; })
+        .catch((error) => hub.notify(error.message || 'Could not restore', true)),
+    });
+  }, [trashedFromDoc]);
 
   const closeModal = () => setModal(null);
   const closeIf = (promise) => promise.then((ok) => { if (ok) closeModal(); });
@@ -781,17 +829,22 @@ export function DocsHub({ boot }) {
     hub.setDocs((items) => items.filter((doc) => !(doc.mine && tree.has(doc.folder))));
     hub.setFolders((items) => items.filter((item) => !tree.has(item.id)));
   };
+  // The catalog as the server has it now: after a folder move, or after
+  // something came back out of Trash.
+  const refreshCatalog = async () => {
+    const response = await fetch('/api/me', { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('Could not refresh the document list');
+    const current = await response.json();
+    hub.setDocs(current.docs || []);
+    hub.setFolders(current.folders || []);
+    hub.setRecent(current.recent || []);
+    hub.setStarred(current.starred || []);
+    setTeamDocs(current.team_docs || []);
+    setTeamFolders(current.team_folders || {});
+  };
   const settleFolderMove = async () => {
     try {
-      const response = await fetch('/api/me', { credentials: 'same-origin' });
-      if (!response.ok) throw new Error('Could not refresh the document list');
-      const current = await response.json();
-      hub.setDocs(current.docs || []);
-      hub.setFolders(current.folders || []);
-      hub.setRecent(current.recent || []);
-      hub.setStarred(current.starred || []);
-      setTeamDocs(current.team_docs || []);
-      setTeamFolders(current.team_folders || {});
+      await refreshCatalog();
       folderMoveBefore.current = null;
     } catch (error) {
       if (folderMoveBefore.current) {
@@ -936,6 +989,13 @@ export function DocsHub({ boot }) {
           <>
             {view === 'comments' ? (
               <TeamCommentsPane team={team} />
+            ) : view === 'trash' ? (
+              <TrashPane
+                team={team}
+                notify={hub.notify}
+                onChanged={() => refreshCatalog().catch(teamFailed)}
+                onFailed={teamFailed}
+              />
             ) : view === 'settings' ? (
               <TeamSettingsPane
                 team={team}
@@ -1086,6 +1146,14 @@ export function DocsHub({ boot }) {
             <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} />
           </section>
         ) : null}
+        {view === 'trash' ? (
+          <TrashPane
+            team={null}
+            notify={hub.notify}
+            onChanged={() => refreshCatalog().catch(teamFailed)}
+            onFailed={teamFailed}
+          />
+        ) : null}
         {view === 'settings' ? <AccountSettingsPane identity={boot.identity} profile={boot.profile} /> : null}
         </>
         )}
@@ -1139,16 +1207,10 @@ export function DocsHub({ boot }) {
           title="Delete this doc?"
           confirmLabel="Delete"
           danger
-          onConfirm={() => deleteDocument(modal.doc.slug)
-            .then(() => {
-              setTeamDocs((list) => list.filter((doc) => doc.slug !== modal.doc.slug));
-              closeModal();
-              hub.notify('Deleted');
-            })
-            .catch(teamFailed)}
+          onConfirm={() => deleteTeamDoc(modal.doc)}
           onClose={closeModal}
         >
-          <p>This permanently removes every version and comment of “{modal.doc.title}” for the whole team. This cannot be undone.</p>
+          <p>“{modal.doc.title}” moves to the team’s Trash for 30 days, then it is deleted for good. Until then nobody can open it, and a team admin can restore it from Trash.</p>
         </HubDialog>
       ) : null}
 
@@ -1240,7 +1302,7 @@ export function DocsHub({ boot }) {
           onConfirm={() => closeIf(deleteTeamFolder(modal.folder))}
           onClose={closeModal}
         >
-          <p>Its contents move up one level. Documents are not deleted.</p>
+          <p>The folder, its subfolders and the docs in them move to the team’s Trash for 30 days, then they are deleted for good. Restore them together from Trash until then. Docs you can’t delete yourself move up a level instead.</p>
         </HubDialog>
       ) : null}
       {modal?.type === 'team-move' && team ? (
@@ -1280,7 +1342,7 @@ export function DocsHub({ boot }) {
           onConfirm={() => closeIf(hub.deleteDocs(modal.slugs))}
           onClose={closeModal}
         >
-          <p>This permanently removes every version and comment. This cannot be undone.</p>
+          <p>{modal.slugs.length === 1 ? 'It moves' : 'They move'} to Trash for 30 days, then {modal.slugs.length === 1 ? 'it is' : 'they are'} deleted for good. Until then nobody can open {modal.slugs.length === 1 ? 'it' : 'them'}, and you can restore {modal.slugs.length === 1 ? 'it' : 'them'} from Trash.</p>
         </HubDialog>
       ) : null}
       {modal?.type === 'delete-folder' ? (
@@ -1291,7 +1353,7 @@ export function DocsHub({ boot }) {
           onConfirm={() => closeIf(hub.deleteFolder(modal.folder))}
           onClose={closeModal}
         >
-          <p>Its contents move up one level. Documents are not deleted.</p>
+          <p>The folder, its subfolders and the docs in them move to Trash for 30 days, then they are deleted for good. Restore them together from Trash until then.</p>
         </HubDialog>
       ) : null}
 
@@ -1299,6 +1361,15 @@ export function DocsHub({ boot }) {
         <div className={`tdoc-toast${hub.toast.error ? ' error' : ''}`} role="status">
           {hub.toast.error ? <X size={15} /> : <Check size={15} />}
           {hub.toast.message}
+          {hub.toast.action ? (
+            <button
+              type="button"
+              className="tdoc-toast-action"
+              onClick={() => { const { run } = hub.toast.action; hub.dismissToast(); run(); }}
+            >
+              {hub.toast.action.label}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

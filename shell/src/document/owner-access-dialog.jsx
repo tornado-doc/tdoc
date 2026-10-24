@@ -288,12 +288,19 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
   const [status, setStatus] = useState('');
   const manage = config.ownerManage;
   if (!manage) return null;
+  const team = config.teamManage?.team || null;
+  const where = team ? `${team.name}’s Trash` : 'Trash';
+  const versions = `${manage.versionCount} ${manage.versionCount === 1 ? 'version' : 'versions'}`;
+  const comments = `${manage.commentCount} ${manage.commentCount === 1 ? 'comment' : 'comments'}`;
 
+  // Delete moves the doc to Trash. My docs then says so, with an Undo that
+  // brings the reader straight back here.
   const remove = async () => {
-    setStatus('Deleting…');
+    setStatus('Moving to Trash…');
     try {
       await deleteDocument(config.slug);
-      location.href = '/me';
+      const query = new URLSearchParams({ ...(team ? { team: team.id } : {}), trashed: config.slug });
+      location.href = `/me?${query}`;
     } catch (error) {
       setStatus(`Failed: ${error.message}`);
     }
@@ -304,7 +311,7 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
       open={open}
       onOpenChange={onOpenChange}
       title="Delete this doc?"
-      description={`This permanently removes ${config.slug}, all ${manage.versionCount} versions, and all ${manage.commentCount} comments.`}
+      description={`${config.slug}, its ${versions} and ${comments} move to ${where} for 30 days, then they are deleted for good.`}
       actions={(
         <>
           <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
@@ -314,7 +321,7 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
         </>
       )}
     >
-      <p>This cannot be undone.</p>
+      <p>Until then nobody can open it, agents included{team ? ', and a team admin can restore it from Trash' : ', and you can restore it from Trash in My docs'}.</p>
       {status ? <p role="status">{status}</p> : null}
     </AppDialog>
   );
