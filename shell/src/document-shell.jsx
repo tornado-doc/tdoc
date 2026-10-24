@@ -845,21 +845,26 @@ export function DocumentShell({ boot, config }) {
     if (!comments.latest.current.some((c) => c.id === openCommentId)) setOpenCommentId(null);
   };
 
-  // Team docs: Send to agent and @agent are off until whose agent answers a
-  // team doc is decided (the server refuses too).
-  const notifyEnabled = Boolean(config.isOwner && !config.teamManage && !config.isLanding && config.mode !== 'local');
-  const notifyTargets = useNotifyTargets(config.slug, notifyEnabled);
-  const canSendToAgent = Boolean(
-    notifyEnabled
-    && notifyTargets.ready
+  // Team docs: every member may send to the team's agents (and an admin to
+  // their own connections); the server lists only those. Send to agent shows
+  // on a team doc once there is someone to send to.
+  const notifyQuery = Boolean((config.isOwner || config.teamManage) && !config.isLanding && config.mode !== 'local');
+  const notifyTargets = useNotifyTargets(config.slug, notifyQuery);
+  const hasNotifyTargets = Boolean(
+    notifyTargets.ready
     && notifyTargets.available
     && notifyTargets.reason !== 'no_agent_bound'
     && (notifyTargets.default || (notifyTargets.candidates || []).length || notifyTargets.fallback),
   );
+  const notifyEnabled = notifyQuery && (!config.teamManage || hasNotifyTargets);
+  const canSendToAgent = Boolean(notifyEnabled && hasNotifyTargets);
   // Comment / Ask AI / Send to my agent. The third is the reader's OWN agent
   // (my-agent.js); the owner keeps Send to agent and @agent, which hand
   // comments to the doc's agent. A demo has no account to send from.
-  const myAgentEnabled = Boolean(config.mode === 'published' && !config.isLanding && !notifyEnabled && !config.demoComments);
+  // The owner's own doc (not a team doc, where a member may also send to the
+  // team's agent) is where Send to agent replaces it.
+  const ownerNotify = Boolean(config.isOwner && !config.teamManage && !config.isLanding && config.mode !== 'local');
+  const myAgentEnabled = Boolean(config.mode === 'published' && !config.isLanding && !ownerNotify && !config.demoComments);
   const myAgent = useMyAgent(config.slug, myAgentEnabled && Boolean(config.identity));
   // Signed out, the entry signs in first; signed in, it waits for the server
   // to say which of the three it is rather than flash the wrong one.

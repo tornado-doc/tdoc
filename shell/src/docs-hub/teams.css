@@ -191,3 +191,13 @@
   .tm-plan-choose { flex-direction: column; align-items: flex-start; }
   .tm-settings-card#billing .tm-settings-actions button { min-height: 44px; }
 }
+
+/* Team agents (team settings -> Agents). */
+.tm-team-agents-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tm-agent-mark { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; flex: none; }
+.tm-agent-add { display: grid; gap: 12px; min-width: 0; }
+.tm-agent-warn { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 10px; background: #fff7e6; color: #5c3d00; font-size: 13px; line-height: 1.45; }
+.tm-agent-warn svg { flex: none; margin-top: 1px; }
+.tm-agent-command { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
+.tm-agent-command code { flex: 1; min-width: 0; padding: 10px; border-radius: 8px; background: #1e1e1e; color: #e6e6e6; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.tm-agent-row .tm-person-text > span { white-space: normal; overflow-wrap: anywhere; }

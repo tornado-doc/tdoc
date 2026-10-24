@@ -428,6 +428,20 @@ export function removeTeamBackup(id) {
   return teamRequest('/api/team/backup', 'DELETE', { id });
 }
 
+// Team agents: every member lists them; an admin adds one (a one-time
+// setup command comes back) or removes it.
+export function listTeamAgents(id) {
+  return request(`/api/team/agents?${new URLSearchParams({ id })}`);
+}
+
+export function addTeamAgent(id, name) {
+  return teamRequest('/api/team/agents', 'POST', { id, name });
+}
+
+export function removeTeamAgent(id, agent) {
+  return teamRequest('/api/team/agents', 'DELETE', { id, agent });
+}
+
 export function getTeamBilling(id) {
   return request(`/api/team/billing?${new URLSearchParams({ id })}`);
 }
