@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tdoc-delete — delete a doc: the local copy (~/tdocs/<slug>) and, if it was
-# published, the published copy too (all versions + comments, via
-# tdoc-unpublish). The one command behind the "Delete" button.
+# published, the published copy too (via tdoc-unpublish, which moves it to
+# Trash for 30 days; tdoc-restore <slug> brings it back). The one command
+# behind the "Delete" button.
 #
 # Usage: tdoc-delete <slug> [--local-only|--published-only]
 set -euo pipefail

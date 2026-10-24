@@ -12,7 +12,7 @@
 #   tdoc-folder add <slug>... --folder <folder> [--team <t>] [--create] [--parent <folder>]
 #   tdoc-folder remove <slug>... [--team <t>]                    # back to the top level
 #   tdoc-folder rename <folder> <new name> [--team <t>]
-#   tdoc-folder delete <folder> [--team <t>]                     # docs move up a level
+#   tdoc-folder delete <folder> [--team <t>]                     # folder + its docs go to Trash (30 days)
 #   tdoc-folder share <folder> [--visibility unlisted|private|public] [--team <t>]  # prints the link
 #   tdoc-folder unshare <folder> [--team <t>]                    # the link stops working
 #   tdoc-folder move-to-team <folder> --team <t>   # a My docs folder, subfolders and docs, into a team
@@ -299,7 +299,7 @@ case "$CMD" in
     FID="$(require_folder "${ARGS[0]}")" || exit 1
     api DELETE "/api/folders?id=$FID${TEAM_ID:+&team=$TEAM_ID}" >/dev/null || exit 1
     recent forget "$FID"
-    echo "[tdoc] deleted folder ${ARGS[0]}; its docs moved up a level."
+    echo "[tdoc] moved folder ${ARGS[0]} and its docs to Trash; they are deleted for good after 30 days. Restore them together from Trash in My docs."
     ;;
   share)
     [ "${#ARGS[@]}" -eq 1 ] || usage
