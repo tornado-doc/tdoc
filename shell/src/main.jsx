@@ -42,5 +42,8 @@ if (appRoot && appBoot) {
   if (!root || !boot || !config || !boot.frameSrc) {
     throw new Error('tdoc boot payload is missing');
   }
+  // The app shows the document now; the text copy for agents would only be
+  // read twice by a screen reader.
+  document.getElementById('tdoc-agent-view')?.remove();
   createRoot(root).render(<DocumentShell boot={boot} config={config} />);
 }
