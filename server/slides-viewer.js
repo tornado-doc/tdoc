@@ -69,9 +69,13 @@
     '@media (max-width:560px){.tdoc-present-bar{flex-wrap:wrap;}.tdoc-present-bar .tdoc-present-notes{position:static;width:100%;justify-content:center;}.tdoc-present-bar .tdoc-present-close{position:static;}}' +
     'html[data-tdoc-presenting]{overflow:hidden!important;}' +
     // Slide view: every slide is laid out at the deck width (960px, 16:9) and
-    // zoomed to the reading column, like a presentation app's normal view.
-    // zoom (not transform) keeps layout, selection and comment anchors real.
-    'html[data-tdoc-slides]:not([data-tdoc-presenting]) [data-tdoc-slide]{width:960px!important;max-width:none!important;aspect-ratio:16/9;height:auto!important;box-sizing:border-box!important;overflow:hidden!important;zoom:var(--tdoc-slide-zoom,1);margin-left:auto!important;margin-right:auto!important;margin-bottom:calc(36px / var(--tdoc-slide-zoom,1))!important;}' +
+    // scaled to the reading column, like a presentation app's normal view.
+    // A transform, as in Present, not zoom: Safari sizes cqw text against the
+    // zoomed width and then zooms it again, so card-relative type came out at
+    // half size on iPhone. Client rects (selection, comment anchors) follow
+    // the transform; the negative bottom margin gives back the height the
+    // scaled card no longer uses (540px = 960px at 16:9).
+    'html[data-tdoc-slides]:not([data-tdoc-presenting]) [data-tdoc-slide]{width:960px!important;max-width:none!important;aspect-ratio:16/9;height:auto!important;box-sizing:border-box!important;overflow:hidden!important;transform:scale(var(--tdoc-slide-scale,1));transform-origin:0 0;margin-left:auto!important;margin-right:auto!important;margin-bottom:calc(36px - 540px * (1 - var(--tdoc-slide-scale,1)))!important;}' +
     '.tdoc-slide-num.is-over{color:#b42318;}' +
     '.tdoc-slide-num{position:absolute;z-index:1;font:12px/1 system-ui;color:#667085;font-variant-numeric:tabular-nums;pointer-events:none;}' +
     'html[data-tdoc-presenting] .tdoc-slide-num{display:none!important;}' +
@@ -83,7 +87,7 @@
   var openButton = null, numbers = [];
   var zoomStyle = provider(document.createElement('style'));
   document.head.appendChild(zoomStyle);
-  // Zoom the slides to the column they sit in, and number them underneath.
+  // Scale the slides to the column they sit in, and number them underneath.
   function layoutSlides(list) {
     var root = document.documentElement;
     if (!list.length) { root.removeAttribute('data-tdoc-slides'); zoomStyle.textContent = ''; numbers.forEach(function (n) { n.remove(); }); numbers = []; return; }
@@ -94,7 +98,7 @@
     var zoom = Math.max(.2, Math.min(1, room / 960));
     // In a provider <style>, not on <html>: nothing here may be saved into the
     // author's document by Edit mode.
-    var rule = ':root{--tdoc-slide-zoom:' + zoom + '}';
+    var rule = ':root{--tdoc-slide-scale:' + zoom + '}';
     if (zoomStyle.textContent !== rule) zoomStyle.textContent = rule;
     while (numbers.length > list.length) numbers.pop().remove();
     list.forEach(function (el, i) {

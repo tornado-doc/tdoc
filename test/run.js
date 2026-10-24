@@ -159,6 +159,7 @@ const BROWSER = [
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
   'custom-design-theme.test.js', // custom palettes opt out of house styles and theme inversion
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
+  'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
   'slides-mode.test.js', // data-tdoc-slide decks present one slide at a time, fitted, and restore on exit
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
