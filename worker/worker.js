@@ -231,8 +231,25 @@ function wantsMarkdown(req) {
   return q('text/markdown') >= q('text/html');
 }
 
+// The name a comment's author goes by on a page anyone may read: the same as
+// the comment card. A GitHub account is @login; an email account is its
+// name or the part before the @, never the address; an agent is
+// "name · who it acts for" (#803).
+function publicAuthorName(a) {
+  if (!a) return 'someone';
+  const noAddress = (s) => String(s || '').replace(/^email:/, '').split('@')[0].trim();
+  if (a.kind === 'agent') {
+    const name = String(a.handle || '').replace(/^@/, '').trim() || noAddress(a.name) || 'agent';
+    const owner = noAddress((a.owner && a.owner.display) || (a.principal && a.principal.display));
+    return owner ? `${name} · ${owner}` : name;
+  }
+  const login = String(a.login || '');
+  if (!login || login.startsWith('email:') || login.includes('@')) return noAddress(a.name) || noAddress(login) || 'someone';
+  return `@${login}`;
+}
+
 function agentCommentsForMarkdown(list) {
-  const who = (a) => (a && (a.login ? `@${a.login}` : a.name)) || 'someone';
+  const who = publicAuthorName;
   return (Array.isArray(list) ? list : []).map((c) => ({
     author: who(c.author),
     quote: c.anchor && typeof c.anchor.text === 'string' ? c.anchor.text : (c.anchor && (c.anchor.label || '')) || '',

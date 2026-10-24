@@ -128,6 +128,19 @@ async function seed(env, slug, access, owner = null) {
     assert(browser.includes('tdoc-agent-view') && !browser.includes('Move billing first'), 'a browser page load read the comments');
   });
 
+  await t('an email account\'s comment never shows its address in the page or the Markdown', async () => {
+    const sid = 'c0ffee'.padEnd(32, '0');
+    await env.META.put(`session:${sid}`, JSON.stringify({ email: 'carol.writer@example.com', name: 'carol.writer@example.com', created }));
+    const posted = await call('/api/comments', { method: 'POST', cookie: `tdoc_sid=${sid}`, body: { slug: 'roadmap', version: 1, text: 'Who owns billing?', anchor: { kind: 'text', text: 'Billing' } } });
+    assert(posted.status === 200, `comment ${posted.status} ${JSON.stringify(posted.body)}`);
+    const page = await (await call('/d/roadmap')).r.text();
+    const md = await (await call('/d/roadmap', { headers: { Accept: 'text/markdown' } })).r.text();
+    for (const [label, body] of [['page', visibleText(page)], ['markdown', md]]) {
+      assert(body.includes('carol.writer on "Billing" (open): Who owns billing?'), `${label}: comment missing or misnamed`);
+      assert(!body.includes('@example.com') && !body.includes('email:'), `${label}: leaks the address`);
+    }
+  });
+
   await t('a denied doc gives neither text nor markdown', async () => {
     for (const opts of [{}, { token: eve.token }, { headers: { Accept: 'text/markdown' } }, { token: eve.token, headers: { Accept: 'text/markdown' } }]) {
       const { status, r } = await call('/d/secret-plan', opts);
