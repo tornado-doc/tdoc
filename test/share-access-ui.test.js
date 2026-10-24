@@ -50,7 +50,7 @@ const OPTIONS = [
         const { access } = JSON.parse(body);
         patches.push(access);
         res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ ok: true, access: { visibility: 'unlisted', history_visibility: 'public', commenting: 'signed_in', allowed_users: [], ...access } }));
+        res.end(JSON.stringify({ ok: true, access: { visibility: 'unlisted', history_visibility: 'owner', commenting: 'signed_in', allowed_users: [], ...access } }));
       });
       return;
     }

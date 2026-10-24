@@ -117,6 +117,7 @@ const ROBOTS_META = /<meta name="robots" content="noindex[^"]*">/;
     assert(r.status === 200, `upload ${r.status} ${JSON.stringify(r.body)}`);
     const meta = JSON.parse(await env.META.get('meta:fresh-plan'));
     assert(meta.access && meta.access.visibility === 'unlisted', `access ${JSON.stringify(meta.access)}`);
+    assert(meta.access.history_visibility === 'owner', `history ${meta.access.history_visibility}: a new doc's history is owner-only, like a flagged publish`);
     const page = await call('/d/fresh-plan/v/1');
     assert(page.status === 200 && /noindex/.test(page.r.headers.get('x-robots-tag') || ''), 'fresh doc is not a noindex link doc');
   });
@@ -145,7 +146,18 @@ const ROBOTS_META = /<meta name="robots" content="noindex[^"]*">/;
     const r = await call('/api/doc/create', { method: 'POST', cookie: alice.cookie, body: {} });
     assert(r.status === 200, `create ${r.status} ${JSON.stringify(r.body)}`);
     const meta = JSON.parse(await env.META.get(`meta:${r.body.slug}`));
-    assert(meta.access && meta.access.visibility === 'unlisted', JSON.stringify(meta.access));
+    assert(meta.access && meta.access.visibility === 'unlisted' && meta.access.history_visibility === 'owner', JSON.stringify(meta.access));
+  });
+
+  await t('My docs tells the owner how each of their docs is shared (for the pin warning), and nobody else', async () => {
+    const r = await call('/api/me', { token: alice.token });
+    assert(r.status === 200, `/api/me ${r.status}`);
+    const rows = Object.fromEntries((r.body.docs || []).map((d) => [d.slug, d]));
+    assert(rows['fresh-plan'] && rows['fresh-plan'].visibility === 'unlisted', JSON.stringify(rows['fresh-plan']));
+    assert(rows['chosen-public'] && rows['chosen-public'].visibility === 'public', JSON.stringify(rows['chosen-public']));
+    const shell = require('fs').readFileSync(path.join(__dirname, '..', 'shell', 'src', 'docs-hub.jsx'), 'utf8')
+      + require('fs').readFileSync(path.join(__dirname, '..', 'shell', 'src', 'profile.jsx'), 'utf8');
+    assert((shell.match(/Pinning makes this doc Public \(searchable\)/g) || []).length === 2, 'both pin paths must warn');
   });
 
   await t('Require sign-in to view: strangers get sign-in, any signed-in account reads', async () => {
@@ -182,16 +194,37 @@ const ROBOTS_META = /<meta name="robots" content="noindex[^"]*">/;
   await put('tornado-doc', { access: { visibility: 'public' } });
   await put('m-link', { access: { visibility: 'unlisted' } });
   await put('m-private', { access: { visibility: 'private' } });
-  await kv.put('account-profile:acct_1', JSON.stringify({ account_id: 'acct_1', pins: ['m-pinned'] }));
+  await put('m-pinned-link', { access: { visibility: 'unlisted' }, hosted: { account_id: 'acct_1' } });
+  await kv.put('account-profile:acct_1', JSON.stringify({ account_id: 'acct_1', pins: ['m-pinned', 'm-pinned-link'] }));
+  await put('m-acct-public', { access: { visibility: 'public' }, hosted: { account_id: 'acct_2' } });
+  await put('m-acct-private', { access: { visibility: 'private' }, hosted: { account_id: 'acct_2' } });
+  await put('m-acct-gated', { access: { visibility: 'unlisted', signin_required: true }, hosted: { account_id: 'acct_2' } });
   const snapshot = () => JSON.stringify([...kv.map.entries()]);
 
   await t('migration dry run counts and lists, and writes nothing', async () => {
     const before = snapshot();
     const res = await mig.runMigration(kv, { write: false, now: '2026-10-24T00:00:00Z' });
     assert(snapshot() === before, 'dry run wrote');
-    assert(res.counts.public === 4 && res.counts.legacy === 1, JSON.stringify(res.counts));
-    assert(res.counts.kept_pinned === 2 && res.counts.kept_site === 1 && res.counts.changed === 2, JSON.stringify(res.counts));
-    assert(res.changed.sort().join(',') === 'm-legacy,m-public', res.changed.join(','));
+    assert(res.counts.public === 5 && res.counts.legacy === 1, JSON.stringify(res.counts));
+    assert(res.counts.kept_pinned === 2 && res.counts.kept_site === 1 && res.counts.changed === 3, JSON.stringify(res.counts));
+    assert(res.changed.sort().join(',') === 'm-acct-public,m-legacy,m-public', res.changed.join(','));
+  });
+
+  await t('migration dry run reports pinned docs that are not Public, and leaves them alone', async () => {
+    const res = await mig.runMigration(kv, { write: false });
+    assert(res.counts.pinned_not_public === 1, JSON.stringify(res.counts));
+    assert(res.pinned_not_public[0].slug === 'm-pinned-link' && res.pinned_not_public[0].visibility === 'unlisted' && res.pinned_not_public[0].pinned_by === 'acct_1',
+      JSON.stringify(res.pinned_not_public));
+    assert(!res.changed.includes('m-pinned-link'), 'a pinned link doc was scheduled for change');
+  });
+
+  await t('migration --account is read-only and counts one account\'s docs by visibility', async () => {
+    const before = snapshot();
+    const res = await mig.runMigration(kv, { account: 'acct_2', write: true });
+    assert(snapshot() === before, '--account wrote');
+    assert(res.write === false && res.counts.docs === 3, JSON.stringify(res.counts));
+    assert(JSON.stringify(res.by_visibility) === JSON.stringify({ public: 1, private: 1, 'unlisted (sign-in required)': 1 }), JSON.stringify(res.by_visibility));
+    assert(res.plan.length === 1 && res.plan[0].slug === 'm-acct-public' && res.plan[0].action === 'move to unlisted', JSON.stringify(res.plan));
   });
 
   await t('migration apply moves only non-profile public docs, keeps the rest of the policy and the KV metadata', async () => {
@@ -214,7 +247,7 @@ const ROBOTS_META = /<meta name="robots" content="noindex[^"]*">/;
 
   await t('migration --undo restores what it changed', async () => {
     const res = await mig.runMigration(kv, { write: true, undo: true });
-    assert(res.changed.sort().join(',') === 'm-legacy,m-public', res.changed.join(','));
+    assert(res.changed.sort().join(',') === 'm-acct-public,m-legacy,m-public', res.changed.join(','));
     assert(!JSON.parse(await kv.get('meta:m-legacy')).access, 'legacy not restored');
     assert(JSON.parse(await kv.get('meta:m-public')).access.visibility === 'public', 'public not restored');
   });

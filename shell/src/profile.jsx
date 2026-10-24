@@ -14,15 +14,12 @@ import {
 } from './profile-posters.js';
 import './docs-hub.css';
 
-const CURATE_WARN_KEY = 'tdoc.curateWarned';
 const PICK_VIEW_KEY = 'tdoc.profilePickView';
 
-function needsCurateWarn() {
-  try { return localStorage.getItem(CURATE_WARN_KEY) !== '1'; } catch { return true; }
-}
-
-function markCurateWarned() {
-  try { localStorage.setItem(CURATE_WARN_KEY, '1'); } catch { /* ignore */ }
+// A profile lists only Public docs, and pinning one makes it Public. Say so
+// every time the doc is not Public yet (an unknown visibility counts as not).
+function pinNeedsPublicConfirm(visibility) {
+  return visibility !== 'public';
 }
 
 function readPickView() {
@@ -203,7 +200,7 @@ export function Profile({ boot }) {
 
   // restore: the card to put back without a reload (Undo of a take-down).
   const togglePin = async (slug, pinned, { confirmed = false, restore = null } = {}) => {
-    if (pinned && !confirmed && needsCurateWarn()) {
+    if (pinned && !confirmed && pinNeedsPublicConfirm((catalog.find((item) => item.slug === slug) || {}).visibility)) {
       setModal({ type: 'curate-warn', slug });
       return false;
     }
@@ -223,7 +220,6 @@ export function Profile({ boot }) {
         setNotice({ error: true, message: pinErrorMessage(body.error, pinned) });
         return false;
       }
-      if (pinned) markCurateWarned();
       setCatalog((cur) => cur
         // A pick whose doc moved to a team or was deleted cannot come back.
         .filter((item) => pinned || item.slug !== slug || !item.status)
@@ -597,8 +593,8 @@ export function Profile({ boot }) {
 
       {modal && modal.type === 'curate-warn' ? (
         <ProfileDialog
-          title="Show on your profile?"
-          confirmLabel="Show on profile"
+          title="Pinning makes this doc Public (searchable)"
+          confirmLabel="Make Public and pin"
           onConfirm={async () => {
             const slug = modal.slug;
             setModal('picks');
@@ -607,7 +603,7 @@ export function Profile({ boot }) {
           onClose={() => setModal('picks')}
         >
           <p className="manage-hint">
-            This makes the doc public so anyone can open the link from your profile.
+            Anyone can open it from your profile, and search engines can find it.
             Taking it down later restores the previous access.
           </p>
         </ProfileDialog>

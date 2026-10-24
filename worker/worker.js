@@ -460,9 +460,10 @@ const ACCESS_COMMENTING = new Set(['owner', 'invited', 'signed_in', 'off']);
 const ACCESS_HISTORY = new Set(['owner', 'invited', 'public']);
 const ACCESS_PATCH_FIELDS = new Set(['visibility', 'commenting', 'history_visibility', 'allowed_users', 'team', 'signin_required']);
 // A doc created without naming its access (a flagless publish, a blank doc
-// from the browser) is readable by link, not published to the web. Only the
-// visibility differs from the legacy policy such a doc used to get.
-const NEW_DOC_ACCESS = Object.freeze({ visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'public', allowed_users: [] });
+// from the browser) is readable by link, not published to the web: the same
+// policy a publish with flags gets for whatever it leaves out (normalizeAccess
+// non-legacy defaults), so history is owner-only.
+const NEW_DOC_ACCESS = Object.freeze({ visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] });
 function newDocAccess() {
   return { ...NEW_DOC_ACCESS, allowed_users: [] };
 }
@@ -6137,6 +6138,13 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
       : isDocOwnerSession(env, session, row.meta),
     starred: starred.has(row.slug),
   });
+  // The owner's own rows say how they are shared, so pinning one that is not
+  // Public can say first that pinning makes it Public (searchable).
+  const ownRow = (row) => {
+    const out = publicRow(row);
+    if (out.mine) out.visibility = accessFromMeta(row.meta).visibility;
+    return out;
+  };
 
   const viewerAccount = session && session.account_id;
   // One small read per team (20 at most) for its folder tree, started with
@@ -6170,7 +6178,7 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
   const feedback = await feedbackSpacesFor(env, session, catalog.filter((row) => isFeedbackSpace(row.meta)), publicRow, false);
 
   return {
-    docs: mine.map((row) => ({ ...publicRow(row), folder: folderState.docs[row.slug] || '' })),
+    docs: mine.map((row) => ({ ...ownRow(row), folder: folderState.docs[row.slug] || '' })),
     feedback,
     recent: savedRows(recentItems).map(publicRow),
     starred: savedRows(starItems).map(publicRow),
@@ -12616,6 +12624,7 @@ const tdocHandlers = {
             slug: row.slug,
             title: row.title,
             on_profile: pinned.has(row.slug),
+            ...(row.visibility ? { visibility: row.visibility } : {}),
           }));
         // Every pin must be in the picker so it can be taken down, including
         // ones My docs no longer lists: moved to a team, deleted, or stamped

@@ -38,15 +38,12 @@ import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
 const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['settings', 'Settings']];
-const CURATE_WARN_KEY = 'tdoc.curateWarned';
 const CATALOG_LAYOUT_KEY = 'tdoc.catalogLayout';
 
-function needsCurateWarn() {
-  try { return localStorage.getItem(CURATE_WARN_KEY) !== '1'; } catch { return true; }
-}
-
-function markCurateWarned() {
-  try { localStorage.setItem(CURATE_WARN_KEY, '1'); } catch { /* ignore */ }
+// A profile lists only Public docs, and pinning one makes it Public. Say so
+// every time the doc is not Public yet (an unknown visibility counts as not).
+function pinNeedsPublicConfirm(visibility) {
+  return visibility !== 'public';
 }
 
 function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, actions }) {
@@ -680,7 +677,7 @@ export function DocsHub({ boot }) {
   const toggleProfilePin = async (doc, { confirmed = false } = {}) => {
     if (!doc || !doc.slug || !boot.profile || !doc.mine) return;
     const next = !pins.has(doc.slug);
-    if (next && !confirmed && needsCurateWarn()) {
+    if (next && !confirmed && pinNeedsPublicConfirm(doc.visibility)) {
       setModal({ type: 'curate-warn', doc });
       return;
     }
@@ -706,7 +703,6 @@ export function DocsHub({ boot }) {
           : `Could not remove from profile${body.error ? ` (${body.error})` : ''}`, true);
         return;
       }
-      if (next) markCurateWarned();
       if (Array.isArray(body.pins)) setPins(new Set(body.pins));
       hub.notify(next ? 'Shown on your profile' : 'Removed from your profile');
     } catch {
@@ -1261,8 +1257,8 @@ export function DocsHub({ boot }) {
       ) : null}
       {modal?.type === 'curate-warn' ? (
         <HubDialog
-          title="Show on your profile?"
-          confirmLabel="Show on profile"
+          title="Pinning makes this doc Public (searchable)"
+          confirmLabel="Make Public and pin"
           onConfirm={() => {
             const doc = modal.doc;
             closeModal();
@@ -1271,7 +1267,7 @@ export function DocsHub({ boot }) {
           onClose={closeModal}
         >
           <p className="manage-hint">
-            This makes the doc public so anyone can open the link from your profile.
+            Anyone can open it from your profile, and search engines can find it.
             Taking it down later restores the previous access. Only you can curate your own docs.
           </p>
         </HubDialog>

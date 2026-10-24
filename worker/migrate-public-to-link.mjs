@@ -19,10 +19,17 @@
 // run finds nothing to do. Each migrated doc records `access_migration`
 // ({ from, at }) so --undo can put back exactly what was there.
 //
+// A profile lists only Public docs, so a pin whose doc is no longer Public
+// (moved to link/private after it was pinned) silently drops off the
+// profile. The dry run lists those as `pinned-not-public` for a person to
+// decide; the migration never changes them.
+//
 // Never runs on deploy. Run it by hand, dry run first:
 //   node worker/migrate-public-to-link.mjs <kv-namespace-id>                 # dry run: counts + slugs
 //   node worker/migrate-public-to-link.mjs <kv-namespace-id> --write         # apply
 //   node worker/migrate-public-to-link.mjs <kv-namespace-id> --undo [--write]   # roll back
+//   node worker/migrate-public-to-link.mjs <kv-namespace-id> --account <id>  # read-only: one account's
+//                                         docs by visibility, and what the migration would do to each
 // Options: --keep <slug,slug>   leave these public as well
 //
 // Needs: wrangler logged in to the Cloudflare account that owns the KV (the
@@ -85,13 +92,13 @@ async function listAll(kv, prefix) {
 
 // Slugs any profile pins, plus docs that carry the curated flag.
 async function pinnedSlugs(kv) {
-  const pinned = new Set();
+  const pinned = new Map(); // slug -> account id whose profile pins it
   for (const { name } of await listAll(kv, 'account-profile:')) {
     let rec = null;
     try { rec = JSON.parse(await kv.get(name)); } catch {}
     for (const item of (rec && Array.isArray(rec.pins) ? rec.pins : [])) {
       const slug = typeof item === 'string' ? item : (item && item.slug);
-      if (typeof slug === 'string' && slug) pinned.add(slug);
+      if (typeof slug === 'string' && slug) pinned.set(slug, (rec && rec.account_id) || name.slice('account-profile:'.length));
     }
   }
   return pinned;
@@ -100,17 +107,41 @@ async function pinnedSlugs(kv) {
 // kv: { list({prefix, cursor}) -> { keys:[{name, metadata}], list_complete, cursor },
 //       get(name) -> string|null, put(name, value, { metadata }) }
 // The Workers KV binding has exactly this shape; the CLI wraps wrangler in it.
-export async function runMigration(kv, { write = false, undo = false, keep = [], now = new Date().toISOString(), log = () => {} } = {}) {
+// What the worker shows for a doc, in the words of the Share panel.
+export function visibilityLabel(meta) {
+  const kind = publicKind(meta);
+  if (kind === 'legacy') return 'public (legacy, no access block)';
+  if (kind === 'public') return 'public';
+  const a = meta.access;
+  if (a.visibility === 'private') return a.team === true ? 'private (team)' : 'private';
+  return a.signin_required === true ? 'unlisted (sign-in required)' : 'unlisted';
+}
+
+// account: report one account's docs (meta.hosted.account_id) and change
+// nothing, whatever else was passed.
+export async function runMigration(kv, { write = false, undo = false, keep = [], account = '', now = new Date().toISOString(), log = () => {} } = {}) {
+  if (account) { write = false; undo = false; }
   const keepSet = new Set([...SITE_PUBLIC_SLUGS, ...keep]);
-  const pinned = undo ? new Set() : await pinnedSlugs(kv);
-  const counts = { docs: 0, public: 0, legacy: 0, kept_pinned: 0, kept_site: 0, changed: 0, undone: 0 };
+  const pinned = undo ? new Map() : await pinnedSlugs(kv);
+  const counts = { docs: 0, public: 0, legacy: 0, kept_pinned: 0, kept_site: 0, changed: 0, undone: 0, pinned_not_public: 0 };
   const changed = [];
+  const pinnedNotPublic = [];
+  const byVisibility = {};
+  const plan = [];
   for (const { name, metadata } of await listAll(kv, 'meta:')) {
     const slug = name.slice('meta:'.length);
     let meta = null;
     try { meta = JSON.parse(await kv.get(name)); } catch {}
     if (!meta || typeof meta !== 'object') continue;
+    if (account && !(meta.hosted && meta.hosted.account_id === account)) continue;
     counts.docs++;
+    const label = visibilityLabel(meta);
+    byVisibility[label] = (byVisibility[label] || 0) + 1;
+    if (!undo && pinned.has(slug) && !publicKind(meta)) {
+      counts.pinned_not_public++;
+      pinnedNotPublic.push({ slug, visibility: label, pinned_by: pinned.get(slug) });
+      log(`note  ${slug}: pinned on a profile but ${label}, so the profile does not show it (left alone)`);
+    }
     let next = null;
     if (undo) {
       next = undoLink(meta);
@@ -119,17 +150,18 @@ export async function runMigration(kv, { write = false, undo = false, keep = [],
       const kind = publicKind(meta);
       if (!kind) continue;
       counts[kind]++;
-      if (pinned.has(slug) || (meta.profile && meta.profile.curated === true)) { counts.kept_pinned++; log(`keep  ${slug} (on a profile)`); continue; }
-      if (keepSet.has(slug)) { counts.kept_site++; log(`keep  ${slug} (site page / --keep)`); continue; }
+      if (pinned.has(slug) || (meta.profile && meta.profile.curated === true)) { counts.kept_pinned++; plan.push({ slug, visibility: label, action: 'keep: on a profile' }); log(`keep  ${slug} (on a profile)`); continue; }
+      if (keepSet.has(slug)) { counts.kept_site++; plan.push({ slug, visibility: label, action: 'keep: site page / --keep' }); log(`keep  ${slug} (site page / --keep)`); continue; }
       next = toLink(meta, now);
       counts.changed++;
+      plan.push({ slug, visibility: label, action: 'move to unlisted' });
       log(`${write ? 'WRITE' : 'would'} ${slug}: ${kind} -> anyone with the link`);
     }
     if (!next) continue;
     changed.push(slug);
     if (write) await kv.put(name, JSON.stringify(next), metadata !== undefined && metadata !== null ? { metadata } : undefined);
   }
-  return { counts, changed, write, undo };
+  return { counts, changed, write, undo, account, by_visibility: byVisibility, pinned_not_public: pinnedNotPublic, plan };
 }
 
 function wranglerKv(ns) {
@@ -151,18 +183,35 @@ function wranglerKv(ns) {
 }
 
 async function main(argv) {
-  const ns = argv.find((a) => !a.startsWith('--') && argv[argv.indexOf(a) - 1] !== '--keep');
+  const ns = argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--keep' && argv[i - 1] !== '--account');
   const write = argv.includes('--write');
   const undo = argv.includes('--undo');
   const keepAt = argv.indexOf('--keep');
   const keep = keepAt >= 0 ? String(argv[keepAt + 1] || '').split(',').map((s) => s.trim()).filter(Boolean) : [];
-  if (!ns) {
-    console.error('usage: node worker/migrate-public-to-link.mjs <kv-namespace-id> [--write] [--undo] [--keep slug,slug]');
+  const accountAt = argv.indexOf('--account');
+  const account = accountAt >= 0 ? String(argv[accountAt + 1] || '') : '';
+  if (!ns || (accountAt >= 0 && !account)) {
+    console.error('usage: node worker/migrate-public-to-link.mjs <kv-namespace-id> [--write] [--undo] [--keep slug,slug] [--account <id>]');
     process.exit(1);
   }
-  const { counts, changed } = await runMigration(wranglerKv(ns), { write, undo, keep, log: (line) => console.log(line) });
+  if (account) {
+    const res = await runMigration(wranglerKv(ns), { account, keep });
+    console.log(`Account ${account}: ${res.counts.docs} doc(s). Read-only; nothing is written in this mode.`);
+    console.log('By visibility now:');
+    for (const [label, n] of Object.entries(res.by_visibility)) console.log(`  ${String(n).padStart(4)}  ${label}`);
+    console.log('What the migration would do:');
+    for (const row of res.plan) console.log(`  ${row.slug}: ${row.visibility} -> ${row.action}`);
+    if (!res.plan.length) console.log('  nothing (no public docs)');
+    for (const row of res.pinned_not_public) console.log(`  note: ${row.slug} is pinned but ${row.visibility}; the profile does not show it`);
+    return;
+  }
+  const { counts, changed, pinned_not_public: pinnedNotPublic } = await runMigration(wranglerKv(ns), { write, undo, keep, log: (line) => console.log(line) });
   console.log('');
   console.log(JSON.stringify(counts));
+  if (pinnedNotPublic.length) {
+    console.log(`${pinnedNotPublic.length} pinned doc(s) are not Public and do not show on their profile (left alone; decide by hand):`);
+    for (const row of pinnedNotPublic) console.log(`  ${row.slug}: ${row.visibility} (pinned by account ${row.pinned_by})`);
+  }
   if (undo) console.log(`${changed.length} doc(s) ${write ? 'restored' : 'would be restored'}.`);
   else console.log(`${counts.public + counts.legacy} public (${counts.public} explicit, ${counts.legacy} legacy); ${counts.kept_pinned} kept (on a profile), ${counts.kept_site} kept (site / --keep); ${changed.length} ${write ? 'moved' : 'would move'} to anyone with the link.`);
   if (!write) console.log('Dry run. Nothing was written; re-run with --write to apply.');

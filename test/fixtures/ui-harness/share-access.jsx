@@ -12,7 +12,7 @@ const access = kind === 'public'
   : kind === 'team'
     ? { visibility: 'private', team: true, history_visibility: 'owner', commenting: 'signed_in', allowed_users: [] }
     // What the worker gives a brand-new doc.
-    : { visibility: 'unlisted', history_visibility: 'public', commenting: 'signed_in', allowed_users: [] };
+    : { visibility: 'unlisted', history_visibility: 'owner', commenting: 'signed_in', allowed_users: [] };
 const team = kind === 'team' ? { id: 'tm_1', name: 'BeFreed' } : null;
 const config = team
   ? { slug: 'quarterly-plan', teamManage: { canManage: true, team, access, versionCount: 3, commentCount: 2 } }

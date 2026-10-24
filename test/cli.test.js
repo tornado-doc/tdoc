@@ -1293,18 +1293,18 @@ t('bin/tdoc-new still defaults to NOT publishing', () => {
   assert(/--publish\)\s*PUBLISH=1/.test(src), '--publish must remain the opt-in');
 });
 
-t('the handoff line does not claim a plain publish is unlisted', () => {
-  // A publish with no flags stores no access block and takes the legacy
-  // policy (public + full history). Telling the user "unlisted" would
-  // understate what a recipient can see. Keeping the default as-is is a
-  // product decision (#245/#246 closed); the copy has to match it.
+t('the handoff line describes a plain publish as anyone with the link', () => {
+  // A new doc published with no flags gets the worker's NEW_DOC_ACCESS:
+  // anyone with the link, noindex, history owner-only. The copy has to match
+  // it, and must not steer agents to Public, which search engines index.
   const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
   const step = skill.slice(skill.indexOf('*Hosted (the default).*'), skill.indexOf('*Self-host.*'));
-  assert(!/live and \*\*unlisted\*\*/.test(step), 'handoff still calls a plain publish unlisted');
   // The blockquote wraps, so match across the "> " continuation.
-  assert(/page back[\s>]+through earlier versions/.test(step),
-    'handoff should say earlier versions are reachable');
-  assert(/--history owner/.test(step), 'handoff should point at the way to change it');
+  assert(/Anyone with this link can read it/.test(step), 'handoff should say anyone with the link reads it');
+  assert(/not[\s>]+listed anywhere or shown to search engines/.test(step), 'handoff should say it is not listed or indexed');
+  assert(/Earlier versions stay visible to you only/.test(step), 'handoff should say history is owner-only');
+  assert(/--history public/.test(step), 'handoff should point at the way to change it');
+  assert(/Do \*\*not\*\* publish `--visibility public` unless/.test(step), 'handoff should keep Public an explicit choice');
 });
 
 t('SKILL.md states the localhost rule and no longer promises localhost by default', () => {
