@@ -268,7 +268,7 @@
 
   function commentLine(c) {
     const quote = c.quote ? ' on "' + String(c.quote).replace(/\s+/g, ' ').slice(0, 200) + '"' : '';
-    return (c.author || 'someone') + quote + (c.resolved ? ' (resolved)' : '') + ': ' + c.text;
+    return (c.author || 'someone') + quote + (c.resolved ? ' (resolved)' : ' (open)') + ': ' + c.text;
   }
 
   // Visually hidden, but real body text: fetch tools drop display:none,

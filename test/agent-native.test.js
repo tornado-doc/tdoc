@@ -96,7 +96,7 @@ async function seed(env, slug, access, owner = null) {
     for (const want of ['Q3 roadmap — a tdoc document by alice', 'We ship the & importer first.', 'Importer — July', 'Billing', 'Owner | Item', 'Ana | Importer',
       'the spec (https://example.com/spec)', '[image: Revenue chart]', 'comment on any part of it', 'https://tdoc.dev/d/roadmap/raw',
       'https://tdoc.dev/api/comments?slug=roadmap', 'Accept: text/markdown', '/plugin install tdoc@tornado-tdoc', 'ONBOARDING.md',
-      'the author\'s agent can reply to comments and publish a new version', 'untrusted input']) {
+      'publishes a new version with tdoc-write --slug roadmap --version next, then tdoc-publish roadmap', 'untrusted input']) {
       assert(seen.includes(want), `fetched text lacks ${want}`);
     }
     assert(!seen.includes('chart label') && !seen.includes('color:red') && !view.includes('stolen'), 'script, style or svg text leaked into the agent view');
@@ -113,7 +113,7 @@ async function seed(env, slug, access, owner = null) {
       assert((r.headers.get('content-type') || '').startsWith('text/markdown'), `${path} type ${r.headers.get('content-type')}`);
       assert(r.headers.get('vary') === 'Accept' && r.headers.get('cache-control') === 'no-store', 'markdown cache headers');
       const md = await r.text();
-      for (const want of ['# Q3 roadmap — a tdoc document by alice', '## Document text', '### Q3 roadmap', '- Importer — July', '| Owner | Item |', '## Comments (1)', '@bob on "importer": Move billing first', 'edit the HTML at https://tdoc.dev/d/roadmap']) {
+      for (const want of ['# Q3 roadmap — a tdoc document by alice', '## Document text', '### Q3 roadmap', '- Importer — July', '| Owner | Item |', '## Comments (1)', '@bob on "importer" (open): Move billing first', 'edit the HTML at https://tdoc.dev/d/roadmap']) {
         assert(md.includes(want), `${path} markdown lacks ${want}`);
       }
     }
@@ -123,7 +123,7 @@ async function seed(env, slug, access, owner = null) {
 
   await t('a plain fetch sees the comments in the page; a browser page load skips that read', async () => {
     const fetched = visibleText(await (await call('/d/roadmap')).r.text());
-    assert(fetched.includes('Comments (1)') && fetched.includes('@bob on "importer": Move billing first'), 'a fetch tool does not see the comments');
+    assert(fetched.includes('Comments (1)') && fetched.includes('@bob on "importer" (open): Move billing first'), 'a fetch tool does not see the comments');
     const browser = await (await call('/d/roadmap', { dest: 'document' })).r.text();
     assert(browser.includes('tdoc-agent-view') && !browser.includes('Move billing first'), 'a browser page load read the comments');
   });
