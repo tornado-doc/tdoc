@@ -54,10 +54,11 @@ const server = read('server/server.js');
 
 console.log('\nsetup gate + onboarding');
 
-t('the gate is a route on both hosts, not a modal', () => {
+t('setup opens the shared dialog over the docs hub', () => {
   assert(worker.includes("if (p === '/setup' && (method === 'GET' || method === 'HEAD'))"), 'worker serves /setup');
   assert(server.includes("if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD'))"), 'the local server serves it too');
-  assert(worker.includes("page: 'setup'") && server.includes("page: 'setup'"), 'both boot the same page');
+  assert(worker.includes("Location: '/me?setup=1'"), 'signed-in setup opens over the real docs hub');
+  assert(gate.includes('<AppDialog open={open}'), 'shared modal surface');
 });
 
 t('a host that can sign people in does not ask them to say so twice', () => {
@@ -710,10 +711,9 @@ t('the chosen AI opens a private practice doc through the account API', () => {
   assert(gate.includes('location.assign(result.url)'), 'opens server-created doc');
   assert(!gate.includes('PORTRAIT_PROMPT'), 'history scanning is not required');
 });
-t('animations show Terminal for installation and tdoc for comments', () => {
-  assert(gate.includes('terminal />') && gate.includes('<PracticeReplay agent='), 'right replay for each step');
-  assert(replay.includes('Terminal — Connect tdoc') && replay.includes('Background service started.'), 'installer take');
-  assert(replay.includes('Send to {agent}') && replay.includes('Applied in v2'), 'browser comment take');
+t('connection advances through Next instead of replacing the page', () => {
+  assert(gate.includes("setStage('choose')") && gate.includes('disabled={!loaded || !connected}'), 'Next requires a live verified computer');
+  assert(!gate.includes('sg-pane-art'), 'no full-page replay');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

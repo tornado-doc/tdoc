@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, LayoutGrid, List, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
+import { SetupGate } from './setup-gate.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
@@ -38,15 +39,12 @@ import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
 const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['settings', 'Settings']];
-const CURATE_WARN_KEY = 'tdoc.curateWarned';
 const CATALOG_LAYOUT_KEY = 'tdoc.catalogLayout';
 
-function needsCurateWarn() {
-  try { return localStorage.getItem(CURATE_WARN_KEY) !== '1'; } catch { return true; }
-}
-
-function markCurateWarned() {
-  try { localStorage.setItem(CURATE_WARN_KEY, '1'); } catch { /* ignore */ }
+// A profile lists only Public docs, and pinning one makes it Public. Say so
+// every time the doc is not Public yet (an unknown visibility counts as not).
+function pinNeedsPublicConfirm(visibility) {
+  return visibility !== 'public';
 }
 
 function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, actions }) {
@@ -478,7 +476,7 @@ function AccountSettingsPane({ identity, profile }) {
         <ConnectorsBody returnTo="/me?view=settings#agents" />
       </section>
       <section className="tm-settings-card" id="agent-access">
-        <div className="tm-settings-head"><div><h2>Agent access</h2><p>Review computers and agents that can publish and edit with your account.</p></div></div>
+        <div className="tm-settings-head"><div><h2>Agent access</h2><p>Computers and agents that can act as you, and which workspaces each one can reach.</p></div></div>
         <DevicesBody />
       </section>
     </section>
@@ -560,6 +558,13 @@ function ClaimHandleDialog({ suggested, current, onClose }) {
 // rows and menus are the shared docs-hub/rows.jsx components; every modal is
 // the AppDialog facade. This component only decides what is on screen.
 export function DocsHub({ boot }) {
+  const [setupOpen, setSetupOpen] = useState(() => Boolean(boot.setup || new URLSearchParams(location.search).get('setup') === '1'));
+  const closeSetup = () => {
+    setSetupOpen(false);
+    const url = new URL(location.href);
+    url.searchParams.delete('setup');
+    history.replaceState(null, '', url);
+  };
   const capabilities = { folders: true, delete: true, star: true, create: true, ...(boot.capabilities || {}) };
   const viewer = boot.identity?.login || '';
   const hub = useDocsHub({
@@ -680,7 +685,7 @@ export function DocsHub({ boot }) {
   const toggleProfilePin = async (doc, { confirmed = false } = {}) => {
     if (!doc || !doc.slug || !boot.profile || !doc.mine) return;
     const next = !pins.has(doc.slug);
-    if (next && !confirmed && needsCurateWarn()) {
+    if (next && !confirmed && pinNeedsPublicConfirm(doc.visibility)) {
       setModal({ type: 'curate-warn', doc });
       return;
     }
@@ -706,7 +711,6 @@ export function DocsHub({ boot }) {
           : `Could not remove from profile${body.error ? ` (${body.error})` : ''}`, true);
         return;
       }
-      if (next) markCurateWarned();
       if (Array.isArray(body.pins)) setPins(new Set(body.pins));
       hub.notify(next ? 'Shown on your profile' : 'Removed from your profile');
     } catch {
@@ -1261,8 +1265,8 @@ export function DocsHub({ boot }) {
       ) : null}
       {modal?.type === 'curate-warn' ? (
         <HubDialog
-          title="Show on your profile?"
-          confirmLabel="Show on profile"
+          title="Pinning makes this doc Public (searchable)"
+          confirmLabel="Make Public and pin"
           onConfirm={() => {
             const doc = modal.doc;
             closeModal();
@@ -1271,7 +1275,7 @@ export function DocsHub({ boot }) {
           onClose={closeModal}
         >
           <p className="manage-hint">
-            This makes the doc public so anyone can open the link from your profile.
+            Anyone can open it from your profile, and search engines can find it.
             Taking it down later restores the previous access. Only you can curate your own docs.
           </p>
         </HubDialog>
@@ -1298,6 +1302,8 @@ export function DocsHub({ boot }) {
           <p>Its contents move up one level. Documents are not deleted.</p>
         </HubDialog>
       ) : null}
+
+      {setupOpen ? <SetupGate boot={boot} onClose={closeSetup} /> : null}
 
       {hub.toast ? (
         <div className={`tdoc-toast${hub.toast.error ? ' error' : ''}`} role="status">

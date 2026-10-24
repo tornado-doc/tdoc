@@ -484,3 +484,32 @@ export async function moveFolderToTeam(folder, team, onProgress) {
   }
   throw new Error('The move did not finish; try again to pick up where it stopped.');
 }
+
+// Ask this doc: the free server-side answer for a reader without an agent.
+// Browser session only; the server keeps nothing but the count.
+export function getAskAllowance(slug) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/ask`);
+}
+
+export function askDocument(slug, { question, version, selection }) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, version, ...(selection ? { selection } : {}) }),
+  });
+}
+
+// Send to my agent: the reader's own agents and the questions this reader
+// sent them about this doc. Browser session only; the server never offers
+// anyone else's agent, and nobody else ever sees these answers.
+export function getMyAgent(slug) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/my-agent`);
+}
+
+export function sendToMyAgent(slug, { question, passage }) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/my-agent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, ...(passage ? { passage } : {}) }),
+  });
+}

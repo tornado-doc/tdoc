@@ -326,7 +326,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(me.body.docs.some((d) => d.slug === 'bob-notes'), 'back in My docs');
   });
 
-  await t('an invitee who opens a team-private doc joins on view and reads it; Accept still works for the rest (#711)', async () => {
+  await t('an invitee who opens a team-private doc is offered the invite and is not a member until Accept (#711)', async () => {
     const created = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'BeFreed', invites: ['Erin@Example.com', 'hana@example.com'] } });
     assert(created.status === 200, `create ${created.status}`);
     const bf = created.body.team;
@@ -341,14 +341,20 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const erin = await sid('erin@example.com', 'acct-erin');
     const gina = await sid('gina@example.com', 'acct-gina');
     const hana = await sid('hana@example.com', 'acct-hana');
-    const gate = await call('/d/ads-report', { cookie: erin });
-    const html = await gate.r.text();
-    assert(gate.status === 200, `the invitee was not let in: ${gate.status}`);
-    assert(bootData(html, '__TDOC_SHELL__').joinedTeam?.name === 'BeFreed', 'no "You joined" notice');
+    // Every way into the doc stops at the invitation; none of them joins.
+    for (const path of ['/d/ads-report', '/d/ads-report/v/1', '/d/ads-report/raw', '/d/ads-report/v/1/raw']) {
+      const gate = await call(path, { cookie: erin });
+      const html = await gate.r.text();
+      assert(gate.status === 403, `${path}: the invitee got ${gate.status}, not the invite`);
+      if (!path.endsWith('/raw')) {
+        assert(html.includes('You’re invited to BeFreed') && html.includes('"acceptInvite":{"slug":"ads-report"'), `${path}: no invite page`);
+      }
+    }
     const t1 = JSON.parse(await env.META.get(`team:${bf.id}`));
-    assert(t1.members.some((m) => m.account_id === 'acct-erin') && !t1.invites.includes('erin@example.com'), 'erin did not join');
-    const again = await call('/d/ads-report', { cookie: erin });
-    assert(again.status === 200 && !bootData(await again.r.text(), '__TDOC_SHELL__').joinedTeam, 'the notice is not one-time');
+    assert(!t1.members.some((m) => m.account_id === 'acct-erin') && t1.invites.includes('erin@example.com'), 'opening the doc joined the team');
+    const teams = await call('/api/teams', { cookie: erin });
+    assert(!(teams.body.teams || []).some((x) => x.id === bf.id), 'the team is in their list before Accept');
+
     const stranger = await call('/d/ads-report', { cookie: gina });
     const strangerHtml = await stranger.r.text();
     assert(stranger.status === 403 && !strangerHtml.includes('acceptInvite'), 'someone without an invite was offered one');
@@ -358,19 +364,30 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(crossSite.status === 403, `cross-site accept ${crossSite.status}`);
     const personal = await call('/api/team/accept', { method: 'POST', cookie: hana, body: { slug: 'solo' }, headers: { Origin: 'https://tdoc.dev' } });
     assert(personal.status === 404, `a personal doc's slug reached a team: ${personal.status}`);
-    const ok = await call('/api/team/accept', { method: 'POST', cookie: hana, body: { slug: 'ads-report' }, headers: { Origin: 'https://tdoc.dev' } });
+
+    // Accept is the one door: it joins, clears the invite and opens the doc.
+    const ok = await call('/api/team/accept', { method: 'POST', cookie: erin, body: { slug: 'ads-report' }, headers: { Origin: 'https://tdoc.dev' } });
     assert(ok.status === 200 && ok.body.next === '/d/ads-report' && ok.body.team.role === 'member', `accept ${ok.status} ${JSON.stringify(ok.body)}`);
     const t2 = JSON.parse(await env.META.get(`team:${bf.id}`));
-    assert(!(t2.invites || []).includes('hana@example.com'), 'the invite was not cleared');
+    assert(t2.members.some((m) => m.account_id === 'acct-erin') && !(t2.invites || []).includes('erin@example.com'), 'Accept did not join');
+    const open = await call('/d/ads-report', { cookie: erin });
+    const openHtml = await open.r.text();
+    assert(open.status === 200 && openHtml.includes('__TDOC_SHELL__') && !('joinedTeam' in (bootData(openHtml, '__TDOC_SHELL__') || {})), `after Accept the doc did not open: ${open.status}`);
+    // The other invitee is untouched by all of the above.
+    const t3 = JSON.parse(await env.META.get(`team:${bf.id}`));
+    assert(t3.invites.includes('hana@example.com') && !t3.members.some((m) => m.account_id === 'acct-hana'), 'hana changed');
   });
 
-  await t('opening a readable team doc while invited joins the team; others, anonymous, bearer and members change nothing', async () => {
+  await t('an invitee who can read a team doc anyway (link or allowlist) reads it and stays invited; nobody joins on view', async () => {
     const made = await call('/api/teams', { method: 'POST', cookie: alice, body: { name: 'Readers', invites: ['Jo@Example.com', 'kit'] } });
     assert(made.status === 200, `create ${made.status}`);
     const rt = made.body.team;
     await seedDoc(env, 'open-memo', 'alice', { visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] });
-    const mv = await call('/api/team/move', { method: 'POST', cookie: alice, body: { slugs: ['open-memo'], team: rt.id } });
+    await seedDoc(env, 'listed-memo', 'alice', { visibility: 'private', commenting: 'signed_in', history_visibility: 'owner', allowed_users: ['jo@example.com'] });
+    const mv = await call('/api/team/move', { method: 'POST', cookie: alice, body: { slugs: ['open-memo', 'listed-memo'], team: rt.id } });
     assert(mv.status === 200, `move ${mv.status}`);
+    const lm = JSON.parse(await env.META.get('meta:listed-memo'));
+    assert(lm.workspace_id === rt.id && lm.access.visibility === 'private' && lm.access.allowed_users.includes('jo@example.com'), `listed-memo ${JSON.stringify(lm.access)}`);
     const sidOf = async (data) => {
       const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
       await env.META.put(`session:${id}`, JSON.stringify({ ...data, created: new Date().toISOString() }));
@@ -382,33 +399,31 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     env.META.put = async (k, v, o) => { writes.push(k); return realPut(k, v, o); };
     const teamWrites = () => writes.filter((k) => k === teamKey || k.startsWith('account-teams:'));
     try {
-      // Anonymous: served, nothing written.
       const anon = await call('/d/open-memo/v/1');
-      assert(anon.status === 200 && !bootData(await anon.r.text(), '__TDOC_SHELL__').joinedTeam, `anon ${anon.status}`);
-      // Signed in, not invited: served, no change.
+      assert(anon.status === 200, `anon ${anon.status}`);
       const nobody = await sidOf({ email: 'nobody@example.com', name: 'n', account_id: 'acct-nobody' });
       const n = await call('/d/open-memo/v/1', { cookie: nobody });
-      assert(n.status === 200 && !bootData(await n.r.text(), '__TDOC_SHELL__').joinedTeam, `not invited ${n.status}`);
-      // Bearer token of an invited handle: an API caller never joins.
+      assert(n.status === 200, `not invited ${n.status}`);
       const kit = await issue(worker, env, 'kit');
       const viaToken = await call('/d/open-memo/v/1', { token: kit.token });
       assert(viaToken.status === 200, `bearer ${viaToken.status}`);
-      // Already a member: no team writes.
+      const viaCookie = await call('/d/open-memo', { cookie: kit.cookie });
+      assert(viaCookie.status === 200, `invited handle ${viaCookie.status}`);
       const m = await call('/d/open-memo/v/1', { cookie: alice });
       assert(m.status === 200, `member ${m.status}`);
-      assert(teamWrites().length === 0, `writes without a join: ${teamWrites()}`);
-      const before = JSON.parse(await env.META.get(teamKey));
-      assert(before.members.length === 1 && before.invites.includes('kit'), 'team changed before any invitee opened it');
-      // Invited by email: opening the readable doc makes them a member.
+      // Invited by email, readable by link and by the allowlist: served, no join.
       const jo = await sidOf({ email: 'jo@example.com', name: 'Jo', account_id: 'acct-jo' });
-      const j = await call('/d/open-memo', { cookie: jo });
-      assert(j.status === 200, `invitee ${j.status}`);
-      assert(bootData(await j.r.text(), '__TDOC_SHELL__').joinedTeam?.name === 'Readers', 'no notice');
+      for (const path of ['/d/open-memo', '/d/open-memo/v/1', '/d/listed-memo', '/d/listed-memo/v/1', '/d/listed-memo/raw']) {
+        const r = await call(path, { cookie: jo });
+        const body = await r.r.text();
+        assert(r.status === 200, `${path}: invitee ${r.status}`);
+        if (!path.endsWith('/raw')) assert(!('joinedTeam' in (bootData(body, '__TDOC_SHELL__') || {})), `${path}: joined notice`);
+      }
+      assert(teamWrites().length === 0, `team writes on view: ${teamWrites()}`);
       const after = JSON.parse(await env.META.get(teamKey));
-      assert(after.members.some((x) => x.account_id === 'acct-jo') && !after.invites.includes('jo@example.com'), 'jo is not a member');
-      assert(after.members.filter((x) => x.account_id === 'acct-jo').length === 1, 'joined twice');
+      assert(after.members.length === 1 && after.invites.includes('jo@example.com') && after.invites.includes('kit'), `team changed on view: ${JSON.stringify(after)}`);
       const list = await call('/api/teams', { cookie: jo });
-      assert(list.body.teams.some((x) => x.id === rt.id), 'the team is not in their list');
+      assert(!(list.body.teams || []).some((x) => x.id === rt.id), 'the team is in their list');
     } finally {
       env.META.put = realPut;
     }

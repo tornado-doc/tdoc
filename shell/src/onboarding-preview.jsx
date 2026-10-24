@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ActivatePage } from './activate-page.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { SetupGate } from './setup-gate.jsx';
+import { DocsHub } from './docs-hub.jsx';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { StatusPage } from './status-page.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
@@ -50,7 +51,7 @@ export default function OnboardingPreview() {
       <SignInDialog open={dialogOpen} onOpenChange={setDialogOpen} onSuccess={() => {}} preview={{device:{user_code:'ABCD-1234',verification_uri:'https://github.com/login/device'},status:'Approve on GitHub, then return here.'}} />
     </div>;
   } else if (['Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published'].includes(state)) {
-    screen = <SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: ['Connected', 'First document', 'Document published'].includes(state), local_agents: ['Connected', 'First document', 'Document published'].includes(state) ? [{ device: 'alex-mac', cli: 'codex', ready: true, status: 'active' }] : [], elapsed: state === 'Connection help' ? 95000 : 0 }} />;
+    screen = <><DocsHub boot={{ identity, capabilities: {create: false} }} /><SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ stage: ['Connected', 'First document', 'Document published'].includes(state) ? 'choose' : 'connect', record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: ['Connected', 'First document', 'Document published'].includes(state), local_agents: ['Connected', 'First document', 'Document published'].includes(state) ? [{ device: 'alex-mac', cli: 'codex', ready: true, status: 'active' }] : [], elapsed: state === 'Connection help' ? 95000 : 0 }} /></>;
   } else if (state.startsWith('Checklist')) {
     screen = <div className="docs-hub op-checklist"><OnboardingChecklist key={state} record={{started:true, agent_connected:true, first_doc:state === 'Checklist' ? null : 'my-first-tdoc', commented:state === 'Checklist after commenting'}} docs={state === 'Checklist' ? [] : [{slug:'my-first-tdoc',title:'My first tdoc'}]} /></div>;
   } else {

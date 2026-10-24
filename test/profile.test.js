@@ -271,7 +271,8 @@ async function seedPins(env, accountId, pins, extra = {}) {
       owner: 'bob',
       access: { visibility: 'public' },
     });
-    // Pin order preserved; private pin is omitted from the public page.
+    // Pin order preserved; a profile is a public listing, so a private pin
+    // and an "anyone with the link" (unlisted) pin are both left off it.
     await seedPins(env, alice, ['alice-link', 'alice-secret', 'alice-open', 'bob-open']);
 
     const empty = await worker.fetch(req('/@bob'), env, {});
@@ -283,8 +284,8 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(r.status === 200, `/@alice ${r.status}`);
     const boot = bootData(await r.text(), '__TDOC_APP_BOOT__');
     assert(boot.page === 'profile' && boot.login === 'alice', 'profile boot');
-    assert(boot.docs.map((d) => d.slug).join(',') === 'alice-link,alice-open',
-      `expected pinned public/unlisted only, got ${JSON.stringify(boot.docs)}`);
+    assert(boot.docs.map((d) => d.slug).join(',') === 'alice-open',
+      `expected pinned public only, got ${JSON.stringify(boot.docs)}`);
     assert(boot.docs.every((d) => d.url && d.title), 'rows need url + title');
   });
 

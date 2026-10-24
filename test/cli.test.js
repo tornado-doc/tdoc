@@ -1293,18 +1293,18 @@ t('bin/tdoc-new still defaults to NOT publishing', () => {
   assert(/--publish\)\s*PUBLISH=1/.test(src), '--publish must remain the opt-in');
 });
 
-t('the handoff line does not claim a plain publish is unlisted', () => {
-  // A publish with no flags stores no access block and takes the legacy
-  // policy (public + full history). Telling the user "unlisted" would
-  // understate what a recipient can see. Keeping the default as-is is a
-  // product decision (#245/#246 closed); the copy has to match it.
+t('the handoff line describes a plain publish as anyone with the link', () => {
+  // A new doc published with no flags gets the worker's NEW_DOC_ACCESS:
+  // anyone with the link, noindex, history owner-only. The copy has to match
+  // it, and must not steer agents to Public, which search engines index.
   const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
   const step = skill.slice(skill.indexOf('*Hosted (the default).*'), skill.indexOf('*Self-host.*'));
-  assert(!/live and \*\*unlisted\*\*/.test(step), 'handoff still calls a plain publish unlisted');
   // The blockquote wraps, so match across the "> " continuation.
-  assert(/page back[\s>]+through earlier versions/.test(step),
-    'handoff should say earlier versions are reachable');
-  assert(/--history owner/.test(step), 'handoff should point at the way to change it');
+  assert(/Anyone with this link can read it/.test(step), 'handoff should say anyone with the link reads it');
+  assert(/not[\s>]+listed anywhere or shown to search engines/.test(step), 'handoff should say it is not listed or indexed');
+  assert(/Earlier versions stay visible to you only/.test(step), 'handoff should say history is owner-only');
+  assert(/--history public/.test(step), 'handoff should point at the way to change it');
+  assert(/Do \*\*not\*\* publish `--visibility public` unless/.test(step), 'handoff should keep Public an explicit choice');
 });
 
 t('SKILL.md states the localhost rule and no longer promises localhost by default', () => {
@@ -2224,6 +2224,63 @@ t('validator rejects a numeral cell class that lands on prose', () => {
     assert(house.status !== 0, 'the house-style path should apply the same rule');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+// ---- an agent connection limited to some workspaces ----
+// The person unticked workspaces on the Allow page. Publishing outside them
+// must say so in words and point at Settings > Agents, not dump JSON; a new
+// doc headed for a team (--team) names it on the upload, so a connection
+// without My docs files it there directly.
+t('a workspace-limited connection: a clear refusal outside, the team named on upload inside', () => {
+  const bin = path.join(BIN, 'tdoc-publish');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-scope-'));
+  const seen = path.join(home, 'uploads.log');
+  const stub = startStub(
+    `((log)=>(q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
+    `s.setHeader('content-type','application/json');` +
+    `const u=q.url.split('?')[0];` +
+    `if(u==='/api/upload'){const j=JSON.parse(b||'{}');require('fs').appendFileSync(log,JSON.stringify({slug:j.slug,team:j.team||null,team_default:j.team_default||null})+'\\n');` +
+    `if(j.team==='abby'){s.statusCode=403;return s.end(JSON.stringify({error:'token_scope',` +
+    `message:'This agent connection cannot publish to the team "abby". Its owner can change which workspaces it reaches in Settings → Agents: https://tdoc.dev/me?view=settings#agent-access'}));}` +
+    `return s.end(JSON.stringify({ok:true,size:42,new_doc:true,scoped:true,team:j.team?'t_b':null}));}` +
+    `if(u==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_b',name:'befreed',role:'member'}],workspaces:['t_b']}));` +
+    `if(u==='/api/team/move'){require('fs').appendFileSync(log,JSON.stringify({move:b})+'\\n');return s.end(JSON.stringify({ok:true,moved:1,team:'t_b'}));}` +
+    `s.statusCode=404;s.end('{}');});})(${JSON.stringify(seen)})`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: stub.base, public_host: '127.0.0.1', upload_token: 'tok', github_login: 'tester',
+    }));
+    for (const slug of ['scoped-out', 'scoped-in', 'scoped-default']) {
+      const docs = path.join(home, 'tdocs', slug, 'v1');
+      fs.mkdirSync(docs, { recursive: true });
+      fs.writeFileSync(path.join(docs, 'index.html'), '<!doctype html><body><div class="wrap"><h1>D</h1></div></body>');
+      fs.writeFileSync(path.join(home, 'tdocs', slug, 'meta.json'), JSON.stringify({ title: 'D', slug, versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }] }));
+    }
+    const env = { ...process.env, HOME: home, TDOC_DIR: path.join(home, 'tdocs'), TDOC_SKIP_UPDATE_CHECK: '1' };
+    const out = spawnSync(bin, ['--team', 'abby', 'scoped-out'], { env, encoding: 'utf8', timeout: 60000 });
+    assert(out.status !== 0, `published outside its workspaces: ${out.stdout}`);
+    assert(/Not published: This agent connection cannot publish to the team "abby"/.test(out.stderr), `no plain refusal: ${out.stderr}`);
+    assert(/me\?view=settings#agent-access/.test(out.stderr), `no way to change it: ${out.stderr}`);
+    assert(!/upload FAILED: \{/.test(out.stderr), `raw JSON dumped: ${out.stderr}`);
+    const inside = spawnSync(bin, ['--team', 'befreed', 'scoped-in'], { env, encoding: 'utf8', timeout: 60000 });
+    assert(inside.status === 0, `publish into its team failed: ${inside.stderr}`);
+    const uploads = fs.readFileSync(seen, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert(uploads.some((u) => u.slug === 'scoped-in' && u.team === 'befreed'), `the team was not named on upload: ${JSON.stringify(uploads)}`);
+    // A default team (here TDOC_TEAM) is only a preference: sent apart from
+    // --team so the server can fall back, and never moved into afterwards.
+    const moves = () => fs.readFileSync(seen, 'utf8').split('\n').filter((l) => l.includes('"move"')).length;
+    const movesBefore = moves();
+    const byDefault = spawnSync(bin, ['scoped-default'], { env: { ...env, TDOC_TEAM: 'abby' }, encoding: 'utf8', timeout: 60000 });
+    assert(byDefault.status === 0, `a default team outside the connection failed the publish: ${byDefault.stderr}`);
+    const last = fs.readFileSync(seen, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((u) => u.slug === 'scoped-default').pop();
+    assert(last && last.team === null && last.team_default === 'abby', `default sent as a demand: ${JSON.stringify(last)}`);
+    assert(moves() === movesBefore, 'the default team was applied on top of the server placement');
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

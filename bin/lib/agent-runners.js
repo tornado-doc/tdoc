@@ -41,8 +41,12 @@ const { spawn } = require('child_process');
 // `bash -c …` or `node -e …`; and Edit/Write reach only the writable folders,
 // never the skill checkout, so it cannot rewrite an allowed script either.
 const TDOC_SCRIPTS = ['tdoc-pull', 'tdoc-write', 'tdoc-publish', 'tdoc-agent-reply'];
+// A reader's question (Send to my agent) is answered, never applied: it may
+// read the doc and post the answer, nothing else -- no Edit, no Write, no
+// tdoc-write or tdoc-publish.
+const TDOC_ASK_SCRIPTS = ['tdoc-pull', 'tdoc-agent-reply'];
 const BIN_DIR = path.resolve(__dirname, '..');
-function claudeAllowedTools({ binDir = BIN_DIR, writeDirs = [], readDirs = [] } = {}) {
+function claudeAllowedTools({ binDir = BIN_DIR, writeDirs = [], readDirs = [], scripts = TDOC_SCRIPTS } = {}) {
   // Read(path) covers Read, Glob and Grep; Edit(path) every file-editing tool.
   // Unscoped reads would let a comment have the agent read ~/.tdoc (the upload
   // token) or ~/.ssh and publish it as doc text.
@@ -50,7 +54,7 @@ function claudeAllowedTools({ binDir = BIN_DIR, writeDirs = [], readDirs = [] } 
   const tools = [];
   for (const dir of [...new Set([...writeDirs, ...readDirs].filter(Boolean))]) tools.push(`Read(${abs(dir)})`);
   for (const dir of writeDirs.filter(Boolean)) tools.push(`Edit(${abs(dir)})`);
-  for (const script of TDOC_SCRIPTS) {
+  for (const script of scripts) {
     const full = path.join(binDir, script);
     tools.push(`Bash(${full}:*)`, `Bash(bash ${full}:*)`, `Bash(bash "${full}":*)`);
   }
@@ -199,7 +203,7 @@ async function runAgentWithOar({ cli, prompt, cwd, env = process.env, timeoutMs 
     // Only the daemon's own variables ride along: OAR takes `env` as deltas
     // over its inherited environment.
     const delta = {};
-    for (const k of ['TDOC_SKILL_DIR', 'TDOC_DIR', 'TDOC_DAEMON', 'TDOC_AGENT']) if (env[k]) delta[k] = env[k];
+    for (const k of ['TDOC_SKILL_DIR', 'TDOC_DIR', 'TDOC_DAEMON', 'TDOC_DAEMON_SLUG', 'TDOC_DAEMON_ASK', 'TDOC_AGENT']) if (env[k]) delta[k] = env[k];
     session = await runtime.session(installation, { cwd, env: delta, ...(cli === 'claude' ? { disallowedTools: OAR_DISALLOWED_TOOLS } : {}) });
     let text = '';
     const stop = session.events((ev) => {
@@ -231,4 +235,4 @@ function runAgentVia(opts) {
   return (opts.runner || process.env.TDOC_DAEMON_RUNNER || 'cli') === 'oar' ? runAgentWithOar(opts) : runAgent(opts);
 }
 
-module.exports = { RUNNERS, TDOC_SCRIPTS, claudeAllowedTools, OAR_DISALLOWED_TOOLS, runAgent, runAgentWithOar, runAgentVia, loadOar, findOnPath, detectClis, knownClis };
+module.exports = { RUNNERS, TDOC_SCRIPTS, TDOC_ASK_SCRIPTS, claudeAllowedTools, OAR_DISALLOWED_TOOLS, runAgent, runAgentWithOar, runAgentVia, loadOar, findOnPath, detectClis, knownClis };

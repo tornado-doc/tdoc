@@ -11,6 +11,7 @@ import {
   postOnboardingEvent,
   renameDocument,
   resendNotifyHandoff,
+  sendToMyAgent,
   setDocumentStar,
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
@@ -26,7 +27,9 @@ import {
   ShareDialog,
 } from './document/document-dialogs.jsx';
 import {
+  DocumentAskAction,
   DocumentBreadcrumbs,
+  DocumentMyAgentAction,
   DocumentOverflowActions,
   DocumentPrimaryAction,
   DocumentSendAgentAction,
@@ -66,6 +69,8 @@ import { markThreadSeen, readSeenMap } from './document/thread-seen.js';
 import { DebugBar } from './debug-bar.jsx';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
+import { AskPanel } from './document/ask-panel.jsx';
+import { MY_AGENT_LABELS, agentAskLine, connectHref, savePendingAsk, takePendingAsk, useMyAgent } from './document/my-agent.js';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -213,6 +218,15 @@ export function DocumentShell({ boot, config }) {
   // Connected-App notify panel (doc-level send). Separate from onboarding
   // copy-paste handoff below.
   const [notifyOpen, setNotifyOpen] = useState(false);
+  // Ask this doc. The selection it opens with is whatever the reader last
+  // highlighted (the composer's, while it is open).
+  const [askOpen, setAskOpen] = useState(false);
+  const [askSelection, setAskSelection] = useState(null);
+  // Which of the panel's three faces (ask-panel.jsx), and a question typed
+  // in the selection popover that comes with it.
+  const [askMode, setAskMode] = useState('ai');
+  const [askInitial, setAskInitial] = useState({ question: '', autoSubmit: false, copied: '' });
+  const lastSelectionRef = useRef(null);
   const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
   // "Send to another agent" from a card: the agent it is stuck on, so the
@@ -220,11 +234,7 @@ export function DocumentShell({ boot, config }) {
   const [notifyAvoid, setNotifyAvoid] = useState(null);
   const [seenMap, setSeenMap] = useState(() => readSeenMap(config.slug));
   const [sendToAgentBusy, setSendToAgentBusy] = useState(false);
-  // Opening this doc accepted a team invite (server sets the flag only on
-  // that one view): say so once, long enough to read.
-  const [toast, setToast] = useState(() => (
-    config.joinedTeam?.name ? { text: `You joined ${config.joinedTeam.name}`, error: false, ms: 4000 } : null
-  ));
+  const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
   // which are painted in the danger tone and stay long enough to read.
   const showToast = useCallback((text, error = false) => setToast({ text, error }), []);
@@ -411,6 +421,7 @@ export function DocumentShell({ boot, config }) {
         .finally(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }));
       return;
     }
+    lastSelectionRef.current = selection && selection.text ? selection : null;
     setComposer(selection);
   }, [comments.moveAnchor]);
 
@@ -602,7 +613,7 @@ export function DocumentShell({ boot, config }) {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), toast.ms || (toast.error ? 5000 : 1800));
+    const timer = window.setTimeout(() => setToast(null), toast.error ? 5000 : 1800);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -741,6 +752,42 @@ export function DocumentShell({ boot, config }) {
     }
   };
 
+  // Ask this doc. Available only where the server has a model, on a
+  // published doc; a signed-out reader is sent through sign-in instead.
+  const askEnabled = Boolean(config.ask?.available) && config.mode === 'published' && !config.isLanding;
+  const openAskPanel = (mode, { question = '', selection = null, autoSubmit = false, copied = '' } = {}) => {
+    setAskMode(mode);
+    setAskSelection(selection);
+    setAskInitial({ question, autoSubmit, copied });
+    setAskOpen(true);
+  };
+  const currentSelection = () => (composer && composer.text ? composer : lastSelectionRef.current);
+  const openAsk = () => {
+    if (!config.identity) { signIn(); return; }
+    openAskPanel('ai', { selection: currentSelection() });
+  };
+  // Ask AI from the selection popover: about that passage, with whatever was
+  // typed there as the question. The popover closes; the panel keeps the
+  // passage, so a posted answer is anchored to it.
+  const askFromComposer = (text) => {
+    if (!config.identity) { signIn(); return; }
+    const selection = composer && composer.text ? composer : null;
+    const question = String(text || '').trim();
+    closeComposer();
+    openAskPanel('ai', { question, selection, autoSubmit: Boolean(question) });
+  };
+  // A posted answer is an ordinary comment by the reader, anchored to the
+  // passage they asked about when there was one.
+  const postAskAnswer = async (text, selection) => {
+    const { ok, value } = await attempt(() => comments.addComment(selection || null, text));
+    if (!ok) return false;
+    markCommented();
+    if (selection && composer) closeComposer();
+    if (value?.id) setOpenCommentId(value.id);
+    showToast('Posted as a comment');
+    return true;
+  };
+
   const replyTo = async (parentId, text, opts = {}) => {
     const { ok, value } = await attempt(() => comments.addReply(parentId, text));
     if (!ok) return false;
@@ -809,6 +856,61 @@ export function DocumentShell({ boot, config }) {
     && notifyTargets.reason !== 'no_agent_bound'
     && (notifyTargets.default || (notifyTargets.candidates || []).length || notifyTargets.fallback),
   );
+  // Comment / Ask AI / Send to my agent. The third is the reader's OWN agent
+  // (my-agent.js); the owner keeps Send to agent and @agent, which hand
+  // comments to the doc's agent. A demo has no account to send from.
+  const myAgentEnabled = Boolean(config.mode === 'published' && !config.isLanding && !notifyEnabled && !config.demoComments);
+  const myAgent = useMyAgent(config.slug, myAgentEnabled && Boolean(config.identity));
+  // Signed out, the entry signs in first; signed in, it waits for the server
+  // to say which of the three it is rather than flash the wrong one.
+  const myAgentLabel = !myAgentEnabled ? null
+    : !config.identity ? MY_AGENT_LABELS.online
+      : myAgent.tier ? MY_AGENT_LABELS[myAgent.tier] : null;
+  const runMyAgent = async (text = '', selection = currentSelection()) => {
+    if (!config.identity) { signIn(); return; }
+    const tier = myAgent.tier || 'none';
+    const question = String(text || '').trim();
+    if (tier === 'none') {
+      // Through /start and the setup page, then back here, where the
+      // question goes to the agent that was just connected.
+      savePendingAsk({ slug: config.slug, question, passage: selection });
+      location.href = connectHref(config.slug);
+      return;
+    }
+    if (composer) closeComposer();
+    if (tier === 'offline' && question) {
+      // One click: copied now, in the click, where the browser allows it.
+      const line = agentAskLine(shareUrl, question, selection?.text);
+      const copied = await copyText(line);
+      showToast(copied ? 'Copied — paste it into your agent' : 'Could not copy', !copied);
+      openAskPanel('copy', { selection, copied: line });
+      return;
+    }
+    openAskPanel(tier === 'online' ? 'agent' : 'copy', { question, selection, autoSubmit: tier === 'online' && Boolean(question) });
+  };
+  const sendMyAgent = async (question, passage) => {
+    try {
+      const body = await sendToMyAgent(config.slug, { question, passage: passage?.text ? passage : null });
+      if (body?.ask) myAgent.addAsk(body.ask);
+      return body?.ask || null;
+    } catch (error) {
+      // Its helper stopped since the page last asked: say so on the entry.
+      if (error.status === 409) myAgent.refresh();
+      throw error;
+    }
+  };
+  // Back from connecting: the question that was waiting goes to the new
+  // agent -- sent when it can be woken, ready to copy when it cannot. Taken
+  // on the first visit either way: back without connecting drops it, so the
+  // setup page stops offering a way back.
+  useEffect(() => {
+    if (!myAgent.tier) return;
+    const pending = takePendingAsk(config.slug);
+    if (!pending || myAgent.tier === 'none') return;
+    const online = myAgent.tier === 'online';
+    openAskPanel(online ? 'agent' : 'copy', { question: pending.question || '', selection: pending.passage, autoSubmit: online && Boolean(pending.question) });
+  }, [myAgent.tier]);
+
   // The agents @ offers: the Send to agent dropdown's list, and only to
   // someone who could press that button.
   const agentMentions = useMemo(() => (canSendToAgent
@@ -1281,6 +1383,8 @@ export function DocumentShell({ boot, config }) {
               onSignIn={signIn}
               onChange={editor.changeMode}
             />
+            {askEnabled ? <DocumentAskAction onClick={openAsk} /> : null}
+            {myAgentLabel ? <DocumentMyAgentAction label={myAgentLabel} onClick={() => runMyAgent('')} /> : null}
             {notifyEnabled ? (
               <DocumentSendAgentAction
                 count={handoffBuckets.ready.length}
@@ -1297,6 +1401,8 @@ export function DocumentShell({ boot, config }) {
         overflowActions={config.isLanding ? null : (
           <DocumentOverflowActions
             config={config}
+            onAsk={askEnabled ? openAsk : null}
+            myAgent={myAgentLabel ? { label: myAgentLabel, onClick: () => runMyAgent('') } : null}
             starred={starred}
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
@@ -1533,6 +1639,8 @@ export function DocumentShell({ boot, config }) {
               : null
           }
           connectAgentPrompt={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
+          onAskAI={askEnabled && !config.demoComments && composer.kind !== 'element' ? askFromComposer : null}
+          myAgentAction={myAgentLabel ? { label: myAgentLabel, onClick: (text) => runMyAgent(text, composer.text ? composer : null) } : null}
           onSubmit={postComment}
           onClose={closeComposer}
         />
@@ -1548,6 +1656,27 @@ export function DocumentShell({ boot, config }) {
         onCopied={() => { setInvited(null); showToast('Link copied'); }}
       />
 
+
+      {(askEnabled || myAgentEnabled) && config.identity ? (
+        <AskPanel
+          open={askOpen}
+          onClose={() => setAskOpen(false)}
+          slug={config.slug}
+          version={config.version}
+          selection={askSelection}
+          limit={config.ask?.limit}
+          canPost={Boolean(config.canComment) && !config.demoComments}
+          onPost={postAskAnswer}
+          mode={askMode}
+          initialQuestion={askInitial.question}
+          autoSubmit={askInitial.autoSubmit}
+          initialCopied={askInitial.copied}
+          myAgent={myAgent.state}
+          docUrl={shareUrl}
+          onSendAgent={sendMyAgent}
+          onCopy={copyText}
+        />
+      ) : null}
 
       {notifyEnabled ? (
         <NotifyHandoffPanel

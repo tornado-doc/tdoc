@@ -71,6 +71,13 @@ export function CommentComposer({
   // Where "Set up an agent" goes. The feedback overlay runs on someone
   // else's app, so it passes an absolute tdoc URL.
   agentSetupHref = '/me?view=settings#agents',
+  // Comment / Ask AI / Send to my agent: the same three as the doc's bar.
+  // Each takes what is typed here as the question (it may be empty: the
+  // panel then asks for one). Absent where there is no such door.
+  onAskAI = null,
+  // { label, title, onClick } -- "Connect my agent", "Send to my agent" or
+  // "Copy for my agent", by what the reader's own account has.
+  myAgentAction = null,
 }) {
   const [text, setText] = useState('');
   const [connectOpen, setConnectOpen] = useState(false);
@@ -145,7 +152,7 @@ export function CommentComposer({
           </details>
         </div>
       ) : null}
-      <div className="foot">
+      <div className={`foot${onAskAI || myAgentAction ? ' has-ask' : ''}`}>
         <span className="hint">
           {demo
             ? 'Demo — refresh clears it'
@@ -161,6 +168,28 @@ export function CommentComposer({
               title="Connect an agent to hand comments to it"
             >
               @agent
+            </button>
+          ) : null}
+          {onAskAI ? (
+            <button
+              className="submit agent tdoc-composer-ask"
+              type="button"
+              disabled={busy}
+              title="Ask AI about this passage"
+              onClick={() => onAskAI(text)}
+            >
+              Ask AI
+            </button>
+          ) : null}
+          {myAgentAction ? (
+            <button
+              className="submit agent tdoc-composer-my-agent"
+              type="button"
+              disabled={busy}
+              title={myAgentAction.title || myAgentAction.label}
+              onClick={() => myAgentAction.onClick(text)}
+            >
+              {myAgentAction.label}
             </button>
           ) : null}
           {canSendToAgent ? (

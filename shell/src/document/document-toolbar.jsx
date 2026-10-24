@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -11,6 +12,7 @@ import {
   History,
   Share2,
   Send,
+  Sparkles,
   Star,
   Trash2,
   Upload,
@@ -167,8 +169,46 @@ export function DocumentSendAgentAction({ count = 0, onClick }) {
   );
 }
 
+// Ask this doc: the free AI answer for readers. Shown only where the server
+// has a model; a signed-out reader gets the sign-in instead of the panel.
+export function DocumentAskAction({ onClick }) {
+  return (
+    <button
+      id="tdoc-ask-btn"
+      type="button"
+      className="tdoc-ask-action"
+      aria-label="Ask AI about this doc"
+      title="Ask AI about this doc"
+      onClick={onClick}
+    >
+      <Sparkles size={15} aria-hidden="true" />
+      <span>Ask AI</span>
+    </button>
+  );
+}
+
+// The third of Comment / Ask AI / Send to my agent, for a reader: the label
+// says what pressing it does with what their own account has (my-agent.js).
+export function DocumentMyAgentAction({ label, title = '', onClick }) {
+  return (
+    <button
+      id="tdoc-my-agent-btn"
+      type="button"
+      className="tdoc-ask-action tdoc-my-agent-action"
+      aria-label={label}
+      title={title || label}
+      onClick={onClick}
+    >
+      <Bot size={15} aria-hidden="true" />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 export function DocumentOverflowActions({
   config,
+  onAsk = null,
+  myAgent = null,
   starred,
   onToggleStar,
   onPublish,
@@ -186,6 +226,16 @@ export function DocumentOverflowActions({
 }) {
   return (
     <>
+      {onAsk ? (
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="ask" onClick={onAsk}>
+          <Sparkles size={15} /> Ask AI
+        </AppMenuItem>
+      ) : null}
+      {myAgent ? (
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="my-agent" onClick={myAgent.onClick}>
+          <Bot size={15} /> {myAgent.label}
+        </AppMenuItem>
+      ) : null}
       <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
         <History size={15} /> View changes
       </AppMenuItem>

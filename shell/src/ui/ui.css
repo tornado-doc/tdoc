@@ -1037,6 +1037,24 @@ a.ui-menu-item:visited {
 .tdoc-activate-page .tdoc-activate-error { margin: 22px 0 0; font-size: 14px; line-height: 1.5; }
 .tdoc-activate-page .tdoc-activate-hint { margin: 12px 0 0; font-size: 13px; line-height: 1.5; }
 
+/* The workspaces an agent connection reaches (workspace-checklist.jsx): one
+   quiet bordered list, a whole row per checkbox so a thumb can hit it. Used
+   on the Allow page and in the Settings > Agents dialog. */
+.tdoc-ws-pick { margin: 0; padding: 0; border: 1px solid var(--td-line, #e8e7e3); border-radius: 12px; overflow: hidden; text-align: left; }
+.tdoc-ws-option {
+  display: flex; align-items: center; gap: 10px; min-height: 46px; box-sizing: border-box;
+  padding: 10px 14px; cursor: pointer; font-size: 14.5px; line-height: 1.3; color: var(--td-ink, #1a1a1a);
+}
+.tdoc-ws-option + .tdoc-ws-option { border-top: 1px solid var(--td-line, #e8e7e3); }
+.tdoc-ws-option:hover { background: var(--td-surface-2, #f7f7f5); }
+.tdoc-ws-option input { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; accent-color: var(--td-accent, #1652f0); cursor: pointer; }
+.tdoc-ws-name { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-ws-kind { flex: 0 0 auto; color: var(--td-muted, #6b6a66); font-size: 12.5px; }
+.tdoc-ws-pick:disabled .tdoc-ws-option { cursor: default; opacity: .6; }
+.tdoc-activate-workspaces { margin: 20px 0 0; }
+.tdoc-activate-page .tdoc-activate-ask { margin: 0 0 8px; font-size: 14px; line-height: 1.5; color: var(--td-ink, #1a1a1a); text-align: left; }
+.tdoc-activate-workspaces .tdoc-activate-hint { text-align: left; }
+
 /* Onboarding spacing: keep the existing UI and group its content with air. */
 .tdoc-activate-stack > h1 + p { margin-top: 12px; }
 .tdoc-activate-stack > p { line-height: 1.6; overflow-wrap: anywhere; }
@@ -1080,10 +1098,79 @@ a.ui-menu-item:visited {
 .tdoc-modal .tdoc-share-version button.tdoc-quiet-link { margin: 0; color: var(--td-accent); }
 
 /* Top-bar workspace switcher (workspace-switcher.jsx): one text-first control
-   on every page, kept visible and compact on a phone. */
+   on every page. */
 .tdoc-bar .tdoc-space-trigger { padding: 5px 10px 5px 12px; gap: 6px; max-width: 220px; }
 .tdoc-bar .tdoc-space-trigger .tdoc-space-name { display: inline; }
 .tdoc-bar .tdoc-space-trigger .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tdoc-space-item-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tdoc-space-check { margin-left: auto; color: var(--td-accent); }
-@media (max-width: 700px) { .tdoc-bar .tdoc-space-trigger { max-width: 140px; } }
+/* On a phone the chip gives its room to ⋯ (#tdoc-more-btn), which carries
+   Show resolved, Share and Versions: the same rows are a "Switch space"
+   submenu there. ⋯ never shrinks out of the bar. */
+.tdoc-space-submenu-current { margin-left: auto; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a8a8a; font-size: 12px; }
+@media (max-width: 700px) {
+  .tdoc-bar .tdoc-space-trigger { display: none; }
+  .tdoc-bar #tdoc-more-btn { flex-shrink: 0; }
+}
+
+/* AppDialog `side`: a panel docked under the top bar at the right edge. The
+   viewport lets clicks through so the document stays readable and scrollable
+   beside it; on a phone it is a bottom sheet. */
+.ui-dialog-viewport.ui-dialog-side {
+  inset: 48px 0 0 auto;
+  width: min(380px, 100vw);
+  padding: 12px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.ui-dialog-popup.ui-dialog-side-popup {
+  pointer-events: auto;
+  width: 100%;
+  max-height: calc(100vh - 48px - 24px);
+  padding: 18px 18px 14px;
+  border: 1px solid var(--td-line, #e5e5e7);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+}
+.ui-dialog-popup.ui-dialog-side-popup h3 { font-size: 16px; }
+.ui-dialog-popup.ui-dialog-side-popup .actions { margin-top: 10px; }
+@media (max-width: 700px) {
+  .ui-dialog-viewport.ui-dialog-side {
+    inset: auto 0 0 0;
+    width: 100%;
+    padding: 0;
+    align-items: flex-end;
+  }
+  .ui-dialog-popup.ui-dialog-side-popup {
+    border-radius: 14px 14px 0 0;
+    max-height: 75dvh;
+    padding: 16px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Setup stays over My docs, with a fixed footer like the other app dialogs. */
+.ui-dialog-popup.ui-setup-modal { width: min(960px, calc(100vw - 40px)); min-height: min(640px, calc(100dvh - 40px)); display: flex; flex-direction: column; padding: 30px 36px 0; }
+.ui-setup-modal .ui-dialog-body { flex: 1; padding: 18px 0 26px; }
+.ui-setup-modal .ui-dialog-title { font-size: 22px; }
+.ui-setup-modal .ui-dialog-description { padding-bottom: 18px; border-bottom: 1px solid var(--td-line, #e5e5e5); }
+.ui-setup-modal .ui-setup-eyebrow { font-size: 13px; color: var(--td-muted, #666); }
+.ui-setup-modal .ui-setup-label { margin: 20px 0 8px; font-weight: 600; font-size: 13px; }
+.ui-setup-command { display: flex; align-items: center; gap: 12px; }
+.ui-setup-command code { flex: 1; min-width: 0; background: #101010; color: #e6f5ce; padding: 14px; border-radius: 6px; overflow-wrap: anywhere; font: 13px/1.6 ui-monospace, monospace; }
+.ui-setup-command button { flex: none; }
+.ui-setup-modal .ui-setup-steps { padding-left: 20px; margin: 16px 0; font-size: 13px; line-height: 1.9; color: var(--td-muted, #666); }
+.ui-setup-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; margin: 18px 0; color: var(--td-muted, #666); }
+.ui-setup-modal .ui-setup-connected { color: #137044; }
+.ui-setup-modal .ui-setup-error { color: #a32929; }
+.ui-setup-details { font-size: 13px; margin-top: 20px; color: var(--td-muted, #666); }
+.ui-setup-details summary { cursor: pointer; width: fit-content; }
+.ui-setup-details p { margin-top: 12px; }
+.ui-setup-modal .actions { position: sticky; bottom: 0; background: var(--td-bg, #fff); padding: 16px 0; border-top: 1px solid var(--td-line, #e5e5e5); margin-top: 0; }
+.ui-setup-modal .ui-setup-later { margin-right: auto; }
+.ui-setup-modal button:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 600px) {
+  .ui-dialog-popup.ui-setup-modal { width: calc(100vw - 32px); padding: 24px 20px 0; min-height: min(640px, calc(100dvh - 40px)); }
+  .ui-setup-command { align-items: stretch; flex-direction: column; gap: 8px; }
+  .ui-setup-command button { align-self: flex-end; }
+}

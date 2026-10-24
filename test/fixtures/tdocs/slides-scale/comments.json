@@ -1,0 +1,13 @@
+[
+  {
+    "id": "on-cqw-title",
+    "version": 1,
+    "created_in": 1,
+    "text": "Shorter title.",
+    "author": { "login": "preview-reviewer", "name": "Reviewer" },
+    "created": "2026-10-24T10:00:00Z",
+    "status": "open",
+    "anchor": { "kind": "text", "text": "Scaled title", "context_before": "", "context_after": "" },
+    "replies": []
+  }
+]

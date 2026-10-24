@@ -204,6 +204,17 @@ if [ -f "$_nag" ]; then
   if printf '%s' "$_uj" | grep -q '^{'; then update_json="$_uj"; fi
 fi
 
+# --- background helper (tdoc-daemon) ---
+# Optional, never a missing_step: publishing works without it. It is what
+# lets "Send to agent" on a doc reach Claude Code / Codex on this computer.
+# `state` reads local files and `launchctl print` only -- no network.
+daemon_json='{"supported":false,"installed":false,"loaded":false,"running":false}'
+_daemon="$(cd "$(dirname "$0")" && pwd)/lib/daemon.js"
+if [ -f "$_daemon" ]; then
+  _dj="$(node "$_daemon" state 2>/dev/null || true)"
+  if printf '%s' "$_dj" | grep -q '^{'; then daemon_json="$_dj"; fi
+fi
+
 # --- already-published config? ---
 published=false
 publish_subdomain=""
@@ -327,12 +338,20 @@ missing_json="$(printf '%b' "$steps" | node -e '
 # machine it most needs to answer correctly, and it answered wrong.
 report_json="$(node -e '
   const [target, nodeVer, wranglerVer, cfAccount, cfSubdomain, pubSub, pubWorker,
-         flags, missingRaw, updateRaw, credentialProblem] = process.argv.slice(1);
+         flags, missingRaw, updateRaw, credentialProblem, daemonRaw] = process.argv.slice(1);
   const f = JSON.parse(flags);
   let missing = [];
   try { missing = JSON.parse(missingRaw); } catch {}
   let update = { ok: true, checked: false, behind: 0 };
   try { const u = JSON.parse(updateRaw); if (u && typeof u === "object") update = u; } catch {}
+  let daemon = { supported: false, installed: false, loaded: false, running: false };
+  try { const d = JSON.parse(daemonRaw); if (d && typeof d === "object") daemon = d; } catch {}
+  // Optional steps never block readiness. "ask" means: ask the human first,
+  // in one plain question, and run cmd only on a yes (FIRST-DOC.md Step 1c).
+  const optional = [];
+  if (f.published && !credentialProblem && daemon.supported && !(daemon.installed && daemon.loaded) && !daemon.running) {
+    optional.push({ id: "daemon", label: "Let your agent pick up comments on your docs in the background", kind: "ask", cmd: "bin/tdoc-daemon install" });
+  }
   process.stdout.write(JSON.stringify({
     target,
     deps: {
@@ -353,12 +372,14 @@ report_json="$(node -e '
     credential_problem: credentialProblem || null,
     ready_to_publish: f.ready,
     missing_steps: missing,
+    optional_steps: optional,
+    daemon,
     update,
   }, null, 2));
 ' "$target" "$node_ver" "$wrangler_ver" "$cf_account_id" "$cf_subdomain" \
   "$publish_subdomain" "$publish_worker" \
   "{\"node\":$node_ok,\"curl\":$curl_ok,\"wrangler\":$wrangler_ok,\"vercel\":$vercel_ok,\"jq\":$jq_ok,\"gh\":$gh_ok,\"cf_logged_in\":$cf_logged_in,\"cf_token\":$cf_publish_token_ok,\"cf_subdomain\":$cf_subdomain_ok,\"cf_r2\":$cf_r2_enabled,\"published\":$published,\"ready\":$ready_to_publish}" \
-  "$missing_json" "$update_json" "$credential_problem")"
+  "$missing_json" "$update_json" "$credential_problem" "$daemon_json")"
 
 if [ "$JSON_MODE" = "1" ]; then
   printf '%s\n' "$report_json"
@@ -397,6 +418,11 @@ printf '%s' "$report_json" | node -e '
     line("Account", !r.published.ok ? "Not connected"
       : r.credential_problem ? "Connected, but the saved credential is unusable"
         : "Connected on this machine");
+    if (r.daemon && r.daemon.supported) {
+      line("Helper", r.daemon.running ? "Picking up comments in the background"
+        : r.daemon.installed ? "Installed, not running right now"
+          : "Off (optional: bin/tdoc-daemon install)");
+    }
     if (r.update && r.update.checked && !r.update.ok) {
       line("Update", r.update.diverged
         ? "Local checkout has diverged"

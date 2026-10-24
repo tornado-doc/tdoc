@@ -159,12 +159,21 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(tdocNew.includes('--first-doc)  FIRST_DOC=1; shift ;;') && tdocNew.includes('out["origin"] = "first-doc"') && tdocNew.includes('meta.get("origin") == "first-doc"'), 'tdoc-write --first-doc marks the meta, and the mark survives later versions');
   const firstDocRecipe = read('FIRST-DOC.md');
   assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name>'), 'FIRST-DOC.md tells the agent to mark it');
-  // Provably public, not public-by-default: access is sticky on both sides, so
-  // a flagless publish over a doc an earlier run locked stays locked.
-  assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-publish" --visibility public --history public what-ai-knows-<name>'), 'the first doc names public out loud');
-  assert(!/private/.test(firstDocRecipe.slice(firstDocRecipe.indexOf('## Step 7'), firstDocRecipe.indexOf('## If there is no history')).replace('`tdoc-publish --visibility private <slug>` makes it theirs alone', '')), 'step 7 mentions private only as the way to lock it');
-  assert(!/publish (it )?privately/i.test(firstDocRecipe), 'and no leftover instruction to publish privately');
-  assert(!/--visibility private --history owner/.test(read('bin/tdoc-publish')), 'the CLI comment no longer claims first docs publish private');
+  // Private, and said out loud: access is sticky on both sides, so naming the
+  // policy keeps every re-run and every -2 exactly as private as the first.
+  assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner what-ai-knows-<name>'), 'the first doc names private out loud');
+  assert(!/--visibility public/.test(firstDocRecipe), 'no leftover instruction to publish the first doc public');
+  assert(/publish it private/i.test(firstDocRecipe) && /Publish it privately/.test(read('ONBOARDING.md')), 'FIRST-DOC.md and ONBOARDING.md agree: private');
+  // The loop closes on the page: the wrap-up names both ways, in plain words.
+  const wrap = firstDocRecipe.slice(firstDocRecipe.indexOf('### Close the loop'), firstDocRecipe.indexOf('## If there is no history'));
+  assert(/read the comments on <link>\s+> and fix them/.test(wrap) && /"Send to\s+> agent"/.test(wrap), 'wrap-up names both ways');
+  assert(/Settings → Agents/.test(wrap) && /tdoc-daemon install/.test(wrap), 'a decline says how to turn the helper on later');
+  assert(!/daemon/i.test(wrap.split('\n').filter((l) => l.startsWith('>')).join('\n').replace('`tdoc-daemon install`', '')), 'no "daemon" in what the human reads');
+  // One question, then install only on a yes.
+  const ask = firstDocRecipe.slice(firstDocRecipe.indexOf('## Step 1c'), firstDocRecipe.indexOf('## The clock'));
+  assert(/own Claude or Codex plan/.test(ask) && /Settings → Agents/.test(ask) && ask.includes('bash "$SKILL_DIR/bin/tdoc-daemon" install') && /Never install it without a yes/.test(ask), 'Step 1c asks once, in plain words, and installs only on yes');
+  assert(/says yes to the one question in FIRST-DOC\.md Step 1c/.test(read('SKILL.md')), 'SKILL.md allows the daemon only on that yes');
+  assert(read('ONBOARDING.md').includes('SKILL_DIR="$HOME/.codex/skills/tdoc"'), 'ONBOARDING.md installs into the Codex skill dir on Codex');
   assert(read('SKILL.md').includes('**Access only ever tightens by omission.**'), 'the access policy says why a publish that opens a doc must say so');
   assert(server.includes('function isFirstDocProductMeta(meta)') && server.includes('function adoptFirstDocLocal(slug)') && server.includes('if (marked && rec.first_doc !== marked.slug && !rec.shared) {'), 'the local twin adopts the marked doc too');
   assert(upload.indexOf("'published_first'") > upload.indexOf("productEvent(env, 'publish_succeeded'"), 'stamps happen after the write succeeded, never before');

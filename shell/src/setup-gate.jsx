@@ -5,8 +5,8 @@ import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
-import { ConnectReplay, PracticeReplay } from './setup-gate/replay.jsx';
-import { DebugBar } from './debug-bar.jsx';
+import { AppDialog } from './ui/dialog.jsx';
+import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
 
 // Shared with Create a doc: existing interactive-agent authoring remains available.
 export const DOC_SUBJECT_PREFIX = 'Use tdoc to write a doc about ';
@@ -21,8 +21,10 @@ export const readyLocalAgents = (agents) => (agents || []).filter((a) => a.ready
 const keyOf = (a) => `${a.device}/${a.cli}`;
 const labelOf = (a) => `${a.cli === 'claude' ? 'Claude Code' : 'Codex'} on ${a.device}`;
 
-export function SetupGate({ boot, preview = null }) {
-  const [record, setRecord] = useState(preview?.record || null);
+export function SetupGate({ boot, preview = null, onClose }) {
+  const [open, setOpen] = useState(true);
+  const [stage, setStage] = useState(preview?.stage || 'connect');
+  const [pendingAsk] = useState(() => preview ? null : peekPendingAsk());
   const [agents, setAgents] = useState(preview?.local_agents || []);
   const [loaded, setLoaded] = useState(Boolean(preview));
   const [selected, setSelected] = useState('');
@@ -33,6 +35,8 @@ export function SetupGate({ boot, preview = null }) {
   const [busy, setBusy] = useState(false);
   const [platform, setPlatform] = useState('unix');
   const promptRef = useRef(null);
+  const active = useRef(true);
+  useEffect(() => () => { active.current = false; }, []);
   const started = useRef(Date.now());
   const signedIn = Boolean(boot?.identity);
   const available = readyLocalAgents(agents);
@@ -49,7 +53,6 @@ export function SetupGate({ boot, preview = null }) {
       try {
         const result = await getOnboarding({ daemon: true });
         if (!cancelled) {
-          setRecord(result?.record || {});
           setAgents(result?.local_agents || []);
           setError((previous) => previous === 'Could not check the connection. Retrying…' ? '' : previous);
         }
@@ -64,6 +67,14 @@ export function SetupGate({ boot, preview = null }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [signedIn, preview]);
 
+  const choose = stage === 'choose' && connected;
+  const close = () => {
+    active.current = false;
+    if (pendingAsk) clearPendingAsk();
+    setOpen(false);
+    if (onClose) onClose();
+    else if (!preview) location.assign('/me');
+  };
   const signIn = () => {
     if (!preview) location.href = '/api/auth/oidc/login?prompt=login&return=%2Fsetup';
   };
@@ -75,51 +86,50 @@ export function SetupGate({ boot, preview = null }) {
   };
   const practice = async () => {
     if (!chosen || busy || preview) return;
+    if (pendingAsk) { location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`); return; }
     setBusy(true); setError('');
     try {
       const result = await createOnboardingPractice({ device: chosen.device, cli: chosen.cli });
-      location.assign(result.url);
+      if (active.current) location.assign(result.url);
     } catch (e) {
+      if (!active.current) return;
       setError(e.message === 'computer_not_ready' ? 'This computer is offline. Wake it up, then try again.' : e.message || 'Could not open your practice doc. Please try again.');
       setBusy(false);
     }
   };
 
   return (
-    <div className="sg-split">
-      <section className="sg-pane-form">
-        <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><img src="/tdoc_logo.svg" alt="" width="28" height="28" data-tdoc-dark="invert" /></a>
-        <div className="sg-mid"><div className="sg-col">
-          <p className="sg-eyebrow"><span className="sg-step-n">{connected ? 2 : 1}</span>{connected ? 'Step 2 of 2' : 'Step 1 of 2'}</p>
-          <h1 className="sg-h1">{connected ? 'Choose your AI' : 'Connect your computer'}</h1>
-          {!signedIn ? <>
-            <p>Use the AI on your computer to revise docs from your comments.</p>
-            <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
-            <p className="sg-account">{boot?.oidcAuth ? 'New here? Signing in creates your account.' : 'Sign-in is not configured on this host.'}</p>
-          </> : !loaded ? <p role="status">Checking your computers…</p> : connected ? <>
-            <p>Choose an AI, then try editing a doc with a comment.</p>
+    <AppDialog open={open} onOpenChange={(next) => { if (!next) close(); }}
+      title={choose ? 'Choose your AI' : 'Connect a computer'}
+      className="ui-setup-modal"
+      description={choose ? 'Choose the AI that will work on your docs.' : 'Connect the computer where you use Claude Code or Codex.'}
+      actions={<>
+        <button type="button" className="ui-setup-later" onClick={choose ? () => setStage('connect') : close}>{choose ? 'Back' : 'Later'}</button>
+        {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
+          : choose ? <button type="button" className="primary" onClick={practice} disabled={busy}>{busy ? 'Opening your doc…' : pendingAsk ? 'Back to the doc' : 'Try a comment'}</button>
+            : <button type="button" className="primary" disabled={!loaded || !connected} onClick={() => setStage('choose')}>Next</button>}
+      </>}
+    >
+      <p className="ui-setup-eyebrow">{choose ? 'Step 2 of 2' : 'Step 1 of 2'}</p>
+      {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to connect this computer.' : 'Sign-in is not configured on this host.'}</p>
+        : !loaded ? <p role="status">Checking your computers…</p>
+          : choose ? <>
             <AppSelect ariaLabel="Your connected AI" value={keyOf(chosen)} onChange={setSelected} options={available.map((a) => ({ value: keyOf(a), label: labelOf(a) }))} disabled={busy} />
-            <div className="sg-status done" role="status"><b>{error.startsWith('This computer is offline') ? 'Connection needs attention' : `Connected · ${labelOf(chosen)}`}</b></div>
-            <button type="button" className="sg-primary" onClick={practice} disabled={busy}>{busy ? 'Opening your doc…' : 'Try a comment'}</button>
-            <a className="sg-account" href="/me?view=settings#agents">Manage connected computers</a>
+            <p className="ui-setup-connected" role="status">{error.startsWith('This computer is offline') ? 'Connection needs attention' : `Connected · ${labelOf(chosen)}`}</p>
+            <p>{pendingAsk ? 'Your question will be waiting when you return.' : 'Next, select a sentence in your private practice doc and leave a comment.'}</p>
           </> : <>
-            <p>Run this in {platform === 'windows' ? 'your WSL terminal' : 'Terminal'}, then approve in your browser.</p>
             <SegmentedControl value={platform} onChange={setPlatform} ariaLabel="Your computer" options={[{ value: 'unix', label: 'macOS / Linux' }, { value: 'windows', label: 'Windows (WSL)' }]} />
-            <div className="sg-prompt"><p className="sg-prompt-text" ref={promptRef}>{SETUP_PROMPT}</p><button type="button" className={`sg-prompt-copy${copied ? ' copied' : ''}`} onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
-            <p className="sg-works"><span>Works with</span><AgentMarks size={21} /><span className="sg-sr">Claude Code and Codex</span></p>
-            <div className="sg-status-slot" aria-live="polite">
-              <div className={`sg-status${state === 'stuck' ? ' stuck' : ''}`}>
-                {state === 'stuck' ? <><div>Still waiting? Check Terminal for a sign-in or installation error.</div><div className="sg-doctor"><code>{DOCTOR_PROMPT}</code><button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy status command</button></div><a href="https://nodejs.org/">Node.js 18+ is required</a></> : <><span className="sg-spin" aria-hidden="true" />{copyFailed ? COPY_FALLBACK : 'Waiting for your computer…'}</>}
-              </div>
+            <p className="ui-setup-label">Install and connect</p>
+            <div className="ui-setup-command"><code ref={promptRef}>{SETUP_PROMPT}</code><button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
+            <ol className="ui-setup-steps"><li>Paste into {platform === 'windows' ? 'your WSL terminal' : 'Terminal'} and press Enter.</li><li>Approve the request in your browser.</li><li>Your computer appears here automatically.</li></ol>
+            <div className="ui-setup-status" role="status" aria-live="polite">
+              {connected ? <span className="ui-setup-connected">Connected · {chosen.device}</span>
+                : state === 'stuck' ? <><p>Still waiting? Check Terminal for a sign-in or installation error.</p><code>{DOCTOR_PROMPT}</code><button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy status command</button><p><a href="https://nodejs.org/">Node.js 18+ is required</a></p></>
+                  : <><span className="sg-spin" aria-hidden="true" />{copyFailed ? COPY_FALLBACK : 'Waiting for your computer…'}</>}
             </div>
-            <details className="sg-help sg-account"><summary>Installation details</summary><p>Installs tdoc in the background and checks your AI using its existing account. Keep this computer awake to receive tasks.</p><p>Already installed? Run <code>~/.local/bin/tdoc setup</code>. Pause with <code>~/.local/bin/tdoc stop</code>.</p></details>
+            <details className="ui-setup-details"><summary>Installation details</summary><p>Installs tdoc in the background and checks your AI using its existing account. Keep this computer awake to receive tasks.</p><p>Already installed? Run <code>~/.local/bin/tdoc setup</code>. Pause with <code>~/.local/bin/tdoc stop</code>.</p><p className="sg-works"><AgentMarks size={21} /><span className="sg-sr">Claude Code and Codex</span></p></details>
           </>}
-          {error ? <p className="sg-status stuck" role="alert">{error}</p> : null}
-          {signedIn ? <p className="sg-account"><a href="/me">Later</a></p> : null}
-        </div></div>
-      </section>
-      {boot?.debug ? <DebugBar record={record} surface="connect" onState={() => location.reload()} /> : null}
-      <aside className="sg-pane-art"><div className="sg-stage"><div className="sg-scene run">{connected ? <PracticeReplay agent={chosen?.cli === 'claude' ? 'Claude Code' : 'Codex'} /> : <ConnectReplay prompt={SETUP_PROMPT} terminal />}</div></div></aside>
-    </div>
+      {error ? <p className="ui-setup-error" role="alert">{error}</p> : null}
+    </AppDialog>
   );
 }
