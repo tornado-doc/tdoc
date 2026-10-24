@@ -42,6 +42,7 @@ const OFFLINE = [
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
+  'ask-doc.test.js',           // Ask this doc: off without a key, browser readers only, read gate, 5 per account, no address to the model
   'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
   'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
   'me-management.test.js',    // /me remote SoT management UI guard
@@ -169,6 +170,7 @@ const BROWSER = [
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
+  'ask-panel-ui.test.js', // Ask this doc: bar + ⋯ entry, side panel / bottom sheet, thinking, post as comment, limit line
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
   'share-access-ui.test.js', // Share panel: specific people / anyone with the link / public, sign-in switch, desktop + phone
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout

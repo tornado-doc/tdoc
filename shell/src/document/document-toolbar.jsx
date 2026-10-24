@@ -11,6 +11,7 @@ import {
   History,
   Share2,
   Send,
+  Sparkles,
   Star,
   Trash2,
   Upload,
@@ -167,8 +168,27 @@ export function DocumentSendAgentAction({ count = 0, onClick }) {
   );
 }
 
+// Ask this doc: the free AI answer for readers. Shown only where the server
+// has a model; a signed-out reader gets the sign-in instead of the panel.
+export function DocumentAskAction({ onClick }) {
+  return (
+    <button
+      id="tdoc-ask-btn"
+      type="button"
+      className="tdoc-ask-action"
+      aria-label="Ask AI about this doc"
+      title="Ask AI about this doc"
+      onClick={onClick}
+    >
+      <Sparkles size={15} aria-hidden="true" />
+      <span>Ask AI</span>
+    </button>
+  );
+}
+
 export function DocumentOverflowActions({
   config,
+  onAsk = null,
   starred,
   onToggleStar,
   onPublish,
@@ -186,6 +206,11 @@ export function DocumentOverflowActions({
 }) {
   return (
     <>
+      {onAsk ? (
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="ask" onClick={onAsk}>
+          <Sparkles size={15} /> Ask AI
+        </AppMenuItem>
+      ) : null}
       <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
         <History size={15} /> View changes
       </AppMenuItem>

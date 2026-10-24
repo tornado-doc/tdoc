@@ -1087,3 +1087,39 @@ a.ui-menu-item:visited {
 .tdoc-space-item-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tdoc-space-check { margin-left: auto; color: var(--td-accent); }
 @media (max-width: 700px) { .tdoc-bar .tdoc-space-trigger { max-width: 140px; } }
+
+/* AppDialog `side`: a panel docked under the top bar at the right edge. The
+   viewport lets clicks through so the document stays readable and scrollable
+   beside it; on a phone it is a bottom sheet. */
+.ui-dialog-viewport.ui-dialog-side {
+  inset: 48px 0 0 auto;
+  width: min(380px, 100vw);
+  padding: 12px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.ui-dialog-popup.ui-dialog-side-popup {
+  pointer-events: auto;
+  width: 100%;
+  max-height: calc(100vh - 48px - 24px);
+  padding: 18px 18px 14px;
+  border: 1px solid var(--td-line, #e5e5e7);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+}
+.ui-dialog-popup.ui-dialog-side-popup h3 { font-size: 16px; }
+.ui-dialog-popup.ui-dialog-side-popup .actions { margin-top: 10px; }
+@media (max-width: 700px) {
+  .ui-dialog-viewport.ui-dialog-side {
+    inset: auto 0 0 0;
+    width: 100%;
+    padding: 0;
+    align-items: flex-end;
+  }
+  .ui-dialog-popup.ui-dialog-side-popup {
+    border-radius: 14px 14px 0 0;
+    max-height: 75dvh;
+    padding: 16px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}

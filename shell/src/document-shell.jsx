@@ -26,6 +26,7 @@ import {
   ShareDialog,
 } from './document/document-dialogs.jsx';
 import {
+  DocumentAskAction,
   DocumentBreadcrumbs,
   DocumentOverflowActions,
   DocumentPrimaryAction,
@@ -66,6 +67,7 @@ import { markThreadSeen, readSeenMap } from './document/thread-seen.js';
 import { DebugBar } from './debug-bar.jsx';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
+import { AskPanel } from './document/ask-panel.jsx';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -213,6 +215,11 @@ export function DocumentShell({ boot, config }) {
   // Connected-App notify panel (doc-level send). Separate from onboarding
   // copy-paste handoff below.
   const [notifyOpen, setNotifyOpen] = useState(false);
+  // Ask this doc. The selection it opens with is whatever the reader last
+  // highlighted (the composer's, while it is open).
+  const [askOpen, setAskOpen] = useState(false);
+  const [askSelection, setAskSelection] = useState(null);
+  const lastSelectionRef = useRef(null);
   const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
   // "Send to another agent" from a card: the agent it is stuck on, so the
@@ -411,6 +418,7 @@ export function DocumentShell({ boot, config }) {
         .finally(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }));
       return;
     }
+    lastSelectionRef.current = selection && selection.text ? selection : null;
     setComposer(selection);
   }, [comments.moveAnchor]);
 
@@ -739,6 +747,26 @@ export function DocumentShell({ boot, config }) {
         setSendToAgentBusy(false);
       }
     }
+  };
+
+  // Ask this doc. Available only where the server has a model, on a
+  // published doc; a signed-out reader is sent through sign-in instead.
+  const askEnabled = Boolean(config.ask?.available) && config.mode === 'published' && !config.isLanding;
+  const openAsk = () => {
+    if (!config.identity) { signIn(); return; }
+    setAskSelection(composer && composer.text ? composer : lastSelectionRef.current);
+    setAskOpen(true);
+  };
+  // A posted answer is an ordinary comment by the reader, anchored to the
+  // passage they asked about when there was one.
+  const postAskAnswer = async (text, selection) => {
+    const { ok, value } = await attempt(() => comments.addComment(selection || null, text));
+    if (!ok) return false;
+    markCommented();
+    if (selection && composer) closeComposer();
+    if (value?.id) setOpenCommentId(value.id);
+    showToast('Posted as a comment');
+    return true;
   };
 
   const replyTo = async (parentId, text, opts = {}) => {
@@ -1281,6 +1309,7 @@ export function DocumentShell({ boot, config }) {
               onSignIn={signIn}
               onChange={editor.changeMode}
             />
+            {askEnabled ? <DocumentAskAction onClick={openAsk} /> : null}
             {notifyEnabled ? (
               <DocumentSendAgentAction
                 count={handoffBuckets.ready.length}
@@ -1297,6 +1326,7 @@ export function DocumentShell({ boot, config }) {
         overflowActions={config.isLanding ? null : (
           <DocumentOverflowActions
             config={config}
+            onAsk={askEnabled ? openAsk : null}
             starred={starred}
             onToggleStar={toggleStar}
             onPublish={() => setDialog({ type: 'publish' })}
@@ -1548,6 +1578,19 @@ export function DocumentShell({ boot, config }) {
         onCopied={() => { setInvited(null); showToast('Link copied'); }}
       />
 
+
+      {askEnabled && config.identity ? (
+        <AskPanel
+          open={askOpen}
+          onClose={() => setAskOpen(false)}
+          slug={config.slug}
+          version={config.version}
+          selection={askSelection}
+          limit={config.ask?.limit}
+          canPost={Boolean(config.canComment) && !config.demoComments}
+          onPost={postAskAnswer}
+        />
+      ) : null}
 
       {notifyEnabled ? (
         <NotifyHandoffPanel
