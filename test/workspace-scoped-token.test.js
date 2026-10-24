@@ -35,7 +35,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   const abby = await mkTeam('abby');
   const befreed = await mkTeam('BeFreed');
   const upload = (token, slug, extra = {}) =>
-    call(env, '/api/upload', { method: 'POST', token, body: { slug, version: extra.version || 1, html: `<p>${slug} v${extra.version || 1}</p>`, meta: { title: slug, access: extra.access || { visibility: 'private' } }, ...(extra.team ? { team: extra.team } : {}) } });
+    call(env, '/api/upload', { method: 'POST', token, body: { slug, version: extra.version || 1, html: `<p>${slug} v${extra.version || 1}</p>`, meta: { title: slug, access: extra.access || { visibility: 'private' } }, ...(extra.team ? { team: extra.team } : {}), ...(extra.team_default ? { team_default: extra.team_default } : {}) } });
   const readable = async (token, slug) => (await call(env, `/d/${slug}/raw`, { token })).status === 200;
   const metaOf = (slug) => JSON.parse(env.META.map.get(`meta:${slug}`));
   assert((await upload(julie.token, 'abby-secret')).status === 200, 'abby doc');
@@ -50,6 +50,8 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   // The browser half of a connection: the CLI starts, the person allows it
   // on /activate with some workspaces ticked, the CLI collects its token.
   async function connect(workspaces) {
+    // The pairing routes' per-session rate limits are not under test here.
+    for (const k of [...env.META.map.keys()]) if (k.startsWith('rl:')) env.META.map.delete(k);
     const start = (await call(env, '/api/cli/pair/start', { method: 'POST', body: { label: 'test', device: 'julies-mac', client: 'Claude Code' } })).body;
     const look = await call(env, '/api/cli/pair/lookup', { method: 'POST', cookie: julie.cookie, headers: origin, body: { user_code: start.user_code } });
     const ok = await call(env, '/api/cli/pair/approve', { method: 'POST', cookie: julie.cookie, headers: origin, body: { user_code: start.user_code, ...(workspaces ? { workspaces } : {}) } });
@@ -235,6 +237,105 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(wider.status === 403 || wider.status === 404, `widened: ${wider.status} ${wider.text}`);
     const same = await call(env, '/api/hosted/token/scoped', { method: 'POST', token: mine.body.token, body: { workspaces: ['me'] } });
     assert(same.status === 200, `same scope: ${same.status} ${same.text}`);
+  });
+
+  // ---- review of #813 ----
+  const idFor = (token) => require('crypto').createHash('sha256').update(token).digest('hex');
+  await t('review: a team-only token cannot touch My docs folders by naming its team in the other half of the request', async () => {
+    const made = await call(env, '/api/folders', { method: 'POST', cookie: julie.cookie, headers: origin, body: { name: 'Private stuff' } });
+    const folderId = made.body.folder.id;
+    const fresh = (await connect([abby.id])).token;
+    // #792 tokens carry scope_team: the same holes, the same fix.
+    const legacy = (await call(env, '/api/hosted/token/scoped', { method: 'POST', token: julie.token, body: { team: abby.id } })).body.token;
+    const rec = JSON.parse(env.META.map.get(`hosted-token:${idFor(legacy)}`));
+    delete rec.scope; rec.scope_team = abby.id;
+    env.META.map.set(`hosted-token:${idFor(legacy)}`, JSON.stringify(rec));
+    for (const token of [fresh, legacy]) {
+      const tries = [
+        [`/api/folders?team=${abby.id}`, { method: 'PATCH', body: { id: folderId, name: 'pwned', visibility: 'public' } }],
+        [`/api/folders?team=${abby.id}`, { method: 'POST', body: { name: 'planted' } }],
+        [`/api/folders/move?team=${abby.id}`, { method: 'POST', body: { slugs: ['my-notes'], folder: folderId } }],
+        [`/api/folders?id=${folderId}`, { method: 'DELETE', body: { team: abby.id } }],
+        ['/api/folders', { method: 'GET', body: null, headers: {} }],
+      ];
+      for (const [path, opts] of tries) {
+        const r = await call(env, path, { token, ...opts });
+        assert(r.status === 403, `${opts.method} ${path} -> ${r.status} ${r.text.slice(0, 160)}`);
+      }
+      const ownTeam = await call(env, '/api/folders', { method: 'POST', token, body: { team: abby.id, name: 'Abby reports', existing_ok: true } });
+      assert(ownTeam.status === 200, `its own team's folders: ${ownTeam.status} ${ownTeam.text}`);
+    }
+    const mine = await call(env, '/api/folders', { cookie: julie.cookie });
+    const names = JSON.stringify(mine.body.folders.map((f) => [f.name, f.visibility]));
+    assert(mine.body.folders.some((f) => f.id === folderId && f.name === 'Private stuff' && f.visibility === 'private'), `folder changed: ${names}`);
+    assert(!names.includes('planted') && !names.includes('pwned'), `planted: ${names}`);
+  });
+
+  await t('review: a My docs token\'s catalog has no one else\'s docs in recent or starred', async () => {
+    assert((await upload(bob.token, 'bobs-public', { access: { visibility: 'public' } })).status === 200, 'bob public doc');
+    for (const slug of ['bobs-public', 'bobs-draft', 'my-notes', 'abby-secret']) {
+      const r = await call(env, '/api/star', { method: 'POST', cookie: julie.cookie, headers: origin, body: { slug, starred: true } });
+      assert(r.status === 200, `star ${slug}: ${r.status} ${r.text}`);
+    }
+    const token = (await connect(['me'])).token;
+    const me = (await call(env, '/api/me', { token })).body;
+    const starred = me.starred.map((row) => row.slug);
+    assert(starred.includes('my-notes'), `own starred doc missing: ${starred}`);
+    for (const slug of ['bobs-public', 'bobs-draft', 'abby-secret']) {
+      assert(!starred.includes(slug) && !JSON.stringify(me.recent).includes(slug) && !JSON.stringify(me.feedback).includes(slug), `${slug} listed: ${JSON.stringify(me).slice(0, 400)}`);
+    }
+    const full = (await call(env, '/api/me', { token: julie.token })).body;
+    assert(full.starred.some((row) => row.slug === 'bobs-public'), 'the account token lost its stars');
+  });
+
+  await t('review: the default team is a preference, --team a demand', async () => {
+    const meAbby = (await connect(['me', abby.id])).token;
+    const missed = await upload(meAbby, 'default-elsewhere', { team_default: 'BeFreed' });
+    assert(missed.status === 200 && missed.body.scoped === true && !metaOf('default-elsewhere').workspace_id, `${missed.status} ${missed.text}`);
+    const hit = await upload(meAbby, 'default-reached', { team_default: 'abby' });
+    assert(hit.status === 200 && metaOf('default-reached').workspace_id === abby.id && hit.body.team === abby.id, hit.text);
+    const demanded = await upload(meAbby, 'demanded-elsewhere', { team: 'BeFreed' });
+    assert(demanded.status === 403 && demanded.body.error === 'token_scope', `${demanded.status} ${demanded.text}`);
+    const oneTeam = (await connect([abby.id])).token;
+    const only = await upload(oneTeam, 'only-team-default', { team_default: 'BeFreed' });
+    assert(only.status === 200 && metaOf('only-team-default').workspace_id === abby.id, `${only.status} ${only.text}`);
+    const account = await upload(julie.token, 'account-default', { team_default: 'BeFreed' });
+    assert(account.status === 200 && !account.body.scoped && !metaOf('account-default').workspace_id, 'an account token is placed by the CLI, not the server');
+  });
+
+  await t('review: a workspace change racing a revoke does not bring the token back', async () => {
+    const token = (await connect(['me'])).token;
+    const id = idFor(token);
+    const key = `hosted-token:${id}`;
+    const get = env.META.get.bind(env.META);
+    let reads = 0;
+    // The revoke lands right after the route's first read of the record.
+    env.META.get = async (k) => {
+      const v = await get(k);
+      if (k === key && ++reads === 1) env.META.map.delete(key);
+      return v;
+    };
+    try {
+      const r = await call(env, '/api/me/tokens/workspaces', { method: 'POST', cookie: julie.cookie, headers: origin, body: { id, workspaces: ['me', abby.id] } });
+      assert(r.status === 404, `${r.status} ${r.text}`);
+    } finally { env.META.get = get; }
+    assert(!env.META.map.has(key), 'the revoked token was written back');
+    assert((await call(env, '/api/hosted/whoami', { token })).status === 401, 'the revoked token works again');
+  });
+
+  await t('review: the last-used stamp expires on its own and goes with unpair', async () => {
+    const token = (await connect(['me'])).token;
+    const put = env.META.put.bind(env.META);
+    let ttl = null;
+    env.META.put = async (k, v, opts) => { if (k === `token-used:${idFor(token)}`) ttl = opts && opts.expirationTtl; return put(k, v, opts); };
+    try {
+      env.META.map.delete(`token-used:${idFor(token)}`);
+      await call(env, '/api/hosted/whoami', { token });
+    } finally { env.META.put = put; }
+    assert(ttl >= 30 * 24 * 3600, `no expiry on the stamp: ${ttl}`);
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
+    const unpair = src.slice(src.indexOf('if (body.unpair === true) {'), src.indexOf('if (body.unpair === true) {') + 1600);
+    assert(/tokenUsedKey\(/.test(unpair), 'unpair leaves last-used stamps behind');
   });
 
   console.log(`\n${pass} passed, ${fail} failed.`);
