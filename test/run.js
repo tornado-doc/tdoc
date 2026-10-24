@@ -58,8 +58,9 @@ const OFFLINE = [
   'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
-  'local-agent.test.js',
-  'daemon-onboarding.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
+  'local-agent.test.js',        // local CLI agents: queued provider, pending index, KV write budget
+  'daemon-onboarding.test.js', // verified installation and private practice
+  'team-agent.test.js',        // team-scoped agent ownership and access
   'daemon-cli.test.js',         // bin/tdoc-daemon once-mode end to end against a stub worker + fake claude
   'handoff-state.test.js',      // handoff classifier: waiting → stale at 5 min, expired past Raft's expiresAt
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
@@ -172,6 +173,7 @@ const BROWSER = [
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
   'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
+  'team-agent-ui.test.js',     // team settings add/remove, member Send to team agent, the real daemon replying, desktop + phone
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold

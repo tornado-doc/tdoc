@@ -159,7 +159,7 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     await env.META.put('account-notify:acct-bob', JSON.stringify([local('bob-mac')]));
     await env.META.put('local-agents-seen:acct-alice', JSON.stringify({ 'alice-mac': new Date().toISOString() }));
     const memberTargets = await call('/api/notify/targets?slug=plan', { cookie: bob });
-    assert(memberTargets.status === 200 && !memberTargets.body.default && memberTargets.body.reason === 'team_admin_only', `member targets ${JSON.stringify(memberTargets.body)}`);
+    assert(memberTargets.status === 200 && !memberTargets.body.default && memberTargets.body.reason === 'no_team_agent', `member targets ${JSON.stringify(memberTargets.body)}`);
     const adminTargets = await call('/api/notify/targets?slug=plan', { cookie: alice });
     assert(adminTargets.status === 200 && adminTargets.body.default?.provider === 'local' && adminTargets.body.default.server_id === 'alice-mac', `admin targets ${JSON.stringify(adminTargets.body)}`);
     assert((adminTargets.body.candidates || []).some((x) => x.provider === 'raft' && x.agent_sub === 'alice-bot'), 'team picker includes the admin Raft agents');

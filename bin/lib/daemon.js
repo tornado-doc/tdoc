@@ -18,6 +18,8 @@
 //   tdoc-daemon install [flags]         macOS: run it at login
 //   tdoc-daemon state                   local state as JSON, no network
 //   tdoc-daemon install-launchd [flags] print a LaunchAgent plist (not loaded)
+//   tdoc-daemon connect-team CODE [--base URL] [--no-start]
+//                                       make this machine a team's agent
 //
 // Credentials: the account's upload token in ~/.tdoc/published.json, the one
 // tdoc-pull and tdoc-agent-reply already use. Nothing else is read or sent.
@@ -69,7 +71,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  const lines = fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 20);
+  const lines = fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 22);
   return lines.map((l) => l.replace(/^\/\/ ?/, '')).join('\n');
 }
 
@@ -85,7 +87,7 @@ function readConfig() {
   if (!base) throw new Error(`${CONFIG_FILE} has no base URL — re-run tdoc-publish to set up`);
   const token = String(cfg.upload_token || '');
   if (!token) throw new Error(`${CONFIG_FILE} has no upload_token — sign in: bash "${BIN_DIR}/tdoc-publish" --signin-only`);
-  return { base: base.replace(/\/+$/, ''), token, platform };
+  return { base: base.replace(/\/+$/, ''), token, platform, teamAgent: cfg.team_agent || null };
 }
 
 // A device name tdoc accepts: the host's first label, lowercase, dashes.
@@ -144,7 +146,12 @@ async function api(cfg, method, p, body) {
     let data = null;
     try { data = await r.json(); } catch {}
     if (!r.ok || (data && data.error)) {
-      const err = new Error(`${method} ${p} -> ${r.status}${data && data.error ? ` ${data.error}` : ''}${data && data.message ? `: ${data.message}` : ''}`);
+      // A team agent is not signed in by a person: it stops when a team
+      // admin removes it, and only an admin can add it back.
+      const why = r.status === 401 && cfg.teamAgent
+        ? `this machine is no longer ${cfg.teamAgent.team_name || 'the team'}'s agent ${cfg.teamAgent.name || ''} (a team admin removed it, or the team is gone). A team admin can add it again in team settings → Agents.`
+        : data && data.message;
+      const err = new Error(`${method} ${p} -> ${r.status}${data && data.error ? ` ${data.error}` : ''}${why ? `: ${why}` : ''}`);
       err.status = r.status; err.code = data && data.error; err.body = data;
       throw err;
     }
@@ -370,7 +377,7 @@ async function cmdStart(args) {
     try { await once(cfg, st, state, { registerFirst: first }); first = false; }
     catch (e) {
       log(`poll failed: ${e.message}`);
-      if (e.status === 401) { log('this sign-in is no longer valid; sign in again with tdoc-publish --signin-only'); break; }
+      if (e.status === 401) { log(cfg.teamAgent ? 'this team agent was removed; stopping' : 'this sign-in is no longer valid; sign in again with tdoc-publish --signin-only'); break; }
     }
     if (stopping) break;
     await new Promise((resolve) => {
@@ -542,6 +549,62 @@ function cmdUninstall() {
   console.log(wasLoaded || had ? `Uninstalled ${LABEL}: comments sent to this computer's agents will wait until a daemon runs again.` : `${LABEL} was not installed; nothing to do.`);
 }
 
+// ---- a team's agent (team settings -> Agents -> Add team agent) -------------
+// The admin's dialog gives one line ending in `connect-team <code> --base
+// <url>`. The code is single-use and short-lived; tdoc trades it for a token
+// that belongs to the team (not to the admin), reaches only that team's
+// docs, and lets every member of the team send this machine comments. Many
+// people's words drive it, so it belongs on a machine with nothing personal
+// on it: this refuses to replace a person's own sign-in unless told to.
+async function cmdConnectTeam(args) {
+  const code = String(args._[1] || '').trim();
+  if (!/^tdts_[a-f0-9]{48}$/.test(code)) throw new Error('usage: tdoc-daemon connect-team <setup code from team settings> [--base https://tdoc.dev]');
+  const base = String(args.base || process.env.TDOC_HOSTED_BASE || 'https://tdoc.dev').replace(/\/+$/, '');
+  // The token travels back over this connection: https, or plain http only
+  // to this machine itself (a local tdoc).
+  let baseUrl = null;
+  try { baseUrl = new URL(base); } catch {}
+  const local = baseUrl && ['localhost', '127.0.0.1', '[::1]'].includes(baseUrl.hostname);
+  if (!baseUrl || !(baseUrl.protocol === 'https:' || (baseUrl.protocol === 'http:' && local))) {
+    throw new Error(`--base must be an https:// address (got ${base})`);
+  }
+  let existing = null;
+  try { existing = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch {}
+  if (existing && existing.upload_token && args.replace !== 'true') {
+    throw new Error(existing.team_agent
+      ? `${CONFIG_FILE} already connects this machine as ${existing.team_agent.name} · ${existing.team_agent.team_name || 'a team'} team agent. Pass --replace to make it this agent instead.`
+      : `${CONFIG_FILE} already holds a person's tdoc sign-in${existing.github_login ? ` (${existing.github_login})` : ''}. A team agent should run on a machine (or container) without personal data, because every member of the team can send it comments. Use a dedicated machine, or pass --replace to sign this one out and use it for the team.`);
+  }
+  const r = await fetch(`${base}/api/team/agents/connect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'tdoc-daemon' },
+    body: JSON.stringify({ code, device: deviceName(args.device), client: 'tdoc-daemon' }),
+  });
+  let data = null;
+  try { data = await r.json(); } catch {}
+  if (!r.ok || !data || !data.token) throw new Error((data && data.message) || `connect failed (${r.status}${data && data.error ? ` ${data.error}` : ''})`);
+  ensureDir(path.dirname(CONFIG_FILE));
+  // The base this command named is the one it just talked to.
+  const host = new URL(base).host;
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify({
+    platform: 'hosted', upload_token: data.token, base, public_host: host,
+    account_id: data.account_id, team_agent: { id: data.agent.id, name: data.agent.name, team: data.team.id, team_name: data.team.name },
+    created: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  }, null, 2) + '\n', { mode: 0o600 });
+  fs.chmodSync(CONFIG_FILE, 0o600);
+  console.log(`Connected: this machine is ${data.agent.display}. It reaches ${data.team.name}'s docs and nothing else.`);
+  // The sign-in it replaced still works until its person removes it; this
+  // machine no longer holds it, but a copy may exist (a backup, a history).
+  if (existing && existing.upload_token && !existing.team_agent) {
+    console.log(`The personal sign-in this replaced${existing.github_login ? ` (${existing.github_login})` : ''} is still valid. Its owner should remove it in Settings → Agents: ${String(existing.base || base).replace(/\/+$/, '')}/me?view=settings#agent-access`);
+  }
+  if (args['no-start'] === 'true') return;
+  // Background at login on a Mac; elsewhere (a container, a Linux box) the
+  // daemon is the foreground process.
+  if (hostOs() === 'darwin') await cmdInstall(args);
+  else await cmdStart(args);
+}
+
 // What is set up here, without the network: for tdoc-doctor.
 function localState() {
   const supported = hostOs() === 'darwin';
@@ -571,6 +634,7 @@ function localState() {
     else if (cmd === 'install-launchd') cmdInstallLaunchd(args);
     else if (cmd === 'install') await cmdInstall(args);
     else if (cmd === 'state') console.log(JSON.stringify(localState()));
+    else if (cmd === 'connect-team') await cmdConnectTeam(args);
     else { console.error(`unknown command: ${cmd}\n\n${usage()}`); process.exit(2); }
   } catch (e) {
     console.error(`tdoc-daemon: ${e.message}`);
