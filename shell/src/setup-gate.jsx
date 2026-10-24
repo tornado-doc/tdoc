@@ -25,6 +25,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
   const [open, setOpen] = useState(true);
   const [stage, setStage] = useState(preview?.stage || 'connect');
   const [pendingAsk] = useState(() => preview ? null : peekPendingAsk());
+  const [paired, setPaired] = useState(Boolean(preview?.paired));
   const [agents, setAgents] = useState(preview?.local_agents || []);
   const [loaded, setLoaded] = useState(Boolean(preview));
   const [selected, setSelected] = useState('');
@@ -54,6 +55,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
         const result = await getOnboarding({ daemon: true });
         if (!cancelled) {
           setAgents(result?.local_agents || []);
+          setPaired(Boolean(result?.paired));
           setError((previous) => previous === 'Could not check the connection. Retrying…' ? '' : previous);
         }
       } catch { if (!cancelled) setError('Could not check the connection. Retrying…'); }
@@ -68,6 +70,9 @@ export function SetupGate({ boot, preview = null, onClose }) {
   }, [signedIn, preview]);
 
   const choose = stage === 'choose' && connected;
+  // A paired reader can return and copy a question even while their helper is offline.
+  // This never marks a computer ready or enables Next for a new author.
+  const canReturn = Boolean(pendingAsk && paired);
   const close = () => {
     active.current = false;
     if (pendingAsk) clearPendingAsk();
@@ -106,6 +111,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
       actions={<>
         <button type="button" className="ui-setup-later" onClick={choose ? () => setStage('connect') : close}>{choose ? 'Back' : 'Later'}</button>
         {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
+          : canReturn ? <button type="button" className="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</button>
           : choose ? <button type="button" className="primary" onClick={practice} disabled={busy}>{busy ? 'Opening your doc…' : pendingAsk ? 'Back to the doc' : 'Try a comment'}</button>
             : <button type="button" className="primary" disabled={!loaded || !connected} onClick={() => setStage('choose')}>Next</button>}
       </>}
@@ -127,6 +133,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
                 : state === 'stuck' ? <><p>Still waiting? Check Terminal for a sign-in or installation error.</p><code>{DOCTOR_PROMPT}</code><button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy status command</button><p><a href="https://nodejs.org/">Node.js 18+ is required</a></p></>
                   : <><span className="sg-spin" aria-hidden="true" />{copyFailed ? COPY_FALLBACK : 'Waiting for your computer…'}</>}
             </div>
+            {canReturn ? <p>Your agent is already linked. You can return to your question and copy it while this computer is offline.</p> : null}
             <details className="ui-setup-details"><summary>Installation details</summary><p>Installs tdoc in the background and checks your AI using its existing account. Keep this computer awake to receive tasks.</p><p>Already installed? Run <code>~/.local/bin/tdoc setup</code>. Pause with <code>~/.local/bin/tdoc stop</code>.</p><p className="sg-works"><AgentMarks size={21} /><span className="sg-sr">Claude Code and Codex</span></p></details>
           </>}
       {error ? <p className="ui-setup-error" role="alert">{error}</p> : null}

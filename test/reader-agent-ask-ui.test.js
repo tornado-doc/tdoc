@@ -185,7 +185,7 @@ async function touchSelect(page, phrase) {
       // The agent is connected (paired, helper not running yet).
       await setTier('offline');
       await page.goto(`${base}/setup`);
-      await page.getByRole('link', { name: 'Back to the doc' }).click();
+      await page.getByRole('button', { name: 'Back to the doc' }).click();
       await page.waitForURL(`${base}/d/${SLUG}`);
       const dialog = page.getByRole('dialog', { name: 'Copy for my agent' });
       await dialog.waitFor({ timeout: 10000 });
@@ -200,8 +200,9 @@ async function touchSelect(page, phrase) {
       if (await page.getByRole('dialog').count()) throw new Error('the pending question came back');
       // Used up: the setup page no longer leads back to the doc.
       await page.goto(`${base}/setup`);
-      await page.getByRole('link', { name: 'Continue' }).waitFor({ timeout: 10000 });
-      if (await page.getByRole('link', { name: 'Back to the doc' }).count()) throw new Error('setup still offers the way back');
+      await page.getByRole('button', { name: 'Next', exact: true }).waitFor({ timeout: 10000 });
+      if (!await page.getByRole('button', { name: 'Next', exact: true }).isDisabled()) throw new Error('an offline historical pairing enabled Next');
+      if (await page.getByRole('button', { name: 'Back to the doc' }).count()) throw new Error('setup still offers the way back');
       await context.close();
     });
 
@@ -212,11 +213,12 @@ async function touchSelect(page, phrase) {
       await page.waitForURL((u) => u.pathname === '/start');
       await setTier('offline');
       await page.goto(`${base}/setup`);
-      await page.getByRole('link', { name: 'Back to the doc' }).waitFor({ timeout: 10000 });
-      await page.getByRole('link', { name: 'Later' }).click();
+      await page.getByRole('button', { name: 'Back to the doc' }).waitFor({ timeout: 10000 });
+      await page.getByRole('button', { name: 'Later', exact: true }).click();
       await page.waitForURL((u) => u.pathname !== '/setup');
       await page.goto(`${base}/setup`);
-      await page.getByRole('link', { name: 'Continue' }).waitFor({ timeout: 10000 });
+      await page.getByRole('button', { name: 'Next', exact: true }).waitFor({ timeout: 10000 });
+      if (!await page.getByRole('button', { name: 'Next', exact: true }).isDisabled()) throw new Error('an offline historical pairing enabled Next');
       await context.close();
     });
 
