@@ -87,11 +87,18 @@ Pick per slide; do not use the same layout twice in a row.
 
 ## Check before publishing
 
-Render the deck at 1280px and 390px wide (the preview helper in
-`$SKILL_DIR/authoring/structure/components.md`, or Playwright) and look at every slide:
+tdoc needs no browser, so check each slide against a budget before you
+publish, and look at it in the real doc afterwards:
 
-- 1280px: nothing spills out of a card, nothing crowds the top while the
-  bottom is empty.
-- 390px: no text under about 12px, columns stacked, nothing cut off.
+- **Fits at 960px:** a headline of at most two lines, at most about 40 words
+  of body text, at most one visual. More than that is two slides.
+- **Fills the card:** the body is centred in the card by `.body`; a slide
+  with only a headline and one short line needs a bigger visual, not more
+  margin.
+- **Reflows at 390px:** every type size has a `px` floor, every side-by-side
+  block is a `.cols` grid released by the container query, and nothing is
+  absolutely positioned except `.inner`.
 
-Fix and re-render before publishing.
+If your environment can take screenshots, also look at the published doc at
+desktop and phone width and fix anything cut off, crowded at the top, or
+smaller than about 12px.
