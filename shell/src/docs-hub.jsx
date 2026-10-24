@@ -475,7 +475,7 @@ function AccountSettingsPane({ identity, profile }) {
         <ConnectorsBody returnTo="/me?view=settings#agents" />
       </section>
       <section className="tm-settings-card" id="agent-access">
-        <div className="tm-settings-head"><div><h2>Agent access</h2><p>Review computers and agents that can publish and edit with your account.</p></div></div>
+        <div className="tm-settings-head"><div><h2>Agent access</h2><p>Computers and agents that can act as you, and which workspaces each one can reach.</p></div></div>
         <DevicesBody />
       </section>
     </section>

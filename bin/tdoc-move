@@ -146,16 +146,18 @@ fi
 
 TEAM_ID="null"
 if [ -n "$TEAM" ]; then
-  id="$(teams_json | MISSING_OK="$CREATE" node -e '
+  id="$(teams_json | MISSING_OK="$CREATE" BASE="$BASE" node -e '
     let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
-      let teams = []; try { teams = JSON.parse(s).teams || []; } catch {}
+      let teams = []; let limited = false;
+      try { const b = JSON.parse(s); teams = b.teams || []; limited = Array.isArray(b.workspaces); } catch {}
       const want = process.argv[1].trim().toLowerCase();
       const hit = teams.filter((t) => String(t.id).toLowerCase() === want || String(t.name || "").trim().toLowerCase() === want);
       if (hit.length === 1) { process.stdout.write(String(hit[0].id)); return; }
       if (!hit.length && process.env.MISSING_OK === "1") return;
       process.stderr.write(hit.length
         ? `[tdoc] more than one team is called "${process.argv[1]}"; pass its id (tdoc-move --teams).\n`
-        : `[tdoc] you are not in a team called "${process.argv[1]}". Your teams: ${teams.map((t) => t.name).join(", ") || "(none)"}\n`);
+        : `[tdoc] you are not in a team called "${process.argv[1]}". Your teams: ${teams.map((t) => t.name).join(", ") || "(none)"}\n`
+          + (limited ? `[tdoc] This agent connection reaches only some of your workspaces. Change them in Settings → Agents: ${process.env.BASE}/me?view=settings#agent-access\n` : ""));
       process.exit(1);
     });' "$TEAM")" || exit 1
   if [ -z "$id" ]; then id="$(create_team "$TEAM")" || exit 1; fi
@@ -171,6 +173,7 @@ if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
     not_owner) echo "[tdoc] cannot move $(printf '%s' "$resp" | json_get slug): only its author (personal doc) or a team admin (team doc) can move it." >&2 ;;
     team_not_found) echo "[tdoc] you are not a member of that team." >&2 ;;
     team_plan_required) echo "[tdoc] $(printf '%s' "$resp" | json_get message)" >&2 ;;
+    token_scope) echo "[tdoc] cannot move there: $(printf '%s' "$resp" | json_get message)" >&2 ;;
     *) echo "[tdoc] move failed: $resp" >&2 ;;
   esac
   exit 1

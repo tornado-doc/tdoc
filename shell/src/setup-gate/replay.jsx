@@ -409,16 +409,16 @@ function ApprovalSheet({ t }) {
       <img src="/tdoc_logo.svg" width="38" height="38" alt="" data-tdoc-dark="invert" />
       {done ? (
         <>
-          <h3>Device login approved</h3>
+          <h3>Access allowed</h3>
           <p>Sign-in is complete. You can close this browser page.</p>
         </>
       ) : (
         <>
-          <h3>Approve Device Login</h3>
+          <h3>Allow access to tdoc</h3>
           <p>Signed in as <b>serenatan1125@gmail.com</b>.</p>
           <div className="rp-code">WXNB-7QKD</div>
           <button type="button" className="rp-approve" style={{ transform: `scale(${1 - press * 0.04})` }}>
-            Approve
+            Allow
           </button>
         </>
       )}

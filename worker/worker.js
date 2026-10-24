@@ -389,9 +389,9 @@ async function sessionFromHostedBearer(env, req) {
   if (!actor) return null;
   const group = await accountGroup(env, actor.account_id);
   const allTeamIds = await loadAccountTeamIds(env, group.canonical);
-  // A team-scoped token sees one team and nothing else: not the account's
-  // other teams, not its personal docs (see tokenScopeAllows).
-  const teamIds = actor.scope_team ? allTeamIds.filter((id) => id === actor.scope_team) : allTeamIds;
+  // A workspace-scoped token sees only the teams it was given, and My docs
+  // only if that was ticked too (see tokenScopeAllows).
+  const teamIds = actor.scope ? allTeamIds.filter((id) => actor.scope.teams.includes(id)) : allTeamIds;
   return {
     id: null,
     login: actor.github_login || '',
@@ -402,7 +402,7 @@ async function sessionFromHostedBearer(env, req) {
     team_ids: teamIds,
     team_admin_ids: await loadAdminTeamIds(env, actor.account_id, teamIds),
     bearer: true,
-    ...(actor.scope_team ? { scope_team: actor.scope_team } : {}),
+    ...(actor.scope ? { scope: actor.scope } : {}),
   };
 }
 
@@ -634,12 +634,39 @@ function sessionTeamAdmin(session, teamId) {
 // The owner manages a doc: sharing, delete, rename, moving it. A personal doc
 // is owned by its author; a team doc by the team, i.e. its current admins.
 // The byline (meta.hosted) is display only and grants nothing on a team doc.
-// A team-scoped token (or the session built from one) reaches only docs in
-// its team. Everything else, personal docs included, is as if it were a
-// stranger: it can still open a public or unlisted link, like anyone can.
+// A token's reach (the access model, tdoc.dev/d/tdoc-agent-access-model).
+// null is account level: everything its person can do, in every workspace.
+// Otherwise it is the workspaces ticked when the connection was allowed or
+// last changed: { me: My docs, teams: [team ids] }. A #792 token names one
+// team in scope_team and reads as { me: false, teams: [that team] }.
+function tokenScopeOf(rec) {
+  if (!rec || typeof rec !== 'object') return null;
+  if (rec.scope && typeof rec.scope === 'object') {
+    const teams = Array.isArray(rec.scope.teams) ? [...new Set(rec.scope.teams.filter(validTeamId))] : [];
+    return { me: rec.scope.me === true, teams };
+  }
+  if (validTeamId(rec.scope_team)) return { me: false, teams: [rec.scope_team] };
+  return null;
+}
+
+// The workspace ids a scope names, as the API speaks them: 'me' is My docs.
+function scopeWorkspaceIds(scope) {
+  return scope ? [...(scope.me ? ['me'] : []), ...scope.teams] : null;
+}
+
+// A workspace-scoped token (or the session built from one) reaches only docs
+// in its workspaces: a team doc of a ticked team, or, with My docs ticked,
+// the person's own personal docs. Everything else -- other teams, and other
+// people's personal docs even when shared with the person -- is as if it
+// were a stranger: it can still open a public or unlisted link, like anyone.
 function tokenScopeAllows(who, meta) {
-  if (!who || !who.scope_team) return true;
-  return !!(meta && meta.workspace_id === who.scope_team);
+  const scope = who && who.scope;
+  if (!scope) return true;
+  if (meta && meta.workspace_id) return scope.teams.includes(meta.workspace_id);
+  if (!scope.me || !meta) return false;
+  if (sessionOwnsAccount(who, meta.hosted && meta.hosted.account_id)) return true;
+  const login = normalizeGithubLogin(who.login || who.github_login);
+  return !!(login && hostedGithubLogin(meta) === login);
 }
 
 function isDocOwnerSession(env, session, meta) {
@@ -2846,13 +2873,18 @@ async function accountTokenList(env, accountId) {
           }
         } catch {}
       }
+      const id = k.name.slice('hosted-token:'.length);
+      let used = '';
+      try { used = (await env.META.get(tokenUsedKey(id))) || ''; } catch {}
+      const lastUsed = [typeof rec.last_used === 'string' ? rec.last_used : '', used].sort().pop();
       out.push({
-        id: k.name.slice('hosted-token:'.length),
+        id,
         created: typeof rec.created === 'string' ? rec.created : '',
-        last_used: typeof rec.last_used === 'string' ? rec.last_used : '',
+        last_used: lastUsed,
         label,
         doc,
-        ...(validTeamId(rec.scope_team) ? { scope_team: rec.scope_team } : {}),
+        // null: every workspace (account level). Else the ids it reaches.
+        workspaces: scopeWorkspaceIds(tokenScopeOf(rec)),
         ...tokenClientInfo(rec),
       });
     }
@@ -3859,10 +3891,12 @@ async function buildFolderShareListing(env, req, shareId) {
   const state = await loadFolderState(env, index.owner_key);
   const folder = state.folders.find((f) => f.id === index.folder_id);
   if (!folder || folder.share_id !== shareId) return { ok: false, status: 404 };
-  // A team-scoped token is a stranger to every personal folder: it sees one
-  // only if anyone with the link could.
+  // A workspace-scoped token is a stranger to every personal folder but the
+  // person's own with My docs ticked: it sees one only if anyone with the
+  // link could.
   const viewer = await getViewerSession(env, req);
-  const session = viewer && viewer.scope_team ? null : viewer;
+  const ownFolder = !!(actorKey(viewer) && normalizeActorKey(index.owner_key) === actorKey(viewer));
+  const session = viewer && viewer.scope && !(viewer.scope.me && ownFolder) ? null : viewer;
   if (!canAccessSharedFolder(folder, session, index.owner_key)) {
     if (!sessionPrincipal(session)) {
       return { ok: false, status: 401 };
@@ -3896,9 +3930,9 @@ async function buildTeamFolderShareListing(env, req, shareId, index) {
   const state = await loadTeamFolders(env, team.id);
   const folder = state.folders.find((f) => f.id === index.folder_id);
   if (!folder || folder.share_id !== shareId) return { ok: false, status: 404 };
-  // A token scoped to another team is a stranger here, member or not.
+  // A token scoped away from this team is a stranger here, member or not.
   const viewer = await getViewerSession(env, req);
-  const session = viewer && viewer.scope_team && viewer.scope_team !== team.id ? null : viewer;
+  const session = viewer && viewer.scope && !viewer.scope.teams.includes(team.id) ? null : viewer;
   if (!canAccessSharedFolder(folder, session, '', team)) {
     return { ok: false, status: sessionPrincipal(session) ? 404 : 401 };
   }
@@ -5231,7 +5265,7 @@ function teamCommentRows(slug, meta, list) {
 async function teamCommentsPage(env, session, teamId, offset = 0) {
   const team = await loadTeam(env, teamId);
   if (!team || !session || !teamMember(team, session.account_id)) return null;
-  if (session.scope_team && session.scope_team !== teamId) return null;
+  if (session.scope && !session.scope.teams.includes(teamId)) return null;
   const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
   slugs.sort();
   const start = Math.max(0, Number(offset) || 0);
@@ -8897,6 +8931,8 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
     record.label = body.label.trim().slice(0, 80);
   }
   Object.assign(record, tokenClientInfo(body));
+  // Only the pairing route passes a scope, from the approver's own ticks.
+  if (body.scope) record.scope = body.scope;
   // The account rides on the key's metadata as well as in the value. A list
   // returns metadata with the keys, so "which of these belong to this account"
   // can be answered from the listing alone -- without it, revoking an
@@ -8919,46 +8955,93 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
   return { token, record };
 }
 
-// ───────────────────── Team-scoped upload tokens (#65) ─────────────────────
+// ─────────────────── Workspace-scoped upload tokens (#65) ───────────────────
 // An account token reaches everything its person can: every team, every
-// personal doc. A team-scoped token reaches one team's docs only, so an agent
-// on a shared machine (a team's reporting bot) cannot read, list or post
-// another team's docs even though its person is a member there. It is minted
-// from an existing token or a browser session and can only narrow: a scoped
-// token cannot mint a token for another team or an unscoped one.
+// personal doc. A workspace-scoped token reaches only the workspaces ticked
+// for it -- My docs, one or more teams -- so an agent on a shared machine (a
+// team's reporting bot) cannot read, list or post another team's docs even
+// though its person is a member there. It is minted when a connection is
+// allowed with some workspaces unticked, from an existing token, or from a
+// browser session, and can only narrow: a scoped token cannot mint a token
+// for a workspace it does not reach, or an unscoped one. The person can
+// change the workspaces later in Settings -> Agents.
 const SCOPED_TOKEN_ROUTES = new Set([
   '/api/upload', '/api/comments', '/api/agent/reply', '/api/me', '/api/teams',
   '/api/team/move', '/api/team/comments', '/api/hosted/whoami', '/api/hosted/token/scoped',
   '/api/doc', '/api/doc/access',
-  // Not /api/folders/move-to-team: it reads and empties a personal folder.
-  '/api/folders', '/api/folders/move', '/api/folders/shared',
+  '/api/folders', '/api/folders/move', '/api/folders/shared', '/api/folders/move-to-team',
 ]);
 async function scopedTokenActorFromReq(env, req) {
   const m = (req.headers.get('authorization') || '').match(/^Bearer\s+(tdoc_[A-Za-z0-9_-]+)$/i);
   if (!m) return null;
   const actor = await hostedTokenActor(env, m[1]);
-  return actor && actor.scope_team ? actor : null;
+  return actor && actor.scope ? actor : null;
+}
+// What an agent prints when it reaches outside its workspaces: what
+// happened, and where its person changes it.
+function tokenScopeBody(origin, message) {
+  const manage = `${origin}/me?view=settings#agent-access`;
+  return {
+    error: 'token_scope',
+    message: `${message || 'This agent connection cannot reach that workspace.'} Its owner can change which workspaces it reaches in Settings → Agents: ${manage}`,
+    manage_url: manage,
+  };
 }
 async function scopedTokenRefusal(env, req, url) {
   const p = url.pathname;
   if (!p.startsWith('/api/')) return null;
   const actor = await scopedTokenActorFromReq(env, req);
   if (!actor) return null;
-  const refuse = () => json({ error: 'token_scope', message: 'This token is limited to one team.' }, { status: 403 });
+  const scope = actor.scope;
+  const refuse = () => json(tokenScopeBody(url.origin), { status: 403 });
   if (!SCOPED_TOKEN_ROUTES.has(p)) return refuse();
-  // Routes that name a team must name this one; personal folders and moving
-  // a doc out of the team are not this token's business.
+  // Routes that name a workspace must name one of this token's. Docs are
+  // then checked one by one (tokenScopeAllows); shared folder links check
+  // their own owner (buildFolderShareListing).
   let body = null;
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     try { body = await req.clone().json(); } catch { body = {}; }
   }
-  const named = (body && (body.team != null ? body.team : body.id)) ?? url.searchParams.get('team') ?? url.searchParams.get('id');
+  const reaches = (team) => validTeamId(String(team || '')) && scope.teams.includes(String(team));
   if (p === '/api/teams' && req.method !== 'GET') return refuse();
-  if (p === '/api/team/move' && String(body && body.team) !== actor.scope_team) return refuse();
-  if (p === '/api/team/comments' && named !== actor.scope_team) return refuse();
-  if (p.startsWith('/api/folders') && String(named || '') !== actor.scope_team) return refuse();
+  // A move's destination: a team, or My docs when it names none.
+  if (p === '/api/team/move') {
+    const to = body && body.team;
+    if (to == null || to === '' ? !scope.me : !reaches(to)) return refuse();
+  }
+  if (p === '/api/team/comments' && !reaches(url.searchParams.get('id'))) return refuse();
+  // Reads and empties a My docs folder into a team: both must be reachable.
+  if (p === '/api/folders/move-to-team' && !(scope.me && reaches(body && body.team))) return refuse();
+  if (p === '/api/folders' || p === '/api/folders/move') {
+    const team = (body && body.team) || url.searchParams.get('team');
+    if (team ? !reaches(team) : !scope.me) return refuse();
+  }
   return null;
 }
+// Every workspace a person can give an agent: My docs, then each team they
+// are a member of. What the Allow page and Settings > Agents tick from.
+async function accountWorkspaces(env, accountId) {
+  if (!accountId) return [{ id: 'me', name: 'My docs' }];
+  const group = await accountGroup(env, accountId);
+  const teams = (await Promise.all((await loadAccountTeamIds(env, group.canonical)).map((id) => loadTeam(env, id))))
+    .filter((team) => team && group.ids.some((id) => teamMember(team, id)));
+  return [{ id: 'me', name: 'My docs' }, ...teams.map((team) => ({ id: team.id, name: team.name }))];
+}
+
+// The workspaces a person ticked, checked against the ones they have. All of
+// them is account level (scope null: it follows the person into teams they
+// join later); some is a scope; none is refused -- to stop a connection,
+// remove it.
+async function scopeFromWorkspaces(env, accountId, list) {
+  if (!Array.isArray(list)) return { error: 'invalid_workspaces' };
+  const wanted = [...new Set(list.map(String))];
+  if (!wanted.length) return { error: 'no_workspaces' };
+  const have = new Set((await accountWorkspaces(env, accountId)).map((w) => w.id));
+  if (wanted.some((id) => !have.has(id))) return { error: 'workspace_not_found' };
+  if (wanted.length === have.size) return { scope: null };
+  return { scope: { me: wanted.includes('me'), teams: wanted.filter((id) => id !== 'me') } };
+}
+
 async function resolveMemberTeam(env, accountId, teamIds, wanted) {
   const want = String(wanted || '').trim();
   if (!want) return null;
@@ -8970,20 +9053,23 @@ async function hostedTokenActor(env, token) {
   if (!env || !env.META) return null;
   const tokenHash = await sha256Hex(token);
   let record = null;
+  let used = null;
   try {
-    const raw = await env.META.get(`hosted-token:${tokenHash}`);
+    const [raw, stamp] = await Promise.all([
+      env.META.get(`hosted-token:${tokenHash}`),
+      env.META.get(tokenUsedKey(tokenHash)),
+    ]);
     if (raw) record = JSON.parse(raw);
+    used = stamp;
   } catch {}
   if (!record || typeof record.account_id !== 'string' || !record.account_id) return null;
   // "Last used", for the credentials list. At most one write an hour per
-  // token, so a busy CLI does not turn every request into a KV write.
-  const lastUsed = Date.parse(record.last_used || '') || 0;
+  // token, so a busy CLI does not turn every request into a KV write. It
+  // lives in its own key: rewriting the record from this (possibly stale)
+  // read could undo a revoke or a workspace change made a moment earlier.
+  const lastUsed = Math.max(Date.parse(record.last_used || '') || 0, Date.parse(used || '') || 0);
   if (Date.now() - lastUsed > 60 * 60 * 1000) {
-    try {
-      await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify({ ...record, last_used: new Date().toISOString() }), {
-        metadata: { account_id: record.account_id },
-      });
-    } catch {}
+    try { await env.META.put(tokenUsedKey(tokenHash), new Date().toISOString()); } catch {}
   }
   const github_login = normalizeGithubLogin(record.github_login);
   const group = await accountGroup(env, record.account_id);
@@ -8995,8 +9081,12 @@ async function hostedTokenActor(env, token) {
     token_hash: tokenHash,
     github_login,
     email: normalizeEmail(record.email),
-    ...(validTeamId(record.scope_team) ? { scope_team: record.scope_team } : {}),
+    ...(tokenScopeOf(record) ? { scope: tokenScopeOf(record) } : {}),
   };
+}
+
+function tokenUsedKey(tokenHash) {
+  return `token-used:${tokenHash}`;
 }
 
 async function hostedOwnerOp(env, slug, op) {
@@ -9075,10 +9165,11 @@ async function teamWriteAccess(env, actor, meta) {
 async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   const meta = await loadDocMeta(env, slug);
   if (!actor || actor.kind === 'admin') return { ok: true, meta };
-  // A team-scoped token writes only its team's docs. A new slug is allowed:
-  // the upload route files it straight into the team.
-  if (actor.scope_team && meta && meta.workspace_id !== actor.scope_team) {
-    return { ok: false, response: json({ error: 'token_scope', message: 'This token is limited to one team and cannot change docs outside it.' }, { status: 403 }) };
+  // A workspace-scoped token writes only in its workspaces. A new slug is
+  // allowed: the upload route files it into one of them. Someone else's
+  // personal doc falls through to the owner check below, as for anyone.
+  if (actor.scope && meta && !tokenScopeAllows(actor, meta) && (meta.workspace_id || !actor.scope.me)) {
+    return { ok: false, response: json(tokenScopeBody('', 'This agent connection cannot change docs outside its workspaces.'), { status: 403 }) };
   }
   const accountId = meta && meta.hosted && meta.hosted.account_id;
   if (opts.create) {
@@ -9087,8 +9178,8 @@ async function requireDocWriteAccess(env, actor, slug, opts = {}) {
       if (!bytes.ok) return { ok: false, response: bytes.response };
       if (bytes.exists) {
         // Bytes with no record are an older personal doc; filing them into a
-        // team from a scoped token would show its history to the team.
-        if (actor.scope_team) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+        // team from a token without My docs would show its history to the team.
+        if (actor.scope && !actor.scope.me) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
         const verified = await hostedOwnerOp(env, slug, { kind: 'verify_owner', account_id: actor.account_id });
         if (verified.ok) return { ok: true, meta: null };
         // Orphan / other-owner bytes are "slug taken" (409), not "not doc
@@ -12453,14 +12544,25 @@ const tdocHandlers = {
       return json({
         ok: true,
         identity: { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) },
-        ...(s.scope_team ? {
-          // A team-scoped token sees its team and nothing of the person's own.
-          docs: [], folders: [], recent: [], starred: [], feedback: [], team_invites: [],
-          teams: (data.teams || []).filter((t) => t.id === s.scope_team),
-          team_docs: (data.team_docs || []).filter((row) => row.team === s.scope_team),
-          team_folders: { [s.scope_team]: (data.team_folders || {})[s.scope_team] || [] },
-          scope_team: s.scope_team,
-        } : {
+        ...(s.scope ? (() => {
+          // A workspace-scoped token sees its teams, and the person's own
+          // docs only with My docs ticked. Recent and starred keep the rows
+          // of those workspaces; pending invites are not its business.
+          const me = s.scope.me;
+          const reach = (row) => (row.workspace_id ? s.scope.teams.includes(row.workspace_id) : me);
+          return {
+            docs: me ? (data.docs || []).map((row) => ({ ...row, on_profile: pinSet.has(row.slug) })) : [],
+            folders: me ? data.folders : [],
+            recent: (data.recent || []).filter(reach),
+            starred: (data.starred || []).filter(reach),
+            feedback: me ? data.feedback : [],
+            team_invites: [],
+            teams: (data.teams || []).filter((t) => s.scope.teams.includes(t.id)),
+            team_docs: (data.team_docs || []).filter((row) => s.scope.teams.includes(row.team)),
+            team_folders: Object.fromEntries(Object.entries(data.team_folders || {}).filter(([id]) => s.scope.teams.includes(id))),
+            workspaces: scopeWorkspaceIds(s.scope),
+          };
+        })() : {
           docs: (data.docs || []).map((row) => ({ ...row, on_profile: pinSet.has(row.slug) })),
           folders: data.folders,
           recent: data.recent,
@@ -12600,7 +12702,8 @@ const tdocHandlers = {
     if (p === '/api/me/tokens' && method === 'GET') {
       const who = await tokenPageSession(env, req);
       if (!who) return json({ error: 'sign_in_required' }, { status: 401 });
-      return json({ ok: true, tokens: await accountTokenList(env, who.accountId) }, { headers: { 'Cache-Control': 'no-store' } });
+      const [tokens, workspaces] = await Promise.all([accountTokenList(env, who.accountId), accountWorkspaces(env, who.accountId)]);
+      return json({ ok: true, tokens, workspaces }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (p === '/api/me/tokens/revoke-all' && method === 'POST') {
       // This is deliberately stronger than the one-row action below and just
@@ -12612,7 +12715,10 @@ const tdocHandlers = {
       const who = await tokenPageSession(env, req);
       if (!who) return json({ error: 'sign_in_required' }, { status: 401 });
       const tokens = await accountTokenList(env, who.accountId);
-      for (const token of tokens) await env.META.delete(`hosted-token:${token.id}`);
+      for (const token of tokens) {
+        await env.META.delete(`hosted-token:${token.id}`);
+        await env.META.delete(tokenUsedKey(token.id));
+      }
       // The fast "has a terminal" marker is not a credential, but leaving it
       // behind after the last credential is removed makes setup claim that a
       // terminal is still connected. Account aliases may each carry an old
@@ -12636,7 +12742,34 @@ const tdocHandlers = {
       try { rec = JSON.parse(await env.META.get(key)); } catch {}
       if (!rec || !sessionOwnsAccount(who.session, rec.account_id)) return json({ error: 'not_found' }, { status: 404 });
       await env.META.delete(key);
+      await env.META.delete(tokenUsedKey(id));
       return json({ ok: true });
+    }
+    // Change which workspaces one connection reaches. Browser session only,
+    // like revoke: a token must not widen itself or its siblings. Every
+    // request reads the record, so the next call the agent makes already
+    // runs under the new workspaces (KV can take up to a minute to reach
+    // every location, the same as a revoke).
+    if (p === '/api/me/tokens/workspaces' && method === 'POST') {
+      if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+      const who = await tokenPageSession(env, req);
+      if (!who) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const id = String((body && body.id) || '');
+      if (!/^[a-f0-9]{64}$/.test(id)) return json({ error: 'invalid_id' }, { status: 400 });
+      const key = `hosted-token:${id}`;
+      let rec = null;
+      try { rec = JSON.parse(await env.META.get(key)); } catch {}
+      if (!rec || !sessionOwnsAccount(who.session, rec.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      const picked = await scopeFromWorkspaces(env, who.accountId, body.workspaces);
+      if (picked.error) return json({ error: picked.error }, { status: 400 });
+      const next = { ...rec };
+      delete next.scope_team;
+      if (picked.scope) next.scope = picked.scope;
+      else delete next.scope;
+      await env.META.put(key, JSON.stringify(next), { metadata: { account_id: rec.account_id } });
+      return json({ ok: true, workspaces: scopeWorkspaceIds(picked.scope) });
     }
     const teamJoinMatch = p.match(/^\/team\/join\/([a-f0-9]{32})$/);
     if (teamJoinMatch && (method === 'GET' || method === 'HEAD')) {
@@ -13792,7 +13925,7 @@ const tdocHandlers = {
       // replayed poll (or a second reader of the code) collects nothing.
       await env.META.delete(`pair:${code}`);
       const approved = record.approved || {};
-      const issued = await issueHostedToken(env, { login: approved.login, label: record.label, device: record.device, client: record.client }, approved.email, approved.idp);
+      const issued = await issueHostedToken(env, { login: approved.login, label: record.label, device: record.device, client: record.client, scope: tokenScopeOf(approved) }, approved.email, approved.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       productEvent(env, 'token_minted', { auth_path: 'pair' });
       return json({
@@ -13802,6 +13935,7 @@ const tdocHandlers = {
         github_login: issued.record.github_login,
         base: url.origin,
         identity: { login: approved.login, name: approved.name || approved.login },
+        workspaces: scopeWorkspaceIds(tokenScopeOf(approved)),
       });
     }
 
@@ -13823,7 +13957,10 @@ const tdocHandlers = {
       if (!code || !record || record.status !== 'pending') {
         return json({ ok: false, error: 'unknown_code' }, { status: 404 });
       }
-      return json({ ok: true, label: record.label || '', created: record.created, ...tokenClientInfo(record) });
+      // The workspaces the Allow page offers: My docs and each of the
+      // approver's teams, all ticked unless they untick some.
+      const workspaces = await accountWorkspaces(env, await sessionAccountId(env, session));
+      return json({ ok: true, label: record.label || '', created: record.created, ...tokenClientInfo(record), workspaces });
     }
 
     if (p === '/api/cli/pair/approve' && method === 'POST') {
@@ -13841,6 +13978,16 @@ const tdocHandlers = {
       if (!code || !record || record.status !== 'pending') {
         return json({ ok: false, error: 'unknown_code' }, { status: 404 });
       }
+      // `workspaces`: the ones left ticked on the Allow page. Absent or all
+      // of them is an account-level token, as every approval was before;
+      // some is a token that reaches only those (checked against what this
+      // approver has, so the body can only narrow).
+      let scope = null;
+      if (body.workspaces !== undefined) {
+        const picked = await scopeFromWorkspaces(env, await sessionAccountId(env, session), body.workspaces);
+        if (picked.error) return json({ ok: false, error: picked.error }, { status: 400 });
+        scope = picked.scope;
+      }
       // The approver's identity is a server-side snapshot of THEIR session —
       // nothing in the request body can pose as it, same discipline as the
       // hosted-token mint.
@@ -13850,6 +13997,7 @@ const tdocHandlers = {
         idp: session.idp || null,
         name: session.name || session.login || (session.email ? String(session.email).split('@')[0] : ''),
         email: session.email || null,
+        ...(scope ? { scope } : {}),
       };
       await env.META.put(`pair:${code}`, JSON.stringify(record), { expirationTtl: PAIR_TTL_SECONDS });
       if (hostedRegistrationEnabled(env, url.origin)) {
@@ -14429,7 +14577,9 @@ const tdocHandlers = {
       const s = gate.session;
       const teams = (await Promise.all((s.team_ids || []).map((id) => loadTeam(env, id))))
         .filter((team) => team && teamMember(team, s.account_id));
-      return json({ ok: true, teams: teams.map((team) => teamSummary(team, s.account_id)) });
+      // A connection limited to some workspaces lists only their teams, and
+      // says so, so the CLI does not tell its person they left a team.
+      return json({ ok: true, teams: teams.map((team) => teamSummary(team, s.account_id)), ...(s.scope ? { workspaces: scopeWorkspaceIds(s.scope) } : {}) });
     }
 
     if (p === '/api/teams' && method === 'POST') {
@@ -15000,11 +15150,19 @@ const tdocHandlers = {
       if (!bearer) return json({ error: 'token_required' }, { status: 401 });
       const actor = await hostedTokenActor(env, bearer);
       if (!actor) return json({ error: 'invalid_token' }, { status: 401 });
-      return json({ ok: true, account_id: actor.account_id, github_login: actor.github_login || null, ...(actor.scope_team ? { scope_team: actor.scope_team } : {}) });
+      // workspaces: null is account level; otherwise the ids it reaches ('me'
+      // is My docs). scope_team stays for a #792 client reading one team.
+      const scope = actor.scope || null;
+      return json({
+        ok: true, account_id: actor.account_id, github_login: actor.github_login || null,
+        workspaces: scopeWorkspaceIds(scope),
+        ...(scope && !scope.me && scope.teams.length === 1 ? { scope_team: scope.teams[0] } : {}),
+      });
     }
 
-    // Narrow a credential to one team (#65). From a Bearer token (an agent
-    // swapping its own account token for a team one) or a same-origin browser
+    // Narrow a credential to some workspaces (#65): one team by `team`, or
+    // `workspaces` ['me', team ids]. From a Bearer token (an agent swapping
+    // its own account token for a narrower one) or a same-origin browser
     // session. The new token is returned once; the old one is untouched.
     if (p === '/api/hosted/token/scoped' && method === 'POST') {
       const cookie = await getSession(env, req);
@@ -15015,9 +15173,22 @@ const tdocHandlers = {
       if (!s.account_id) return json({ error: 'account_required' }, { status: 403 });
       let body = {};
       try { body = await req.json(); } catch {}
-      const team = await resolveMemberTeam(env, s.account_id, s.team_ids, body.team);
-      if (!team) return json({ error: 'team_not_found', message: 'Name a team this account belongs to (id or exact name).' }, { status: 404 });
-      if (s.scope_team && s.scope_team !== team.id) return json({ error: 'token_scope' }, { status: 403 });
+      let scope = null;
+      let team = null;
+      if (Array.isArray(body.workspaces)) {
+        const picked = await scopeFromWorkspaces(env, s.account_id, body.workspaces);
+        if (picked.error) return json({ error: picked.error }, { status: picked.error === 'workspace_not_found' ? 404 : 400 });
+        const ids = body.workspaces.map(String);
+        scope = picked.scope || { me: ids.includes('me'), teams: ids.filter((id) => id !== 'me') };
+      } else {
+        team = await resolveMemberTeam(env, s.account_id, s.team_ids, body.team);
+        if (!team) return json({ error: 'team_not_found', message: 'Name a team this account belongs to (id or exact name).' }, { status: 404 });
+        scope = { me: false, teams: [team.id] };
+      }
+      // Only narrower: nothing the minting credential cannot reach itself.
+      if (s.scope && ((scope.me && !s.scope.me) || scope.teams.some((id) => !s.scope.teams.includes(id)))) {
+        return json(tokenScopeBody(url.origin), { status: 403 });
+      }
       const token = `tdoc_${rand(24)}`;
       const tokenHash = await sha256Hex(token);
       const record = {
@@ -15025,13 +15196,17 @@ const tdocHandlers = {
         ...(sessionLogin(s) ? { github_login: sessionLogin(s) } : {}),
         ...(!sessionLogin(s) && normalizeEmail(s.email) ? { email: normalizeEmail(s.email) } : {}),
         created: new Date().toISOString(),
-        scope_team: team.id,
-        label: (typeof body.label === 'string' && body.label.trim() ? body.label.trim() : `${team.name} only`).slice(0, 80),
+        scope,
+        ...(typeof body.label === 'string' && body.label.trim() ? { label: body.label.trim().slice(0, 80) } : team ? { label: `${team.name} only`.slice(0, 80) } : {}),
         ...tokenClientInfo(body),
       };
       await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify(record), { metadata: { account_id: record.account_id } });
       productEvent(env, 'token_minted', { auth_path: 'scoped' });
-      return json({ ok: true, token, account_id: record.account_id, scope: { team_id: team.id, team_name: team.name }, base: url.origin });
+      return json({
+        ok: true, token, account_id: record.account_id, workspaces: scopeWorkspaceIds(scope),
+        ...(team ? { scope: { team_id: team.id, team_name: team.name } } : {}),
+        base: url.origin,
+      });
     }
 
     if (p === '/api/hosted/token' && method === 'POST') {
@@ -15056,7 +15231,7 @@ const tdocHandlers = {
       // passed as its own argument so nothing in the client-controlled body
       // can pose as it. This is what gives a brand-new publisher their email
       // merge key at the moment their account is minted.
-      const issued = await issueHostedToken(env, { ...body, login }, session && session.email, session && session.idp);
+      const issued = await issueHostedToken(env, { ...body, login, scope: null }, session && session.email, session && session.idp);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       productEvent(env, 'token_minted', { auth_path: 'session' });
       return json({
@@ -16399,6 +16574,30 @@ const tdocHandlers = {
       }
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
+      // Where a new doc from a workspace-scoped token lands, so it never
+      // exists somewhere the token could not see it again: the team the
+      // client names (`team`, id or name: the CLI's --team or default team)
+      // if the token reaches it, else My docs if it reaches them, else its
+      // only team. Naming an unreachable team is refused before anything is
+      // written; so is guessing between several teams.
+      let scopedNewTeam = null;
+      if (!writeGate.meta && auth.actor && auth.actor.scope) {
+        const scope = auth.actor.scope;
+        const hint = typeof body.team === 'string' ? body.team.trim() : '';
+        if (hint) {
+          const named = await resolveMemberTeam(env, auth.actor.account_id, scope.teams, hint);
+          if (!named) return json(tokenScopeBody(url.origin, `This agent connection cannot publish to the team "${hint.slice(0, 80)}".`), { status: 403 });
+          scopedNewTeam = named.id;
+        } else if (!scope.me) {
+          if (scope.teams.length !== 1) {
+            return json({
+              error: 'team_required',
+              message: 'This agent connection can publish to more than one team but not to My docs. Say which team (tdoc-publish --team <name>).',
+            }, { status: 409 });
+          }
+          scopedNewTeam = scope.teams[0];
+        }
+      }
       const firstHostedPublish = !!(
         auth.actor && auth.actor.kind === 'hosted' && !writeGate.meta && verNum === 1
       );
@@ -16408,10 +16607,10 @@ const tdocHandlers = {
         if (size > maxBytes) {
           return json({ error: 'quota_upload_bytes', limit: maxBytes, size }, { status: 413 });
         }
-        if (!writeGate.meta && auth.actor.scope_team) {
-          const team = await loadTeam(env, auth.actor.scope_team);
+        if (scopedNewTeam) {
+          const team = await loadTeam(env, scopedNewTeam);
           if (!sessionAccountIds(auth.actor).some((id) => teamMember(team, id))) {
-            return json({ error: 'token_scope', message: 'This token is limited to a team this account is no longer in.' }, { status: 403 });
+            return json(tokenScopeBody(url.origin, 'This agent connection is limited to a team this account is no longer in.'), { status: 403 });
           }
           const blocked = await teamPlanBlocksDocs(env, team, 1);
           if (blocked) return json(blocked, { status: 402 });
@@ -16447,9 +16646,9 @@ const tdocHandlers = {
         // Team placement is moved only through /api/team/move; a publish
         // neither sets it nor drops it, and keeps the team share flag unless
         // the client says otherwise.
-        // A team-scoped token's new doc goes straight into its team, so it
-        // never exists as a personal doc the token could not see again.
-        const prevTeam = (prev && prev.workspace_id) || (!prev && auth.actor && auth.actor.scope_team) || null;
+        // A workspace-scoped token's new doc may go straight into a team
+        // (scopedNewTeam above).
+        const prevTeam = (prev && prev.workspace_id) || (!prev && scopedNewTeam) || null;
         if (prevTeam) incoming.workspace_id = prevTeam;
         else delete incoming.workspace_id;
         if (incoming.access) {
@@ -16770,7 +16969,7 @@ const tdocHandlers = {
       return json({
         ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal,
         new_doc: !writeGate.meta,
-        team: (writeGate.meta && writeGate.meta.workspace_id) || null,
+        team: (writeGate.meta && writeGate.meta.workspace_id) || scopedNewTeam || null,
       });
     }
 

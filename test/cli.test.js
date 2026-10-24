@@ -2228,5 +2228,53 @@ t('validator rejects a numeral cell class that lands on prose', () => {
 });
 
 
+// ---- an agent connection limited to some workspaces ----
+// The person unticked workspaces on the Allow page. Publishing outside them
+// must say so in words and point at Settings > Agents, not dump JSON; a new
+// doc headed for a team (--team) names it on the upload, so a connection
+// without My docs files it there directly.
+t('a workspace-limited connection: a clear refusal outside, the team named on upload inside', () => {
+  const bin = path.join(BIN, 'tdoc-publish');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-scope-'));
+  const seen = path.join(home, 'uploads.log');
+  const stub = startStub(
+    `((log)=>(q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
+    `s.setHeader('content-type','application/json');` +
+    `const u=q.url.split('?')[0];` +
+    `if(u==='/api/upload'){const j=JSON.parse(b||'{}');require('fs').appendFileSync(log,JSON.stringify({slug:j.slug,team:j.team||null})+'\\n');` +
+    `if(j.team==='abby'){s.statusCode=403;return s.end(JSON.stringify({error:'token_scope',` +
+    `message:'This agent connection cannot publish to the team "abby". Its owner can change which workspaces it reaches in Settings → Agents: https://tdoc.dev/me?view=settings#agent-access'}));}` +
+    `return s.end(JSON.stringify({ok:true,size:42,new_doc:true,team:j.team?'t_b':null}));}` +
+    `if(u==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_b',name:'befreed',role:'member'}],workspaces:['t_b']}));` +
+    `if(u==='/api/team/move')return s.end(JSON.stringify({ok:true,moved:1,team:'t_b'}));` +
+    `s.statusCode=404;s.end('{}');});})(${JSON.stringify(seen)})`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: stub.base, public_host: '127.0.0.1', upload_token: 'tok', github_login: 'tester',
+    }));
+    for (const slug of ['scoped-out', 'scoped-in']) {
+      const docs = path.join(home, 'tdocs', slug, 'v1');
+      fs.mkdirSync(docs, { recursive: true });
+      fs.writeFileSync(path.join(docs, 'index.html'), '<!doctype html><body><div class="wrap"><h1>D</h1></div></body>');
+      fs.writeFileSync(path.join(home, 'tdocs', slug, 'meta.json'), JSON.stringify({ title: 'D', slug, versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }] }));
+    }
+    const env = { ...process.env, HOME: home, TDOC_DIR: path.join(home, 'tdocs'), TDOC_SKIP_UPDATE_CHECK: '1' };
+    const out = spawnSync(bin, ['--team', 'abby', 'scoped-out'], { env, encoding: 'utf8', timeout: 60000 });
+    assert(out.status !== 0, `published outside its workspaces: ${out.stdout}`);
+    assert(/Not published: This agent connection cannot publish to the team "abby"/.test(out.stderr), `no plain refusal: ${out.stderr}`);
+    assert(/me\?view=settings#agent-access/.test(out.stderr), `no way to change it: ${out.stderr}`);
+    assert(!/upload FAILED: \{/.test(out.stderr), `raw JSON dumped: ${out.stderr}`);
+    const inside = spawnSync(bin, ['--team', 'befreed', 'scoped-in'], { env, encoding: 'utf8', timeout: 60000 });
+    assert(inside.status === 0, `publish into its team failed: ${inside.stderr}`);
+    const uploads = fs.readFileSync(seen, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert(uploads.some((u) => u.slug === 'scoped-in' && u.team === 'befreed'), `the team was not named on upload: ${JSON.stringify(uploads)}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

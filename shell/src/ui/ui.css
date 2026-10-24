@@ -1037,6 +1037,24 @@ a.ui-menu-item:visited {
 .tdoc-activate-page .tdoc-activate-error { margin: 22px 0 0; font-size: 14px; line-height: 1.5; }
 .tdoc-activate-page .tdoc-activate-hint { margin: 12px 0 0; font-size: 13px; line-height: 1.5; }
 
+/* The workspaces an agent connection reaches (workspace-checklist.jsx): one
+   quiet bordered list, a whole row per checkbox so a thumb can hit it. Used
+   on the Allow page and in the Settings > Agents dialog. */
+.tdoc-ws-pick { margin: 0; padding: 0; border: 1px solid var(--td-line, #e8e7e3); border-radius: 12px; overflow: hidden; text-align: left; }
+.tdoc-ws-option {
+  display: flex; align-items: center; gap: 10px; min-height: 46px; box-sizing: border-box;
+  padding: 10px 14px; cursor: pointer; font-size: 14.5px; line-height: 1.3; color: var(--td-ink, #1a1a1a);
+}
+.tdoc-ws-option + .tdoc-ws-option { border-top: 1px solid var(--td-line, #e8e7e3); }
+.tdoc-ws-option:hover { background: var(--td-surface-2, #f7f7f5); }
+.tdoc-ws-option input { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; accent-color: var(--td-accent, #1652f0); cursor: pointer; }
+.tdoc-ws-name { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-ws-kind { flex: 0 0 auto; color: var(--td-muted, #6b6a66); font-size: 12.5px; }
+.tdoc-ws-pick:disabled .tdoc-ws-option { cursor: default; opacity: .6; }
+.tdoc-activate-workspaces { margin: 20px 0 0; }
+.tdoc-activate-page .tdoc-activate-ask { margin: 0 0 8px; font-size: 14px; line-height: 1.5; color: var(--td-ink, #1a1a1a); text-align: left; }
+.tdoc-activate-workspaces .tdoc-activate-hint { text-align: left; }
+
 /* Onboarding spacing: keep the existing UI and group its content with air. */
 .tdoc-activate-stack > h1 + p { margin-top: 12px; }
 .tdoc-activate-stack > p { line-height: 1.6; overflow-wrap: anywhere; }
