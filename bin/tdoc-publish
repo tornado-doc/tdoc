@@ -43,7 +43,8 @@ usage: tdoc-publish [options] <slug>
 
 Options:
   --platform hosted|cloudflare|vercel    (default for first publish: hosted; re-pass to switch)
-  --visibility public|unlisted|private   (default for new access block: unlisted)
+  --visibility unlisted|public|private   (default for a new doc: unlisted = anyone with the link,
+                                          not listed or indexed; public = listed and searchable)
   --history owner|invited|public         (default for new access block: owner)
   --commenting owner|invited|signed_in|off  (default: signed_in)
   --allow-user <github-login>            (repeatable; private/shared allowlist)
@@ -1524,8 +1525,11 @@ if [ ! -f "$META_FILE" ]; then
 fi
 
 # JUL-31 access policy: merge flags into local meta.json so /api/upload
-# carries them. Defaults for a brand-new access block: unlisted + owner
-# history (pure publish). Existing access blocks keep unspecified fields.
+# carries them. Defaults for a brand-new access block: unlisted ("anyone with
+# the link") + owner history (pure publish). Existing access blocks keep
+# unspecified fields. With no flags at all nothing is written and the worker
+# gives a NEW doc "anyone with the link" (NEW_DOC_ACCESS); an existing doc
+# keeps its stored access.
 #
 # Access is sticky, deliberately: a flag left out never loosens what is already
 # there, here or on the worker (which carries a stored access block forward
@@ -1536,7 +1540,7 @@ fi
 if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG" ] || [ ${#ALLOW_USERS[@]} -gt 0 ]; then
   case "${VISIBILITY_FLAG:-}" in
     ''|public|unlisted|private) ;;
-    *) echo "[tdoc] invalid --visibility '$VISIBILITY_FLAG' (public|unlisted|private)" >&2; exit 1 ;;
+    *) echo "[tdoc] invalid --visibility '$VISIBILITY_FLAG' (unlisted|public|private)" >&2; exit 1 ;;
   esac
   case "${HISTORY_FLAG:-}" in
     ''|owner|invited|public) ;;

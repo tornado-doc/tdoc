@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
-import { AppSelect } from '../ui/select.jsx';
+import { AppSwitch } from '../ui/switch.jsx';
 import { deleteDocument, updateDocumentAccess } from './api.js';
 import { VersionLinkChoice } from './document-dialogs.jsx';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
@@ -26,6 +26,38 @@ const COMMENTING_OPTIONS = [
   { value: 'owner', label: 'Owner only' },
   { value: 'off', label: 'Off' },
 ];
+
+// Who can open the doc, the way Google Docs says it. "Anyone with the link"
+// is stored as `unlisted`. Public is the only one search engines may index.
+export const GENERAL_ACCESS_OPTIONS = [
+  { value: 'private', label: 'Specific people / team', hint: 'Only people you add.' },
+  { value: 'unlisted', label: 'Anyone with the link', hint: 'Not listed or searchable.' },
+  { value: 'public', label: 'Public', hint: 'Listed on the web and searchable by search engines.' },
+];
+
+function GeneralAccessChoice({ value, onChange }) {
+  return (
+    <div className="tdoc-access-options" role="radiogroup" aria-label="Who has access">
+      {GENERAL_ACCESS_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          className={`tdoc-access-option${value === option.value ? ' active' : ''}`}
+          data-access={option.value}
+          onClick={() => { if (value !== option.value) onChange(option.value); }}
+        >
+          <span className="tdoc-access-dot" aria-hidden="true" />
+          <span className="tdoc-access-text">
+            <span className="tdoc-access-label">{option.label}</span>
+            <span className="tdoc-access-hint">{option.hint}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const HISTORY_OPTIONS = [
   { value: 'owner', label: 'Owner only' },
@@ -147,14 +179,19 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
     || normalized.commenting === 'invited'
     || normalized.history_visibility === 'invited';
   const invitedCount = normalized.allowed_users.length;
-  const general = normalized.visibility !== 'private' ? 'unlisted' : (team && normalized.team ? 'team' : 'private');
-  const accessDescription = general === 'unlisted'
-    ? 'Anyone with the link can read it.'
-    : general === 'team'
-      ? `Everyone in ${team.name} can open and comment${invitedCount ? `, plus ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'}` : ''}.`
-      : invitedCount
-      ? `Only you and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open it.`
-      : 'Only you can open it. Add people below to invite them.';
+  const general = ['private', 'unlisted', 'public'].includes(normalized.visibility) ? normalized.visibility : 'unlisted';
+  const teamWide = general === 'private' && !!team && !!normalized.team;
+  const accessDescription = general === 'public'
+    ? 'Anyone can find and read it, including search engines.'
+    : general === 'unlisted'
+      ? (normalized.signin_required
+        ? 'Anyone signed in to tdoc who has the link can read it. It is not listed anywhere.'
+        : 'Anyone with the link can read it. It is not listed anywhere or shown to search engines.')
+      : teamWide
+        ? `Everyone in ${team.name} can open and comment${invitedCount ? `, plus ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'}` : ''}.`
+        : invitedCount
+          ? `Only you and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open it.`
+          : 'Only you can open it. Add people below to invite them.';
 
   return (
     <AppDialog
@@ -183,21 +220,31 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
       ) : null}
 
       <section className="manage-section">
-        <label className="field" htmlFor="tdoc-access-select">Who has access</label>
-        <AppSelect
-          id="tdoc-access-select"
+        <label className="field" id="tdoc-access-label">Who has access</label>
+        <GeneralAccessChoice
           value={general}
-          onChange={(value) => {
-            if (!team) save({ visibility: value });
-            else if (value === 'unlisted') save({ visibility: 'unlisted' });
-            else save({ visibility: 'private', team: value === 'team' });
-          }}
-          options={[
-            { value: 'private', label: team ? 'Only people with access' : 'Only people I invite' },
-            ...(team ? [{ value: 'team', label: `Everyone in ${team.name}` }] : []),
-            { value: 'unlisted', label: 'Anyone with the link' },
-          ]}
+          onChange={(value) => save({ visibility: value })}
         />
+        {general === 'unlisted' ? (
+          <div className="tdoc-access-sub">
+            <AppSwitch
+              id="tdoc-access-signin"
+              checked={!!normalized.signin_required}
+              onCheckedChange={(checked) => save({ signin_required: !!checked })}
+              label="Require sign-in to view"
+            />
+          </div>
+        ) : null}
+        {general === 'private' && team ? (
+          <div className="tdoc-access-sub">
+            <AppSwitch
+              id="tdoc-access-team"
+              checked={!!normalized.team}
+              onCheckedChange={(checked) => save({ team: !!checked })}
+              label={`Everyone in ${team.name}`}
+            />
+          </div>
+        ) : null}
         <p className="manage-hint">{accessDescription}</p>
 
         {inviteRelevant ? (

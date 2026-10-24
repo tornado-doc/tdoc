@@ -338,24 +338,26 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-publish" <slug>
-   # keep earlier drafts to yourself:
-   #   bash "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
+   # let readers page back through earlier versions too:
+   #   bash "$SKILL_DIR/bin/tdoc-publish" --history public <slug>
    ```
 
    Report the `https://tdoc.dev/d/<slug>` URL (no `/v/<n>`: it always opens the
    newest version) on its own line, and say what
    it is — the user may never have seen a tdoc page before. Describe the
-   access it actually has, which for a plain publish is the legacy policy:
+   access it actually has, which for a plain publish of a new doc is
+   "anyone with the link":
 
-   > Your doc is live. Anyone with this link can read it — and can page back
-   > through earlier versions — but it is not listed anywhere, so only people
-   > you send it to will find it.
+   > Your doc is live. Anyone with this link can read it, but it is not
+   > listed anywhere or shown to search engines, so only people you send it
+   > to will find it. Earlier versions stay visible to you only.
 
-   Do **not** call it "unlisted". A publish with no explicit flags stores no
-   access block and takes the legacy policy (`visibility: public`,
-   `history_visibility: public`); saying unlisted would understate what a
-   recipient can see. If the user wants earlier versions kept private, that is
-   `--history owner`.
+   That is the default, and it is what people mean when they paste a link
+   into Slack. Do **not** publish `--visibility public` unless the user asks
+   for the doc to be public on the web: Public docs are listed and indexed by
+   search engines. If the user wants readers to page back through earlier
+   versions, that is `--history public`; `--visibility private` keeps the doc
+   to people they invite.
 
    *If the sign-in has not completed yet*, do not fall back to localhost and do
    not go quiet. Say the doc is written and waiting, and that approving the
@@ -724,7 +726,9 @@ pkill -f "$SKILL_DIR/server/server.js"
 
 ### `/tdoc publish <slug>` — publish to hosted tdoc (default), or self-host
 
-Publishes the latest version of `<slug>` to a public URL.
+Publishes the latest version of `<slug>` to a shareable URL (a new doc is
+readable by anyone with the link, and not indexed; `--visibility public`
+makes it Public).
 
 Architecture — publish auth, multi-tenant scoping, account/BYOK
 switching, and the client-version gap — is written up as a tdoc:
@@ -1237,20 +1241,22 @@ Remote storage holds optional `meta.access`:
 ```json
 {
   "visibility": "public | unlisted | private",
+  "signin_required": "true | false (unlisted only)",
   "commenting": "owner | invited | signed_in | off",
   "history_visibility": "owner | invited | public",
   "allowed_users": ["github-login"]
 }
 ```
 
-- **public / unlisted**: link-readable without login. Unlisted is not catalog-discovery; `/me` still lists the signed-in publisher's docs.
+- **unlisted** ("Anyone with the link"; `--visibility unlisted`): link-readable without login, every response `noindex`, listed nowhere (not on profiles, not in /llms.txt). `/me` still lists the signed-in publisher's docs. `signin_required: true` (Share panel "Require sign-in to view") lets any signed-in account read it instead of anyone. The default for a new doc.
+- **public** ("Public"; `--visibility public`): link-readable without login and indexable by search engines. Profile pins (`/@handle`) are always public. Only on explicit request.
 - **private**: the doc publisher (hosted `github_login`, or `TDOC_OWNER` on BYOK/legacy) + `allowed_users`. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
 - **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
-- Legacy meta without `access` stays world-readable + full history (back-compat).
+- Legacy meta without `access` stays world-readable + full history (back-compat); `worker/migrate-public-to-link.mjs` (manual, dry run by default) moves those and other non-profile public docs to unlisted.
 - **Access only ever tightens by omission.** A flag left out keeps what is
   already stored — the CLI leaves an existing `meta.access` alone, and the
   worker carries the stored block forward when an upload names none. A publish
-  that means to OPEN a doc must say so (`--visibility public`), and a
+  that means to OPEN a doc must say so (`--visibility unlisted` or `public`), and a
   re-publish that must stay closed is safest saying so too; this is why
   FIRST-DOC.md names the policy (`--visibility private --history owner`)
   instead of publishing flagless.
