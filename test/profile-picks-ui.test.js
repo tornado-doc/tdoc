@@ -90,9 +90,10 @@ async function startServer(worker, env) {
   const t = async (name, fn) => {
     try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); }
   };
-  const fresh = async (width = 1100) => {
+  const fresh = async (width = 1100, more = null) => {
     const env = makeEnv(mod.CommentsStore);
     await seed(worker, env);
+    if (more) await more(env);
     const { server, base } = await startServer(worker, env);
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     await context.addCookies([{ name: 'tdoc_sid', value: SID, url: base }]);
@@ -162,6 +163,41 @@ async function startServer(worker, env) {
         await dialog.getByRole('button', { name: 'Done' }).click();
         await page.reload();
         await page.getByText('No public picks yet. Add one from your docs.').waitFor();
+      } finally { await close(); }
+    });
+
+    await t('pinning a doc that is not Public says it makes it Public (searchable) first; a Public doc pins at once', async () => {
+      const extra = async (env) => {
+        for (const [slug, title, visibility] of [['link-doc', 'Link doc', 'unlisted'], ['open-doc', 'Open doc', 'public']]) {
+          await env.META.put(`meta:${slug}`, JSON.stringify({
+            title, slug, created: '2026-01-02T00:00:00.000Z', versions: [{ n: 1, created: '2026-01-02T00:00:00.000Z' }],
+            hosted: { account_id: 'acct-owner', github_login: 'owner' },
+            access: { visibility, commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
+          }));
+          await env.DOCS.put(`docs/${slug}/v1/index.html`, `<h1>${title}</h1>`);
+        }
+      };
+      const { env, page, pins, close } = await fresh(390, extra);
+      try {
+        await page.getByRole('button', { name: 'Add a pick' }).click();
+        const picks = page.getByRole('dialog', { name: 'Public picks' });
+        await picks.waitFor();
+        const row = (title) => picks.locator('.profile-pick-row').filter({ has: page.locator('b', { hasText: title }) });
+        await row('Link doc').locator('input').click();
+        const confirm = page.getByRole('dialog', { name: 'Pinning makes this doc Public (searchable)' });
+        await confirm.waitFor();
+        assert.equal(JSON.parse(await env.META.get('meta:link-doc')).access.visibility, 'unlisted', 'changed before confirming');
+        if (process.env.TDOC_UI_SHOTS) await page.screenshot({ path: `${process.env.TDOC_UI_SHOTS}/profile-pin-public-confirm-390.png` });
+        await confirm.getByRole('button', { name: 'Make Public and pin' }).click();
+        // A new pick reloads the page so its card has a server-side excerpt.
+        await page.locator('.profile-pick-item .profile-pick-title', { hasText: 'Link doc' }).waitFor();
+        assert.equal(JSON.parse(await env.META.get('meta:link-doc')).access.visibility, 'public');
+        assert.ok((await pins()).includes('link-doc'));
+        await page.getByRole('button', { name: 'Add a pick' }).click();
+        await picks.waitFor();
+        await row('Open doc').locator('input').click();
+        await page.locator('.profile-pick-item .profile-pick-title', { hasText: 'Open doc' }).waitFor();
+        assert.ok((await pins()).includes('open-doc'), 'a Public doc did not pin without the confirm');
       } finally { await close(); }
     });
 

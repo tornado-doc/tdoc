@@ -29,6 +29,7 @@ const OFFLINE = [
   'agent-status-emoji.test.js',// agent verdict emoji constant must exist (v>=2 folds)
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
+  'link-sharing.test.js',     // anyone with the link: noindex everywhere, unlisted by default, require sign-in, public->link migration
   'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
@@ -169,6 +170,7 @@ const BROWSER = [
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
+  'share-access-ui.test.js', // Share panel: specific people / anyone with the link / public, sign-in switch, desktop + phone
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout
   'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
   'team-billing-ui.test.js', // #48 Team plan card: free seats, upgrade, paid summary, portal, phone
