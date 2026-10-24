@@ -8,6 +8,8 @@
 #   tdoc-agent-reply --slug <slug> --parent <id> --text "..." \
 #     [--status applied|partial|question|answered] [--applied-in N] \
 #     [--login grok] [--name Grok] [--avatar-url https://...] [--force]
+#   tdoc-agent-reply --slug <slug> --ask <ask_id> --text "..."
+#                                       # private answer to a reader's question
 #   tdoc-agent-reply --print-identity   # login/name JSON, no network
 #
 # Posts to the published worker when ~/.tdoc/published.json exists,
@@ -19,6 +21,7 @@ TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 SLUG=""
 PARENT=""
+ASK=""
 TEXT=""
 STATUS=""
 APPLIED_IN=""
@@ -32,6 +35,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --slug) SLUG="${2:-}"; shift 2 ;;
     --parent|--parent-id) PARENT="${2:-}"; shift 2 ;;
+    --ask) ASK="${2:-}"; shift 2 ;;
     --text) TEXT="${2:-}"; shift 2 ;;
     --status) STATUS="${2:-}"; shift 2 ;;
     --applied-in) APPLIED_IN="${2:-}"; shift 2 ;;
@@ -41,7 +45,7 @@ while [ $# -gt 0 ]; do
     --force) FORCE=1; shift ;;
     --print-identity) PRINT_IDENTITY=1; shift ;;
     -h|--help)
-      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -82,10 +86,15 @@ if [ "$PRINT_IDENTITY" = 1 ]; then
   exit 0
 fi
 
-if [ -z "$SLUG" ] || [ -z "$PARENT" ] || [ -z "$TEXT" ]; then
+if [ -z "$SLUG" ] || { [ -z "$PARENT" ] && [ -z "$ASK" ]; } || [ -z "$TEXT" ]; then
   echo "usage: tdoc-agent-reply --slug <slug> --parent <id> --text \"...\"" >&2
+  echo "       tdoc-agent-reply --slug <slug> --ask <ask_id> --text \"...\"" >&2
   exit 1
 fi
+# A reader's question ("Send to my agent") is answered to that reader alone:
+# no comment, no status, and only the account that asked may answer it.
+ROUTE="/api/agent/reply"
+[ -n "$ASK" ] && ROUTE="/api/agent/ask-reply"
 if ! printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
   echo "[tdoc] invalid slug '$SLUG'" >&2
   exit 1
@@ -95,14 +104,15 @@ fi
 # of /tdoc edit, and macOS ships no jq, so a jq dependency here takes the whole
 # comment loop down on a stock machine. See #276.
 PAYLOAD="$(node -e '
-  const [slug, parent, text, status, applied, login, name, avatar, force] = process.argv.slice(1);
+  const [slug, parent, text, status, applied, login, name, avatar, force, ask] = process.argv.slice(1);
+  if (ask) { process.stdout.write(JSON.stringify({ slug, ask_id: ask, text, agent_login: login, agent_name: name })); process.exit(0); }
   const o = { slug, parent_id: parent, text, agent_login: login, agent_name: name };
   if (status !== "") o.status = status;
   if (applied !== "") o.applied_in = Number(applied);
   if (avatar !== "") o.agent_avatar_url = avatar;
   if (force === "1") o.force = true;
   process.stdout.write(JSON.stringify(o));
-' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR" "$FORCE")"
+' "$SLUG" "$PARENT" "$TEXT" "$STATUS" "$APPLIED_IN" "$LOGIN" "$NAME" "$AVATAR" "$FORCE" "$ASK")"
 
 # Which Raft agent this is. The Raft runtime exposes both ids; the server honours
 # the claim only for an agent already linked to this account (actingAgent in the
@@ -192,10 +202,10 @@ if [ -f "$CONFIG_FILE" ]; then
     fi
   fi
   if [ -n "$TOKEN" ] && [ -n "$BASE" ] && [ "$BASE" != "https://." ]; then
-    post_reply "${BASE}/api/agent/reply" "$TOKEN" || exit 1
+    post_reply "${BASE}${ROUTE}" "$TOKEN" || exit 1
     exit 0
   fi
 fi
 
 TDOC_PORT="${TDOC_PORT:-7878}"
-post_reply "http://localhost:${TDOC_PORT}/api/agent/reply" || exit 1
+post_reply "http://localhost:${TDOC_PORT}${ROUTE}" || exit 1

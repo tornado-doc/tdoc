@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
   CircleCheck,
@@ -186,9 +187,28 @@ export function DocumentAskAction({ onClick }) {
   );
 }
 
+// The third of Comment / Ask AI / Send to my agent, for a reader: the label
+// says what pressing it does with what their own account has (my-agent.js).
+export function DocumentMyAgentAction({ label, title = '', onClick }) {
+  return (
+    <button
+      id="tdoc-my-agent-btn"
+      type="button"
+      className="tdoc-ask-action tdoc-my-agent-action"
+      aria-label={label}
+      title={title || label}
+      onClick={onClick}
+    >
+      <Bot size={15} aria-hidden="true" />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 export function DocumentOverflowActions({
   config,
   onAsk = null,
+  myAgent = null,
   starred,
   onToggleStar,
   onPublish,
@@ -209,6 +229,11 @@ export function DocumentOverflowActions({
       {onAsk ? (
         <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="ask" onClick={onAsk}>
           <Sparkles size={15} /> Ask AI
+        </AppMenuItem>
+      ) : null}
+      {myAgent ? (
+        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="my-agent" onClick={myAgent.onClick}>
+          <Bot size={15} /> {myAgent.label}
         </AppMenuItem>
       ) : null}
       <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>

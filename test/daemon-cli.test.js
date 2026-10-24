@@ -12,6 +12,8 @@
 //   - the prompt carries the handoff line, the comment ids, the instruction,
 //     and the untrusted-input frame
 //   - a failing CLI is retried once, then the handoff is reported failed
+//   - a reader's own question (Send to my agent) is answered with --ask, never
+//     an edit, and closed through the ask routes
 //   - install-launchd prints a plist and loads nothing
 //   - install / uninstall drive launchctl (a fake one here) under a temp HOME,
 //     and tdoc-doctor reports the helper as an optional step
@@ -133,6 +135,9 @@ const stub = startStub(`(() => {
       const send = (code, obj) => { s.writeHead(code, { 'Content-Type': 'application/json' }); s.end(JSON.stringify(obj)); };
       if (u.pathname === '/__log') return send(200, log);
       if (u.pathname === '/__reset') { pending = [{ ...pending[0] || {}, slug: 'q3-plan', handoff_id: 'h_' + (json && json.n || 2), comment_ids: ['c_a'], instruction: '', recipient: { provider: 'local', device: 'testbox', cli: 'claude', agent_sub: 'testbox_claude' }, url: 'https://tdoc.dev/d/q3-plan', at: '2026-10-13T10:00:00.000Z', by: json && 'by' in json ? json.by : 'acct-owner', acked_at: null }]; return send(200, { ok: true }); }
+      // A reader's own question (Send to my agent): no comments, answered
+      // privately through the ask routes.
+      if (u.pathname === '/__ask') { pending = [{ kind: 'ask', slug: 'their-doc', handoff_id: 'q_1', ask_id: 'q_1', at: '2026-10-13T11:00:00.000Z', by: 'acct-owner', acked_at: null, comment_ids: [], question: 'What ships first?', selection: 'Billing ships first', recipient: { provider: 'local', device: 'testbox', cli: 'claude', agent_sub: 'testbox_claude' }, url: 'https://tdoc.dev/d/their-doc' }]; return send(200, { ok: true }); }
       if ((q.headers.authorization || '') !== 'Bearer tok-1') return send(401, { error: 'unauthorized' });
       if (u.pathname === '/api/notify/local/register') return send(200, { ok: true, device: json.device, added: 1, targets: [] });
       if (u.pathname === '/api/notify/local/pending') return send(200, { ok: true, account_ids: ['acct-owner'], pending: pending.filter((h) => !u.searchParams.get('device') || h.recipient.device === u.searchParams.get('device')) });
@@ -140,6 +145,9 @@ const stub = startStub(`(() => {
       if (u.pathname === '/api/notify/resolve') { pending = pending.filter((h) => h.handoff_id !== json.handoff_id); return send(200, { ok: true, resolved: 2, of: 2 }); }
       if (u.pathname === '/api/notify/local/fail') { pending = pending.filter((h) => h.handoff_id !== json.handoff_id); return send(200, { ok: true }); }
       if (u.pathname === '/api/agent/reply') return send(200, { ok: true, id: 'r_1', author: { kind: 'agent', login: json.agent_login } });
+      if (u.pathname === '/api/agent/ask-ack') return send(200, { ok: true, ask_id: json.ask_id });
+      if (u.pathname === '/api/agent/ask-reply') return send(200, { ok: true, ask_id: json.ask_id });
+      if (u.pathname === '/api/agent/ask-done') { pending = pending.filter((h) => h.ask_id !== json.ask_id); return send(200, { ok: true, answered: true }); }
       send(404, { error: 'not_found' });
     });
   };
@@ -155,7 +163,11 @@ printf '%s\\n' "$@" > "$RECORD/args.txt"
 pwd > "$RECORD/cwd.txt"
 env | grep -E '^TDOC_' | sort > "$RECORD/env.txt"
 cat > "$RECORD/prompt.txt"
-bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug q3-plan --parent c_a --text "tightened" --status applied --login claude >/dev/null
+if [ "\${FAKE_ASK:-0}" = 1 ]; then
+  bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug their-doc --ask q_1 --text "Billing ships first." --login claude >/dev/null
+else
+  bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug q3-plan --parent c_a --text "tightened" --status applied --login claude >/dev/null
+fi
 if [ "\${FAKE_FAIL:-0}" = 1 ]; then echo "simulated failure" >&2; exit 1; fi
 echo "all done"
 `);
@@ -268,6 +280,22 @@ try {
     state = JSON.parse(fs.readFileSync(path.join(DAEMON_DIR, 'state.json'), 'utf8'));
     assert(!state.attempts.h_2, 'reported, so the counter is cleared');
     assert(!stubLog().some((c) => c.path === '/api/notify/resolve' && c.body.handoff_id === 'h_2'), 'a failed run is never resolved');
+  });
+
+  t('a reader question: ask-ack → the CLI answers privately with --ask → ask-done; nothing is edited or resolved', () => {
+    execFileSync('curl', ['-sS', '--max-time', '5', '-X', 'POST', `${stub.base}/__ask`]);
+    const before = stubLog().length;
+    const r = daemon(['once', '--cli', 'claude', '--device', 'testbox'], { FAKE_ASK: '1' });
+    assert(r.status === 0, `exit ${r.status}: ${r.stderr}`);
+    const calls = stubLog().slice(before).filter((c) => c.path.startsWith('/api/')).map((c) => c.path);
+    const want = ['/api/notify/local/register', '/api/notify/local/pending', '/api/agent/ask-ack', '/api/agent/ask-reply', '/api/agent/ask-done'];
+    assert(JSON.stringify(calls) === JSON.stringify(want), `calls: ${calls.join(' → ')}`);
+    const reply = stubLog().find((c) => c.path === '/api/agent/ask-reply');
+    assert(reply.body.ask_id === 'q_1' && reply.body.slug === 'their-doc' && reply.body.text === 'Billing ships first.' && !('parent_id' in reply.body), JSON.stringify(reply.body));
+    const prompt = fs.readFileSync(path.join(RECORD, 'prompt.txt'), 'utf8');
+    assert(prompt.startsWith('Read https://tdoc.dev/d/their-doc and answer: What ships first?'), prompt.split('\n')[0]);
+    assert(/Billing ships first/.test(prompt) && /--ask q_1/.test(prompt) && /Do not edit, publish or comment/.test(prompt) && /UNTRUSTED/.test(prompt), prompt);
+    assert(/run q_1 on their-doc with claude \(a question/.test(r.stdout), r.stdout);
   });
 
   t('a revoked token stops the daemon with a sign-in hint, not a stack trace', () => {

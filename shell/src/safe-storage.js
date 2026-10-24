@@ -34,3 +34,12 @@ export function writeStored(key, value) {
     return false;
   }
 }
+
+export function removeStored(key) {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}

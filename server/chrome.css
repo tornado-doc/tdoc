@@ -1064,11 +1064,15 @@
   .tdoc-bar .tdoc-ask-action { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--td-ink, #1a1a1a); font: 500 13px/1 system-ui, -apple-system, sans-serif; cursor: pointer; flex-shrink: 0; }
   .tdoc-bar .tdoc-ask-action:hover { background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); }
   @media (max-width: 700px) { .tdoc-bar .tdoc-ask-action { display: none; } }
+  /* Send to my agent: its words fold before the doc's title does; the icon
+     keeps the label as its name and tooltip. On a phone it is in ⋯. */
+  @media (max-width: 960px) { .tdoc-bar .tdoc-my-agent-action span { display: none; } .tdoc-bar .tdoc-my-agent-action { padding: 0 8px; } }
   .tdoc-ask-panel .tdoc-ask-form { display: flex; flex-direction: column; gap: 8px; }
   .tdoc-modal textarea.tdoc-ask-input { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 64px; background: #fff; }
   .tdoc-modal textarea.tdoc-ask-input:focus { outline: none; border-color: var(--td-accent); }
   .tdoc-ask-panel .tdoc-ask-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .tdoc-ask-panel .tdoc-ask-remaining { font-size: 12px; color: #777; min-width: 0; }
+  .tdoc-ask-panel .tdoc-ask-row button { flex: none; white-space: nowrap; }
   .tdoc-ask-panel .tdoc-ask-focus { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; color: #555; background: #f5f6f8; border-radius: 6px; padding: 6px 8px; }
   .tdoc-ask-panel .tdoc-ask-focus q { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-style: italic; }
   .tdoc-ask-panel .tdoc-ask-focus-label { font-weight: 600; color: #777; flex: none; }
@@ -1085,6 +1089,20 @@
   .tdoc-ask-panel p.tdoc-ask-limit { margin: 0; }
   .tdoc-ask-panel p.tdoc-ask-limit a.tdoc-ask-connect { font-size: 13px; color: #444; }
   .tdoc-ask-panel p.tdoc-ask-error { margin: 0; font-size: 13px; color: var(--td-danger, #c33); }
+  /* Send to my agent / Copy for my agent: the same panel, one status line
+     per question and the line to paste. */
+  .tdoc-ask-panel .tdoc-ask-result .tdoc-ask-focus { margin: 0 0 8px; }
+  .tdoc-ask-panel p.tdoc-ask-status { margin: 0 0 8px; font-size: 12.5px; color: #666; }
+  .tdoc-ask-panel p.tdoc-ask-status.is-failed { color: var(--td-danger, #c33); }
+  .tdoc-ask-panel pre.tdoc-ask-line { margin: 0 0 8px; padding: 8px 10px; border-radius: 6px; background: #f5f6f8; color: #222; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* One look for the three: the panel's question box is the comment
+     composer's (accent border, same quote chip), light instead of dark. */
+  .tdoc-modal textarea.tdoc-ask-input { border-color: var(--td-accent, #1652f0); }
+  /* Comment / Ask AI / Send to my agent in the selection popover: the three
+     buttons keep one row, the shortcut hint drops under them. */
+  .tdoc-popup .foot.has-ask .hint { order: 2; flex-basis: 100%; text-align: right; }
+  .tdoc-popup .foot.has-ask .tdoc-composer-foot-actions { margin-left: auto; gap: 6px; }
+  .tdoc-popup .foot.has-ask .submit { padding: 6px 10px; white-space: nowrap; }
 
   /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
   .tdoc-bar .tdoc-send-agent-action {
