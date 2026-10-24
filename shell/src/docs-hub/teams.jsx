@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { DatabaseBackup, Link2, MessageSquareText, RefreshCw, SlidersHorizontal, UsersRound } from 'lucide-react';
+import { Bot, DatabaseBackup, Link2, MessageSquareText, RefreshCw, ServerCog, SlidersHorizontal, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppSelect } from '../ui/select.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { copyText } from '../document/model.js';
 import {
+  addTeamAgent,
   createTeam,
   getTeamBackup,
   getTeamBilling,
   getTeam,
+  listTeamAgents,
   listTeamComments,
   moveFolderToTeam,
   openTeamBilling,
+  removeTeamAgent,
   removeTeamBackup,
   removeTeamMember,
   saveTeamBackup,
@@ -36,6 +40,8 @@ const ERRORS = {
   billing_unavailable: 'Billing is not set up on this deployment.',
   already_subscribed: 'This team already has the Team plan. Use Manage billing.',
   no_billing_customer: 'There is no billing account yet. Upgrade first.',
+  team_agent_limit: 'This team has the most agents it can have. Remove one first.',
+  name_taken: 'This team already has an agent by that name.',
 };
 const message = (error) => ERRORS[error?.body?.error] || error?.message || 'Request failed';
 
@@ -714,6 +720,150 @@ export function TeamBillingCard({ team }) {
   );
 }
 
+function seenText(iso) {
+  const ms = Date.now() - Date.parse(iso || '');
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const min = Math.round(ms / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+}
+
+// Team agents: agents that belong to the team, not to a person. Every member
+// can send them comments on team docs; admins add and remove them. Adding
+// gives one command for a dedicated machine; nothing personal should be on
+// it, because every member's comments drive it.
+function TeamAgentRow({ agent, team, canManage, onRemove }) {
+  const devices = agent.devices || [];
+  const sub = !agent.connected
+    ? 'Waiting for its machine to run the setup command'
+    : devices.length
+      ? devices.map((d) => `${d.device} · seen ${seenText(d.last_seen)}`).join(', ')
+      : 'Connected; its daemon has not checked in yet';
+  return (
+    <div className="tm-person tm-agent-row">
+      <span className="tdoc-avatar-fallback tm-agent-mark" aria-hidden="true"><Bot size={15} /></span>
+      <div className="tm-person-text">
+        <span><b>{agent.name}</b> · {team.name} team agent</span>
+        <span className="tm-person-sub">{sub}</span>
+      </div>
+      <div className="tm-person-right">
+        {canManage ? <button type="button" className="tm-text-btn" onClick={() => onRemove(agent)}>Remove</button> : null}
+      </div>
+    </div>
+  );
+}
+
+function AddTeamAgentDialog({ team, onClose, onAdded }) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+  const [added, setAdded] = useState(null);
+  const add = async () => {
+    setBusy(true);
+    setStatus('');
+    try {
+      const result = await addTeamAgent(team.id, name.trim());
+      setAdded(result);
+      onAdded(result.agents);
+    } catch (error) { setStatus(message(error)); }
+    setBusy(false);
+  };
+  return (
+    <AppDialog
+      open
+      onOpenChange={(open) => { if (!open && !busy) onClose(); }}
+      title={added ? `Connect ${added.agent.name}` : 'Add team agent'}
+      actions={added ? <button type="button" className="primary" onClick={onClose}>Done</button> : (
+        <>
+          <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className="primary" onClick={add} disabled={busy || !name.trim()}>{busy ? 'Adding…' : 'Add'}</button>
+        </>
+      )}
+    >
+      <div className="tm-agent-add">
+        <p className="tm-agent-warn">
+          <ServerCog size={18} aria-hidden="true" />
+          <span><b>Run it on a dedicated machine or container, with no personal data on it.</b> Every member of {team.name} can send it comments, so many people&apos;s words drive what it does on that machine.</span>
+        </p>
+        {added ? (
+          <>
+            <p>Run this once on that machine. It installs tdoc if needed, connects as <b>{added.agent.name} · {team.name} team agent</b>, and starts picking up comments. It works once, within the hour.</p>
+            <div className="tm-agent-command">
+              <code>{added.command}</code>
+              <CopyPromptButton text={added.command} />
+            </div>
+            <p className="manage-hint">It reaches {team.name}&apos;s docs and nothing else: no one&apos;s personal docs, no other team. It cannot share, delete, invite or change billing. It belongs to the team, so it keeps working if you leave; remove it here to stop it.</p>
+          </>
+        ) : (
+          <>
+            <label className="field">Name<input type="text" maxLength={40} placeholder="e.g. report-bot" value={name} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) add(); }} /></label>
+            <p className="manage-hint">Shown on its replies as “{name.trim() || 'name'} · {team.name} team agent”.</p>
+          </>
+        )}
+        {status ? <p className="status" role="status">{status}</p> : null}
+      </div>
+    </AppDialog>
+  );
+}
+
+export function TeamAgentsSection({ team }) {
+  const [agents, setAgents] = useState(null);
+  const [canManage, setCanManage] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState(null);
+  const [status, setStatus] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    listTeamAgents(team.id).then((result) => {
+      if (cancelled) return;
+      setAgents(result.agents || []);
+      setCanManage(!!result.can_manage);
+    }).catch((error) => { if (!cancelled) { setAgents([]); setStatus(message(error)); } });
+    return () => { cancelled = true; };
+  }, [team.id]);
+  const remove = async () => {
+    const agent = removing;
+    setStatus('Removing…');
+    try {
+      const result = await removeTeamAgent(team.id, agent.id);
+      setAgents(result.agents || []);
+      setStatus(`${agent.name} removed. Its machine can no longer reach ${team.name}.`);
+    } catch (error) { setStatus(message(error)); }
+    setRemoving(null);
+  };
+  return (
+    <section className="manage-section tm-team-agents" aria-labelledby="tm-team-agents-heading">
+      <div className="tm-team-agents-head">
+        <label className="field" id="tm-team-agents-heading">Team agents</label>
+        {canManage ? <button type="button" className="tm-link-btn" onClick={() => setAdding(true)}><Bot size={14} /> Add team agent</button> : null}
+      </div>
+      {agents === null ? <p className="muted">Loading…</p> : agents.length ? agents.map((agent) => (
+        <TeamAgentRow key={agent.id} agent={agent} team={team} canManage={canManage} onRemove={setRemoving} />
+      )) : <p className="empty">No team agent yet.{canManage ? '' : ' A team admin can add one.'}</p>}
+      <p className="manage-hint">Every member can send a comment on a {team.name} doc to a team agent; its replies are visible to everyone who can see the doc. It belongs to the team, not to whoever added it.</p>
+      {status ? <p className="status" role="status">{status}</p> : null}
+      {adding ? <AddTeamAgentDialog team={team} onClose={() => setAdding(false)} onAdded={setAgents} /> : null}
+      {removing ? (
+        <AppDialog
+          open
+          onOpenChange={(open) => { if (!open) setRemoving(null); }}
+          title={`Remove ${removing.name}?`}
+          actions={(
+            <>
+              <button type="button" onClick={() => setRemoving(null)}>Cancel</button>
+              <button type="button" className="danger" onClick={remove}>Remove</button>
+            </>
+          )}
+        >
+          <p>Its token stops working right away and comments can no longer be sent to it. Its past replies stay.</p>
+        </AppDialog>
+      ) : null}
+    </section>
+  );
+}
+
 export function TeamSettingsPane({ team, onChanged, onLeave }) {
   return (
     <section className="tm-settings" aria-label={`${team.name} workspace settings`}>
@@ -724,10 +874,14 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
       {team.role === 'admin' ? <TeamBillingCard team={team} /> : null}
       <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} />
       <section className="tm-settings-card" id="agents">
-        <div className="tm-settings-head"><div><h2>Agents</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
-        {team.role === 'admin'
-          ? <ConnectorsBody team={team} returnTo={`/me?team=${encodeURIComponent(team.id)}&view=settings#agents`} />
-          : <p className="empty">Only a workspace admin can connect agents and send team comments to them.</p>}
+        <div className="tm-settings-head"><div><h2>Agents</h2><p>Team agents work for everyone in this workspace. Admins can also use their own connected agents here.</p></div></div>
+        <TeamAgentsSection team={team} />
+        {team.role === 'admin' ? (
+          <section className="manage-section">
+            <label className="field">Your own agents</label>
+            <ConnectorsBody team={team} returnTo={`/me?team=${encodeURIComponent(team.id)}&view=settings#agents`} />
+          </section>
+        ) : null}
       </section>
       {team.role === 'admin' ? <TeamBackupDialog team={team} inline /> : null}
     </section>

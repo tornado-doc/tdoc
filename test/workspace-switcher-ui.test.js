@@ -146,7 +146,10 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       const member = await open(1280, '?team=tm_lab');
       await member.getByRole('tab', { name: 'Settings' }).click();
       assert.equal(await member.getByRole('heading', { name: 'Data backup' }).count(), 0);
-      assert.match(await member.locator('#agents').textContent(), /Only a workspace admin can connect agents/);
+      // A member sees the team's agents, and not the admin's own connectors.
+      const memberAgents = await member.locator('#agents').textContent();
+      assert.match(memberAgents, /Team agents/);
+      assert.doesNotMatch(memberAgents, /Your own agents|Add a connector/);
       await member.close();
     });
     await t('personal Settings has one Agents area for Raft and local setup', async () => {

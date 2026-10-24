@@ -80,7 +80,6 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       ['/api/team/move', { method: 'POST', body: { team: abby.id, slugs: ['befreed-report'] } }],
       ['/api/team/move', { method: 'POST', body: { team: null, slugs: ['befreed-report'] } }],
       ['/api/me/tokens', {}],
-      ['/api/notify/local/pending', {}],
       ['/api/hosted/token/scoped', { method: 'POST', body: { team: abby.id } }],
     ];
     for (const [path, opts] of checks) {

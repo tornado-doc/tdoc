@@ -25,6 +25,7 @@ export { providerMeta, readableHandle };
 // What the reader needs: where this goes (provider), not which UUID. Handle is
 // secondary detail when we have a readable one.
 function recipientPrimary(t) {
+  if (t && t.team_agent) return 'Send to team agent';
   const { label } = providerMeta(t);
   return readableHandle(t)
     ? `Send to ${label}`
@@ -64,6 +65,7 @@ export function localSeenText(t) {
 
 // "smarter-tdoc-claw", or "your Raft agent" when the handle is unreadable.
 function agentLabel(t) {
+  if (t && t.team_agent && t.team_agent.name) return t.team_agent.name;
   return readableHandle(t) || `your ${providerMeta(t).label} agent`;
 }
 
@@ -494,7 +496,7 @@ function TeamDaemonView({ reason, onClose }) {
     <AppDialog
       open
       onOpenChange={(next) => { if (!next) onClose(); }}
-      title={admin ? 'Set up an always-on agent' : 'A team admin sends this'}
+      title={admin ? 'Set up an always-on agent' : reason === 'no_team_agent' ? 'No team agent yet' : 'A team admin sends this'}
       actions={<button type="button" onClick={onClose}>Close</button>}
     >
       {admin ? (
@@ -507,7 +509,9 @@ function TeamDaemonView({ reason, onClose }) {
           </details>
           <p className="manage-hint">You can also set it up under Workspace Settings → Always-on agent.</p>
         </>
-      ) : <p>For safety, only a workspace admin can run an agent on their computer from a team document.</p>}
+      ) : reason === 'no_team_agent'
+        ? <p>This team has no agent to send comments to. A team admin can add one in the team&apos;s settings, under Agents; then every member can send it comments from team docs.</p>
+        : <p>For safety, only a workspace admin can run an agent on their computer from a team document.</p>}
     </AppDialog>
   );
 }
@@ -641,7 +645,7 @@ export function NotifyHandoffPanel({
   // of a Send button that cannot go anywhere. A connected server whose Raft
   // directory lists agents is not this case: those are offered below.
   const refreshAll = async () => { await targets.refresh(); if (onTargetsChanged) await onTargetsChanged(); };
-  if (open && targets.ready && targets.available && (targets.reason === 'team_admin_only' || targets.reason === 'no_team_daemon')) {
+  if (open && targets.ready && targets.available && (targets.reason === 'team_admin_only' || targets.reason === 'no_team_daemon' || targets.reason === 'no_team_agent')) {
     return <TeamDaemonView reason={targets.reason} onClose={onClose} />;
   }
   if (open && targets.ready && targets.available && !choices.length) {
@@ -668,7 +672,7 @@ export function NotifyHandoffPanel({
       description={unavailable
         ? 'Notify is not available on this host yet.'
         : ids.length
-          ? `${ids.length === 1 ? '1 comment' : `${ids.length} comments`} for your agent to fix. It replies on each one here.`
+          ? `${ids.length === 1 ? '1 comment' : `${ids.length} comments`} for ${chosen && chosen.team_agent ? 'the team agent' : 'your agent'} to fix. It replies on each one here.`
           : lastIds.length
             ? `No new comments. The last ${lastIds.length === 1 ? 'one' : `${lastIds.length}`} went to ${agentLabel(last.recipient)}${sinceText(last.at) ? ` ${sinceText(last.at)}` : ''}.`
             : 'No new comments to send.'}

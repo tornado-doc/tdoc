@@ -274,8 +274,13 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       const r = await call(env, `/api/agent/${route}`, { method: 'POST', token: scoped, body: { slug: 'plan', ask_id: ask.ask_id, text: 'x' } });
       assert(r.status === 403 && r.body.error === 'token_scope', `${route}: ${r.status} ${JSON.stringify(r.body)}`);
     }
+    // A scoped token may poll its own queue (a team agent's daemon does), but
+    // a question on a doc outside its workspaces is not on it, and stays
+    // queued for the account's wider token.
     const poll = await call(env, '/api/notify/local/pending?device=readerbox', { token: scoped });
-    assert(poll.status === 403, `pending with a scoped token: ${poll.status}`);
+    assert(poll.status === 200 && !poll.body.pending.length, `pending with a scoped token: ${poll.status} ${JSON.stringify(poll.body)}`);
+    const wide = await call(env, '/api/notify/local/pending?device=readerbox', { token: reader.token });
+    assert(wide.body.pending.some((h) => h.ask_id === ask.ask_id), `the scoped poll dropped it: ${JSON.stringify(wide.body)}`);
     assert(!(await state(env, reader)).body.asks[0].answer, 'answered through a scoped token');
   });
 

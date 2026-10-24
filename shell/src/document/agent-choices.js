@@ -74,6 +74,8 @@ export function agentProgram(t) {
 // own: "claude on juliesmac" is the program and the computer.
 export function agentName(t) {
   if (!t) return '';
+  // A team agent goes by the name its admin gave it, on its rows and replies.
+  if (t.team_agent && t.team_agent.name) return String(t.team_agent.name);
   if (t.kind === 'agent') {
     const handle = String(t.handle || '').replace(/^@/, '').trim();
     if (handle) return handle;
