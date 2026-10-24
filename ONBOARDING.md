@@ -1,6 +1,6 @@
 # Onboarding tdoc
 
-> **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. Execute every step in order, ask the user for confirmation on browser-side actions, and re-probe state with `bin/tdoc-doctor --json` after each step.
+> **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. For new tdoc.dev users, follow Default web onboarding below. Use the manual appendix only when requested; its portrait recipe is optional. Ask for confirmation on browser-side actions and re-probe state with `bin/tdoc-doctor --json` when using that manual path.
 
 ## Default web onboarding — connect the computer
 

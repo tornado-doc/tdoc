@@ -82,22 +82,27 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     await setup({}, { ...deps, install(clis) { assert.deepEqual(clis, ['codex']); } });
     assert.deepEqual(readSetup().clis, ['codex']);
   });
-  await test('managed macOS service uses the verified runtime and uninstall preserves user data', async () => {
-    if (process.platform !== 'darwin') return;
+  await test('managed user service uses the verified runtime and uninstall preserves user data', async () => {
+    if (!['darwin', 'linux'].includes(process.platform)) return;
     const { spawnSync } = require('child_process');
     const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-service-'));
     const fakeBin = path.join(sandbox, 'bin'); fs.mkdirSync(fakeBin);
     const calls = path.join(sandbox, 'calls');
-    fs.writeFileSync(path.join(fakeBin, 'launchctl'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TDOC_TEST_CALLS"\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(fakeBin, process.platform === 'darwin' ? 'launchctl' : 'systemctl'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TDOC_TEST_CALLS"\n', { mode: 0o755 });
     const modulePath = path.resolve(__dirname, '../bin/lib/daemon-setup.js');
     const envVars = { ...process.env, HOME: sandbox, TDOC_DAEMON_DIR: path.join(sandbox, '.tdoc/daemon'), TDOC_SKILL_DIR: path.resolve(__dirname, '..'), TDOC_TEST_CALLS: calls, PATH: fakeBin + path.delimiter + process.env.PATH };
     const run = (code) => { const r = spawnSync(process.execPath, ['-e', code], { env: envVars, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
     run(`require(${JSON.stringify(modulePath)}).installService(['codex'])`);
-    const plist = path.join(sandbox, 'Library/LaunchAgents/dev.tdoc.daemon.plist');
+    const plist = process.platform === 'darwin' ? path.join(sandbox, 'Library/LaunchAgents/dev.tdoc.daemon.plist') : path.join(sandbox, '.config/systemd/user/tdoc-daemon.service');
     const contents = fs.readFileSync(plist, 'utf8');
-    assert.ok(contents.includes(process.execPath)); assert.ok(contents.includes('<string>codex</string>'));
-    assert.ok(contents.includes('<key>KeepAlive</key><true/>'));
-    assert.match(fs.readFileSync(calls, 'utf8'), /bootout[\s\S]*bootstrap/);
+    assert.ok(contents.includes(process.execPath));
+    if (process.platform === 'darwin') {
+      assert.ok(contents.includes('<string>codex</string>')); assert.ok(contents.includes('<key>KeepAlive</key><true/>'));
+      assert.match(fs.readFileSync(calls, 'utf8'), /bootout[\s\S]*bootstrap/);
+    } else {
+      assert.ok(contents.includes('\"--cli\" \"codex\"')); assert.ok(contents.includes('Restart=on-failure'));
+      assert.match(fs.readFileSync(calls, 'utf8'), /stop[\s\S]*daemon-reload[\s\S]*enable --now/);
+    }
     const data = path.join(sandbox, '.tdoc/daemon/keep.txt'); fs.writeFileSync(data, 'preserve');
     run(`require(${JSON.stringify(modulePath)}).uninstall()`);
     assert.equal(fs.existsSync(plist), false); assert.equal(fs.readFileSync(data, 'utf8'), 'preserve');
