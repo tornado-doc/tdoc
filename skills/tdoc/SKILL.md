@@ -51,9 +51,10 @@ write one doc whose pages are `<section data-tdoc-slide>` elements, each a
 16:9 card (`aspect-ratio:16/9`). The reader shows a **Present** button for such
 docs: one slide at a time, full screen, arrow keys or swipe to move, Esc to
 leave. Every slide stays commentable like any other block. Size slide text
-from the card (`container-type:inline-size` and `cqw` units) so a slide reads
-the same on a phone. Structure: `$SKILL_DIR/authoring/structure/components.md`
-(Slide).
+from the card (`container-type:inline-size` and `cqw` units, each with a `px`
+floor) and let it reflow on a phone. **Before writing a deck, read
+`$SKILL_DIR/authoring/structure/slides.md`**: the frame, design rules, layouts,
+and the 1280px + 390px check before publishing.
 
 ### Existing documents and comment handoff
 
