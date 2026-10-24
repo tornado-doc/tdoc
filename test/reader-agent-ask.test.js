@@ -279,7 +279,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(!(await state(env, reader)).body.asks[0].answer, 'answered through a scoped token');
   });
 
-  await t("deleting the doc deletes readers' questions and its handoffs; the slug starts clean", async () => {
+  await t("deleting the doc for good deletes readers' questions and its handoffs; the slug starts clean", async () => {
     const { env, owner, reader } = await seed();
     await register(env, reader.token, 'readerbox');
     await send(env, reader, { question: 'q' });
@@ -287,6 +287,10 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     await env.META.put('agent-asks:plan-two:x', '[]');
     const del = await call(env, '/api/doc?slug=plan', { method: 'DELETE', token: owner.token });
     assert(del.status === 200, `delete ${del.status} ${JSON.stringify(del.body)}`);
+    // Delete moves it to Trash, which keeps them for a restore; Delete forever erases.
+    assert(env.META.map.has('handoffs:plan'), 'Trash dropped the handoffs a restore would bring back');
+    const purge = await call(env, '/api/trash/purge', { method: 'POST', token: owner.token, body: { slug: 'plan' } });
+    assert(purge.status === 200, `purge ${purge.status} ${JSON.stringify(purge.body)}`);
     const left = [...env.META.map.keys()].filter((k) => k.startsWith('agent-asks:plan:') || k === 'handoffs:plan');
     assert(left.length === 0, `left behind: ${left}`);
     assert(env.META.map.has('agent-asks:plan-two:x'), 'another doc with a longer slug lost its questions');
