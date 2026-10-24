@@ -249,7 +249,7 @@ const SAME = { Origin: 'https://tdoc.dev' };
     const sub = (await call('/api/folders', { method: 'POST', token: alice.token, body: { name: 'Drafts', parent: top.id } })).body.folder;
     await call('/api/folders/move', { method: 'POST', token: alice.token, body: { folder: top.id, slugs: ['f-one'] } });
     await call('/api/folders/move', { method: 'POST', token: alice.token, body: { folder: sub.id, slugs: ['f-two'] } });
-    const del = await call(`/api/folders?id=${top.id}`, { method: 'DELETE', token: alice.token });
+    const del = await call(`/api/folders?batch=1&id=${top.id}`, { method: 'DELETE', token: alice.token });
     assert(del.status === 200 && del.body.docs.sort().join() === 'f-one,f-two', `${del.status} ${del.text}`);
     for (const slug of ['f-one', 'f-two']) assert((await call(`/d/${slug}/raw`)).status === 404, `${slug} still readable`);
     assert((await call('/d/f-keep/raw')).status === 200, 'a doc outside the folder went too');
@@ -261,7 +261,7 @@ const SAME = { Origin: 'https://tdoc.dev' };
     assert(me.docs.find((d) => d.slug === 'f-one').folder === top.id && me.docs.find((d) => d.slug === 'f-two').folder === sub.id, 'docs back in their folders');
     assert(me.folders.some((f) => f.id === sub.id && f.parent === top.id), 'subfolder back under its parent');
     // And Delete forever on a folder erases its docs.
-    await call(`/api/folders?id=${top.id}`, { method: 'DELETE', token: alice.token });
+    await call(`/api/folders?batch=1&id=${top.id}`, { method: 'DELETE', token: alice.token });
     const gone = await call('/api/trash/purge', { method: 'POST', token: alice.token, body: { folder: top.id } });
     assert(gone.status === 200 && gone.body.purged.length === 2, `${gone.status} ${gone.text}`);
     assert(!(await env.META.get('meta:f-one')) && !(await env.META.get('meta:f-two')), 'folder purge left docs');
@@ -272,7 +272,7 @@ const SAME = { Origin: 'https://tdoc.dev' };
     assert((await publish(alice, 'old-one')).status === 200, 'publish');
     const box = (await call('/api/folders', { method: 'POST', token: alice.token, body: { name: 'Old' } })).body.folder;
     await call('/api/folders/move', { method: 'POST', token: alice.token, body: { folder: box.id, slugs: ['old-one'] } });
-    await call(`/api/folders?id=${box.id}`, { method: 'DELETE', token: alice.token });
+    await call(`/api/folders?batch=1&id=${box.id}`, { method: 'DELETE', token: alice.token });
     await cron(Date.now() + 31 * DAY);
     assert(!(await env.META.get('meta:old-one')), 'doc not purged');
     assert(![...env.META.map.keys()].some((k) => k.startsWith('trashfolder:')), 'folder entry not purged');
@@ -290,7 +290,7 @@ const SAME = { Origin: 'https://tdoc.dev' };
   const acmeBot = await scoped('Acme');
   const otherBot = await scoped('Other');
 
-  await t('a team doc: only admins delete it, see it in the team Trash and restore it', async () => {
+  await t('a team doc: only admins delete it or erase it; its author still sees it in the team Trash', async () => {
     const byMember = await call('/api/doc?slug=team-plan', { method: 'DELETE', token: bob.token });
     assert(byMember.status === 403, `a member deleted a team doc: ${byMember.status}`);
     assert((await call('/api/doc?slug=team-plan', { method: 'DELETE', token: alice.token })).status === 200, 'admin delete');
@@ -300,10 +300,14 @@ const SAME = { Origin: 'https://tdoc.dev' };
     const adminTrash = await call(`/api/trash?team=${team.id}`, { cookie: alice.cookie });
     assert(adminTrash.body.items.some((x) => x.slug === 'team-plan'), 'admin team Trash');
     assert(!(await call('/api/trash', { cookie: alice.cookie })).body.items.some((x) => x.slug === 'team-plan'), 'a team doc in My docs Trash');
-    assert(!(await call(`/api/trash?team=${team.id}`, { cookie: bob.cookie })).body.items.length, 'a member sees the team Trash');
+    // Bob wrote it and is still on the team: he sees it and may bring it
+    // back, but erasing it is an admin's call.
+    const authorView = (await call(`/api/trash?team=${team.id}`, { cookie: bob.cookie })).body.items;
+    assert(authorView.length === 1 && authorView[0].slug === 'team-plan' && authorView[0].can_purge === false, `author's team Trash ${JSON.stringify(authorView)}`);
+    assert((await call(`/api/trash?team=${team.id}`, { cookie: alice.cookie })).body.items.find((x) => x.slug === 'team-plan').can_purge === true, 'admin can purge');
     assert(!(await call('/api/trash', { cookie: bob.cookie })).body.items.some((x) => x.slug === 'team-plan'), "the author's My docs Trash");
-    const memberRestore = await call('/api/trash/restore', { method: 'POST', token: bob.token, body: { slug: 'team-plan' } });
-    assert(memberRestore.status === 403, `a member restored it: ${memberRestore.status}`);
+    const memberPurge = await call('/api/trash/purge', { method: 'POST', token: bob.token, body: { slug: 'team-plan' } });
+    assert(memberPurge.status === 403 && await env.META.get('meta:team-plan'), `the author erased a team doc: ${memberPurge.status}`);
     assert((await call(`/api/trash?team=${team.id}`, { cookie: carol.cookie })).status === 404, 'an outsider reads the team Trash');
   });
 

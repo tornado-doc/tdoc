@@ -233,12 +233,17 @@ export function restoreFromTrash(target) {
   });
 }
 
-export function deleteForever(target) {
-  return request('/api/trash/purge', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(target),
-  });
+// A folder is erased a batch per request, like its delete.
+export async function deleteForever(target) {
+  for (let round = 0; round < 200; round += 1) {
+    const body = await request('/api/trash/purge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(target),
+    });
+    if (!body || !body.remaining) return body;
+  }
+  throw new Error('Still deleting. Try again.');
 }
 
 export function listNotifications(offset = 0) {
@@ -412,9 +417,19 @@ export function updateFolderAccess(id, { visibility, allowed_users, share } = {}
   });
 }
 
-export function deleteFolder(id, team) {
-  const query = new URLSearchParams(team ? { id, team } : { id });
-  return request(`/api/folders?${query}`, { method: 'DELETE' });
+// A folder goes to Trash with its docs a batch per request; this keeps
+// asking until the server says nothing remains, and returns every doc taken.
+export async function deleteFolder(id, team) {
+  const docs = [];
+  let after = '';
+  for (let round = 0; round < 200; round += 1) {
+    const query = new URLSearchParams({ id, batch: '1', ...(team ? { team } : {}), ...(after ? { after } : {}) });
+    const body = await request(`/api/folders?${query}`, { method: 'DELETE' });
+    docs.push(...((body && body.docs) || []));
+    if (!body || !body.remaining) return { ...body, docs };
+    after = body.after || '';
+  }
+  throw new Error('The folder is still being moved to Trash. Try again.');
 }
 
 function teamRequest(path, method, body) {

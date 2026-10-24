@@ -846,6 +846,7 @@ restore it first, never pick a new slug to get around it without asking.
 bash "$SKILL_DIR/bin/tdoc-unpublish" <slug>
 bash "$SKILL_DIR/bin/tdoc-restore" <slug>      # bring it back out of Trash
 bash "$SKILL_DIR/bin/tdoc-restore" --list      # what is in Trash, days left
+bash "$SKILL_DIR/bin/tdoc-unpublish" <slug> --forever   # erase now (frees the slug); only when the user asks
 ```
 
 ### `/tdoc onboard` — guided first-time setup

@@ -119,7 +119,8 @@ export function TrashPane({ team, notify, onChanged, onFailed }) {
                 </button>
                 <RowMenu
                   label={`More actions for ${item.title}`}
-                  items={[{
+                  // A team doc's author may restore it; erasing it is an admin's call.
+                  items={item.can_purge === false ? [] : [{
                     label: 'Delete forever',
                     tone: 'danger',
                     className: 'trash-purge',

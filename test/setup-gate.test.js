@@ -766,7 +766,7 @@ t('replay is new again, not just a blank record', () => {
   assert(worker.includes('meta.hosted.account_id === accountId'), 'and only one this account owns');
   // The product already knows how to delete a doc. A second, thinner version
   // is how one of them ends up leaving the DO populated.
-  assert(worker.includes('async function deleteDocEverywhere(env, slug) {')
+  assert(worker.includes('async function deleteDocEverywhere(env, slug')
     && (worker.match(/deleteDocEverywhere\(env, /g) || []).length >= 2,
     'both callers delete a doc the same way');
   // The dismissals live in the browser. Every key here is somebody saying

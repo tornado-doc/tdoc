@@ -38,7 +38,7 @@ const purgeHelper = block('async function purgeTrashedDoc(env, slug) {', '// Who
 // deletes a doc too and a second, thinner copy is how one of them ends up
 // leaving the DO populated. The order still matters, so the order is still
 // pinned -- just where it is written.
-const deleteBody = block('async function deleteDocEverywhere(env, slug) {', 'async function loadDocMeta');
+const deleteBody = block('async function deleteDocEverywhere(env, slug', 'async function loadDocMeta');
 const wipeRoute = block("url.searchParams.get('all') === '1'", '// Soft-delete:');
 const agentReplyRoute = block("if (p === '/api/agent/reply' && method === 'POST')", '// ---- admin upload');
 const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env, slug) {');

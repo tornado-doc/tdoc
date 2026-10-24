@@ -305,7 +305,7 @@ function bootData(html, name) {
     const bogus = await worker.fetch(req('/api/folders/move', { method: 'POST', cookie, body: { slugs: ['my-doc'], folder: 'f_nope' } }), env, {});
     assert(bogus.status === 404, `move to unknown folder should 404, got ${bogus.status}`);
 
-    const del = await worker.fetch(req('/api/folders?id=' + folder.id, { method: 'DELETE', cookie }), env, {});
+    const del = await worker.fetch(req('/api/folders?batch=1&id=' + folder.id, { method: 'DELETE', cookie }), env, {});
     assert(del.status === 200, `delete folder ${del.status}`);
     assert((await del.clone().json()).docs.includes('my-doc'), 'the folder must take its doc to Trash');
     boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
@@ -320,7 +320,7 @@ function bootData(html, name) {
     assert(boot.folders.some((item) => item.id === folder.id && item.name === 'Work'), 'restore must bring the folder back');
     assert(boot.docs.find((doc) => doc.slug === 'my-doc')?.folder === folder.id, 'and the doc back inside it ');
     // Leave alice's folder tree as the next case expects to find it: empty.
-    await worker.fetch(req('/api/folders?id=' + folder.id, { method: 'DELETE', cookie }), env, {});
+    await worker.fetch(req('/api/folders?batch=1&id=' + folder.id, { method: 'DELETE', cookie }), env, {});
   });
 
   await t('folders shelve only your own docs; rename works; state is per-login', async () => {
@@ -363,7 +363,7 @@ function bootData(html, name) {
     assert(e.status === 400 && e.body.error === 'too_deep', `depth 5 must be rejected, got ${e.status}`);
     const mv = await worker.fetch(req('/api/folders/move', { method: 'POST', cookie, body: { slugs: ['deep-doc'], folder: b.body.folder.id } }), env, {});
     assert(mv.status === 200, 'move into nested folder failed');
-    const del = await worker.fetch(req('/api/folders?id=' + b.body.folder.id, { method: 'DELETE', cookie }), env, {});
+    const del = await worker.fetch(req('/api/folders?batch=1&id=' + b.body.folder.id, { method: 'DELETE', cookie }), env, {});
     assert(del.status === 200, 'delete nested folder failed');
     let state = JSON.parse(await env.META.get('folders:alice'));
     assert(!state.docs['deep-doc'], 'the doc goes to Trash with its folder');

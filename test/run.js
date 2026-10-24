@@ -53,6 +53,7 @@ const OFFLINE = [
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
   'doc-index.test.js',          // per-owner/team doc index, invite index, one-pass frame bake + per-version cache (1102)
   'trash.test.js',              // Delete moves to Trash: gone on every path, restore, 30-day purge, folders, permissions
+  'trash-hardening.test.js',    // #815 review: resumable purge, restore quota, batched folder delete, bounded reads, write race, old CLIs, --forever
   'mention-directory.test.js',  // @ offers doc people, teammates, recent contacts first
   'publish-attribution.test.js', // author name + per-version publisher come from the credential
   'operator-fallback.test.js',  // TDOC_OWNER owns only ownerless docs, not email accounts' docs

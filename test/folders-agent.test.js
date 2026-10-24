@@ -152,9 +152,9 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(share.status === 403 && share.body.error === 'not_folder_owner', `member shared admin's folder ${share.status}`);
     const renamed = await call('/api/folders', { method: 'PATCH', token: amy.token, body: { id: parent.id, name: '日报', team: team.id } });
     assert(renamed.status === 200 && renamed.body.folder.name === '日报', `maker rename ${renamed.status}`);
-    const noDel = await call(`/api/folders?id=${child.id}&team=${team.id}`, { method: 'DELETE', token: amy.token });
+    const noDel = await call(`/api/folders?batch=1&id=${child.id}&team=${team.id}`, { method: 'DELETE', token: amy.token });
     assert(noDel.status === 403, `member deleted admin's folder ${noDel.status}`);
-    const del = await call(`/api/folders?id=${child.id}&team=${team.id}`, { method: 'DELETE', token: zed.token });
+    const del = await call(`/api/folders?batch=1&id=${child.id}&team=${team.id}`, { method: 'DELETE', token: zed.token });
     assert(del.status === 200 && del.body.docs.includes('team-daily'), `admin delete ${del.status} ${JSON.stringify(del.body)}`);
     let boot = bootData(await (await call('/me', { cookie: zed.cookie })).r.text(), '__TDOC_APP_BOOT__');
     assert(!boot.team_docs.some((d) => d.slug === 'team-daily'), 'a doc in Trash is still listed in the team');
@@ -225,7 +225,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     // Deleting the folder kills its link.
     const otherLink = (await call('/api/folders', { method: 'PATCH', token: zed.token, body: { id: other.id, visibility: 'unlisted', team: team.id } })).body.folder.share_id;
     assert(slugsOf(await shared(otherLink, zed)) === 'team-daily', 'other folder listing');
-    const del = await call(`/api/folders?id=${other.id}&team=${team.id}`, { method: 'DELETE', token: zed.token });
+    const del = await call(`/api/folders?batch=1&id=${other.id}&team=${team.id}`, { method: 'DELETE', token: zed.token });
     assert(del.status === 200, `delete ${del.status}`);
     assert(!(await env.META.get(`folder-share:${otherLink}`)), 'deleted folder\'s share index left behind');
     assert((await shared(otherLink, zed)).status === 404, 'deleted folder link still opens');

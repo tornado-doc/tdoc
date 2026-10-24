@@ -4,12 +4,22 @@
 # Trash for 30 days; tdoc-restore <slug> brings it back). The one command
 # behind the "Delete" button.
 #
-# Usage: tdoc-delete <slug> [--local-only|--published-only]
+# Usage: tdoc-delete <slug> [--local-only|--published-only] [--forever]
+#   --forever  erase the published copy now instead of moving it to Trash
+#              (needed to publish the same slug again before 30 days are up)
 set -euo pipefail
 
 SLUG="${1:-}"
-MODE="${2:-}"
-if [ -z "$SLUG" ]; then echo "usage: tdoc-delete <slug> [--local-only|--published-only]" >&2; exit 1; fi
+MODE=""
+FOREVER=""
+for arg in "${@:2}"; do
+  case "$arg" in
+    --forever) FOREVER="--forever" ;;
+    --local-only|--published-only) MODE="$arg" ;;
+    *) echo "usage: tdoc-delete <slug> [--local-only|--published-only] [--forever]" >&2; exit 1 ;;
+  esac
+done
+if [ -z "$SLUG" ]; then echo "usage: tdoc-delete <slug> [--local-only|--published-only] [--forever]" >&2; exit 1; fi
 # Same kebab-case rule as tdoc-new/tdoc-unpublish; keeps $SLUG shell/URL-safe
 # and, critically here, safe to splice into an rm -rf path.
 if ! printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
@@ -26,7 +36,7 @@ deleted_something=0
 if [ "$MODE" != "--local-only" ]; then
   # Best-effort: only try the network delete when a publish config exists.
   if [ -f "$HOME/.tdoc/published.json" ]; then
-    if bash "$SCRIPT_DIR/tdoc-unpublish" "$SLUG"; then
+    if bash "$SCRIPT_DIR/tdoc-unpublish" "$SLUG" $FOREVER; then
       deleted_something=1
     else
       # A doc that was never published 404s here — that's fine when we're
