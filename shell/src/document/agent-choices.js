@@ -145,14 +145,20 @@ export function agentFacts(t) {
 
 export function targetKey(t) {
   if (!t) return '';
-  return `${t.provider}:${t.server_id}:${t.agent_sub}`;
+  // Two team agents may run on computers of the same name: the agent tells
+  // them apart.
+  const agent = t.team_agent && t.team_agent.id ? `:${t.team_agent.id}` : '';
+  return `${t.provider}:${t.server_id}:${t.agent_sub}${agent}`;
 }
 
 export function sameTarget(a, b) {
   if (!a || !b) return false;
   return a.provider === b.provider
     && a.server_id === b.server_id
-    && a.agent_sub === b.agent_sub;
+    && a.agent_sub === b.agent_sub
+    // Two team agents on computers of the same name differ by agent; a row
+    // that does not say which (a stored handoff's recipient) still matches.
+    && !(a.team_agent && b.team_agent && a.team_agent.id !== b.team_agent.id);
 }
 
 // This doc's agent (or the account default) first, then the others that

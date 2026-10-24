@@ -4539,6 +4539,16 @@ function publicTeamAgent(agent, seen = {}) {
     devices: Object.entries(seen).map(([device, at]) => ({ device, last_seen: at })),
   };
 }
+// An agent whose setup command expired unused never reached a machine:
+// it goes, so it neither lingers as "waiting" nor holds one of the slots.
+// Returns whether any went (the caller saves the team).
+function dropExpiredTeamAgents(team) {
+  const now = Date.now();
+  const keep = teamAgents(team).filter((a) => a.token_hash || !a.setup_expires || Date.parse(a.setup_expires) > now);
+  if (keep.length === teamAgents(team).length) return false;
+  team.agents = keep;
+  return true;
+}
 async function teamAgentRows(env, team) {
   return Promise.all(teamAgents(team).map(async (a) => publicTeamAgent(a, await localSeenMap(env, a.id))));
 }
@@ -9052,11 +9062,20 @@ const SCOPED_TOKEN_ROUTES = new Set([
   '/api/notify/local/register', '/api/notify/local/pending', '/api/notify/local/fail',
   '/api/notify/ack', '/api/notify/resolve',
 ]);
+// A daemon of its own is a team agent's. A person's narrowed connection that
+// registered a computer would become where that person's Send to agent goes
+// (on every doc, not just the ones it reaches) and swallow the handoffs; a
+// person runs their daemon on their account-level sign-in.
+const TEAM_AGENT_ONLY_ROUTES = new Set(['/api/notify/local/register', '/api/notify/local/pending', '/api/notify/local/fail']);
 // A team agent's token is narrower still: it belongs to no person, so
 // nothing that mints, moves, shares or deletes is its business, even inside
 // its own team. Those stay with the team's admins in the browser.
+// It reads a team doc's comments through /api/comments, one doc at a time;
+// the person-shaped catalog (/api/me) and the team-wide comment feed are not
+// for it.
 const TEAM_AGENT_REFUSED = new Set([
   '/api/hosted/token/scoped', '/api/team/move', '/api/doc', '/api/doc/access', '/api/folders/move-to-team',
+  '/api/me', '/api/team/comments',
 ]);
 async function scopedTokenActorFromReq(env, req) {
   const m = (req.headers.get('authorization') || '').match(/^Bearer\s+(tdoc_[A-Za-z0-9_-]+)$/i);
@@ -9082,6 +9101,7 @@ async function scopedTokenRefusal(env, req, url) {
   const scope = actor.scope;
   const refuse = () => json(tokenScopeBody(url.origin), { status: 403 });
   if (!SCOPED_TOKEN_ROUTES.has(p)) return refuse();
+  if (TEAM_AGENT_ONLY_ROUTES.has(p) && !actor.team_agent) return refuse();
   if (actor.team_agent) {
     const refuseAgent = () => json({ error: 'token_scope', message: `This is the ${actor.team_agent.team_name} team agent: it reads and writes that team's docs and nothing else. A team admin manages it in the team's settings.` }, { status: 403 });
     if (TEAM_AGENT_REFUSED.has(p)) return refuseAgent();
@@ -9137,7 +9157,7 @@ async function scopeFromWorkspaces(env, accountId, list) {
 async function resolveMemberTeam(env, accountId, teamIds, wanted) {
   const want = String(wanted || '').trim();
   if (!want) return null;
-  const teams = (await Promise.all((teamIds || []).map((id) => loadTeam(env, id)))).filter((t) => t && teamMember(t, accountId));
+  const teams = (await Promise.all((teamIds || []).map((id) => loadTeam(env, id)))).filter((t) => t && teamInsider(t, accountId));
   return teams.find((t) => t.id === want) || teams.find((t) => String(t.name).toLowerCase() === want.toLowerCase()) || null;
 }
 
@@ -10900,10 +10920,12 @@ async function teamAgentTargets(env, team) {
   return out;
 }
 // The team agent a picked target belongs to, read from the team's own list
-// (never from what the client sent).
+// (never from what the client sent). By agent id: two agents whose daemons
+// run on computers of the same name have the same device and CLI.
 function teamAgentOfTarget(team, targets, t) {
-  const hit = t && targets.find((x) => sameNotifyTarget(x, t));
-  return hit ? teamAgent(team, hit.team_agent.id) : null;
+  const id = t && t.team_agent && t.team_agent.id;
+  const hit = id && targets.find((x) => x.team_agent && x.team_agent.id === id && sameNotifyTarget(x, t));
+  return hit ? teamAgent(team, id) : null;
 }
 
 async function loadLocalPending(env, accountId) {
@@ -15469,6 +15491,7 @@ const tdocHandlers = {
       const team = await loadTeam(env, method === 'GET' ? url.searchParams.get('id') : body.id);
       if (!teamMember(team, s.account_id)) return json({ error: 'not_found' }, { status: 404 });
       const admin = teamRole(team, s.account_id) === 'admin';
+      if (dropExpiredTeamAgents(team)) await saveTeam(env, team);
       if (method === 'GET') {
         return json({ ok: true, agents: await teamAgentRows(env, team), can_manage: admin }, { headers: { 'Cache-Control': 'no-store' } });
       }
@@ -15495,6 +15518,7 @@ const tdocHandlers = {
         // agent stays when that person leaves.
         added_by: s.account_id,
         setup_hash: await sha256Hex(code),
+        setup_expires: new Date(Date.now() + TEAM_AGENT_SETUP_TTL_SECONDS * 1000).toISOString(),
       };
       team.agents = [...teamAgents(team), agent];
       await saveTeam(env, team);
@@ -15521,25 +15545,37 @@ const tdocHandlers = {
       let pending = null;
       try { pending = JSON.parse(await env.META.get(`team-agent-setup:${setupHash}`)); } catch {}
       await env.META.delete(`team-agent-setup:${setupHash}`);
-      const team = pending ? await loadTeam(env, pending.team) : null;
-      const agent = team ? teamAgent(team, pending.agent) : null;
-      if (!agent || agent.setup_hash !== setupHash) {
-        return json({ error: 'unknown_code', message: 'This setup command has expired or was already used. A team admin can remove the agent and add it again for a new one.' }, { status: 404 });
-      }
+      const gone = () => json({ error: 'unknown_code', message: 'This setup command has expired or was already used. A team admin can remove the agent and add it again for a new one.' }, { status: 404 });
+      if (!pending || !validTeamId(pending.team) || !validTeamAgentId(pending.agent)) return gone();
       const token = `tdoc_${rand(24)}`;
       const tokenHash = await sha256Hex(token);
-      delete agent.setup_hash;
-      agent.token_hash = tokenHash;
-      agent.connected_at = new Date().toISOString();
+      // Read the team as it is now and change only this agent's entry: a
+      // copy read before an admin removed the agent (or a member) must never
+      // be written back over that removal.
+      const team = await loadTeam(env, pending.team);
+      const agent = team ? teamAgent(team, pending.agent) : null;
+      if (!agent || agent.setup_hash !== setupHash || (agent.setup_expires && Date.parse(agent.setup_expires) <= Date.now())) return gone();
+      const connectedAt = new Date().toISOString();
+      team.agents = teamAgents(team).map((a) => (a.id === agent.id
+        ? { ...Object.fromEntries(Object.entries(a).filter(([k]) => k !== 'setup_hash' && k !== 'setup_expires')), token_hash: tokenHash, connected_at: connectedAt }
+        : a));
+      await saveTeam(env, team);
+      // KV has no compare-and-set. Two machines redeeming the same code at
+      // once both get this far; the team record keeps one token hash, and
+      // only the request whose hash it kept gets a token.
+      const settled = teamAgent(await loadTeam(env, team.id), agent.id);
+      if (!settled || settled.token_hash !== tokenHash) {
+        return json({ error: 'code_already_used', message: 'Another machine used this setup command at the same moment. A team admin can remove the agent and add it again.' }, { status: 409 });
+      }
+      // The token exists only once the team says so.
       await env.META.put(`hosted-token:${tokenHash}`, JSON.stringify({
         account_id: agent.id,
         team_agent: { team: team.id, id: agent.id },
         scope: { me: false, teams: [team.id] },
         label: agent.name,
-        created: agent.connected_at,
+        created: connectedAt,
         ...tokenClientInfo(body),
       }), { metadata: { account_id: agent.id } });
-      await saveTeam(env, team);
       productEvent(env, 'token_minted', { auth_path: 'team_agent' });
       return json({
         ok: true, token, account_id: agent.id, base: url.origin,
@@ -17092,7 +17128,18 @@ const tdocHandlers = {
           ? await agentOwner(env, auth.actor.account_id, credentialKey(auth.actor))
           : null;
       if (owner) agent = { ...agent, owner };
-      if (auth.actor.team_agent) agent = { ...agent, team_agent: { id: auth.actor.team_agent.id, name: auth.actor.team_agent.name } };
+      // Its identity is the credential's, never the body's: a team agent
+      // driven by many people's comments must not be able to sign a reply
+      // as one of them.
+      if (auth.actor.team_agent) {
+        agent = {
+          ...agent,
+          login: `team-agent:${auth.actor.team_agent.id}`,
+          name: auth.actor.team_agent.name,
+          avatar_url: logoForAgentLogin(agent.login),
+          team_agent: { id: auth.actor.team_agent.id, name: auth.actor.team_agent.name },
+        };
+      }
       if (replyTarget) {
         const accountHandle = auth.actor.account_id
           ? (await accountClaimedHandle(env, auth.actor.account_id)) || auth.actor.github_login || ''
@@ -17297,6 +17344,10 @@ const tdocHandlers = {
         // A brand-new doc that names no access is shared by link, not
         // published to the web. An existing doc keeps what it has.
         if (!incoming.access && !prev) incoming.access = newDocAccess();
+        // A team agent shares nothing: its new doc is the team's alone,
+        // whatever the client asked (an existing team doc keeps its access,
+        // below). Sharing wider is a team admin's call in the browser.
+        if (auth.actor && auth.actor.team_agent && !prev) incoming.access = { visibility: 'private' };
         if (incoming.access) {
           const validatedAccess = validateAccessWrite(incoming.access);
           if (validatedAccess.error) {

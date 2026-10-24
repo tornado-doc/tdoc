@@ -234,18 +234,20 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(meta.hosted.github_login === 'julie', 'a teammate\'s version moved the byline');
   });
 
-  await t('a scoped person token pulls only handoffs on docs it reaches', async () => {
+  // Review #817 (4): a person's narrowed connection that registered a
+  // computer became that person's default Send to agent target everywhere.
+  await t('a person\'s narrowed connection cannot run a daemon (register, poll, fail): only a team agent can', async () => {
     const scoped = (await call('/api/hosted/token/scoped', { method: 'POST', token: julie.token, body: { team: abby.id } })).body.token;
-    await call('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device: 'julies-mac', clis: ['claude'] } });
-    const notesComment = await comment(julie.cookie, 'julie-notes', 'typo here');
-    const sent = await call('/api/notify/handoff', { method: 'POST', cookie: julie.cookie, body: { slug: 'julie-notes', comment_ids: [notesComment], recipient: { provider: 'local', server_id: 'julies-mac', agent_sub: 'julies-mac_claude' } } });
-    assert(sent.status === 200, sent.text);
-    const wide = await call('/api/notify/local/pending?device=julies-mac', { token: julie.token });
-    assert(wide.body.pending.some((h) => h.slug === 'julie-notes'), `account token misses it: ${wide.text}`);
-    const narrow = await call('/api/notify/local/pending?device=julies-mac', { token: scoped });
-    assert(narrow.status === 200 && !narrow.body.pending.some((h) => h.slug === 'julie-notes'), `abby-only token pulls a personal doc: ${narrow.text}`);
-    const again = await call('/api/notify/local/pending?device=julies-mac', { token: julie.token });
-    assert(again.body.pending.some((h) => h.slug === 'julie-notes'), 'the scoped poll dropped it for the account');
+    for (const [path, opts] of [
+      ['/api/notify/local/register', { method: 'POST', body: { device: 'third-party', clis: ['claude'] } }],
+      ['/api/notify/local/pending', {}],
+      ['/api/notify/local/fail', { method: 'POST', body: { slug: 'abby-secret', handoff_id: 'h_x' } }],
+    ]) {
+      const r = await call(path, { token: scoped, ...opts });
+      assert(r.status === 403, `${path}: ${r.status} ${r.text.slice(0, 120)}`);
+    }
+    const targets = await call('/api/notify/targets?slug=julie-notes', { cookie: julie.cookie });
+    assert(!targets.text.includes('third-party'), `registered anyway: ${targets.text}`);
   });
 
   await t('it survives the admin who added it leaving the team', async () => {
@@ -366,6 +368,180 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
     await env.META.delete(`team:${abby.id}`);
     assert((await call('/api/hosted/whoami', { token: tok })).status === 401, 'token outlived its team');
   });
+
+  // ---- Review #817: races, sharing, same-named computers, identity ----
+  {
+    const env2 = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev' });
+    const call2 = async (path, opts) => {
+      const r = await worker.fetch(req(path, opts), env2, ctx);
+      const text = await r.text();
+      let body = null; try { body = JSON.parse(text); } catch {}
+      return { status: r.status, body, text };
+    };
+    const ann = await issue(worker, env2, 'ann');
+    const ben = await issue(worker, env2, 'ben');
+    const cat = await issue(worker, env2, 'cat');
+    const crew = (await call2('/api/teams', { method: 'POST', cookie: ann.cookie, headers: origin, body: { name: 'Crew' } })).body.team;
+    for (const u of [ben, cat]) await call2('/api/team/join', { method: 'POST', cookie: u.cookie, body: { token: crew.invite_url.split('/').pop() } });
+    await call2('/api/upload', { method: 'POST', token: ann.token, body: { slug: 'crew-doc', version: 1, html: html('crew-doc'), meta: { title: 'crew-doc', access: { visibility: 'private' } } } });
+    await call2('/api/team/move', { method: 'POST', token: ann.token, body: { team: crew.id, slugs: ['crew-doc'] } });
+    const teamNow = () => JSON.parse(env2.META.map.get(`team:${crew.id}`));
+    const add = async (name) => (await call2('/api/team/agents', { method: 'POST', cookie: ann.cookie, headers: origin, body: { id: crew.id, name } })).body;
+    const connect = (code, device = 'box') => call2('/api/team/agents/connect', { method: 'POST', body: { code, device } });
+    const works = async (r) => !!(r.body && r.body.token) && (await call2('/api/hosted/whoami', { token: r.body.token })).status === 200;
+
+    // Runs `during` the moment connect writes the token record: before the
+    // fix that was between reading the team and saving it, so a save from a
+    // stale copy undid whatever `during` changed.
+    const duringTokenWrite = (during) => {
+      const put = env2.META.put.bind(env2.META);
+      let fired = false;
+      env2.META.put = async (k, v, o) => {
+        if (!fired && k.startsWith('hosted-token:') && String(v).includes('team_agent')) { fired = true; await during(); }
+        return put(k, v, o);
+      };
+      return () => { env2.META.put = put; };
+    };
+
+    await t('(1) connecting at the same moment a member is removed does not bring the member back', async () => {
+      const a = await add('racer');
+      const catId = teamNow().members.find((m) => m.key === 'cat').account_id;
+      let rm = null;
+      const restore = duringTokenWrite(async () => {
+        rm = await call2('/api/team/remove', { method: 'POST', cookie: ann.cookie, headers: origin, body: { id: crew.id, account_id: catId } });
+      });
+      const cn = await connect(a.setup_code);
+      restore();
+      assert(rm && rm.status === 200, rm && rm.text);
+      assert(!teamNow().members.some((m) => m.key === 'cat'), `cat restored (connect ${cn.status})`);
+      const up = await call2('/api/upload', { method: 'POST', token: cat.token, body: { slug: 'crew-doc', version: 2, html: html('crew-doc', 2), meta: { title: 'crew-doc' } } });
+      assert(up.status === 403, `removed member still writes: ${up.status}`);
+    });
+
+    await t('(1) connecting at the same moment the agent is removed leaves it removed, token dead', async () => {
+      const a = await add('doomed');
+      const id = teamNow().agents.find((x) => x.name === 'doomed').id;
+      let del = null;
+      const restore = duringTokenWrite(async () => {
+        del = await call2('/api/team/agents', { method: 'DELETE', cookie: ann.cookie, headers: origin, body: { id: crew.id, agent: id } });
+      });
+      const cn = await connect(a.setup_code);
+      restore();
+      assert(del && del.status === 200, del && del.text);
+      assert(!teamNow().agents.some((x) => x.id === id), `agent resurrected (connect ${cn.status})`);
+      assert(!(await works(cn)), 'its token works');
+    });
+
+    await t('(1) one setup code, two machines at once: exactly one gets a working token', async () => {
+      const a = await add('twice');
+      const [r1, r2] = await Promise.all([connect(a.setup_code, 'm1'), connect(a.setup_code, 'm2')]);
+      const ok = [await works(r1), await works(r2)];
+      assert(ok.filter(Boolean).length === 1, `working tokens: ${ok} (${r1.status}, ${r2.status})`);
+      const loser = ok[0] ? r2 : r1;
+      assert(loser.status === 404 || loser.status === 409, `loser: ${loser.status} ${loser.text}`);
+    });
+
+    await t('(1) a redeem whose save lost to another machine\'s gets 409 and no token', async () => {
+      const a = await add('raced');
+      const put = env2.META.put.bind(env2.META);
+      let fired = false;
+      env2.META.put = async (k, v, o) => {
+        await put(k, v, o);
+        // Another machine's save lands right after this one.
+        if (!fired && k === `team:${crew.id}` && String(v).includes('"name":"raced"') && String(v).includes('token_hash')) {
+          fired = true;
+          const team = JSON.parse(v);
+          team.agents = team.agents.map((x) => (x.name === 'raced' ? { ...x, token_hash: 'f'.repeat(64) } : x));
+          await put(k, JSON.stringify(team), o);
+        }
+      };
+      const r = await connect(a.setup_code);
+      env2.META.put = put;
+      assert(r.status === 409 && !r.body.token, `${r.status} ${r.text}`);
+      assert(![...env2.META.map.entries()].some(([k, v]) => k.startsWith('hosted-token:') && v.includes(a.agent.id)), 'a token record was written for the loser');
+    });
+
+    // Fresh slots for the rest.
+    for (const a of teamAgents(teamNow())) await call2('/api/team/agents', { method: 'DELETE', cookie: ann.cookie, headers: origin, body: { id: crew.id, agent: a.id } });
+    function teamAgents(team) { return team.agents || []; }
+    const one = await add('one');
+    const tokOne = (await connect(one.setup_code, 'box')).body.token;
+    const two = await add('two');
+    const tokTwo = (await connect(two.setup_code, 'box')).body.token;
+
+    await t('(2) a team agent cannot publish a new doc wider than its team, nor widen one by publishing', async () => {
+      const r = await call2('/api/upload', { method: 'POST', token: tokOne, body: { slug: 'agent-public', version: 1, html: html('agent-public'), meta: { title: 'x', access: { visibility: 'public', allowed_users: ['mallory'] } } } });
+      assert(r.status === 200, r.text);
+      const meta = JSON.parse(env2.META.map.get('meta:agent-public'));
+      assert(meta.access.visibility === 'private' && meta.access.team === true && !(meta.access.allowed_users || []).length, JSON.stringify(meta.access));
+      assert((await call2('/d/agent-public/raw', {})).status !== 200, 'anyone reads it');
+      const v2 = await call2('/api/upload', { method: 'POST', token: tokOne, body: { slug: 'crew-doc', version: 2, html: html('crew-doc', 2), meta: { title: 'crew-doc', access: { visibility: 'public' } } } });
+      assert(v2.status === 200, v2.text);
+      assert(JSON.parse(env2.META.map.get('meta:crew-doc')).access.visibility === 'private', 'publish widened an existing team doc');
+    });
+
+    await t('(3) two team agents on computers of the same name: the handoff goes to the one picked', async () => {
+      for (const tok of [tokOne, tokTwo]) await call2('/api/notify/local/register', { method: 'POST', token: tok, body: { device: 'box', clis: ['claude'] } });
+      const targets = await call2('/api/notify/targets?slug=crew-doc', { cookie: ben.cookie });
+      const all = [targets.body.default, ...(targets.body.candidates || [])].filter(Boolean);
+      const pick = all.find((x) => x.team_agent && x.team_agent.name === 'two');
+      assert(pick && all.length === 2, targets.text);
+      const c = (await call2('/api/comments', { method: 'POST', cookie: ben.cookie, body: { slug: 'crew-doc', version: 1, text: 'for two', anchor: { kind: 'text', text: 'a sentence' } } })).body.id;
+      const sent = await call2('/api/notify/handoff', { method: 'POST', cookie: ben.cookie, body: { slug: 'crew-doc', comment_ids: [c], recipient: pick } });
+      assert(sent.status === 200, sent.text);
+      const q1 = (await call2('/api/notify/local/pending?device=box', { token: tokOne })).body.pending.length;
+      const q2 = (await call2('/api/notify/local/pending?device=box', { token: tokTwo })).body.pending.length;
+      assert(q1 === 0 && q2 === 1, `queues one=${q1} two=${q2}`);
+    });
+
+    await t('(5) a team agent cannot sign a reply as someone else', async () => {
+      const c = (await call2('/api/comments', { method: 'POST', cookie: ben.cookie, body: { slug: 'crew-doc', version: 1, text: 'who answers', anchor: { kind: 'text', text: 'a sentence' } } })).body.id;
+      const r = await call2('/api/agent/reply', { method: 'POST', token: tokOne, body: { slug: 'crew-doc', parent_id: c, text: 'done', agent_login: 'ben', agent_name: 'Ben', agent_avatar_url: 'https://github.com/ben.png' } });
+      assert(r.status === 200, r.text);
+      const a = r.body.author;
+      assert(a.login === `team-agent:${one.agent.id}` && a.name === 'one' && a.kind === 'agent' && !/ben/i.test(JSON.stringify(a)), JSON.stringify(a));
+    });
+
+    await t('(6) a setup command that expired unused frees its slot and leaves no waiting row', async () => {
+      const a = await add('never');
+      const t2 = teamNow();
+      t2.agents = t2.agents.map((x) => (x.id === a.agent.id ? { ...x, setup_expires: new Date(Date.now() - 1000).toISOString() } : x));
+      await env2.META.put(`team:${crew.id}`, JSON.stringify(t2));
+      const list = await call2(`/api/team/agents?id=${crew.id}`, { cookie: ann.cookie });
+      assert(!list.text.includes('never'), list.text);
+      assert(!teamNow().agents.some((x) => x.id === a.agent.id), 'still stored');
+      assert((await connect(a.setup_code)).status === 404, 'expired code still connects');
+    });
+
+    await t('(7) --team names its own team; the person-shaped catalog and team feed are refused, not 401', async () => {
+      const r = await call2('/api/upload', { method: 'POST', token: tokOne, body: { slug: 'hinted', version: 1, team: 'Crew', html: html('hinted'), meta: { title: 'hinted' } } });
+      assert(r.status === 200 && JSON.parse(env2.META.map.get('meta:hinted')).workspace_id === crew.id, `${r.status} ${r.text}`);
+      for (const path of ['/api/me', `/api/team/comments?id=${crew.id}`]) {
+        const res = await call2(path, { token: tokOne });
+        assert(res.status === 403 && res.body.error === 'token_scope', `${path}: ${res.status} ${res.text.slice(0, 120)}`);
+      }
+    });
+
+    await t('(8) connect-team: https only (http just for this machine); replacing any sign-in needs --replace', async () => {
+      const fs = require('fs');
+      const os = require('os');
+      const path = require('path');
+      const { spawnSync } = require('child_process');
+      const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-connect-team-'));
+      fs.mkdirSync(path.join(HOME, '.tdoc'), { recursive: true });
+      const code = `tdts_${'a'.repeat(48)}`;
+      const run = (...args) => spawnSync('bash', [path.join(__dirname, '..', 'bin', 'tdoc-daemon'), 'connect-team', code, ...args, '--no-start'], { encoding: 'utf8', env: { ...process.env, HOME } });
+      try {
+        const plain = run('--base', 'http://tdoc.example.com');
+        assert(plain.status !== 0 && /https/.test(plain.stderr), plain.stderr);
+        const config = path.join(HOME, '.tdoc', 'published.json');
+        fs.writeFileSync(config, JSON.stringify({ platform: 'hosted', base: 'https://tdoc.dev', upload_token: 'tdoc_x', team_agent: { name: 'old', team_name: 'Crew' } }));
+        const again = run('--base', 'https://tdoc.dev');
+        assert(again.status !== 0 && /old · Crew team agent.*--replace/.test(again.stderr), again.stderr);
+        assert(JSON.parse(fs.readFileSync(config, 'utf8')).upload_token === 'tdoc_x', 'config replaced');
+      } finally { fs.rmSync(HOME, { recursive: true, force: true }); }
+    });
+  }
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

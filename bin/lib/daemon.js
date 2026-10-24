@@ -556,11 +556,20 @@ async function cmdConnectTeam(args) {
   const code = String(args._[1] || '').trim();
   if (!/^tdts_[a-f0-9]{48}$/.test(code)) throw new Error('usage: tdoc-daemon connect-team <setup code from team settings> [--base https://tdoc.dev]');
   const base = String(args.base || process.env.TDOC_HOSTED_BASE || 'https://tdoc.dev').replace(/\/+$/, '');
-  if (!/^https?:\/\//.test(base)) throw new Error(`--base must start with https:// (got ${base})`);
+  // The token travels back over this connection: https, or plain http only
+  // to this machine itself (a local tdoc).
+  let baseUrl = null;
+  try { baseUrl = new URL(base); } catch {}
+  const local = baseUrl && ['localhost', '127.0.0.1', '[::1]'].includes(baseUrl.hostname);
+  if (!baseUrl || !(baseUrl.protocol === 'https:' || (baseUrl.protocol === 'http:' && local))) {
+    throw new Error(`--base must be an https:// address (got ${base})`);
+  }
   let existing = null;
   try { existing = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch {}
-  if (existing && existing.upload_token && !existing.team_agent && args.replace !== 'true') {
-    throw new Error(`${CONFIG_FILE} already holds a person's tdoc sign-in${existing.github_login ? ` (${existing.github_login})` : ''}. A team agent should run on a machine (or container) without personal data, because every member of the team can send it comments. Use a dedicated machine, or pass --replace to sign this one out and use it for the team.`);
+  if (existing && existing.upload_token && args.replace !== 'true') {
+    throw new Error(existing.team_agent
+      ? `${CONFIG_FILE} already connects this machine as ${existing.team_agent.name} · ${existing.team_agent.team_name || 'a team'} team agent. Pass --replace to make it this agent instead.`
+      : `${CONFIG_FILE} already holds a person's tdoc sign-in${existing.github_login ? ` (${existing.github_login})` : ''}. A team agent should run on a machine (or container) without personal data, because every member of the team can send it comments. Use a dedicated machine, or pass --replace to sign this one out and use it for the team.`);
   }
   const r = await fetch(`${base}/api/team/agents/connect`, {
     method: 'POST',
@@ -580,6 +589,11 @@ async function cmdConnectTeam(args) {
   }, null, 2) + '\n', { mode: 0o600 });
   fs.chmodSync(CONFIG_FILE, 0o600);
   console.log(`Connected: this machine is ${data.agent.display}. It reaches ${data.team.name}'s docs and nothing else.`);
+  // The sign-in it replaced still works until its person removes it; this
+  // machine no longer holds it, but a copy may exist (a backup, a history).
+  if (existing && existing.upload_token && !existing.team_agent) {
+    console.log(`The personal sign-in this replaced${existing.github_login ? ` (${existing.github_login})` : ''} is still valid. Its owner should remove it in Settings → Agents: ${String(existing.base || base).replace(/\/+$/, '')}/me?view=settings#agent-access`);
+  }
   if (args['no-start'] === 'true') return;
   // Background at login on a Mac; elsewhere (a container, a Linux box) the
   // daemon is the foreground process.
