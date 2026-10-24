@@ -120,6 +120,7 @@ const OFFLINE = [
   'agent-reply-once.test.js', // #349 the agent answers once per human turn
   'kv-write-budget.test.js', // repeat actions spend no extra KV writes (daily quota)
   'team-billing.test.js', // #48 Team plan: Stripe checkout, portal, signed webhook, seat sync
+  'team-scoped-token.test.js', // #65 a token narrowed to one team cannot read, list or write outside it
   'appsumo-licensing.test.js', // #61 AppSumo lifetime licenses: signed webhook, OAuth claim, seat cap, refund
   'logout-provider.test.js', // #58 logout also ends the Clerk session
   'reply-activity.test.js', // old versions see live reply status without rewriting their snapshot

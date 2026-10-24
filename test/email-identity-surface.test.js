@@ -48,7 +48,7 @@ vm.runInContext([
   'normalizeGithubLogin', 'normalizeEmail', 'sessionLogin', 'sessionPrincipal',
   'sessionAccountIds', 'sessionOwnsAccount',
   'actorKey', 'actorKeys', 'actorDisplayName', 'normalizeActorKey', 'normalizeInvitee', 'isAllowlisted',
-  'isOwnerSession', 'isDocOwnerSession', 'hostedGithubLogin', 'canCommentOnDoc',
+  'isOwnerSession', 'tokenScopeAllows', 'isDocOwnerSession', 'hostedGithubLogin', 'canCommentOnDoc',
   'canMutate',
 ].map(sliceFn).join('\n'), box);
 
