@@ -181,11 +181,12 @@ Present control; nothing else changes about how it reads or takes comments.
 
 ```css
 .slide { container-type:inline-size; aspect-ratio:16/9; overflow:hidden; }
-.slide h2 { font-size:3.6cqw; } .slide p { font-size:1.75cqw; }
+.slide h2 { font-size:max(3.6cqw,24px); } .slide p { font-size:max(1.75cqw,15px); }
 ```
 
 Keep every slide's content inside its 16:9 box: the presenter scales the box
-to the screen, so anything that spills is cut off. One idea per slide.
+to the screen, so anything that spills is cut off. One idea per slide. Design,
+layouts and phone reflow: `$SKILL_DIR/authoring/structure/slides.md`.
 
 ## Figure parts
 
