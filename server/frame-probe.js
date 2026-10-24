@@ -129,6 +129,8 @@
     var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 2 2, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');
+    // Author figure rules also match our SVG icons. Protect the provider's
+    // fixed icon geometry from ID-scoped map sizing and reader image margins.
     s.textContent =
       '.tdoc-hover-outline{position:absolute;pointer-events:none;z-index:2147483644;border:2px dashed ' + COMMENT_ACCENT + ';border-radius:4px;background:rgba(22,82,240,.06);box-sizing:border-box;}' +
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
@@ -138,10 +140,10 @@
       'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;box-sizing:border-box;padding-right:52px;margin-bottom:4px;}' +
       'html[data-tdoc-interaction-mode="edit"] figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{padding-right:0;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 13px;border:1px solid #c8d7fc;border-radius:999px;background:#f3f7ff;box-shadow:none;color:#1652f0;font:600 13px/1.2 system-ui,sans-serif;cursor:pointer;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 13px;border:1px solid #c8d7fc;border-radius:999px;background:#f3f7ff;box-shadow:none;color:#1652f0;font:600 13px/1.2 system-ui,sans-serif;white-space:nowrap;cursor:pointer;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:hover{background:#e8f0ff;border-color:#a9c0f8;color:#1244c5;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
-      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:16px!important;min-width:16px!important;max-width:16px!important;height:16px!important;min-height:16px!important;max-height:16px!important;margin:0!important;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
       '@media print{figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:none!important;}}' +
       'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
@@ -654,14 +656,14 @@
     hoverPill.style.left = (r.right + sx - 34) + 'px'; hoverPill.style.top = (r.top + sy + 6) + 'px';
   }
   function hideHover() { hoverEl = null; if (hoverOutline) hoverOutline.style.display = 'none'; if (hoverPill) hoverPill.style.display = 'none'; }
-  function commentOnElement(el) {
+  function commentOnElement(el, near) {
     var r = clipRect(el);   // visible box — the raw rect of a scroll-container child can be miles wide
     var label = el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('data-tdoc-artifact') || el.tagName.toLowerCase();
     // Anchor the composer to the PILL the user just clicked (element top-right),
     // not the element box — a tall section would otherwise park the composer
     // below the whole box, far from the click.
     var pr = (hoverPill && hoverPill.style.display !== 'none') ? hoverPill.getBoundingClientRect() : null;
-    var ar = pr && (pr.width || pr.height) ? pr : { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
+    var ar = near || (pr && (pr.width || pr.height) ? pr : null) || { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
     post({
       type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: cssPath(el),
       text: '', context_before: '', context_after: '',
@@ -669,6 +671,13 @@
     });
     hideHover();
   }
+  // The slides presenter's "Comment on this slide" asks for a whole-element
+  // comment the same way the hover pill does.
+  document.addEventListener('tdoc:comment-element', function (e) {
+    var d = e.detail || {};
+    if (!d.el || !d.el.isConnected) return;
+    hideHover(); commentOnElement(d.el, d.rect || null);
+  });
   document.addEventListener('mousemove', function (e) {
     if (interactionMode !== 'comment' || !elementComment || visualViewerOpen()) { if (hoverEl) hideHover(); return; }
     var t = e.target;
@@ -1136,6 +1145,8 @@
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
     setActiveAnchor(_activeAnchorId, false);
+    // Frame-local: the slides presenter counts the threads on the slide shown.
+    try { document.dispatchEvent(new CustomEvent('tdoc:anchors-resolved', { detail: { targets: _anchorTargets, comments: (comments || []).filter(function (c) { return c && !c.hidden && !c.deleted; }).map(function (c) { return c.id; }) } })); } catch (x) {}
     post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
 
@@ -1534,6 +1545,9 @@
     cleanEditorAttributes(clone);
     clone.removeAttribute('data-tdoc-theme');
     clone.removeAttribute('data-tdoc-editing');
+    clone.removeAttribute('data-tdoc-slides');
+    clone.removeAttribute('data-tdoc-presenting');
+    clone.removeAttribute('data-tdoc-visual-open');
     return '<!doctype html>\n' + clone.outerHTML;
   }
 

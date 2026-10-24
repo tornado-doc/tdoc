@@ -163,6 +163,8 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const adminTargets = await call('/api/notify/targets?slug=plan', { cookie: alice });
     assert(adminTargets.status === 200 && adminTargets.body.default?.provider === 'local' && adminTargets.body.default.server_id === 'alice-mac', `admin targets ${JSON.stringify(adminTargets.body)}`);
     assert((adminTargets.body.candidates || []).some((x) => x.provider === 'raft' && x.agent_sub === 'alice-bot'), 'team picker includes the admin Raft agents');
+    // The admin's own connections, so the admin is who they act for.
+    assert(adminTargets.body.default.owner?.display === 'alice', `team owner ${JSON.stringify(adminTargets.body.default.owner)}`);
     const outsiderTargets = await call('/api/notify/targets?slug=plan', { cookie: dave });
     assert(outsiderTargets.status === 403 || outsiderTargets.status === 401, `outsider targets ${outsiderTargets.status}`);
     const memberSend = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: ['c1'], recipient: local('bob-mac') } });

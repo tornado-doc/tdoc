@@ -56,7 +56,9 @@ import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
-import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
+import { orderedAgentChoices } from './document/agent-choices.js';
+import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffBanner } from './document/handoff-banner.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { summarizeHandoffSurfaces } from './document/handoff-state.js';
@@ -186,6 +188,8 @@ export function DocumentShell({ boot, config }) {
   const diagramApplyRef = useRef(null);
   const [diagram, setDiagram] = useState(null);
   const [visualOpen, setVisualOpen] = useState(false);
+  // Slides presenting: full screen like a visual, but commenting stays on.
+  const [presenting, setPresenting] = useState(false);
   const [composer, setComposer] = useState(null);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
@@ -412,6 +416,7 @@ export function DocumentShell({ boot, config }) {
 
   const bridge = useFrameBridge({
     'tdoc:visualState': (message) => setVisualOpen(message.open === true),
+    'tdoc:presentState': (message) => setPresenting(message.open === true),
     'tdoc:selection': selectFromFrame,
     'tdoc:diagramApplied': (message) => {
       const pending = diagramApplyRef.current;
@@ -722,11 +727,11 @@ export function DocumentShell({ boot, config }) {
     if (opts.sendToAgent && value?.id && canSendToAgent) {
       setSendToAgentBusy(true);
       try {
-        const body = await sendOneCommentToAgent(config.slug, value.id);
+        const body = await sendOneCommentToAgent(config.slug, value.id, opts.recipient);
         const failed = body?.delivery?.status === 'failed';
         showToast(failed
           ? `Sent — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
-          : 'Sent to agent');
+          : `Sent to ${readableHandle(opts.recipient) || 'agent'}`);
         await comments.refresh();
       } catch (err) {
         showToast(err.message || 'Comment posted — could not send to agent');
@@ -747,11 +752,11 @@ export function DocumentShell({ boot, config }) {
       if (handoffId) {
         setSendToAgentBusy(true);
         try {
-          const body = await sendOneCommentToAgent(config.slug, handoffId);
+          const body = await sendOneCommentToAgent(config.slug, handoffId, opts.recipient);
           const failed = body?.delivery?.status === 'failed';
           showToast(failed
             ? `Sent — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
-            : 'Sent to agent', failed);
+            : `Sent to ${readableHandle(opts.recipient) || 'agent'}`, failed);
           await comments.refresh();
         } catch (err) {
           showToast(err.message || 'Reply posted — could not send to agent', true);
@@ -804,6 +809,12 @@ export function DocumentShell({ boot, config }) {
     && notifyTargets.reason !== 'no_agent_bound'
     && (notifyTargets.default || (notifyTargets.candidates || []).length || notifyTargets.fallback),
   );
+  // The agents @ offers: the Send to agent dropdown's list, and only to
+  // someone who could press that button.
+  const agentMentions = useMemo(() => (canSendToAgent
+    ? { choices: orderedAgentChoices(notifyTargets), preselected: notifyTargets.default }
+    : { choices: [], preselected: null }
+  ), [canSendToAgent, notifyTargets.default, notifyTargets.candidates, notifyTargets.fallback]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);
@@ -1232,6 +1243,7 @@ export function DocumentShell({ boot, config }) {
     <div
       className="tdoc-document-app"
       data-visual-open={visualOpen || undefined}
+      data-presenting={(visualOpen && presenting) || undefined}
       onPointerDown={() => {
         // Legacy behavior: a click anywhere outside a card, pin, or composer
         // closes the open card and cluster popover (they stop propagation).
@@ -1239,6 +1251,7 @@ export function DocumentShell({ boot, config }) {
         setOpenCommentId(null);
       }}
     >
+      <AgentMentionContext.Provider value={agentMentions}>
       <TopBar
         identity={config.identity}
         space={config.teamManage?.team?.id || ''}
@@ -1643,6 +1656,7 @@ export function DocumentShell({ boot, config }) {
           {toast.text}
         </div>
       ) : null}
+      </AgentMentionContext.Provider>
     </div>
   );
 }

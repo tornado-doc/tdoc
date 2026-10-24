@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Combobox } from '@base-ui/react/combobox';
+import { usePortalContainer } from './portal.js';
 
 // The searchable dropdown, for lists long enough that scrolling is the slow
 // part: a Raft server's agents run to dozens. It looks like AppSelect closed
@@ -48,7 +49,7 @@ export function AppCombobox({ value, onChange, options, id, ariaLabel, className
         />
         <Combobox.Trigger className="ui-combo-trigger" aria-label={ariaLabel ? `Show all: ${ariaLabel}` : 'Show all'} tabIndex={-1} />
       </Combobox.InputGroup>
-      <Combobox.Portal>
+      <Combobox.Portal container={usePortalContainer()}>
         <Combobox.Positioner className="ui-menu-positioner ui-select-positioner" sideOffset={4} align="start">
           <Combobox.Popup className="ui-menu-popup ui-select-popup ui-combo-popup">
             <Combobox.Empty className="ui-combo-empty">{query.trim() || !options.length ? empty : null}</Combobox.Empty>

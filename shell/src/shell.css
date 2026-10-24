@@ -1,3 +1,19 @@
+/* The doc's text and a note on taking part, written into the page for agents
+   whose fetch tools never run the app or open its frame. Visually hidden
+   rather than display:none, which those tools drop; main.jsx removes it as
+   soon as the app starts. */
+.tdoc-agent-view {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* dvh, not vh. On iOS 100vh is the LARGE viewport — the height the page would
    have if Safari's toolbars were collapsed — so while a toolbar is showing the
    shell is taller than the screen and the PAGE itself scrolls. The bar is
@@ -55,6 +71,14 @@ body,
 /* The viewer applies its own theme inside the sandbox. An invert/counter-
    invert pair in the shell clips saturated image colors even when it cancels. */
 html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
+/* Presenting slides keeps commenting: the composer and the open comment card
+   stay above the full-screen frame. Pins stay hidden; the presenter's own bar
+   counts the threads on the slide shown. */
+.tdoc-document-app[data-presenting] .tdoc-reader-surface > .tdoc-popup,
+.tdoc-document-app[data-presenting] .tdoc-reader-surface > .tdoc-floating-open {
+  display: block !important;
+  z-index: 1001 !important;
+}
 
 .tdoc-bar button.tdoc-mode-trigger {
   box-sizing: border-box;

@@ -41,6 +41,7 @@ const OFFLINE = [
   'notify-handoff.test.js',   // outbound handoff: owner-gated, note by default, failure recorded not retried
   'remote-access-route.test.js', // remote access mutation auth + meta-only guard
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
+  'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
   'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
@@ -125,6 +126,7 @@ const OFFLINE = [
   'reply-activity.test.js', // old versions see live reply status without rewriting their snapshot
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
+  'agent-choices.test.js',    // @ offers the Send to agent list: same order, top 2, typed search, tag is no @login
   'rich-text.test.js',        // comment markdown subset (bold/code/list/link)
   'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
@@ -146,16 +148,20 @@ const OFFLINE = [
 
 // These run against local fixtures and require the development browser.
 const BROWSER = [
+  'diagram-controls-ui.test.js', // authored map SVG sizing cannot stretch provider controls
   'reply-activity-ui.test.js', // v2 receives v3 reply status without navigation or pulsing
   'version-diff-ui.test.js', // real version frames, table alignment and mobile diff
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments
   'profile-picks-ui.test.js', // /@handle owner removes picks: card control + Undo, every pin in the picker, errors shown
+  'agent-view-ui.test.js', // doc text for agents: no visible space without JS, removed once the app starts
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection
   'resolved-visibility-ui.test.js', // resolved filter, highlights and pointer behavior
   'custom-design-theme.test.js', // custom palettes opt out of house styles and theme inversion
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
+  'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
+  'slides-mode.test.js', // data-tdoc-slide decks present one slide at a time, fitted, and restore on exit
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
@@ -166,6 +172,7 @@ const BROWSER = [
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout
   'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
   'team-billing-ui.test.js', // #48 Team plan card: free seats, upgrade, paid summary, portal, phone
+  'agent-mention-ui.test.js', // @ lists real agents above people; picking one hands the comment to it
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
 ];
 
