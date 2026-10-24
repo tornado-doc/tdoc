@@ -147,7 +147,20 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     }));
     await toggle();
     await paintFrame.waitForFunction(() => CSS.highlights.get('tdoc-anchor-moved')?.size > 0);
-    assert(!before.equals(await code.screenshot()), 'resolved moved highlight must actually paint');
+    const firstPaint = await code.screenshot();
+    if (before.equals(firstPaint)) {
+      const paintDetails = await paintFrame.evaluate(() => ({
+        ranges: [...CSS.highlights.get('tdoc-anchor-moved')].map(r => ({ text: r.toString(), parent: r.startContainer.parentElement?.tagName, rect: r.getBoundingClientRect().toJSON() })),
+        code: document.querySelector('pre')?.getBoundingClientRect().toJSON(),
+        css: document.getElementById('tdoc-provider-highlight-style')?.textContent,
+      }));
+      await paintFrame.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const nextFrame = await code.screenshot();
+      await paintFrame.evaluate(() => { const style = document.getElementById('tdoc-provider-highlight-style'); if (style) style.textContent += '\n'; });
+      const invalidatedStyle = await code.screenshot();
+      console.log('Highlight paint diagnostic:', JSON.stringify({ ...paintDetails, changedAfterFrame: !before.equals(nextFrame), changedAfterStyleInvalidation: !before.equals(invalidatedStyle) }));
+    }
+    assert(!before.equals(firstPaint), 'resolved moved highlight must actually paint');
     await toggle();
     await paintFrame.waitForFunction(() => !CSS.highlights.get('tdoc-anchor-moved')?.size);
     assert(before.equals(await code.screenshot()), 'resolved moved highlight must disappear from pixels, not only the registry');
