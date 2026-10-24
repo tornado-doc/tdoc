@@ -168,6 +168,20 @@ const SAME = { Origin: 'https://tdoc.dev' };
     assert((await call('/api/trash')).status === 401, 'anonymous Trash');
   });
 
+  await t('a Trash list a minute behind its write still shows what this browser just deleted, and nothing else', async () => {
+    // KV lists lag writes; the browser names what it just deleted.
+    const marker = [...env.META.map.keys()].find((k) => k.startsWith('trashidx:') && k.endsWith(':plan'));
+    const saved = env.META.map.get(marker);
+    const savedMeta = env.META.metadata.get(marker);
+    await env.META.delete(marker);
+    assert(!(await call('/api/trash', { cookie: alice.cookie })).body.items.some((x) => x.slug === 'plan'), 'precondition: the list misses it');
+    const hinted = await call('/api/trash?slugs=plan', { cookie: alice.cookie });
+    assert(hinted.body.items.some((x) => x.slug === 'plan'), `a hint did not show the doc: ${hinted.text}`);
+    const nosy = await call('/api/trash?slugs=plan', { cookie: bob.cookie });
+    assert(!nosy.body.items.some((x) => x.slug === 'plan'), 'a hint showed someone else\'s doc');
+    await env.META.put(marker, saved, { metadata: savedMeta });
+  });
+
   await t('restore: only the owner; the doc comes back whole, in its folder, readable and listed', async () => {
     const byBob = await call('/api/trash/restore', { method: 'POST', token: bob.token, body: { slug: 'plan' } });
     assert(byBob.status === 403, `a reader restored it: ${byBob.status}`);

@@ -3,6 +3,7 @@ import { Folder, Trash2 } from 'lucide-react';
 import { RowMenu, day } from './rows.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { deleteForever, listTrash, restoreFromTrash } from '../document/api.js';
+import { recentTrash } from '../recent-trash.js';
 
 const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
 
@@ -35,7 +36,11 @@ export function TrashPane({ team, notify, onChanged, onFailed }) {
 
   const load = useCallback(() => {
     setItems(null);
-    listTrash(teamId)
+    const recent = recentTrash();
+    listTrash(teamId, {
+      slugs: recent.map((item) => item.slug).filter(Boolean),
+      folders: recent.map((item) => item.folder).filter(Boolean),
+    })
       .then((body) => setItems(Array.isArray(body?.items) ? body.items : []))
       .catch((error) => { setItems([]); failed.current(error); });
   }, [teamId]);

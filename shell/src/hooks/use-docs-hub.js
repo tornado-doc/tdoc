@@ -11,6 +11,7 @@ import {
   updateFolderAccess,
   setDocumentStar,
 } from '../document/api.js';
+import { rememberTrashed } from '../recent-trash.js';
 import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from '../docs-hub/search.js';
 
 const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
@@ -199,6 +200,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
   const deleteDocs = useCallback(async (slugs) => {
     const ok = await run(() => Promise.all(slugs.map((slug) => deleteDocument(slug))));
     if (!ok) return false;
+    slugs.forEach((slug) => rememberTrashed({ slug }));
     const gone = new Set(slugs);
     const before = { docs, recent, starred };
     const keep = (items) => items.filter((item) => !gone.has(item.slug));
@@ -255,6 +257,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     let result;
     const ok = await run(async () => { result = await deleteFolderRequest(item.id); });
     if (!ok) return false;
+    rememberTrashed({ folder: item.id });
     const before = { docs, folders, recent, starred };
     const tree = new Set([item.id]);
     for (let grew = true; grew;) {

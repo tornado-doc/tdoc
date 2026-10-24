@@ -1225,7 +1225,11 @@ function trashDocRow(slug, record, now = Date.now()) {
 // full record, as the catalog does; stale markers are swept, and anything
 // past its days that the viewer could purge goes now rather than wait for
 // the next scheduled run.
-async function listTrash(env, session, team, now = Date.now()) {
+// `hints` are what this browser itself just deleted ({ slugs, folders }): a
+// KV list can lag a write by up to a minute, and "I deleted it and Trash is
+// empty" is not an answer. Each hint is read directly and passes the same
+// checks as a listed row, so a hint can only add what the viewer may see.
+async function listTrash(env, session, team, now = Date.now(), hints = {}) {
   const facets = [];
   if (team) facets.push(`w:${team.id}`);
   else if (session && session.account_id) facets.push(`p:${session.account_id}`);
@@ -1244,8 +1248,12 @@ async function listTrash(env, session, team, now = Date.now()) {
   }
   const items = [];
   const folderIds = new Set();
-  for (const k of folderKeys) {
-    const entry = await loadTrashFolder(env, scope, k.name.slice(k.name.lastIndexOf(':') + 1));
+  const folderIdsToRead = [...new Set([
+    ...folderKeys.map((k) => k.name.slice(k.name.lastIndexOf(':') + 1)),
+    ...(hints.folders || []),
+  ])];
+  for (const folderId of folderIdsToRead) {
+    const entry = await loadTrashFolder(env, scope, folderId);
     if (!entry || !canManageTrashFolder(entry, session, team)) continue;
     if (trashExpired(entry.at, now)) { await purgeTrashFolder(env, scope, entry, { session, now }); continue; }
     folderIds.add(entry.id);
@@ -1262,29 +1270,29 @@ async function listTrash(env, session, team, now = Date.now()) {
     });
   }
   const seen = new Set();
+  const rows = [];
   for (const facet of facets) {
     let cursor;
-    const keys = [];
     do {
       const page = await env.META.list({ prefix: `trashidx:${facet}:`, cursor });
-      keys.push(...page.keys);
+      for (const k of page.keys) rows.push({ slug: k.name.slice(`trashidx:${facet}:`.length), key: k.name });
       cursor = page.cursor;
       if (page.list_complete) break;
     } while (cursor);
-    for (const k of keys) {
-      const slug = k.name.slice(`trashidx:${facet}:`.length);
-      if (seen.has(slug) || !isValidSlug(slug)) continue;
-      seen.add(slug);
-      const record = await loadDocRecord(env, slug);
-      if (!isTrashedMeta(record)) { await env.META.delete(k.name).catch(() => {}); continue; }
-      if (!team && record.workspace_id) continue;
-      if (team && record.workspace_id !== team.id) continue;
-      if (!isDocOwnerSession(env, session, record)) continue;
-      if (trashExpired(record.trashed_at, now)) { await purgeTrashedDoc(env, slug); continue; }
-      // A doc that went with a folder still in Trash is listed under it.
-      if (record.trashed_with && folderIds.has(record.trashed_with)) continue;
-      items.push(trashDocRow(slug, record, now));
-    }
+  }
+  for (const slug of hints.slugs || []) rows.push({ slug, key: null });
+  for (const { slug, key } of rows) {
+    if (seen.has(slug) || !isValidSlug(slug)) continue;
+    seen.add(slug);
+    const record = await loadDocRecord(env, slug);
+    if (!isTrashedMeta(record)) { if (key) await env.META.delete(key).catch(() => {}); continue; }
+    if (!team && record.workspace_id) continue;
+    if (team && record.workspace_id !== team.id) continue;
+    if (!isDocOwnerSession(env, session, record)) continue;
+    if (trashExpired(record.trashed_at, now)) { await purgeTrashedDoc(env, slug); continue; }
+    // A doc that went with a folder still in Trash is listed under it.
+    if (record.trashed_with && folderIds.has(record.trashed_with)) continue;
+    items.push(trashDocRow(slug, record, now));
   }
   items.sort((a, b) => String(b.trashed_at).localeCompare(String(a.trashed_at)));
   return items;
@@ -18418,7 +18426,11 @@ const tdocHandlers = {
     if (p === '/api/trash' && method === 'GET') {
       const scope = await folderScope(env, req, url, url.searchParams.get('team'));
       if (!scope.ok) return scope.response;
-      const items = await listTrash(env, scope.session, scope.team);
+      const listed = (name) => String(url.searchParams.get(name) || '').split(',').filter(Boolean).slice(0, 20);
+      const items = await listTrash(env, scope.session, scope.team, Date.now(), {
+        slugs: listed('slugs').filter(isValidSlug),
+        folders: listed('folders'),
+      });
       return json({ ok: true, retention_days: TRASH_DAYS, items }, { headers: { 'Cache-Control': 'no-store' } });
     }
 

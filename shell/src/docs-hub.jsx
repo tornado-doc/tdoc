@@ -25,6 +25,7 @@ import {
   updateFolderAccess,
 } from './document/api.js';
 import { TrashPane } from './docs-hub/trash.jsx';
+import { rememberTrashed } from './recent-trash.js';
 import {
   LeaveTeamDialog,
   MoveFolderToTeamDialog,
@@ -660,6 +661,7 @@ export function DocsHub({ boot }) {
   const deleteTeamFolder = (item) => teamRun(deleteFolderRequest(item.id, team.id).then((result) => {
     const up = item.parent || '';
     const owner = team;
+    rememberTrashed({ folder: item.id });
     const before = { folders: spaceFolders, docs: teamDocs };
     const tree = new Set([item.id]);
     for (let grew = true; grew;) {
@@ -683,6 +685,7 @@ export function DocsHub({ boot }) {
   }));
   // Delete a team doc: to the team's Trash, with Undo on the toast.
   const deleteTeamDoc = (doc) => deleteDocument(doc.slug).then(() => {
+    rememberTrashed({ slug: doc.slug });
     setTeamDocs((list) => list.filter((row) => row.slug !== doc.slug));
     closeModal();
     hub.notify('Moved to Trash', false, {

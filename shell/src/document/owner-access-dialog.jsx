@@ -4,6 +4,7 @@ import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AppSwitch } from '../ui/switch.jsx';
 import { deleteDocument, updateDocumentAccess } from './api.js';
+import { rememberTrashed } from '../recent-trash.js';
 import { VersionLinkChoice } from './document-dialogs.jsx';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
 
@@ -299,6 +300,7 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
     setStatus('Moving to Trash…');
     try {
       await deleteDocument(config.slug);
+      rememberTrashed({ slug: config.slug });
       const query = new URLSearchParams({ ...(team ? { team: team.id } : {}), trashed: config.slug });
       location.href = `/me?${query}`;
     } catch (error) {

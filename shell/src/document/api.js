@@ -214,9 +214,15 @@ export function deleteDocument(slug) {
 
 // Trash. Delete moves a doc (or a folder with its docs) here for 30 days;
 // `target` is { slug } for a doc, { folder, team? } for a folder.
-export function listTrash(team) {
-  const query = team ? `?${new URLSearchParams({ team })}` : '';
-  return request(`/api/trash${query}`);
+// `recent`: { slugs, folders } this browser just deleted, which a Trash list
+// a moment behind its write would otherwise miss.
+export function listTrash(team, recent = {}) {
+  const params = new URLSearchParams();
+  if (team) params.set('team', team);
+  if (recent.slugs?.length) params.set('slugs', recent.slugs.join(','));
+  if (recent.folders?.length) params.set('folders', recent.folders.join(','));
+  const query = params.toString();
+  return request(`/api/trash${query ? `?${query}` : ''}`);
 }
 
 export function restoreFromTrash(target) {
