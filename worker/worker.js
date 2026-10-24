@@ -244,6 +244,7 @@ function publicAuthorName(a) {
     return owner ? `${name} · ${owner}` : name;
   }
   const login = String(a.login || '');
+  if (login.startsWith(EMAIL_ALIAS_PREFIX) || login === EMAIL_HIDDEN_KEY) return noAddress(a.name) || 'someone';
   if (!login || login.startsWith('email:') || login.includes('@')) return noAddress(a.name) || noAddress(login) || 'someone';
   return `@${login}`;
 }
@@ -2600,7 +2601,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
   const markdown = SHELL && wantsMarkdown(req);
   let comments = null;
   if (!isLanding && (markdown || !req.headers.get('sec-fetch-dest'))) {
-    try { comments = agentCommentsForMarkdown(snapshotList(await readComments(env, slug), version)); } catch { comments = null; }
+    try { comments = agentCommentsForMarkdown(await redactCommentEmails(snapshotList(await readComments(env, slug), version), await emailPrivacyFor(env, session, slug, gate.meta))); } catch { comments = null; }
   }
   agentView.comments = comments;
   if (markdown) {
@@ -8440,6 +8441,100 @@ async function accountClaimedHandle(env, accountId) {
   return normalizeGithubLogin(rec && rec.handle);
 }
 
+// Commenters who signed in by email are keyed `email:<address>`, and that key
+// rides in every comment record: author, replies, events, mentions,
+// reactions. Read routes answer anyone who can read the doc, so on a public
+// doc any visitor could collect the addresses. Before a comment payload
+// leaves the worker, each address the reader is not entitled to becomes a
+// stable alias (an HMAC under a server secret, per doc, so it cannot be
+// reversed or matched across docs) and a bare address becomes its local
+// part. A reader keeps their own address, the doc's owner keeps the
+// addresses they invited, and a team keeps its members'. Document text in
+// anchors is left alone; mention tags in comment text are shortened except
+// in the reader's own comments.
+const EMAIL_KEY_RE = /^email:([^\s@]+@[^\s@]+\.[^\s@]+)$/i;
+const BARE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_TAG_RE = /(^|[^A-Za-z0-9_@/-])@([^\s@]+@[^\s@]+\.[^\s@]+)/g;
+const EMAIL_ALIAS_PREFIX = 'email-alias:';
+const EMAIL_HIDDEN_KEY = 'email-hidden';
+
+async function emailPrivacyFor(env, session, slug, meta) {
+  const reveal = new Set();
+  const addEmail = (key) => {
+    const raw = String(key || '').trim().toLowerCase();
+    const email = normalizeEmail(raw.startsWith('email:') ? raw.slice(6) : raw);
+    if (email) reveal.add(email);
+  };
+  for (const key of (session ? actorKeys(session) : [])) addEmail(key);
+  if (session && meta) {
+    if (isDocOwnerSession(env, session, meta)) for (const u of accessFromMeta(meta).allowed_users || []) addEmail(u);
+    if (meta.workspace_id && session.account_id) {
+      const team = await loadTeam(env, meta.workspace_id).catch(() => null);
+      if (team && teamMember(team, session.account_id)) for (const m of team.members || []) addEmail(m.key);
+    }
+  }
+  // A dedicated secret; the others only stand in for it. With none at all,
+  // an HMAC under a known key could be matched against a list of addresses,
+  // so no alias is made (see redactCommentEmails).
+  const secret = String((env && (env.TDOC_EMAIL_ALIAS_SECRET || env.TDOC_DATA_MIRROR_KEY || env.TDOC_UPLOAD_TOKEN || env.GITHUB_CLIENT_SECRET)) || '');
+  return { reveal, slug: String(slug || ''), secret, mine: new Set([...(session ? actorKeys(session) : [])].map((k) => String(k).toLowerCase())) };
+}
+
+function collectEmails(value, out, key = '') {
+  if (key === 'anchor' || value == null) return out;
+  if (typeof value === 'string') {
+    if (key === 'text') { for (const t of value.matchAll(EMAIL_TAG_RE)) out.add(t[2].toLowerCase()); return out; }
+    const m = value.match(EMAIL_KEY_RE);
+    if (m) out.add(m[1].toLowerCase());
+    else if (BARE_EMAIL_RE.test(value)) out.add(value.toLowerCase());
+    return out;
+  }
+  if (Array.isArray(value)) { for (const v of value) collectEmails(v, out); return out; }
+  if (typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) { collectEmails(k, out); collectEmails(v, out, k); }
+  }
+  return out;
+}
+
+async function redactCommentEmails(value, privacy) {
+  const hidden = [...collectEmails(value, new Set())].filter((e) => !privacy.reveal.has(e));
+  if (!hidden.length) return value;
+  const alias = new Map();
+  await Promise.all(hidden.map(async (email) => {
+    if (!privacy.secret) { alias.set(email, EMAIL_HIDDEN_KEY); return; }
+    const mac = await hmacBytes(`tdoc-email-alias-v1\0${privacy.secret}`, `${privacy.slug}\0${email}`);
+    alias.set(email, EMAIL_ALIAS_PREFIX + [...mac.slice(0, 6)].map((b) => b.toString(16).padStart(2, '0')).join(''));
+  }));
+  const local = (email) => email.split('@')[0];
+  const str = (s) => {
+    const m = s.match(EMAIL_KEY_RE);
+    if (m) { const e = m[1].toLowerCase(); return alias.has(e) ? alias.get(e) : s; }
+    if (BARE_EMAIL_RE.test(s) && alias.has(s.toLowerCase())) return local(s);
+    return s;
+  };
+  const walk = (v, key, ownText) => {
+    if (key === 'anchor' || v == null) return v;
+    if (typeof v === 'string') {
+      if (key === 'text') return ownText ? v : v.replace(EMAIL_TAG_RE, (all, pre, addr) => (alias.has(addr.toLowerCase()) ? `${pre}@${local(addr)}` : all));
+      return str(v);
+    }
+    if (Array.isArray(v)) return v.map((x) => walk(x, '', ownText));
+    if (typeof v === 'object') {
+      const own = !!(v.author && typeof v.author.login === 'string' && privacy.mine.has(v.author.login.toLowerCase()));
+      const out = {};
+      for (const [k, x] of Object.entries(v)) out[str(k)] = walk(x, k, own);
+      return out;
+    }
+    return v;
+  };
+  return walk(value, '', false);
+}
+
+async function commentPrivacyJson(env, session, slug, body, init) {
+  const meta = slug ? await loadDocMeta(env, slug).catch(() => null) : null;
+  return json(await redactCommentEmails(body, await emailPrivacyFor(env, session, slug, meta)), init);
+}
+
 // Profile links are current presentation data, not part of the comment log.
 // Resolve the actor's account first: a claimed vanity handle is not a GitHub
 // identity, and an email actor must never become an email-shaped public URL.
@@ -11940,7 +12035,7 @@ export default {
       const metas = await Promise.all([...slugs].map(async (slug) => ({ slug, meta: await loadDocMeta(env, slug) })));
       const bySlug = new Map((data.feedback || []).map((x) => [x.slug, x]));
       const spaces = await feedbackSpacesFor(env, s, metas.filter((m) => m.meta).map((m) => ({ ...m, updated: bySlug.get(m.slug).updated })), (row) => bySlug.get(row.slug), true);
-      return json({ ok: true, spaces }, { headers: { 'Cache-Control': 'no-store' } });
+      return json(await redactCommentEmails({ ok: true, spaces }, await emailPrivacyFor(env, s, 'me:feedback', null)), { headers: { 'Cache-Control': 'no-store' } });
     }
     if (p === '/api/team/comments' && method === 'GET') {
       const s = await getViewerSession(env, req);
@@ -11951,7 +12046,8 @@ export default {
       // A team is private membership data: outsiders get the same answer as a
       // missing team and cannot use this endpoint to enumerate names or ids.
       if (!page) return json({ error: 'not_found' }, { status: 404 });
-      return json({ ok: true, ...page }, { headers: { 'Cache-Control': 'private, no-store' } });
+      const privacy = await emailPrivacyFor(env, s, `team:${teamId}`, { workspace_id: teamId });
+      return json(await redactCommentEmails({ ok: true, ...page }, privacy), { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (p === '/api/me' && method === 'GET') {
       const s = await getViewerSession(env, req);
@@ -12695,7 +12791,7 @@ export default {
       // `!== 'resolved'` filter here was a no-op. We intentionally export ALL
       // snapshotted comments — including agent-applied ones — so the fork/export
       // carries the full resolution history, not just still-open items.
-      const openComments = snapshotList(rawList, Number(vStr));
+      const openComments = await redactCommentEmails(snapshotList(rawList, Number(vStr)), await emailPrivacyFor(env, gate.session, slug, gate.meta));
 
       // 1. Build the agent-readable banner.
       const reactionsText = (rs) => {
@@ -13565,7 +13661,7 @@ export default {
       const parts = await loadViewerInboxes(env, s);
       if (!parts.length) return json({ error: 'sign_in_required' }, { status: 401 });
       const offset = Number(url.searchParams.get('offset') || 0);
-      return json(pageInbox(mergeInboxes(parts), { offset }));
+      return json(await redactCommentEmails(pageInbox(mergeInboxes(parts), { offset }), await emailPrivacyFor(env, s, 'me:inbox', null)));
     }
     if (p === '/api/notifications/unread' && method === 'GET') {
       const s = await getSession(env, req);
@@ -14761,8 +14857,9 @@ export default {
       // comment: the comment log stays a log of what people said, and "has
       // this been handed over" is a fact about the handoff, not the comment.
       const decorated = withHandoffStatus(live, await loadHandoffs(env, slug));
-      return json(V !== 'all' && hostedRegistrationEnabled(env, url.origin)
-        ? await withCommentProfileLinks(env, decorated) : decorated);
+      const linked = V !== 'all' && hostedRegistrationEnabled(env, url.origin)
+        ? await withCommentProfileLinks(env, decorated) : decorated;
+      return json(await redactCommentEmails(linked, await emailPrivacyFor(env, gate.session, slug, gate.meta)));
     }
 
     // Who the composer offers after `@`. Same gate as posting a comment: if
@@ -14779,7 +14876,13 @@ export default {
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
       const list = await readComments(env, slug);
       const me = actorKey(s);
-      const users = await mentionDirectory(env, s, meta, access, list);
+      // An address this person is not entitled to is not offered at all: a
+      // tag inserts the address into the comment text.
+      const privacy = await emailPrivacyFor(env, s, slug, meta);
+      const users = (await mentionDirectory(env, s, meta, access, list)).filter((u) => {
+        const m = String(u.login || '').match(EMAIL_KEY_RE);
+        return !m || privacy.reveal.has(m[1].toLowerCase());
+      });
       return json({
         users,
         identity: { login: me, name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
@@ -14856,7 +14959,7 @@ export default {
       // The same words twice within seconds is one comment: answer with the
       // one already there instead of writing a twin.
       const dup = duplicateComment(priorList, { author, text: commentText, anchor, parent_id, at: created });
-      if (dup) return json({ ...dup, duplicate_of: dup.id, mention_outcome: outcome });
+      if (dup) return commentPrivacyJson(env, s, slug, { ...dup, duplicate_of: dup.id, mention_outcome: outcome });
       // Serialized through the per-slug DO (mutation logic lives once in
       // applyCommentOp). create + reply are both id-stamped here so the
       // response is deterministic regardless of where the write runs.
@@ -14927,7 +15030,7 @@ export default {
       const body_out = res.status === 200 && res.body && typeof res.body === 'object'
         ? { ...res.body, mention_outcome: outcome }
         : res.body;
-      return json(body_out, { status: res.status });
+      return commentPrivacyJson(env, s, slug, body_out, { status: res.status });
     }
 
     // Re-anchor a comment, or edit its text. Appends an `anchor_changed` /
@@ -14961,7 +15064,7 @@ export default {
         const res = await mutateComments(env, slug, {
           kind: 'set_status', slug, id, resolved: body.resolved, version: V, actor: { login: s.login },
         });
-        return json(res.body, { status: res.status });
+        return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
       }
       if (typeof body.text === 'string') {
         const text = body.text.trim();
@@ -14981,7 +15084,7 @@ export default {
         const res = await mutateComments(env, slug, {
           kind: 'edit_text', slug, id, text, version: V, actor: { login: actorKey(s) },
         });
-        return json(res.body, { status: res.status });
+        return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
       }
       if (!slug || !id || !anchor) return json({ error: 'slug, id, anchor required' }, { status: 400 });
       // Auth read (canMutate needs session+env): resolve the target up front.
@@ -14997,7 +15100,7 @@ export default {
       const res = await mutateComments(env, slug, {
         kind: 'patch_anchor', slug, id, anchor, reset_status: true, version: V, actor: { login: actorKey(s) },
       });
-      return json(res.body, { status: res.status });
+      return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
     }
 
     // Admin: wipe ALL comments for a slug (doc owner only — uses the same
@@ -15017,7 +15120,7 @@ export default {
       if (writeGate.teamDoc && !writeGate.teamAdmin) return json({ error: 'not_doc_owner' }, { status: 403 });
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
-      return json(res.body, { status: res.status });
+      return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
     }
     // Soft-delete: append a `deleted` event at the current version. The
     // record is preserved; older versions still see the comment as it was.
@@ -15054,7 +15157,7 @@ export default {
       const res = await mutateComments(env, slug, {
         kind: 'delete', slug, id, version: stampVersion, actor: { login: actorKey(s) },
       });
-      return json(res.body, { status: res.status });
+      return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
     }
 
     // ---- reactions: toggle emoji on a comment OR reply ----
@@ -15094,7 +15197,7 @@ export default {
           title: (meta && meta.title) || slug, emoji,
         }, { ctx, origin: url.origin });
       }
-      return json(res.body, { status: res.status });
+      return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
     }
 
     // ---- Raft agent behavior manifest ----

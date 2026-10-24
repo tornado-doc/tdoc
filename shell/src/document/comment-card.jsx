@@ -24,7 +24,7 @@ function authorLine(author) {
     if (principal) return principal;
     if (handle) return handle;
   }
-  return author.name || author.login || 'anonymous';
+  return author.name || (author.login ? replyName(author) : 'anonymous');
 }
 
 // An agent's name with the five facts behind it on hover: name, who it acts
@@ -364,13 +364,22 @@ function descendantsOf(replies, parentId, rootId) {
   return out;
 }
 
+// The name in "Replying to @…": a GitHub login, else the display name. An
+// email account's key is an address (or, for other readers, an alias), and
+// neither belongs on screen.
+function replyName(author) {
+  const login = String(author?.login || '');
+  if (login && login !== 'email-hidden' && !login.includes(':') && !login.includes('@')) return login;
+  return String(author?.name || '').split('@')[0] || 'someone';
+}
+
 // Who a reply is answering, for the line a flattened reply carries in place of
 // the indentation it lost.
 function answers(replies, reply, rootComment) {
   const parent = reply.parent_id === rootComment.id || !reply.parent_id
     ? rootComment
     : replies.find((other) => other.id === reply.parent_id) || rootComment;
-  return parent.author?.login || parent.author?.name || '';
+  return replyName(parent.author);
 }
 
 // A comment or reply whose text was taken down but whose slot still holds a
@@ -419,7 +428,7 @@ function ReplyCard({
 }) {
   const kids = childrenOf(replies, reply.id, rootId);
   const reacted = hasReactions(reply);
-  const author = reply.author?.login || reply.author?.name || '';
+  const author = replyName(reply.author);
   // A deep link lands on a reply that may live inside a continuation, so an
   // expanded thread opens its continuations too — otherwise the link arrives
   // at a thread with its own target folded away.
