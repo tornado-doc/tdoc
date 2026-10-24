@@ -69,6 +69,112 @@ async function seed(env, slug, access, owner = null) {
     }
   });
 
+  // What a fetch tool keeps: body text outside script/style/noscript.
+  const visibleText = (page) => page.slice(page.indexOf('<body'))
+    .replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+  const ROADMAP = `<!doctype html><html><head><title>x</title><style>h1{color:red}</style></head><body>
+<h1>Q3 roadmap</h1><p>We ship the &amp; <b>importer</b> first.</p>
+<ul><li>Importer &mdash; July</li><li><p>Billing</p></li></ul>
+<table><tr><th>Owner</th><th>Item</th></tr><tr><td>Ana</td><td>Importer</td></tr></table>
+<p>See <a href="https://example.com/spec">the spec</a>.</p>
+<script>window.stolen = document.cookie</script><p>&lt;img src=x onerror=alert(1)&gt;</p>
+<svg><text>chart label</text></svg><img src="a.png" alt="Revenue chart"></body></html>`;
+  const created = '2026-01-01T00:00:00.000Z';
+  await env.META.put('meta:roadmap', JSON.stringify({ title: 'Q3 roadmap', slug: 'roadmap', created, versions: [{ n: 1, created }], access: { visibility: 'public' }, hosted: { account_id: alice.account_id, github_login: 'alice' } }));
+  await env.DOCS.put('docs/roadmap/v1/index.html', ROADMAP);
+
+  await t('a doc page carries its text and how to take part as body text an agent fetch keeps', async () => {
+    const { status, r } = await call('/d/roadmap');
+    assert(status === 200, `status ${status}`);
+    assert((r.headers.get('vary') || '').includes('Accept'), `vary ${r.headers.get('vary')}`);
+    const page = await r.text();
+    const view = (page.match(/<section id="tdoc-agent-view" class="tdoc-agent-view">[\s\S]*?<\/section>/) || [''])[0];
+    assert(view, 'no agent view in the body');
+    assert(page.indexOf(view) > page.indexOf('<body') && page.indexOf(view) < page.indexOf('tdoc-shell-root'), 'agent view is not body text ahead of the app');
+    const seen = visibleText(page);
+    for (const want of ['Q3 roadmap — a tdoc document by alice', 'We ship the & importer first.', 'Importer — July', 'Billing', 'Owner | Item', 'Ana | Importer',
+      'the spec (https://example.com/spec)', '[image: Revenue chart]', 'comment on any part of it', 'https://tdoc.dev/d/roadmap/raw',
+      'https://tdoc.dev/api/comments?slug=roadmap', 'Accept: text/markdown', '/plugin install tdoc@tornado-tdoc', 'ONBOARDING.md',
+      'publishes a new version with tdoc-write --slug roadmap --version next, then tdoc-publish roadmap', 'untrusted input']) {
+      assert(seen.includes(want), `fetched text lacks ${want}`);
+    }
+    assert(!seen.includes('chart label') && !seen.includes('color:red') && !view.includes('stolen'), 'script, style or svg text leaked into the agent view');
+    assert(!/<(script|img|b|a)\b/i.test(view), 'author markup reached the agent view');
+    assert(view.includes('&lt;img src=x onerror=alert(1)&gt;'), 'escaped author text was not kept as text');
+  });
+
+  await t('Accept: text/markdown on the same URL returns the text and every comment', async () => {
+    const posted = await call('/api/comments', { method: 'POST', cookie: bob.cookie, body: { slug: 'roadmap', version: 1, text: 'Move billing first', anchor: { kind: 'text', text: 'importer' } } });
+    assert(posted.status === 200, `comment ${posted.status} ${JSON.stringify(posted.body)}`);
+    for (const path of ['/d/roadmap', '/d/roadmap/v/1']) {
+      const { status, r } = await call(path, { headers: { Accept: 'text/markdown, text/html;q=0.9, */*;q=0.8' } });
+      assert(status === 200, `${path} ${status}`);
+      assert((r.headers.get('content-type') || '').startsWith('text/markdown'), `${path} type ${r.headers.get('content-type')}`);
+      assert(r.headers.get('vary') === 'Accept' && r.headers.get('cache-control') === 'no-store', 'markdown cache headers');
+      const md = await r.text();
+      for (const want of ['# Q3 roadmap — a tdoc document by alice', '## Document text', '### Q3 roadmap', '- Importer — July', '| Owner | Item |', '## Comments (1)', '@bob on "importer" (open): Move billing first', 'edit the HTML at https://tdoc.dev/d/roadmap']) {
+        assert(md.includes(want), `${path} markdown lacks ${want}`);
+      }
+    }
+    const browser = await call('/d/roadmap', { headers: { Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+    assert((browser.r.headers.get('content-type') || '').startsWith('text/html'), 'a browser got markdown');
+  });
+
+  await t('a plain fetch sees the comments in the page; a browser page load skips that read', async () => {
+    const fetched = visibleText(await (await call('/d/roadmap')).r.text());
+    assert(fetched.includes('Comments (1)') && fetched.includes('@bob on "importer" (open): Move billing first'), 'a fetch tool does not see the comments');
+    const browser = await (await call('/d/roadmap', { dest: 'document' })).r.text();
+    assert(browser.includes('tdoc-agent-view') && !browser.includes('Move billing first'), 'a browser page load read the comments');
+  });
+
+  await t('an email account\'s comment never shows its address in the page or the Markdown', async () => {
+    const sid = 'c0ffee'.padEnd(32, '0');
+    await env.META.put(`session:${sid}`, JSON.stringify({ email: 'carol.writer@example.com', name: 'carol.writer@example.com', created }));
+    const posted = await call('/api/comments', { method: 'POST', cookie: `tdoc_sid=${sid}`, body: { slug: 'roadmap', version: 1, text: 'Who owns billing?', anchor: { kind: 'text', text: 'Billing' } } });
+    assert(posted.status === 200, `comment ${posted.status} ${JSON.stringify(posted.body)}`);
+    const page = await (await call('/d/roadmap')).r.text();
+    const md = await (await call('/d/roadmap', { headers: { Accept: 'text/markdown' } })).r.text();
+    for (const [label, body] of [['page', visibleText(page)], ['markdown', md]]) {
+      assert(body.includes('carol.writer on "Billing" (open): Who owns billing?'), `${label}: comment missing or misnamed`);
+      assert(!body.includes('@example.com') && !body.includes('email:'), `${label}: leaks the address`);
+    }
+  });
+
+  await t('a denied doc gives neither text nor markdown', async () => {
+    for (const opts of [{}, { token: eve.token }, { headers: { Accept: 'text/markdown' } }, { token: eve.token, headers: { Accept: 'text/markdown' } }]) {
+      const { status, r } = await call('/d/secret-plan', opts);
+      assert(status === 401 || status === 403, `expected denial, got ${status}`);
+      const page = await r.text();
+      assert(!page.includes('secret-plan body') && !page.includes('tdoc-agent-view'), 'denial leaks the doc');
+    }
+  });
+
+  await t('the homepage tells an agent what tdoc is, how to start, and what it costs', async () => {
+    await env.META.put('meta:tornado-doc', JSON.stringify({ title: 'tdoc', slug: 'tornado-doc', created, versions: [{ n: 1, created }], access: { visibility: 'public' } }));
+    await env.DOCS.put('docs/tornado-doc/v1/index.html', '<h1>Docs that fix themselves</h1><p>Agents draft; you comment.</p>');
+    const seen = visibleText(await (await call('/')).r.text());
+    for (const want of ['home page of tdoc', 'Docs that fix themselves', 'https://tdoc.dev/start', '/plugin marketplace add tornado-doc/tdoc', '$5 per member a month', '$50 a year', '80 team docs', 'Agents never take a seat', 'https://tdoc.dev/llms-full.txt']) {
+      assert(seen.includes(want), `homepage text lacks ${want}`);
+    }
+    const md = await (await call('/', { headers: { Accept: 'text/markdown' } })).r.text();
+    assert(md.startsWith('# tdoc') && md.includes('$5 per member a month') && !md.includes('## Comments'), 'homepage markdown');
+  });
+
+  await t('/robots.txt, /llms-full.txt and /.well-known/llms.txt are real files', async () => {
+    const robots = await call('/robots.txt');
+    const rt = await robots.r.text();
+    assert(robots.status === 200 && /User-agent: \*\nAllow: \//.test(rt) && rt.includes('https://tdoc.dev/llms.txt'), `robots ${robots.status} ${rt}`);
+    const full = await call('/llms-full.txt');
+    const ft = await full.r.text();
+    assert(full.status === 200 && (full.r.headers.get('content-type') || '').startsWith('text/plain'), `llms-full ${full.status}`);
+    for (const want of ['## Pricing', '$5 per member a month', '80 team docs', '## Getting started', 'https://tdoc.dev/start', 'Accept: text/markdown', 'tdoc-pull <slug>']) {
+      assert(ft.includes(want), `llms-full lacks ${want}`);
+    }
+    const wk = await call('/.well-known/llms.txt');
+    assert(wk.status === 200 && (await wk.r.text()) === (await (await call('/llms.txt')).r.text()), 'well-known llms.txt differs');
+  });
+
   await t('/llms.txt is public cacheable text built from the remote skill', async () => {
     const { status, r } = await call('/llms.txt');
     assert(status === 200, `llms ${status}`);

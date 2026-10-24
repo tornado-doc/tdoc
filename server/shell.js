@@ -160,6 +160,192 @@
     return out;
   }
 
+  // The document as text blocks, for agents. A fetch tool turns a page into
+  // Markdown and keeps only the visible body text, and the document lives in
+  // a frame it never opens. So the shell repeats the text itself: headings,
+  // paragraphs, list items and table rows, rebuilt from text only — no author
+  // markup reaches the shell. Bounded input and output keep the CPU cost of
+  // a large doc flat.
+  const AGENT_SCAN_BYTES = 256 * 1024;
+  const AGENT_TEXT_CHARS = 24000;
+  const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '\u2014', ndash: '\u2013', hellip: '\u2026', middot: '\u00b7', rarr: '\u2192', larr: '\u2190', times: '\u00d7', copy: '\u00a9', lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201c', rdquo: '\u201d', bull: '\u2022' };
+  // One pass, so `&amp;lt;` stays the text `&lt;`.
+  function decodeEntities(s) {
+    return s.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, function (m, e) {
+      if (e[0] === '#') {
+        const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+        return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ' ';
+      }
+      return Object.prototype.hasOwnProperty.call(ENTITIES, e.toLowerCase()) ? ENTITIES[e.toLowerCase()] : ' ';
+    });
+  }
+  const BREAK_TAGS = /^(p|div|section|article|header|footer|main|aside|nav|blockquote|pre|figure|figcaption|dl|dt|dd|ul|ol|table|thead|tbody|tfoot|details|summary|form|fieldset|hr|br|caption)$/;
+  function agentBlocksFromHtml(html, maxChars) {
+    const limit = Number(maxChars) || AGENT_TEXT_CHARS;
+    if (typeof html !== 'string' || !html) return { blocks: [], truncated: false };
+    const source = html.length > AGENT_SCAN_BYTES ? html.slice(0, AGENT_SCAN_BYTES) : html;
+    let truncated = html.length > AGENT_SCAN_BYTES;
+    let body = source
+      .replace(/<!--[\s\S]*?(-->|$)/g, ' ')
+      .replace(/<[!?][^>]*>/g, ' ')
+      .replace(/<head\b[\s\S]*?(<\/head\s*>|(?=<body\b))/i, ' ')
+      .replace(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, ' ');
+    // A cut source can end inside one of those blocks, or inside a tag.
+    const open = body.search(/<(script|style|noscript|template|svg|iframe|object|canvas|math)\b/i);
+    if (open >= 0) { body = body.slice(0, open); truncated = true; }
+    body = body.replace(/<[^>]*$/, ' ');
+    const blocks = [];
+    let used = 0;
+    let buf = '';
+    let kind = 'p';
+    let level = 0;
+    let row = null;
+    let cell = null;
+    let href = null;
+    const clean = (s) => s.replace(/\s+/g, ' ').trim();
+    const push = (block, size) => {
+      if (used + size > limit) { truncated = true; return false; }
+      blocks.push(block); used += size; return true;
+    };
+    const flush = () => {
+      const t = clean(buf);
+      buf = '';
+      if (t) push(kind === 'h' ? { t: 'h', level: level, text: t } : { t: kind, text: t }, t.length);
+      kind = 'p'; level = 0;
+    };
+    const re = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>|([^<]+|<)/g;
+    let m;
+    while ((m = re.exec(body)) && !truncated) {
+      if (m[4] != null) {
+        const t = decodeEntities(m[4]);
+        if (cell != null) cell += t; else buf += t;
+        continue;
+      }
+      const close = m[1] === '/';
+      const tag = m[2].toLowerCase();
+      if (tag === 'tr') {
+        if (cell != null) { if (row) row.push(clean(cell)); cell = null; }
+        if (row && row.some(Boolean)) push({ t: 'row', cells: row }, row.join(' | ').length);
+        row = close ? null : [];
+        continue;
+      }
+      if (tag === 'td' || tag === 'th') {
+        if (cell != null && row) row.push(clean(cell));
+        cell = close ? null : '';
+        if (!close && !row) row = [];
+        continue;
+      }
+      if (tag === 'a') {
+        if (!close) {
+          const h = /\bhref\s*=\s*("([^"]*)"|'([^']*)')/i.exec(m[3]);
+          href = h ? decodeEntities(h[2] != null ? h[2] : h[3]).trim() : null;
+        } else if (href) {
+          if (/^https?:\/\//i.test(href)) { const s = ' (' + href + ')'; if (cell != null) cell += s; else buf += s; }
+          href = null;
+        }
+        continue;
+      }
+      if (tag === 'img' && !close) {
+        const alt = /\balt\s*=\s*("([^"]*)"|'([^']*)')/i.exec(m[3]);
+        const a = alt ? clean(decodeEntities(alt[2] != null ? alt[2] : alt[3])) : '';
+        if (a) { const s = ' [image: ' + a + '] '; if (cell != null) cell += s; else buf += s; }
+        continue;
+      }
+      if (/^h[1-6]$/.test(tag)) { flush(); if (!close) { kind = 'h'; level = Number(tag[1]); } continue; }
+      if (tag === 'li') { flush(); if (!close) kind = 'li'; continue; }
+      if (BREAK_TAGS.test(tag)) {
+        if (cell != null) { cell += ' '; continue; }
+        const keep = kind;
+        const lvl = level;
+        flush();
+        // A <p> inside an <li> is still that item.
+        if (!close && keep === 'li' && tag === 'p') { kind = 'li'; level = lvl; }
+      }
+    }
+    if (!truncated) flush();
+    return { blocks: blocks, truncated: truncated };
+  }
+
+  function commentLine(c) {
+    const quote = c.quote ? ' on "' + String(c.quote).replace(/\s+/g, ' ').slice(0, 200) + '"' : '';
+    return (c.author || 'someone') + quote + (c.resolved ? ' (resolved)' : ' (open)') + ': ' + c.text;
+  }
+
+  // Visually hidden, but real body text: fetch tools drop display:none,
+  // [hidden] and aria-hidden, and keep this. The shell removes it on boot.
+  function agentBodyHtml(d) {
+    const v = d && d.agentView;
+    if (!v) return '';
+    let out = '<section id="tdoc-agent-view" class="tdoc-agent-view">\n';
+    out += '<h1>' + esc(v.title || '') + '</h1>\n';
+    (v.intro || []).forEach(function (line) { out += '<p>' + esc(line) + '</p>\n'; });
+    const blocks = v.blocks || [];
+    if (blocks.length) {
+      out += '<h2>' + esc(v.contentHeading || 'Document text') + '</h2>\n';
+      let inList = false;
+      blocks.forEach(function (b) {
+        if (b.t === 'li' && !inList) { out += '<ul>\n'; inList = true; }
+        if (b.t !== 'li' && inList) { out += '</ul>\n'; inList = false; }
+        if (b.t === 'h') { const l = Math.min(6, (b.level || 1) + 2); out += '<h' + l + '>' + esc(b.text) + '</h' + l + '>\n'; }
+        else if (b.t === 'li') out += '<li>' + esc(b.text) + '</li>\n';
+        else if (b.t === 'row') out += '<p>' + esc(b.cells.join(' | ')) + '</p>\n';
+        else out += '<p>' + esc(b.text) + '</p>\n';
+      });
+      if (inList) out += '</ul>\n';
+    }
+    if (v.truncated && v.raw) out += '<p>' + esc('The text above is cut short. The full source is at ' + v.raw) + '</p>\n';
+    if (Array.isArray(v.comments)) {
+      out += '<h2>' + esc('Comments (' + v.comments.length + ')') + '</h2>\n';
+      if (!v.comments.length) out += '<p>No comments yet.</p>\n';
+      else {
+        out += '<ul>\n';
+        v.comments.forEach(function (c) {
+          out += '<li>' + esc(commentLine(c));
+          if ((c.replies || []).length) {
+            out += '<ul>' + c.replies.map(function (r) { return '<li>' + esc((r.author || 'someone') + ': ' + r.text) + '</li>'; }).join('') + '</ul>';
+          }
+          out += '</li>\n';
+        });
+        out += '</ul>\n';
+      }
+    }
+    out += '</section>\n';
+    return out;
+  }
+
+  // The same view as Markdown, for `Accept: text/markdown` on the doc's URL.
+  function agentMarkdown(v, comments) {
+    if (comments === undefined) comments = v.comments;
+    const md = (s) => String(s == null ? '' : s).replace(/\r?\n/g, ' ');
+    let out = '# ' + md(v.title) + '\n\n';
+    (v.intro || []).forEach(function (line) { out += md(line) + '\n\n'; });
+    const blocks = v.blocks || [];
+    if (blocks.length) {
+      out += '## ' + md(v.contentHeading || 'Document text') + '\n\n';
+      let prev = '';
+      blocks.forEach(function (b) {
+        if (prev && prev !== b.t && (prev === 'li' || prev === 'row')) out += '\n';
+        if (b.t === 'h') out += '#'.repeat(Math.min(6, (b.level || 1) + 2)) + ' ' + md(b.text) + '\n\n';
+        else if (b.t === 'li') out += '- ' + md(b.text) + '\n';
+        else if (b.t === 'row') out += '| ' + b.cells.map(function (c) { return md(c).replace(/\|/g, '\\|'); }).join(' | ') + ' |\n';
+        else out += md(b.text) + '\n\n';
+        prev = b.t;
+      });
+      if (prev === 'li' || prev === 'row') out += '\n';
+    }
+    if (v.truncated && v.raw) out += 'The text above is cut short. The full source is at ' + v.raw + '\n\n';
+    if (Array.isArray(comments)) {
+      out += '## Comments (' + comments.length + ')\n\n';
+      if (!comments.length) out += 'No comments yet.\n\n';
+      comments.forEach(function (c) {
+        out += '- ' + md(commentLine(c)) + '\n';
+        (c.replies || []).forEach(function (r) { out += '  - ' + md(r.author || 'someone') + ': ' + md(r.text) + '\n'; });
+      });
+      out += '\n';
+    }
+    return out;
+  }
+
   // An agent handed a doc link fetches this shell, not the document (that
   // lives in the sandboxed frame), so the head says where the readable source
   // is and that the tdoc skill can comment, reply and publish here. Nothing
@@ -201,6 +387,7 @@ seoHeadHtml(d) +
 '<link rel="stylesheet" href="' + esc(d.runtimeCssPath) + '">\n' +
 '</head><body>\n' +
 seoBodyHtml(d) +
+agentBodyHtml(d) +
 '  <div id="tdoc-shell-root"></div>\n' +
 '  <script' + d.nonceAttr + '>window.__TDOC_SHELL__ = ' + d.cfgJson + ';</scr' + 'ipt>\n' +
 '  <script' + d.nonceAttr + '>window.__TDOC_SHELL_BOOT__ = ' + d.bootJson + ';</scr' + 'ipt>\n' +
@@ -230,6 +417,8 @@ seoBodyHtml(d) +
     firstImageFromHtml: firstImageFromHtml,
     resolveDocAssetUrl: resolveDocAssetUrl,
     previewFromHtml: previewFromHtml,
+    agentBlocksFromHtml: agentBlocksFromHtml,
+    agentMarkdown: agentMarkdown,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.TDOC_SHELL_BUILDER = api;
