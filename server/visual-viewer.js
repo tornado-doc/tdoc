@@ -28,6 +28,10 @@
     '.tdoc-visual-open:hover{background:#f2f4f7;border-color:#98a2b3;}' +
     '.tdoc-visual-open[hidden]{display:none!important;}' +
     '.tdoc-visual-open svg{display:block;width:20px;height:20px;margin:0!important;}' +
+    // A slide card is a page of text: its button sits under the card, beside
+    // the slide number, never over the slide's own corner.
+    '.tdoc-visual-open.is-slide{width:32px;height:32px;box-shadow:none;}' +
+    '.tdoc-visual-open.is-slide svg{width:16px;height:16px;}' +
     '.tdoc-visual-viewer{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;margin:0!important;padding:0!important;border:0!important;box-sizing:border-box!important;}' +
     '.tdoc-visual-viewer::backdrop{background:transparent;}' +
     '.tdoc-visual-toolbar{position:fixed!important;inset:0 0 auto!important;width:100vw;max-width:none;box-sizing:border-box;margin:0;border:0;display:flex;align-items:center;gap:8px;padding:12px max(12px,env(safe-area-inset-right)) 12px max(12px,env(safe-area-inset-left));font:14px/1.4 system-ui;color:inherit;}' +
@@ -46,6 +50,11 @@
     entries.forEach(function (entry) {
       var r = entry.el.getBoundingClientRect();
       entry.button.hidden = !canExpand() || !!active || !entry.el.isConnected || r.width < 64 || r.height < 48;
+      if (entry.slide) {
+        entry.button.style.left = 'clamp(0px,' + Math.max(0, r.right + window.scrollX - 32) + 'px,calc(100% - 32px))';
+        entry.button.style.top = r.bottom + window.scrollY + 8 + 'px';
+        return;
+      }
       entry.button.style.left = 'clamp(0px,' + Math.max(0, r.right + window.scrollX - 48) + 'px,calc(100% - 48px))';
       entry.button.style.top = r.top + window.scrollY + 2 + 'px';
     });
@@ -60,12 +69,13 @@
       var r = el.getBoundingClientRect();
       if (r.width < 64 || r.height < 48) return;
       var button = provider(document.createElement('button'));
-      button.type = 'button'; button.className = 'tdoc-visual-open';
+      var slide = el.matches('[data-tdoc-slide]');
+      button.type = 'button'; button.className = 'tdoc-visual-open' + (slide ? ' is-slide' : '');
       button.setAttribute('aria-label', 'View ' + label(el) + ' fullscreen');
       button.title = 'View fullscreen';
       button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>';
       button.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); open(el, button); });
-      document.body.appendChild(button); entries.push({ el: el, button: button });
+      document.body.appendChild(button); entries.push({ el: el, button: button, slide: slide });
     });
     schedule();
   }
@@ -188,7 +198,9 @@
     if (active || !readMode() || e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
     if (e.target.closest(CONTROL) || window.getSelection()?.toString()) return;
     var el = visual(e.target), entry = entries.find(function (item) { return item.el === el; });
-    if (entry && !el.matches('video,iframe')) { e.preventDefault(); open(el, entry.button); }
+    // A slide is read, not opened: a tap on its text (a phone scrolling the
+    // deck) must not throw it fullscreen. Its button and Present do that.
+    if (entry && !el.matches('video,iframe,[data-tdoc-slide]')) { e.preventDefault(); open(el, entry.button); }
   });
   document.addEventListener('keydown', function (e) {
     if (!active) return;

@@ -14,7 +14,9 @@ emphasis. A deck is designed page by page.
 | **Browse, phone** | Cards as wide as the phone (about 350px); the reader lets each card grow taller than 16:9 so it can be scrolled like a page | The card must reflow: columns stack, text stays readable |
 
 Design for all three. A slide that only works as a scaled-down 16:9 picture
-leaves 5px text on a phone.
+leaves 5px text on a phone. The reader checks the whole deck on a phone: if
+any card has text placed absolutely, content wider than the card, or text
+under 11px, every card falls back to the scaled 16:9 picture.
 
 ## The frame
 

@@ -1,6 +1,6 @@
 // Top-bar workspace switcher: shows the current space, lists My docs and
 // every team with the current one checked, and New team; the only switcher
-// (the old pill row is gone), on a phone too.
+// (the old pill row is gone); on a phone the same list is under ⋯.
 const assert = require('assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -158,18 +158,25 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await page.getByRole('heading', { name: 'Agent access' }).waitFor();
       await page.close();
     });
-    await t('phone: the switcher is there and the old pill row is gone', async () => {
+    await t('phone: the spaces are in ⋯ and the old pill row is gone', async () => {
       const page = await open(390, '?team=tm_befreed');
-      const trigger = page.locator('.tdoc-space-trigger');
-      await trigger.waitFor();
-      assert.equal(await trigger.isVisible(), true);
+      // The chip gives its room to ⋯ on a phone; the same list is under
+      // ⋯ → Switch space (phone-top-bar-ui.test.js covers the doc page).
+      const more = page.locator('#tdoc-more-btn');
+      await more.waitFor();
+      assert.equal(await page.locator('.tdoc-space-trigger').isVisible(), false, 'space chip hidden on a phone');
       assert.equal(await page.locator('.tm-spaces').count(), 0, 'the pill row is back');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'switcher-phone.png') });
       await page.getByRole('button', { name: 'Grid view' }).click();
       await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'grid overflows sideways');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-grid-phone.png'), fullPage: true });
-      await trigger.click();
+      await more.click();
+      await page.getByRole('menuitem', { name: /Switch space/ }).click();
+      const names = page.locator('.ui-menu-popup .tdoc-space-item-name');
+      await names.first().waitFor();
+      assert.deepEqual((await names.allTextContents()).map((x) => x.trim()), ['My docs', 'BeFreed', 'Smrti Lab', 'Workspace settings', 'New team']);
+      assert.equal(await page.locator('.ui-menu-popup .tdoc-space-check').count(), 1, 'the current team is checked');
       await page.getByRole('menuitem', { name: 'Workspace settings' }).click();
       await page.getByRole('heading', { name: 'Data backup' }).waitFor();
       const geometry = await page.evaluate(() => ({
@@ -243,8 +250,10 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await page.waitForFunction(() => !document.querySelector('.doc-row[data-slug="team-plan"]'));
       assert.match(page.url(), /team=tm_befreed/);
       finishMove();
-      await page.locator('.tdoc-space-trigger').click();
-      await page.getByRole('menuitem', { name: 'My docs' }).click();
+      await page.locator('#tdoc-more-btn').click();
+      await page.getByRole('menuitem', { name: /Switch space/ }).click();
+      // The space row, not the ⋯ menu's own My docs link (that one navigates).
+      await page.locator('.ui-menu-popup .tdoc-space-item-name', { hasText: /^My docs$/ }).click();
       await page.locator('.doc-row[data-slug="team-plan"]').waitFor();
       await page.close();
     });

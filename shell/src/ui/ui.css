@@ -1080,13 +1080,20 @@ a.ui-menu-item:visited {
 .tdoc-modal .tdoc-share-version button.tdoc-quiet-link { margin: 0; color: var(--td-accent); }
 
 /* Top-bar workspace switcher (workspace-switcher.jsx): one text-first control
-   on every page, kept visible and compact on a phone. */
+   on every page. */
 .tdoc-bar .tdoc-space-trigger { padding: 5px 10px 5px 12px; gap: 6px; max-width: 220px; }
 .tdoc-bar .tdoc-space-trigger .tdoc-space-name { display: inline; }
 .tdoc-bar .tdoc-space-trigger .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tdoc-space-item-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tdoc-space-check { margin-left: auto; color: var(--td-accent); }
-@media (max-width: 700px) { .tdoc-bar .tdoc-space-trigger { max-width: 140px; } }
+/* On a phone the chip gives its room to ⋯ (#tdoc-more-btn), which carries
+   Show resolved, Share and Versions: the same rows are a "Switch space"
+   submenu there. ⋯ never shrinks out of the bar. */
+.tdoc-space-submenu-current { margin-left: auto; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a8a8a; font-size: 12px; }
+@media (max-width: 700px) {
+  .tdoc-bar .tdoc-space-trigger { display: none; }
+  .tdoc-bar #tdoc-more-btn { flex-shrink: 0; }
+}
 
 /* AppDialog `side`: a panel docked under the top bar at the right edge. The
    viewport lets clicks through so the document stays readable and scrollable

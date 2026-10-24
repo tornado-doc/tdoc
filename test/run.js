@@ -164,6 +164,7 @@ const BROWSER = [
   'visual-viewer.test.js', // visual expansion preserves interactive state and reading mode
   'slides-scale.test.js', // slide view scales cards once: cqw type the same in WebKit and Chromium, desktop and phone
   'slides-mode.test.js', // data-tdoc-slide decks present one slide at a time, fitted, and restore on exit
+  'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
@@ -171,6 +172,7 @@ const BROWSER = [
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'ask-panel-ui.test.js', // Ask this doc: bar + ⋯ entry, side panel / bottom sheet, thinking, post as comment, limit line
+  'phone-top-bar-ui.test.js', // signed in on a phone: ⋯ stays on screen, spaces under ⋯ → Switch space
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
   'share-access-ui.test.js', // Share panel: specific people / anyone with the link / public, sign-in switch, desktop + phone
   'team-comments-ui.test.js', // team-wide comments: filters, exact deep links, bounded pagination, phone layout
