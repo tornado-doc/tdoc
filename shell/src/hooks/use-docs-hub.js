@@ -5,11 +5,13 @@ import {
   renameDocument,
   deleteDocument,
   deleteFolder as deleteFolderRequest,
+  restoreFromTrash,
   moveDocsToFolder,
   renameFolder,
   updateFolderAccess,
   setDocumentStar,
 } from '../document/api.js';
+import { rememberTrashed } from '../recent-trash.js';
 import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from '../docs-hub/search.js';
 
 const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
@@ -35,7 +37,8 @@ export function useDocsHub({ boot, onUnauthorized }) {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 3500);
+    // A toast that offers Undo stays long enough to reach for it.
+    const timer = window.setTimeout(() => setToast(null), toast.action ? 8000 : 3500);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -52,7 +55,8 @@ export function useDocsHub({ boot, onUnauthorized }) {
     setSelected(new Set());
   }, [folder]);
 
-  const notify = useCallback((message, error = false) => setToast({ message, error }), []);
+  // `action`: { label, run } -- one button on the toast (Undo after a delete).
+  const notify = useCallback((message, error = false, action = null) => setToast({ message, error, action }), []);
 
   const run = useCallback(async (operation, success) => {
     try {
@@ -191,19 +195,35 @@ export function useDocsHub({ boot, onUnauthorized }) {
     return true;
   }, [docs, run]);
 
+  // Delete moves the docs to Trash; the toast's Undo takes them straight back
+  // out, rows and all, without a reload.
   const deleteDocs = useCallback(async (slugs) => {
-    const ok = await run(
-      () => Promise.all(slugs.map((slug) => deleteDocument(slug))),
-      `Deleted ${plural(slugs.length, 'doc')}`,
-    );
+    const ok = await run(() => Promise.all(slugs.map((slug) => deleteDocument(slug))));
     if (!ok) return false;
-    const keep = (items) => items.filter((item) => !slugs.includes(item.slug));
+    slugs.forEach((slug) => rememberTrashed({ slug }));
+    const gone = new Set(slugs);
+    const before = { docs, recent, starred };
+    const keep = (items) => items.filter((item) => !gone.has(item.slug));
     setDocs(keep);
     setRecent(keep);
     setStarred(keep);
     setSelected(new Set());
+    notify(`Moved ${plural(slugs.length, 'doc')} to Trash`, false, {
+      label: 'Undo',
+      run: async () => {
+        const back = await run(
+          () => Promise.all(slugs.map((slug) => restoreFromTrash({ slug }))),
+          `Restored ${plural(slugs.length, 'doc')}`,
+        );
+        if (!back) return;
+        const putBack = (list, items) => [...list.filter((item) => gone.has(item.slug)), ...keep(items)];
+        setDocs((items) => putBack(before.docs, items));
+        setRecent((items) => putBack(before.recent, items));
+        setStarred((items) => putBack(before.starred, items));
+      },
+    });
     return true;
-  }, [run]);
+  }, [docs, recent, starred, notify, run]);
 
   const saveFolder = useCallback(async ({ id, name }) => {
     const trimmed = String(name || '').trim();
@@ -231,16 +251,40 @@ export function useDocsHub({ boot, onUnauthorized }) {
     return saved;
   }, [run]);
 
+  // A folder goes to Trash with its subfolders and the docs in them; Undo
+  // brings the whole tree back.
   const deleteFolder = useCallback(async (item) => {
-    const ok = await run(() => deleteFolderRequest(item.id));
+    let result;
+    const ok = await run(async () => { result = await deleteFolderRequest(item.id); });
     if (!ok) return false;
-    setFolders((items) => items
-      .filter((candidate) => candidate.id !== item.id)
-      .map((candidate) => (candidate.parent === item.id ? { ...candidate, parent: item.parent } : candidate)));
-    setDocs((items) => items.map((doc) => (doc.folder === item.id ? { ...doc, folder: item.parent } : doc)));
-    if (folder === item.id) setFolder(item.parent);
+    rememberTrashed({ folder: item.id });
+    const before = { docs, folders, recent, starred };
+    const tree = new Set([item.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const candidate of folders) if (tree.has(candidate.parent) && !tree.has(candidate.id)) { tree.add(candidate.id); grew = true; }
+    }
+    const trashed = new Set((result && result.docs) || []);
+    const keep = (items) => items.filter((doc) => !trashed.has(doc.slug));
+    setFolders((items) => items.filter((candidate) => !tree.has(candidate.id)));
+    // Whatever stayed behind (docs it could not delete) moves up a level.
+    setDocs((items) => keep(items).map((doc) => (tree.has(doc.folder) ? { ...doc, folder: item.parent } : doc)));
+    setRecent(keep);
+    setStarred(keep);
+    if (tree.has(folder)) setFolder(item.parent);
+    notify(`Moved “${item.name}”${trashed.size ? ` and ${plural(trashed.size, 'doc')}` : ''} to Trash`, false, {
+      label: 'Undo',
+      run: async () => {
+        const back = await run(() => restoreFromTrash({ folder: item.id }), `Restored “${item.name}”`);
+        if (!back) return;
+        setFolders(before.folders);
+        setDocs(before.docs);
+        setRecent(before.recent);
+        setStarred(before.starred);
+      },
+    });
     return true;
-  }, [folder, run]);
+  }, [docs, folders, recent, starred, folder, notify, run]);
 
   return {
     docs,
@@ -269,6 +313,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
     selectAll,
     toast,
     notify,
+    dismissToast: () => setToast(null),
     createDoc,
     renameDoc,
     toggleStar,

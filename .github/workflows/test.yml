@@ -67,7 +67,7 @@ jobs:
       # intentional scaffolding vars (e.g. HTML_PATH, HAS_JQ). The gate is for
       # the dangerous classes (quoting/word-splitting/injection), not lint nits.
       - name: ShellCheck CLIs
-        run: shellcheck --severity=warning --exclude=SC2034 bin/tdoc-publish bin/tdoc-doctor bin/tdoc-pull bin/tdoc-new bin/tdoc-unpublish bin/tdoc-update
+        run: shellcheck --severity=warning --exclude=SC2034 bin/tdoc-publish bin/tdoc-doctor bin/tdoc-pull bin/tdoc-new bin/tdoc-unpublish bin/tdoc-restore bin/tdoc-update
 
   svg-preview:
     name: SVG preview and font coverage

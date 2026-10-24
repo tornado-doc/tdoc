@@ -154,6 +154,19 @@ async function seedDoc(env, slug, owner) {
       assert(!remote.some((x) => x.url.endsWith('/docs/plan/v1/index.html')), 'old version recopied');
     });
 
+    await t('Trash keeps the backup copy; the purge 30 days later sends the tombstone', async () => {
+      await seedDoc(env, 'old-plan', 'alice');
+      await call('/api/team/move', { method: 'POST', cookie: alice, body: { slugs: ['old-plan'], team: team.id } });
+      sent.length = 0;
+      const trashed = await call('/api/doc?slug=old-plan', { method: 'DELETE', cookie: alice, headers: origin });
+      assert(trashed.status === 200, `trash ${trashed.status} ${JSON.stringify(trashed.body)}`);
+      assert(!sent.some((job) => job.slug === 'old-plan'), `moving to Trash touched the backup: ${JSON.stringify(sent)}`);
+      const at = Date.parse(JSON.parse(await env.META.get('meta:old-plan')).trashed_at);
+      await worker.scheduled({ scheduledTime: at + 31 * 24 * 60 * 60 * 1000 }, env, {});
+      const tombstone = sent.find((job) => job.kind === 'deleted' && job.slug === 'old-plan');
+      assert(tombstone && tombstone.team === team.id, `purge tombstone ${JSON.stringify(sent)}`);
+    });
+
     await t('move-out produces a tombstone for the old team', async () => {
       sent.length = 0;
       const moved = await call('/api/team/move', { method: 'POST', cookie: alice, body: { slugs: ['plan'], team: null } });

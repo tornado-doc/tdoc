@@ -232,6 +232,24 @@ jobs:
                 return 1
                 ;;
             esac
+            # Delete moves a doc to Trash, where its slug stays reserved;
+            # erase it for good so the fixture can be published again. A
+            # worker from before Trash answers 404 here (nothing to purge).
+            status="$(curl -sS --connect-timeout 10 --max-time 60 -X POST \
+              "$BASE/api/trash/purge" \
+              -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "{\"slug\":\"$slug\"}" \
+              -o /tmp/tdoc-preview-delete-resp.json \
+              -w '%{http_code}')"
+            case "$status" in
+              200|404) ;;
+              *)
+                cat /tmp/tdoc-preview-delete-resp.json >&2
+                echo "could not purge preview fixture $slug (HTTP $status)" >&2
+                return 1
+                ;;
+            esac
           }
           reset_preview_slug conway-life
           reset_preview_slug tornado-doc

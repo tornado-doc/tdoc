@@ -188,7 +188,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(repaired.hosted.account_id === tok.account_id, 'retry did not repair hosted ownership meta');
   });
 
-  await t('after delete, original owner can republish; second token cannot squat while owned', async () => {
+  await t('after delete forever, original owner can republish; second token cannot squat while owned or in Trash', async () => {
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env, 'owner');
     const b = await issue(worker, env, 'other');
@@ -206,8 +206,24 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
     const del = await worker.fetch(req('/api/doc?slug=reclaim-doc', { method: 'DELETE', token: a.token }), env, {});
     assert(del.status === 200, `delete ${del.status}: ${await del.text()}`);
+    // Delete moves it to Trash: the slug stays reserved, nobody writes it.
+    assert(env.COMMENTS.stateFor('reclaim-doc').storage.map.has('hostedOwner'), 'Trash must keep the slug reserved');
+    const squatInTrash = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: b.token,
+      body: { slug: 'reclaim-doc', version: 1, html: '<h1>stolen</h1>' },
+    }), env, {});
+    assert(squatInTrash.status === 403, `second token must not take a trashed slug, got ${squatInTrash.status}`);
+    const ownerInTrash = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'reclaim-doc', version: 2, html: '<h1>v2</h1>' },
+    }), env, {});
+    const ownerBody = await ownerInTrash.json();
+    assert(ownerInTrash.status === 409 && ownerBody.error === 'doc_in_trash' && /Restore it first/.test(ownerBody.message),
+      `owner publishing to a trashed slug must be told to restore, got ${ownerInTrash.status} ${JSON.stringify(ownerBody)}`);
+    const purge = await worker.fetch(req('/api/trash/purge', { method: 'POST', token: a.token, body: { slug: 'reclaim-doc' } }), env, {});
+    assert(purge.status === 200, `purge ${purge.status}: ${await purge.text()}`);
     assert(!env.COMMENTS.stateFor('reclaim-doc').storage.map.has('hostedOwner'),
-      'delete must release hostedOwner');
+      'delete forever must release hostedOwner');
     assert(!await env.META.get('meta:reclaim-doc'), 'delete must drop meta');
     assert(!await env.DOCS.head('docs/reclaim-doc/v1/index.html'), 'delete must drop R2 bytes');
 
@@ -249,10 +265,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       };
     };
 
-    const del = await worker.fetch(req('/api/doc?slug=parked-on-bad-release', {
+    const trash = await worker.fetch(req('/api/doc?slug=parked-on-bad-release', {
       method: 'DELETE', token: a.token,
     }), env, {});
-    assert(del.status !== 200, `DELETE must not succeed when release fails, got ${del.status}`);
+    assert(trash.status === 200, `move to Trash ${trash.status}`);
+    const del = await worker.fetch(req('/api/trash/purge', {
+      method: 'POST', token: a.token, body: { slug: 'parked-on-bad-release' },
+    }), env, {});
+    assert(del.status !== 200, `delete forever must not succeed when release fails, got ${del.status}`);
     const body = await del.json();
     assert(body.error === 'forced_release_fail' || body.error === 'owner_release_failed',
       `unexpected error body ${JSON.stringify(body)}`);
@@ -268,10 +288,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     }));
     await env.DOCS.put('docs/vercel-style/v1/index.html', '<h1>v1</h1>');
     delete env.COMMENTS;
-    const del = await worker.fetch(req('/api/doc?slug=vercel-style', {
+    const trash = await worker.fetch(req('/api/doc?slug=vercel-style', {
       method: 'DELETE', token: 'admin-token',
     }), env, {});
-    assert(del.status === 200, `Vercel-style delete should 200, got ${del.status}: ${await del.text()}`);
+    assert(trash.status === 200, `Vercel-style move to Trash should 200, got ${trash.status}: ${await trash.text()}`);
+    const del = await worker.fetch(req('/api/trash/purge', {
+      method: 'POST', token: 'admin-token', body: { slug: 'vercel-style' },
+    }), env, {});
+    assert(del.status === 200, `Vercel-style delete forever should 200, got ${del.status}: ${await del.text()}`);
     assert(!await env.META.get('meta:vercel-style'), 'meta should be wiped');
   });
 

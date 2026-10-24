@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# tdoc-restore — bring a deleted doc back out of Trash, or list what is there.
+# A doc stays in Trash for 30 days after Delete (tdoc-delete / tdoc-unpublish
+# or the web), unreadable everywhere, then it is erased for good.
+#
+# Usage: tdoc-restore <slug>          # restore one doc
+#        tdoc-restore --list [--team <team id>]   # what is in Trash, days left
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+
+ARG="${1:-}"
+if [ -z "$ARG" ]; then echo "usage: tdoc-restore <slug> | --list [--team <team id>]" >&2; exit 1; fi
+
+CONFIG_FILE="$HOME/.tdoc/published.json"
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo "no ~/.tdoc/published.json — nothing published to restore." >&2
+  exit 1
+fi
+TOKEN="$(json_file_get "$CONFIG_FILE" upload_token)"
+PLATFORM="$(json_file_get "$CONFIG_FILE" platform)"; PLATFORM="${PLATFORM:-cloudflare}"
+if [ "$PLATFORM" = "hosted" ] || [ "$PLATFORM" = "vercel" ]; then
+  BASE="$(json_file_get "$CONFIG_FILE" base)"
+  if [ -z "$BASE" ] || [ "$BASE" = "null" ]; then
+    echo "[tdoc] $CONFIG_FILE has no '.base' — delete it and re-run /tdoc publish to re-setup." >&2
+    exit 1
+  fi
+else
+  SUBDOMAIN="$(json_file_get "$CONFIG_FILE" subdomain)"
+  WORKER_NAME="$(json_file_get "$CONFIG_FILE" worker)"
+  BASE="https://${WORKER_NAME}.${SUBDOMAIN}.workers.dev"
+fi
+
+if [ "$ARG" = "--list" ]; then
+  QUERY=""
+  if [ "${2:-}" = "--team" ] && [ -n "${3:-}" ]; then QUERY="?team=$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$3")"; fi
+  RESP="$(curl -sS --connect-timeout 10 --max-time 60 "$BASE/api/trash$QUERY" -H "Authorization: Bearer $TOKEN")"
+  if ERR="$(printf '%s' "$RESP" | json_error)"; then echo "[tdoc] could not read Trash: $ERR" >&2; exit 1; fi
+  printf '%s' "$RESP" | node -e '
+    let s = ""; process.stdin.on("data", (d) => { s += d; });
+    process.stdin.on("end", () => {
+      const items = (JSON.parse(s).items || []);
+      if (!items.length) { console.log("Trash is empty."); return; }
+      for (const i of items) {
+        const days = `${i.days_left} day${i.days_left === 1 ? "" : "s"} left`;
+        console.log(i.kind === "folder"
+          ? `folder  ${i.title} (${i.doc_count} doc${i.doc_count === 1 ? "" : "s"})  ${days}  [restore from My docs > Trash]`
+          : `${i.slug}  ${i.title}  ${days}`);
+      }
+    });'
+  exit 0
+fi
+
+SLUG="$ARG"
+# Same kebab-case rule as tdoc-new; [a-z0-9-] is JSON- and URL-safe.
+if ! printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
+  echo "[tdoc] invalid slug '$SLUG' — must be lowercase kebab-case (a-z, 0-9, -)." >&2
+  exit 1
+fi
+RESP="$(curl -sS --connect-timeout 10 --max-time 60 -X POST "$BASE/api/trash/restore" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  --data "{\"slug\":\"$SLUG\"}")"
+if ERR="$(printf '%s' "$RESP" | json_error)"; then
+  case "$ERR" in
+    not_in_trash) echo "[tdoc] $SLUG is not in Trash (never deleted, or already erased after 30 days)." >&2 ;;
+    *) echo "[tdoc] could not restore $SLUG: $ERR" >&2 ;;
+  esac
+  exit 1
+fi
+echo "Restored $SLUG from Trash: $BASE/d/$SLUG"

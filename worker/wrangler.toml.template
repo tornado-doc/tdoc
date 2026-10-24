@@ -20,6 +20,11 @@ head_sampling_rate = 1
 binding = "PRODUCT_ANALYTICS"
 dataset = "tdoc_product_events"
 
+# Trash: deleted docs wait 30 days, then the scheduled handler erases them
+# (purgeExpiredTrash, a bounded batch per run, so hourly keeps up).
+[triggers]
+crons = ["23 * * * *"]
+
 [[r2_buckets]]
 binding = "DOCS"
 bucket_name = "tdoc-docs"

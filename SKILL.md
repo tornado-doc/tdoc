@@ -836,11 +836,17 @@ bash "$SKILL_DIR/bin/tdoc-pull" <slug>
 
 ### `/tdoc unpublish <slug>` — remove from your Worker
 
-Deletes all versions, meta, and comments for `<slug>` from R2/KV. Local files
-are untouched.
+Moves `<slug>` to Trash: from that moment nobody (owner included, agents
+included) can read, comment on or publish to it, and it is erased for good
+after 30 days. Until then it can be restored, whole. Local files are
+untouched. Publishing to a slug in Trash is refused with `doc_in_trash`:
+restore it first, never pick a new slug to get around it without asking.
 
 ```bash
 bash "$SKILL_DIR/bin/tdoc-unpublish" <slug>
+bash "$SKILL_DIR/bin/tdoc-restore" <slug>      # bring it back out of Trash
+bash "$SKILL_DIR/bin/tdoc-restore" --list      # what is in Trash, days left
+bash "$SKILL_DIR/bin/tdoc-unpublish" <slug> --forever   # erase now (frees the slug); only when the user asks
 ```
 
 ### `/tdoc onboard` — guided first-time setup
@@ -1334,7 +1340,9 @@ bash "$SKILL_DIR/bin/tdoc-folder" move-to-team <folder> --team BeFreed   # a who
 - My docs folders hold your own docs. Team folders: any member makes one; its
   maker or a team admin renames/deletes it; a team doc is filed by its author
   or an admin, and must already be in the team (`tdoc-move --team` first).
-- Deleting a folder never deletes docs; they move up one level.
+- Deleting a folder moves it to Trash with its subfolders and every doc in
+  them that you could delete yourself; restoring the folder (Trash in My docs
+  or the team) brings them all back. Docs you could not delete move up a level.
 - `share` (My docs or team; in a team, maker or admin) prints a link listing
   the folder's docs (not subfolders). It grants no doc access: each doc still
   opens only for whoever its own access allows, so a team-only doc stays
