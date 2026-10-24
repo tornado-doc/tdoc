@@ -57,6 +57,12 @@
 #   - With --publish: also prints the published URL on a second line.
 
 set -euo pipefail
+# A reader's question run under the local agent daemon (TDOC_DAEMON_ASK)
+# answers; it never writes a version. tdoc-write lands here too.
+if [ -n "${TDOC_DAEMON_ASK:-}" ]; then
+  echo "[tdoc] a question run cannot write a document; answer with tdoc-agent-reply --ask." >&2
+  exit 2
+fi
 
 # ─────────────────────────────── arg parsing ──────────────────────────────
 SLUG=""

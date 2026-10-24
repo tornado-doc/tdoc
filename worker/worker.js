@@ -873,6 +873,17 @@ async function deleteDocEverywhere(env, slug) {
   // legacy KV value goes too, as cleanup.
   await mutateComments(env, slug, { kind: 'wipe' });
   await env.META.delete(`comments:${slug}`);
+  // Handoffs and readers' questions belong to this doc too: a slug published
+  // again later must not inherit them.
+  await env.META.delete(`handoffs:${slug}`);
+  try {
+    let kvCursor;
+    do {
+      const r = await env.META.list({ prefix: `agent-asks:${slug}:`, cursor: kvCursor });
+      for (const k of r.keys) await env.META.delete(k.name);
+      kvCursor = r.list_complete ? undefined : r.cursor;
+    } while (kvCursor);
+  } catch {}
   // Free the hosted slug reservation so it can be republished. Data is already
   // gone; this goes last. If COMMENTS is absent (Vercel) there was never a
   // hostedOwner key -- the caller ignores the 503.
@@ -12210,22 +12221,32 @@ async function handleAsk(env, req, url, slug) {
 // can be reached now: Send to my agent), 'offline' (connected, but the only
 // way in is a daemon that is not running, or a terminal that can publish and
 // cannot be woken: Copy for my agent).
-const AGENT_ASK_MAX = 100;
-const AGENT_ASK_LIST = 10;
+//
+// Stored per doc AND asker (agent-asks:<slug>:<account>): one reader's
+// questions can neither push out nor race another's.
+const AGENT_ASK_MAX = 50;          // kept per reader per doc
+const AGENT_ASK_LIST = 10;         // shown to the reader
+const AGENT_ASK_OPEN_MAX = 5;      // unanswered at once, per reader per doc
+const AGENT_ASK_RATE = 20;         // sent per reader per hour, all docs
 const AGENT_ASK_ANSWER_CHARS = 20000;
 const AGENT_HELPER_HREF = '/me?view=settings#agents';
 
-async function loadAgentAsks(env, slug) {
+function agentAsksKey(slug, accountId) {
+  return `agent-asks:${slug}:${accountId}`;
+}
+
+async function loadAgentAsks(env, slug, accountId) {
+  if (!accountId) return [];
   try {
-    const list = JSON.parse((await env.META.get(`agent-asks:${slug}`)) || '[]');
+    const list = JSON.parse((await env.META.get(agentAsksKey(slug, accountId))) || '[]');
     return Array.isArray(list) ? list.filter((a) => a && typeof a.ask_id === 'string') : [];
   } catch { return []; }
 }
 
 async function putAgentAsk(env, slug, rec) {
-  const list = await loadAgentAsks(env, slug);
+  const list = await loadAgentAsks(env, slug, rec.by);
   const next = [rec, ...list.filter((a) => a.ask_id !== rec.ask_id)].slice(0, AGENT_ASK_MAX);
-  await env.META.put(`agent-asks:${slug}`, JSON.stringify(next));
+  await env.META.put(agentAsksKey(slug, rec.by), JSON.stringify(next));
   return rec;
 }
 
@@ -12319,6 +12340,12 @@ async function handleMyAgent(env, req, url, slug) {
   // agents through the CLI, not through here.
   if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
   if (!sameOrigin(req, url)) return json({ error: 'cross_origin' }, { status: 403 });
+  // Sending makes an agent run, so it must provably come from this site: an
+  // Origin of ours, or a browser that says same-origin. A missing Origin is
+  // not taken as one.
+  if (req.method === 'POST' && req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
+    return json({ error: 'cross_origin' }, { status: 403 });
+  }
   const session = await getSession(env, req);
   if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
   const meta = await loadDocMeta(env, slug);
@@ -12330,9 +12357,9 @@ async function handleMyAgent(env, req, url, slug) {
   }
   const accountId = await sessionAccountId(env, session);
   const state = accountId ? await readerAgentState(env, accountId) : { group: { ids: [], canonical: null }, own: [], reachable: [], tier: 'none' };
-  const mine = (a) => !!a.by && state.group.ids.includes(a.by);
+  const asker = state.group.canonical || accountId;
   if (req.method === 'GET') {
-    const asks = accountId ? (await loadAgentAsks(env, slug)).filter(mine).slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
+    const asks = accountId ? (await loadAgentAsks(env, slug, asker)).slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
     return json({
       tier: state.tier,
       agent: agentAskTargetView(state.reachable[0] || null),
@@ -12354,6 +12381,11 @@ async function handleMyAgent(env, req, url, slug) {
   }
   const target = asked ? state.reachable.find((t) => sameNotifyTarget(t, asked)) : state.reachable[0];
   if (!target) return json({ error: state.tier === 'none' ? 'agent_not_connected' : 'agent_offline', tier: state.tier }, { status: 409 });
+  // Each send is writes and an outbound call: a few open at once per doc,
+  // and a budget per hour.
+  const open = (await loadAgentAsks(env, slug, asker)).filter((a) => !agentAskDone(a)).length;
+  if (open >= AGENT_ASK_OPEN_MAX) return json({ error: 'too_many_open_questions', message: 'Your agent has not answered your earlier questions on this doc yet.' }, { status: 429 });
+  if (await rateLimited(env, `myagent:${asker}`, AGENT_ASK_RATE, 3600)) return json({ error: 'rate_limited', message: 'Too many questions sent to your agent; try again later.' }, { status: 429 });
   const passage = agentAskPassage(body && body.passage);
   const askId = `q_${Date.now()}_${rand(3)}`;
   const event = agentAskEvent({ slug, docTitle: meta.title, askId, question, passage: passage && passage.text, publicHost: env.PUBLIC_HOST });
@@ -12362,7 +12394,7 @@ async function handleMyAgent(env, req, url, slug) {
   const rec = await putAgentAsk(env, slug, {
     ask_id: askId,
     at,
-    by: state.group.canonical || accountId,
+    by: asker,
     question,
     ...(passage ? { passage } : {}),
     recipient: target,
@@ -12371,7 +12403,7 @@ async function handleMyAgent(env, req, url, slug) {
   // A local agent is not pushed to: the reader's own daemon finds it in the
   // reader's own pending index, never the doc owner's.
   if (target.provider === 'local') {
-    await localPendingPut(env, rec.by, { slug, handoff_id: askId, kind: 'ask', device: target.device, agent_sub: target.agent_sub, at });
+    await localPendingPut(env, rec.by, { slug, handoff_id: askId, kind: 'ask', by: rec.by, device: target.device, agent_sub: target.agent_sub, at });
   }
   return json({ ok: true, ask: agentAskView(rec) });
 }
@@ -12387,14 +12419,21 @@ async function handleAgentAsk(env, req, action) {
   const { slug, ask_id: askId } = body || {};
   if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
   if (typeof askId !== 'string' || !askId) return json({ error: 'ask_id required' }, { status: 400 });
-  const prev = (await loadAgentAsks(env, slug)).find((a) => a.ask_id === askId);
+  // Only the asking account's own questions are even looked at: somebody
+  // else's token finds nothing to answer.
+  const group = await accountGroup(env, auth.actor.account_id);
+  const prev = (await loadAgentAsks(env, slug, group.canonical)).find((a) => a.ask_id === askId);
   if (!prev) return json({ error: 'ask_not_found' }, { status: 404 });
-  const ids = (await accountGroup(env, auth.actor.account_id)).ids;
-  if (!prev.by || !ids.includes(prev.by)) return json({ error: 'not_your_question', message: 'Only the account that asked can answer this question.' }, { status: 403 });
-  const meta = await loadDocMeta(env, slug);
-  const gate = meta ? await enforceDocAccess(env, req, slug, latestVersionNumber(meta) || 1) : { ok: false };
-  if (!gate.ok) return json({ error: 'access_denied' }, { status: 403 });
+  if (!prev.by || !group.ids.includes(prev.by)) return json({ error: 'not_your_question', message: 'Only the account that asked can answer this question.' }, { status: 403 });
   const at = new Date().toISOString();
+  // Closing a run needs no read access: an asker who lost it must still be
+  // able to take the question off their own queue.
+  if (action !== 'done') {
+    const meta = await loadDocMeta(env, slug);
+    if (meta && !tokenScopeAllows(auth.actor, meta)) return json(tokenScopeBody(new URL(req.url).origin), { status: 403 });
+    const gate = meta ? await enforceDocAccess(env, req, slug, latestVersionNumber(meta) || 1) : { ok: false };
+    if (!gate.ok) return json({ error: 'access_denied' }, { status: 403 });
+  }
   if (action === 'ack') {
     if (prev.acked_at) return json({ ok: true, ask_id: askId, acked_at: prev.acked_at, already: true });
     await putAgentAsk(env, slug, { ...prev, acked_at: at });
@@ -16592,11 +16631,23 @@ const tdocHandlers = {
           // its own record (see handleMyAgent). Answered privately, never
           // with an edit or a comment.
           if (e.kind === 'ask') {
-            const askKey = `ask:${e.slug}`;
-            if (!cache.has(askKey)) cache.set(askKey, await loadAgentAsks(env, e.slug));
+            const askKey = `ask:${e.slug}:${e.by || id}`;
+            if (!cache.has(askKey)) cache.set(askKey, await loadAgentAsks(env, e.slug, e.by || id));
             const a = cache.get(askKey).find((x) => x.ask_id === e.handoff_id);
             if (agentAskDone(a)) continue;
             if (!a.by || !accountIds.includes(a.by)) continue;
+            // A doc that is gone, or that this account can no longer read (or
+            // this token may not reach): nothing to answer, and not kept, so
+            // the queue never sticks on it.
+            const readKey = `read:${e.slug}`;
+            if (!cache.has(readKey)) {
+              const m = await loadDocMeta(env, e.slug);
+              cache.set(readKey, !!m && tokenScopeAllows(auth.actor, m) && (await enforceDocAccess(env, req, e.slug, latestVersionNumber(m) || 1)).ok);
+            }
+            if (!cache.get(readKey)) {
+              await putAgentAsk(env, e.slug, { ...a, delivery: { status: 'failed', error: 'access_lost', at: new Date().toISOString() } });
+              continue;
+            }
             keep.push(e);
             if (device && e.device !== device) continue;
             pending.push({

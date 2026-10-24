@@ -36,7 +36,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { runAgentVia, detectClis, knownClis, findOnPath, RUNNERS, claudeAllowedTools } = require('./agent-runners.js');
+const { runAgentVia, detectClis, knownClis, findOnPath, RUNNERS, claudeAllowedTools, TDOC_ASK_SCRIPTS } = require('./agent-runners.js');
 
 const HOME = process.env.HOME || os.homedir();
 const SKILL_DIR = process.env.TDOC_SKILL_DIR || path.resolve(__dirname, '..', '..');
@@ -230,13 +230,6 @@ async function runHandoff(cfg, st, state, h, accountIds) {
     log(`skip ${key} on ${h.slug}: addressed to ${cli}, which this daemon does not run (--cli ${st.clis.join(',')})`);
     return;
   }
-  if (attempts >= MAX_ATTEMPTS) {
-    log(`giving up on ${key} (${h.slug}) after ${attempts} attempts`);
-    await done(`gave up after ${attempts} attempts`).catch((e) => log(`fail not recorded: ${e.message}`));
-    delete state.attempts[key];
-    saveState(state);
-    return;
-  }
   // A question asked about someone else's doc is acked, answered and closed
   // through its own routes, which check the asker rather than the doc's
   // writers.
@@ -246,6 +239,21 @@ async function runHandoff(cfg, st, state, h, accountIds) {
     : error
       ? api(cfg, 'POST', '/api/notify/local/fail', { slug: h.slug, handoff_id: key, error })
       : api(cfg, 'POST', '/api/notify/resolve', { slug: h.slug, handoff_id: key }));
+  if (attempts >= MAX_ATTEMPTS) {
+    log(`giving up on ${key} (${h.slug}) after ${attempts} attempts`);
+    await done(`gave up after ${attempts} attempts`).catch((e) => log(`fail not recorded: ${e.message}`));
+    delete state.attempts[key];
+    saveState(state);
+    return;
+  }
+  // Codex has no per-command allow-list, only a sandbox that can still read
+  // the disk with the network on; a question written by a reader does not
+  // get that. Said, not silently dropped.
+  if (ask && cli !== 'claude') {
+    log(`not running question ${key} on ${h.slug} with ${cli}: only claude answers questions (read-only allow-list)`);
+    await done(`${cli} cannot answer reader questions; run the daemon with --cli claude`).catch((e) => log(`fail not recorded: ${e.message}`));
+    return;
+  }
   // Ack first: the card flips from "waiting for the daemon" to "picked it
   // up" before the CLI has said a word. The ack also re-checks that this
   // token may write the doc (or, for a question, that this account asked);
@@ -284,9 +292,17 @@ async function runHandoff(cfg, st, state, h, accountIds) {
     // tdoc-agent-reply / tdoc-publish forward this as X-Tdoc-Agent so the
     // reply wears this agent's mark and it takes the doc's follow-up seat.
     TDOC_AGENT: `local/${h.recipient.device}/${h.recipient.agent_sub}`,
+    // A question run: tdoc-agent-reply answers only this question, and
+    // tdoc-write / tdoc-publish refuse outright.
+    ...(ask ? { TDOC_DAEMON_ASK: key } : {}),
   };
   const started = Date.now();
-  const res = await runAgentVia({ runner: st.runner, cli, prompt, cwd, env, timeoutMs: st.timeoutMs, logPath: runLog, permissionMode: st.permissionMode, addDirs: [docDir, SKILL_DIR], writeDirs: [cwd, docDir], allowedTools: cli === 'claude' ? claudeAllowedTools({ binDir: BIN_DIR, writeDirs: [cwd, docDir], readDirs: [SKILL_DIR] }) : null });
+  // A question gets its own, smaller run: read the doc, post the answer. The
+  // conservative CLI runner always, whatever --runner / --permission-mode
+  // say for edit handoffs.
+  const res = ask
+    ? await runAgentVia({ runner: 'cli', cli, prompt, cwd, env, timeoutMs: st.timeoutMs, logPath: runLog, permissionMode: null, addDirs: [docDir, SKILL_DIR], writeDirs: [], allowedTools: claudeAllowedTools({ binDir: BIN_DIR, writeDirs: [], readDirs: [docDir, SKILL_DIR], scripts: TDOC_ASK_SCRIPTS }) })
+    : await runAgentVia({ runner: st.runner, cli, prompt, cwd, env, timeoutMs: st.timeoutMs, logPath: runLog, permissionMode: st.permissionMode, addDirs: [docDir, SKILL_DIR], writeDirs: [cwd, docDir], allowedTools: cli === 'claude' ? claudeAllowedTools({ binDir: BIN_DIR, writeDirs: [cwd, docDir], readDirs: [SKILL_DIR] }) : null });
   const run = { handoff_id: key, slug: h.slug, cli, started: new Date(started).toISOString(), ended: new Date().toISOString(), ok: res.ok, code: res.code, error: res.error, log: runLog };
   state.runs = [run, ...(state.runs || [])].slice(0, 30);
   if (res.ok) {

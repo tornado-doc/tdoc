@@ -198,6 +198,25 @@ async function touchSelect(page, phrase) {
       await page.frameLocator('iframe').locator('h1').waitFor();
       await page.waitForTimeout(500);
       if (await page.getByRole('dialog').count()) throw new Error('the pending question came back');
+      // Used up: the setup page no longer leads back to the doc.
+      await page.goto(`${base}/setup`);
+      await page.getByRole('link', { name: 'Continue' }).waitFor({ timeout: 10000 });
+      if (await page.getByRole('link', { name: 'Back to the doc' }).count()) throw new Error('setup still offers the way back');
+      await context.close();
+    });
+
+    await t('desktop, no agent: Later on the setup page dismisses the waiting question', async () => {
+      await setTier('none');
+      const { context, page } = await open(reader, DESKTOP);
+      await page.getByRole('button', { name: 'Connect my agent' }).click();
+      await page.waitForURL((u) => u.pathname === '/start');
+      await setTier('offline');
+      await page.goto(`${base}/setup`);
+      await page.getByRole('link', { name: 'Back to the doc' }).waitFor({ timeout: 10000 });
+      await page.getByRole('link', { name: 'Later' }).click();
+      await page.waitForURL((u) => u.pathname !== '/setup');
+      await page.goto(`${base}/setup`);
+      await page.getByRole('link', { name: 'Continue' }).waitFor({ timeout: 10000 });
       await context.close();
     });
 

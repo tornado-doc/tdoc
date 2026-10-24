@@ -703,7 +703,9 @@ started (`TDOC_DAEMON=1` in the environment), follow the edit flow for the one
 doc named in the prompt and stop; the daemon resolves the handoff when you
 exit. A reader's own question (Send to my agent on a doc they can read) also
 reaches their own daemon: the prompt then asks for an answer through
-`tdoc-agent-reply --ask`, and no edit.
+`tdoc-agent-reply --ask`, and no edit. That run is claude only, with a smaller
+allow-list (read the doc folder, `tdoc-pull` and `tdoc-agent-reply`; no Edit,
+no `tdoc-write` / `tdoc-publish`, which refuse under `TDOC_DAEMON_ASK`).
 
 ### `tdoc-site` — make the person's own website commentable
 

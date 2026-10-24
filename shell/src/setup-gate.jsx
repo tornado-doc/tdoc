@@ -5,7 +5,7 @@ import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_LINE, NOTHING_YET, RECIPE_
 import { AgentMarks } from './agent-marks.jsx';
 import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
 import { DebugBar } from './debug-bar.jsx';
-import { peekPendingAsk } from './document/my-agent.js';
+import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -506,7 +506,9 @@ export function SetupGate({ boot, preview = null }) {
                 <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
                   {step === 'doc' ? 'Open doc' : pendingAsk ? 'Back to the doc' : 'Continue'}
                 </a>
-                <p className="sg-account"><a href="/me">Later</a></p>
+                {/* Later is a way out of the question too: dismissed, the
+                    setup page stops leading back to that doc. */}
+                <p className="sg-account"><a href="/me" onClick={() => { if (pendingAsk) clearPendingAsk(); }}>Later</a></p>
               </>
             ) : (
               <>

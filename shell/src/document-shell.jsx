@@ -904,11 +904,13 @@ export function DocumentShell({ boot, config }) {
     }
   };
   // Back from connecting: the question that was waiting goes to the new
-  // agent -- sent when it can be woken, ready to copy when it cannot.
+  // agent -- sent when it can be woken, ready to copy when it cannot. Taken
+  // on the first visit either way: back without connecting drops it, so the
+  // setup page stops offering a way back.
   useEffect(() => {
-    if (!myAgent.tier || myAgent.tier === 'none') return;
+    if (!myAgent.tier) return;
     const pending = takePendingAsk(config.slug);
-    if (!pending) return;
+    if (!pending || myAgent.tier === 'none') return;
     const online = myAgent.tier === 'online';
     openAskPanel(online ? 'agent' : 'copy', { question: pending.question || '', selection: pending.passage, autoSubmit: online && Boolean(pending.question) });
   }, [myAgent.tier]);

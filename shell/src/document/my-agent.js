@@ -53,6 +53,10 @@ export function peekPendingAsk() {
   }
 }
 
+export function clearPendingAsk() {
+  removeStored(PENDING_KEY);
+}
+
 export function takePendingAsk(slug) {
   const p = peekPendingAsk();
   if (!p || p.slug !== slug) return null;

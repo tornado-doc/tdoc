@@ -56,6 +56,12 @@ if [ -n "${TDOC_DAEMON_SLUG:-}" ] && [ "$PRINT_IDENTITY" != "1" ] && [ "$SLUG" !
   echo "[tdoc] the daemon may only reply on \"$TDOC_DAEMON_SLUG\"." >&2
   exit 2
 fi
+# A question run (TDOC_DAEMON_ASK) answers that one question, privately: no
+# comment replies, no other question.
+if [ -n "${TDOC_DAEMON_ASK:-}" ] && [ "$PRINT_IDENTITY" != "1" ] && [ "$ASK" != "$TDOC_DAEMON_ASK" ]; then
+  echo "[tdoc] this run may only answer question \"$TDOC_DAEMON_ASK\" (--ask $TDOC_DAEMON_ASK)." >&2
+  exit 2
+fi
 
 detect_login() {
   if [ -n "${GROK_AGENT:-}${GROK_SESSION_ID:-}${GROK_BUILD:-}${XAI_AGENT:-}" ]; then echo grok; return; fi

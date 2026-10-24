@@ -14,6 +14,10 @@
 //     only that reader sees it -- not another reader, not the owner, not the
 //     comment list, not the owner's handoff list
 //   - a daemon run that ends without an answer is reported failed
+//   - review fixes: a send must carry our Origin; questions are stored per
+//     reader, so one reader cannot evict another's; a rate limit and a cap
+//     on open questions; an asker who lost access still drains the queue;
+//     scoped tokens stay out; deleting the doc deletes its questions
 //
 // Run with: node test/reader-agent-ask.test.js
 
@@ -46,7 +50,8 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   }
   const register = (env, token, device) => call(env, '/api/notify/local/register', { method: 'POST', token, body: { device, clis: ['claude'] } });
   const state = (env, who) => call(env, '/api/docs/plan/my-agent', { cookie: who.cookie });
-  const send = (env, who, body) => call(env, '/api/docs/plan/my-agent', { method: 'POST', cookie: who.cookie, body });
+  const ORIGIN = { Origin: 'https://tdoc.dev' };
+  const send = (env, who, body) => call(env, '/api/docs/plan/my-agent', { method: 'POST', cookie: who.cookie, headers: ORIGIN, body });
   const pendingFor = async (env, who, device) => (await call(env, `/api/notify/local/pending?device=${device}`, { token: who.token })).body.pending;
   const PASSAGE = { text: 'Billing ships first', context_before: '', context_after: '. Then search.', occurrence: 0, occurrences: 1, rect: { top: 1 } };
 
@@ -121,7 +126,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const answer = (who, text = 'PRIVATE-ANSWER-MARKER') => call(env, '/api/agent/ask-reply', { method: 'POST', token: who.token, body: { slug: 'plan', ask_id: ask.ask_id, text, agent_login: 'claude', agent_name: 'Claude' } });
     for (const who of [owner, other]) {
       const r = await answer(who, 'injected');
-      assert(r.status === 403 && r.body.error === 'not_your_question', `${who.login}: ${r.status}`);
+      assert(r.status === 404 && r.body.error === 'ask_not_found', `${who.login}: ${r.status}`);
     }
     const cookieOnly = await call(env, '/api/agent/ask-reply', { method: 'POST', cookie: reader.cookie, body: { slug: 'plan', ask_id: ask.ask_id, text: 'x' } });
     assert(cookieOnly.status === 401, `a browser session answered: ${cookieOnly.status}`);
@@ -189,8 +194,102 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const cookie = await putSession(env, 'newcomer');
     const r = await call(env, '/api/docs/plan/my-agent', { cookie });
     assert(r.status === 200 && r.body.tier === 'none', JSON.stringify(r.body));
-    const s = await call(env, '/api/docs/plan/my-agent', { method: 'POST', cookie, body: { question: 'q' } });
+    const s = await call(env, '/api/docs/plan/my-agent', { method: 'POST', cookie, headers: ORIGIN, body: { question: 'q' } });
     assert(s.status === 409 && s.body.error === 'agent_not_connected', JSON.stringify(s.body));
+  });
+
+  await t('sending needs our Origin (or a same-origin fetch): a missing or foreign Origin is refused', async () => {
+    const { env, reader } = await seed();
+    await register(env, reader.token, 'readerbox');
+    const none = await call(env, '/api/docs/plan/my-agent', { method: 'POST', cookie: reader.cookie, body: { question: 'q' } });
+    assert(none.status === 403 && none.body.error === 'cross_origin', `no Origin: ${none.status}`);
+    const foreign = await call(env, '/api/docs/plan/my-agent', { method: 'POST', cookie: reader.cookie, headers: { Origin: 'https://evil.example' }, body: { question: 'q' } });
+    assert(foreign.status === 403, `foreign Origin: ${foreign.status}`);
+    const fetchSite = await call(env, '/api/docs/plan/my-agent', { method: 'POST', cookie: reader.cookie, headers: { 'Sec-Fetch-Site': 'same-origin' }, body: { question: 'q' } });
+    assert(fetchSite.status === 200, `same-origin fetch: ${fetchSite.status}`);
+    assert((await pendingFor(env, reader, 'readerbox')).length === 1, 'only the same-origin send was queued');
+  });
+
+  await t("one reader's questions never push out another's; open questions and sends per hour are capped", async () => {
+    const { env, reader, other } = await seed();
+    await register(env, reader.token, 'readerbox');
+    await register(env, other.token, 'otherbox');
+    const mine = (await send(env, reader, { question: 'A private q' })).body.ask;
+    await call(env, '/api/agent/ask-reply', { method: 'POST', token: reader.token, body: { slug: 'plan', ask_id: mine.ask_id, text: 'A answer' } });
+    const codes = [];
+    for (let i = 0; i < 12; i++) codes.push((await send(env, other, { question: `spam ${i}` })).status);
+    assert(codes.filter((c) => c === 200).length === 5 && codes.slice(5).every((c) => c === 429), `open-question cap: ${codes}`);
+    // Answer them as they come, so only the hourly budget is left to stop it.
+    const answerAll = async () => {
+      for (const a of (await state(env, other)).body.asks) if (!a.answer) await call(env, '/api/agent/ask-reply', { method: 'POST', token: other.token, body: { slug: 'plan', ask_id: a.ask_id, text: 'ok' } });
+    };
+    let sent = 5;
+    let limited = null;
+    for (let i = 0; i < 30 && !limited; i++) {
+      await answerAll();
+      const r = await send(env, other, { question: `more ${i}` });
+      if (r.status === 200) sent++; else limited = r;
+    }
+    assert(limited && limited.status === 429 && limited.body.error === 'rate_limited' && sent === 20, `hourly budget: sent ${sent}, ${limited && limited.status}`);
+    const after = (await state(env, reader)).body.asks;
+    assert(after.length === 1 && after[0].answer.text === 'A answer', `the reader's question was evicted: ${JSON.stringify(after)}`);
+    const again = await call(env, '/api/agent/ask-reply', { method: 'POST', token: reader.token, body: { slug: 'plan', ask_id: mine.ask_id, text: 'again' } });
+    assert(again.status === 200, `the reader can still answer: ${again.status}`);
+  });
+
+  await t('an asker who lost access: done still clears it, and the next poll drops what is left', async () => {
+    const { env, reader } = await seed();
+    await register(env, reader.token, 'readerbox');
+    const a = (await send(env, reader, { question: 'one' })).body.ask;
+    const b = (await send(env, reader, { question: 'two' })).body.ask;
+    const meta = JSON.parse(await env.META.get('meta:plan'));
+    await env.META.put('meta:plan', JSON.stringify({ ...meta, access: { visibility: 'private', allowed_users: ['owner'] } }));
+    const ack = await call(env, '/api/agent/ask-ack', { method: 'POST', token: reader.token, body: { slug: 'plan', ask_id: a.ask_id } });
+    assert(ack.status === 403, `ack after access lost: ${ack.status}`);
+    const done = await call(env, '/api/agent/ask-done', { method: 'POST', token: reader.token, body: { slug: 'plan', ask_id: a.ask_id, error: 'x' } });
+    assert(done.status === 200, `done after access lost: ${done.status}`);
+    const left = await pendingFor(env, reader, 'readerbox');
+    assert(left.length === 0, `still queued: ${JSON.stringify(left.map((x) => x.ask_id))}`);
+    const raw = JSON.parse(await env.META.get(`local-pending:${reader.account_id}`));
+    assert(!raw.some((e) => e.handoff_id === b.ask_id), 'the unreadable question stayed in the index');
+    // And a deleted doc the same way.
+    await env.META.put('meta:plan', JSON.stringify(meta));
+    await send(env, reader, { question: 'three' });
+    await env.META.delete('meta:plan');
+    assert((await pendingFor(env, reader, 'readerbox')).length === 0, 'a question on a deleted doc stays queued');
+  });
+
+  await t('a workspace-scoped token cannot answer or poll questions on a doc outside its workspaces', async () => {
+    const { env, reader } = await seed();
+    await register(env, reader.token, 'readerbox');
+    const { ask } = (await send(env, reader, { question: 'q' })).body;
+    // The reader's own connection, ticked for My docs only: somebody else's
+    // doc is outside it.
+    const scoped = 'tdoc_scopedreadertoken0000000000000000';
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(scoped).digest('hex');
+    const base = JSON.parse(await env.META.get(`hosted-token:${crypto.createHash('sha256').update(reader.token).digest('hex')}`));
+    await env.META.put(`hosted-token:${hash}`, JSON.stringify({ ...base, scope: { me: true, teams: [] } }));
+    for (const route of ['ask-reply', 'ask-ack']) {
+      const r = await call(env, `/api/agent/${route}`, { method: 'POST', token: scoped, body: { slug: 'plan', ask_id: ask.ask_id, text: 'x' } });
+      assert(r.status === 403 && r.body.error === 'token_scope', `${route}: ${r.status} ${JSON.stringify(r.body)}`);
+    }
+    const poll = await call(env, '/api/notify/local/pending?device=readerbox', { token: scoped });
+    assert(poll.status === 403, `pending with a scoped token: ${poll.status}`);
+    assert(!(await state(env, reader)).body.asks[0].answer, 'answered through a scoped token');
+  });
+
+  await t("deleting the doc deletes readers' questions and its handoffs; the slug starts clean", async () => {
+    const { env, owner, reader } = await seed();
+    await register(env, reader.token, 'readerbox');
+    await send(env, reader, { question: 'q' });
+    await env.META.put('handoffs:plan', '[{"handoff_id":"h_1"}]');
+    await env.META.put('agent-asks:plan-two:x', '[]');
+    const del = await call(env, '/api/doc?slug=plan', { method: 'DELETE', token: owner.token });
+    assert(del.status === 200, `delete ${del.status} ${JSON.stringify(del.body)}`);
+    const left = [...env.META.map.keys()].filter((k) => k.startsWith('agent-asks:plan:') || k === 'handoffs:plan');
+    assert(left.length === 0, `left behind: ${left}`);
+    assert(env.META.map.has('agent-asks:plan-two:x'), 'another doc with a longer slug lost its questions');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
