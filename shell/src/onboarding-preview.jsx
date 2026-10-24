@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ActivatePage } from './activate-page.jsx';
+import { AppSelect } from './ui/select.jsx';
 import { SetupGate } from './setup-gate.jsx';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { StatusPage } from './status-page.jsx';
@@ -33,7 +34,10 @@ function TutorialPreview({ state }) {
 // The original components and markup, with local sample state only.
 // This gallery is served only by the PR preview Worker, never production.
 export default function OnboardingPreview() {
-  const [state, setState] = useState('Approved');
+  const [state, setState] = useState(() => {
+    const screen = new URLSearchParams(location.search).get('screen');
+    return states.includes(screen) ? screen : 'Connect agent';
+  });
   const [dialogOpen, setDialogOpen] = useState(true);
   const [notice, setNotice] = useState('');
   let screen;
@@ -46,7 +50,7 @@ export default function OnboardingPreview() {
       <SignInDialog open={dialogOpen} onOpenChange={setDialogOpen} onSuccess={() => {}} preview={{device:{user_code:'ABCD-1234',verification_uri:'https://github.com/login/device'},status:'Approve on GitHub, then return here.'}} />
     </div>;
   } else if (['Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published'].includes(state)) {
-    screen = <SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: ['Connected', 'First document', 'Document published'].includes(state), elapsed: state === 'Connection help' ? 65000 : 0 }} />;
+    screen = <SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: ['Connected', 'First document', 'Document published'].includes(state), local_agents: ['Connected', 'First document', 'Document published'].includes(state) ? [{ device: 'alex-mac', cli: 'codex', ready: true, status: 'active' }] : [], elapsed: state === 'Connection help' ? 95000 : 0 }} />;
   } else if (state.startsWith('Checklist')) {
     screen = <div className="docs-hub op-checklist"><OnboardingChecklist key={state} record={{started:true, agent_connected:true, first_doc:state === 'Checklist' ? null : 'my-first-tdoc', commented:state === 'Checklist after commenting'}} docs={state === 'Checklist' ? [] : [{slug:'my-first-tdoc',title:'My first tdoc'}]} /></div>;
   } else {
@@ -60,7 +64,7 @@ export default function OnboardingPreview() {
     }
   };
   return <div className="op-preview" onClickCapture={keepInPreview}>
-    <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding preview</strong><span>Original UI · sample data</span></div><label>Screen <select value={state} onChange={e => {setState(e.target.value);setDialogOpen(true);setNotice('');}}>{states.map(s => <option key={s}>{s}</option>)}</select></label></nav>
+    <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding preview</strong><span>Original UI · sample data</span></div><label>Screen <AppSelect ariaLabel="Screen" value={state} onChange={next => {setState(next);setDialogOpen(true);setNotice('');const url=new URL(location.href);url.searchParams.set('screen',next);history.replaceState(null,'',url);}} options={states.map(value => ({value,label:value}))} /></label></nav>
     {notice ? <p className="op-notice" role="status">{notice}</p> : null}
     {screen}
   </div>;

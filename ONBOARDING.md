@@ -1,6 +1,39 @@
 # Onboarding tdoc
 
-> **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. Execute every step in order, ask the user for confirmation on browser-side actions, and re-probe state with `bin/tdoc-doctor --json` after each step.
+> **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. For new tdoc.dev users, follow Default web onboarding below. Use the manual appendix only when requested; its portrait recipe is optional. Ask for confirmation on browser-side actions and re-probe state with `bin/tdoc-doctor --json` when using that manual path.
+
+## Default web onboarding — connect the computer
+
+For a new user starting at tdoc.dev, open `https://tdoc.dev/setup`. The existing
+split layout now gives a Terminal install command, browser pairing, a verified
+local AI picker, and a private practice doc. Do not send the person through the
+old prompt/portrait flow before connecting the background service.
+
+The official bootstrap is:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash
+```
+
+It needs working Node.js 18+, curl and tar, and installs in `~/.tdoc/releases`.
+It preserves existing skill checkouts and AI provider/model settings. Setup
+signs in using the normal browser approval, runs a tiny AI connection check,
+and starts a user service (launchd on macOS, systemd on Linux; Windows uses WSL).
+The service runs while the computer is awake and its user is signed in.
+
+Manage it with `~/.local/bin/tdoc status`, `stop`, `setup`, or `uninstall`.
+Uninstall removes the user service and keeps docs, logs and sign-in. Existing
+skill users can instead run `bash "$SKILL_DIR/bin/tdoc-daemon" setup`.
+
+On the website, a historical publisher token never means the daemon is online.
+The setup page waits for a registered computer whose AI passed its connection
+check. The first doc is explicitly created by **Try a comment**, is private,
+and starts a real comment → Send to agent → published v2 workflow. Do not scan
+chat history or create a personal portrait as a requirement of this path.
+
+The manual skill-only installation and optional portrait recipe below remain
+available for people explicitly using an existing interactive agent or
+self-hosting; they do not complete daemon setup.
 
 ## What you are installing
 
