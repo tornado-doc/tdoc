@@ -3,6 +3,7 @@ import { readStored, writeStored } from './safe-storage.js';
 import {
   Bell,
   ChevronRight,
+  Layers,
   Library,
   LogIn,
   LogOut,
@@ -16,7 +17,7 @@ import { AppMenu, AppMenuItem, AppMenuLinkItem, AppMenuSeparator, AppSubmenu } f
 import { isPlainNavigationClick, startNavigationProgress } from './nav-progress.js';
 import { useNotifications } from './hooks/use-notifications.js';
 import { BrowserAlertsPrompt, NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
-import { WorkspaceSwitcher } from './workspace-switcher.jsx';
+import { SpaceMenuItems, WorkspaceSwitcher, spaceLabel, useSpaceTeams } from './workspace-switcher.jsx';
 
 // Sign in always asks which account: after Sign out, the provider (and
 // GitHub behind it) still remember the last one, and going straight back in
@@ -61,6 +62,7 @@ export function TopBar({
   const [viewerProfile, setViewerProfile] = useState(null);
   const viewerKey = identity?.login || '';
   const activeProfile = profile || (viewerProfile?.viewerKey === viewerKey ? viewerProfile.profile : null);
+  const spaceTeams = useSpaceTeams(teams, Boolean(identity));
 
   useEffect(() => {
     if (!viewerKey || profile) return undefined;
@@ -177,6 +179,21 @@ export function TopBar({
               <AppMenuLinkItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" href="/me">
                 <Library size={15} /> My docs
               </AppMenuLinkItem>
+              {/* The space chip is hidden on a phone so ⋯ always has room;
+                  its list lives here instead. */}
+              <AppSubmenu
+                className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-space-submenu-trigger"
+                trigger={(
+                  <>
+                    <Layers size={15} />
+                    <span>Switch space</span>
+                    {space !== null ? <span className="tdoc-space-submenu-current">{spaceLabel(space, spaceTeams, currentTeam)}</span> : null}
+                    <ChevronRight className="tdoc-submenu-chevron" size={14} />
+                  </>
+                )}
+              >
+                <SpaceMenuItems space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} />
+              </AppSubmenu>
               {/* Both of these are "the account", and neither is something you
                   reach for often. Mobile-only like the rows above: on a desktop
                   the account chip beside this menu already carries them, and
@@ -217,7 +234,7 @@ export function TopBar({
         {supportsTheme ? <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
           {dark ? <Sun size={14} /> : <Moon size={14} />}
         </button> : null}
-        {identity ? <WorkspaceSwitcher space={space} teams={teams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
+        {identity ? <WorkspaceSwitcher space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
         {identity ? (
           <AppMenu trigger={(
             <button className="tdoc-chip tdoc-account-trigger" type="button">

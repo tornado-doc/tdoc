@@ -20,8 +20,8 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         const frame = page.frameLocator('iframe[aria-label="Document content"]');
         await frame.locator('html[data-tdoc-interaction-mode]').waitFor();
         const before = await frame.locator('#s2').getAttribute('style');
-        // Slide view: each slide is a 960px 16:9 card zoomed to the column,
-        // numbered underneath, and the page does not scroll sideways.
+        // Slide view: on desktop each slide is a 960px 16:9 card scaled to the
+        // column, numbered underneath, and the page does not scroll sideways.
         await frame.locator('.tdoc-slide-num').first().waitFor();
         const view = await frame.locator('html').evaluate(() => {
           const s = document.querySelector('#s1'), r = s.getBoundingClientRect();
@@ -29,10 +29,17 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
             nums: Array.from(document.querySelectorAll('.tdoc-slide-num')).map((n) => n.textContent),
             overflow: document.documentElement.scrollWidth - innerWidth };
         });
-        assert.equal(view.layoutWidth, 960, 'slides are laid out at 960px');
-        assert(Math.abs(view.w / view.h - 16 / 9) < 0.02, `16:9 card: ${view.w}x${view.h}`);
+        if (width >= 700) {
+          assert.equal(view.layoutWidth, 960, 'slides are laid out at 960px');
+          assert(Math.abs(view.w / view.h - 16 / 9) < 0.02, `16:9 card: ${view.w}x${view.h}`);
+          assert.deepEqual(view.nums, ['1 / 3', '2 / 3', '3 / 3 · content is cut off'], 'overflowing slide is flagged');
+        } else {
+          // A phone reads this plain deck as a page: unscaled cards as tall
+          // as their content, so nothing is cut off (slides-reflow.test.js).
+          assert.equal(view.layoutWidth, Math.round(view.w), 'slides are not scaled on a phone');
+          assert.deepEqual(view.nums, ['1 / 3', '2 / 3', '3 / 3'], 'no cut-off flag on a reflowed card');
+        }
         assert(view.w <= view.room + 1, `card fits the column: ${view.w} > ${view.room}`);
-        assert.deepEqual(view.nums, ['1 / 3', '2 / 3', '3 / 3 · content is cut off'], 'overflowing slide is flagged');
         assert(view.overflow <= 1, `no sideways overflow in slide view: ${view.overflow}`);
         if (process.env.TDOC_TEST_SCREENSHOTS) {
           fs.mkdirSync(process.env.TDOC_TEST_SCREENSHOTS, { recursive: true });

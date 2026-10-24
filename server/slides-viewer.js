@@ -75,9 +75,15 @@
     // half size on iPhone. Client rects (selection, comment anchors) follow
     // the transform; the negative bottom margin gives back the height the
     // scaled card no longer uses (540px = 960px at 16:9).
-    'html[data-tdoc-slides]:not([data-tdoc-presenting]) [data-tdoc-slide]{width:960px!important;max-width:none!important;aspect-ratio:16/9;height:auto!important;box-sizing:border-box!important;overflow:hidden!important;transform:scale(var(--tdoc-slide-scale,1));transform-origin:0 0;margin-left:auto!important;margin-right:auto!important;margin-bottom:calc(36px - 540px * (1 - var(--tdoc-slide-scale,1)))!important;}' +
+    'html[data-tdoc-slides]:not([data-tdoc-slides="reflow"]):not([data-tdoc-presenting]) [data-tdoc-slide]{width:960px!important;max-width:none!important;aspect-ratio:16/9;height:auto!important;box-sizing:border-box!important;overflow:hidden!important;transform:scale(var(--tdoc-slide-scale,1));transform-origin:0 0;margin-left:auto!important;margin-right:auto!important;margin-bottom:calc(48px - 540px * (1 - var(--tdoc-slide-scale,1)))!important;}' +
+    // Phone browse: a deck written to reflow (cqw type with px floors, .inner
+    // released by a container query, .cols stacking) is read like a page.
+    // Each card is as wide as the phone and as tall as its content, so cqw
+    // resolves against the real card. A deck that cannot reflow keeps the
+    // scaled cards above; layoutSlides decides once for the whole deck.
+    'html[data-tdoc-slides="reflow"]:not([data-tdoc-presenting]) [data-tdoc-slide]{width:auto!important;min-width:0!important;max-width:100%!important;aspect-ratio:auto!important;height:auto!important;min-height:0!important;max-height:none!important;box-sizing:border-box!important;overflow-x:clip!important;overflow-y:visible!important;transform:none!important;margin-left:0!important;margin-right:0!important;margin-bottom:48px!important;}' +
     '.tdoc-slide-num.is-over{color:#b42318;}' +
-    '.tdoc-slide-num{position:absolute;z-index:1;font:12px/1 system-ui;color:#667085;font-variant-numeric:tabular-nums;pointer-events:none;}' +
+    '.tdoc-slide-num{position:absolute;z-index:1;font:12px/1 system-ui;white-space:nowrap;color:#667085;font-variant-numeric:tabular-nums;pointer-events:none;}' +
     'html[data-tdoc-presenting] .tdoc-slide-num{display:none!important;}' +
     'html[data-tdoc-interaction-mode="edit"] .tdoc-slide-num{display:none!important;}' +
     'html[data-tdoc-presenting] .tdoc-present-open,html[data-tdoc-presenting] .tdoc-visual-open{display:none!important;}' +
@@ -87,11 +93,60 @@
   var openButton = null, numbers = [];
   var zoomStyle = provider(document.createElement('style'));
   document.head.appendChild(zoomStyle);
+  // Can this deck be read as a page on a phone? Asked with the reflow layout
+  // applied: no text placed absolutely, nothing wider than its card, and no
+  // text under 11px (cqw type without a px floor). One card failing keeps the
+  // whole deck scaled, so the deck reads one way.
+  var NARROW = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+  var REPLACED = 'img,svg,canvas,video,iframe,object,embed';
+  function fits(node, box, range, wide) {
+    for (var c = node.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 3) {
+        if (!c.data.trim()) continue;
+        range.selectNodeContents(c);
+        var r = range.getBoundingClientRect();
+        if (!r.width) continue;
+        if (parseFloat(getComputedStyle(node).fontSize) < 11) return false;
+        if (!wide && (r.left < box.left - 2 || r.right > box.right + 2)) return false;
+        continue;
+      }
+      if (c.nodeType !== 1 || c.hasAttribute('data-tdoc-provider')) continue;
+      var cs = getComputedStyle(c);
+      if (cs.display === 'none') continue;
+      // Text placed by coordinates cannot reflow. A decoration (no text) is
+      // clipped by the card and does not count.
+      if (cs.position === 'absolute' || cs.position === 'fixed') { if (c.textContent.trim()) return false; continue; }
+      var replaced = c.matches(REPLACED), scroller = /auto|scroll/.test(cs.overflowX);
+      if (replaced || scroller) {
+        var er = c.getBoundingClientRect();
+        if (!wide && er.width && (er.left < box.left - 2 || er.right > box.right + 2)) return false;
+        if (replaced) continue;
+      }
+      // Inside a scroller, wide content scrolls; its type must still be legible.
+      if (!fits(c, box, range, wide || scroller)) return false;
+    }
+    return true;
+  }
+  function reflows(list) {
+    var range = document.createRange();
+    for (var i = 0; i < list.length; i++) {
+      var box = list[i].getBoundingClientRect();
+      if (!box.width) continue;
+      if (box.right > innerWidth + 1 || box.left < -1 || !fits(list[i], box, range, false)) return false;
+    }
+    return true;
+  }
   // Scale the slides to the column they sit in, and number them underneath.
+  // On a phone, lay them out as a page instead when the deck can reflow.
   function layoutSlides(list) {
     var root = document.documentElement;
     if (!list.length) { root.removeAttribute('data-tdoc-slides'); zoomStyle.textContent = ''; numbers.forEach(function (n) { n.remove(); }); numbers = []; return; }
-    root.setAttribute('data-tdoc-slides', '');
+    var reflow = false;
+    if (NARROW && NARROW.matches) {
+      root.setAttribute('data-tdoc-slides', 'reflow');
+      reflow = reflows(list);
+    }
+    root.setAttribute('data-tdoc-slides', reflow ? 'reflow' : '');
     var parent = list[0].parentElement || document.body;
     var cs = getComputedStyle(parent);
     var room = parent.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
@@ -105,12 +160,16 @@
       var n = numbers[i];
       if (!n) { n = provider(document.createElement('div')); n.className = 'tdoc-slide-num'; n.setAttribute('aria-hidden', 'true'); document.body.appendChild(n); numbers[i] = n; }
       // Content past the 16:9 box is cut off when presenting: say so here.
-      var over = el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2;
+      // A reflowed card has no 16:9 box to measure against.
+      var over = !reflow && (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2);
       n.textContent = (i + 1) + ' / ' + list.length + (over ? ' · content is cut off' : '');
       n.classList.toggle('is-over', over);
       var r = el.getBoundingClientRect();
-      n.style.top = (r.bottom + window.scrollY + 8) + 'px';
-      n.style.left = (r.right + window.scrollX - n.offsetWidth) + 'px';
+      // A slide that is its own visual has a fullscreen button at its bottom
+      // right (visual-viewer.js); the number sits beside it.
+      var beside = el.closest('figure,[data-tdoc-artifact],[class~="tdoc-artifact"]') === el ? 40 : 0;
+      n.style.top = (r.bottom + window.scrollY + 18) + 'px';
+      n.style.left = (r.right + window.scrollX - beside - n.offsetWidth) + 'px';
     });
   }
   function placeButton() {
@@ -275,5 +334,7 @@
     if (e.data.type === 'tdoc:present') present(Number(e.data.index) || 0, null);
   });
   new ResizeObserver(placeButton).observe(document.body);
+  if (NARROW) { if (NARROW.addEventListener) NARROW.addEventListener('change', placeButton); else if (NARROW.addListener) NARROW.addListener(placeButton); }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (!active) placeButton(); });
   placeButton();
 })();
