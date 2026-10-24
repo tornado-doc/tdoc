@@ -29,7 +29,11 @@ function block(startNeedle, endNeedle) {
 const hostedRoute = block("if (p === '/api/hosted/token' && method === 'POST')", '// ---- comments ----');
 const uploadRoute = block("if (p === '/api/upload' && method === 'POST')", '// ---- admin access mutation ----');
 const accessRoute = block("if (p === '/api/doc/access' && method === 'PATCH')", '// ---- admin delete ----');
-const deleteRoute = block("if (p === '/api/doc' && method === 'DELETE')", "return text('Not found'");
+const deleteRoute = block("if (p === '/api/doc' && method === 'DELETE')", '// ---- Trash: list, restore, delete forever ----');
+// Delete moves a doc to Trash; "Delete forever" (and the scheduled purge)
+// is where the erasing happens now.
+const purgeRoute = block("if ((p === '/api/trash/restore' || p === '/api/trash/purge') && method === 'POST')", "return text('Not found'");
+const purgeHelper = block('async function purgeTrashedDoc(env, slug) {', '// Who may restore or purge a trashed doc');
 // The erasing itself lives in a named helper now, because the replay reset
 // deletes a doc too and a second, thinner copy is how one of them ends up
 // leaving the DO populated. The order still matters, so the order is still
@@ -150,18 +154,21 @@ t('Access mutation and delete go through the shared gate with the slug', () => {
   }
 });
 
-t('DELETE releases hosted slug ownership after wiping storage', () => {
+t('Delete forever releases hosted slug ownership after wiping storage', () => {
   const release = deleteBody.indexOf("kind: 'release_owner'");
   const metaDel = deleteBody.indexOf('env.META.delete(`meta:${slug}`)');
   const wipe = deleteBody.indexOf("kind: 'wipe'");
   assert(release >= 0, 'DELETE must call release_owner');
-  assert(deleteRoute.includes('await deleteDocEverywhere(env, slug)'), 'and it is the route that asks for it');
+  assert(purgeHelper.includes('deleteDocEverywhere(env, slug)'), 'and the purge is what asks for it');
+  assert(purgeRoute.includes('await purgeTrashedDoc(env, slug)'), 'from the Delete forever route');
+  assert(!deleteRoute.includes('deleteDocEverywhere'), 'plain Delete erases nothing: it moves to Trash');
+  assert(deleteRoute.includes('trashDoc(env, slug, meta, auth)'), 'plain Delete moves to Trash');
   assert(metaDel >= 0 && wipe >= 0 && metaDel < release && wipe < release,
     'release_owner must run after meta/comment wipe so a failed delete cannot free a live slug');
   assert(deleteBody.indexOf('DOCS.delete') < metaDel, 'and the bytes go before the index that finds them');
-  assert(deleteRoute.includes('released.ok === false'),
-    'DELETE must fail closed when COMMENTS is present and release_owner fails');
-  assert(deleteRoute.includes("error: released.error || 'owner_release_failed'"),
+  assert(purgeRoute.includes('released.ok === false'),
+    'Delete forever must fail closed when COMMENTS is present and release_owner fails');
+  assert(purgeRoute.includes("error: released.error || 'owner_release_failed'"),
     'failed release must surface owner_release_failed (or DO error)');
 });
 

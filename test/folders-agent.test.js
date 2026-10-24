@@ -141,7 +141,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(boot.team_docs.find((d) => d.slug === 'team-daily').can_file === false, 'amy may not file zed\'s doc');
   });
 
-  await t('team folder rename/delete: maker or admin only; no sharing; deleted folder\'s docs move up', async () => {
+  await t('team folder rename/delete: maker or admin only; no sharing; a deleted folder takes its docs to Trash and back', async () => {
     const parent = (await call(`/api/folders?team=${team.id}`, { token: zed.token })).body.folders[0];
     const child = (await call('/api/folders', { method: 'POST', token: zed.token, body: { name: '2026', parent: parent.id, team: team.id } })).body.folder;
     const filed = await call('/api/folders/move', { method: 'POST', token: zed.token, body: { team: team.id, folder: child.id, slugs: ['team-daily'] } });
@@ -154,11 +154,22 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(renamed.status === 200 && renamed.body.folder.name === '日报', `maker rename ${renamed.status}`);
     const noDel = await call(`/api/folders?id=${child.id}&team=${team.id}`, { method: 'DELETE', token: amy.token });
     assert(noDel.status === 403, `member deleted admin's folder ${noDel.status}`);
-    const before = writes();
     const del = await call(`/api/folders?id=${child.id}&team=${team.id}`, { method: 'DELETE', token: zed.token });
-    assert(del.status === 200 && writes() === before + 1, `admin delete ${del.status}, writes ${writes() - before}`);
-    const boot = bootData(await (await call('/me', { cookie: zed.cookie })).r.text(), '__TDOC_APP_BOOT__');
-    assert(boot.team_docs.find((d) => d.slug === 'team-daily').folder === parent.id, 'doc did not move up to the parent');
+    assert(del.status === 200 && del.body.docs.includes('team-daily'), `admin delete ${del.status} ${JSON.stringify(del.body)}`);
+    let boot = bootData(await (await call('/me', { cookie: zed.cookie })).r.text(), '__TDOC_APP_BOOT__');
+    assert(!boot.team_docs.some((d) => d.slug === 'team-daily'), 'a doc in Trash is still listed in the team');
+    const memberTrash = await call(`/api/trash?team=${team.id}`, { token: amy.token });
+    assert(memberTrash.status === 200 && memberTrash.body.items.length === 0, `a member who could not delete it sees it in Trash ${JSON.stringify(memberTrash.body)}`);
+    const memberRestore = await call('/api/trash/restore', { method: 'POST', token: amy.token, body: { folder: child.id, team: team.id } });
+    assert(memberRestore.status === 403, `a member restored an admin's folder ${memberRestore.status}`);
+    const adminTrash = await call(`/api/trash?team=${team.id}`, { token: zed.token });
+    assert(adminTrash.body.items.length === 1 && adminTrash.body.items[0].kind === 'folder' && adminTrash.body.items[0].doc_count === 1,
+      `team Trash ${JSON.stringify(adminTrash.body)}`);
+    const restored = await call('/api/trash/restore', { method: 'POST', token: zed.token, body: { folder: child.id, team: team.id } });
+    assert(restored.status === 200 && restored.body.restored.includes('team-daily'), `restore ${restored.status} ${JSON.stringify(restored.body)}`);
+    boot = bootData(await (await call('/me', { cookie: zed.cookie })).r.text(), '__TDOC_APP_BOOT__');
+    assert(boot.team_docs.find((d) => d.slug === 'team-daily').folder === child.id, 'doc did not come back into its folder');
+    assert((boot.team_folders[team.id] || []).some((f) => f.id === child.id && f.parent === parent.id), 'folder did not come back');
   });
 
   await t('team folder sharing: maker or admin shares; the link lists only that folder, each doc behind its own access', async () => {
@@ -218,7 +229,10 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(del.status === 200, `delete ${del.status}`);
     assert(!(await env.META.get(`folder-share:${otherLink}`)), 'deleted folder\'s share index left behind');
     assert((await shared(otherLink, zed)).status === 404, 'deleted folder link still opens');
-    // team-daily resolves up to the root, so it stays off any shared listing.
+    // Restored from Trash, the folder brings its doc and its link back.
+    const back = await call('/api/trash/restore', { method: 'POST', token: zed.token, body: { folder: other.id, team: team.id } });
+    assert(back.status === 200, `restore ${back.status}`);
+    assert(slugsOf(await shared(otherLink, zed)) === 'team-daily', 'restored folder link does not list its doc');
   });
 
   await t('CLI: tdoc-folder share prints the team folder\'s link; unshare kills it', async () => {

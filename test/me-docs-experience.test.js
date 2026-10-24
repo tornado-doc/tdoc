@@ -279,7 +279,7 @@ function bootData(html, name) {
     assert(!boot.starred.some((doc) => doc.slug === 'was-open'), 'Starred must drop unreadable docs');
   });
 
-  await t('folders as places: folder row + count + crumbs; delete returns docs to root', async () => {
+  await t('folders as places: folder row + count + crumbs; delete takes the folder and its docs to Trash, restore brings them back', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'alice');
     await seedDoc(env, 'my-doc', { owner: 'alice' });
@@ -307,10 +307,20 @@ function bootData(html, name) {
 
     const del = await worker.fetch(req('/api/folders?id=' + folder.id, { method: 'DELETE', cookie }), env, {});
     assert(del.status === 200, `delete folder ${del.status}`);
+    assert((await del.clone().json()).docs.includes('my-doc'), 'the folder must take its doc to Trash');
     boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
-    assert(boot.docs.some((doc) => doc.slug === 'my-doc'), 'doc must survive folder deletion');
-    assert(boot.docs.find((doc) => doc.slug === 'my-doc').folder === '', 'doc must fall back to the root after its folder is deleted');
+    assert(!boot.docs.some((doc) => doc.slug === 'my-doc'), 'a doc in Trash must leave My docs');
     assert(!boot.folders.some((item) => item.id === folder.id), 'deleted folder must not remain in boot data');
+    const trash = await (await worker.fetch(req('/api/trash', { cookie }), env, {})).json();
+    assert(trash.items.length === 1 && trash.items[0].kind === 'folder' && trash.items[0].doc_count === 1 && trash.items[0].title === 'Work',
+      `Trash must list the folder once, with its doc inside: ${JSON.stringify(trash.items)}`);
+    const restore = await worker.fetch(req('/api/trash/restore', { method: 'POST', cookie, body: { folder: folder.id } }), env, {});
+    assert(restore.status === 200, `restore ${restore.status}: ${await restore.clone().text()}`);
+    boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(boot.folders.some((item) => item.id === folder.id && item.name === 'Work'), 'restore must bring the folder back');
+    assert(boot.docs.find((doc) => doc.slug === 'my-doc')?.folder === folder.id, 'and the doc back inside it ');
+    // Leave alice's folder tree as the next case expects to find it: empty.
+    await worker.fetch(req('/api/folders?id=' + folder.id, { method: 'DELETE', cookie }), env, {});
   });
 
   await t('folders shelve only your own docs; rename works; state is per-login', async () => {
@@ -330,7 +340,7 @@ function bootData(html, name) {
     assert(stored.folders.length === 1 && stored.folders[0].name === 'Renamed', 'rename must persist');
   });
 
-  await t('folders nest: parent chain, sibling-scoped names, depth cap, delete moves contents up', async () => {
+  await t('folders nest: parent chain, sibling-scoped names, depth cap, delete takes the whole subtree to Trash', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'alice');
     await seedDoc(env, 'deep-doc', { owner: 'alice' });
@@ -355,15 +365,18 @@ function bootData(html, name) {
     assert(mv.status === 200, 'move into nested folder failed');
     const del = await worker.fetch(req('/api/folders?id=' + b.body.folder.id, { method: 'DELETE', cookie }), env, {});
     assert(del.status === 200, 'delete nested folder failed');
-    const state = JSON.parse(await env.META.get('folders:alice'));
-    assert(state.docs['deep-doc'] === a.body.folder.id, "doc must move up to the deleted folder's parent, not to root");
-    const cRec = state.folders.find((f) => f.id === c.body.folder.id);
-    assert(cRec && cRec.parent === a.body.folder.id, "subfolder must reparent to the deleted folder's parent");
+    let state = JSON.parse(await env.META.get('folders:alice'));
+    assert(!state.docs['deep-doc'], 'the doc goes to Trash with its folder');
+    assert(!state.folders.some((f) => [b, c, d].some((x) => x.body.folder.id === f.id)), 'subfolders go with it');
+    assert(state.folders.some((f) => f.id === a.body.folder.id), 'the parent stays');
+    const restore = await worker.fetch(req('/api/trash/restore', { method: 'POST', cookie, body: { folder: b.body.folder.id } }), env, {});
+    assert(restore.status === 200, `restore ${restore.status}`);
     const boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
-    assert(boot.folders.some((folder) => folder.id === c.body.folder.id && folder.parent === a.body.folder.id),
-      'folder boot data must carry parent relationships');
-    assert(boot.docs.find((doc) => doc.slug === 'deep-doc')?.folder === a.body.folder.id,
-      'document boot data must carry its new parent');
+    assert(boot.folders.some((folder) => folder.id === c.body.folder.id && folder.parent === b.body.folder.id)
+      && boot.folders.some((folder) => folder.id === b.body.folder.id && folder.parent === a.body.folder.id),
+      'restore puts the tree back with its parent relationships');
+    assert(boot.docs.find((doc) => doc.slug === 'deep-doc')?.folder === b.body.folder.id,
+      'and the doc back where it was');
   });
 
   await t('/api/me: cookie and hosted Bearer see the same owned docs/folders', async () => {
