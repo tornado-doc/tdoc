@@ -1060,6 +1060,32 @@
   }
   .tdoc-handoff-details-actions .text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
+  /* Ask this doc: the toolbar entry and its side panel. */
+  .tdoc-bar .tdoc-ask-action { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--td-ink, #1a1a1a); font: 500 13px/1 system-ui, -apple-system, sans-serif; cursor: pointer; flex-shrink: 0; }
+  .tdoc-bar .tdoc-ask-action:hover { background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); }
+  @media (max-width: 700px) { .tdoc-bar .tdoc-ask-action { display: none; } }
+  .tdoc-ask-panel .tdoc-ask-form { display: flex; flex-direction: column; gap: 8px; }
+  .tdoc-modal textarea.tdoc-ask-input { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 64px; background: #fff; }
+  .tdoc-modal textarea.tdoc-ask-input:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-ask-panel .tdoc-ask-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .tdoc-ask-panel .tdoc-ask-remaining { font-size: 12px; color: #777; min-width: 0; }
+  .tdoc-ask-panel .tdoc-ask-focus { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; color: #555; background: #f5f6f8; border-radius: 6px; padding: 6px 8px; }
+  .tdoc-ask-panel .tdoc-ask-focus q { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-style: italic; }
+  .tdoc-ask-panel .tdoc-ask-focus-label { font-weight: 600; color: #777; flex: none; }
+  .tdoc-ask-panel .text-btn { border: 0; background: none; padding: 0; color: var(--td-accent, #1652f0); font-size: 12px; cursor: pointer; flex: none; }
+  .tdoc-ask-panel .tdoc-ask-result { margin: 0 0 14px; padding: 0 0 12px; border-bottom: 1px solid #eee; }
+  .tdoc-ask-panel p.tdoc-ask-q { margin: 0 0 8px; font-weight: 600; color: #222; overflow-wrap: anywhere; }
+  .tdoc-ask-panel .tdoc-ask-answer-text { font-size: 14px; line-height: 1.55; color: #222; overflow-wrap: anywhere; }
+  .tdoc-ask-panel .tdoc-ask-answer-text p { margin: 0 0 8px; color: inherit; }
+  .tdoc-ask-panel .tdoc-ask-answer-text ul, .tdoc-ask-panel .tdoc-ask-answer-text ol { margin: 0 0 8px; padding-left: 20px; }
+  .tdoc-ask-panel .tdoc-ask-result-actions { display: flex; gap: 8px; margin: 4px 0 8px; }
+  .tdoc-modal .tdoc-ask-result-actions button { padding: 5px 12px; font-size: 13px; }
+  .tdoc-ask-panel a.tdoc-ask-connect { display: inline-block; font-size: 12px; color: #777; text-decoration: none; }
+  .tdoc-ask-panel a.tdoc-ask-connect:hover { color: var(--td-accent, #1652f0); text-decoration: underline; }
+  .tdoc-ask-panel p.tdoc-ask-limit { margin: 0; }
+  .tdoc-ask-panel p.tdoc-ask-limit a.tdoc-ask-connect { font-size: 13px; color: #444; }
+  .tdoc-ask-panel p.tdoc-ask-error { margin: 0; font-size: 13px; color: var(--td-danger, #c33); }
+
   /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
   .tdoc-bar .tdoc-send-agent-action {
     position: relative;
