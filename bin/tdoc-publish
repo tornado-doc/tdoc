@@ -1531,8 +1531,8 @@ fi
 # there, here or on the worker (which carries a stored access block forward
 # when an upload names none). Silently flinging open a doc somebody locked is
 # the one bug this file must never have. The cost is that a publish meaning to
-# OPEN a doc has to say so — which is why FIRST-DOC.md names `public`
-# explicitly instead of relying on the flagless default.
+# OPEN a doc has to say so, and FIRST-DOC.md names its policy (private, owner
+# history) explicitly on every run instead of relying on the flagless default.
 if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG" ] || [ ${#ALLOW_USERS[@]} -gt 0 ]; then
   case "${VISIBILITY_FLAG:-}" in
     ''|public|unlisted|private) ;;
@@ -1547,7 +1547,7 @@ if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG
     *) echo "[tdoc] invalid --commenting '$COMMENTING_FLAG' (owner|invited|signed_in|off)" >&2; exit 1 ;;
   esac
   # Written with node, not jq. FIRST-DOC.md step 7 publishes the very first doc
-  # `--visibility public --history public`, so this block is on the hosted path
+  # with explicit access flags (private, owner history), so this block is on the hosted path
   # for every new user — and #256 removed jq from that path precisely because
   # macOS does not ship it. It was missed then because the test only checked
   # inside the functions that changed.

@@ -146,7 +146,7 @@ export const CONNECT_AGENT_PROMPT = 'Connect yourself to my tdoc account so I ca
 // connected yet.
 // What a person pastes into Claude Code or Codex on their own computer: the
 // agent starts the daemon (bin/tdoc-daemon), which registers that computer.
-export const LOCAL_DAEMON_PROMPT = 'Set up the tdoc agent daemon on this computer so Claude Code or Codex stays available after login, without Raft: use the tdoc skill, run bin/tdoc-daemon install-launchd, then follow its printed commands to enable the LaunchAgent.';
+export const LOCAL_DAEMON_PROMPT = 'Set up the tdoc agent daemon on this computer so Claude Code or Codex picks up comments I send to it, now and after login, without Raft: use the tdoc skill and run bin/tdoc-daemon install (on Linux, run bin/tdoc-daemon start in a terminal instead).';
 
 export const AGENT_CONNECTORS = [
   {
