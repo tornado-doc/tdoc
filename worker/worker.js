@@ -9106,26 +9106,64 @@ async function previewCardHash(svg) {
 function xmlCardText(value) {
   return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
+// Wraps card text by width units of the font size: Latin words stay whole
+// (a word longer than a line is split), CJK wraps at any character. A cut
+// last line ends in an ellipsis.
 function cardLines(value, maxUnits, maxLines) {
-  const words = Array.from(String(value || '').replace(/\s+/g, ' ').trim());
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const unitsOf = (char) => (char === ' ' ? 0.3 : /[\x00-\x7f]/.test(char) ? (/[A-Z0-9mwMW@%&]/.test(char) ? 0.66 : 0.54) : 1);
+  const width = (s) => Array.from(s).reduce((sum, char) => sum + unitsOf(char), 0);
+  const tokens = text.match(/[\x21-\x7e\u00a0-\u024f]+|\s|[^]/gu) || [];
   const lines = [];
-  let line = '', width = 0;
-  for (const char of words) {
-    const units = /[\x00-\x7f]/.test(char) ? (char === ' ' ? 0.4 : 0.57) : 1;
-    if (width + units > maxUnits && line) {
-      lines.push(line.trim()); line = ''; width = 0;
+  let line = '';
+  let cut = false;
+  const push = () => { lines.push(line.trim()); line = ''; };
+  for (let token of tokens) {
+    if (lines.length === maxLines) { cut = true; break; }
+    if (token === ' ') { if (line) line += ' '; continue; }
+    while (width(token) > maxUnits) {
+      let head = '';
+      for (const char of Array.from(token)) { if (width(line + head + char) > maxUnits) break; head += char; }
+      if (!head) { push(); if (lines.length === maxLines) break; continue; }
+      line += head; token = token.slice(head.length); push();
       if (lines.length === maxLines) break;
     }
-    line += char; width += units;
+    if (lines.length === maxLines) { cut = !!token; if (cut) break; continue; }
+    if (width(line + token) > maxUnits && line.trim()) { push(); if (lines.length === maxLines) { cut = true; break; } }
+    line += token;
   }
-  if (lines.length < maxLines && line.trim()) lines.push(line.trim());
-  if (lines.length === maxLines && words.join('').length > lines.join('').length) lines[maxLines - 1] = lines[maxLines - 1].slice(0, -1) + '…';
+  if (line.trim() && lines.length < maxLines) push();
+  if (cut && lines.length) {
+    let last = lines[lines.length - 1];
+    while (last && width(last + '…') > maxUnits) last = Array.from(last).slice(0, -1).join('');
+    lines[lines.length - 1] = last.replace(/[\s,.;:，。、；：]+$/u, '') + '…';
+  }
   return lines;
 }
+// The tdoc mark (TDOC_LOGO_SVG) redrawn as plain lines in card space: the
+// card validator allows no transforms, so the mark's own transform is applied
+// here once. x/y is the top-left of a mark `size` px wide.
+function previewCardLogo(x, y, size) {
+  const segments = [[88.5, 171.5, 309.5, 130.5], [122.5, 200.5, 279.5, 169.5], [148.5, 222, 278.5, 222], [158.5, 271.5, 255, 252.5], [180.5, 306.5, 243, 291.5]];
+  const k = size / 343;
+  const px = (v) => +(x + (218 + 1.55 * (v - 199) - 46.7) * k).toFixed(1);
+  const py = (v) => +(y + (218.5 + 1.55 * (v - 218.5) - 82.1) * k).toFixed(1);
+  return `<g stroke="#0a0a0a" stroke-width="${+(size / 12).toFixed(1)}" stroke-linecap="round">${segments.map(([x1, y1, x2, y2]) => `<line x1="${px(x1)}" y1="${py(y1)}" x2="${px(x2)}" y2="${py(y2)}"/>`).join('')}</g>`;
+}
+// The automatic card, in tdoc's own look (server/chrome.css): white page,
+// near-black ink, one small blue accent, the title as the hero, a grey line
+// or two of the document's own words, and the mark + tdoc.dev at the foot.
 function defaultPreviewSvg(title, excerpt) {
-  const titleSvg = cardLines(title || 'Untitled', 22, 2).map((line, i) => `<text x="92" y="${252 + i * 76}" font-size="60" font-weight="700" fill="#132b28">${xmlCardText(line)}</text>`).join('');
-  const excerptSvg = cardLines(excerpt, 46, 2).map((line, i) => `<text x="94" y="${424 + i * 38}" font-size="28" fill="#42635b">${xmlCardText(line)}</text>`).join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><rect width="1200" height="630" fill="#f3f8f4"/><rect x="42" y="42" width="1116" height="546" rx="34" fill="#fff"/><rect x="42" y="42" width="12" height="546" rx="6" fill="#198052"/><circle cx="1080" cy="132" r="92" fill="#e1f4e8"/><circle cx="1080" cy="132" r="49" fill="#bce4ca"/><text x="92" y="129" font-size="26" font-weight="700" fill="#198052">tdoc</text>${titleSvg}${excerptSvg}<line x1="92" y1="532" x2="1108" y2="532" stroke="#dce9df" stroke-width="2"/><text x="94" y="569" font-size="20" fill="#729385">tdoc.dev</text></svg>`;
+  const titleLines = cardLines(title || 'Untitled', 16, 3);
+  const titleSvg = titleLines.map((line, i) => `<text x="80" y="${196 + i * 80}" font-size="64" font-weight="700" fill="#0a0a0a">${xmlCardText(line)}</text>`).join('');
+  const excerptTop = 196 + (titleLines.length - 1) * 80 + 76;
+  // Pages with no body text describe themselves with their own title (the
+  // <title> and the <h1>); repeating it under itself is not an excerpt.
+  let words = String(excerpt || '').replace(/\s+/g, ' ').trim();
+  const heading = String(title || '').replace(/\s+/g, ' ').trim();
+  while (heading && words.startsWith(heading)) words = words.slice(heading.length).replace(/^[\s:：·|—-]+/u, '');
+  const excerptSvg = cardLines(words, 37, titleLines.length > 2 ? 1 : 2).map((line, i) => `<text x="80" y="${excerptTop + i * 42}" font-size="28" fill="#6b6b6b">${xmlCardText(line)}</text>`).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><rect width="1200" height="630" fill="#ffffff"/><rect x="80" y="84" width="48" height="6" rx="3" fill="#1652f0"/>${titleSvg}${excerptSvg}${previewCardLogo(80, 530, 44)}<text x="138" y="560" font-size="24" font-weight="700" fill="#0a0a0a">tdoc.dev</text></svg>`;
 }
 function validatePreviewSvg(svg) { return previewNormalizeSvg(svg).error || null; }
 let previewRendererReady = null;
