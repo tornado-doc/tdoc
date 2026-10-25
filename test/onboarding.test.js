@@ -24,6 +24,25 @@ const os = require('os');
 // broken working tree still goes green.
 const SKILL_DIR = path.join(__dirname, '..');
 const DOCTOR = path.join(SKILL_DIR, 'bin/tdoc-doctor');
+// Cloudflare scenarios must not depend on a developer's Wrangler install or
+// login. The fake CLI reports one account; doctor still exercises its own
+// missing-login, missing-token, subdomain and R2 branches.
+const cloudflareCliDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-doctor-cli-'));
+fs.writeFileSync(path.join(cloudflareCliDir, 'wrangler'), `#!/bin/sh
+case "$1" in
+  --version) echo 'wrangler 4.0.0' ;;
+  whoami) echo 'account 0123456789abcdef0123456789abcdef' ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+fs.writeFileSync(path.join(cloudflareCliDir, 'curl'), `#!/bin/sh
+case "$*" in
+  *workers/subdomain*) echo '{"result":{"subdomain":"tdoc-test"}}' ;;
+  *r2/buckets*) echo '{"result":[],"errors":[]}' ;;
+  *) echo '{}' ;;
+esac
+`, { mode: 0o755 });
+process.on('exit', () => fs.rmSync(cloudflareCliDir, { recursive: true, force: true }));
 
 let pass = 0, fail = 0;
 function ok(name) { console.log(`  ✓ ${name}`); pass++; }
@@ -34,6 +53,10 @@ function runDoctor(envOverrides = {}) {
   // TDOC_PLATFORM is inherited from the caller's shell otherwise, which would
   // silently retarget every scenario.
   const env = { ...process.env, TDOC_PLATFORM: '', ...envOverrides };
+  if (env.TDOC_PLATFORM === 'cloudflare' && !env.TDOC_MOCK_NO_WRANGLER) {
+    env.PATH = `${cloudflareCliDir}${path.delimiter}${env.PATH}`;
+    env.CLOUDFLARE_API_TOKEN = 'doctor-test-token';
+  }
   const out = execFileSync(DOCTOR, ['--json'], { env, encoding: 'utf8' });
   return JSON.parse(out);
 }
