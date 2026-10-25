@@ -22,6 +22,7 @@ jobs:
       - run: npm test
       - run: node test/preview-workerd.test.js
       - run: npx playwright install --with-deps chromium webkit
+      - run: node test/workspace-switcher-ui.test.js
       - run: npm run test:browser
         env:
           TDOC_UI_SHOTS: /tmp/onboarding-final-ui-shots
