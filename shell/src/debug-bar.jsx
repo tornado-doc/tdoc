@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import './debug-bar.css';
+import { setDevMode } from './dev-mode.js';
 
 // The internal bar, on every page a walk passes through.
 //
@@ -72,6 +73,11 @@ export function DebugBar({ record, onState, surface = 'hub' }) {
   // Replay's first press, waiting for its second.
   const [armed, setArmed] = useState(false);
   const armTimer = useRef(0);
+  // Exit's first press, the same two-press shape as replay. Leaving takes the
+  // bar away from every page, and the way back is in the account menu, so a
+  // stray tap must not be enough.
+  const [exitArmed, setExitArmed] = useState(false);
+  const exitTimer = useRef(0);
   const doc = record && record.first_doc;
 
   return (
@@ -127,6 +133,24 @@ export function DebugBar({ record, onState, surface = 'hub' }) {
         }}
       >{busy === 'replay' ? '…' : armed ? (doc ? `delete ${doc}?` : 'replay?') : 'replay'}</button>
       <span className="sg-debug-now">record: {recordName(record)}</span>
+      <button
+        type="button"
+        className={`sg-debug-exit${exitArmed ? ' armed' : ''}`}
+        disabled={Boolean(busy)}
+        onClick={async () => {
+          if (!exitArmed) {
+            setExitArmed(true);
+            window.clearTimeout(exitTimer.current);
+            exitTimer.current = window.setTimeout(() => setExitArmed(false), 4000);
+            return;
+          }
+          window.clearTimeout(exitTimer.current);
+          setExitArmed(false);
+          setBusy('exit');
+          // Off on the server, then the page again as anybody else sees it.
+          try { await setDevMode(false); } catch { setBusy(''); }
+        }}
+      >{busy === 'exit' ? '…' : exitArmed ? 'exit dev mode?' : 'Exit dev mode'}</button>
     </div>
   );
 }

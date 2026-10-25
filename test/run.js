@@ -101,6 +101,7 @@ const OFFLINE = [
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'resolve-a-thread.test.js',
   'onboarding-journey.test.js',
+  'dev-mode.test.js', // Dev mode switch (allow-list only, per account) + onboarding never returns on re-login
   'setup-gate.test.js', // the journey: two doors, three server-driven bridges, no daemon // #357 a person can resolve; resolved threads leave the margin
   'tornado-doc-landing.test.js',
   'landing-republish.test.js', // #458 the homepage is one v1, re-shipped in place with `replace`
@@ -191,6 +192,7 @@ const BROWSER = [
   'team-billing-ui.test.js', // #48 Team plan card: free seats, upgrade, paid summary, portal, phone
   'agent-mention-ui.test.js', // @ lists real agents above people; picking one hands the comment to it
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
+  'dev-mode-ui.test.js', // account menu Dev mode on/off, Internal bar Exit needs two presses, refused off the list, re-login skips the gate; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
 ];
 
