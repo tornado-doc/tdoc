@@ -5,12 +5,12 @@
 ## Default web onboarding — background helper is optional
 
 Open `https://tdoc.dev/setup`. A centered dialog over My docs offers an optional
-computer connection and **Use without a background helper**. Do not require a
+computer connection and **Use your AI instead**. Do not require a
 local AI, daemon, or always-on computer for the copy/paste workflow.
 
 ### Work in an existing AI conversation
 
-Choose **Use without a background helper**, then **Try a comment**. This creates
+Choose **Use your AI instead**, then **Try a comment**. This creates
 an owned, private practice doc without registering a computer or claiming that
 an AI is connected. Leave a comment and copy its instruction into your AI.
 An AI with terminal access can read `https://tdoc.dev/SKILL.md`, sign in with

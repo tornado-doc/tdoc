@@ -119,7 +119,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    // A fresh account can take the manual route without inventing a ready AI.
    agents=[];computers=[];
    await page.goto(base+'?setup=1');
-   await page.getByRole('button',{name:'Use without a background helper →'}).click();
+   await page.getByRole('button',{name:'Use your AI instead'}).click();
    await page.getByRole('heading',{name:'Use your AI',exact:true}).waitFor();
    assert.equal(await page.getByRole('button',{name:'Try a comment'}).isEnabled(),true);
    assert.equal(await page.locator('.ui-setup-command').count(),0,'manual route never asks to install or start a service');

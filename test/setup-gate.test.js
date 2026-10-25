@@ -75,7 +75,7 @@ t('automatic detection is local, while interactive conversations remain supporte
   const inventory = gate.slice(gate.indexOf('const RUNTIMES ='), gate.indexOf('export function SetupGate'));
   assert(inventory.includes("value: 'claude'") && inventory.includes("value: 'codex'"), 'managed local providers');
   assert(!/ChatGPT|Grok/.test(inventory), 'cloud conversations are not reported as detected local runtimes');
-  assert(gate.includes('Use without a background helper'), 'interactive use is optional and explicit');
+  assert(gate.includes('Use your AI instead'), 'interactive use is optional and explicit');
 });
 
 t('a refused clipboard says so instead of doing nothing', () => {

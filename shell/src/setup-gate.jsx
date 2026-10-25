@@ -128,9 +128,10 @@ export function SetupGate({ boot, preview = null, onClose }) {
       title={manual ? 'Use your AI' : 'Connect a computer'}
       className="ui-setup-modal"
       eyebrow="SET UP TDOC"
-      description={manual ? 'Work with your AI by copying a comment into your conversation.' : 'Connect a computer to let your AI pick up comments automatically. The background helper is optional.'}
+      description={manual ? 'No background helper or always-on computer required.' : 'Connect a computer to let your AI pick up comments automatically. The background helper is optional.'}
       actions={<>
         <button type="button" className="ui-setup-later" onClick={manual ? () => { setStage('connect'); setError(''); } : close}>{manual ? 'Back' : 'Later'}</button>
+        {signedIn && !manual ? <button type="button" className="ui-setup-manual-link" onClick={() => { setStage('manual'); setError(''); }}>Use your AI instead</button> : null}
         {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
           : canReturn ? <button type="button" className="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</button>
           : <button type="button" className="primary" onClick={practice} disabled={busy || (!manual && (!loaded || !runtimeReady))}>{busy ? 'Opening your doc…' : manual ? 'Try a comment' : 'Next'}</button>}
@@ -139,10 +140,10 @@ export function SetupGate({ boot, preview = null, onClose }) {
       {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to use tdoc.' : 'Sign-in is not configured on this host.'}</p>
         : manual ? <div className="ui-setup-manual">
           <p className="ui-setup-label">NO BACKGROUND HELPER NEEDED</p>
-          <h3>Keep working in your AI conversation.</h3>
-          <p>Leave a comment in your private practice doc, then copy its instruction into your AI. It can read the comments and publish a revision at the same link.</p>
-          <p>Use a conversation with terminal access, such as Cowork or Grok Bot. In ChatGPT, use a mode with terminal access. Plain chat can help write a doc, but cannot publish a revision by itself.</p>
-          <p>You may need to approve tdoc sign-in in your browser. Nothing runs in the background.</p>
+          <h3>Try a comment with your AI.</h3>
+          <p>Leave a comment in your private practice doc. Copy its instruction into your AI conversation to ask for a revision.</p>
+          <p>Your AI needs terminal access: Cowork, Grok Bot, or a suitable ChatGPT mode. Plain chat alone cannot publish a revision.</p>
+          <p>You may be asked to approve tdoc sign-in in your browser.</p>
           <a href="https://tdoc.dev/SKILL.md" target="_blank" rel="noreferrer">Instructions for your AI ↗</a>
         </div>
           : !loaded ? <p role="status">Checking your computers…</p> : <>
@@ -176,7 +177,6 @@ export function SetupGate({ boot, preview = null, onClose }) {
             {computer && !connected ? <p role="status">This computer is offline. Wake it up to check its AI.</p> : null}
             {copyFailed ? <p role="status">{COPY_FALLBACK}</p> : null}
             {canReturn ? <p>Your agent is already linked. You can return to your question and copy it while this computer is offline.</p> : null}
-            <button type="button" className="ui-setup-manual-link" onClick={() => { setStage('manual'); setError(''); }}>Use without a background helper →</button>
             <details className="ui-setup-details"><summary>Installation details</summary><p>Setup installs an optional background helper and checks your AI using its existing account. Keep this computer awake to receive tasks automatically.</p><p>Already installed? Run <code>~/.local/bin/tdoc setup</code>. Pause with <code>~/.local/bin/tdoc stop</code>.</p></details>
           </>}
       {error ? <p className="ui-setup-error" role="alert">{error}</p> : null}
