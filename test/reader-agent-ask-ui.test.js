@@ -188,7 +188,7 @@ async function touchSelect(page, phrase) {
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
       if (labels.join('|') !== '@agent|Comment') throw new Error(`popover buttons: ${labels.join('|')}`);
       const { row } = await ask(page, 'Why billing first?');
-      if (!/^tdoc AI/.test(row) || !/5 free left/.test(row)) throw new Error(`first row: ${row}`);
+      if (!/^tdoc AI/.test(row) || !/5 free/.test(row)) throw new Error(`first row: ${row}`);
       await answersOnly(pop);
       const onlyMe = pop.locator('.tdoc-only-me [role=checkbox]');
       if (await onlyMe.getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
@@ -309,7 +309,7 @@ async function touchSelect(page, phrase) {
       const menu = page.locator('.ui-menu-popup');
       await menu.waitFor();
       const items = await menu.innerText();
-      if (!/tdoc AI/.test(items) || !/free left/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
+      if (!/tdoc AI/.test(items) || !/\d+ free/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
       if (await menu.locator('a[href="/start"]').count() !== 1) throw new Error('no Connect my agent link');
       await page.keyboard.press('Escape');
       // The owner has no agent of their own here: tdoc AI only asks.

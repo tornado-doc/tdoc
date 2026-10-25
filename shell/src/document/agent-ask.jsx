@@ -110,9 +110,10 @@ export function AgentAskRow({ ask, hint = null }) {
 
 // The line under the box saying what the named agent will do.
 export function agentAskHint(ask) {
-  const { target, onlyMe, canChange } = ask;
+  const { target, onlyMe, canChange, choices } = ask;
   if (!target) return null;
-  const name = agentDisplayName(target);
+  // The pill's short name (Julie, 2026-10-25).
+  const name = agentMentionName(target, choices);
   if (onlyMe) return `${name} answers you alone`;
   return canChange ? `${name} answers or changes the doc` : `${name} answers in the thread`;
 }

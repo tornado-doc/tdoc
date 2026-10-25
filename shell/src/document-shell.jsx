@@ -61,7 +61,7 @@ import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName } from './document/agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sameTarget, taggedAgentSpan } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffBanner } from './document/handoff-banner.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
@@ -777,9 +777,16 @@ export function DocumentShell({ boot, config }) {
       setSendToAgentBusy(false);
     }
   };
+  // The agent's tag as the text holds it (a draft may hold an older, longer
+  // form), else as the picker would put it in.
+  const askTagIn = (text, target) => {
+    const span = taggedAgentSpan(text, agentChoices);
+    return span && sameTarget(span.target, target) ? String(text).slice(span.start, span.end)
+      : `@${AGENT_TAG_JOINER}${agentMentionName(target, agentChoices)}`;
+  };
   // Ask only, in the thread: the answer is the reply under this comment.
   const askOn = async (commentId, text, selection, target) => {
-    const question = withoutAskTags(text, `@${AGENT_TAG_JOINER}${agentMentionName(target, agentChoices)}`);
+    const question = withoutAskTags(text, askTagIn(text, target));
     const passage = selection && selection.text ? selection : null;
     const label = agentDisplayName(target);
     setAiThinking({ id: commentId, label, agent: !target.tdoc_ai });
@@ -806,7 +813,7 @@ export function DocumentShell({ boot, config }) {
   // From a reply box, `parentId` is the reply's parent: the answer shows in
   // that box, and Make public posts the question as a reply there.
   const askPrivately = async (text, selection, target, parentId = null) => {
-    const question = withoutAskTags(text, `@${AGENT_TAG_JOINER}${agentMentionName(target, agentChoices)}`);
+    const question = withoutAskTags(text, askTagIn(text, target));
     const passage = selection && selection.text ? selection : null;
     const kind = target.tdoc_ai ? 'tdoc-ai' : 'agent';
     setPrivateAsk({ kind, label: agentDisplayName(target), question, selection, parentId, answer: '', error: '' });

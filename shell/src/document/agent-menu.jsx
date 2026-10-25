@@ -1,38 +1,53 @@
 import React from 'react';
 import { Check } from 'lucide-react';
-import { agentDisplayName, targetKey } from './agent-choices.js';
+import { agentDisplayName, agentMentionName, targetKey } from './agent-choices.js';
 import { ProviderMark } from './notify-handoff.jsx';
 import { AppMenuItem, AppMenuLinkItem } from '../ui/menu.jsx';
-import { freeLeftText } from './ai-answerer.js';
+import { FEW_FREE_LEFT } from './ai-answerer.js';
 
-// Whose an agent is, as both agent lists group it.
+// Whose an agent is, the order both agent lists keep: Mine, Team, tdoc AI.
 export const AGENT_GROUPS = ['Mine', 'Team', 'tdoc AI'];
 export const whose = (t) => (t.tdoc_ai ? 'tdoc AI' : t.team_agent ? 'Team' : 'Mine');
 
-// The agents a comment may name, grouped Mine / Team / tdoc AI (with its
-// free answers left when few are), and "Connect my agent". The agent pill's
-// dropdown in both composers: the same agents typing @ offers.
+// The small grey tag at a row's right end, in both agent lists: "Mine",
+// "Team", or tdoc AI's free answers left when few are ("5 free").
+export function agentTag(t, ai = null) {
+  if (!t) return '';
+  if (!t.tdoc_ai) return whose(t);
+  const left = ai && ai.remaining;
+  return typeof left === 'number' && left <= FEW_FREE_LEFT ? `${left} free` : '';
+}
+
+// The agents a comment may name -- one quiet row each, short name and its
+// tag, Mine / Team / tdoc AI in that order -- then "Connect my agent" where
+// tdoc AI is offered. The agent pill's dropdown in both composers, in the
+// typed-@ list's light style (Julie, 2026-10-25): the same agents typing @
+// offers.
 export function AgentMenuItems({ choices, ai = null, current = null, onPick }) {
-  return AGENT_GROUPS.map((group) => {
-    const rows = (choices || []).filter((t) => whose(t) === group);
-    if (!rows.length) return null;
-    return (
-      <React.Fragment key={group}>
-        <div className="tdoc-agent-menu-group">{group}</div>
-        {rows.map((t) => (
-          <AppMenuItem key={targetKey(t)} className="tdoc-action-menu-item tdoc-agent-menu-item" onClick={() => onPick(t)}>
-            <ProviderMark target={t} size={14} />
-            <span className="tdoc-agent-menu-name">{agentDisplayName(t, choices)}</span>
-            {t.tdoc_ai && freeLeftText(ai?.remaining)
-              ? <span className="tdoc-agent-menu-hint">{freeLeftText(ai.remaining)}</span>
-              : t.last_writer ? <span className="tdoc-agent-menu-hint">edited last</span> : null}
-            {current && targetKey(current) === targetKey(t) ? <Check size={14} className="tdoc-space-check" aria-label="Picked" /> : null}
+  const list = choices || [];
+  const rows = AGENT_GROUPS.flatMap((group) => list.filter((t) => whose(t) === group));
+  return (
+    <>
+      {rows.map((t) => {
+        const picked = Boolean(current) && targetKey(current) === targetKey(t);
+        const tag = agentTag(t, ai);
+        return (
+          <AppMenuItem
+            key={targetKey(t)}
+            className="tdoc-agent-menu-item"
+            title={agentDisplayName(t, list)}
+            onClick={() => onPick(t)}
+          >
+            <span className="tdoc-mention-agent-mark"><ProviderMark target={t} size={14} /></span>
+            <span className="tdoc-agent-menu-name">{agentMentionName(t, list)}</span>
+            {tag ? <span className="tdoc-agent-menu-tag">{tag}</span> : null}
+            <span className="tdoc-agent-menu-check">{picked ? <Check size={13} aria-label="Picked" /> : null}</span>
           </AppMenuItem>
-        ))}
-        {group === 'tdoc AI' ? (
-          <AppMenuLinkItem className="tdoc-action-menu-item tdoc-agent-menu-connect" href="/start">Connect my agent →</AppMenuLinkItem>
-        ) : null}
-      </React.Fragment>
-    );
-  });
+        );
+      })}
+      {rows.some((t) => t.tdoc_ai) ? (
+        <AppMenuLinkItem className="tdoc-agent-menu-connect" href="/start">Connect my agent</AppMenuLinkItem>
+      ) : null}
+    </>
+  );
 }

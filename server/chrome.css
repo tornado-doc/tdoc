@@ -1142,8 +1142,8 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
   html[data-tdoc-navigating] body::after { animation: none; transform: scaleX(0.6); }
 }
 
-/* The comment composer's @agent button, the agent menu (Mine / Team /
-   tdoc AI), and the Answers only / Only me row under the text. */
+/* The comment composer's @agent button, the agent pill's menu
+   and the Answers only / Only me row under the text. */
 .tdoc-popup .tdoc-composer-agent { padding: 6px 10px; border: 1px solid #4a4a4a; border-radius: 6px; background: #2c2c2c; color: #f0f0f0; font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; }
 .tdoc-popup .tdoc-composer-agent:hover { background: #3a3a3a; }
 .tdoc-popup .tdoc-ask-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; color: #e8e8e8; }
@@ -1153,13 +1153,22 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
 .tdoc-popup .tdoc-ask-mode button.active { background: var(--td-accent); color: #fff; }
 .tdoc-popup .tdoc-ask-mode button:disabled { color: #6e6e73; }
 .tdoc-popup .tdoc-ask-row .ui-checkbox-box:not([data-checked]) { border-color: #8a8a90; }
-.tdoc-agent-menu-group { padding: 6px 10px 2px; font: 600 11px system-ui, -apple-system, sans-serif; color: #8a8a8a; }
-.ui-menu-item.tdoc-agent-menu-item { min-width: 240px; }
-.tdoc-agent-menu-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tdoc-agent-menu-hint { margin-left: auto; color: #8a8a8a; font-size: 12px; white-space: nowrap; }
-.ui-menu-item.tdoc-agent-menu-connect { color: var(--td-accent, #1652f0); font-size: 12.5px; }
-.tdoc-mention-menu a.tdoc-mention-connect { display: block; padding: 4px 10px 6px 34px; font-size: 12px; color: var(--td-accent, #1652f0); text-decoration: none; }
-.tdoc-mention-menu a.tdoc-mention-connect:hover { text-decoration: underline; }
+/* The agent pill's dropdown in the typed-@ list's light style (Julie,
+   2026-10-25): its box, rows and highlight are .tdoc-mention-menu's and
+   .tdoc-mention-option's; no group headers, no focus ring. Each row: mark,
+   short name, a small grey tag (Mine / Team / "5 free"), a quiet check on
+   the agent in the text. Connect my agent is a quiet link row. */
+.ui-menu-popup.tdoc-agent-menu { min-width: 200px; max-width: 320px; padding: 4px; background: #fff; border: 1px solid var(--td-line, #e5e5e7); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); outline: none; }
+.ui-menu-item.tdoc-agent-menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font: 13px system-ui, sans-serif; color: var(--td-ink, #1a1a1a); outline: none; }
+.ui-menu-item.tdoc-agent-menu-item[data-highlighted] { background: var(--td-accent-tint, #e8eeff); }
+.tdoc-agent-menu-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.tdoc-agent-menu-tag { margin-left: auto; flex: none; color: var(--td-muted, #8a8a8a); font-size: 11px; white-space: nowrap; }
+.tdoc-mention-agent .tdoc-mention-login { flex: 0 1 auto; }
+.tdoc-agent-menu-check { width: 13px; flex: none; display: inline-flex; color: var(--td-muted, #8a8a8a); }
+a.ui-menu-item.tdoc-agent-menu-connect { display: block; padding: 5px 8px 5px 34px; border-radius: 6px; font: 12px system-ui, sans-serif; color: var(--td-muted, #8a8a8a); outline: none; }
+a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; color: var(--td-ink, #1a1a1a); text-decoration: underline; }
+.tdoc-mention-menu a.tdoc-mention-connect { display: block; padding: 5px 8px 5px 34px; font: 12px system-ui, sans-serif; color: var(--td-muted); text-decoration: none; }
+.tdoc-mention-menu a.tdoc-mention-connect:hover { color: var(--td-ink); text-decoration: underline; }
 
 /* The document bar (option A, Julie 2026-10-24): logo · space / folder /
    title on the left; Edited … · ✈ · Share · ⋯ · avatar on the right. Calm:

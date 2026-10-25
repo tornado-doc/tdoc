@@ -71,18 +71,19 @@ async function t(name, fn) {
         await box.type('please fix @');
         await page.locator('.tdoc-mention-option').first().waitFor();
         const empty = await rows(page);
-        assert.deepEqual(empty.slice(0, 5), ['# Mine', "xiaocc · julieMine · this doc's agent", 'Claude Code · julieMine', 'Codex · julieMine', 'devin · julieMine'], JSON.stringify(empty));
-        assert.equal(empty[5], '# People', JSON.stringify(empty));
-        assert.ok(empty[6].startsWith('@dana'), JSON.stringify(empty));
+        // Short names and a grey tag, no group headers: the pill dropdown's rows.
+        assert.deepEqual(empty.slice(0, 4), ['xiaoccMine', 'Claude CodeMine', 'CodexMine', 'devinMine'], JSON.stringify(empty));
+        assert.equal(empty[4], '# People', JSON.stringify(empty));
+        assert.ok(empty[5].startsWith('@dana'), JSON.stringify(empty));
         assert.ok(!empty.some((r) => /^@claude\b/i.test(r)), 'a fake @claude person is offered');
         if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, `agent-mention-${width}.png`) }); }
 
         await box.type('cod');
         await page.waitForFunction(() => document.querySelectorAll('.tdoc-mention-agent').length === 2);
         const typed = await rows(page);
-        assert.deepEqual(typed, ['# Mine', 'Codex · julieMine', 'Claude Code · julieMine'], JSON.stringify(typed));
+        assert.deepEqual(typed, ['CodexMine', 'Claude CodeMine'], JSON.stringify(typed));
         await page.keyboard.press('Enter');
-        assert.equal(await box.inputValue(), `please fix @${JOINER}Codex · julie `);
+        assert.equal(await box.inputValue(), `please fix @${JOINER}Codex `);
         await page.getByRole('button', { name: 'Comment', exact: true }).click();
         await page.waitForFunction(() => window.__posts.length === 1);
         const post = await page.evaluate(() => window.__posts[0]);
@@ -99,7 +100,7 @@ async function t(name, fn) {
       await box.click();
       await box.type('@dev');
       await page.locator('.tdoc-mention-agent').first().waitFor();
-      assert.deepEqual((await rows(page)).slice(0, 2), ['# Mine', 'devin · julieMine']);
+      assert.deepEqual((await rows(page)).slice(0, 1), ['devinMine']);
       await context.close();
     });
 

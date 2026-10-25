@@ -36,16 +36,21 @@ file and `.claude-plugin/plugin.json`.
   control.** A reply under a thread had no @agent at all after #823. Both
   boxes now share one piece (`shell/src/document/agent-ask.jsx`): @agent puts
   the default agent into the text at the caret as a pill, and the pill's
-  dropdown swaps it (Mine / Team / tdoc AI, Connect my agent); typing @ makes
+  dropdown swaps it; typing @ makes
   the same pill, and Backspace removes it whole. "Ask / Ask + request change"
   is gone: the named agent reads the comment and answers or edits, where the
   authorship rules let it edit; elsewhere the hand-off is answer only and the
   box says "Answers only". "Only me" stays for one's own agent or tdoc AI,
   in a reply too (the answer shows in that reply box; Make public posts it
   as replies). ⌘⇧Enter puts the default agent in and sends. The @ list now
-  shows every agent, grouped like the pill's dropdown: it stopped at two,
-  which hid tdoc AI and the team agent from anyone with two agents of their
-  own.
+  shows every agent, as the pill's dropdown does: it stopped at two, which
+  hid tdoc AI and the team agent from anyone with two agents of their own.
+  Pill and lists are quiet (Julie, 2026-10-25): the pill reads the short
+  name ("@tdoc-bot", "@tdoc AI"; the owner only when two agents share a
+  name; the full name in its tooltip), and the dropdown is the typed-@
+  list's light menu: one row per agent with a small grey tag (Mine / Team /
+  "5 free"), a quiet check on the one in the text, no group headers, and a
+  quiet "Connect my agent" row.
 
 - **A calmer document bar, and agents from the comment composer (Julie,
   2026-10-24).** The bar had grown to nine controls. Now, left: logo · space /
