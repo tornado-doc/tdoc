@@ -157,7 +157,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
             <div className="ui-setup-status" role="status" aria-live="polite">
               {connected ? <span className="ui-setup-connected"><Check size={14} aria-hidden="true" /> Connected · {computer.device}</span>
                 : state === 'stuck' ? <><p>Still waiting? Check Terminal for a sign-in or installation error.</p><code>{DOCTOR_PROMPT}</code><button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy status command</button><p><a href="https://nodejs.org/">Node.js 18+ is required</a></p></>
-                  : <><span className="sg-spin" aria-hidden="true" />{copyFailed ? COPY_FALLBACK : 'Waiting for you to run the commands and approve in your browser…'}</>}
+                  : <><span className="sg-spin" aria-hidden="true" />Waiting for you to run the commands and approve in your browser…</>}
             </div>
             {connected ? <>
               {runtimeReady ? <div className="ui-setup-status ui-setup-connected" role="status"><Check size={14} aria-hidden="true" />{labelOf(chosen)} detected{observed?.version ? ` · ${observed.version}` : ''}</div>

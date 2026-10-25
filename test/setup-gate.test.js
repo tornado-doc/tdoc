@@ -71,12 +71,11 @@ t('a host that can sign people in does not ask them to say so twice', () => {
   assert(gate.includes("Sign-in is not configured on this host."), 'and says so plainly where there is none');
 });
 
-t('works with: Claude Code and Codex only', () => {
-  assert(gate.includes('<span className="sg-sr">Claude Code and Codex</span>'), 'the screen-reader list still names other apps');
-  assert(!/ChatGPT|Grok/.test(gate.slice(gate.indexOf('function WorksWith'), gate.indexOf('function ChatWindow'))), 'works with still names ChatGPT or Grok');
-  const marks = read('shell/src/agent-marks.jsx');
-  const cluster = marks.slice(marks.indexOf('export function AgentMarks'));
-  assert(cluster.includes('<ClaudeMark') && cluster.includes('<OpenAIMark') && !cluster.includes('<GrokMark'), 'the cluster is not Claude Code + Codex');
+t('automatic detection is local, while interactive conversations remain supported', () => {
+  const inventory = gate.slice(gate.indexOf('const RUNTIMES ='), gate.indexOf('export function SetupGate'));
+  assert(inventory.includes("value: 'claude'") && inventory.includes("value: 'codex'"), 'managed local providers');
+  assert(!/ChatGPT|Grok/.test(inventory), 'cloud conversations are not reported as detected local runtimes');
+  assert(gate.includes('Use without a background helper'), 'interactive use is optional and explicit');
 });
 
 t('a refused clipboard says so instead of doing nothing', () => {
@@ -737,7 +736,7 @@ t('the real connection remains visible when a computer stops responding', () => 
   assert(gate.includes('window.clearTimeout(timer)'), 'unmount clears the timer');
 });
 t('the chosen AI opens a private practice doc through the account API', () => {
-  assert(gate.includes('createOnboardingPractice({ device: chosen.device, cli: chosen.cli })'), 'explicit target');
+  assert(gate.includes("createOnboardingPractice(manual ? { mode: 'manual' } : { device: chosen.device, cli: chosen.cli })"), 'explicit target');
   assert(gate.includes('location.assign(result.url)'), 'opens server-created doc');
   assert(!gate.includes('PORTRAIT_PROMPT'), 'history scanning is not required');
 });
