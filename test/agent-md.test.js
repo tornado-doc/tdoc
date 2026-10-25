@@ -10,7 +10,9 @@ const expected =
   '\n' +
   'Shell / product UI: reuse the existing design language. Prefer AppDialog (HubDialog / NameDialog), docs-hub.css classes (page-hd, toolbar, new-folder-btn, loc-hint, manage-hint, field, tabs, doc-row), and chrome.css modal rules. Do not invent one-off panes, inline layout styles, or a parallel component kit for /me, /@, or other shell surfaces.\n' +
   '\n' +
-  'UI primitives are mandatory. Use shell/src/ui/ (AppDialog, AppMenu, AppSelect, SegmentedControl, Switch, CopyPromptButton); never a native <select>, whose open list the OS draws. If none fits, add one there. Match the page\'s margins, type scale and button hierarchy. Dialog styles go in ui.css or chrome.css (the feedback overlay loads only those). A UI change is done only after screenshots at desktop and phone width plus a browser regression; test/ui-primitives.test.js enforces the source rules.\n';
+  'UI primitives are mandatory. Use shell/src/ui/ (AppDialog, AppMenu, AppSelect, SegmentedControl, Switch, CopyPromptButton); never a native <select>, whose open list the OS draws. If none fits, add one there. Match the page\'s margins, type scale and button hierarchy. Dialog styles go in ui.css or chrome.css (the feedback overlay loads only those). A UI change is done only after screenshots at desktop and phone width plus a browser regression; test/ui-primitives.test.js enforces the source rules.\n' +
+  '\n' +
+  'New or uncertain features ship behind a flag in shell/src/feature-flags.js, visible only in dev mode; flip default to true when approved; remove the flag after it\'s stable.\n';
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }

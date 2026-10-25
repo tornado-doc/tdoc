@@ -387,6 +387,16 @@
   .doc-card-preview span { display: -webkit-box; margin: 16px; overflow: hidden; -webkit-line-clamp: 6; -webkit-box-orient: vertical; font: 13px/1.55 Georgia, serif; color: var(--td-muted); }
   .doc-list.is-grid .doc-info { align-self: stretch; }
   .doc-list.is-grid .doc-preview-excerpt { display: none; }
+  /* Text card (no thumbnail): title and a few lines of excerpt across the
+     card, then the date with the star and menu on the bottom line. */
+  .doc-list.is-grid .doc-row.is-text-card { grid-template-rows: auto auto 1fr; row-gap: 6px; min-height: 132px; padding: 14px 10px 8px 14px; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-info { display: contents; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-title-line { grid-column: 1 / -1; padding-right: 26px; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-title { font-size: 15px; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-preview-excerpt { grid-column: 1 / -1; display: -webkit-box; margin: 0; white-space: normal; -webkit-line-clamp: 3; -webkit-box-orient: vertical; color: var(--td-muted); opacity: 1; font-size: 13px; line-height: 1.45; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-meta { grid-column: 1; align-self: end; margin: 0; padding-bottom: 6px; }
+  .doc-list.is-grid .doc-row.is-text-card .row-actions { grid-column: 2; grid-row: 3; }
+  .doc-list.is-grid .doc-row.is-text-card .row-check { top: 10px; right: 10px; left: auto; padding: 2px; background: none; }
   .doc-list.is-grid .row-actions { align-self: end; display: flex; align-items: center; }
   /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
      switches over the already-rendered page — no fetch on tab change. */

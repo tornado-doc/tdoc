@@ -105,16 +105,16 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
     await t('grid/list preview switch is shared, complete, and remembered', async () => {
       const page = await open(1280, '');
       await page.getByRole('button', { name: 'Grid view' }).click();
-      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
-      assert.match(await page.locator('.doc-card-preview').textContent(), /Only in My docs/);
+      await page.locator('.doc-list.is-grid .doc-row.is-card').waitFor();
+      assert.match(await page.locator('.doc-list.is-grid .doc-row.is-card').first().textContent(), /Only in My docs/);
       assert.equal(await page.getByRole('button', { name: 'Grid view' }).getAttribute('aria-pressed'), 'true');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-grid-desktop.png'), fullPage: true });
       await page.reload();
       await page.locator('.doc-list.is-grid').waitFor();
       await page.locator('.tdoc-space-trigger').click();
       await page.getByRole('menuitem', { name: 'BeFreed' }).click();
-      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
-      assert.match(await page.locator('.doc-card-preview').textContent(), /Only in BeFreed/);
+      await page.locator('.doc-list.is-grid .doc-row.is-card').waitFor();
+      assert.match(await page.locator('.doc-list.is-grid .doc-row.is-card').first().textContent(), /Only in BeFreed/);
       await page.getByRole('button', { name: 'List view' }).click();
       assert.equal(await page.locator('.doc-list.is-list').count(), 1);
       await page.close();
@@ -186,7 +186,7 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       assert.equal(await page.locator('.tm-spaces').count(), 0, 'the pill row is back');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'switcher-phone.png') });
       await page.getByRole('button', { name: 'Grid view' }).click();
-      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
+      await page.locator('.doc-list.is-grid .doc-row.is-card').waitFor();
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'grid overflows sideways');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-grid-phone.png'), fullPage: true });
       await more.click();

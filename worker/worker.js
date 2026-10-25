@@ -15101,6 +15101,8 @@ const tdocHandlers = {
           docs,
           mine,
           ...(mine ? { catalog, identity } : { identity }),
+          // Dev-mode-only features (shell/src/feature-flags.js) read this.
+          devMode: (await devModeBoot(env, session)).devMode,
         }),
       }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
