@@ -2,11 +2,13 @@ import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, 
 import { createPortal } from 'react-dom';
 import { usePortalContainer } from '../ui/portal.js';
 import { useGithubUserSearch } from './github-user-search.js';
-import { AGENT_TAG_JOINER, agentFacts, agentMentionName, matchAgentChoices, targetKey } from './agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentFacts, agentMentionName, matchAgentChoices, taggedAgentSpan, targetKey } from './agent-choices.js';
+import { ChevronDown } from 'lucide-react';
+import { AppMenu } from '../ui/menu.jsx';
+import { AGENT_GROUPS, AgentMenuItems, agentTag, whose } from './agent-menu.jsx';
 import { ProviderMark, recipientOption } from './notify-handoff.jsx';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
 import { parseRichText } from './rich-text.js';
-import { freeLeftText } from './ai-answerer.js';
 
 // A textarea that offers people after `@`. Both composers use it, so mentioning
 // works the same whether you are starting a thread or answering one.
@@ -41,22 +43,36 @@ export function MentionField({
   placeholder,
   autoFocus = false,
   rootClassName = '',
+  // The textarea, for a caller that inserts at the caret (the @agent button).
+  fieldRef = null,
 }) {
-  const ref = useRef(null);
+  const ownRef = useRef(null);
+  const mirrorRef = useRef(null);
+  const ref = fieldRef || ownRef;
   const caretAfterInsert = useRef(null);
   const [query, setQuery] = useState(null);
   const [active, setActive] = useState(0);
   const agentsOnOffer = useContext(AgentMentionContext);
 
-  // Agents are their own group above people: the first two with nothing
-  // typed, every one whose name matches once something is.
+  // Agents come above people, in the agent pill's dropdown's order and look
+  // (Mine, Team, tdoc AI; short name, grey tag): the same list
+  // (agentChoices), all of it with nothing typed, every one whose name
+  // matches once something is. It used to stop at the first two, which hid
+  // tdoc AI (always last) and the team agent from anyone with two agents of
+  // their own.
   const agentMatches = query
     ? matchAgentChoices(agentsOnOffer.choices, query.query, {
+      limit: Infinity,
       labelOf: (t) => recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices).label,
-    }).map((t) => {
+    }).map((t, i) => ({ t, i })).sort((a, b) => (AGENT_GROUPS.indexOf(whose(a.t)) - AGENT_GROUPS.indexOf(whose(b.t))) || (a.i - b.i)).map(({ t }) => {
       const option = recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices);
-      const left = t.tdoc_ai ? freeLeftText(agentsOnOffer.ai?.remaining) : null;
-      return { agent: t, key: `agent:${targetKey(t)}`, ...option, hint: [option.hint, left].filter(Boolean).join(' · ') };
+      return {
+        agent: t,
+        key: `agent:${targetKey(t)}`,
+        ...option,
+        name: agentMentionName(t, agentsOnOffer.choices),
+        tag: agentTag(t, agentsOnOffer.ai),
+      };
     })
     : [];
   const localMatches = query ? matchMentionable(people, query.query) : [];
@@ -149,6 +165,7 @@ export function MentionField({
   };
 
   const onKeyDown = (event) => {
+    if (!open && removeWholeTag(event)) return;
     if (open) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
@@ -178,6 +195,30 @@ export function MentionField({
     }
   };
 
+  // The agent named in the text (from the @agent button or picked after @)
+  // is drawn as a pill over its tag, with a dropdown to swap it. The tag is
+  // one unit: Backspace or Delete at its edge removes all of it.
+  const pill = taggedAgentSpan(value, agentsOnOffer.choices);
+  const swapAgent = (t) => {
+    if (!pill) return;
+    const tag = `@${AGENT_TAG_JOINER}${agentMentionName(t, agentsOnOffer.choices)}`;
+    caretAfterInsert.current = pill.start + tag.length + (value[pill.end] === ' ' ? 1 : 0);
+    onChange(`${value.slice(0, pill.start)}${tag}${value.slice(pill.end)}`);
+  };
+  const removeWholeTag = (event) => {
+    if (!pill || event.metaKey || event.ctrlKey || event.altKey) return false;
+    const el = event.currentTarget;
+    if (el.selectionStart !== el.selectionEnd) return false;
+    const at = el.selectionStart;
+    const hit = event.key === 'Backspace' ? at > pill.start && at <= pill.end
+      : event.key === 'Delete' ? at >= pill.start && at < pill.end : false;
+    if (!hit) return false;
+    event.preventDefault();
+    caretAfterInsert.current = pill.start;
+    onChange(`${value.slice(0, pill.start)}${value.slice(pill.end)}`);
+    return true;
+  };
+
   return (
     <div className={`tdoc-mention-field${rootClassName ? ` ${rootClassName}` : ''}`}>
       <textarea
@@ -197,10 +238,21 @@ export function MentionField({
         onClick={(event) => syncQuery(event.target)}
         onBlur={() => setQuery(null)}
         onKeyDown={onKeyDown}
+        onScroll={(event) => { if (mirrorRef.current) mirrorRef.current.scrollTop = event.currentTarget.scrollTop; }}
       />
+      {pill ? (
+        <AgentPillMirror
+          boxRef={ref}
+          mirrorRef={mirrorRef}
+          value={value}
+          pill={pill}
+          choices={agentsOnOffer.choices}
+          ai={agentsOnOffer.ai}
+          onPick={swapAgent}
+        />
+      ) : null}
       {open && menuBox ? createPortal((
         <div className="tdoc-mention-menu" id="tdoc-mention-menu" role="listbox" style={menuBox}>
-          {agentMatches.length ? <div className="tdoc-mention-group" role="presentation">Agents</div> : null}
           {agentMatches.map((row, index) => (
             <button
               key={row.key}
@@ -208,18 +260,18 @@ export function MentionField({
               role="option"
               aria-selected={index === active}
               className={`tdoc-mention-option tdoc-mention-agent${index === active ? ' active' : ''}`}
-              title={row.agent.tdoc_ai ? `${row.label}: ${row.hint}` : agentFacts(row.agent).map((f) => `${f.label}: ${f.value}`).join('\n')}
+              title={[row.label, row.hint].filter(Boolean).join(' · ') + (row.agent.tdoc_ai ? '' : `\n${agentFacts(row.agent).map((f) => `${f.label}: ${f.value}`).join('\n')}`)}
               onMouseDown={(event) => event.preventDefault()}
               onMouseEnter={() => setActive(index)}
               onClick={() => pick(row)}
             >
               <span className="tdoc-mention-agent-mark"><ProviderMark target={row.agent} size={14} /></span>
-              <span className="tdoc-mention-login">{row.label}</span>
-              {row.hint ? <span className="tdoc-mention-source">{row.hint}</span> : null}
+              <span className="tdoc-mention-login">{row.name}</span>
+              {row.tag ? <span className="tdoc-agent-menu-tag">{row.tag}</span> : null}
             </button>
           ))}
           {agentMatches.some((row) => row.agent.tdoc_ai) ? (
-            <a className="tdoc-mention-connect" href="/start" onMouseDown={(event) => event.preventDefault()}>Connect my agent →</a>
+            <a className="tdoc-mention-connect" href="/start" onMouseDown={(event) => event.preventDefault()}>Connect my agent</a>
           ) : null}
           {agentMatches.length && matches.length ? <div className="tdoc-mention-group" role="presentation">People</div> : null}
           {matches.map((person, i) => {
@@ -248,6 +300,71 @@ export function MentionField({
           })}
         </div>
       ), portalContainer || document.body) : null}
+    </div>
+  );
+}
+
+// A layer over the textarea, laid out exactly like it (same box, font,
+// padding, wrapping, scroll), with the text itself invisible: only the agent
+// tag shows, as a pill that covers the tag the textarea holds. The pill is
+// the tag's own glyphs in the same order -- a chevron where the "@" is, then
+// the name -- so it wraps exactly as the textarea does and the text around it
+// stays where the caret thinks it is. Everything but
+// the pill lets clicks through to the textarea.
+const MIRRORED = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'wordSpacing',
+  'textTransform', 'textIndent', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+  'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'tabSize'];
+function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, ai, onPick }) {
+  const [box, setBox] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const cs = window.getComputedStyle(el);
+      const style = {};
+      for (const k of MIRRORED) style[k] = cs[k];
+      // A vertical scrollbar narrows the textarea's text column.
+      const bars = el.offsetWidth - el.clientWidth - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
+      if (bars > 0) style.paddingRight = `${parseFloat(cs.paddingRight) + bars}px`;
+      setBox({ ...style, top: el.offsetTop, left: el.offsetLeft, width: el.offsetWidth, height: el.offsetHeight });
+      if (mirrorRef.current) mirrorRef.current.scrollTop = el.scrollTop;
+    };
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [value]);
+  const tag = value.slice(pill.start, pill.end);
+  const name = tag.slice(1);
+  // The pill reads the short name; the full one is its tooltip.
+  const label = agentDisplayName(pill.target, choices);
+  return (
+    <div ref={mirrorRef} className="tdoc-agent-pill-layer" style={box || { visibility: 'hidden' }}>
+      <span aria-hidden="true">{value.slice(0, pill.start)}</span>
+      <AppMenu
+        align="start"
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        popupClassName="tdoc-agent-menu"
+        trigger={(
+          <span
+            className="tdoc-agent-pill"
+            data-agent={label}
+            role="button"
+            tabIndex={-1}
+            aria-label={`${label} -- change agent`}
+            title={label}
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            <span className="tdoc-agent-pill-caret">@<ChevronDown size={11} aria-hidden="true" /></span>
+            {name}
+          </span>
+        )}
+      >
+        <AgentMenuItems choices={choices} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
+      </AppMenu>
+      <span aria-hidden="true">{`${value.slice(pill.end)}\u200b`}</span>
     </div>
   );
 }
