@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Monitor } from 'lucide-react';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSelect } from './ui/select.jsx';
@@ -16,6 +16,7 @@ async function call(body) {
 
 export function ComputersBody({ identity, preview = null }) {
   const [data, setData] = useState(preview);
+  const revision = useRef(0);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [setup, setSetup] = useState(false);
@@ -24,7 +25,8 @@ export function ComputersBody({ identity, preview = null }) {
     if (preview) return undefined;
     let cancelled = false; let timer;
     const load = async () => {
-      try { const next = await call(); if (!cancelled) { setData(next); setNotice(previous => previous === 'Could not load your computers. Retrying…' ? '' : previous); } }
+      const observed = revision.current;
+      try { const next = await call(); if (!cancelled && observed === revision.current) { setData(next); setNotice(previous => previous === 'Could not load your computers. Retrying…' ? '' : previous); } }
       catch { if (!cancelled) setNotice('Could not load your computers. Retrying…'); }
       if (!cancelled) timer = window.setTimeout(load, 15000);
     };
@@ -32,7 +34,7 @@ export function ComputersBody({ identity, preview = null }) {
   }, [preview]);
   const update = async (body) => {
     if (busy) return;
-    setBusy(true); setNotice('');
+    revision.current++; setBusy(true); setNotice('');
     try {
       if (preview) setData(previous => ({ ...previous, ...(body.action === 'default' ? { default: { provider: 'local', device: body.device, cli: body.cli } } : { computers: previous.computers.map(c => c.device === body.device ? { ...c, paused: body.action === 'pause', status: body.action === 'pause' ? 'paused' : 'active' } : c) }) }));
       else { await call(body); setData(await call()); }
