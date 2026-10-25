@@ -59,6 +59,14 @@ const MODEL = 'https://model.invalid/v1';
   const added = (await call('/api/team/agents', { method: 'POST', cookie: julie.cookie, headers: origin, body: { id: team.id, name: 'acme-bot' } })).body;
   const agentToken = (await call('/api/team/agents/connect', { method: 'POST', body: { code: added.setup_code, device: 'acme-box' } })).body.token;
   await call('/api/notify/local/register', { method: 'POST', token: agentToken, body: { device: 'acme-box', clis: ['claude'] } });
+  // Julie last edited agent-doc in the browser, so the team agent may write
+  // it (authorship at write time); then it is the team agent's doc.
+  {
+    const meta = JSON.parse(env.META.map.get('meta:agent-doc'));
+    Object.assign(meta.versions[meta.versions.length - 1], { source: 'browser', author: 'julie' });
+    delete meta.versions[meta.versions.length - 1].by;
+    env.META.map.set('meta:agent-doc', JSON.stringify(meta));
+  }
   assert((await upload(agentToken, 'agent-doc', 2)).status === 200, 'the team agent writes agent-doc');
   await call('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device: 'juliesmac', clis: ['claude'] } });
 

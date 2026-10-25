@@ -74,7 +74,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
     }
     if (req.url === '/libraries') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<!doctype html><meta charset="utf-8"><style>body{font:16px system-ui}.modal-overlay{position:fixed;inset:0;background:#0005}.modal-content{position:fixed;top:18%;left:20%;min-width:400px;padding:24px;background:white;z-index:30}#custom-headless-panel{transition:opacity .5s}#custom-headless-panel[data-closed]{opacity:0}</style><div id="host-app"></div><script src="/libraries.js"></script>');
+      res.end('<!doctype html><meta charset="utf-8"><style>body{font:16px system-ui}.modal-overlay{position:fixed;inset:0;background:#0005}.modal-content{position:fixed;top:18%;left:20%;min-width:400px;padding:24px;background:white;z-index:30}#custom-headless-panel{transition:opacity 1s}#custom-headless-panel[data-closed]{opacity:0}</style><div id="host-app"></div><script src="/libraries.js"></script>');
       return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -723,6 +723,18 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await dock.waitFor({ timeout: 5000 });
         assert(await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement), 'closed MUI keepMounted dialog captured feedback');
 
+        await libs.evaluate(() => {
+          const banner = document.createElement('div');
+          banner.id = 'cookie-banner'; banner.setAttribute('role', 'dialog'); banner.setAttribute('data-state', 'open');
+          banner.setAttribute('aria-labelledby', 'cookie-title'); banner.setAttribute('aria-describedby', 'cookie-description');
+          banner.innerHTML = '<h2 id="cookie-title">Cookie choices</h2><p id="cookie-description">Choose whether to allow cookies.</p>';
+          document.body.appendChild(banner);
+        });
+        await libs.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        assert(await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement),
+          'a nonmodal cookie banner captured feedback');
+        await libs.evaluate(() => document.getElementById('cookie-banner').remove());
+
         await libs.locator('#popover-open').click();
         await libs.locator('#radix-popover').waitFor();
         assert(await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement), 'non-modal Radix Popover captured feedback');
@@ -756,16 +768,52 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await libs.getByRole('button', { name: 'Close Radix' }).click();
         await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
 
+        await libs.locator('#radix-no-overlay-open').click();
+        await libs.locator('#radix-no-overlay-target').waitFor();
+        assert(await libs.evaluate(() => !document.body.hasAttribute('data-scroll-locked')),
+          'Radix no-Overlay fixture unexpectedly locked body scrolling');
+        assert(await libs.evaluate(() => document.body.style.pointerEvents === 'none'),
+          'Radix no-Overlay fixture did not exercise modal pointer isolation');
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'radix-no-overlay-content');
+        if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
+        await libs.locator('#radix-no-overlay-target').click();
+        await libs.locator('#tdoc-feedback-root .tdoc-popup textarea').first().fill('Feedback on a dialog without an overlay');
+        assert(await libs.locator('#radix-no-overlay-content').isVisible(), 'feedback closed a Radix Dialog without Overlay');
+        await libs.locator('#tdoc-feedback-root .tdoc-popup button.submit').click();
+        assert(await libs.locator('#radix-no-overlay-content').isVisible(), 'posting feedback closed a Radix Dialog without Overlay');
+        await libs.getByRole('button', { name: 'Close Radix without Overlay' }).click();
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
+        if (await pick.evaluate((button) => button.classList.contains('on'))) await pick.click();
+
         await libs.locator('#headless-open').click();
         await libs.locator('#custom-headless-panel[data-closed]').waitFor({ state: 'attached', timeout: 3000 });
         const entering = await libs.locator('#custom-headless-panel').evaluate((panel) => ({
           opacity: Number(getComputedStyle(panel).opacity), parent: document.getElementById('tdoc-feedback-root').parentElement.id,
         }));
-        assert(entering.opacity === 0 && entering.parent !== 'custom-headless-panel',
-          `Headless UI fixture did not exercise transparent entry before feedback moves: ${JSON.stringify(entering)}`);
+        assert(entering.opacity === 0,
+          `Headless UI fixture did not exercise transparent entry: ${JSON.stringify(entering)}`);
         await libs.locator('#headless-target').waitFor();
-        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'custom-headless-panel', null, { timeout: 3000 });
-        if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
+        await libs.waitForFunction(() => {
+          const panel = document.getElementById('custom-headless-panel');
+          return panel && panel.getAnimations().some((animation) => animation.playState === 'running')
+            && Number(getComputedStyle(panel).opacity) < 0.8
+            && document.getElementById('tdoc-feedback-root').parentElement === panel;
+        }, null, { timeout: 3000 });
+        await libs.evaluate(() => {
+          window.__headlessEntryClick = null;
+          document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-feedback-dock button.primary').addEventListener('pointerdown', () => {
+            const panel = document.getElementById('custom-headless-panel');
+            window.__headlessEntryClick = {
+              opacity: Number(getComputedStyle(panel).opacity),
+              inside: document.getElementById('tdoc-feedback-root').parentElement === panel,
+            };
+          }, { once: true });
+        });
+        await pick.click({ force: true });
+        const entryClick = await libs.evaluate(() => window.__headlessEntryClick);
+        assert(entryClick && entryClick.opacity < 1 && entryClick.inside,
+          `feedback was not inside the Headless UI panel during entry: ${JSON.stringify(entryClick)}`);
+        assert(await libs.locator('#custom-headless-panel').isVisible(), 'clicking feedback during Headless UI entry closed the dialog');
         await libs.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
         await libs.locator('#headless-target').click();
         const headlessDraft = libs.locator('#tdoc-feedback-root .tdoc-popup textarea').first();

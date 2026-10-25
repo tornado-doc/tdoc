@@ -16,6 +16,15 @@ const fs = require('fs');
 const http = require('http');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { loadWorker, makeEnv, issue } = require('./helpers/worker-harness');
+const browserEdit = (env, slug, login) => {
+  // A person's last edit in the browser (what the editor stamps), so the
+  // team agent may write the doc: authorship is enforced at write time.
+  const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+  const last = meta.versions.reduce((a, b) => (Number(b.n) > Number(a.n) ? b : a));
+  Object.assign(last, { source: 'browser', author: login });
+  delete last.by;
+  env.META.map.set(`meta:${slug}`, JSON.stringify(meta));
+};
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
 const { chromium, devices } = requirePlaywrightOrSkip('doc-bar-composer-ui.test.js');
@@ -84,6 +93,7 @@ async function dragSelect(page, phrase) {
   const added = (await api('/api/team/agents', { method: 'POST', cookie: julie.cookie, body: { id: team.id, name: 'tdoc-bot' } })).body;
   const agentToken = (await api('/api/team/agents/connect', { method: 'POST', body: { code: added.setup_code, device: 'team-box' } })).body.token;
   await api('/api/notify/local/register', { method: 'POST', token: agentToken, body: { device: 'team-box', clis: ['claude'] } });
+  browserEdit(env, 'team-plan', 'julie');
   await up(agentToken, 'team-plan', 2, 'Team plan');
   // Two threads on launch-plan, one resolved, for the filter.
   const c1 = await api('/api/comments', { method: 'POST', cookie: reader.cookie, body: { slug: 'launch-plan', version: 1, text: 'Who owns billing?', anchor: { kind: 'text', text: 'Search follows in April' } } });

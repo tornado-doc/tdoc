@@ -10382,7 +10382,7 @@ async function sendInviteEmails(env, { added, inviterName, inviterId, slug, titl
 // Hosted tokens are NOT global owners. `slug` must be known before this
 // runs whenever a hosted token might be in play. Returns { ok: true, actor,
 // session, meta? } or { ok: false, response }.
-async function authorizeOwnerMutation(req, env, slug) {
+async function authorizeOwnerMutation(req, env, slug, opts = {}) {
   const session = await getSession(env, req);
   // A feedback token speaks for one doc. Owning another doc does not make the
   // token good for it.
@@ -10401,6 +10401,13 @@ async function authorizeOwnerMutation(req, env, slug) {
   if (writeGate.teamDoc && !writeGate.teamAdmin) {
     return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
   }
+  // Renaming or deleting with an agent token follows authorship too
+  // (opts.authorship): an admin's agent does not rename or delete a doc
+  // another person's agent wrote. Sharing is the admin's governance, not an
+  // edit, and keeps working from the CLI; handoffs apply authorship
+  // themselves; the browser save refuses tokens.
+  const authorship = opts.authorship ? agentWriteRefusal(writeGate.meta, auth.actor) : null;
+  if (authorship) return { ok: false, response: await agentWriteRefusalResponse(env, writeGate.meta, authorship) };
   return { ok: true, session: null, actor: auth.actor, meta: writeGate.meta };
 }
 
@@ -12343,8 +12350,13 @@ function docLastWriter(meta) {
   if (!v) return null;
   if (v.team_agent && v.team_agent.id) return { kind: 'team_agent', id: v.team_agent.id };
   if (v.source === 'browser') return { kind: 'person', login: v.author || '' };
-  const by = v.by || (meta.hosted && meta.hosted.account_id) || null;
-  return by ? { kind: 'agent', account_id: by } : null;
+  // Made by a person in the browser without an edit: a blank doc's scaffold,
+  // a duplicate. Nobody's agent wrote it.
+  if (v.blank || v.human) return { kind: 'person', login: v.author || '' };
+  if (v.by) return { kind: 'agent', account_id: v.by };
+  // Older versions do not say who wrote them; the owner is a guess (legacy).
+  const owner = meta.hosted && meta.hosted.account_id;
+  return owner ? { kind: 'agent', account_id: owner, legacy: true } : null;
 }
 
 // Who wrote the latest version, in words for a refusal: the team agent's
@@ -12386,6 +12398,52 @@ function agentEditPolicy(meta, accountIds) {
     own: owner || mine,
     byOther: !!(writer && writer.kind === 'agent' && !mine),
   };
+}
+
+// Authorship at WRITE time (Julie, 2026-10-25). agentEditPolicy decides
+// whom a handoff may go to; this decides what an agent may actually write,
+// whatever reached it. An agent token is a person's upload token (their
+// agent: tdoc-publish, tdoc-agent-reply) or a team agent's. On a team doc:
+//   team agent      may edit a new doc, or one last written by a team agent
+//                   of its team or by a person in the browser; never over
+//                   a person's own agent (written_by_other)
+//   person's agent  may edit a doc they own, a new one, one a person last
+//                   wrote in the browser, or one their own agent wrote; not
+//                   one another person's agent wrote (written_by_other) or
+//                   the team agent wrote (team_agent_wrote)
+// A version that does not record its writer (legacy, before `by`) blocks
+// nobody. Personal docs need no rule here: only their owner's token reaches
+// them.
+// Feedback spaces are comment hubs about an app, not authored docs.
+// Browser sessions and the provider token never come through here.
+function agentWriteRefusal(meta, actor) {
+  if (!meta || !actor || actor.kind !== 'hosted') return null;
+  if (!meta.workspace_id || meta.created_from === 'feedback') return null;
+  const writer = docLastWriter(meta);
+  const ids = sessionAccountIds(actor);
+  // A version that does not say who wrote it (written before versions
+  // recorded it) is nobody's in particular: it does not lock anyone out.
+  if (!writer || writer.kind === 'person' || writer.legacy) return null;
+  // Any of the team's agents may continue a doc a team agent wrote: a
+  // member's handoff is offered to all of them there (notifyTargetsFor), and
+  // a team doc is reached only by its own team's agents.
+  if (actor.team_agent) {
+    if (writer.kind === 'team_agent') return null;
+    return { reason: 'written_by_other', writer };
+  }
+  const ownerId = meta.hosted && meta.hosted.account_id;
+  if (ownerId && ids.includes(ownerId)) return null;
+  if (writer.kind === 'agent' && ids.includes(writer.account_id)) return null;
+  return { reason: writer.kind === 'team_agent' ? 'team_agent_wrote' : 'written_by_other', writer };
+}
+async function agentWriteRefusalResponse(env, meta, refusal) {
+  const who = (await docWriterName(env, meta, refusal.writer)) || 'someone else';
+  return json({
+    error: 'agent_not_author_editor',
+    reason: refusal.reason,
+    writer: who,
+    message: `This doc was last written by ${who}; this agent may not change it. Answer in the thread instead (tdoc-agent-reply without --status applied), and leave the edit to them.`,
+  }, { status: 403 });
 }
 
 async function notifyTargetsFor(env, slug, gate, localDriver = null) {
@@ -12933,6 +12991,20 @@ export class CommentsStore {
             for (const f of (Array.isArray(op.facets) ? op.facets : [])) await txn.delete(`index-dirty:${f}`);
             out = { ok: true };
           }
+        });
+      } catch { out = { ok: false }; }
+      return Response.json(out);
+    }
+
+    // Answer-only locks for this doc (answerLocks): one per question asked
+    // of an agent, until its answer lands. Serialized here, read fresh.
+    if (u.pathname === '/answer-locks') {
+      let out = { ok: false };
+      try {
+        await this.state.storage.transaction(async (txn) => {
+          const next = applyAnswerLockOp(await txn.get('answerLocks'), op, Date.now());
+          if (next.changed) await txn.put('answerLocks', next.map);
+          out = { ok: true, locks: Object.values(next.map) };
         });
       } catch { out = { ok: false }; }
       return Response.json(out);
@@ -13802,6 +13874,47 @@ async function teamAskTargets(env, gate) {
   return { targets, reachable: targets.filter((t) => t.provider !== 'local' || t.status === 'active') };
 }
 
+// POST /api/docs/<slug>/my-agent/cancel { ask_id }  or  { all: true }
+// The asker takes back a question their agent (or the team agent) has not
+// answered: its answer-only lock goes, and the question is marked cancelled.
+// The doc's owner (a team admin on a team doc) may clear any question's lock
+// on their doc, or all of them -- a stuck lock must never hold a doc.
+async function handleMyAgentCancel(env, req, url, slug) {
+  if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+  if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
+  if (req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
+    return json({ error: 'cross_origin' }, { status: 403 });
+  }
+  const session = await getSession(env, req);
+  if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+  const meta = await loadDocMeta(env, slug);
+  if (!meta) return json({ error: 'not_found' }, { status: 404 });
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const askId = typeof body.ask_id === 'string' ? body.ask_id : '';
+  const owner = isDocOwnerSession(env, session, meta);
+  if (body.all === true) {
+    if (!owner) return json({ error: 'not_doc_owner' }, { status: 403 });
+    let locks;
+    try { locks = await answerLocks(env, slug, { kind: 'list' }); } catch { return json({ error: 'answer_lock_unavailable' }, { status: 503 }); }
+    for (const l of locks) if (l && l.ask_id) await answerLocks(env, slug, { kind: 'remove', id: l.ask_id });
+    return json({ ok: true, cleared: locks.length });
+  }
+  if (!askId) return json({ error: 'ask_id required' }, { status: 400 });
+  const accountId = await sessionAccountId(env, session);
+  const group = accountId ? await accountGroup(env, accountId) : { ids: [], canonical: null };
+  const asker = group.canonical || accountId;
+  const prev = asker ? (await loadAgentAsks(env, slug, asker)).find((a) => a.ask_id === askId) : null;
+  if (!prev && !owner) return json({ error: 'ask_not_found' }, { status: 404 });
+  try { await answerLocks(env, slug, { kind: 'remove', id: askId }); } catch { return json({ error: 'answer_lock_unavailable' }, { status: 503 }); }
+  if (prev && !prev.answer) {
+    const at = new Date().toISOString();
+    await putAgentAsk(env, slug, { ...prev, delivery: { status: 'failed', error: 'cancelled', at }, run: { status: 'cancelled', at } });
+    await localPendingDrop(env, prev.runner || prev.by, askId);
+  }
+  return json({ ok: true, ask_id: askId, cancelled: Boolean(prev && !prev.answer) });
+}
+
 async function handleMyAgent(env, req, url, slug) {
   if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
   // The reader in their browser. An agent's token asks its own account's
@@ -13892,43 +14005,107 @@ async function handleMyAgent(env, req, url, slug) {
   const passage = commentId != null ? storedPassage : agentAskPassage(body && body.passage);
   const askId = `q_${Date.now()}_${rand(3)}`;
   const event = agentAskEvent({ slug, docTitle: meta.title, askId, question, passage: passage && passage.text, publicHost: env.PUBLIC_HOST, commentId });
-  const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
-  const at = new Date().toISOString();
-  const rec = await putAgentAsk(env, slug, {
-    ask_id: askId,
-    at,
-    by: asker,
-    question,
-    ...(passage ? { passage } : {}),
-    ...(commentId ? { comment_id: commentId } : {}),
-    recipient: target,
-    ...(runner ? { runner, team_agent: { id: target.team_agent.id, name: target.team_agent.name } } : {}),
-    delivery: { ...delivery, at },
-  });
-  // A local agent is not pushed to: the reader's own daemon finds it in the
-  // reader's own pending index, never the doc owner's. The team agent's
-  // daemon finds it in the team agent's, and its token finds the question
-  // through team-ask:<id> (handleAgentAsk).
-  if (runner) await env.META.put(`team-ask:${askId}`, JSON.stringify({ slug, by: rec.by, runner }), { expirationTtl: 30 * 86400 });
-  if (target.provider === 'local') {
-    await localPendingPut(env, runner || rec.by, { slug, handoff_id: askId, kind: 'ask', by: rec.by, ...(runner ? { runner } : {}), device: target.device, agent_sub: target.agent_sub, at });
+  // Answer only, from now: the agent asked may not edit this doc until its
+  // answer lands (answerLockRefusal). Not for the doc's owner asking their
+  // own agent: they may edit their own doc whenever they like.
+  const ownerAsks = !runner && Boolean(meta.hosted && meta.hosted.account_id && state.group.ids.concat(accountId).includes(meta.hosted.account_id));
+  if (!ownerAsks) {
+    try {
+      await answerLocks(env, slug, { kind: 'add', id: askId, lock: { ask_id: askId, asker, ...(runner ? { runner } : { by: asker, ids: [...new Set(state.group.ids.concat(accountId))] }), until: Date.now() + ANSWER_LOCK_TTL_MS } });
+    } catch {
+      return json({ error: 'answer_lock_unavailable', message: 'Could not send the question right now; try again.' }, { status: 503 });
+    }
+  }
+  // The lock and the question are one: if anything after the lock fails,
+  // the lock goes too, so no question that was never recorded holds an
+  // agent.
+  let rec;
+  try {
+    const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
+    if (delivery && delivery.status === 'failed') await releaseAnswerLock(env, slug, askId);
+    const at = new Date().toISOString();
+    rec = await putAgentAsk(env, slug, {
+      ask_id: askId,
+      at,
+      by: asker,
+      question,
+      ...(passage ? { passage } : {}),
+      ...(commentId ? { comment_id: commentId } : {}),
+      recipient: target,
+      ...(runner ? { runner, team_agent: { id: target.team_agent.id, name: target.team_agent.name } } : {}),
+      delivery: { ...delivery, at },
+    });
+    // A local agent is not pushed to: the reader's own daemon finds it in the
+    // reader's own pending index, never the doc owner's. The team agent's
+    // daemon finds it in the team agent's, and its token finds the question
+    // through team-ask:<id> (handleAgentAsk).
+    if (runner) await env.META.put(`team-ask:${askId}`, JSON.stringify({ slug, by: rec.by, runner }), { expirationTtl: 30 * 86400 });
+    if (target.provider === 'local') {
+      await localPendingPut(env, runner || rec.by, { slug, handoff_id: askId, kind: 'ask', by: rec.by, ...(runner ? { runner } : {}), device: target.device, agent_sub: target.agent_sub, at });
+    }
+  } catch (error) {
+    await releaseAnswerLock(env, slug, askId);
+    console.error('[my-agent] ask failed after the lock:', error && error.message);
+    return json({ error: 'ask_failed', message: 'Could not send the question; try again.' }, { status: 502 });
   }
   return json({ ok: true, ask: agentAskView(rec) });
 }
 
 // The asker's agent, on the asker's own upload token. The token's account
 // must be the one that asked, and must still be able to read the doc.
-const TEAM_ASK_RUN_TTL = 3600;
-function teamAskRunKey(agentId, slug) {
-  return `team-ask-run:${agentId}:${slug}`;
+// An answer-only question (one's own agent, Only me, a team agent) locks
+// its agent out of edits on that doc from the moment it is SENT until its
+// answer lands (ask-reply), the asker cancels it (my-agent/cancel; the doc's
+// owner or a team admin may clear any), or ANSWER_LOCK_TTL_MS passes. One lock per question, in the doc's Durable Object
+// (strongly consistent), so overlapping questions each hold their own; a
+// lock that cannot be read refuses the write (fails closed).
+const ANSWER_LOCK_TTL_MS = 6 * 3600 * 1000;
+async function answerLocks(env, slug, op) {
+  if (env.COMMENTS) {
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(slug));
+    const r = await stub.fetch('https://do/answer-locks', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, op }),
+    });
+    const body = await r.json();
+    if (!body || !body.ok || !Array.isArray(body.locks)) throw new Error('answer_locks_unavailable');
+    return body.locks;
+  }
+  // No Durable Object binding: the same map in KV (not serialized).
+  const key = `answer-locks:${slug}`;
+  const raw = await env.META.get(key);
+  const next = applyAnswerLockOp(raw ? JSON.parse(raw) : {}, op, Date.now());
+  if (next.changed) await env.META.put(key, JSON.stringify(next.map));
+  return Object.values(next.map);
 }
-// A team agent answering a question on this doc right now: an answer-only
-// run, so nothing it sends may change the doc.
-async function teamAskRunActive(env, actor, slug) {
-  if (!(actor && actor.team_agent && actor.team_agent.id)) return false;
-  try { return Boolean(await env.META.get(teamAskRunKey(actor.team_agent.id, slug))); } catch { return false; }
+function applyAnswerLockOp(current, op, now) {
+  const map = {};
+  let changed = false;
+  for (const [k, v] of Object.entries(current && typeof current === 'object' ? current : {})) {
+    if (v && Number(v.until) > now) map[k] = v; else changed = true;
+  }
+  if (op && op.kind === 'add' && typeof op.id === 'string') { map[op.id] = op.lock; changed = true; }
+  if (op && op.kind === 'remove' && map[op.id]) { delete map[op.id]; changed = true; }
+  return { map, changed };
 }
-const ANSWER_ONLY_RUN = { error: 'answer_only_run', message: 'This team agent is answering a question on this doc: an answer only, no edits, until that run ends.' };
+async function releaseAnswerLock(env, slug, askId) {
+  try { await answerLocks(env, slug, { kind: 'remove', id: askId }); } catch {}
+}
+// null when this actor may write; else the refusal to send.
+async function answerLockRefusal(env, actor, slug) {
+  if (!actor || actor.kind !== 'hosted') return null;
+  let locks;
+  try { locks = await answerLocks(env, slug, { kind: 'list' }); } catch {
+    return json({ error: 'answer_lock_unavailable', message: 'Could not check whether this agent is answering a question on this doc; try again.' }, { status: 503 });
+  }
+  const teamAgentId = actor.team_agent && actor.team_agent.id;
+  const ids = sessionAccountIds(actor);
+  const held = locks.some((l) => l && (teamAgentId
+    ? l.runner === teamAgentId
+    : !l.runner && (Array.isArray(l.ids) ? l.ids : [l.by]).some((id) => ids.includes(id))));
+  return held ? json(ANSWER_ONLY_RUN, { status: 403 }) : null;
+}
+const ANSWER_ONLY_RUN = { error: 'answer_only_run', message: 'This agent was asked a question on this doc: it answers only (tdoc-agent-reply --ask), no edits or other replies here, until that answer is posted or the person who asked cancels it.' };
 
 async function handleAgentAsk(env, req, action) {
   const auth = await requireUploadAuth(req, env);
@@ -13969,10 +14146,6 @@ async function handleAgentAsk(env, req, action) {
     if (!gate.ok) return json({ error: 'access_denied' }, { status: 403 });
   }
   if (action === 'ack') {
-    // A team agent's token can write its team's docs. While it answers a
-    // question on this doc it may only answer: uploads and replies on this
-    // slug are refused (teamAskRunActive) until ask-done or an hour passes.
-    if (teamAgentId) await env.META.put(teamAskRunKey(teamAgentId, slug), askId, { expirationTtl: TEAM_ASK_RUN_TTL });
     if (prev.acked_at) return json({ ok: true, ask_id: askId, acked_at: prev.acked_at, already: true });
     await putAgentAsk(env, slug, { ...prev, acked_at: at });
     return json({ ok: true, ask_id: askId, acked_at: at, already: false });
@@ -13985,9 +14158,9 @@ async function handleAgentAsk(env, req, action) {
     // Asked in a comment: the answer is a reply in that thread, signed by
     // the asker's agent (naming the asker) or the team agent. A reader's own
     // token cannot write somebody else's doc; a team agent's token can write
-    // its team's docs, so while its answer run is on (from ask-ack to
-    // ask-done) uploads and other replies on this slug are refused
-    // (teamAskRunActive).
+    // its team's docs, so from the moment the question was sent until this
+    // answer lands, uploads and other replies on this slug are refused
+    // (answerLockRefusal).
     let replyId = null;
     if (prev.comment_id) {
       const list = await readComments(env, slug);
@@ -14004,13 +14177,14 @@ async function handleAgentAsk(env, req, action) {
       }
     }
     const rec = await putAgentAsk(env, slug, { ...prev, acked_at: prev.acked_at || at, answer: { text, at, agent }, ...(replyId ? { reply_id: replyId } : {}) });
+    // The answer has landed: this question no longer holds its agent.
+    await releaseAnswerLock(env, slug, askId);
     if (prev.recipient && prev.recipient.provider === 'local') await localPendingDrop(env, queueOf, askId);
     return json({ ok: true, ask_id: askId, answered_at: rec.answer.at, ...(replyId ? { reply_id: replyId } : {}) });
   }
-  if (teamAgentId) {
-    try { if ((await env.META.get(teamAskRunKey(teamAgentId, slug))) === askId) await env.META.delete(teamAskRunKey(teamAgentId, slug)); } catch {}
-  }
-  // done: a daemon run ended. Answered already is the good ending; anything
+  // done: a daemon run ended. It does not lift the answer-only lock: only
+  // the answer does (ask-reply), or the asker cancelling, or the lock's
+  // expiry; an agent cannot end its own lock by saying it is done. Answered already is the good ending; anything
   // else is recorded as failed so the asker is told rather than left waiting.
   if (!prev.answer) {
     const error = String(body.error || 'finished without an answer').slice(0, 300);
@@ -15768,7 +15942,7 @@ const tdocHandlers = {
         title,
         slug: newSlug,
         created: now,
-        versions: [{ n: 1, created: now, prompt: `Duplicated from ${slug} v${version}` }],
+        versions: [{ n: 1, created: now, prompt: `Duplicated from ${slug} v${version}`, human: true, ...(sessionLogin(session) ? { author: sessionLogin(session) } : {}) }],
         source: { slug, version },
         duplicated_by: session.login,
         // Deliberately NOT inherited from the source: on tdoc.dev a reader may
@@ -17287,6 +17461,11 @@ const tdocHandlers = {
       const gate = await teamSession(env, req, url.origin, { bearer: true });
       if (!gate.ok) return gate.response;
       const s = gate.session;
+      // Through an agent token (no browser session), moving a doc follows
+      // authorship like any other agent write: an admin's agent does not move
+      // another person's agent-written doc out of (or across) its team.
+      const viaAgent = Boolean(req.headers.get('authorization')) && !(await getSession(env, req));
+      const agentActor = viaAgent ? { kind: 'hosted', account_id: s.account_id, linked_account_ids: s.linked_account_ids } : null;
       let body = {};
       try { body = await req.json(); } catch {}
       const teamId = body.team == null ? null : String(body.team);
@@ -17307,6 +17486,8 @@ const tdocHandlers = {
         // and a member who is not the team's admin must not fail on that.
         if (meta && team && meta.workspace_id === team.id) continue;
         if (!meta || !isDocOwnerSession(env, s, meta)) return json({ error: 'not_owner', slug }, { status: 403 });
+        const authorship = agentActor ? agentWriteRefusal(meta, agentActor) : null;
+        if (authorship) return agentWriteRefusalResponse(env, meta, authorship);
         metas.push([slug, meta]);
       }
       if (team) {
@@ -17527,7 +17708,7 @@ const tdocHandlers = {
           const target = local.find(t => t.device === body.device && t.cli === body.cli);
           let ready = []; try { ready = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${body.device}`)) || []; } catch {}
           if (!target || !Array.isArray(ready) || !ready.includes(body.cli) || withLocalSeen(target, seen, paused).status !== 'active') return json({ error: 'computer_not_ready' }, { status: 409 });
-          await env.META.put(`account-notify:${accountId}`, JSON.stringify([target, ...targets.filter(t => !sameNotifyTarget(t, target))]));
+          await env.META.put(`account-notify:${accountId}`, JSON.stringify([{ ...target, last_touched: new Date().toISOString() }, ...targets.filter(t => !sameNotifyTarget(t, target))]));
           return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
         }
         return json({ error: 'invalid_action' }, { status: 400 });
@@ -17812,6 +17993,8 @@ const tdocHandlers = {
       const askMatch = p.match(/^\/api\/docs\/([^/]+)\/ask\/?$/);
       if (askMatch && (method === 'POST' || method === 'GET')) return handleAsk(env, req, url, askMatch[1]);
       // Send to my agent: the reader's own agents only (see handleMyAgent).
+      const cancelMatch = p.match(/^\/api\/docs\/([^/]+)\/my-agent\/cancel\/?$/);
+      if (cancelMatch && method === 'POST') return handleMyAgentCancel(env, req, url, cancelMatch[1]);
       const myAgentMatch = p.match(/^\/api\/docs\/([^/]+)\/my-agent\/?$/);
       if (myAgentMatch && (method === 'POST' || method === 'GET')) return handleMyAgent(env, req, url, myAgentMatch[1]);
       const agentAskMatch = p.match(/^\/api\/agent\/ask-(ack|reply|done)$/);
@@ -18141,9 +18324,16 @@ const tdocHandlers = {
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
       if (!writeGate.ok) return writeGate.response;
       if (writeGate.teamDoc && !writeGate.teamAdmin) return json({ error: 'not_doc_owner' }, { status: 403 });
+      // Wiping a doc's comments with an agent token follows authorship
+      // (agentWriteRefusal): an admin's agent does not clear the comments on
+      // a doc another person's agent wrote.
+      const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
+      if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
-      return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
+      // The answer says how it went; there are no comments in it to filter
+      // for a reader (and no session here: this route is token-only).
+      return json(res.body, { status: res.status });
     }
     // Soft-delete: append a `deleted` event at the current version. The
     // record is preserved; older versions still see the comment as it was.
@@ -18947,7 +19137,27 @@ const tdocHandlers = {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
       if (!writeGate.ok) return writeGate.response;
-      if (await teamAskRunActive(env, auth.actor, slug)) return json(ANSWER_ONLY_RUN, { status: 403 });
+      // Marking a comment applied / partial, or moving its anchor, is an
+      // edit's report: authorship decides, as for an upload. An answer is
+      // not an edit. An agent holding an answer-only question here answers
+      // through tdoc-agent-reply --ask only.
+      const answering = await answerLockRefusal(env, auth.actor, slug);
+      if (answering) return answering;
+      // Reopening a resolved comment (answered / question on an applied
+      // thread) is a status change too.
+      let reopens = false;
+      if (agentStatus === 'answered' || agentStatus === 'question') {
+        try {
+          const list0 = await readComments(env, slug);
+          ensureMigrated(list0);
+          const t0 = findCommentThread(list0, parent_id);
+          reopens = Boolean(t0 && (snapshotAt(t0.root, Infinity) || {}).status === 'applied');
+        } catch { reopens = true; }
+      }
+      if (agentStatus === 'applied' || agentStatus === 'partial' || bind_anchor_aid || reopens) {
+        const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
+        if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
+      }
       // Resolve parent + its current anchor up front (the optional rebind needs
       // the folded anchor for label/fallback). agent/reply is upload-token-authed
       // (owner-only), so concurrency here is negligible; the serialized write
@@ -19091,8 +19301,16 @@ const tdocHandlers = {
       }
       const mediaRefusal = inlineMediaRejection(doc);
       if (mediaRefusal) return mediaRefusal;
+      // The browser editor's save, and only that: it is recorded as a
+      // person's edit (source: browser), which authorship trusts. An upload
+      // or agent token publishes through /api/upload, where authorship and
+      // answer-only locks apply.
+      if (req.headers.get('authorization')) return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
       const auth = await authorizeDocEdit(req, env, slug);
       if (!auth.ok) return auth.response;
+      if (auth.actor.kind !== 'owner_session' && auth.actor.kind !== 'team_member') {
+        return json({ error: 'browser_session_required', message: 'Saving a version here is for the browser editor. Agents publish with tdoc-publish.' }, { status: 403 });
+      }
       const result = await createBrowserVersion(env, slug, {
         baseVersion,
         html: doc,
@@ -19172,7 +19390,12 @@ const tdocHandlers = {
       }
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
-      if (await teamAskRunActive(env, auth.actor, slug)) return json(ANSWER_ONLY_RUN, { status: 403 });
+      // An answer-only question this agent holds here (a new doc has none),
+      // then authorship at write time.
+      const answering = writeGate.meta ? await answerLockRefusal(env, auth.actor, slug) : null;
+      if (answering) return answering;
+      const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
+      if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
       previewWarning = body.preview_svg == null ? null : validatePreviewSvg(body.preview_svg);
       // Where a new doc from a workspace-scoped token lands, so it never
       // exists somewhere the token could not see it again: the team the
@@ -19236,6 +19459,12 @@ const tdocHandlers = {
       let incoming = null;
       if (meta || (auth.actor && auth.actor.kind === 'hosted')) {
         incoming = (meta && typeof meta === 'object') ? { ...meta } : {};
+        // What kind of doc this is, and its feedback binding, are the
+        // server's: a client cannot turn a doc into a feedback space (which
+        // authorship and team listings skip) or back. The stored value stays.
+        delete incoming.created_from;
+        delete incoming.feedback;
+        delete incoming.trashed_at;
         const prev = writeGate.meta;
         if (!incoming.access && prev && prev.access) {
           incoming.access = prev.access;
@@ -19407,11 +19636,12 @@ const tdocHandlers = {
             // A catch-up commits up to this version only; the client's newer
             // ones land with their own uploads.
             if (catchUp && number > verNum) continue;
-            // `token`, `team_agent`, `by`, `source` and `author` are the
+            // `token`, `team_agent`, `by`, `source`, `author`, `blank` and
+            // `human` are the
             // server's record of who wrote a version (docLastWriter decides
             // who may hand edits to an agent from them); a client cannot
             // write any of them.
-            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, source: _clientSource, author: _clientAuthor, ...clean } = item || {};
+            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, source: _clientSource, author: _clientAuthor, blank: _clientBlank, human: _clientHuman, ...clean } = item || {};
             if (!versionByNumber.has(number) || number === verNum) versionByNumber.set(number, clean);
           }
           if (!versionByNumber.has(verNum)) {
@@ -19806,7 +20036,7 @@ const tdocHandlers = {
       const clean = typeof title === 'string' ? title.trim() : '';
       if (!clean) return json({ error: 'title_required' }, { status: 400 });
       if (clean.length > 120) return json({ error: 'title_too_long', limit: 120 }, { status: 400 });
-      const auth = await authorizeOwnerMutation(req, env, slug);
+      const auth = await authorizeOwnerMutation(req, env, slug, { authorship: true });
       if (!auth.ok) return auth.response;
       const meta = auth.meta || await loadDocMeta(env, slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
@@ -19825,7 +20055,7 @@ const tdocHandlers = {
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
-      const auth = await authorizeOwnerMutation(req, env, slug);
+      const auth = await authorizeOwnerMutation(req, env, slug, { authorship: true });
       if (!auth.ok) return auth.response;
       const meta = auth.meta || await loadDocMeta(env, slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
