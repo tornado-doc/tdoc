@@ -132,6 +132,7 @@ const OFFLINE = [
   'workspace-scoped-token.test.js', // agent connections reach only the workspaces ticked for them; change and remove take effect at once
   'appsumo-licensing.test.js', // #61 AppSumo lifetime licenses: signed webhook, OAuth claim, seat cap, refund
   'logout-provider.test.js', // #58 logout also ends the Clerk session
+  'github-account-switch.test.js', // #58 GitHub account mapping per door, select_account, sign-out-of-github notice
   'reply-activity.test.js', // old versions see live reply status without rewriting their snapshot
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
