@@ -85,7 +85,17 @@ async function dragSelect(page, phrase) {
   const added = (await api('/api/team/agents', { method: 'POST', cookie: julie.cookie, body: { id: team.id, name: 'tdoc-bot' } })).body;
   const agentToken = (await api('/api/team/agents/connect', { method: 'POST', body: { code: added.setup_code, device: 'team-box' } })).body.token;
   await api('/api/notify/local/register', { method: 'POST', token: agentToken, body: { device: 'team-box', clis: ['claude'] } });
-  await up(agentToken, 'team-plan', 2, 'Team plan');
+  // Since #829 the team agent may not publish over a doc Julie's own agent
+  // wrote: team-plan v1 counts as Julie's in the browser, so the team agent's
+  // v2 is allowed and the doc is the team agent's.
+  {
+    const meta = JSON.parse(env.META.map.get('meta:team-plan'));
+    const v1 = meta.versions.find((x) => Number(x.n) === 1);
+    Object.assign(v1, { source: 'browser', author: 'julie' }); delete v1.by;
+    env.META.map.set('meta:team-plan', JSON.stringify(meta));
+  }
+  const v2 = await up(agentToken, 'team-plan', 2, 'Team plan');
+  if (v2.status !== 200) throw new Error(`team agent v2: ${v2.status} ${JSON.stringify(v2.body)}`);
   // Two threads on launch-plan, one resolved, for the filter.
   const c1 = await api('/api/comments', { method: 'POST', cookie: reader.cookie, body: { slug: 'launch-plan', version: 1, text: 'Who owns billing?', anchor: { kind: 'text', text: 'Search follows in April' } } });
   const c2 = await api('/api/comments', { method: 'POST', cookie: reader.cookie, body: { slug: 'launch-plan', version: 1, text: 'Q4?', anchor: { kind: 'text', text: 'The mobile app waits' } } });
