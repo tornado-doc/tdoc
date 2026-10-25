@@ -55,6 +55,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await page.getByRole('button',{name:/^Connect for automatic updates/}).click();
    await page.getByRole('heading',{name:'Connect a computer'}).waitFor();
    assert.equal(await page.getByRole('button',{name:'Finish setup',exact:true}).count(),0,'old token cannot complete automatic setup');
+   await page.getByRole('status').filter({hasText:'Waiting for your AI to connect…'}).waitFor();
    assert.equal(await page.getByRole('button',{name:'Copy instruction',exact:true}).isEnabled(),true);
    assert.equal(await page.getByRole('radio',{name:'Windows (WSL)'}).isVisible(),false,'terminal is a fallback, not the default task');
    await page.locator('summary').filter({hasText:'Use Terminal instead'}).click();
