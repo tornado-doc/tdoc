@@ -55,6 +55,14 @@ const assert = require('assert/strict');
     assert.ok(profile.includes("isFeatureOn('docThumbnails')"), 'profile.jsx gates the card thumbnail');
   });
 
+  t('full-text search results are a dev-mode-only flag, read by the hub', () => {
+    assert.equal(FLAGS.fullTextSearch.default, false);
+    assert.equal(isFeatureOn('fullTextSearch', null), false);
+    assert.equal(isFeatureOn('fullTextSearch', { on: true }), true);
+    const hub = require('fs').readFileSync(require.resolve('../shell/src/docs-hub.jsx'), 'utf8');
+    assert.ok(hub.includes("isFeatureOn('fullTextSearch')"), 'docs-hub.jsx gates the text results');
+  });
+
   if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
   console.log('\nall passed');
 })().catch((error) => { console.error(error); process.exit(1); });

@@ -39,6 +39,7 @@ import {
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from './docs-hub/search.js';
 import { TextSearchResults, useTextSearch } from './docs-hub/text-search.jsx';
+import { isFeatureOn } from './feature-flags.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
@@ -632,7 +633,10 @@ export function DocsHub({ boot }) {
 
   // Words inside documents and comments, from the server, for the space on
   // screen. The title filter above stays instant; these follow it.
-  const textSearch = useTextSearch(view === 'docs' ? hub.query : '', team ? team.id : '');
+  // Behind the fullTextSearch flag (dev mode only until approved): off, the
+  // hook never asks and the section never shows.
+  const [fullTextSearch] = useState(() => isFeatureOn('fullTextSearch'));
+  const textSearch = useTextSearch(fullTextSearch && view === 'docs' ? hub.query : '', team ? team.id : '');
   // With no title match, the empty notice waits for the text results and
   // only shows when they found nothing either.
   const titleEmpty = (searching) => {

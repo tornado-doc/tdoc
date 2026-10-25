@@ -138,7 +138,12 @@ const SAME = { Origin: 'https://tdoc.dev' };
     const r = await call('/api/doc/versions', { method: 'POST', cookie: alice.cookie, headers: SAME, body: { slug: 'search-notes', baseVersion: 1, html: '<!doctype html><html><head><title>x</title></head><body><h1>Search notes</h1><p>Browser edited paragraph zebrafish. Notes on search ranking.</p></body></html>' } });
     assert(r.status === 200, `save ${r.status} ${r.text.slice(0, 200)}`);
     await settle();
-    assert(slugs(await search(alice, 'zebrafish')).join() === 'search-notes', 'saved text found');
+    const saved = await search(alice, 'zebrafish');
+    assert(slugs(saved).join() === 'search-notes', 'saved text found');
+    assert((await publish(alice, 'doctype-doc', '<!DOCTYPE html><?xml version="1.0"?><html><body><p>doctypeword here</p></body></html>')).status === 200, 'publish doctype doc');
+    await settle();
+    const declared = await search(alice, 'doctypeword');
+    assert(!/DOCTYPE|xml version/.test(declared.body.results[0].snippet.map((s) => s.text).join('')), `markup in the passage: ${JSON.stringify(declared.body.results[0].snippet)}`);
   });
 
   let commentId = '';

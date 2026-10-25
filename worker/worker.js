@@ -9577,6 +9577,14 @@ function searchPlainText(html, cap = SEARCH_BODY_CAP) {
       pos = end + 3;
       continue;
     }
+    // <!doctype ...>, <![CDATA[ ...>, <?xml ...?>: declarations, not text.
+    if (src[lt + 1] === '!' || src[lt + 1] === '?') {
+      const end = src.indexOf('>', lt + 2);
+      if (end === -1) break;
+      out.push(' ');
+      pos = end + 1;
+      continue;
+    }
     let m = lt + 1;
     if (src[m] === '/') m += 1;
     let nameEnd = m;

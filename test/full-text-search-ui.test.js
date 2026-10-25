@@ -32,7 +32,7 @@ async function seed(env) {
     account_id: 'acct-alice', github_login: 'alice', created: '2026-01-01T00:00:00.000Z',
   }));
   await env.META.put(`session:${SID}`, JSON.stringify({
-    login: 'alice', account_id: 'acct-alice', name: 'alice', avatar_url: '', created: new Date().toISOString(),
+    login: 'alice', email: 'alice@example.com', account_id: 'acct-alice', name: 'alice', avatar_url: '', created: new Date().toISOString(),
   }));
   for (const [slug, title, date, body] of DOCS) {
     const created = `${date}T09:00:00.000Z`;
@@ -99,7 +99,8 @@ async function startServer(worker, env, waits) {
   };
 
   const run = async (label, viewport) => {
-    const env = makeEnv(mod.CommentsStore, { TDOC_SEARCH_CACHE_MS: '0' });
+    // The text results ship behind the fullTextSearch flag: dev mode only.
+    const env = makeEnv(mod.CommentsStore, { TDOC_SEARCH_CACHE_MS: '0', TDOC_DEBUG_ACCOUNTS: 'alice@example.com' });
     await seed(env);
     const waits = [];
     // A folder, so results show where a doc lives. (Folder records are cached
@@ -124,11 +125,25 @@ async function startServer(worker, env, waits) {
     const input = page.getByRole('searchbox', { name: 'Search docs' });
     const results = page.locator('.text-search-row');
     try {
+      await env.META.put('dev-mode:alice@example.com', 'off');
       await page.goto(`${base}/me`);
       await page.locator('.doc-row[data-slug="launch-retro"]').waitFor();
       // Opening My docs queued every unindexed doc; the store's alarm reads them.
       while (waits.length) await Promise.all(waits.splice(0));
       await env.COMMENTS.runAlarms();
+
+      await t(`${label}: with the flag off (dev mode off) there are no text results`, async () => {
+        let asked = 0;
+        page.on('request', (r) => { if (r.url().includes('/api/search')) asked++; });
+        await input.fill('budget');
+        await page.locator('#pane-mine > .empty').getByText('No matches.').waitFor();
+        await page.waitForTimeout(500);
+        assert.equal(await page.locator('.text-search').count(), 0, 'text results shown with the flag off');
+        assert.equal(asked, 0, 'the hub asked /api/search with the flag off');
+      });
+      await env.META.delete('dev-mode:alice@example.com');
+      await page.reload();
+      await page.locator('.doc-row[data-slug="launch-retro"]').waitFor();
 
       await t(`${label}: English body and comment text, marked, title filter still instant`, async () => {
         await input.fill('budget');
@@ -159,6 +174,9 @@ async function startServer(worker, env, waits) {
         const slugs = await results.evaluateAll((rows) => rows.map((row) => row.dataset.slug));
         assert.deepEqual([...slugs].sort(), ['zh-pricing', 'zh-weekly'], `results ${slugs}`);
         assert.ok((await page.locator('.text-search mark').allTextContents()).every((m) => m === '收入增长'));
+        const passages = (await page.locator('.text-search-snippet').allTextContents()).join(' | ');
+        assert.ok(!/doctype/i.test(passages), `markup in a passage: ${passages}`);
+        assert.ok(!passages.includes('定价方案讨论 团队版'), `the title heading repeated in the passage: ${passages}`);
         await shot('search-zh');
         await input.fill('反馈');
         await page.locator('.text-search-row[data-slug="zh-weekly"]').waitFor();
