@@ -9197,8 +9197,74 @@ async function renderPreviewPng(svg) {
     try { return image.asPng(); } finally { image.free(); }
   } finally { renderer.free(); }
 }
-async function buildDocPreview(env, html, { slug, version, title, svg = null, onRenderTask = null, existingPreview = null } = {}) {
+// A screenshot of the document's first screen, taken by a real browser, is
+// the best card there is. It is a
+// PNG stored as-is under the same versioned card key as a rendered SVG card,
+// so the OG tags, the hub and the access-checked image route need nothing
+// new. It never goes through the SVG renderer or the queue.
+const PREVIEW_PNG_MAX_BYTES = 400 * 1024;
+const PREVIEW_PNG_WIDTH = 1200;
+const PREVIEW_PNG_MIN_HEIGHT = 600;
+const PREVIEW_PNG_MAX_HEIGHT = 700;
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+// value: base64 string (JSON bodies) or bytes. Returns { bytes, width,
+// height } or { error, message } -- the message says what to fix.
+function validatePreviewPng(value) {
+  let bytes;
+  if (typeof value === 'string') {
+    const b64 = value.replace(/^data:image\/png;base64,/, '').replace(/\s+/g, '');
+    if (!b64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { error: 'invalid_preview_png', message: 'png_base64 must be a base64-encoded PNG.' };
+    // Refuse an oversized body before decoding it.
+    if (b64.length > Math.ceil(PREVIEW_PNG_MAX_BYTES / 3) * 4 + 4) return { error: 'preview_png_too_large', message: `The screenshot must be at most ${PREVIEW_PNG_MAX_BYTES / 1024} KB.` };
+    try { bytes = previewDecodeBase64(b64); } catch { return { error: 'invalid_preview_png', message: 'png_base64 must be a base64-encoded PNG.' }; }
+  } else if (value instanceof Uint8Array) bytes = value;
+  else return { error: 'invalid_preview_png', message: 'png_base64 must be a base64-encoded PNG.' };
+  if (bytes.length > PREVIEW_PNG_MAX_BYTES) return { error: 'preview_png_too_large', message: `The screenshot must be at most ${PREVIEW_PNG_MAX_BYTES / 1024} KB.` };
+  if (bytes.length < 8 + 25 + 12 || PNG_SIGNATURE.some((byte, i) => bytes[i] !== byte)) {
+    return { error: 'invalid_preview_png', message: 'The screenshot is not a PNG file.' };
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const type = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
+  if (view.getUint32(8) !== 13 || type !== 'IHDR') return { error: 'invalid_preview_png', message: 'The screenshot is not a valid PNG (no IHDR header).' };
+  const width = view.getUint32(16), height = view.getUint32(20);
+  const tail = String.fromCharCode(...bytes.subarray(bytes.length - 8, bytes.length - 4));
+  if (tail !== 'IEND') return { error: 'invalid_preview_png', message: 'The screenshot PNG is truncated.' };
+  if (width !== PREVIEW_PNG_WIDTH || height < PREVIEW_PNG_MIN_HEIGHT || height > PREVIEW_PNG_MAX_HEIGHT) {
+    return { error: 'invalid_preview_dimensions', message: `The screenshot is ${width}x${height}; it must be ${PREVIEW_PNG_WIDTH} wide and ${PREVIEW_PNG_MIN_HEIGHT}-${PREVIEW_PNG_MAX_HEIGHT} tall (1200x630 is best).` };
+  }
+  return { bytes, width, height };
+}
+// Domain-separated from SVG card hashes, so a screenshot never shares a key
+// with a rendered card.
+async function previewPngHash(bytes) {
+  const tagged = new Uint8Array(11 + bytes.length);
+  tagged.set(new TextEncoder().encode('screenshot:'), 0);
+  tagged.set(bytes, 11);
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', tagged))].slice(0, 6).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+// Writes the PNG and returns the meta.preview image fields that point at it.
+async function storePreviewScreenshot(env, slug, version, bytes) {
+  const hash = await previewPngHash(bytes);
+  const key = previewCardKey(slug, version, hash);
+  if (!await env.DOCS.head(key)) await env.DOCS.put(key, bytes, { httpMetadata: { contentType: 'image/png' } });
+  return {
+    image: previewCardUrl(slug, version, hash), image_v: Number(version), image_hash: hash,
+    image_source: 'screenshot', image_source_custom: false, image_custom: false,
+  };
+}
+function previewIsScreenshot(preview, slug, version) {
+  return !!(preview && preview.image_source === 'screenshot' && previewCardMatches(preview, slug, version));
+}
+
+async function buildDocPreview(env, html, { slug, version, title, svg = null, onRenderTask = null, existingPreview = null, screenshot = null } = {}) {
   const preview = docPreviewFromHtml(html, { slug, version, title });
+  // Precedence: screenshot > authored SVG > automatic card. A screenshot is
+  // for one version only; a newer version without one gets a card again.
+  if (screenshot && Number(screenshot.image_v) === Number(version)) return { ...preview, ...screenshot };
+  if (previewIsScreenshot(existingPreview, slug, version)) {
+    const { image, image_v, image_hash } = existingPreview;
+    return { ...preview, image, image_v, image_hash, image_source: 'screenshot', image_source_custom: false, image_custom: false };
+  }
   // The unbundled source is used by in-process tests; only the deploy bundle
   // carries the renderer. A missing renderer must never block publishing.
   if (!PREVIEW_RENDERER || typeof PREVIEW_RENDERER !== 'object') {
@@ -19191,6 +19257,49 @@ const tdocHandlers = {
       return json({ ok: true, dry_run: dryRun, scanned, eligible, updated, failed, cursor: page.list_complete ? null : page.cursor });
     }
 
+    // A screenshot of a doc version's first screen becomes its preview card
+    // (validatePreviewPng). Same credential and write check as publishing a
+    // new version of the doc. Only the latest version: an older version's
+    // picture must never replace the current card.
+    const previewPostMatch = p.match(/^\/api\/docs\/([^/]+)\/preview\/?$/);
+    if (previewPostMatch && method === 'POST') {
+      const slug = previewPostMatch[1];
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
+      if (!writeGate.ok) return writeGate.response;
+      // The same refusals as publishing a version: an answer-only question
+      // this agent holds here, then authorship at write time.
+      const answering = await answerLockRefusal(env, auth.actor, slug);
+      if (answering) return answering;
+      const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
+      if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const version = Number(body && body.version);
+      if (!Number.isInteger(version) || version < 1) return json({ error: 'invalid_version' }, { status: 400 });
+      const checked = validatePreviewPng(body && body.png_base64);
+      if (checked.error) return json({ error: checked.error, message: checked.message }, { status: checked.error === 'preview_png_too_large' ? 413 : 400 });
+      const meta = writeGate.meta || await loadDocMeta(env, slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      const latest = latestVersionNumber(meta) || 1;
+      if (!(Array.isArray(meta.versions) ? meta.versions : []).some((item) => Number(item && item.n) === version)) {
+        return json({ error: 'version_not_found', message: `${slug} has no version ${version}.` }, { status: 404 });
+      }
+      if (version !== latest) {
+        return json({ error: 'not_latest_version', latest, message: `v${version} is not the latest version (v${latest}); a screenshot only replaces the latest card.` }, { status: 409 });
+      }
+      const fields = await storePreviewScreenshot(env, slug, version, checked.bytes);
+      const current = await loadDocMeta(env, slug);
+      if (!current || latestVersionNumber(current) !== version) {
+        return json({ error: 'not_latest_version', latest: current ? latestVersionNumber(current) : null, message: 'A newer version was published meanwhile.' }, { status: 409 });
+      }
+      const previous = current.preview && typeof current.preview === 'object' ? current.preview : {};
+      await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: { ...previous, ...fields } }));
+      return json({ ok: true, slug, version, image: fields.image, width: checked.width, height: checked.height });
+    }
+
     // ---- admin upload (from `tdoc publish`) ----
     if (p === '/api/upload' && method === 'POST') {
       const auth = await requireUploadAuth(req, env);
@@ -19230,6 +19339,10 @@ const tdocHandlers = {
       const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
       if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
       previewWarning = body.preview_svg == null ? null : validatePreviewSvg(body.preview_svg);
+      // An invalid screenshot is a warning, like an invalid preview.svg: the
+      // publish goes ahead with the automatic card.
+      const previewShot = body.preview_png == null ? null : validatePreviewPng(body.preview_png);
+      if (previewShot && previewShot.error) previewWarning = `preview_png: ${previewShot.message}`;
       // Where a new doc from a workspace-scoped token lands, so it never
       // exists somewhere the token could not see it again: the team the
       // client names (`team`, id or name: the CLI's --team) if the token
@@ -19509,6 +19622,8 @@ const tdocHandlers = {
               title: (incoming && incoming.title) || (currentMeta && currentMeta.title) || slug,
               svg: body.preview_svg || null,
               existingPreview: currentMeta && currentMeta.preview,
+              screenshot: previewShot && previewShot.bytes && verNum === Number(mergedVersions[mergedVersions.length - 1].n)
+                ? await storePreviewScreenshot(env, slug, verNum, previewShot.bytes) : null,
               onRenderTask: (task) => { pendingPreviewTask = task; },
             }),
           }));

@@ -146,6 +146,7 @@ const OFFLINE = [
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)
   'preview-cards.test.js',    // versioned OG cards, PNG rendering and access gate
+  'preview-screenshot.test.js', // page screenshot as the card: PNG checks, write access, precedence
   'preview-workflow.test.js', // #148 PR preview GitHub Action contract
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'widget-island.test.js',    // #138 sandboxed widget route + host iframe rewrite
