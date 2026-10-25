@@ -997,14 +997,15 @@
   .tdoc-ask-drawer-close { position: absolute; top: 9px; right: 12px; width: 28px; height: 28px; border: 0; background: transparent; color: var(--td-muted); font: 23px/1 system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-drawer-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
   .tdoc-ask-mobile-drawer .tdoc-ask-conversation { max-height: none; }
-  .tdoc-ask-mobile-drawer .tdoc-ask-answer-body { font-size: 15px; line-height: 1.55; }
-  .tdoc-ask-mobile-drawer .tdoc-ask-question { font-size: 14px; line-height: 1.5; }
+  .tdoc-ask-mobile-drawer .tdoc-ask-answer-body .text { font-size: 15px; line-height: 1.55; }
+  .tdoc-ask-mobile-drawer .tdoc-ask-question .text { font-size: 14px; line-height: 1.5; }
   .tdoc-ask-panel h2 { margin: 0 0 12px; font: 700 16px/1.3 Inter, system-ui, sans-serif; }
   .tdoc-ask-form { border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 8px 10px 9px; }
   .tdoc-ask-form:focus-within { border-color: var(--td-accent, #1652f0); }
   .tdoc-ask-form textarea { display: block; width: 100%; min-height: 44px; max-height: 160px; resize: none; overflow-y: auto; padding: 2px 0; border: 0; outline: 0; background: transparent; color: var(--td-ink, #1a1a1a); font: 13px/1.5 Inter, system-ui, sans-serif; box-sizing: border-box; }
   .tdoc-ask-form-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .tdoc-ask-form-bottom .tdoc-ask-target-select { max-width: calc(100% - 42px); padding: 5px 3px; border: 0; background: transparent; color: var(--td-muted, #6b6a66); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-form-bottom .tdoc-ask-target-pill { display: inline-flex; align-items: center; gap: 5px; max-width: calc(100% - 42px); padding: 2px 5px; border: 0; color: var(--td-accent); font: 600 12px Inter, system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tdoc-ask-only-hint { margin-top: 5px; color: var(--td-muted, #6b6a66); font-size: 11px; }
   .tdoc-ask-form-bottom button[type="submit"] { width: 28px; height: 28px; border: 0; border-radius: 8px; background: var(--td-accent, #1652f0); color: #fff; font: 700 19px/1 Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }
   .tdoc-ask-notice { margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
@@ -1012,20 +1013,18 @@
   .tdoc-ask-ready { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
   .tdoc-ask-ready button { border: 0; padding: 0; background: transparent; color: var(--td-accent, #1652f0); font: 650 12px Inter, system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
   .tdoc-ask-conversation { display: grid; gap: 11px; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
-  .tdoc-ask-turn { display: grid; gap: 6px; }
-  .tdoc-ask-question { max-width: 88%; justify-self: end; border-radius: 10px; padding: 7px 10px; background: var(--td-accent-wash, rgba(22,82,240,.06)); color: var(--td-ink, #1a1a1a); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .tdoc-ask-answer { max-width: 96%; border-radius: 10px; padding: 10px; background: var(--td-surface-2, #f7f7f5); color: var(--td-ink, #1a1a1a); }
-  .tdoc-ask-answer.is-error { background: #fff7f6; color: #9c4545; }
-  .tdoc-ask-answer-heading { color: var(--td-muted, #6b6a66); font-size: 11px; font-weight: 700; }
-  .tdoc-ask-answer p { margin: 7px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .tdoc-ask-answer-body { margin-top: 7px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-  .tdoc-ask-answer-body .tdoc-md-p { display: block; margin: 0 0 9px; white-space: pre-wrap; }
-  .tdoc-ask-answer-body .tdoc-md-heading { margin: 12px 0 6px; font-size: 1.05em; line-height: 1.35; }
-  .tdoc-ask-answer-body .tdoc-md-list { margin: 6px 0 10px; padding-left: 1.3em; }
-  .tdoc-ask-answer-body .tdoc-md-list li { margin: 4px 0; }
-  .tdoc-ask-answer-body .tdoc-md-pre { max-width: 100%; overflow-x: auto; margin: 8px 0; padding: 10px; border-radius: 7px; background: #eceef2; white-space: pre; font: 12px/1.5 ui-monospace, SFMono-Regular, monospace; }
-  .tdoc-ask-answer-body .tdoc-md-code { border-radius: 4px; padding: 1px 3px; background: #eceef2; font: .9em ui-monospace, SFMono-Regular, monospace; }
-  .tdoc-ask-answer-body .tdoc-md-link { color: var(--td-accent); text-decoration: underline; }
+  .tdoc-ask-turn { display: grid; gap: 8px; }
+  .tdoc-margin-comment.tdoc-ask-question { position: static; width: auto; max-width: none; padding: 12px; z-index: auto; box-shadow: none; }
+  .tdoc-ask-answer.tdoc-reply { padding: 2px 0 2px 12px; }
+  /* Private turns read as a conversation. Posted turns keep the same comment
+     and reply shape they have in the document margin. */
+  .tdoc-ask-turn:not(.is-public) .tdoc-ask-question { justify-self: end; max-width: 88%; border-radius: 12px 12px 3px 12px; background: var(--td-surface-2, #f7f7f5); }
+  .tdoc-ask-turn:not(.is-public) .tdoc-ask-answer { justify-self: start; max-width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 12px 12px 12px 3px; background: var(--td-surface, #fff); }
+  .tdoc-ask-answer.is-error .text { color: #9c4545; }
+  .tdoc-ask-visibility { margin-top: 6px; color: var(--td-muted, #6b6a66); font-size: 11px; }
+  .tdoc-ask-answer-body .text { white-space: normal; }
+  .tdoc-ask-answer-body .tdoc-md-p { display: block; margin: 0 0 8px; }
+  .tdoc-ask-answer-body .tdoc-md-pre { max-width: 100%; }
   .tdoc-ask-turn-summary { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 10px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); font: 13px/1.4 Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
   .tdoc-ask-turn-summary span:first-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .tdoc-ask-turn-summary span:last-child { flex: none; color: var(--td-accent); font-size: 11px; }
