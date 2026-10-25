@@ -192,6 +192,8 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await page.getByRole('status').filter({hasText:'Saved. This AI'}).waitFor();
    await office.getByRole('button',{name:'Pause updates',exact:true}).click();
    await office.getByRole('button',{name:'Resume updates',exact:true}).waitFor();
+   assert.match(await page.getByRole('combobox',{name:'AI for new docs',exact:true}).textContent(),/Claude Code · office-mac/,'pausing the default never silently switches AI');
+   await page.getByRole('status').filter({hasText:'Automatic updates paused.'}).waitFor();
    await page.getByRole('button',{name:'Check setup',exact:true}).first().click();
    await page.getByRole('dialog',{name:'Check alex-mac',exact:true}).waitFor();
    await page.getByRole('button',{name:'Done',exact:true}).click();
