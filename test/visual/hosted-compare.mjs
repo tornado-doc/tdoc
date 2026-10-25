@@ -13,6 +13,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
+const { toggleTheme } = require('../helpers/theme-toggle');
 const OUT = process.argv[2]; const BUNDLES = { old: process.argv[3], new: process.argv[4] };
 const FIXTURE = process.argv[5] || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../fixtures/tdocs/sample-doc');
 if (!OUT || !BUNDLES.old || !BUNDLES.new) { console.error('usage: node test/visual/hosted-compare.mjs <out-dir> <old-bundle> <new-bundle> [fixture-dir]'); process.exit(2); }
@@ -94,7 +95,7 @@ const SCENES = [
   { name: 'h07-account-menu', as: 'alice', run: async (p) => { await click(p, '.tdoc-chip'); } },
   { name: 'h08-notifications', as: 'alice', run: async (p) => { await click(p, '.tdoc-chip'); await click(p, 'text=Notifications'); await settle(p, 600); } },
   { name: 'h09-reader-card', as: 'bob', run: async (p) => { await click(p, '.tdoc-pin'); } },
-  { name: 'h10-owner-dark-share', as: 'alice', run: async (p) => { await click(p, '#tdoc-theme-btn'); await click(p, '#tdoc-share-btn'); await settle(p, 800); } },
+  { name: 'h10-owner-dark-share', as: 'alice', run: async (p) => { await toggleTheme(p); await click(p, '#tdoc-share-btn'); await settle(p, 800); } },
   { name: 'h11-me', as: 'alice', url: '/me' },
   // The homepage, full page, signed out and signed in — the surface most
   // chrome changes are actually judged on.

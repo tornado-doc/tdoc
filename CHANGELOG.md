@@ -32,6 +32,31 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **A calmer document bar, and agents from the comment composer (Julie,
+  2026-10-24).** The bar had grown to nine controls. Now, left: logo · space /
+  folder / title (the space opens a switcher; the folder goes to its list);
+  right: "Edited 3m ago" (the versions) · ✈ for owners and admins · Share as a
+  quiet button · ⋯ (only with something in it) · the avatar alone. Read /
+  Comment / Edit head ⋯ with the current one ticked; Resolved (N) became an
+  Open / Resolved / All filter at the head of the comments (the phone drawer
+  too); light / dark, Switch space and Dev mode are in the account menu; the
+  space chip and Ask AI / Send to my agent left the doc page, and the Ask AI
+  panel is gone. On a phone: title · ✈ · Share · ⋯.
+  The composer is Comment + @agent. @agent puts in the default agent (the one
+  that last edited, when the commenter may drive it) and its menu changes it:
+  Mine / Team / tdoc AI ("N free left" only when ten or fewer remain, and
+  Connect my agent). Typing @ lists the same agents. "Ask" or "Ask + request
+  change": the second only where that agent may edit -- authorship decides
+  (`agentEditPolicy`: the owner's own; the team agent on a doc it wrote; no
+  one on a doc somebody else's personal agent wrote, `written_by_other`).
+  Ask never edits and goes to one's own agent, the doc's team agent (members;
+  it answers as itself, no tdoc AI quota), or tdoc AI (anyone, within their
+  free answers) -- never somebody else's personal agent. "Only me" (Ask, to
+  one's own agent or tdoc AI) keeps question and answer private, with Make
+  public later. Answers are replies in the thread. One door decides:
+  `POST /api/docs/<slug>/hand-off`. Versions record `by`, the account whose
+  agent published them.
+
 - **Onboarding observability moved to the provider boundary.** The skill no
   longer prompts for analytics consent, writes per-machine/session telemetry,
   or sends events to the retired Supabase project. The hosted Worker instead

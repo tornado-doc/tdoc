@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send, RefreshCw } from 'lucide-react';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
+import { AgentButtonsContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
 import { avatarFor } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText } from '../../shell/src/document/notify-handoff.jsx';
@@ -1127,5 +1128,5 @@ ${uiCss}
   const portals = document.createElement('div');
   portals.className = 'tdoc-fb-portals';
   host.append(appBox, portals);
-  createRoot(appBox).render(<PortalContainerContext.Provider value={portals}><FeedbackApp /></PortalContainerContext.Provider>);
+  createRoot(appBox).render(<PortalContainerContext.Provider value={portals}><AgentButtonsContext.Provider value><FeedbackApp /></AgentButtonsContext.Provider></PortalContainerContext.Provider>);
 }

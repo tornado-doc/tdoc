@@ -52,7 +52,8 @@ t('the local server declares an owner it can never have', () => {
 });
 
 t('a document with nobody recorded names nobody', () => {
-  assert(/\{config\.author \? <span className="doc-author">\{config\.author\}<\/span> : null\}/.test(toolbar),
+  // The owner is the first crumb for anyone else (the breadcrumb, option A).
+  assert(/config\.author \? <span className="tdoc-crumb doc-author">\{config\.author\}<\/span> : null/.test(toolbar),
     'the bar must render nothing at all when there is no owner');
   assert(ownerLabel({ owner: '' }, 'serena') === null, 'an empty owner is not a label');
   assert(ownerLabel({}, 'serena') === null, 'a missing owner is not a label');

@@ -1,6 +1,7 @@
 // Reproduces the dark authored report with light reader headings/table fills.
 // Uses the real sandbox, provider bridge and shell, including a saved dark preference.
 const assert = require('assert/strict');
+const { toggleTheme, themeRow } = require('./helpers/theme-toggle');
 const { chromium, webkit } = require('playwright');
 const { resolveTarget } = require('./helpers/fixture-server');
 (async () => {
@@ -15,7 +16,8 @@ const { resolveTarget } = require('./helpers/fixture-server');
       await page.goto(`${base}/d/custom-design/v/1`);
       const frame = page.frameLocator('iframe[aria-label="Document content"]');
       await frame.locator('html[data-tdoc-interaction-mode]').waitFor();
-      assert.equal(await page.locator('#tdoc-theme-btn').count(), 0, 'custom design must have no light/dark toggle');
+      assert.equal(await themeRow(page), null, 'custom design must have no light/dark toggle');
+      await page.keyboard.press('Escape');
       assert.equal(await page.locator('html').evaluate(el => getComputedStyle(el).filter), 'none', 'custom colors must not pass through shell inversion either');
       // Even a stale/mistaken theme message cannot recolor a custom document.
       await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({source:'tdoc-shell',type:'tdoc:theme',theme:'dark'}, '*'));
@@ -33,9 +35,10 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await page.setViewportSize({width:1280,height:800});
     await page.goto(target.url);
     const frame = page.frameLocator('iframe[aria-label="Document content"]');
-    await page.locator('#tdoc-theme-btn[aria-pressed="true"]').waitFor();
     await frame.locator('html[data-tdoc-theme="dark"]').waitFor();
-    await page.locator('#tdoc-theme-btn').click();
+    const row = await themeRow(page);
+    assert.equal((await row.textContent()).trim(), 'Light mode', 'dark is on: the row offers light');
+    await row.click();
     await frame.locator('html:not([data-tdoc-theme])').waitFor();
     assert.equal(await frame.locator('html').evaluate(el => getComputedStyle(el).filter), 'none');
     console.log('✓ tdoc design retains working dark/light control');

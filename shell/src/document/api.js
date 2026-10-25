@@ -545,11 +545,13 @@ export function getAskAllowance(slug) {
   return request(`/api/docs/${encodeURIComponent(slug)}/ask`);
 }
 
-export function askDocument(slug, { question, version, selection }) {
+// With comment_id, the answer is posted as a reply under that comment (the
+// asker's own) and the response carries the reply instead of the answer.
+export function askDocument(slug, { question, version, selection, commentId = null }) {
   return request(`/api/docs/${encodeURIComponent(slug)}/ask`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, version, ...(selection ? { selection } : {}) }),
+    body: JSON.stringify({ question, version, ...(selection ? { selection } : {}), ...(commentId ? { comment_id: commentId } : {}) }),
   });
 }
 
@@ -560,10 +562,30 @@ export function getMyAgent(slug) {
   return request(`/api/docs/${encodeURIComponent(slug)}/my-agent`);
 }
 
-export function sendToMyAgent(slug, { question, passage }) {
+// The comment composer's one door to an agent: ask_only false hands the
+// comment to EDIT the doc; true asks for an answer (only_me: privately).
+export function handOff(slug, payload) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/hand-off`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+// Make public: the asker's private answer goes under their new comment.
+// kind 'ask' (tdoc AI) or 'my-agent'. The server posts what it kept.
+export function publishAsk(slug, kind, { askId, commentId }) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/${kind}/publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ask_id: askId, comment_id: commentId }),
+  });
+}
+
+export function sendToMyAgent(slug, { question, passage, commentId = null }) {
   return request(`/api/docs/${encodeURIComponent(slug)}/my-agent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, ...(passage ? { passage } : {}) }),
+    body: JSON.stringify({ question, ...(passage ? { passage } : {}), ...(commentId ? { comment_id: commentId } : {}) }),
   });
 }

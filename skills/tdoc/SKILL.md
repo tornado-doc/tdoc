@@ -74,10 +74,12 @@ A reader's question is a different line, and it is not an edit:
 > Read https://tdoc.dev/d/<slug> and answer: <question>
 
 Pull or read the doc and answer in the chat. Do not edit, publish or comment.
-When it came from tdoc as a handoff with an `ask_id` (Send to my agent), answer
-only the person who asked, with
-`bash "$SKILL_DIR/bin/tdoc-agent-reply" --slug <slug> --ask <ask_id> --text "..."`;
-tdoc shows that answer to them alone until they choose to post it.
+When it came from tdoc as a handoff with an `ask_id` (a reader's Ask AI or
+@AI in a comment, or Send to my agent), answer with
+`bash "$SKILL_DIR/bin/tdoc-agent-reply" --slug <slug> --ask <ask_id> --text "..."`.
+Asked in a comment (the handoff has a `comment_id`), tdoc posts the answer as
+your reply under that comment, for everyone who can see it; otherwise only
+the person who asked sees it.
 
 ### Documents produced inside another workflow
 
@@ -701,9 +703,10 @@ and the daemon runs only handoffs tdoc says that account queued.
 `@botiverse/oar`, which skips permissions) are explicit opt-ins. If you are the CLI the daemon
 started (`TDOC_DAEMON=1` in the environment), follow the edit flow for the one
 doc named in the prompt and stop; the daemon resolves the handoff when you
-exit. A reader's own question (Send to my agent on a doc they can read) also
-reaches their own daemon: the prompt then asks for an answer through
-`tdoc-agent-reply --ask`, and no edit. That run is claude only, with a smaller
+exit. A reader's own question (Ask AI in a comment on a doc they can read)
+also reaches their own daemon: the prompt then asks for an answer through
+`tdoc-agent-reply --ask`, which lands as the reply in their comment's thread,
+and no edit. That run is claude only, with a smaller
 allow-list (read the doc folder, `tdoc-pull` and `tdoc-agent-reply`; no Edit,
 no `tdoc-write` / `tdoc-publish`, which refuse under `TDOC_DAEMON_ASK`).
 

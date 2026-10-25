@@ -6,8 +6,9 @@ import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { usePortalContainer } from '../ui/portal.js';
-import { AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
+import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner, taggedAgent } from './agent-choices.js';
+import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 
@@ -174,18 +175,24 @@ function ReplyForm({
   // in flight does not post a twin.
   const [busy, setBusy] = useState(false);
   const agents = useContext(AgentMentionContext);
+  const agentButtons = useContext(AgentButtonsContext);
 
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
-      // An agent picked after @ gets the thread, as if chosen in Send to agent.
-      const recipient = canSendToAgent ? taggedAgent(text, agents.choices) : null;
+      // An agent picked after @ (a bare @AI: the list's first) gets the
+      // thread: to edit when it may edit this doc, else to answer under
+      // this reply.
+      const target = taggedAgent(text, agents.choices) || (mentionsAi(text) ? (agents.choices || [])[0] || null : null);
+      const recipient = canSendToAgent && target && target.can_edit !== false ? target : null;
       // onReply resolves false when the shell reported a failure; keep the draft.
-      const ok = await onReply(commentId, text, {
+      const ok = await onReply(commentId, target || mentionsAi(text) ? joinAiTags(text) : text, {
         sendToAgent: canSendToAgent && (sendToAgent || Boolean(recipient)),
         recipient,
         handoffCommentId: handoffCommentId || commentId,
+        target,
+        askOnly: Boolean(target) && target.can_edit === false,
       });
       if (ok !== false) setText('');
     } finally { setBusy(false); }
@@ -207,13 +214,13 @@ function ReplyForm({
       />
       <div className="tdoc-reply-form-foot">
         <span className="hint">
-          {canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
+          {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
         </span>
         <div className="tdoc-reply-form-actions">
-          {!canSendToAgent && agentSetupHref ? (
+          {agentButtons && !canSendToAgent && agentSetupHref ? (
             <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
           ) : null}
-          {canSendToAgent ? (
+          {agentButtons && canSendToAgent ? (
             <button
               className="tdoc-reply-submit agent"
               type="button"
@@ -283,6 +290,27 @@ function EditForm({ item, onSave, onCancel }) {
 // rewriting nor removing somebody else's comment is a power owning the
 // document confers. The worker enforces the same rule on PATCH and DELETE,
 // and this keeps the buttons from rendering where they would 403.
+// Under a tdoc AI answer, for the person who asked and nobody else: one muted
+// line with what is left of the free answers and the way to unlimited ones.
+function TdocAiQuota({ reply, currentUser }) {
+  const { ai } = useContext(AgentMentionContext);
+  if (!isOwnTdocAiReply(reply, currentUser)) return null;
+  // Only when few are left: the allowance is large (freeLeftText).
+  const left = freeLeftText(ai && ai.remaining);
+  return (
+    <div className="tdoc-ai-quota">
+      {left ? <>tdoc AI · {left} · <a href="/start">Connect your agent for unlimited</a></> : 'tdoc AI'}
+    </div>
+  );
+}
+
+// Whoever answers Ask AI is writing an answer somewhere in this thread.
+function AiAnswering({ ids }) {
+  const { ai } = useContext(AgentMentionContext);
+  if (!ai || !ai.thinking || !ids.has(ai.thinking.id)) return null;
+  return <div className="tdoc-ai-quota tdoc-ai-answering" aria-live="polite">{ai.thinking.label} is answering…</div>;
+}
+
 function authoredBy(item, currentUser) {
   return Boolean(
     currentUser
@@ -516,6 +544,7 @@ function ReplyCard({
       ) : (
         <div className="text"><MentionText text={reply.text} mentions={reply.mentions} /></div>
       )}
+      <TdocAiQuota reply={reply} currentUser={currentUser} />
       {reacted ? <Reactions item={reply} me={currentUser} onReact={onReact} /> : null}
 
       <div className="meta">
@@ -616,6 +645,12 @@ export function CommentCard({
   onSendHandoffElsewhere = null,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
+  // A thread that asked AI opens its replies, so the answer is in view when
+  // it lands.
+  const { ai: asking } = useContext(AgentMentionContext);
+  const thinkingId = asking?.thinking?.id;
+  const askingHere = Boolean(thinkingId) && (thinkingId === comment.id || (comment.replies || []).some((r) => r.id === thinkingId));
+  useEffect(() => { if (askingHere) setRepliesOpen(true); }, [askingHere]);
   const [replyTarget, setReplyTarget] = useState(null);
   // One record at a time is being rewritten — this card's comment or any reply
   // under it — the same way one reply form is open at a time.
@@ -904,6 +939,7 @@ export function CommentCard({
       </div>
 
       {threadBlock}
+      <AiAnswering ids={known} />
 
       {replyTarget === comment.id ? (
         <ReplyForm

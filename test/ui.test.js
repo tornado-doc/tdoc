@@ -2,6 +2,7 @@
 // artifact-shell.test.js; this suite protects the reusable menu/dialog facades,
 // shell framing, and Docs Hub at desktop and phone widths.
 const { requirePlaywrightOrSkip, resolveTarget } = require('./helpers/fixture-server');
+const { toggleTheme, themeRow } = require('./helpers/theme-toggle');
 const { chromium } = requirePlaywrightOrSkip('ui.test.js');
 
 let pass = 0, fail = 0;
@@ -41,7 +42,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
   await t('theme toggle persists and reaches the author frame', async () => {
     await page.evaluate(() => localStorage.removeItem('tdoc-theme'));
     await page.reload({ waitUntil: 'networkidle' });
-    await page.click('#tdoc-theme-btn');
+    await toggleTheme(page);
     await page.waitForFunction(() => document.documentElement.dataset.tdocTheme === 'dark');
     const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
@@ -107,7 +108,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
           scrollWidth: document.documentElement.scrollWidth,
           innerWidth: window.innerWidth,
           visible: ['.tdoc-bar-mark', '.tdoc-mode-trigger', '#tdoc-more-btn'].map(measure),
-          secondary: ['#tdoc-version-toggle', '#tdoc-star-btn', '#tdoc-publish-btn', '#tdoc-theme-btn', '.tdoc-account-trigger'].map(measure),
+          secondary: ['#tdoc-version-toggle', '#tdoc-star-btn', '#tdoc-publish-btn', '.tdoc-account-trigger'].map(measure),
           straySeparator: Boolean(document.querySelector('.crumb-sep-slug')?.getClientRects().length),
         };
       });

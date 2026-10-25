@@ -6,6 +6,7 @@ import { AGENT_TAG_JOINER, agentFacts, agentMentionName, matchAgentChoices, targ
 import { ProviderMark, recipientOption } from './notify-handoff.jsx';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
 import { parseRichText } from './rich-text.js';
+import { freeLeftText } from './ai-answerer.js';
 
 // A textarea that offers people after `@`. Both composers use it, so mentioning
 // works the same whether you are starting a thread or answering one.
@@ -21,7 +22,16 @@ const MENU_MAX_HEIGHT = 184;
 // The agents this viewer can hand comments to, in the Send to agent
 // dropdown's order (orderedAgentChoices), and the one it preselects. Empty
 // unless the shell lets this viewer send to agents: a reader sees people only.
-export const AgentMentionContext = createContext({ choices: [], preselected: null });
+// `choices` is the composer's @ list (ai-answerer.js composerAgents): agents
+// that may edit and agents that may only answer, each row saying which, the
+// default first. `ai` carries tdoc AI's free answers left and who is
+// answering where.
+export const AgentMentionContext = createContext({ choices: [], preselected: null, ai: null });
+
+// The composers' @agent buttons. The document page has none -- @ in the text
+// is the one way to hand a comment to an agent -- the feedback overlay keeps
+// them (it has no @ list of agents).
+export const AgentButtonsContext = createContext(false);
 
 export function MentionField({
   value,
@@ -43,7 +53,11 @@ export function MentionField({
   const agentMatches = query
     ? matchAgentChoices(agentsOnOffer.choices, query.query, {
       labelOf: (t) => recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices).label,
-    }).map((t) => ({ agent: t, key: `agent:${targetKey(t)}`, ...recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices) }))
+    }).map((t) => {
+      const option = recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices);
+      const left = t.tdoc_ai ? freeLeftText(agentsOnOffer.ai?.remaining) : null;
+      return { agent: t, key: `agent:${targetKey(t)}`, ...option, hint: [option.hint, left].filter(Boolean).join(' · ') };
+    })
     : [];
   const localMatches = query ? matchMentionable(people, query.query) : [];
   // Typing an address is already a complete tag — asking GitHub's user search
@@ -194,7 +208,7 @@ export function MentionField({
               role="option"
               aria-selected={index === active}
               className={`tdoc-mention-option tdoc-mention-agent${index === active ? ' active' : ''}`}
-              title={agentFacts(row.agent).map((f) => `${f.label}: ${f.value}`).join('\n')}
+              title={row.agent.tdoc_ai ? `${row.label}: ${row.hint}` : agentFacts(row.agent).map((f) => `${f.label}: ${f.value}`).join('\n')}
               onMouseDown={(event) => event.preventDefault()}
               onMouseEnter={() => setActive(index)}
               onClick={() => pick(row)}
@@ -204,6 +218,9 @@ export function MentionField({
               {row.hint ? <span className="tdoc-mention-source">{row.hint}</span> : null}
             </button>
           ))}
+          {agentMatches.some((row) => row.agent.tdoc_ai) ? (
+            <a className="tdoc-mention-connect" href="/start" onMouseDown={(event) => event.preventDefault()}>Connect my agent →</a>
+          ) : null}
           {agentMatches.length && matches.length ? <div className="tdoc-mention-group" role="presentation">People</div> : null}
           {matches.map((person, i) => {
             const index = agentMatches.length + i;

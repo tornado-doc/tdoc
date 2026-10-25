@@ -71,7 +71,7 @@ async function t(name, fn) {
         await box.type('please fix @');
         await page.locator('.tdoc-mention-option').first().waitFor();
         const empty = await rows(page);
-        assert.deepEqual(empty.slice(0, 3), ['# Agents', "xiaocc · juliethis doc's agent", 'Claude Code · julie'], JSON.stringify(empty));
+        assert.deepEqual(empty.slice(0, 3), ['# Agents', "xiaocc · julieMine · this doc's agent", 'Claude Code · julieMine'], JSON.stringify(empty));
         assert.equal(empty[3], '# People', JSON.stringify(empty));
         assert.ok(empty[4].startsWith('@dana'), JSON.stringify(empty));
         assert.ok(!empty.some((r) => /^@claude\b/i.test(r)), 'a fake @claude person is offered');
@@ -80,7 +80,7 @@ async function t(name, fn) {
         await box.type('cod');
         await page.waitForFunction(() => document.querySelectorAll('.tdoc-mention-agent').length === 2);
         const typed = await rows(page);
-        assert.deepEqual(typed, ['# Agents', 'Codex · julie', 'Claude Code · julie'], JSON.stringify(typed));
+        assert.deepEqual(typed, ['# Agents', 'Codex · julieMine', 'Claude Code · julieMine'], JSON.stringify(typed));
         await page.keyboard.press('Enter');
         assert.equal(await box.inputValue(), `please fix @${JOINER}Codex · julie `);
         await page.getByRole('button', { name: 'Comment', exact: true }).click();
@@ -99,13 +99,15 @@ async function t(name, fn) {
       await box.click();
       await box.type('@dev');
       await page.locator('.tdoc-mention-agent').first().waitFor();
-      assert.deepEqual((await rows(page)).slice(0, 2), ['# Agents', 'devin · julie']);
+      assert.deepEqual((await rows(page)).slice(0, 2), ['# Agents', 'devin · julieMine']);
       await context.close();
     });
 
     await t('a plain comment that tags no agent is not handed over', async () => {
       const { context, page } = await open(1050);
       await page.locator('textarea').fill('looks good @dana');
+      // The @ list is open over the composer's only button: close it first.
+      await page.locator('.tdoc-popup .h').click();
       await page.getByRole('button', { name: 'Comment', exact: true }).click();
       await page.waitForFunction(() => window.__posts.length === 1);
       const post = await page.evaluate(() => window.__posts[0]);

@@ -192,7 +192,8 @@ t('a visitor with no session still sees a way to comment, and it is the sign-in'
   assert(toolbar.includes("(option.value === 'comment' && (canComment || signInToComment))"), 'the Comment option shows for the visitor');
   assert(toolbar.includes("? 'Sign in to comment'"), 'and says what it will do');
   assert(toolbar.includes('? onSignIn?.()'), 'and opens the sign-in rather than the mode');
-  assert(shell.includes('signInToComment={Boolean(config.signInToComment)}') && shell.includes('onSignIn={signIn}'), 'the shell wires it');
+  // The modes are rows at the top of ⋯ now (option A); Comment there signs in.
+  assert(shell.includes('signInToComment: Boolean(config.signInToComment)') && /value === 'comment' && !config\.canComment && config\.signInToComment \? signIn\(\)/.test(shell), 'the shell wires it');
 });
 
 t('bridge 1 is read off the server, and a paired account is never asked for a code', () => {
@@ -332,7 +333,7 @@ t('the two arrivals open the right card and say what happened', () => {
   // pop-up stopped opening, and the checklist rows land through `?step=`.
   assert(!shell.includes("params.get('welcome')"), 'the wizard arrival is gone');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
-  assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
+  assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return 'all';"), 'with resolved threads shown, or v2 looks like nothing happened');
   // A version published without a resolved thread still arrived; the count
   // going to zero must not turn the arrival into a report of failure.
   assert(shell.includes('`v${version} published. Share it.`'), 'the exit line drops the count rather than printing zero');
