@@ -64,8 +64,7 @@ import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTarg
 import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sameTarget, taggedAgentSpan } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
-import { canSeeHandoff, summarizeHandoffSurfaces } from './document/handoff-state.js';
-import { isThreadUnread, markThreadSeen, readSeenMap } from './document/thread-seen.js';
+import { useCommentArea } from './document/comment-area.js';
 import { DebugBar } from './debug-bar.jsx';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
@@ -231,7 +230,6 @@ export function DocumentShell({ boot, config }) {
   // "Send to another agent" from a card: the agent it is stuck on, so the
   // picker opens on someone else.
   const [notifyAvoid, setNotifyAvoid] = useState(null);
-  const [seenMap, setSeenMap] = useState(() => readSeenMap(config.slug));
   const [hoveredAnchorId, setHoveredAnchorId] = useState(null);
   const [sendToAgentBusy, setSendToAgentBusy] = useState(false);
   const [toast, setToast] = useState(null);
@@ -313,6 +311,12 @@ export function DocumentShell({ boot, config }) {
     onUnauthorized: signIn,
     demo: !!config.demoComments,
     identity: config.identity,
+  });
+  const handoffViewer = useMemo(() => [config.identity?.login, ...(config.identity?.linked_actor_keys || [])], [config.identity]);
+  const commentArea = useCommentArea({
+    comments: comments.comments, slug: config.slug, selectedId: openCommentId,
+    filter: commentFilter, filterMode: 'resolution', handoffViewer,
+    isOwner: Boolean(config.isOwner),
   });
 
   const [invited, setInvited] = useState(null);
@@ -543,41 +547,15 @@ export function DocumentShell({ boot, config }) {
     bridge.send({ type: 'tdoc:focusAnchor', id, scroll });
   }, [bridge.send]);
 
-  useEffect(() => {
-    setSeenMap(readSeenMap(config.slug));
-  }, [config.slug]);
-
-  // Opening a thread clears its unread pin dot (mail/chat semantics).
-  useEffect(() => {
-    if (!openCommentId) return;
-    const comment = comments.comments.find((c) => c.id === openCommentId);
-    if (!comment) return;
-    if (markThreadSeen(config.slug, comment)) setSeenMap(readSeenMap(config.slug));
-  }, [openCommentId, comments.comments, config.slug]);
-
   // Everything, always: an id has to resolve to its comment even when that
   // comment is hidden, or a deep link would open nothing.
-  const commentsById = useMemo(
-    () => new Map(comments.comments.map((comment) => [comment.id, comment])),
-    [comments.comments],
-  );
-  const resolvedCount = useMemo(
-    () => comments.comments.filter((comment) => comment.status === 'applied').length,
-    [comments.comments],
-  );
+  const commentsById = commentArea.byId;
+  const resolvedCount = commentArea.resolvedCount;
   // One visible set drives the margin and the frame. Selection must never
   // override the filter; explicit links enable it before opening a thread.
-  const shownComments = useMemo(() => (
-    commentFilter === 'all'
-      ? comments.comments
-      : commentFilter === 'resolved'
-        ? comments.comments.filter((comment) => comment.status === 'applied')
-        : comments.comments.filter((comment) => comment.status !== 'applied')
-  ), [comments.comments, commentFilter]);
-  const visibleCommentsById = useMemo(
-    () => new Map(shownComments.map((comment) => [comment.id, comment])),
-    [shownComments],
-  );
+  const shownComments = commentArea.shown;
+  const visibleCommentsById = commentArea.shownById;
+  const seenMap = commentArea.seenMap;
   // Lost pins are seats, not anchors: they give the card somewhere to be drawn
   // while it still reads — and styles — as unanchored, with the way back.
   const pinIds = useMemo(
@@ -1018,26 +996,11 @@ export function DocumentShell({ boot, config }) {
   };
   // Badge + send panel = comments ready to hand off (never sent, or human
   // wrote again after the last handoff). Not "open" and not "sent".
-  const handoffViewer = useMemo(() => [config.identity?.login, ...(config.identity?.linked_actor_keys || [])], [config.identity]);
-  const visibleHandoffComments = useMemo(
-    () => comments.comments.filter((comment) => canSeeHandoff(comment, handoffViewer, Boolean(config.isOwner))),
-    [comments.comments, handoffViewer, config.isOwner],
-  );
-  const handoffBuckets = useMemo(
-    () => summarizeHandoffSurfaces(visibleHandoffComments),
-    [visibleHandoffComments],
-  );
-  const unreadAgentReplies = visibleHandoffComments.filter((comment) => isThreadUnread(comment, seenMap, handoffViewer)).length;
-  const markAgentReplyRead = (comment) => {
-    if (markThreadSeen(config.slug, comment)) setSeenMap(readSeenMap(config.slug));
-  };
-  const markAllAgentRepliesRead = () => {
-    let changed = false;
-    for (const comment of visibleHandoffComments) {
-      if (isThreadUnread(comment, seenMap, handoffViewer)) changed = markThreadSeen(config.slug, comment) || changed;
-    }
-    if (changed) setSeenMap(readSeenMap(config.slug));
-  };
+  const visibleHandoffComments = commentArea.visibleHandoffs;
+  const handoffBuckets = commentArea.handoffBuckets;
+  const unreadAgentReplies = commentArea.unreadCount;
+  const markAgentReplyRead = commentArea.markRead;
+  const markAllAgentRepliesRead = commentArea.markAllRead;
   const openDocNotify = (selectedIds = handoffBuckets.ready.map((c) => c.id)) => {
     setHandoffDetailsOpen(false);
     openNotifyPanel(selectedIds);
@@ -1411,14 +1374,11 @@ export function DocumentShell({ boot, config }) {
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
     window.innerWidth - 34,
   );
-  const openComment = visibleCommentsById.get(openCommentId);
+  const openComment = commentArea.selected;
   // Open / Resolved / All, in the comments area (it was a switch in the bar).
   // Only when there is something to filter.
-  const openCount = comments.comments.length - resolvedCount;
-  const mobileUnread = comments.comments.some((comment) => (
-    canSeeHandoff(comment, handoffViewer, Boolean(config.isOwner))
-    && isThreadUnread(comment, seenMap, handoffViewer)
-  ));
+  const openCount = commentArea.openCount;
+  const mobileUnread = commentArea.unreadCount > 0;
   const startDocumentComment = (askAi = false) => {
     if (!config.canComment) { if (config.signInToComment) signIn(); return; }
     if (editor.mode === 'edit' && editor.dirty) {
@@ -1704,6 +1664,7 @@ export function DocumentShell({ boot, config }) {
           // do nothing at all.
           comments={shownComments}
           pinIds={pinIds}
+          seenMap={seenMap}
           currentUser={config.identity?.login || 'anon'}
           handoffViewer={handoffViewer}
           isOwner={Boolean(config.isOwner)}

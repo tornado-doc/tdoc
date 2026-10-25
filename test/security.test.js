@@ -339,8 +339,11 @@ t('comment card renders the re-anchor button only for the author or the doc owne
 });
 t('both comment layers forward isOwner to the card', () => {
   const cards = [...layerSrc.matchAll(/<CommentCard\b([\s\S]*?)\/>/g)];
-  assert(cards.length === 2 && cards.every((match) => match[1].includes('isOwner={isOwner}')),
-    'desktop layer and mobile drawer must both pass isOwner to CommentCard');
+  const sharedList = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'comment-thread-list.jsx'), 'utf8');
+  assert(cards.length === 1 && cards[0][1].includes('isOwner={isOwner}')
+    && layerSrc.includes('cardProps={{') && layerSrc.includes('currentUser, handoffViewer, isOwner, mentionable')
+    && sharedList.includes('<CommentCard') && sharedList.includes('{...cardProps}'),
+  'desktop layer and mobile drawer must both pass isOwner to CommentCard');
 });
 t('the document shell sources isOwner from the boot config', () => {
   assert(shellSrc.split('isOwner={Boolean(config.isOwner)}').length === 3,
