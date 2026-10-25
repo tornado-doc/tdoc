@@ -91,6 +91,13 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     const denied = await worker.fetch(req(`/d/${slug}/raw`), env, {});
     assert.notEqual(denied.status, 200);
   });
+  await test('switching back to automatic practice resumes its doc after an interactive first doc', async () => {
+    const written = await call('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'owner-interactive-doc', version: 1, html: '<h1>A topic from my AI</h1><p>A new plan.</p>', meta: { origin: 'first-doc' } } });
+    assert.equal(written.status, 200, JSON.stringify(written.body));
+    assert.equal((await call('/api/onboarding', { cookie: owner.cookie })).body.record.first_doc, 'owner-interactive-doc');
+    assert.equal((await practice()).body.slug, slug, 'same private practice is resumed');
+    assert.equal((await call('/api/onboarding', { cookie: owner.cookie })).body.record.first_doc, slug, 'comment and revision steps follow the selected path’s doc');
+  });
   await test('another account and cross-origin callers cannot use the computer', async () => {
     assert.equal((await practice(other.cookie)).status, 409);
     assert.equal((await practice(owner.cookie, { Origin: 'https://other.example' })).status, 403);

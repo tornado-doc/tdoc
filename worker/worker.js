@@ -17515,10 +17515,10 @@ const tdocHandlers = {
         });
         if (!made.ok) return made.response;
         slug = made.slug;
-        await adoptFirstDocFor(env, accountId, slug);
         const next = await loadOnboarding(env, accountId);
         await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({ ...next, daemon_practice_doc: slug }));
       }
+      if (record.first_doc !== slug) await adoptFirstDocFor(env, accountId, slug);
       // An explicit choice, scoped to this practice doc. Other docs keep their agent.
       if (target) await touchDocAgent(env, slug, target);
       return json({ ok: true, slug, url: `/d/${slug}?step=comment` });
