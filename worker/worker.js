@@ -12733,6 +12733,14 @@ function withHandoffStatus(list, handoffs) {
 // who manage this document. A public or team-readable comment can still be
 // read normally without exposing which agent was asked to handle it.
 const PRIVATE_HANDOFF_FIELDS = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to', 'handoff_resend_allowed'];
+// The member who sent a handoff: `sent_by` for one sent to a team agent,
+// `by` for one queued on the member's own agent (a team agent's `by` is the
+// agent, never a person).
+function handoffSentBySession(handoff, session) {
+  if (!handoff || !session || session.team_agent || session.feedback) return false;
+  const ids = sessionAccountIds(session);
+  return ids.includes(handoff.sent_by) || (!handoff.team_agent && ids.includes(handoff.by));
+}
 function maySeeCommentHandoff(env, gate, comment, handoffsById) {
   if (gate.ownerToken || isDocOwnerSession(env, gate.session, gate.meta)) return true;
   const teamAgent = gate.session?.team_agent;
@@ -12740,6 +12748,8 @@ function maySeeCommentHandoff(env, gate, comment, handoffsById) {
     const handoff = handoffsById.get(comment.handoff_id);
     if (handoff?.by === gate.session.account_id) return true;
   }
+  // Whoever sent this handoff sees it, also on a thread somebody else began.
+  if (comment.handoff_id && handoffSentBySession(handoffsById.get(comment.handoff_id), gate.session)) return true;
   const author = String(comment && comment.author && comment.author.login || '').trim().toLowerCase();
   return !!(author && actorKeys(gate.session).includes(author));
 }
@@ -12747,7 +12757,7 @@ function redactCommentHandoffs(env, gate, comments, handoffs, allComments) {
   const handoffsById = new Map(handoffs.filter((handoff) => handoff?.handoff_id).map((handoff) => [handoff.handoff_id, handoff]));
   const member = gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && !gate.session?.team_agent;
   const keys = member ? actorKeys(gate.session) : [];
-  const own = new Set(keys.length ? allComments.filter((comment) => keys.includes(String(comment?.author?.login || '').trim().toLowerCase())).map((comment) => comment.id) : []);
+  const own = keys.length ? handoffThreadIds(allComments, keys) : new Set();
   return comments.map((comment) => {
     if (!maySeeCommentHandoff(env, gate, comment, handoffsById)) {
       const copy = { ...comment };
@@ -12762,12 +12772,41 @@ function redactCommentHandoffs(env, gate, comments, handoffs, allComments) {
   });
 }
 
+const authoredBy = (keys, item) => {
+  const login = String(item?.author?.login || '').trim().toLowerCase();
+  return !!login && keys.includes(login);
+};
 async function ownCommentIds(env, slug, session) {
   const keys = actorKeys(session);
   if (!keys.length) return new Set();
   const list = await readComments(env, slug);
   ensureMigrated(list);
-  return new Set(list.filter((comment) => keys.includes(String(comment?.author?.login || '').trim().toLowerCase())).map((comment) => comment.id));
+  return new Set(list.filter((comment) => authoredBy(keys, comment)).map((comment) => comment.id));
+}
+// What a member may hand off: threads they began, threads they have a
+// (non-deleted) reply in, and those replies themselves. Seeing a handoff
+// stays with ownCommentIds and the handoff's sender.
+function handoffThreadIds(list, keys) {
+  const out = new Set();
+  for (const comment of Array.isArray(list) ? list : []) {
+    if (!comment || !comment.id) continue;
+    if (authoredBy(keys, comment)) out.add(comment.id);
+    const snap = snapshotAt(comment, Infinity);
+    if (!snap || snap.deleted) continue;
+    for (const reply of snap.replies || []) {
+      if (!reply || reply.deleted || !authoredBy(keys, reply)) continue;
+      out.add(comment.id);
+      out.add(reply.id);
+    }
+  }
+  return out;
+}
+async function handoffThreadIdsFor(env, slug, session) {
+  const keys = actorKeys(session);
+  if (!keys.length) return new Set();
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  return handoffThreadIds(list, keys);
 }
 
 async function mutateComments(env, slug, op) {
@@ -18682,7 +18721,8 @@ const tdocHandlers = {
       if (gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && gate.actor?.kind === 'team_member') {
         const own = await ownCommentIds(env, slug, gate.session);
         handoffs = handoffs.flatMap((handoff) => {
-          const commentIds = (handoff.comment_ids || []).filter((id) => own.has(id));
+          const sent = handoffSentBySession(handoff, gate.session);
+          const commentIds = (handoff.comment_ids || []).filter((id) => sent || own.has(id));
           if (!commentIds.length) return [];
           const ids = new Set(commentIds);
           return [{
@@ -18709,7 +18749,7 @@ const tdocHandlers = {
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
-        const own = await ownCommentIds(env, slug, gate.session);
+        const own = await handoffThreadIdsFor(env, slug, gate.session);
         if (ids.some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
       }
       // Threads whose last word is already an agent's are the person's turn:
@@ -18828,7 +18868,7 @@ const tdocHandlers = {
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
       if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
-        const own = await ownCommentIds(env, slug, gate.session);
+        const own = await handoffThreadIdsFor(env, slug, gate.session);
         if ((prev.comment_ids || []).some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
       }
       // A resend reuses the original externalEventId, so a provider that did
