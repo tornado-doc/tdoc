@@ -127,6 +127,7 @@ const OFFLINE = [
   'agent-runtime.test.js',    // host-runtime detect + agent logos
   'pins-layout.test.js',      // v0.8.0 pins clustering/spread/overflow-fold core
   'worker-shell.test.js',     // step7 worker shell parity: /frame route, CSP, bundled builders
+  'upload-linear-time.test.js', // malformed 1.5 MB HTML must stay fast through the real upload route
   'bake-reader.test.js',      // tdoc-new bakes the reader template → self-contained docs (shell)
   'dark-invert-parity.test.js', // the shell's dark invert and the frame's copy must not drift
   'write-invariants.test.js',  // every server write path bakes, stamps aids, records sha

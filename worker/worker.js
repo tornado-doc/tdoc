@@ -2029,6 +2029,23 @@ function cyrb53(str, seed = 0) {
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
+// A failed `<!--...-->` regex attempt at each repeated opener scans the rest
+// of the document again. Keep malformed/unclosed comments verbatim, matching
+// the old replacement, while each character is visited at most once.
+function stripClosedHtmlComments(html) {
+  const chunks = [];
+  let pos = 0;
+  while (pos < html.length) {
+    const open = html.indexOf('<!--', pos);
+    if (open === -1) break;
+    const close = html.indexOf('-->', open + 4);
+    if (close === -1) break;
+    chunks.push(html.slice(pos, open));
+    pos = close + 3;
+  }
+  chunks.push(html.slice(pos));
+  return chunks.join('');
+}
 // Compute an aid from a raw HTML substring representing one artifact element.
 // Strips data-tdoc-* attrs from the open tag (so an aid doesn't include
 // itself), strips comments, collapses whitespace inside.
@@ -2041,8 +2058,7 @@ function aidFor(tag, innerHtml, openAttrs) {
       return m ? a + '=' + m[1] : '';
     })
     .filter(Boolean).join('|');
-  const norm = (innerHtml || '')
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const norm = stripClosedHtmlComments(innerHtml || '')
     .replace(/\sdata-tdoc-[\w-]+\s*=\s*"[^"]*"/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -2082,6 +2098,59 @@ function skipRawTextBodyAt(html, openTag, attrs, openEnd) {
   return m ? openEnd + m.index + m[0].length : html.length;
 }
 
+// A heading label is plain text. Skip complete nested tags once and discard
+// any stray brackets left by malformed markup.
+function headingPlainText(html) {
+  const chunks = [];
+  let pos = 0;
+  while (pos < html.length) {
+    const open = html.indexOf('<', pos);
+    if (open === -1) { chunks.push(html.slice(pos)); break; }
+    chunks.push(html.slice(pos, open));
+    const close = html.indexOf('>', open + 1);
+    if (close === -1) break;
+    pos = close + 1;
+  }
+  const text = chunks.join('');
+  let clean = '';
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '<' && text[i] !== '>') clean += text[i];
+  }
+  return clean.replace(/\s+/g, ' ').trim();
+}
+
+// The former non-greedy heading regex retried the entire remaining document
+// for every unclosed <h1>/<h2>/<h3>. Preserve its first-close semantics while
+// scanning each candidate once. Once a level has no later close, no subsequent
+// opener of that level can produce a heading either.
+function headingsFromHtml(html) {
+  const headings = [];
+  const openRe = /<h([1-3])\b/gi;
+  const closeRe = [null, /<\/h1>/gi, /<\/h2>/gi, /<\/h3>/gi];
+  const noClose = new Set();
+  let match;
+  while ((match = openRe.exec(html))) {
+    const level = Number(match[1]);
+    if (noClose.has(level)) continue;
+    const openEnd = html.indexOf('>', openRe.lastIndex);
+    if (openEnd === -1) break;
+    const close = closeRe[level];
+    close.lastIndex = openEnd + 1;
+    const endMatch = close.exec(html);
+    if (!endMatch) {
+      noClose.add(level);
+      openRe.lastIndex = openEnd + 1;
+      continue;
+    }
+    headings.push({
+      end: close.lastIndex,
+      text: headingPlainText(html.slice(openEnd + 1, endMatch.index)),
+    });
+    openRe.lastIndex = close.lastIndex;
+  }
+  return headings;
+}
+
 // --- #24 dry-run instrumentation -------------------------------------------
 // The hardened stampAids() above fixes real regex bugs (`>` in an attribute,
 // `</tag>` inside <script>/<style>). For ORDINARY HTML it produces aids
@@ -2095,13 +2164,7 @@ function skipRawTextBodyAt(html, openTag, attrs, openEnd) {
 // (it folds deep copies). (Design: docs/DESIGN-aid-migration.md. Empirically 0
 // across current docs.)
 function stampAidsLegacy(rawHtml) {
-  const headRe = /<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
-  const headings = [];
-  let hmatch;
-  while ((hmatch = headRe.exec(rawHtml))) {
-    headings.push({ end: hmatch.index + hmatch[0].length,
-      text: hmatch[2].replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim() });
-  }
+  const headings = headingsFromHtml(rawHtml);
   function nearestHeadingAt(idx) {
     let best = null;
     // Use <= so a heading whose close tag ends exactly at the next
@@ -2140,11 +2203,19 @@ function stampAidsLegacy(rawHtml) {
   // Pass 2: opt-in markers (any tag with data-tdoc-artifact or class
   // containing `tdoc-artifact`). Authors mark composed cards/widgets this
   // way so they're commentable as a unit.
-  const optInRe = /<([a-z][\w-]*)\b([^>]*\b(?:data-tdoc-artifact\b|class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*")[^>]*)>/gi;
+  const optInRe = /<([a-z][\w-]*)\b/gi;
   let om;
   while ((om = optInRe.exec(rawHtml))) {
     const tagLower = om[1].toLowerCase();
-    harvest(om.index, om.index + om[0].length, tagLower, om[2] || '');
+    // Keep the legacy `>` boundary for the dry-run comparison, but do not
+    // retry the rest of an unclosed tag at every nested `<script` opener.
+    const end = rawHtml.indexOf('>', om.index + om[0].length);
+    if (end === -1) break;
+    const attrs = rawHtml.slice(om.index + om[0].length, end);
+    optInRe.lastIndex = end + 1;
+    if (/\bdata-tdoc-artifact\b/i.test(attrs) || /class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*"/i.test(attrs)) {
+      harvest(om.index, end + 1, tagLower, attrs);
+    }
   }
   // Compute aid per element (uses cleaned attrs + inner content with any
   // existing data-tdoc-aid stripped, so re-stamping is idempotent).
@@ -2243,13 +2314,7 @@ function measureAidDrift(rawHtml, comments) {
 // SEPARATE passes per tag, so an svg inside a figure gets stamped just
 // like a free-standing svg. Both are valid anchor targets.
 function stampAids(rawHtml) {
-  const headRe = /<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
-  const headings = [];
-  let hmatch;
-  while ((hmatch = headRe.exec(rawHtml))) {
-    headings.push({ end: hmatch.index + hmatch[0].length,
-      text: hmatch[2].replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim() });
-  }
+  const headings = headingsFromHtml(rawHtml);
   function nearestHeadingAt(idx) {
     let best = null;
     // Use <= so a heading whose close tag ends exactly at the next
@@ -2318,7 +2383,8 @@ function stampAids(rawHtml) {
     let m;
     while ((m = openRe.exec(rawHtml))) {
       const end = attrAwareOpenTagEnd(rawHtml, m.index);
-      if (end < 0) continue;
+      if (end < 0) break;
+      openRe.lastIndex = end;
       const attrs = rawHtml.slice(m.index + 1 + tag.length, end - 1);
       harvest(m.index, end, tag, attrs);
     }
@@ -2332,7 +2398,8 @@ function stampAids(rawHtml) {
   while ((om = optInProbe.exec(rawHtml))) {
     const tagLower = om[1].toLowerCase();
     const end = attrAwareOpenTagEnd(rawHtml, om.index);
-    if (end < 0) continue;
+    if (end < 0) break;
+    optInProbe.lastIndex = end;
     const attrs = rawHtml.slice(om.index + 1 + om[1].length, end - 1);
     if (/\bdata-tdoc-artifact\b/i.test(attrs) || /class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*"/i.test(attrs)) {
       harvest(om.index, end, tagLower, attrs);
