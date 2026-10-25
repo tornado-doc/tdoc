@@ -9,12 +9,14 @@ window.__libraryEvents = { radixKeys: 0, headlessKeys: 0, headlessSubmits: 0, he
 
 function LibraryHost() {
   const [radixOpen, setRadixOpen] = useState(false);
+  const [radixNoOverlayOpen, setRadixNoOverlayOpen] = useState(false);
   const [headlessOpen, setHeadlessOpen] = useState(false);
   const [muiOpen, setMuiOpen] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
   return <main>
     <h1>Real modal libraries</h1>
     <button id="radix-open" onClick={() => setRadixOpen(true)}>Open Radix</button>
+    <button id="radix-no-overlay-open" onClick={() => setRadixNoOverlayOpen(true)}>Open Radix without Overlay</button>
     <button id="headless-open" onClick={() => setHeadlessOpen(true)}>Open Headless UI</button>
     <button id="mui-open" onClick={() => setMuiOpen(true)}>Open MUI</button>
     <RadixPopover.Root open={popoverOpen} onOpenChange={setPopoverOpen}>
@@ -31,6 +33,16 @@ function LibraryHost() {
           <RadixDialog.Description>Settings for this app</RadixDialog.Description>
           <h2 id="radix-target">Comment on Radix</h2>
           <RadixDialog.Close>Close Radix</RadixDialog.Close>
+        </RadixDialog.Content>
+      </RadixDialog.Portal>
+    </RadixDialog.Root>
+    <RadixDialog.Root open={radixNoOverlayOpen} onOpenChange={setRadixNoOverlayOpen}>
+      <RadixDialog.Portal>
+        <RadixDialog.Content id="radix-no-overlay-content" className="modal-content">
+          <RadixDialog.Title>Radix without Overlay</RadixDialog.Title>
+          <RadixDialog.Description>Settings without a backdrop</RadixDialog.Description>
+          <h2 id="radix-no-overlay-target">Comment on this dialog</h2>
+          <RadixDialog.Close>Close Radix without Overlay</RadixDialog.Close>
         </RadixDialog.Content>
       </RadixDialog.Portal>
     </RadixDialog.Root>

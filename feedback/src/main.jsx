@@ -186,15 +186,24 @@ ${uiCss}
         try { if (!node.matches(':modal')) return false; } catch (_) { return false; }
       }
       // Radix Dialog marks its content role=dialog/data-state=open, but does
-      // not set aria-modal. Its modal mode locks scrolling; Radix Popover has
-      // the same role/state without the lock and must not capture this layer.
+      // not set aria-modal. An Overlay normally locks scrolling, but Dialogs
+      // without one do not. Radix Popover has the same role/state and its
+      // popper wrapper distinguishes it from Dialog content.
       if (node.matches('[role="dialog"][data-state="open"]') && node.getAttribute('aria-modal') !== 'true'
-        && (!document.body.hasAttribute('data-scroll-locked') || node.closest('[data-radix-popper-content-wrapper]'))) return false;
+        && node.closest('[data-radix-popper-content-wrapper]')) return false;
       if (!node.getClientRects().length || getComputedStyle(node).pointerEvents === 'none') return false;
+      // Headless UI starts an entering DialogPanel at opacity 0. The panel is
+      // still the library's outside-press boundary during its fade-in, so keep
+      // our layer inside it as soon as the entry animation begins.
+      const enteringPanel = node.matches('[data-headlessui-dialog-panel], [id^="headlessui-dialog-panel-"], [data-headlessui-state]')
+        && node.hasAttribute('data-enter') && !node.hasAttribute('data-leave')
+        && typeof node.getAnimations === 'function'
+        && node.getAnimations().some((animation) => animation.playState === 'running');
       for (let el = node; el instanceof Element; el = el.parentElement) {
         if (el.hidden || el.hasAttribute('inert') || el.getAttribute('aria-hidden') === 'true') return false;
         const css = getComputedStyle(el);
-        if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || Number(css.opacity) === 0) return false;
+        if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse'
+          || (Number(css.opacity) === 0 && !(el === node && enteringPanel))) return false;
       }
       return true;
     };
@@ -260,8 +269,10 @@ ${uiCss}
       if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
     }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'hidden', 'inert', 'aria-hidden', 'aria-modal', 'class', 'style', 'data-state', 'data-closed', 'data-enter', 'data-leave'] });
     document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
-    document.addEventListener('transitionend', (e) => { if (e.target instanceof Element && (hasModal(e.target) || withinActiveModal(e.target))) place(); }, true);
-    document.addEventListener('animationend', (e) => { if (e.target instanceof Element && (hasModal(e.target) || withinActiveModal(e.target))) place(); }, true);
+    const onModalTransition = (e) => { if (e.target instanceof Element && (hasModal(e.target) || withinActiveModal(e.target))) place(); };
+    ['transitionrun', 'transitionend', 'animationstart', 'animationend'].forEach((type) => {
+      document.addEventListener(type, onModalTransition, true);
+    });
     // A dialog removed without closing (a React unmount) takes the layer with it.
     new MutationObserver(() => { if (!host.isConnected) place(); }).observe(document.documentElement, { childList: true, subtree: true });
     // Script-driven modals (Base UI, Radix, Headless UI) close on a press
