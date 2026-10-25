@@ -242,6 +242,11 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await send.waitFor();
         await pause(page, 1500);
         await send.click();
+        const activity = page.locator('.tdoc-handoff-popover');
+        await activity.waitFor();
+        const ready = activity.locator('.tdoc-handoff-ready');
+        if (!(await ready.innerText()).includes('Can you add last week for comparison?')) throw new Error('comment missing from Ready to send');
+        await ready.locator('.tdoc-handoff-ready-send').click();
         const dialog = page.getByRole('dialog', { name: 'Send to agent' });
         await dialog.waitFor();
         const recipient = await dialog.locator('.tdoc-notify-recipient').innerText();

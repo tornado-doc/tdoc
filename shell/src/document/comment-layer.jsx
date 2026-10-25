@@ -4,22 +4,23 @@ import { CommentIcon } from '../ui/comment-icon.jsx';
 import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { avatarFor, TOP_BAR_HEIGHT } from './model.js';
-import { handoffSurfaceState, isHandoffInFlight } from './handoff-state.js';
+import { canSeeHandoff, handoffPinBadge, handoffWaitState, isHandoffInFlight } from './handoff-state.js';
 import { isThreadUnread } from './thread-seen.js';
 
 function Pin({
-  cluster, top, left, frameTop, commentsById, seenMap, onOpenComment, onOpenCluster,
+  cluster, top, left, frameTop, commentsById, seenMap, currentUser, isOwner, hoveredAnchorId, onOpenComment, onOpenCluster,
 }) {
   const single = cluster.items.length === 1 ? cluster.items[0].comment : null;
   const resolved = single?.resolved
     || (!single && cluster.items.every((item) => item.comment.resolved));
   const live = single && commentsById ? commentsById.get(single.id) : null;
-  // Pin shows at most three things (plus failed, which is rare and urgent):
-  // waiting pulse / unread solid dot / resolved check. Fine states stay on the card.
-  const handoff = (!resolved && live) ? handoffSurfaceState(live) : null;
+  const maySee = single && live && canSeeHandoff(live, currentUser, isOwner);
+  const handoff = maySee ? handoffWaitState(live) : null;
+  const badge = maySee ? handoffPinBadge(live) : null;
   const waiting = isHandoffInFlight(handoff);
-  const failed = handoff === 'failed';
-  const unread = !resolved && !waiting && live ? isThreadUnread(live, seenMap) : false;
+  const unread = maySee && !waiting && isThreadUnread(live, seenMap);
+  const badgeText = { question: '❓', done: '✅', partial: '🟡', warning: '⚠' }[badge];
+  const badgeLabel = { question: 'Agent asked you', done: 'Agent done', partial: 'Partially done', warning: 'Agent handoff needs attention' }[badge];
 
   return (
     <button
@@ -27,23 +28,20 @@ function Pin({
       className={[
         'tdoc-pin',
         single ? '' : 'tdoc-pin-cluster',
-        single?.resolved ? 'tdoc-pin-resolved' : '',
+        single?.resolved && (!live?.handoff_at || live?.resolved_by) ? 'tdoc-pin-resolved' : '',
         // A tombstone keeps its pin — that is the way back to the replies
         // under it — but it must not look like a comment somebody is waiting
         // on. Without this a deleted thread is invisible until you click it.
         single?.deleted ? 'tdoc-pin-deleted' : '',
         !single && resolved ? 'tdoc-cluster-allresolved' : '',
         waiting ? 'is-waiting-handoff' : '',
-        failed ? 'is-failed-handoff' : '',
         unread ? 'is-unread-handoff' : '',
+        hoveredAnchorId && cluster.items.some((item) => item.comment.id === hoveredAnchorId) ? 'tdoc-pin-anchor-hover' : '',
       ].filter(Boolean).join(' ')}
       data-id={single?.id}
       data-key={cluster.key}
       title={
-        waiting ? 'Waiting on agent'
-          : failed ? 'Handoff not delivered'
-            : unread ? 'New agent reply'
-              : undefined
+        badgeLabel || (waiting ? 'Agent is working' : unread ? 'New agent reply' : undefined)
       }
       style={{ top: Math.max(frameTop + 4, top), left }}
       onPointerDown={(event) => event.stopPropagation()}
@@ -54,6 +52,8 @@ function Pin({
           ? <img src={avatarFor(single)} alt="" />
           : <span className="tdoc-pin-anon" />
       ) : cluster.items.length}
+      {badgeText ? <span className={`tdoc-pin-handoff-badge is-${badge}`} aria-hidden="true">{badgeText}</span> : null}
+      {unread ? <span className="tdoc-pin-unread-dot" aria-hidden="true" /> : null}
     </button>
   );
 }
@@ -88,6 +88,7 @@ export function DesktopCommentLayer({
   clusters,
   commentsById,
   seenMap = {},
+  hoveredAnchorId = null,
   frameScrollY,
   frameTop = TOP_BAR_HEIGHT,
   pinLeft,
@@ -130,6 +131,9 @@ export function DesktopCommentLayer({
             left={pinLeft}
             commentsById={commentsById}
             seenMap={seenMap}
+            currentUser={currentUser}
+            isOwner={isOwner}
+            hoveredAnchorId={hoveredAnchorId}
             onOpenComment={onOpenComment}
             onOpenCluster={onOpenCluster}
           />
@@ -182,6 +186,8 @@ export function MobileCommentDrawer({
   filter = null,
   open,
   comments,
+  openCount = comments.length,
+  unread = false,
   pinIds,
   currentUser,
   isOwner,
@@ -192,6 +198,8 @@ export function MobileCommentDrawer({
   canSendToAgent = false,
   agentSetupHref = null,
   onOpenChange,
+  onStartComment = null,
+  onAskAi = null,
   onReply,
   onReact,
   onDelete,
@@ -224,13 +232,12 @@ export function MobileCommentDrawer({
     return () => cancelAnimationFrame(raf);
   }, [open, openCommentId]);
 
-  if (!comments.length && !filter) return null;
-
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
-      <Drawer.Trigger className="tdoc-fab">
+      <Drawer.Trigger className="tdoc-fab" aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
         <CommentIcon size={16} />
-        <span id="tdoc-fab-count">{comments.length}</span>
+        {openCount > 0 ? <span id="tdoc-fab-count">{openCount}</span> : null}
+        {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
       </Drawer.Trigger>
       <Drawer.Portal>
         <Drawer.Backdrop className="tdoc-drawer-backdrop" />
@@ -240,6 +247,13 @@ export function MobileCommentDrawer({
             <Drawer.Close className="tdoc-drawer-handle" aria-label="Close comments" />
             <Drawer.Content className="tdoc-drawer-list">
               {filter ? <div className="tdoc-comment-filter-row">{filter}</div> : null}
+              {!comments.length ? <div className="tdoc-drawer-empty">
+                <p>No comments here yet.</p>
+                <div className="tdoc-drawer-empty-actions">
+                  {onStartComment ? <button type="button" onClick={() => { onOpenChange(false); onStartComment(); }}>Leave a comment</button> : null}
+                  {onAskAi ? <button type="button" onClick={() => { onOpenChange(false); onAskAi(); }}>Ask AI</button> : null}
+                </div>
+              </div> : null}
               {comments.map((comment) => (
                 <CommentCard
                   key={comment.id}

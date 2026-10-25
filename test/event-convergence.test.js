@@ -134,8 +134,7 @@ t('CONVERGENCE: applied -> partial -> applied ends applied, not stuck open', () 
   appendEvent(c, { kind: 'marked_applied', at_version: 1, at: 't3', applied_in: 1, by: 'claude', agent_status: 'applied' });
   const snap = snapshotAt(c, 1);
   assert(snap.status === 'applied', `status stuck at "${snap.status}" after re-applying`);
-  assert(Object.keys(snap.reactions || {}).join('') === '✅',
-    `emoji is ${JSON.stringify(Object.keys(snap.reactions || {}))}, expected ✅`);
+  assert(Object.keys(snap.reactions || {}).length === 0, 'agent verdict should not add a reaction');
 });
 
 t('CONVERGENCE: question -> applied flips the verdict within one version', () => {

@@ -719,10 +719,8 @@ function isLocalMutation(req) {
 
 // Escape `</script>` and HTML comment terminators so a malicious or stray value
 // inside the JSON payload can't break out of the surrounding <script> block.
-// Replace the acting agent's reaction on a comment with the emoji for the new
-// status. Also removes legacy `tdoc-agent` reactions first so old state
-// can't outlive the new outcome (e.g. an "applied" ✅ after a later
-// "question" outcome on the same comment).
+// Agent verdicts used to create reactions. Keep their set only to clean old
+// local comment files when a thread is reopened; new verdicts do not react.
 const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓', answered: '💬' };
 // The emoji set the agent uses as a verdict marker — used by the per-version
 // fold to strip a stale verdict off snapshots where the comment reads 'open'.
@@ -804,10 +802,10 @@ function agentIdentity(body = {}, env = {}) {
   if (!avatar) avatar = logoForAgentLogin(login);
   return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
 }
-function setAgentReaction(target, status, actor = 'tdoc-agent') {
-  if (!target.reactions) target.reactions = {};
+function clearLegacyAgentReactions(target, actor = 'tdoc-agent') {
+  if (!target.reactions) return;
   const agentUsers = new Set(['tdoc-agent', actor].filter(Boolean));
-  for (const emoji of Object.keys(target.reactions)) {
+  for (const emoji of AGENT_VERDICT_EMOJI) {
     const users = target.reactions[emoji] || [];
     for (let i = users.length - 1; i >= 0; i--) {
       if (agentUsers.has(users[i])) users.splice(i, 1);
@@ -815,11 +813,6 @@ function setAgentReaction(target, status, actor = 'tdoc-agent') {
     if (users.length === 0) delete target.reactions[emoji];
     else target.reactions[emoji] = users;
   }
-  const next = AGENT_STATUS_EMOJI[status];
-  if (!next) return;
-  const u = target.reactions[next] || [];
-  if (!u.includes(actor)) u.push(actor);
-  target.reactions[next] = u;
 }
 
 function safeJsonForScript(obj) {
@@ -1185,7 +1178,7 @@ function foldCommentsAtVersion(comments, version) {
     const resolvedByV = c.status === 'applied' && appliedIn != null && appliedIn <= V;
     // Reactions are stored flat (no per-reaction version), so spreading `...c`
     // would carry the CURRENT reactions — including the agent verdict emoji
-    // (✅/🟡/❓ written by setAgentReaction) — onto every past snapshot. On a
+    // (✅/🟡/❓ written by the old agent-reaction path) — onto every past snapshot. On a
     // version where the comment folds to 'open' that's a contradictory
     // "resolved" emoji, so drop the agent verdict there.
     let reactions = c.reactions;
@@ -2127,7 +2120,6 @@ const server = http.createServer(async (req, res) => {
     } else if (agentStatus === 'question' || agentStatus === 'partial' || agentStatus === 'answered') {
       parent.status = 'open';
     }
-    setAgentReaction(parent, agentStatus, agent.login);
     writeJson(file, all);
     return json(res, 200, reply);
   }
@@ -2202,7 +2194,7 @@ const server = http.createServer(async (req, res) => {
     target.anchor = anchor;
     target.status = 'open';
     delete target.applied_in;
-    setAgentReaction(target, null, target.agent_actor || 'tdoc-agent');
+    clearLegacyAgentReactions(target, target.agent_actor || 'tdoc-agent');
     delete target.agent_actor;
     writeJson(file, all);
     return json(res, 200, target);
