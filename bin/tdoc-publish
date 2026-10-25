@@ -1788,6 +1788,14 @@ EOF
       esac
       return 1
     fi
+    # Authorship (who may edit this doc) and answer-only questions are
+    # refusals to stop at, not to retry: say who decides and what to do.
+    if [ "$_qerr" = "agent_not_author_editor" ] || [ "$_qerr" = "answer_only_run" ] || [ "$_qerr" = "answer_lock_unavailable" ]; then
+      _smsg="$(printf '%s' "$resp" | json_get message)"
+      echo "[tdoc] Not published ($_qerr): ${_smsg:-this agent may not change this doc.}" >&2
+      [ "$_qerr" = "answer_lock_unavailable" ] || echo "[tdoc] Do not retry. Answer in the doc's thread instead (bin/tdoc-agent-reply)." >&2
+      return 1
+    fi
     if [ "$_qerr" = "quota_docs" ]; then
       _qlimit="$(printf '%s' "$resp" | json_get limit)"
       _qused="$(printf '%s' "$resp" | json_get used)"

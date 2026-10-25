@@ -61,7 +61,7 @@ t('Worker access and delete routes share authorizeOwnerMutation', () => {
     const start = worker.indexOf(routeStart);
     const block = worker.slice(start, start + 2200);
     assert(start >= 0, `${routeStart} missing`);
-    assert(block.includes('await authorizeOwnerMutation(req, env, slug)'), `${routeStart} bypasses owner gate`);
+    assert(/await authorizeOwnerMutation\(req, env, slug[,)]/.test(block), `${routeStart} bypasses owner gate`);
   }
 });
 
