@@ -9,10 +9,10 @@
 //             team agent (members), or tdoc AI when neither can answer.
 //             Never somebody else's personal agent. "Only me" keeps the
 //             question and answer private, with Make public later.
-// composerAgents builds the one @ list (the @agent button's menu and the @
-// picker); each row says whether it may edit. Julie, later the same day:
-// the composer picks "Ask" or "Ask + request change" instead of a box, and
-// tdoc AI is offered to everyone.
+// composerAgents builds the one @ list (the agent pill's dropdown and the @
+// picker); each row says whether it may edit. tdoc AI is offered to
+// everyone. There is no mode to pick: the named agent answers or edits from
+// the text, where authorship lets it edit, and answers only elsewhere.
 
 import { AGENT_TAG_JOINER, orderedAgentChoices, sameTarget } from './agent-choices.js';
 

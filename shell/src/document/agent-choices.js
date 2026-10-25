@@ -184,10 +184,19 @@ export function orderedAgentChoices(targets) {
 // for the GitHub user "claude" (an owner's @login invites that person).
 export const AGENT_TAG_JOINER = '⁠';
 
-// What the @ tag says: the agent's display name in its list, minus any `@`
-// of its own (a second `@` inside the tag could read as an address).
+// What the @ tag (and the agent pill) says: the agent's short name --
+// "tdoc-bot", "tdoc AI", "smarter-tdoc-claw" (Julie, 2026-10-25: the
+// "· owner" suffix made the pill too long). Only when another agent in the
+// list has the same short name does it take the full display name ("claude ·
+// julie", then where it runs). Minus any `@` of its own (a second `@` inside
+// the tag could read as an address).
 export function agentMentionName(t, list = null) {
-  return agentDisplayName(t, list).replace(/@/g, '').trim();
+  if (!t) return '';
+  const short = agentName(t);
+  const lower = short.toLowerCase();
+  const twin = Array.isArray(list)
+    && list.some((o) => o && o !== t && !sameTarget(o, t) && agentName(o).toLowerCase() === lower);
+  return (twin ? agentDisplayName(t, list) : short).replace(/@/g, '').trim();
 }
 
 // The agents to offer for what is typed after `@`. With nothing typed, the
@@ -219,6 +228,13 @@ export function matchAgentChoices(choices, query, { limit = 2, labelOf = null } 
 // the picker inserted, or null. One handoff addresses one agent, so a second
 // tag does not fork the comment to a second agent.
 export function taggedAgent(text, choices) {
+  const span = taggedAgentSpan(text, choices);
+  return span ? span.target : null;
+}
+
+// The same tag with where it sits: { target, start, end } (end exclusive),
+// or null. The composers draw it as the agent pill.
+export function taggedAgentSpan(text, choices) {
   const source = String(text || '');
   const lower = source.toLowerCase();
   const list = Array.isArray(choices) ? choices : [];
@@ -227,9 +243,11 @@ export function taggedAgent(text, choices) {
   let bestLength = 0;
   for (const t of list) {
     if (!t) continue;
-    // The label as the picker inserted it, and without the location suffix
-    // in case the list it was picked from had no twin.
-    const tags = [...new Set([agentMentionName(t, list), agentMentionName(t)])]
+    // The tag as the picker inserted it, the short name in case the list it
+    // was picked from had no twin, and the full display name a draft from
+    // before the short tags may still hold.
+    const tags = [...new Set([agentMentionName(t, list), agentMentionName(t),
+      agentDisplayName(t, list).replace(/@/g, '').trim(), agentDisplayName(t).replace(/@/g, '').trim()])]
       .map((name) => `@${AGENT_TAG_JOINER}${name}`.toLowerCase());
     for (const tag of tags) {
       let i = lower.indexOf(tag);
@@ -243,5 +261,5 @@ export function taggedAgent(text, choices) {
       if (i !== -1 && (i < at || (i === at && tag.length > bestLength))) { at = i; best = t; bestLength = tag.length; }
     }
   }
-  return best;
+  return best ? { target: best, start: at, end: at + bestLength } : null;
 }
