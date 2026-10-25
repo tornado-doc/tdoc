@@ -44,9 +44,9 @@ export function useCommentArea({ comments, slug, selectedId, filter, filterMode,
   const markRead = (comment) => {
     if (markThreadSeen(slug, comment)) setSeenMap(readSeenMap(slug));
   };
-  const markAllRead = () => {
+  const markAllRead = (commentsToMark = area.unread) => {
     let changed = false;
-    for (const comment of area.unread) changed = markThreadSeen(slug, comment) || changed;
+    for (const comment of commentsToMark) changed = markThreadSeen(slug, comment) || changed;
     if (changed) setSeenMap(readSeenMap(slug));
   };
   return { ...area, seenMap, markRead, markAllRead };

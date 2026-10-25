@@ -968,6 +968,84 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       }
     });
 
+    await test('stored unsafe product links cannot navigate the host; feedback read controls match pin state', async () => {
+      const session = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), `tdoc-feedback:${tdocBase}`);
+      const file = path.join(root, session.slug, 'comments.json');
+      const original = fs.readFileSync(file, 'utf8');
+      const source = JSON.parse(original).find((c) => c.anchor?.kind === 'product');
+      assert(source, 'no product comment for link-safety fixture');
+      const at = (offset) => new Date(Date.now() + offset).toISOString();
+      const clone = (id, url, replies = []) => ({ ...source, id, text: `Fixture ${id}`, created: at(-120000),
+        anchor: { kind: 'product', url, selector: '#invite', text: 'Send invite' },
+        status: 'open', handoff_at: at(-90000), handoff_status: 'sent',
+        handoff_delivery: { status: 'delivered', at: at(-90000) }, replies, reactions: {} });
+      const agentReply = (id) => ({ id, text: 'I have a question', created: at(-60000),
+        author: { kind: 'agent', login: 'helper', name: 'Helper' }, agent_status: 'question', reactions: {} });
+      const unsafe = clone('c_fb_unsafe', 'javascript:window.__feedbackInjected=1');
+      const external = clone('c_fb_external', 'https://elsewhere.example/steal');
+      const unreadA = clone('c_fb_unread_a', `${appBase}/dashboard`, [agentReply('r_fb_unread_a')]);
+      const unreadB = clone('c_fb_unread_b', `${appBase}/pricing`, [agentReply('r_fb_unread_b')]);
+      const waiting = clone('c_fb_waiting', `${appBase}/dashboard`, [agentReply('r_fb_waiting'), {
+        id: 'r_fb_waiting_human', text: 'Please also check this', created: at(-30000),
+        author: { kind: 'human', login: 'teammate', name: 'Teammate' }, reactions: {},
+      }]);
+      waiting.handoff_at = at(-10000);
+      waiting.handoff_delivery = { status: 'delivered', at: waiting.handoff_at };
+      fs.writeFileSync(file, JSON.stringify([...JSON.parse(original), unsafe, external, unreadA, unreadB, waiting]));
+      const host = await context.newPage();
+      try {
+        await host.setViewportSize({ width: 390, height: 800 });
+        await host.goto(`${appBase}/dashboard`);
+        await host.evaluate(() => { window.__feedbackInjected = 0; });
+        await host.addScriptTag({ url: `${tdocBase}/feedback.js` });
+        await host.waitForFunction(() => Boolean(window.tdocFeedback));
+        await host.evaluate(() => window.tdocFeedback.open());
+        const panel = host.locator('#tdoc-feedback-root .tdoc-fb-panel');
+        if (!(await panel.isVisible())) await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+        await panel.waitFor({ state: 'visible' });
+        await panel.getByRole('button', { name: 'All', exact: true }).click();
+        const card = (id) => panel.locator(`article[data-comment-id="${id}"]`);
+        await card('c_fb_unread_a').waitFor();
+        assert((await card('c_fb_waiting').locator('.tdoc-thread-unread-dot').count()) === 0,
+          'waiting thread has an unread list dot while its pin has none');
+        assert((await card('c_fb_unread_a').locator('.tdoc-thread-unread-dot').count()) === 1,
+          'unread thread lost its read control');
+        const readbar = panel.locator('.tdoc-fb-readbar');
+        assert(await readbar.getByRole('button', { name: 'Mark all as read' }).isVisible(), 'bulk read control is missing');
+        const shots = process.env.TDOC_UI_SHOTS;
+        await card('c_fb_unread_a').scrollIntoViewIfNeeded();
+        await host.waitForTimeout(250); // finish the panel's clip entrance before screenshots
+        if (shots) { fs.mkdirSync(shots, { recursive: true }); await host.screenshot({ path: path.join(shots, 'feedback-link-read-controls-390.png') }); }
+        await host.setViewportSize({ width: 1440, height: 800 });
+        await card('c_fb_unread_a').scrollIntoViewIfNeeded();
+        if (shots) await host.screenshot({ path: path.join(shots, 'feedback-link-read-controls-1440.png') });
+        await card('c_fb_unread_a').getByRole('button', { name: 'Mark as read' }).click();
+        assert((await card('c_fb_unread_a').locator('.tdoc-thread-unread-dot').count()) === 0,
+          'single read control did not clear its thread');
+        assert((await card('c_fb_unread_b').locator('.tdoc-thread-unread-dot').count()) === 1,
+          'single read control cleared another thread');
+        await readbar.getByRole('button', { name: 'Mark all as read' }).click();
+        assert((await card('c_fb_unread_b').locator('.tdoc-thread-unread-dot').count()) === 0,
+          'bulk read control did not clear remaining threads');
+        assert((await card('c_fb_unsafe').locator('a.tdoc-product-where').count()) === 0,
+          'legacy script URL was rendered as a clickable link');
+        assert((await card('c_fb_external').locator('a.tdoc-product-where').count()) === 0,
+          'an off-site product link was rendered as a clickable link in feedback');
+        for (const id of ['c_fb_unsafe', 'c_fb_external']) {
+          const target = card(id);
+          await target.scrollIntoViewIfNeeded();
+          await panel.locator(`.tdoc-fb-item:has(article[data-comment-id="${id}"]) .tdoc-fb-context`).click();
+          assert(host.url() === `${appBase}/dashboard`, `${id} navigated off the current page`);
+        }
+        assert(await host.evaluate(() => window.__feedbackInjected === 0), 'script URL executed in the host page');
+        await panel.locator('.tdoc-fb-item:has(article[data-comment-id="c_fb_unread_b"]) .tdoc-fb-context').click();
+        await host.waitForURL(`${appBase}/pricing`);
+      } finally {
+        await host.close();
+        fs.writeFileSync(file, original);
+      }
+    });
+
     await test('no console errors on the app page', async () => {
       assert(consoleErrors.length === 0, consoleErrors.join('\n'));
     });

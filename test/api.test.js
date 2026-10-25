@@ -93,6 +93,22 @@ function waitReady(port, ms = 5000) {
   fs.writeFileSync(path.join(docDir, 'meta.json'), JSON.stringify({ title: 'api test', versions: [{ n: 1 }] }));
   fs.writeFileSync(path.join(docDir, 'comments.json'), '[]');
 
+  await t('local product anchors reject unsafe page URLs on create and re-anchor', async () => {
+    try {
+      const anchor = (url) => ({ kind: 'product', url, selector: '#invite' });
+      for (const url of ['javascript:alert(1)', '/dashboard', 'file:///tmp/page']) {
+        const r = await req('POST', '/api/comments', { slug: SLUG, version: 1, text: `unsafe ${url}`, anchor: anchor(url) });
+        if (r.status !== 400 || r.body.error !== 'invalid_product_url') throw new Error(`create ${url}: ${r.status}`);
+      }
+      const made = await req('POST', '/api/comments', { slug: SLUG, version: 1, text: 'valid product link', anchor: anchor('http://localhost:3000/dashboard') });
+      if (made.status !== 200) throw new Error(`valid create: ${made.status}`);
+      const re = await req('PATCH', '/api/comments', { slug: SLUG, version: 1, id: made.body.id, anchor: anchor('data:text/html,hello') });
+      if (re.status !== 400 || re.body.error !== 'invalid_product_url') throw new Error(`unsafe re-anchor: ${re.status}`);
+    } finally {
+      fs.writeFileSync(path.join(docDir, 'comments.json'), '[]');
+    }
+  });
+
   let topId;
   let replyId;
 

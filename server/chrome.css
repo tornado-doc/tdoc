@@ -154,7 +154,7 @@
   .tdoc-bar .tdoc-chip.signin, .tdoc-bar a.tdoc-chip.signin { border-radius: 6px; padding: 7px 14px; font-weight: 600; line-height: 1.2; }
   a.tdoc-chip { text-decoration: none; }
   .tdoc-product-where { display: block; margin: -2px 0 6px; font-size: 12px; color: var(--td-muted, #6b6a66); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tdoc-product-where:hover { color: var(--td-accent, #1652f0); }
+  a.tdoc-product-where:hover { color: var(--td-accent, #1652f0); }
   .tdoc-popup .submit.agent.tdoc-agent-unlinked { opacity: .7; }
   .tdoc-connectors { display: grid; gap: 12px; }
   .tdoc-connector { border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 12px; display: grid; gap: 8px; }
@@ -922,6 +922,12 @@
     flex: none; width: 8px; height: 8px; margin-left: auto;
     border-radius: 50%; background: var(--td-accent, #1652f0);
   }
+  .tdoc-thread-mark-read {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    margin-left: auto; padding: 6px; border-radius: 50%;
+  }
+  .tdoc-thread-mark-read:hover { background: var(--td-accent-ring-soft); }
+  .tdoc-thread-mark-read .tdoc-thread-unread-dot { display: block; margin: 0; }
   /* Keep one compact pill for the current step, including the agent's reply
      verdict. Delivery and reply are stages of one sequence, not two badges. */
   .tdoc-handoff-chip.is-done { color: #1d7a3a; background: #eaf6ee; }
