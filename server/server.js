@@ -1928,6 +1928,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- COMMENTS (anonymous) ---
+  if (p === '/api/me/computers' && req.method === 'GET') return json(res, 200, { computers: [], default: null });
+
   // ---- onboarding (local twin of the worker's routes) ----
   if (p === '/api/onboarding' && req.method === 'GET') {
     const all = loadOnboardingLocal();

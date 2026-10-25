@@ -11,53 +11,60 @@ Do not require a daemon or always-on computer for interactive use.
 
 ### Use with your AI
 
-Choose **Use with your AI**, name a topic, and copy the instruction into your
-existing ChatGPT Work, Cowork, Grok Bot, Claude Code or Codex conversation.
-The instruction reads `https://tdoc.dev/SKILL.md`, asks for a new private doc,
-and explicitly declines background-helper installation. The AI signs in with
-browser approval when needed, creates the doc and publishes it.
+Copy the setup instruction into an existing ChatGPT Work, Cowork, Grok Bot,
+Claude Code or Codex conversation with command and network access. The AI reads
+`https://tdoc.dev/SKILL.md`, installs/prepares the official tools without a
+background service, signs in through browser approval when needed, then runs
+`~/.local/bin/tdoc connect CODE` using the exact fresh code from the instruction.
 
-The dialog waits for a newly created document owned by the signed-in account,
-then enables **Open your doc**. Copying, pairing, historical docs and revisions
-to old docs do not complete this step. It captures the server's observation
-time before copying and compares the document's first-version time, so browser
-clock skew cannot make an old doc look new. Opening the published doc continues
-the shared comment → AI revision journey. This path does not create a practice
-template or register a computer.
-
-Use a mode with terminal and network access. Plain chat alone cannot run the
-publishing CLI. Provider-specific sign-in and private-document access still
-need validation in that session. Do not run `tdoc setup` or install a service
-unless the person explicitly chooses automatic pickup.
+The browser waits for that account's tools to confirm this setup attempt.
+Copying, an old token, a historical doc or an unrelated computer heartbeat does
+not complete it. Codes expire after 15 minutes and another account cannot use
+them. The confirmation creates no document and starts no daemon. Cloud session
+files may be temporary; do not promise skills persist beyond that environment.
 
 ### Connect for automatic updates (optional)
 
-The dialog gives separate install and setup commands:
+The default action copies one setup instruction into Claude Code or Codex on
+the computer being connected. The AI installs the official tdoc skill and tools,
+connects the account through browser approval, checks the existing AI account,
+and starts a user service. **Use Terminal instead** exposes the alternate flow:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash -s -- --install-only
 ~/.local/bin/tdoc setup
 ```
 
-Setup checks installed Claude Code / Codex accounts, then starts a user service
-(launchd on macOS, systemd on Linux; Windows uses WSL). It needs Node.js 18+,
-curl and tar, and preserves existing skills and provider settings. The service
-runs while the computer is awake and its user is signed in. Installation alone
-(`--install-only`) never starts a service.
+The first command installs the tools and skill, preserving an existing skill.
+The second checks AI execution and starts launchd on macOS or systemd on Linux
+(Windows uses WSL). Node.js 18+, curl and tar are required. Installation alone
+never starts a service. The computer must stay awake to pick up work.
 
-Runtime detection happens within the connection step. There is no separate
-Choose AI page. When no verified AI is available, compact expandable rows show
-installation/sign-in guidance. A historical publisher token or an installed
-binary never proves readiness. **Next** opens private practice only after a
-live AI passes its connection check. If both AIs are ready, an inline field
-chooses the AI for this doc; there is no computer dropdown.
+Runtime detection stays in the connection step. There is no computer dropdown
+or separate Choose AI page. Missing/sign-in guidance stays inline. Only a live,
+verified AI enables **Finish setup**, which saves the chosen AI as the fallback
+for docs with no selected agent. It does not create a practice doc.
 
-Manage the helper with `~/.local/bin/tdoc status`, `stop`, `setup`, or `uninstall`.
-Uninstall keeps docs, logs and sign-in. Existing skill users may run
-`bash "$SKILL_DIR/bin/tdoc-daemon" setup` when opting into automation.
+### Setup ends here; the tutorial is optional
 
-The manual skill installation below remains available for interactive agents
-and self-hosting. A portrait is optional and never required for web onboarding.
+Both paths finish at **You’re ready**. **Go to my docs** exits setup without
+creating anything. **Try the tutorial** separately starts the existing first-doc
+recipe for interactive use, or a private practice doc for automatic updates.
+Document creation, comments and AI revision belong to that tutorial.
+
+### Manage later in tdoc
+
+**My docs → Settings → Computers & AI** shows every connected computer, its
+connection state and detected AI versions/readiness. Choose **AI for new docs**,
+**Pause updates**, **Resume updates**, **Check setup** or **Connect a computer**
+without restarting onboarding. A pause survives helper restarts/registrations,
+stops new queued work from being picked up, and preserves waiting comments.
+A run already executing can finish. Account access is managed separately in
+**Agent access**. Pausing does not uninstall the service or revoke credentials.
+
+The CLI commands `~/.local/bin/tdoc status`, `stop`, `setup` and `uninstall` remain
+available. Uninstall keeps docs, logs and sign-in. Self-hosting and manual skill
+installation remain below; a portrait is never required for web onboarding.
 
 ## What you are installing
 

@@ -13,6 +13,7 @@
 //                     [--runner cli|oar]
 //   tdoc-daemon once  [same flags]      one poll, for cron or launchd
 //   tdoc-daemon status                  what is registered, running, pending
+//   tdoc-daemon connect CODE             connect this conversation, no service
 //   tdoc-daemon setup [--cli claude,codex] sign in, verify AI, start at login
 //   tdoc-daemon stop | uninstall         pause / remove the background service
 //   tdoc-daemon install [flags]         macOS: run it at login
@@ -39,7 +40,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { setup, uninstall, stopService, readSetup } = require('./daemon-setup.js');
+const { connect, setup, uninstall, stopService, readSetup } = require('./daemon-setup.js');
 const { inspectLocalRuntimes } = require('./local-runtimes.js');
 const { runAgentVia, detectClis, knownClis, findOnPath, RUNNERS, claudeAllowedTools, TDOC_ASK_SCRIPTS } = require('./agent-runners.js');
 
@@ -633,7 +634,8 @@ function localState() {
   const cmd = args._[0];
   if (args.help || !cmd) { console.log(usage()); process.exit(cmd ? 0 : 2); }
   try {
-    if (cmd === 'setup') await setup(args);
+    if (cmd === 'connect') await connect(args._[1]);
+    else if (cmd === 'setup') await setup(args);
     else if (cmd === 'stop') { stopService(); console.log('Background service paused. Resume with tdoc setup.'); }
     else if (cmd === 'uninstall') { if (readSetup()) uninstall(); else cmdUninstall(); }
     else if (cmd === 'start') await cmdStart(args);

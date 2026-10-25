@@ -727,7 +727,7 @@ t('setup asks for the terminal installer and uses server-confirmed local agents'
   assert(!gate.includes('paired || record'), 'a historical token cannot complete setup');
 });
 t('connection errors remain actionable, and clipboard refusal preserves manual copy', () => {
-  assert(gate.includes('Check Terminal for a sign-in or installation error.'), 'points at the real install surface');
+  assert(gate.includes('Ask your AI to check the setup and tdoc sign-in.'), 'points at the real install surface');
   assert(gate.includes('~/.local/bin/tdoc status'), 'diagnostics run outside agent chat');
   assert(gate.includes('selectContents(ref.current)'), 'manual copy fallback');
 });
@@ -740,8 +740,10 @@ t('the chosen AI opens a private practice doc through the account API', () => {
   assert(gate.includes('location.assign(result.url)'), 'opens server-created doc');
   assert(!gate.includes('PORTRAIT_PROMPT'), 'history scanning is not required');
 });
-t('connection advances through Next instead of replacing the page', () => {
-  assert(gate.includes("useState(preview?.stage || 'intro')") && gate.includes('disabled={busy || !loaded || !runtimeReady}'), 'first choose a path; only automatic pickup requires a live verified computer');
+t('setup ends before the optional tutorial', () => {
+  assert(gate.includes('useState(preview?.stage || startAt)') && gate.includes('if (!runtimeReady || busy) return;') && gate.includes("setCompletedPath('connect'); setStage('done');"), 'automatic setup ends only after a verified connection');
+  assert(gate.includes('Try the tutorial') && gate.includes('Go to my docs'), 'tutorial is optional after setup');
+  assert(gate.includes('conversationSetupStatus(code)') && !gate.includes('setPublishedDoc'), 'interactive setup waits for tool confirmation, not publication');
   assert(!gate.includes('sg-pane-art'), 'no full-page replay');
 });
 

@@ -81,10 +81,28 @@ async function setup(args, deps = {}) {
   if (!ready.length) console.log('[tdoc] No AI is ready yet. Choose your AI in tdoc to see installation and sign-in instructions. No tasks will run until an AI passes the connection check.');
   console.log('[tdoc] Runs while this computer is awake and you are signed in. Pause: tdoc stop. Resume: tdoc setup.');
 }
+// Interactive setup is deliberately separate from setup(): no AI subprocess,
+// service, document or local-runtime registration is started here.
+async function connect(code, deps = {}) {
+  if (!/^[a-f0-9]{32}$/.test(code || '')) throw new Error('Copy a fresh setup instruction from tdoc.');
+  if (!fs.existsSync(path.join(root(), 'SKILL.md'))) throw new Error('tdoc skill is missing. Install the official tools and retry.');
+  (deps.signIn || (() => run('bash', [path.join(root(), 'bin/tdoc-publish'), '--signin-only'])))();
+  const config = deps.config || JSON.parse(fs.readFileSync(process.env.TDOC_CONFIG || path.join(home(), '.tdoc/published.json'), 'utf8'));
+  if (config.platform !== 'hosted' || !config.upload_token || !config.base) throw new Error('Sign in to your tdoc.dev account, then retry this setup instruction.');
+  const base = new URL(config.base);
+  if (base.protocol !== 'https:' || base.username || base.password) throw new Error('Hosted setup requires a secure tdoc URL.');
+  const response = await (deps.fetch || fetch)(new URL('/api/onboarding/connect/complete', base), {
+    method: 'POST', headers: { Authorization: `Bearer ${config.upload_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }), signal: AbortSignal.timeout(20000),
+  });
+  if (!response.ok) throw new Error(`Setup was not confirmed (${response.status}). Check the account in your browser or copy a fresh instruction.`);
+  console.log('[tdoc] Ready for this AI conversation. Return to tdoc. No background helper was started.');
+}
+
 function uninstall() {
   stopService();
   if (process.platform === 'linux') spawnSync('systemctl', ['--user', 'disable', 'tdoc-daemon.service'], { stdio: 'ignore' });
   try { fs.unlinkSync(serviceFile()); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   console.log('[tdoc] Background service removed. Your docs, sign-in and logs were kept.');
 }
-module.exports = { setup, uninstall, stopService, readSetup, serviceFile, installService };
+module.exports = { connect, setup, uninstall, stopService, readSetup, serviceFile, installService };

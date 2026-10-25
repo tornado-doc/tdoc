@@ -48,6 +48,17 @@ export function getOnboarding(options) {
   return request(options?.daemon ? '/api/onboarding?daemon=1' : options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
 }
 
+export function updateComputer(body) {
+  return request('/api/me/computers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+export function startConversationSetup() {
+  return request('/api/onboarding/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+}
+export function conversationSetupStatus(code) {
+  return request(`/api/onboarding/connect?${new URLSearchParams({ code })}`);
+}
+
 export function createOnboardingPractice(target) {
   return request('/api/onboarding/practice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target) });
 }

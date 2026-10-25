@@ -9,6 +9,7 @@ import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { ConnectorsBody } from './connectors-page.jsx';
+import { ComputersBody } from './computers-settings.jsx';
 import { DevicesBody } from './tokens-page.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
 import { DebugBar } from './debug-bar.jsx';
@@ -476,6 +477,9 @@ function AccountSettingsPane({ identity, profile }) {
         </a>
       </section>
       <SignInMethodsCard />
+      <section className="tm-settings-card" id="computers">
+        <ComputersBody identity={identity} />
+      </section>
       <section className="tm-settings-card" id="agents">
         <div className="tm-settings-head"><div><h2>Agents</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
         <ConnectorsBody returnTo="/me?view=settings#agents" />
@@ -591,7 +595,8 @@ export function DocsHub({ boot }) {
   // ?new_team=1 is the top-bar switcher's "New team" from any page.
   const [modal, setModal] = useState(() => (
     boot.profile && location.hash === '#claim-profile' ? { type: 'claim-handle' }
-      : new URLSearchParams(location.search).get('new_team') === '1' ? { type: 'new-team' } : null
+      : new URLSearchParams(location.search).get('new_team') === '1' ? { type: 'new-team' }
+        : new URLSearchParams(location.search).get('tutorial') === '1' ? { type: 'create-agent' } : null
   ));
   const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
   const [teams, setTeams] = useState(() => boot.teams || []);

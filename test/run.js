@@ -32,6 +32,7 @@ const OFFLINE = [
   'link-sharing.test.js',     // anyone with the link: noindex everywhere, unlisted by default, require sign-in, public->link migration
   'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
+  'computer-settings.test.js', // fresh interactive setup + durable browser computer controls
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
   'ui-primitives.test.js',    // product UI uses shell/src/ui primitives; no native <select>
   'app-header.test.js',       // every app page renders the shared TopBar; no second account chip, no worker-drawn header
