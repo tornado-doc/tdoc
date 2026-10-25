@@ -11,6 +11,7 @@ import { agentFacts, agentName, agentOwner, taggedAgent } from './agent-choices.
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
+import { canSeeHandoff } from './handoff-state.js';
 
 function authorLine(author) {
   if (!author) return 'anonymous';
@@ -789,12 +790,14 @@ export function CommentCard({
       <div className="tdoc-status-row">
         {comment.status === 'applied' ? (
           <span className="tdoc-resolved-chip">
-            {comment.resolved_by
+            {comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, currentUser, isOwner)) ? '✅ Done' : comment.resolved_by
               ? `✓ resolved by @${comment.resolved_by}`
               : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
           </span>
         ) : null}
-        <HandoffStatusChips comment={comment} onResend={onResendHandoff} onSendElsewhere={onSendHandoffElsewhere} />
+        {demo || canSeeHandoff(comment, currentUser, isOwner) ? (
+          <HandoffStatusChips comment={comment} onResend={onResendHandoff} />
+        ) : null}
       </div>
       <header className="tdoc-cc-head">
         <Author

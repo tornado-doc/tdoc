@@ -48,11 +48,10 @@ t('the status op writes one event per version, so it converges', () => {
     'both status kinds must share one event id per version');
 });
 
-t('a person resolving does not leave an emoji in their name', () => {
+t('resolution records its author without synthesizing reactions', () => {
   const start = worker.indexOf("case 'marked_applied':");
   const block = worker.slice(start, worker.indexOf("case 'deleted':", start));
-  assert(/snap\._agentVerdict = e\.human \? null : \(e\.agent_status \|\| 'applied'\)/.test(block),
-    'the ✅/🟡/❓ reaction is the agent verdict, and a human decision is not one');
+  assert(!block.includes('_agentVerdict'), 'resolution still stages a synthetic reaction');
   assert(/snap\.resolved_by = e\.human \? \(e\.by \|\| ''\) : ''/.test(block),
     'the card needs to know a person resolved it, and which person');
   // Every event written before people could resolve lacks `human`, so the
@@ -61,10 +60,12 @@ t('a person resolving does not leave an emoji in their name', () => {
 });
 
 t('the chip says who decided, because they are different claims', () => {
+  assert(card.includes("comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, currentUser, isOwner)) ? '✅ Done'"),
+    'an agent handoff resolved by the agent should show Done');
   assert(/comment\.resolved_by\s*\n?\s*\? `✓ resolved by @\$\{comment\.resolved_by\}`/.test(card),
     'a person resolving should not read as "fixed"');
   assert(/: `✓ fixed\$\{comment\.applied_in \? ` · v\$\{comment\.applied_in\}` : ''\}`/.test(card),
-    "an agent's verdict keeps the wording it had");
+    'a resolved comment without a handoff retains its prior wording');
 });
 
 t('resolve sits with the thread actions, behind canMutate', () => {
