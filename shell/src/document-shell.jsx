@@ -1526,7 +1526,6 @@ export function DocumentShell({ boot, config }) {
       <AgentMentionContext.Provider value={agentMentions}>
       <TopBar
         identity={config.identity}
-        hideMobileMark={!config.isLanding}
         onboardingTest={config.debug ? {
           record: onboardingRecord,
           surface: config.isLanding ? 'landing' : 'document',
@@ -1547,7 +1546,7 @@ export function DocumentShell({ boot, config }) {
                 counts={Object.fromEntries(Object.entries(handoffBuckets).map(([state, list]) => [state, list.length]))}
                 unread={unreadAgentReplies}
                 open={handoffDetailsOpen}
-                onOpenChange={(open) => { setHandoffDetailsOpen(open); if (open) setAgentActivityOpen(false); }}
+                onOpenChange={(open) => { setHandoffDetailsOpen(open); if (open) { setAgentActivityOpen(false); setDrawerOpen(false); } }}
                 narrow={narrow}
               >
                 <AskAiPanel
@@ -1772,7 +1771,8 @@ export function DocumentShell({ boot, config }) {
           expandReplies={deepReply}
           canSendToAgent={canSendToAgent}
           agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
-          onOpenChange={setDrawerOpen}
+          onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
+          hideFab={handoffDetailsOpen}
           onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
           onAskAi={config.canComment || config.signInToComment ? () => startDocumentComment(true) : null}
           onReply={replyTo}

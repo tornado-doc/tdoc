@@ -244,7 +244,7 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await send.waitFor();
         await pause(page, 1500);
         await send.click();
-        const activity = page.locator('.tdoc-handoff-popover');
+        const activity = page.locator(label === 'phone' ? '.tdoc-ask-mobile-drawer' : '.tdoc-handoff-popover');
         await activity.waitFor();
         const readySummary = activity.locator('.tdoc-ask-ready');
         if (!(await readySummary.innerText()).includes('1 comment not sent')) throw new Error('the team member has no ready-to-send summary');

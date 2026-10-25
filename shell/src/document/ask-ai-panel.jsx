@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AppSelect } from '../ui/select.jsx';
+import { MentionText } from './mention-field.jsx';
 
 // A document-level question starts private. Sending a saved comment to an
 // editor stays a separate action, visible only when comments are ready.
@@ -7,6 +8,7 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   turns, busy, remaining, onAsk, onKeep, onPost, readyCount, onSendReady,
   activityOpen, onActivityOpen, unreadCount, children }) {
   const input = useRef(null);
+  const [expandedTurnId, setExpandedTurnId] = useState(null);
   useEffect(() => {
     if (open && !activityOpen) input.current?.focus();
   }, [open, activityOpen]);
@@ -18,6 +20,8 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   const selected = targets.find((target) => target.key === targetKey) || targets[0];
   const noFreeAnswers = selected?.tdocAi && remaining === 0;
   const latest = turns.at(-1);
+  useEffect(() => { setExpandedTurnId(null); }, [latest?.id]);
+  const activeTurnId = expandedTurnId || latest?.id;
   return <div className="tdoc-ask-panel">
     <h2>Ask AI</h2>
     <form className="tdoc-ask-form" onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
@@ -37,14 +41,18 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
       <button type="button" onClick={onSendReady}>Send to agent →</button>
     </div> : null}
     {turns.length ? <div className="tdoc-ask-conversation" aria-live="polite">
-      {turns.map((turn) => <div className="tdoc-ask-turn" key={turn.id}>
+      {turns.map((turn) => activeTurnId !== turn.id ? <button type="button" className="tdoc-ask-turn-summary" key={turn.id}
+        aria-expanded="false" onClick={() => setExpandedTurnId(turn.id)}>
+        <span>{turn.question}</span><span>{turn.status === 'answered' ? 'View answer ›' : 'View ›'}</span>
+      </button> : <div className="tdoc-ask-turn" key={turn.id}>
+        {turn.id !== latest?.id ? <button type="button" className="tdoc-ask-turn-collapse" onClick={() => setExpandedTurnId(null)}>Latest answer ↑</button> : null}
         <div className="tdoc-ask-question">{turn.question}</div>
         <div className={`tdoc-ask-answer${turn.status === 'failed' ? ' is-error' : ''}`}>
           <div className="tdoc-ask-answer-heading">{turn.public ? 'Posted as a comment · Visible to everyone' : `${turn.label} · Only you can see this`}</div>
           {turn.status === 'thinking' ? <p>Reading this document…</p>
             : turn.status === 'waiting' ? <p>Sent · waiting for your agent…</p>
               : turn.status === 'failed' ? <><p>{turn.error || 'Could not get an answer.'}</p><button type="button" onClick={() => onAsk(turn.question, turn.target)}>Retry</button></>
-                : <><p>{turn.answer}</p>
+                : <><div className="tdoc-ask-answer-body"><MentionText text={turn.answer} mentions={[]} /></div>
                   {turn.public ? null
                     : turn.kept ? <span className="tdoc-ask-private-note">Kept private</span>
                       : <div className="tdoc-ask-answer-actions">

@@ -31,6 +31,7 @@ const { loadRuntimeAssets } = require('../server/runtime-assets');
 const { chromium, devices } = requirePlaywrightOrSkip('doc-bar-composer-ui.test.js');
 const SHOTS = process.env.TDOC_UI_SHOTS || '';
 const MODEL = 'https://model.invalid/v1';
+const LONG_ANSWER = 'Billing goes first.\n\n## Why billing leads\n- Invoices block two renewals.\n- Search can follow in April.\n\nCheck **the launch plan** and [details](https://tdoc.dev/docs).\n\n```js\nconst phase = "billing";\nconsole.log(phase);\n```';
 const DOC = (t) => `<!doctype html><html><body><h1>${t}</h1><p>Billing ships first, on March 14, because invoices block two renewals. Search follows in April.</p><p>The mobile app waits for Q4.</p></body></html>`;
 
 async function startServer(worker, env) {
@@ -70,7 +71,7 @@ async function dragSelect(page, phrase) {
   globalThis.fetch = async (input, init = {}) => {
     const u = typeof input === 'string' ? input : input.url;
     if (!String(u).startsWith(MODEL)) return realFetch(input, init);
-    return new Response(JSON.stringify({ choices: [{ message: { content: 'Billing goes first.' } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ choices: [{ message: { content: LONG_ANSWER } }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
   const mod = await loadWorker();
   const worker = mod.default;
@@ -164,30 +165,53 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('phone bar: title; Ask AI · Share · ⋯, with My docs first in the menu', async () => {
+    await t('phone bar and Ask AI drawer fit 390px and 430px, including a reduced keyboard viewport', async () => {
+      for (const width of [390, 430]) {
       const { context, page } = await open(julie, 'launch-plan', true);
+      await page.setViewportSize({ width, height: 800 });
       await page.locator('#tdoc-send-agent-btn').waitFor();
       if (!(await page.locator('#tdoc-share-btn').isVisible())) throw new Error('no Share on a phone');
       if (!(await page.locator('.tdoc-bar .doc-title').isVisible())) throw new Error('no title on a phone');
-      if (await page.locator('.tdoc-bar-mark').isVisible()) throw new Error('mobile logo still crowds the title');
+      if (!(await page.locator('.tdoc-bar-mark').isVisible())) throw new Error('mobile logo is missing');
+      if (await page.locator('.tdoc-ask-ai-label').isVisible()) throw new Error('Ask AI label crowds the phone bar');
       if (await page.locator('.tdoc-bar .tdoc-space-trigger').isVisible()) throw new Error('space chip crowds the phone bar');
       if (await page.locator('.tdoc-account-trigger').isVisible()) throw new Error('avatar in the phone bar');
       await page.locator('#tdoc-more-btn').click();
-      if (!/^My docs$/.test((await page.getByRole('menuitem').first().innerText()).trim())) throw new Error('My docs is not the first mobile menu item');
+      await page.getByRole('menuitem', { name: 'My docs', exact: true }).waitFor();
       await page.getByRole('menuitem', { name: /My account/ }).waitFor();
       const unreadDot = page.locator('#tdoc-more-btn .tdoc-unread-dot');
       if (await unreadDot.count() && await unreadDot.evaluate((el) => getComputedStyle(el).backgroundColor) !== 'rgb(22, 82, 240)') throw new Error('mobile unread dot is not blue');
       await page.keyboard.press('Escape');
       await page.locator('#tdoc-send-agent-btn').click();
-      await page.getByRole('dialog', { name: 'Ask AI' }).waitFor();
-      await shot(page, 'ask-ai-phone-empty.png');
-      await page.locator('#tdoc-send-agent-btn').click();
+      const drawer = page.getByRole('dialog', { name: 'Ask AI' });
+      await drawer.waitFor();
+      const bounds = await drawer.boundingBox();
+      if (!bounds || Math.abs(bounds.x) > 2 || Math.abs(bounds.width - width) > 2 || bounds.y < 0) throw new Error(`Ask AI is not a bottom drawer at ${width}px: ${JSON.stringify(bounds)}`);
+      if (await page.locator('.tdoc-fab').isVisible()) throw new Error('comment FAB overlaps Ask AI drawer');
+      await shot(page, `ask-ai-phone-${width}.png`);
+      await drawer.locator('textarea').fill('Why billing first?');
+      await page.evaluate(() => {
+        // Headless browsers have no software keyboard. Shrink and shift the
+        // visual viewport as iOS does when the keyboard opens.
+        Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 420 });
+        Object.defineProperty(window.visualViewport, 'offsetTop', { configurable: true, value: 20 });
+        window.visualViewport.dispatchEvent(new Event('resize'));
+      });
+      await page.waitForFunction(() => {
+        const rect = document.querySelector('.tdoc-ask-mobile-drawer')?.getBoundingClientRect();
+        return rect && rect.bottom <= 441 && rect.height <= 413 && rect.top >= 18;
+      });
+      const keyboard = await drawer.evaluate((el) => ({ drawer: el.getBoundingClientRect().toJSON(), input: el.querySelector('textarea').getBoundingClientRect().toJSON() }));
+      if (keyboard.drawer.y < 18 || keyboard.input.bottom > 440 || keyboard.drawer.bottom > 441) throw new Error(`keyboard covers Ask AI at ${width}px: ${JSON.stringify(keyboard)}`);
+      await shot(page, `ask-ai-keyboard-${width}.png`);
+      await drawer.getByRole('button', { name: 'Close Ask AI' }).click();
       await page.locator('.tdoc-fab').click();
       await page.locator('#tdoc-comment-layer .tdoc-comment-filter').waitFor();
       const layout = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
       if (layout.scrollWidth > layout.width + 1) throw new Error(JSON.stringify(layout));
-      await shot(page, 'doc-bar-phone.png');
+      await shot(page, `doc-bar-phone-${width}.png`);
       await context.close();
+      }
     });
 
     await t('owner on own doc: @agent puts in their agent; Comment hands it to them to answer or edit', async () => {
@@ -238,6 +262,34 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
+    await t('long Markdown answer stays readable in the 390px drawer and can expand to full height', async () => {
+      const { context, page } = await open(reader, 'launch-plan', true);
+      await page.setViewportSize({ width: 390, height: 800 });
+      if (!(await page.locator('.tdoc-bar-mark').isVisible())) throw new Error('reader logo is missing');
+      await page.locator('#tdoc-send-agent-btn').click();
+      const drawer = page.getByRole('dialog', { name: 'Ask AI' });
+      await drawer.getByRole('textbox', { name: 'Ask about this document' }).fill('Explain the plan');
+      await drawer.getByRole('button', { name: 'Send question' }).click();
+      await drawer.locator('.tdoc-ask-answer-body h2').waitFor();
+      if (!(await drawer.locator('.tdoc-ask-answer-body ul li').count())) throw new Error('Markdown list did not render');
+      if (!(await drawer.locator('.tdoc-ask-answer-body pre code').count())) throw new Error('code block did not render');
+      if (await drawer.locator('.tdoc-ask-answer-body a[href="https://tdoc.dev/docs"]').count() !== 1) throw new Error('safe Markdown link did not render');
+      const box = await drawer.boundingBox();
+      if (!box || box.height < 800 * .69) throw new Error(`drawer is too short: ${JSON.stringify(box)}`);
+      await shot(page, 'ask-ai-phone-long-answer-390.png');
+      // Drag the handle upward to the full-height snap point.
+      const handle = await drawer.getByRole('button', { name: 'Expand Ask AI' }).boundingBox();
+      await page.mouse.move(handle.x + handle.width / 2, handle.y + 2);
+      await page.mouse.down();
+      await page.mouse.move(handle.x + handle.width / 2, 80, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(350);
+      const expanded = await drawer.boundingBox();
+      if (!expanded || expanded.y > box.y - 100) throw new Error(`drawer did not expand: ${JSON.stringify({ box, expanded })}`);
+      await shot(page, 'ask-ai-phone-long-answer-expanded-390.png');
+      await context.close();
+    });
+
     await t('Ask AI opens for a reader, answers privately, preserves follow-ups and posts only on request', async () => {
       const { context, page } = await open(reader, 'launch-plan');
       await page.locator('#tdoc-send-agent-btn').click();
@@ -253,6 +305,7 @@ async function dragSelect(page, phrase) {
       await input.fill('What is the conclusion?');
       await panel.getByRole('button', { name: 'Send question' }).click();
       await panel.getByText('Billing goes first.').waitFor();
+      await panel.locator('.tdoc-ask-answer-body h2').waitFor();
       const before = (await api('/api/comments?slug=launch-plan&version=1', { cookie: reader.cookie })).body;
       if (JSON.stringify(before).includes('What is the conclusion?')) throw new Error('private question was posted');
       await panel.getByRole('button', { name: 'Keep to myself' }).click();
@@ -260,15 +313,18 @@ async function dragSelect(page, phrase) {
       await input.fill('What happens next?');
       await input.press('Enter');
       await panel.getByText('Billing goes first.').last().waitFor();
-      if (await panel.locator('.tdoc-ask-turn').count() !== 2) throw new Error('follow-up did not stay in the conversation');
+      if (await panel.locator('.tdoc-ask-turn').count() !== 1 || await panel.locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('previous answer did not collapse');
+      await panel.locator('.tdoc-ask-turn-summary').click();
+      if (!(await panel.locator('.tdoc-ask-turn').getByText('Kept private').isVisible())) throw new Error('previous answer did not expand');
+      await panel.locator('.tdoc-ask-turn-collapse').click();
       await panel.getByRole('button', { name: 'Post as comment' }).click();
       await panel.getByText('Posted as a comment').waitFor();
-      if (await panel.getByText('Only you can see this').count() !== 1) throw new Error('public answer still looks private');
+      if (await panel.locator('.tdoc-ask-turn').getByText('Only you can see this').count()) throw new Error('public answer still looks private');
       const after = (await api('/api/comments?slug=launch-plan&version=1', { cookie: reader.cookie })).body;
       if (!JSON.stringify(after).includes('What happens next?')) throw new Error('public question was not posted');
       await page.locator('#tdoc-send-agent-btn').click();
       await page.locator('#tdoc-send-agent-btn').click();
-      if (await page.getByRole('dialog', { name: 'Ask AI' }).locator('.tdoc-ask-turn').count() !== 2) throw new Error('conversation disappeared after closing the panel');
+      if (await page.getByRole('dialog', { name: 'Ask AI' }).locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('conversation disappeared after closing the panel');
       await shot(page, 'ask-ai-reader-desktop.png');
       await context.close();
     });
