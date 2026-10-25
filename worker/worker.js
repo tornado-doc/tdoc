@@ -2123,7 +2123,9 @@ function headingsFromHtml(html) {
     }
     headings.push({
       end: close.lastIndex,
-      text: html.slice(openEnd + 1, endMatch.index).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(),
+      // Malformed nested markup can leave a partial tag after tag removal;
+      // a heading is a label, so no angle bracket should survive.
+      text: html.slice(openEnd + 1, endMatch.index).replace(/<[^>]+>/g, '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim(),
     });
     openRe.lastIndex = close.lastIndex;
   }

@@ -135,6 +135,12 @@ t('EDGE: `</section>` inside an inline <script> does not close the section early
   assert(aids.filter(a => a.tag === 'section').length === 1, 'section mis-parsed (split)');
 });
 
+t('malformed markup cannot leave an angle bracket in a heading label', () => {
+  const html = '<h1><<script>>Heading</h1><section>Body</section>';
+  const heading = stampNew(html).aids.find(a => a.tag === 'section').heading;
+  assert(heading && !/[<>]/.test(heading), `unsafe heading label: ${heading}`);
+});
+
 t('IDEMPOTENT: re-stamping already-stamped HTML yields the same aids', () => {
   const html = '<body><figure><svg viewBox="0 0 2 2"></svg></figure><table><tr><td>1</td></tr></table></body>';
   const once = stampNew(html);
