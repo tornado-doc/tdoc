@@ -22,6 +22,15 @@ const http = require('http');
 const { spawn } = require('child_process');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
+const browserEdit = (env, slug, login) => {
+  // A person's last edit in the browser (what the editor stamps), so the
+  // team agent may write the doc: authorship is enforced at write time.
+  const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+  const last = meta.versions.reduce((a, b) => (Number(b.n) > Number(a.n) ? b : a));
+  Object.assign(last, { source: 'browser', author: login });
+  delete last.by;
+  env.META.map.set(`meta:${slug}`, JSON.stringify(meta));
+};
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
 const { chromium } = requirePlaywrightOrSkip('team-agent-ui.test.js');
@@ -221,6 +230,7 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         // The team agent edits what it wrote (agentEditPolicy): it publishes
         // this doc's latest version first.
         const agentToken = JSON.parse(fs.readFileSync(path.join(HOME, '.tdoc', 'published.json'), 'utf8')).upload_token;
+        browserEdit(env, slug, 'julie');
         const v2 = await call('/api/upload', { method: 'POST', token: agentToken, body: { slug, version: 2, html: docHtml, meta: { title: 'Weekly report' } } });
         if (v2.status !== 200) throw new Error(`agent v2: ${v2.status} ${JSON.stringify(v2.body)}`);
         await as(bob);

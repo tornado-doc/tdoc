@@ -32,6 +32,27 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **Who may edit is enforced when an agent writes, not only when work is
+  handed to it.** #823's authorship rules decided whom a handoff could go to,
+  but an agent token could still publish anywhere its account could write.
+  Now `/api/upload` and `/api/agent/reply` (marking a comment applied or
+  partial, or moving its anchor) apply them to agent tokens on team docs. The
+  team agent may write a new doc, or one a team agent or a person in the
+  browser last wrote. A person's own agent may write a doc they own, a new
+  one, one a person last edited in the browser, or one their own agent
+  wrote. Nobody's agent writes over another person's agent. The refusal is
+  `403 agent_not_author_editor` with `reason` (`written_by_other`,
+  `team_agent_wrote`) and `writer`. Personal docs, browser edits, the
+  provider token and feedback spaces are unchanged.
+  An answer-only question (one's own agent, Only me, a team agent) now locks
+  its agent out of edits on that doc from the moment it is sent, not from
+  ack, until its answer lands or its run ends (at most six hours). There is
+  one lock per question in the doc's Durable Object, so overlapping questions
+  no longer end each other's lock, and a lock that cannot be read refuses the
+  write (`503 answer_lock_unavailable`). The doc's owner asking their own
+  agent is not locked out of their own doc. SKILL.md tells agents to answer
+  instead of retrying.
+
 - **A calmer document bar, and agents from the comment composer (Julie,
   2026-10-24).** The bar had grown to nine controls. Now, left: logo · space /
   folder / title (the space opens a switcher; the folder goes to its list);
