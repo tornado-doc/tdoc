@@ -149,7 +149,8 @@
   .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; position: relative; }
   .tdoc-chip:hover { background: #e5e6ea; }
   .tdoc-chip img { width: 26px; height: 26px; border-radius: 50%; }
-  .tdoc-chip .name { font-size: 13px; font-weight: 500; }
+  /* A long name ends in … rather than pushing the bar's buttons left. */
+  .tdoc-chip .name { font-size: 13px; font-weight: 500; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-chip.signin { padding: 7px 14px; background: var(--td-accent); color: #fff; font-weight: 600; }
   .tdoc-chip.signin:hover { background: var(--td-accent-hover); }
   /* One Sign in / primary-action shape across every page's bar: the 6px
@@ -692,6 +693,7 @@
   .tdoc-seg button { border: none; border-radius: 0; padding: 7px 14px; background: #fff; color: #444; }
   .tdoc-seg button + button { border-left: 1px solid #ddd; }
   .tdoc-seg button.active { background: var(--td-accent); color: #fff; }
+  .tdoc-seg button:disabled { color: #aaa; cursor: not-allowed; }
   .tdoc-modal .manage-hint { font-size: 12px; color: #888; margin: 6px 0 0; }
   /* Share: who has access. Three rows, each a name and one plain line. */
   .tdoc-modal .tdoc-access-options { display: flex; flex-direction: column; gap: 6px; }
@@ -783,10 +785,14 @@
        a flex box, so justify-content is what places the text. */
     .tdoc-bar button.doc-title-edit { justify-content: flex-start; }
     .tdoc-bar #tdoc-star-btn,
-    .tdoc-bar .tdoc-document-primary,
-    .tdoc-bar #tdoc-theme-btn,
+    .tdoc-bar #tdoc-publish-btn,
     .tdoc-bar .tdoc-switch,
+    .tdoc-bar .tdoc-crumb,
+    .tdoc-bar .tdoc-crumb-sep,
     .tdoc-bar .tdoc-account-trigger { display: none; }
+    /* Share stays on a phone, as its icon. */
+    .tdoc-bar .tdoc-share-quiet span { display: none; }
+    .tdoc-bar .tdoc-share-quiet { padding: 0; }
     .tdoc-bar .tdoc-secondary-toggle.tdoc-mobile-overflow-trigger { display: inline-flex; }
     .tdoc-bar-right, .tdoc-bar-actions { gap: 0; }
   }
@@ -829,8 +835,6 @@
     .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 5; }
   }
 
-  /* Theme toggle — icon-only, lives in the bar's right cluster. */
-  .tdoc-theme-btn { flex-shrink: 0; }
   .tdoc-theme-icon-sun { display: none; }
   html[data-tdoc-theme="dark"] .tdoc-theme-icon-moon { display: none; }
   html[data-tdoc-theme="dark"] .tdoc-theme-icon-sun { display: block; }
@@ -1060,49 +1064,23 @@
   }
   .tdoc-handoff-details-actions .text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
-  /* Ask this doc: the toolbar entry and its side panel. */
-  .tdoc-bar .tdoc-ask-action { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--td-ink, #1a1a1a); font: 500 13px/1 system-ui, -apple-system, sans-serif; cursor: pointer; flex-shrink: 0; }
-  .tdoc-bar .tdoc-ask-action:hover { background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); }
-  @media (max-width: 700px) { .tdoc-bar .tdoc-ask-action { display: none; } }
-  /* Send to my agent: its words fold before the doc's title does; the icon
-     keeps the label as its name and tooltip. On a phone it is in ⋯. */
-  @media (max-width: 960px) { .tdoc-bar .tdoc-my-agent-action span { display: none; } .tdoc-bar .tdoc-my-agent-action { padding: 0 8px; } }
-  .tdoc-ask-panel .tdoc-ask-form { display: flex; flex-direction: column; gap: 8px; }
-  .tdoc-modal textarea.tdoc-ask-input { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 64px; background: #fff; }
-  .tdoc-modal textarea.tdoc-ask-input:focus { outline: none; border-color: var(--td-accent); }
-  .tdoc-ask-panel .tdoc-ask-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .tdoc-ask-panel .tdoc-ask-remaining { font-size: 12px; color: #777; min-width: 0; }
-  .tdoc-ask-panel .tdoc-ask-row button { flex: none; white-space: nowrap; }
-  .tdoc-ask-panel .tdoc-ask-focus { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; color: #555; background: #f5f6f8; border-radius: 6px; padding: 6px 8px; }
-  .tdoc-ask-panel .tdoc-ask-focus q { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-style: italic; }
-  .tdoc-ask-panel .tdoc-ask-focus-label { font-weight: 600; color: #777; flex: none; }
-  .tdoc-ask-panel .text-btn { border: 0; background: none; padding: 0; color: var(--td-accent, #1652f0); font-size: 12px; cursor: pointer; flex: none; }
-  .tdoc-ask-panel .tdoc-ask-result { margin: 0 0 14px; padding: 0 0 12px; border-bottom: 1px solid #eee; }
-  .tdoc-ask-panel p.tdoc-ask-q { margin: 0 0 8px; font-weight: 600; color: #222; overflow-wrap: anywhere; }
-  .tdoc-ask-panel .tdoc-ask-answer-text { font-size: 14px; line-height: 1.55; color: #222; overflow-wrap: anywhere; }
-  .tdoc-ask-panel .tdoc-ask-answer-text p { margin: 0 0 8px; color: inherit; }
-  .tdoc-ask-panel .tdoc-ask-answer-text ul, .tdoc-ask-panel .tdoc-ask-answer-text ol { margin: 0 0 8px; padding-left: 20px; }
-  .tdoc-ask-panel .tdoc-ask-result-actions { display: flex; gap: 8px; margin: 4px 0 8px; }
-  .tdoc-modal .tdoc-ask-result-actions button { padding: 5px 12px; font-size: 13px; }
-  .tdoc-ask-panel a.tdoc-ask-connect { display: inline-block; font-size: 12px; color: #777; text-decoration: none; }
-  .tdoc-ask-panel a.tdoc-ask-connect:hover { color: var(--td-accent, #1652f0); text-decoration: underline; }
-  .tdoc-ask-panel p.tdoc-ask-limit { margin: 0; }
-  .tdoc-ask-panel p.tdoc-ask-limit a.tdoc-ask-connect { font-size: 13px; color: #444; }
-  .tdoc-ask-panel p.tdoc-ask-error { margin: 0; font-size: 13px; color: var(--td-danger, #c33); }
-  /* Send to my agent / Copy for my agent: the same panel, one status line
-     per question and the line to paste. */
-  .tdoc-ask-panel .tdoc-ask-result .tdoc-ask-focus { margin: 0 0 8px; }
-  .tdoc-ask-panel p.tdoc-ask-status { margin: 0 0 8px; font-size: 12.5px; color: #666; }
-  .tdoc-ask-panel p.tdoc-ask-status.is-failed { color: var(--td-danger, #c33); }
-  .tdoc-ask-panel pre.tdoc-ask-line { margin: 0 0 8px; padding: 8px 10px; border-radius: 6px; background: #f5f6f8; color: #222; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-  /* One look for the three: the panel's question box is the comment
-     composer's (accent border, same quote chip), light instead of dark. */
-  .tdoc-modal textarea.tdoc-ask-input { border-color: var(--td-accent, #1652f0); }
-  /* Comment / Ask AI / Send to my agent in the selection popover: the three
-     buttons keep one row, the shortcut hint drops under them. */
-  .tdoc-popup .foot.has-ask .hint { order: 2; flex-basis: 100%; text-align: right; }
-  .tdoc-popup .foot.has-ask .tdoc-composer-foot-actions { margin-left: auto; gap: 6px; }
-  .tdoc-popup .foot.has-ask .submit { padding: 6px 10px; white-space: nowrap; }
+  /* Asking in the comment composer: @ hands a comment to an agent; tagging
+     the answerer (their own agent, answers only, or tdoc AI) shows "Only me",
+     which keeps the question and its answer private until Make public. One
+     muted line under a tdoc AI reply tells its asker what is left. */
+  .tdoc-popup .tdoc-ask-boxes { display: inline-flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; overflow: hidden; color: #e8e8e8; }
+  .tdoc-popup .tdoc-ask-boxes .ui-checkbox-hint { color: #9a9a9a; }
+  .tdoc-popup .tdoc-ask-boxes .ui-checkbox-box:not([data-checked]) { border-color: #8a8a90; }
+  .tdoc-popup .foot .tdoc-composer-foot-actions { flex: none; margin-left: auto; }
+  .tdoc-popup.tdoc-private-ask p.tdoc-private-q { margin: 8px 0 6px; color: #fff; font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+  .tdoc-popup.tdoc-private-ask .tdoc-private-a { max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: #1d1d1f; color: #e8e8e8; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .tdoc-popup.tdoc-private-ask .tdoc-private-who { display: block; margin-bottom: 4px; font-size: 11px; font-weight: 600; color: #9aa4ff; }
+  .tdoc-popup.tdoc-private-ask .tdoc-private-status { color: #9a9a9a; }
+  .tdoc-popup.tdoc-private-ask .hint { display: inline-flex; align-items: center; gap: 4px; }
+  .tdoc-ai-quota { margin: 2px 0 4px; font-size: 11.5px; color: #8a8a8a; }
+  .tdoc-ai-quota a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .tdoc-ai-quota a:hover { color: var(--td-accent, #1652f0); }
+  .tdoc-ai-answering { padding: 4px 0 0; }
 
   /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
   .tdoc-bar .tdoc-send-agent-action {
@@ -1163,3 +1141,53 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
 @media (prefers-reduced-motion: reduce) {
   html[data-tdoc-navigating] body::after { animation: none; transform: scaleX(0.6); }
 }
+
+/* The comment composer's @agent button, its menu (Mine / Team / tdoc AI),
+   and the Ask / Ask + request change row under the text. */
+.tdoc-popup .tdoc-composer-agent { padding: 6px 10px; border: 1px solid #4a4a4a; border-radius: 6px; background: #2c2c2c; color: #f0f0f0; font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.tdoc-popup .tdoc-composer-agent:hover { background: #3a3a3a; }
+.tdoc-popup .tdoc-ask-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; color: #e8e8e8; }
+.tdoc-popup .tdoc-ask-mode { border-color: #4a4a4a; flex-wrap: nowrap; }
+.tdoc-popup .tdoc-ask-mode button { padding: 4px 10px; background: #1d1d1f; color: #d8d8d8; font-size: 12px; white-space: nowrap; }
+.tdoc-popup .tdoc-ask-mode button + button { border-left-color: #4a4a4a; }
+.tdoc-popup .tdoc-ask-mode button.active { background: var(--td-accent); color: #fff; }
+.tdoc-popup .tdoc-ask-mode button:disabled { color: #6e6e73; }
+.tdoc-popup .tdoc-ask-row .ui-checkbox-box:not([data-checked]) { border-color: #8a8a90; }
+.tdoc-agent-menu-group { padding: 6px 10px 2px; font: 600 11px system-ui, -apple-system, sans-serif; color: #8a8a8a; }
+.ui-menu-item.tdoc-agent-menu-item { min-width: 240px; }
+.tdoc-agent-menu-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tdoc-agent-menu-hint { margin-left: auto; color: #8a8a8a; font-size: 12px; white-space: nowrap; }
+.ui-menu-item.tdoc-agent-menu-connect { color: var(--td-accent, #1652f0); font-size: 12.5px; }
+.tdoc-mention-menu a.tdoc-mention-connect { display: block; padding: 4px 10px 6px 34px; font-size: 12px; color: var(--td-accent, #1652f0); text-decoration: none; }
+.tdoc-mention-menu a.tdoc-mention-connect:hover { text-decoration: underline; }
+
+/* The document bar (option A, Julie 2026-10-24): logo · space / folder /
+   title on the left; Edited … · ✈ · Share · ⋯ · avatar on the right. Calm:
+   muted words and quiet buttons, the one accent is the unread dot. */
+.tdoc-bar .tdoc-crumbs { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+.tdoc-bar .tdoc-crumb { flex: 0 1 auto; min-width: 0; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 6px; border: 0; border-radius: 6px; background: transparent; color: #6b6b70; font: 500 14px system-ui, -apple-system, sans-serif; text-decoration: none; cursor: pointer; }
+.tdoc-bar .tdoc-crumb:hover { background: #f0f1f4; color: #1a1a1a; }
+.tdoc-bar span.tdoc-crumb { cursor: default; }
+.tdoc-bar span.tdoc-crumb:hover { background: transparent; color: #6b6b70; }
+.tdoc-bar .tdoc-crumbs .doc-author::before { content: none; }
+.tdoc-bar .tdoc-crumb-sep { color: #c8c8cc; flex: none; }
+.tdoc-bar .tdoc-crumbs .doc-title { padding-left: 4px; }
+.tdoc-bar .tdoc-edited { height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: #8a8a8f; font: 13px system-ui, -apple-system, sans-serif; white-space: nowrap; cursor: pointer; }
+.tdoc-bar .tdoc-edited:hover { background: #f0f1f4; color: #1a1a1a; }
+.tdoc-bar .tdoc-share-quiet { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #1a1a1a; font: 500 13.5px system-ui, -apple-system, sans-serif; cursor: pointer; }
+.tdoc-bar .tdoc-share-quiet:hover { background: #f0f1f4; }
+/* Avatar only: the name is the menu's title, not the bar's. */
+.tdoc-bar .tdoc-account-trigger .name { display: none; }
+.tdoc-bar .tdoc-chip.tdoc-account-trigger:not(.signin) { padding: 3px; }
+/* Mode rows at the top of ⋯. */
+.tdoc-menu-label { padding: 6px 10px 2px; font: 600 11px system-ui, -apple-system, sans-serif; color: #8a8a8a; }
+.ui-menu-item.tdoc-mode-item .tdoc-mode-check { margin-left: auto; color: var(--td-accent, #1652f0); }
+/* Open / Resolved / All, docked at the top of the comment column on a wide
+   screen, and above the list in the phone drawer. */
+.tdoc-comment-filter-dock { position: fixed; z-index: 999990; }
+.tdoc-comment-filter.tdoc-seg { background: #fff; border-color: #e3e3e6; box-shadow: 0 1px 2px rgba(0,0,0,.04); flex-wrap: nowrap; }
+.tdoc-comment-filter.tdoc-seg button { padding: 4px 10px; font: 12px system-ui, -apple-system, sans-serif; white-space: nowrap; }
+.tdoc-comment-filter-row { display: flex; justify-content: center; margin: 0 0 10px; }
+.tdoc-bar .tdoc-secondary-toggle { position: relative; }
+.tdoc-bar .tdoc-crumbs .doc-title { margin-left: 2px; }
+.tdoc-bar .tdoc-secondary-toggle .tdoc-unread-dot { top: 8px; right: 6px; }

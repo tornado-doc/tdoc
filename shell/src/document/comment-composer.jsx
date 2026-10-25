@@ -1,6 +1,12 @@
-import React, { useContext, useEffect, useState } from 'react';
-import { AgentMentionContext, MentionField } from './mention-field.jsx';
-import { taggedAgent } from './agent-choices.js';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import { Check, Lock } from 'lucide-react';
+import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, taggedAgent, targetKey } from './agent-choices.js';
+import { ProviderMark } from './notify-handoff.jsx';
+import { AppMenu, AppMenuItem, AppMenuLinkItem } from '../ui/menu.jsx';
+import { SegmentedControl } from '../ui/segmented-control.jsx';
+import { freeLeftText, joinAiTags, mentionsAi, onlyMeDefault } from './ai-answerer.js';
+import { AppCheckbox } from '../ui/checkbox.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
@@ -67,21 +73,22 @@ export function CommentComposer({
   sendToAgentDisabledReason = null,
   // Set when @agent would work but nobody is linked yet: the button stays,
   // and pressing it explains how to connect instead of vanishing silently.
+  // Only where the @agent buttons are (AgentButtonsContext).
   connectAgentPrompt = null,
   // Where "Set up an agent" goes. The feedback overlay runs on someone
   // else's app, so it passes an absolute tdoc URL.
   agentSetupHref = '/me?view=settings#agents',
-  // Comment / Ask AI / Send to my agent: the same three as the doc's bar.
-  // Each takes what is typed here as the question (it may be empty: the
-  // panel then asks for one). Absent where there is no such door.
-  onAskAI = null,
-  // { label, title, onClick } -- "Connect my agent", "Send to my agent" or
-  // "Copy for my agent", by what the reader's own account has.
-  myAgentAction = null,
+  // An "Only me" question in flight or answered: { question, label, status,
+  // answer, error }. The composer turns into its answer, with Make public.
+  privateAsk = null,
+  onMakePublic = null,
 }) {
   const [text, setText] = useState('');
+  const [mode, setMode] = useState(null);
+  const [onlyMe, setOnlyMe] = useState(null);
   const [connectOpen, setConnectOpen] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
+  const agentButtons = useContext(AgentButtonsContext);
 
   useEffect(() => {
     const onChange = () => setViewport(readViewport());
@@ -108,17 +115,82 @@ export function CommentComposer({
   // press while the first post is still in flight used to post a twin.
   const [busy, setBusy] = useState(false);
   const agents = useContext(AgentMentionContext);
+  const choices = agents.choices || [];
+  // The agent this comment names after @ (the @agent button puts the
+  // default one in; a bare @AI means it too). With one, "Ask" or "Ask +
+  // request change": the second only when that agent may edit this doc
+  // (authorship, decided by the server), and the default when it may.
+  // "Only me" (private question and answer) is for Ask, to one's own agent
+  // or tdoc AI -- never a team agent, which answers for the team.
+  const target = taggedAgent(text, choices) || (mentionsAi(text) ? choices[0] || null : null);
+  const canChange = Boolean(target && target.can_edit);
+  const askMode = canChange ? (mode || 'change') : 'ask';
+  const asking = Boolean(target) && askMode === 'ask';
+  const ownOrCloud = Boolean(target) && (target.tdoc_ai || !target.team_agent);
+  const private_ = asking && ownOrCloud && (onlyMe === null ? onlyMeDefault(target) : onlyMe);
+  const tagOf = (t) => `@${AGENT_TAG_JOINER}${agentMentionName(t, choices)}`;
+  // The @agent button and its menu: put the default agent in (once), or
+  // swap the one already there.
+  const field = useRef(null);
+  const putAgent = (t) => {
+    const tag = tagOf(t);
+    setText((cur) => {
+      const now = taggedAgent(cur, choices);
+      if (now) return cur.split(tagOf(now)).join(tag);
+      return `${cur.replace(/\s+$/, '')}${cur.trim() ? ' ' : ''}${tag} `;
+    });
+    setMode(null);
+    setOnlyMe(null);
+  };
+  const whose = (t) => (t.tdoc_ai ? 'tdoc AI' : t.team_agent ? 'Team' : 'Mine');
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
-      // An agent picked after @ gets this comment, as if chosen in Send to agent.
-      const recipient = canSendToAgent ? taggedAgent(text, agents.choices) : null;
-      await onSubmit(text, { sendToAgent: canSendToAgent && (sendToAgent || Boolean(recipient)), recipient });
+      // An agent picked after @ that may edit gets this comment, as if
+      // chosen in Send to agent -- unless Ask only is ticked.
+      const recipient = canSendToAgent && target && canChange && !asking ? target : null;
+      await onSubmit(target || mentionsAi(text) ? joinAiTags(text) : text, {
+        sendToAgent: canSendToAgent && !asking && (sendToAgent || Boolean(recipient)),
+        recipient,
+        target,
+        askOnly: asking,
+        onlyMe: private_,
+      });
     } finally {
       setBusy(false);
     }
   };
+
+  if (privateAsk) {
+    return (
+      <div
+        className="tdoc-popup tdoc-private-ask"
+        style={{ top, left }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="head">
+          <span className="h">{preview}</span>
+          <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
+        </div>
+        <p className="tdoc-private-q">{privateAsk.question}</p>
+        <div className="tdoc-private-a" aria-live="polite">
+          <span className="tdoc-private-who">{privateAsk.label}</span>
+          {privateAsk.answer
+            ? <MentionText text={privateAsk.answer} mentions={[]} />
+            : <span className="tdoc-private-status">{privateAsk.error || privateAsk.status}</span>}
+        </div>
+        <div className="foot">
+          <span className="hint"><Lock size={11} aria-hidden="true" /> Only you can see this</span>
+          <div className="tdoc-composer-foot-actions">
+            <button className="submit" type="button" disabled={!privateAsk.answer || privateAsk.publishing} onClick={onMakePublic}>
+              {privateAsk.publishing ? 'Posting…' : 'Make public'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -131,16 +203,40 @@ export function CommentComposer({
         <span className="h">{preview}</span>
         <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
       </div>
-      <MentionField
+      <div ref={field}><MentionField
         autoFocus
         placeholder={demo
           ? 'What should change? Type a GitHub @ — or @email'
-          : 'What should change? Type @ to notify someone'}
+          : (agents.choices || []).length && !agentButtons
+            ? 'Comment, or type @ to ask an agent'
+            : 'What should change? Type @ to notify someone'}
         value={text}
         people={mentionable}
         onChange={setText}
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
-      />
+      /></div>
+      {target ? (
+        <div className="tdoc-ask-row">
+          <SegmentedControl
+            className="tdoc-ask-mode"
+            ariaLabel="What the agent does"
+            value={askMode}
+            onChange={setMode}
+            options={[
+              { value: 'ask', label: 'Ask' },
+              {
+                value: 'change',
+                label: 'Ask + request change',
+                disabled: !canChange,
+                reason: target.tdoc_ai ? 'tdoc AI only answers' : 'this agent can’t edit this doc',
+              },
+            ]}
+          />
+          {asking && ownOrCloud ? (
+            <AppCheckbox className="tdoc-only-me" checked={private_} onCheckedChange={setOnlyMe} label="Only me" />
+          ) : null}
+        </div>
+      ) : null}
       {connectOpen && connectAgentPrompt ? (
         <div className="tdoc-connect-agent">
           <p><strong>No agent is connected yet.</strong> Connect one once (Raft or a webhook), then @agent works here.</p>
@@ -152,14 +248,53 @@ export function CommentComposer({
           </details>
         </div>
       ) : null}
-      <div className={`foot${onAskAI || myAgentAction ? ' has-ask' : ''}`}>
-        <span className="hint">
-          {demo
-            ? 'Demo — refresh clears it'
-            : (canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : '⌘+Enter to submit')}
-        </span>
+      <div className="foot">
+        {target ? (
+          <span className="hint">{asking
+            ? `${agentDisplayName(target)} answers${private_ ? ' you alone' : ' in the thread'}${canChange ? '' : target.tdoc_ai ? ' · it only answers' : ' · it can’t edit this doc'}`
+            : `${agentDisplayName(target)} answers and may change the doc`}</span>
+        ) : (
+          <span className="hint">
+            {demo
+              ? 'Demo — refresh clears it'
+              : (canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : '⌘+Enter to submit')}
+          </span>
+        )}
         <div className="tdoc-composer-foot-actions">
-          {!canSendToAgent && connectAgentPrompt ? (
+          {choices.length && !agentButtons ? (
+            <AppMenu
+              align="end"
+              trigger={(
+                <button className="tdoc-composer-agent" type="button" disabled={busy} onClick={() => { if (!target) putAgent(choices[0]); }}>
+                  @agent
+                </button>
+              )}
+            >
+              {['Mine', 'Team', 'tdoc AI'].map((group) => {
+                const rows = choices.filter((t) => whose(t) === group);
+                if (!rows.length) return null;
+                return (
+                  <React.Fragment key={group}>
+                    <div className="tdoc-agent-menu-group">{group}</div>
+                    {rows.map((t) => (
+                      <AppMenuItem key={targetKey(t)} className="tdoc-action-menu-item tdoc-agent-menu-item" onClick={() => putAgent(t)}>
+                        <ProviderMark target={t} size={14} />
+                        <span className="tdoc-agent-menu-name">{agentDisplayName(t, choices)}</span>
+                        {t.tdoc_ai && freeLeftText(agents.ai?.remaining)
+                          ? <span className="tdoc-agent-menu-hint">{freeLeftText(agents.ai.remaining)}</span>
+                          : t.last_writer ? <span className="tdoc-agent-menu-hint">edited last</span> : null}
+                        {target && targetKey(target) === targetKey(t) ? <Check size={14} className="tdoc-space-check" aria-label="Picked" /> : null}
+                      </AppMenuItem>
+                    ))}
+                    {group === 'tdoc AI' ? (
+                      <AppMenuLinkItem className="tdoc-action-menu-item tdoc-agent-menu-connect" href="/start">Connect my agent →</AppMenuLinkItem>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </AppMenu>
+          ) : null}
+          {agentButtons && !canSendToAgent && connectAgentPrompt ? (
             <button
               className="submit agent tdoc-agent-unlinked"
               type="button"
@@ -170,29 +305,7 @@ export function CommentComposer({
               @agent
             </button>
           ) : null}
-          {onAskAI ? (
-            <button
-              className="submit agent tdoc-composer-ask"
-              type="button"
-              disabled={busy}
-              title="Ask AI about this passage"
-              onClick={() => onAskAI(text)}
-            >
-              Ask AI
-            </button>
-          ) : null}
-          {myAgentAction ? (
-            <button
-              className="submit agent tdoc-composer-my-agent"
-              type="button"
-              disabled={busy}
-              title={myAgentAction.title || myAgentAction.label}
-              onClick={() => myAgentAction.onClick(text)}
-            >
-              {myAgentAction.label}
-            </button>
-          ) : null}
-          {canSendToAgent ? (
+          {agentButtons && canSendToAgent ? (
             <button
               className="submit agent"
               type="button"

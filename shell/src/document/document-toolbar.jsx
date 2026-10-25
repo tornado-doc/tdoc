@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Bot,
-  ChevronDown,
+  Check,
   ChevronRight,
-  CircleCheck,
   Copy,
   CopyPlus,
   Download,
@@ -12,12 +10,12 @@ import {
   History,
   Share2,
   Send,
-  Sparkles,
   Star,
   Trash2,
   Upload,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
+import { SpaceMenuItems, useSpaceTeams } from '../workspace-switcher.jsx';
 
 // The label after a version number. "current" read as "latest" from an old
 // version (round-4 tester), so the two facts get their own words: where you
@@ -83,52 +81,88 @@ function DocumentTitle({ title, canRename, onRename }) {
   );
 }
 
-export function DocumentBreadcrumbs({ config, title, starred, onRename, onToggleStar, onCompare }) {
-  if (config.isLanding) return null;
+// "Edited 3m ago": when the version on screen was made, in words.
+export function editedAgo(iso, now = Date.now()) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return '';
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 60) return 'Edited just now';
+  if (s < 3600) return `Edited ${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `Edited ${Math.floor(s / 3600)}h ago`;
+  if (s < 7 * 86400) return `Edited ${Math.floor(s / 86400)}d ago`;
+  return `Edited ${new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+}
 
+// The space a doc sits in, as the first crumb: its team, or My docs for the
+// owner. A click opens the space switcher (the same rows as the account
+// menu's Switch space).
+function SpaceCrumb({ config, label, space, currentTeam }) {
+  const teams = useSpaceTeams(null, Boolean(config.identity));
   return (
-    <>
-      <AppMenu
-        align="start"
-        trigger={(
-          <button id="tdoc-version-toggle" type="button" className="tdoc-version-toggle">
-            v{config.version}
-            {config.versions?.length > 1 ? <ChevronDown size={11} /> : null}
-          </button>
-        )}
-      >
-        {(config.versions || []).map((version) => (
-          <AppMenuItem
-            key={version.n}
-            className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
-            onClick={() => {
-              location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`;
-            }}
-          >
-            v{version.n}{versionLabel(version.n, config)}
-          </AppMenuItem>
-        ))}
-        <AppMenuSeparator />
-        <AppMenuItem onClick={onCompare}>View changes</AppMenuItem>
-      </AppMenu>
-      <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
-      {/* Whose document this is. Absent for anything published before hosted
-          accounts, for the landing doc, and on a self-hosted worker — those
-          name nobody rather than guessing. Folds away before the title does. */}
-      {config.author ? <span className="doc-author">{config.author}</span> : null}
-      {config.viewerStar ? (
-        <button
-          id="tdoc-star-btn"
-          type="button"
-          className={`tdoc-star-btn${starred ? ' is-starred' : ''}`}
-          aria-pressed={starred}
-          aria-label={starred ? 'Remove from starred' : 'Add to starred'}
-          onClick={onToggleStar}
-        >
-          <Star size={15} fill={starred ? 'currentColor' : 'none'} />
+    <AppMenu
+      align="start"
+      trigger={(
+        <button type="button" className="tdoc-crumb tdoc-crumb-space" aria-label={`Space: ${label}. Switch space`}>
+          {label}
         </button>
-      ) : null}
-    </>
+      )}
+    >
+      <SpaceMenuItems space={space} teams={teams} currentTeam={currentTeam} />
+    </AppMenu>
+  );
+}
+
+// The bar's left side after the logo: space / folder / title. The space is
+// the doc's team (for its members), My docs (for its owner), or whose doc it
+// is (for anyone else); the folder goes to that folder's list. Version and
+// star moved: the version is behind "Edited …" on the right, the star in ⋯.
+export function DocumentBreadcrumbs({ config, title, onRename }) {
+  if (config.isLanding) return null;
+  const team = config.teamManage?.team || null;
+  const sep = <span className="tdoc-crumb-sep" aria-hidden="true">/</span>;
+  const space = team
+    ? <SpaceCrumb config={config} label={team.name} space={team.id} currentTeam={team} />
+    : config.isOwner && config.identity
+      ? <SpaceCrumb config={config} label="My docs" space="" currentTeam={null} />
+      : config.author ? <span className="tdoc-crumb doc-author">{config.author}</span> : null;
+  return (
+    <nav className="tdoc-crumbs" aria-label="Breadcrumb">
+      {space ? <>{space}{sep}</> : null}
+      {config.folder ? <><a className="tdoc-crumb tdoc-crumb-folder" href={config.folder.href}>{config.folder.name}</a>{sep}</> : null}
+      <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
+    </nav>
+  );
+}
+
+// "Edited 3m ago", muted, on the right: the version on screen. A click lists
+// the versions and View changes (it was the v1 chip beside the title).
+export function DocumentEdited({ config, onCompare }) {
+  if (config.isLanding || config.mode === 'local') return null;
+  const current = (config.versions || []).find((v) => Number(v.n) === Number(config.version)) || null;
+  const words = editedAgo(current?.created) || `v${config.version}`;
+  return (
+    <AppMenu
+      align="end"
+      trigger={(
+        <button id="tdoc-version-toggle" type="button" className="tdoc-edited" title={`Version ${config.version}`}>
+          {words}
+        </button>
+      )}
+    >
+      {[...(config.versions || [])].reverse().map((version) => (
+        <AppMenuItem
+          key={version.n}
+          className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
+          onClick={() => {
+            location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`;
+          }}
+        >
+          v{version.n}{versionLabel(version.n, config)}
+        </AppMenuItem>
+      ))}
+      <AppMenuSeparator />
+      <AppMenuItem onClick={onCompare}>View changes</AppMenuItem>
+    </AppMenu>
   );
 }
 
@@ -142,8 +176,8 @@ export function DocumentPrimaryAction({
       <Upload size={14} /> <span>Publish</span>
     </button>
   ) : (
-    <button id="tdoc-share-btn" type="button" className="primary tdoc-document-primary" aria-label="Share" onClick={onShare}>
-      <Share2 size={14} /> <span>Share</span>
+    <button id="tdoc-share-btn" type="button" className="tdoc-share-quiet tdoc-document-primary" aria-label="Share" onClick={onShare}>
+      <Share2 size={15} /> <span>Share</span>
     </button>
   );
 }
@@ -169,46 +203,8 @@ export function DocumentSendAgentAction({ count = 0, onClick }) {
   );
 }
 
-// Ask this doc: the free AI answer for readers. Shown only where the server
-// has a model; a signed-out reader gets the sign-in instead of the panel.
-export function DocumentAskAction({ onClick }) {
-  return (
-    <button
-      id="tdoc-ask-btn"
-      type="button"
-      className="tdoc-ask-action"
-      aria-label="Ask AI about this doc"
-      title="Ask AI about this doc"
-      onClick={onClick}
-    >
-      <Sparkles size={15} aria-hidden="true" />
-      <span>Ask AI</span>
-    </button>
-  );
-}
-
-// The third of Comment / Ask AI / Send to my agent, for a reader: the label
-// says what pressing it does with what their own account has (my-agent.js).
-export function DocumentMyAgentAction({ label, title = '', onClick }) {
-  return (
-    <button
-      id="tdoc-my-agent-btn"
-      type="button"
-      className="tdoc-ask-action tdoc-my-agent-action"
-      aria-label={label}
-      title={title || label}
-      onClick={onClick}
-    >
-      <Bot size={15} aria-hidden="true" />
-      <span>{label}</span>
-    </button>
-  );
-}
-
 export function DocumentOverflowActions({
   config,
-  onAsk = null,
-  myAgent = null,
   starred,
   onToggleStar,
   onPublish,
@@ -219,22 +215,35 @@ export function DocumentOverflowActions({
   onPrint,
   onMoveDocument,
   onDelete,
-  resolvedCount,
-  showResolved,
-  onToggleResolved,
   onCompare,
+  // Read / Comment / Edit, at the top of ⋯ with the current one ticked
+  // (it was a dropdown in the bar): { modes: [{ value, label, Icon }], value, onChange }.
+  mode = null,
 }) {
   return (
     <>
-      {onAsk ? (
-        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="ask" onClick={onAsk}>
-          <Sparkles size={15} /> Ask AI
-        </AppMenuItem>
-      ) : null}
-      {myAgent ? (
-        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="my-agent" onClick={myAgent.onClick}>
-          <Bot size={15} /> {myAgent.label}
-        </AppMenuItem>
+      {mode && mode.modes.length > 1 ? (
+        <>
+          <div className="tdoc-menu-label">Mode</div>
+          {mode.modes.map((option) => {
+            const Icon = option.Icon;
+            const selected = option.value === mode.value;
+            return (
+              <AppMenuItem
+                key={option.value}
+                className={`tdoc-action-menu-item tdoc-mode-item${selected ? ' current' : ''}`}
+                role="menuitemradio"
+                aria-checked={selected}
+                data-action={`mode-${option.value}`}
+                onClick={() => mode.onChange(option.value)}
+              >
+                <Icon size={15} /> <span>{option.label}</span>
+                {selected ? <Check className="tdoc-mode-check" size={14} /> : null}
+              </AppMenuItem>
+            );
+          })}
+          <AppMenuSeparator />
+        </>
       ) : null}
       <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
         <History size={15} /> View changes
@@ -250,7 +259,7 @@ export function DocumentOverflowActions({
       )}
       {(config.versions || []).length > 1 ? (
         <AppSubmenu
-          className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-version-submenu-trigger"
+          className="tdoc-action-menu-item tdoc-version-submenu-trigger"
           popupClassName="tdoc-version-submenu"
           trigger={(
             <>
@@ -273,19 +282,9 @@ export function DocumentOverflowActions({
         </AppSubmenu>
       ) : null}
       {config.viewerStar ? (
-        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="star" onClick={onToggleStar}>
+        <AppMenuItem className="tdoc-action-menu-item" data-action="star" onClick={onToggleStar}>
           <Star size={15} fill={starred ? 'currentColor' : 'none'} />
           {starred ? 'Remove from starred' : 'Add to starred'}
-        </AppMenuItem>
-      ) : null}
-      {resolvedCount ? (
-        <AppMenuItem
-          className="tdoc-action-menu-item tdoc-mobile-overflow-only"
-          data-action="show-resolved"
-          onClick={onToggleResolved}
-        >
-          <CircleCheck size={15} />
-          {showResolved ? 'Hide resolved' : `Show resolved (${resolvedCount})`}
         </AppMenuItem>
       ) : null}
       {/* Four groups: what this doc is, how to take a copy of it, the app, the
@@ -293,7 +292,7 @@ export function DocumentOverflowActions({
           separator carries tdoc-mobile-overflow-only because everything above
           it does — on a desktop that group is not rendered, and a rule floating
           at the top of the menu would be the only thing left of it. */}
-      <AppMenuSeparator className="tdoc-mobile-overflow-only" />
+      <AppMenuSeparator />
       {/* One row instead of three. Taking a copy of the document is a single
           intent; which format is a detail that belongs one level down.
           Duplicate stays out here — it makes a new document on tdoc, which is

@@ -3,7 +3,7 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Terminal, Webhook } from 'lucide-react';
+import { Sparkles, Terminal, Webhook } from 'lucide-react';
 import { ClaudeMark, OpenAIMark, RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
@@ -39,13 +39,17 @@ function recipientPrimary(t) {
 // recently. Directory agents that never worked with tdoc carry no note.
 // `list` is the picker's whole list: a label repeats where the agent runs
 // only when another row would otherwise read the same.
+// Every row says whose agent it is -- the team's, or the viewer's own -- and
+// the one that wrote the latest version says so (it is the default).
 export function recipientOption(t, preselected, list = null) {
   const why = agentDown(t)
     ? (t.provider === 'local' ? localSeenText(t) : `${t.status} in Raft`)
-    : sameTarget(t, preselected)
-      ? (t.source === 'doc' ? "this doc's agent" : 'default')
-      : (t.last_touched ? `used ${sinceText(t.last_touched)}` : '');
-  return { value: targetKey(t), label: agentDisplayName(t, list), hint: why };
+    : t.last_writer ? 'edited last'
+      : sameTarget(t, preselected)
+        ? (t.source === 'doc' ? "this doc's agent" : 'default')
+        : (t.last_touched ? `used ${sinceText(t.last_touched)}` : '');
+  const whose = t.tdoc_ai ? '' : t.team_agent ? 'Team' : 'Mine';
+  return { value: targetKey(t), label: agentDisplayName(t, list), hint: [whose, why].filter(Boolean).join(' · '), whose };
 }
 
 // Raft's directory says this agent is not running (worker raftDirectoryAgents,
@@ -80,6 +84,7 @@ function sinceText(iso) {
 }
 
 export function ProviderMark({ target, size = 18 }) {
+  if (target && target.tdoc_ai) return <Sparkles size={size} aria-hidden="true" />;
   const meta = providerMeta(target);
   if (meta.mark === 'raft') return <RaftMark size={size} />;
   if (meta.mark === 'webhook') return <Webhook size={size} aria-hidden="true" />;

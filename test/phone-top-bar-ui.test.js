@@ -2,7 +2,9 @@
 // space chip and the account chip step aside, and the space list (My docs,
 // every team with the current one checked, New team, Workspace settings) is
 // a "Switch space" submenu of ⋯. Show resolved, Share and Versions stay
-// reachable there, and Ask AI where it is offered. A desktop keeps its chips exactly as before.
+// reachable there; Ask AI is not a menu row (it is asked in a comment). On a
+// desktop the document page has no space chip -- a doc already belongs to its
+// space -- and Switch space is in the account menu.
 // Run with: node test/phone-top-bar-ui.test.js
 
 const assert = require('assert/strict');
@@ -47,7 +49,7 @@ const TEAMS = [
         };
         for (const [teams, askAi] of [[TEAMS, false], [[], false], [TEAMS, true]]) {
           const which = (teams.length ? 'with teams' : 'without teams') + (askAi ? ', published with Ask AI' : '');
-          await t(`${engine} 390px ${which}: ⋯ is on screen and carries Show resolved and the spaces`, async () => {
+          await t(`${engine} 390px ${which}: ⋯ is on screen and carries the spaces; the drawer filters resolved`, async () => {
             const { ctx, page, errors } = await open(390, teams, askAi);
             const bar = await page.evaluate(() => {
               const more = document.getElementById('tdoc-more-btn');
@@ -62,16 +64,14 @@ const TEAMS = [
             assert(bar.overflow <= 1, `bar overflows sideways: ${bar.overflow}`);
             if (shots) await page.screenshot({ path: path.join(shots, `phone-bar-${engine}-${teams.length ? 'teams' : 'solo'}.png`) });
             await page.locator('#tdoc-more-btn').click();
-            // Signed in, resolved threads may start shown: the row reads Hide.
-            const resolved = page.getByRole('menuitem', { name: /(Show|Hide) resolved/ });
-            await resolved.waitFor({ timeout: 5000 });
-            const label = (await resolved.textContent()).trim();
+            await page.getByRole('menuitem', { name: /Switch space/ }).waitFor({ timeout: 5000 });
             // The local server publishes; tdoc.dev shares. Either is the doc's
-            // way out, and both live in ⋯ on a phone.
-            for (const name of [/(Show|Hide) resolved/, /^(Share|Publish)/, /Versions/, /Switch space/, /My account/, ...(askAi ? [/Ask AI/] : [])]) {
+            // way out, and both live in ⋯ on a phone. The modes head it.
+            for (const name of [/^(Share|Publish)/, /Versions/, /Switch space/, /My account/, /Dark mode|Light mode/]) {
               const item = page.getByRole('menuitem', { name }).first();
               assert(await item.isVisible(), `${name} is in ⋯`);
             }
+            assert.equal(await page.getByRole('menuitem', { name: /Ask AI|my agent|resolved/i }).count(), 0, 'Ask AI / my agent / resolved rows are back in ⋯');
             await page.getByRole('menuitem', { name: /Switch space/ }).click();
             const names = page.locator('.ui-menu-popup .tdoc-space-item-name');
             await names.first().waitFor({ timeout: 5000 });
@@ -84,27 +84,32 @@ const TEAMS = [
             await page.keyboard.press('Escape');
             await page.keyboard.press('Escape');
             await page.locator('.ui-menu-popup').first().waitFor({ state: 'detached' }).catch(() => {});
-            // Show / Hide resolved still works from ⋯.
-            await page.locator('#tdoc-more-btn').click();
-            await page.getByRole('menuitem', { name: /(Show|Hide) resolved/ }).click();
-            await page.locator('#tdoc-more-btn').click();
-            await page.getByRole('menuitem', { name: /^Show/.test(label) ? /Hide resolved/ : /Show resolved/ }).waitFor({ timeout: 5000 });
-            await page.keyboard.press('Escape');
+            // Resolved threads are filtered at the head of the comments drawer.
+            await page.locator('.tdoc-fab').click();
+            const filter = page.locator('#tdoc-comment-layer .tdoc-comment-filter');
+            await filter.waitFor({ timeout: 5000 });
+            await filter.getByRole('radio', { name: /Open/ }).click();
+            assert.equal(await filter.getByRole('radio', { name: /Open/ }).getAttribute('aria-checked'), 'true');
+            await filter.getByRole('radio', { name: /All/ }).click();
             assert.deepEqual(errors, []);
             await ctx.close();
           });
         }
-        await t(`${engine} 1280px: desktop keeps the space and account chips`, async () => {
+        await t(`${engine} 1280px: the doc page has no space chip; Switch space and Dark mode are in the account menu`, async () => {
           const { ctx, page, errors } = await open(1280, TEAMS);
-          const space = page.locator('.tdoc-bar .tdoc-space-trigger');
-          await space.waitFor();
-          assert(await space.isVisible(), 'space chip shown on desktop');
-          assert(await page.locator('.tdoc-bar .tdoc-account-trigger').isVisible(), 'account chip shown on desktop');
-          await space.click();
+          const account = page.locator('.tdoc-bar .tdoc-account-trigger');
+          await account.waitFor();
+          assert.equal(await page.locator('.tdoc-bar .tdoc-space-trigger').count(), 0, 'space chip on a document page');
+          assert.equal(await page.locator('.tdoc-bar .tdoc-theme-btn, #tdoc-theme-btn').count(), 0, 'standalone theme button is back');
+          await account.click();
+          await page.getByRole('menuitem', { name: /Dark mode|Light mode/ }).waitFor();
+          await page.getByRole('menuitem', { name: /Switch space/ }).click();
           const names = page.locator('.ui-menu-popup .tdoc-space-item-name');
           await names.first().waitFor({ timeout: 5000 });
           assert.deepEqual((await names.allTextContents()).map((s) => s.trim()), ['My docs', ...TEAMS.map((x) => x.name), 'Workspace settings', 'New team']);
           await page.keyboard.press('Escape');
+          await page.keyboard.press('Escape');
+          await page.locator('.ui-menu-popup').first().waitFor({ state: 'detached' }).catch(() => {});
           await page.locator('#tdoc-more-btn').click();
           await page.locator('.ui-menu-popup').first().waitFor();
           assert.equal(await page.getByRole('menuitem', { name: /Switch space/ }).isVisible().catch(() => false), false, 'no Switch space row on desktop');

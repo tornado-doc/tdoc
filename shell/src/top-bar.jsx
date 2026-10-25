@@ -53,6 +53,10 @@ export function TopBar({
   currentTeam = null,
   onSpace = null,
   onNewTeam = null,
+  // The space chip. A list page (My docs, a team) shows it; a document does
+  // not -- it already belongs to its space, and Switch space is in the
+  // account menu on every page.
+  spaceSwitcher = true,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -141,6 +145,13 @@ export function TopBar({
   const publicProfileLabel = activeProfile?.handle
     ? `Public profile (@${activeProfile.handle})`
     : 'Claim public profile';
+  const themeLabel = dark ? 'Light mode' : 'Dark mode';
+  // Light / dark is a row of the account menu, not a button of its own. A
+  // signed-out visitor has no account menu, so for them it is in ⋯, which
+  // then shows at every width. ⋯ itself shows on a wide screen only when it
+  // has something in it there.
+  const themeInMore = supportsTheme && !identity;
+  const moreOnDesktop = Boolean(overflowActions) || themeInMore;
 
   return (
     <header className="tdoc-bar">
@@ -162,7 +173,7 @@ export function TopBar({
           <button
             id="tdoc-more-btn"
             type="button"
-            className={`tdoc-secondary-toggle${overflowActions ? '' : ' tdoc-mobile-overflow-trigger'}`}
+            className={`tdoc-secondary-toggle${moreOnDesktop ? '' : ' tdoc-mobile-overflow-trigger'}`}
             aria-label="More actions"
           >
             <MoreHorizontal size={18} />
@@ -170,11 +181,19 @@ export function TopBar({
           </button>
         )}>
           {overflowActions}
-          <AppMenuSeparator className="tdoc-mobile-overflow-only" />
-          <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={toggleTheme}>
-            {dark ? <Sun size={15} /> : <Moon size={15} />}
-            {dark ? 'Light mode' : 'Dark mode'}
-          </AppMenuItem>
+          {supportsTheme ? (
+            <>
+              <AppMenuSeparator className={themeInMore && overflowActions ? '' : 'tdoc-mobile-overflow-only'} />
+              <AppMenuItem
+                className={`tdoc-action-menu-item${themeInMore ? '' : ' tdoc-mobile-overflow-only'}`}
+                data-action="theme"
+                onClick={toggleTheme}
+              >
+                {dark ? <Sun size={15} /> : <Moon size={15} />}
+                {themeLabel}
+              </AppMenuItem>
+            </>
+          ) : null}
           {identity ? (
             <>
               <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={openNotifications}>
@@ -242,13 +261,10 @@ export function TopBar({
             </AppMenuItem>
           ) : null}
         </AppMenu>
-        {supportsTheme ? <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
-          {dark ? <Sun size={14} /> : <Moon size={14} />}
-        </button> : null}
-        {identity ? <WorkspaceSwitcher space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
+        {identity && spaceSwitcher ? <WorkspaceSwitcher space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
         {identity ? (
           <AppMenu trigger={(
-            <button className="tdoc-chip tdoc-account-trigger" type="button">
+            <button className="tdoc-chip tdoc-account-trigger" type="button" aria-label={`Account: ${identity.name || identity.login}`} title={identity.name || identity.login}>
               {identity.avatar_url ? <img src={identity.avatar_url} alt="" /> : <span className="tdoc-avatar-fallback">{String(identity.name || identity.login || "?").slice(0, 1).toUpperCase()}</span>}
               <span className="name">{identity.name || identity.login}</span>
               {notifications.unread ? <span className="tdoc-unread-dot" /> : null}
@@ -258,6 +274,18 @@ export function TopBar({
               Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
             </AppMenuItem>
             <AppMenuLinkItem href="/me">My docs</AppMenuLinkItem>
+            <AppSubmenu
+              className="tdoc-space-submenu-trigger tdoc-account-space-trigger"
+              trigger={(
+                <>
+                  <span>Switch space</span>
+                  {space !== null ? <span className="tdoc-space-submenu-current">{spaceLabel(space, spaceTeams, currentTeam)}</span> : null}
+                  <ChevronRight className="tdoc-submenu-chevron" size={14} />
+                </>
+              )}
+            >
+              <SpaceMenuItems space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} />
+            </AppSubmenu>
             {publicProfileHref ? (
               <AppMenuLinkItem href={publicProfileHref}>{publicProfileLabel}</AppMenuLinkItem>
             ) : activeProfile || onClaimProfile ? (
@@ -269,6 +297,13 @@ export function TopBar({
                 {devModeLabel}
               </AppMenuItem>
             ) : null}
+            {supportsTheme ? (
+              <>
+                <AppMenuSeparator />
+                <AppMenuItem data-action="theme" onClick={toggleTheme}>{themeLabel}</AppMenuItem>
+              </>
+            ) : null}
+            <AppMenuSeparator />
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
         ) : authConfigured ? (

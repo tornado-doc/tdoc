@@ -601,14 +601,13 @@ async function chooseMode(page, label) {
         modeLabelDisplay: getComputedStyle(document.querySelector('.tdoc-mode-label')).display,
         versionDisplay: getComputedStyle(document.querySelector('#tdoc-version-toggle')).display,
         publishDisplay: getComputedStyle(document.querySelector('#tdoc-publish-btn')).display,
-        themeDisplay: getComputedStyle(document.querySelector('#tdoc-theme-btn')).display,
         accountDisplay: getComputedStyle(document.querySelector('.tdoc-account-trigger')).display,
       }));
       assert(dimensions.scrollWidth <= dimensions.innerWidth + 1,
         `mobile shell overflows: ${JSON.stringify(dimensions)}`);
       assert(dimensions.modeWidth === 44 && dimensions.modeLabelDisplay === 'none',
         `mobile mode control did not collapse to one icon: ${JSON.stringify(dimensions)}`);
-      assert(['versionDisplay', 'publishDisplay', 'themeDisplay', 'accountDisplay'].every((key) => dimensions[key] === 'none'),
+      assert(['versionDisplay', 'publishDisplay', 'accountDisplay'].every((key) => dimensions[key] === 'none'),
         `secondary controls leaked into the mobile primary bar: ${JSON.stringify(dimensions)}`);
       await page.getByRole('button', { name: /Document mode:/ }).click();
       await page.getByRole('menuitemradio', { name: 'Comment' }).waitFor();

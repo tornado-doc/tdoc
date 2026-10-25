@@ -25,7 +25,7 @@ import { CommentIcon } from '../ui/comment-icon.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { formatDraftAge } from './draft-store.js';
 
-const MODES = [
+export const MODES = [
   { value: 'read', label: 'Read', Icon: Eye },
   { value: 'comment', label: 'Comment', Icon: CommentIcon },
   { value: 'edit', label: 'Edit', Icon: Pencil },
@@ -35,6 +35,15 @@ const MODES = [
 // Comment option still shows — the door has to be where the person looks for
 // it, not hidden behind a Sign in button in the corner — and choosing it opens
 // the sign-in instead of the mode.
+// The modes this visitor has: Read, Comment (or Sign in to comment), Edit.
+export function availableModes({ canComment, canEdit, signInToComment = false }) {
+  return MODES.filter((option) => (
+    option.value === 'read'
+    || (option.value === 'comment' && (canComment || signInToComment))
+    || (option.value === 'edit' && canEdit)
+  )).map((option) => (option.value === 'comment' && !canComment && signInToComment ? { ...option, label: 'Sign in to comment', signIn: true } : option));
+}
+
 export function DocumentModeControl({ mode, canComment, canEdit, onChange, signInToComment = false, onSignIn }) {
   const options = MODES.filter((option) => (
     option.value === 'read'

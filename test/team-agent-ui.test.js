@@ -218,6 +218,11 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
 
       let commentId = null;
       await t(`${label}: a member sends a comment on a team doc to the team agent`, async () => {
+        // The team agent edits what it wrote (agentEditPolicy): it publishes
+        // this doc's latest version first.
+        const agentToken = JSON.parse(fs.readFileSync(path.join(HOME, '.tdoc', 'published.json'), 'utf8')).upload_token;
+        const v2 = await call('/api/upload', { method: 'POST', token: agentToken, body: { slug, version: 2, html: docHtml, meta: { title: 'Weekly report' } } });
+        if (v2.status !== 200) throw new Error(`agent v2: ${v2.status} ${JSON.stringify(v2.body)}`);
         await as(bob);
         const posted = await call('/api/comments', { method: 'POST', cookie: bob.cookie, body: { slug, version: 1, text: 'Can you add last week for comparison?', anchor: { kind: 'text', text: 'Signups grew 12% this week' } } });
         commentId = posted.body.id;

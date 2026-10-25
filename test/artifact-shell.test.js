@@ -18,6 +18,7 @@
 // Each phase flips one block from red to green.
 
 const fs = require('fs');
+const { themeRow } = require('./helpers/theme-toggle');
 const path = require('path');
 const { requirePlaywrightOrSkip, resolveTarget, isPublishedTarget } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('artifact-shell.test.js');
@@ -243,7 +244,8 @@ const SLUG = 'hostile-body-css';
     await t('custom author palette keeps reader theme unavailable', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
-      const themeButton = await page.locator('#tdoc-theme-btn').count();
+      const themeButton = (await themeRow(page, { waitMs: 800 })) ? 1 : 0;
+      await page.keyboard.press('Escape');
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
       const frameTheme = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
       if (themeButton || frameTheme === 'dark') throw new Error('custom palette was overridden by reader theme');
