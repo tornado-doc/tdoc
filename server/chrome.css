@@ -914,9 +914,13 @@
     margin: 0 0 4px;
     min-width: 0;
   }
-  .tdoc-status-row:not(:has(.tdoc-resolved-chip, .tdoc-handoff-chip)) {
+  .tdoc-status-row:not(:has(.tdoc-resolved-chip, .tdoc-handoff-chip, .tdoc-thread-unread-dot)) {
     display: none;
     margin: 0;
+  }
+  .tdoc-thread-unread-dot {
+    flex: none; width: 8px; height: 8px; margin-left: auto;
+    border-radius: 50%; background: var(--td-accent, #1652f0);
   }
   /* Keep one compact pill for the current step, including the agent's reply
      verdict. Delivery and reply are stages of one sequence, not two badges. */

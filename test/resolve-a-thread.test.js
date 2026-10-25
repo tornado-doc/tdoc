@@ -79,15 +79,17 @@ t('resolve sits with the thread actions, behind canMutate', () => {
 });
 
 t('resolved visibility governs selection without deleting stored comments', () => {
-  const start = shell.indexOf('const shownComments = useMemo');
-  const block = shell.slice(start, shell.indexOf('), [', start) + 120);
-  assert(/comment\.status !== 'applied'/.test(block), 'resolved threads should not be sent as anchors');
-  assert(!/comment\.id === (openCommentId|deepTarget)/.test(block),
+  const model = read('shell/src/document/comment-area.js');
+  assert(model.includes("filterMode === 'resolution' && filter === 'open' && phase(comment) !== 'resolved'"),
+    'resolved threads should not be sent as anchors');
+  assert(!/comment\.id === (openCommentId|deepTarget)/.test(model),
     'selection or a notification link must not bypass the visibility switch');
-  assert(shell.includes('const openComment = visibleCommentsById.get(openCommentId);'),
+  assert(shell.includes('const openComment = commentArea.selected;')
+    && model.includes('selected: shown.find((comment) => comment.id === selectedId)'),
     'the card must obey the same visible set as the frame');
   // Hidden records remain available for status changes and explicit reveals.
-  assert(/const commentsById = useMemo\(\s*\n\s*\(\) => new Map\(comments\.comments/.test(shell),
+  assert(shell.includes('const commentsById = commentArea.byId;')
+    && model.includes('const byId = new Map(all.map((comment) => [comment.id, comment]));'),
     'hiding must not discard the stored comment');
 });
 

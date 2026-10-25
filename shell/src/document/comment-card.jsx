@@ -658,6 +658,7 @@ export function CommentCard({
   position,
   expandReplies = false,
   selected = false,
+  unread = false,
   canSendToAgent = false,
   // Owner with no agent connected: @agent stays visible and leads to setup.
   agentSetupHref = null,
@@ -828,6 +829,7 @@ export function CommentCard({
         {demo || canSeeHandoff(comment, handoffViewer, isOwner) ? (
           <HandoffStatusChips comment={comment} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
         ) : null}
+        {unread ? <span className="tdoc-thread-unread-dot" role="status" aria-label="New agent reply" title="New agent reply" /> : null}
       </div>
       <header className="tdoc-cc-head">
         <Author
