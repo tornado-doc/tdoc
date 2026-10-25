@@ -29,8 +29,13 @@ Uninstall removes the user service and keeps docs, logs and sign-in. Existing
 skill users can instead run `bash "$SKILL_DIR/bin/tdoc-daemon" setup`.
 
 On the website, a historical publisher token never means the daemon is online.
-The setup page waits for a registered computer whose AI passed its connection
-check. The first doc is explicitly created by **Try a comment**, is private,
+The setup page waits for a live connected computer, then detects its local
+Claude Code and Codex installations. Choose your AI shows versions and readiness,
+with installation or sign-in guidance when needed. Run `tdoc setup --cli codex`
+or `tdoc setup --cli claude` after fixing that runtime; the page updates automatically.
+A connected computer without a verified AI reports its inventory but cannot
+execute tasks. **Try a comment** stays disabled until the selected AI passes its
+connection check. The first doc is explicitly created by **Try a comment**, is private,
 and starts a real comment → Send to agent → published v2 workflow. Do not scan
 chat history or create a personal portrait as a requirement of this path.
 

@@ -31,6 +31,30 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     assert.equal(ready.body.local_agents[0].ready, true);
     assert.equal(ready.body.local_agents[0].status, 'active');
   });
+  await test('runtime inventory reports an empty computer and stays private to its account', async () => {
+    const runtimes = [{ cli: 'claude', state: 'not_installed' }, { cli: 'codex', state: 'not_installed' }];
+    const report = await call('/api/notify/local/register', { method: 'POST', token: owner.token, body: { device: 'empty-mac', clis: [], ready_clis: ['codex'], runtimes } });
+    assert.equal(report.status, 200);
+    const own = (await call('/api/onboarding?daemon=1', { cookie: owner.cookie })).body;
+    assert.deepEqual(own.local_computers.find((c) => c.device === 'empty-mac').runtimes, runtimes);
+    assert.equal(own.local_computers[0].status, 'active');
+    assert.deepEqual((await call('/api/onboarding?daemon=1', { cookie: other.cookie })).body.local_computers, []);
+    const attempt = await call('/api/onboarding/practice', { method: 'POST', cookie: owner.cookie, headers: origin, body: { device: 'empty-mac', cli: 'codex' } });
+    assert.equal(attempt.status, 409);
+    const invalid = await call('/api/notify/local/register', { method: 'POST', token: owner.token, body: { device: 'empty-mac', clis: [], runtimes: [] } });
+    assert.equal(invalid.status, 400);
+  });
+  await test('inventory strips local details and expires with the computer heartbeat', async () => {
+    const runtimes = [{ cli: 'claude', state: 'not_installed', path: '/private/path' }, { cli: 'codex', state: 'ready', version: '1.2.3', token: 'private-value' }];
+    const report = await call('/api/notify/local/register', { method: 'POST', token: owner.token, body: { device: 'inventory-mac', clis: ['codex'], ready_clis: [], runtimes } });
+    assert.equal(report.status, 200);
+    const inventory = (await call('/api/onboarding?daemon=1', { cookie: owner.cookie })).body.local_computers.find((c) => c.device === 'inventory-mac');
+    assert.deepEqual(inventory.runtimes, [{ cli: 'claude', state: 'not_installed' }, { cli: 'codex', state: 'needs_check', version: '1.2.3' }]);
+    const seenKey = `local-agents-seen:${report.body.account_id}`;
+    const seen = JSON.parse(await env.META.get(seenKey));
+    await env.META.put(seenKey, JSON.stringify({ ...seen, 'inventory-mac': '2000-01-01T00:00:00Z' }));
+    assert.equal((await call('/api/onboarding?daemon=1', { cookie: owner.cookie })).body.local_computers.find((c) => c.device === 'inventory-mac').status, 'inactive');
+  });
   let slug;
   await test('practice creates one private, owned doc and resumes it on retry', async () => {
     const made = await practice();
@@ -70,13 +94,55 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-setup-check-'));
   process.env.TDOC_DAEMON_DIR = temp;
   const { setup, readSetup } = require('../bin/lib/daemon-setup');
-  await test('failed AI checks do not install or advertise a background service', async () => {
+  await test('local inspection detects versions and revokes readiness after removal or upgrade', async () => {
+    const { inspectLocalRuntimes } = require('../bin/lib/local-runtimes');
+    const fakeBin = path.join(temp, 'runtime-bin'); fs.mkdirSync(fakeBin);
+    const binary = path.join(fakeBin, 'codex');
+    fs.writeFileSync(binary, '#!/bin/sh\necho "codex-cli 1.2.3"\n', { mode: 0o755 });
+    const envVars = { ...process.env, PATH: fakeBin };
+    const receipt = { clis: ['codex'], runtimes: [{ cli: 'codex', version: '1.2.3' }] };
+    assert.deepEqual(inspectLocalRuntimes(receipt, envVars), [{ cli: 'claude', state: 'not_installed' }, { cli: 'codex', state: 'ready', version: '1.2.3' }]);
+    fs.writeFileSync(binary, '#!/bin/sh\necho "codex-cli 2.0.0"\n');
+    assert.equal(inspectLocalRuntimes(receipt, envVars)[1].state, 'needs_check');
+    fs.writeFileSync(binary, '#!/bin/sh\necho "private arbitrary output"\nexit 1\n');
+    assert.deepEqual(inspectLocalRuntimes(receipt, envVars)[1], { cli: 'codex', state: 'needs_check' });
+    fs.unlinkSync(binary);
+    assert.equal(inspectLocalRuntimes(receipt, envVars)[1].state, 'not_installed');
+  });
+  await test('managed helper reports inventory but never runs an unverified runtime', async () => {
+    const { spawnSync } = require('child_process');
+    const { startStub } = require('./helpers/fixture-server');
+    const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-inventory-daemon-'));
+    const fakeBin = path.join(sandbox, 'bin'); fs.mkdirSync(fakeBin);
+    fs.writeFileSync(path.join(fakeBin, 'codex'), '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.2.3; exit 0; fi\necho UNEXPECTED_EXECUTION >&2\nexit 1\n', { mode: 0o755 });
+    const stub = startStub(`(() => { const calls=[]; return (q,s) => { let body=''; q.on('data',d=>body+=d); q.on('end',()=>{ s.setHeader('Content-Type','application/json'); if(q.url==='/log') return s.end(JSON.stringify(calls)); calls.push({url:q.url,body:body?JSON.parse(body):null}); s.end(JSON.stringify(q.url.includes('/pending')?{account_ids:['owner'],pending:[{by:'owner',recipient:{cli:'codex'},handoff_id:'never-run',slug:'test'}]}:{ok:true})); }); }; })()`);
+    try {
+      const config = path.join(sandbox, 'config.json');
+      fs.writeFileSync(config, JSON.stringify({ platform: 'hosted', base: stub.base, upload_token: 'test-only' }));
+      const envVars = { ...process.env, HOME: sandbox, PATH: fakeBin, TDOC_CONFIG: config, TDOC_DAEMON_DIR: path.join(sandbox, 'daemon') };
+      for (const empty of [false, true]) {
+        if (empty) fs.unlinkSync(path.join(fakeBin, 'codex'));
+        const r = spawnSync(process.execPath, [path.resolve(__dirname, '../bin/lib/daemon.js'), 'once', '--managed', '--device', 'testbox'], { env: envVars, encoding: 'utf8', timeout: 15000 });
+        assert.equal(r.status, 0, r.stderr); assert.doesNotMatch(r.stderr + r.stdout, /UNEXPECTED_EXECUTION/);
+      }
+      const calls = await (await fetch(stub.base + '/log')).json();
+      assert.equal(calls.length, 4, JSON.stringify(calls));
+      assert.deepEqual(calls[0].body.ready_clis, []); assert.deepEqual(calls[0].body.clis, ['codex']);
+      assert.deepEqual(calls[2].body.clis, []);
+      assert.equal(calls[2].body.runtimes.every((r) => r.state === 'not_installed'), true);
+    } finally { stub.stop(); fs.rmSync(sandbox, { recursive: true }); }
+  });
+  await test('a connected helper can report failed or absent AI without advertising readiness', async () => {
     let installed = false;
-    await assert.rejects(setup({}, { signIn() {}, detect: () => ['codex'], probe: async () => ({ ok: false, tail: '' }), install: () => { installed = true; } }), /No AI passed/);
-    assert.equal(installed, false); assert.equal(readSetup(), null);
+    const inspect = () => [{ cli: 'claude', state: 'not_installed' }, { cli: 'codex', state: 'needs_check' }];
+    await setup({}, { signIn() {}, detect: () => ['codex'], inspect, probe: async () => ({ ok: false, tail: '' }), install: () => { installed = true; } });
+    assert.equal(installed, true); assert.deepEqual(readSetup().clis, []);
+    await setup({}, { signIn() {}, detect: () => [], inspect, probe: async () => { throw new Error('must not invoke absent AI'); }, install() {} });
+    assert.deepEqual(readSetup().clis, []);
+    fs.unlinkSync(path.join(temp, 'setup.json'));
   });
   await test('verified AI is persisted before starting the service; failure rolls back', async () => {
-    const deps = { signIn() {}, detect: () => ['codex'], probe: async () => ({ ok: true, tail: 'TDOC_READY' }) };
+    const deps = { signIn() {}, detect: () => ['codex'], inspect: () => [{ cli: 'codex', state: 'ready', version: '1.2.3' }], probe: async () => ({ ok: true, tail: 'TDOC_READY' }) };
     await assert.rejects(setup({}, { ...deps, install() { assert.deepEqual(readSetup().clis, ['codex']); throw new Error('service unavailable'); } }), /service unavailable/);
     assert.equal(readSetup(), null);
     await setup({}, { ...deps, install(clis) { assert.deepEqual(clis, ['codex']); } });
@@ -97,10 +163,10 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     const contents = fs.readFileSync(plist, 'utf8');
     assert.ok(contents.includes(process.execPath));
     if (process.platform === 'darwin') {
-      assert.ok(contents.includes('<string>codex</string>')); assert.ok(contents.includes('<key>KeepAlive</key><true/>'));
+      assert.ok(contents.includes('<string>--managed</string>')); assert.ok(contents.includes('<key>KeepAlive</key><true/>'));
       assert.match(fs.readFileSync(calls, 'utf8'), /bootout[\s\S]*bootstrap/);
     } else {
-      assert.ok(contents.includes('\"--cli\" \"codex\"')); assert.ok(contents.includes('Restart=on-failure'));
+      assert.ok(contents.includes('\"--managed\"')); assert.ok(contents.includes('Restart=on-failure'));
       assert.match(fs.readFileSync(calls, 'utf8'), /stop[\s\S]*daemon-reload[\s\S]*enable --now/);
     }
     const data = path.join(sandbox, '.tdoc/daemon/keep.txt'); fs.writeFileSync(data, 'preserve');

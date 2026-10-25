@@ -16518,6 +16518,7 @@ const tdocHandlers = {
       try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
       const record = await loadOnboarding(env, accountId);
       let local_agents;
+      let local_computers;
       if (url.searchParams.get('daemon') === '1') {
         const targets = (await accountNotifyTargets(env, accountId)).filter(isLocalTarget);
         const seen = await localSeenMap(env, accountId);
@@ -16528,13 +16529,16 @@ const tdocHandlers = {
           }
         }
         local_agents = targets.map((t) => ({ ...withLocalSeen(t, seen), ready: ready.get(t.device).includes(t.cli) }));
+        let computers = {};
+        try { computers = JSON.parse(await env.META.get(`local-computers:${accountId}`)) || {}; } catch {}
+        local_computers = Object.entries(computers).map(([device, computer]) => withLocalSeen({ device, ...computer }, seen));
       }
       // `?docs=1` costs a catalog walk, so only the page that waits for a doc
       // to appear asks for it. The connect gate's own poll stays two reads.
       if (url.searchParams.get('docs') === '1') {
         return json({ record, paired, newest_doc: await newestDocFor(env, accountId) });
       }
-      return json({ record, paired, ...(local_agents ? { local_agents } : {}) }, { headers: { 'Cache-Control': 'no-store' } });
+      return json({ record, paired, ...(local_agents ? { local_agents, local_computers } : {}) }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (p === '/api/onboarding/practice' && method === 'POST') {
       if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
@@ -17649,7 +17653,14 @@ const tdocHandlers = {
       const device = String(body.device || '').trim().toLowerCase();
       if (!LOCAL_DEVICE_RE.test(device)) return json({ error: 'invalid_device', message: 'device: 1-40 chars, a-z 0-9 and dashes.' }, { status: 400 });
       const clis = [...new Set((Array.isArray(body.clis) ? body.clis : []).map((c) => String(c || '').trim().toLowerCase()))].slice(0, 4);
-      if (!clis.length || !clis.every((c) => LOCAL_CLI_RE.test(c))) return json({ error: 'invalid_clis', message: 'clis: one to four names like "claude" or "codex".' }, { status: 400 });
+      const runtimeNames = ['claude', 'codex'];
+      // Optional inventory from the managed helper. Rebuild an allowlisted
+      // shape: no local paths, credential details or probe output is stored.
+      const runtimes = Array.isArray(body.runtimes) && body.runtimes.length === runtimeNames.length
+        && runtimeNames.every((cli) => body.runtimes.filter((r) => r?.cli === cli).length === 1)
+        && body.runtimes.every((r) => ['ready', 'needs_check', 'not_installed'].includes(r.state))
+        ? body.runtimes.map((r) => ({ cli: r.cli, state: r.state, ...(typeof r.version === 'string' && /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(r.version) && r.version.length <= 64 ? { version: r.version } : {}) })) : null;
+      if ((body.runtimes !== undefined && !runtimes) || (!clis.length && !runtimes) || !clis.every((c) => LOCAL_CLI_RE.test(c))) return json({ error: 'invalid_clis', message: 'clis: supported installed runtimes, or a complete managed runtime inventory.' }, { status: 400 });
       const accountId = auth.actor.account_id;
       const wanted = clis.map((cli) => normalizeNotifyTarget({ provider: 'local', device, cli, agent_name: localAgentName(device, cli) }));
       const current = await accountNotifyTargets(env, accountId);
@@ -17667,10 +17678,20 @@ const tdocHandlers = {
       await localTouchSeen(env, accountId, device);
       // Sent only after a CLI answered the installer's harmless connection check.
       // Missing on older daemons: registering a binary alone is not proof it can run.
-      const readyClis = Array.isArray(body.ready_clis) ? clis.filter((c) => body.ready_clis.includes(c)) : [];
+      const readyClis = Array.isArray(body.ready_clis) ? clis.filter((c) => body.ready_clis.includes(c) && (!runtimes || runtimes.some((r) => r.cli === c && r.state === 'ready'))) : [];
       const readyKey = `local-agent-ready:${accountId}:${device}`;
       const priorReady = await env.META.get(readyKey);
       if (JSON.stringify(readyClis) !== priorReady) await env.META.put(readyKey, JSON.stringify(readyClis));
+      if (runtimes) {
+        let computers = {};
+        const computerKey = `local-computers:${accountId}`;
+        try { computers = JSON.parse(await env.META.get(computerKey)) || {}; } catch {}
+        const next = { runtimes: runtimes.map((r) => ({ ...r, state: r.state === 'ready' && !readyClis.includes(r.cli) ? 'needs_check' : r.state })) };
+        if (JSON.stringify(computers[device]) !== JSON.stringify(next)) {
+          const entries = Object.entries({ ...computers, [device]: next }).slice(-NOTIFY_AGENTS_MAX);
+          await env.META.put(computerKey, JSON.stringify(Object.fromEntries(entries)));
+        }
+      }
       if (readyClis.length) {
         await stampOnboardingFor(env, accountId, 'started');
         await stampOnboardingFor(env, accountId, 'agent_connected');

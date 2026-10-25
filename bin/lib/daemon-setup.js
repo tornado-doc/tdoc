@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { detectClis, runAgent } = require('./agent-runners.js');
+const { inspectLocalRuntimes } = require('./local-runtimes.js');
 
 const home = () => process.env.HOME || os.homedir();
 const dir = () => process.env.TDOC_DAEMON_DIR || path.join(home(), '.tdoc', 'daemon');
@@ -35,12 +36,12 @@ function installService(clis) {
   const envPath = `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH || '/usr/bin:/bin'}`;
   if (process.platform === 'darwin') {
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const argv = [process.execPath, script, 'start', '--cli', clis.join(',')];
+    const argv = [process.execPath, script, 'start', '--managed'];
     fs.writeFileSync(file, `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>dev.tdoc.daemon</string><key>ProgramArguments</key><array>${argv.map((s) => `<string>${esc(s)}</string>`).join('')}</array><key>EnvironmentVariables</key><dict><key>PATH</key><string>${esc(envPath)}</string><key>HOME</key><string>${esc(home())}</string><key>TDOC_SKILL_DIR</key><string>${esc(root())}</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${esc(path.join(dir(), 'service.log'))}</string><key>StandardErrorPath</key><string>${esc(path.join(dir(), 'service.err.log'))}</string></dict></plist>\n`);
     run('launchctl', ['bootstrap', `gui/${process.getuid()}`, file]);
   } else {
     const quote = (s) => '"' + String(s).replace(/%/g, '%%').replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
-    fs.writeFileSync(file, `[Unit]\nDescription=tdoc local document agent\nAfter=network-online.target\n[Service]\nExecStart=${[process.execPath, script, 'start', '--cli', clis.join(',')].map(quote).join(' ')}\nEnvironment=${quote(`PATH=${envPath}`)} ${quote(`HOME=${home()}`)} ${quote(`TDOC_SKILL_DIR=${root()}`)}\nRestart=on-failure\nRestartSec=15\n[Install]\nWantedBy=default.target\n`);
+    fs.writeFileSync(file, `[Unit]\nDescription=tdoc local document agent\nAfter=network-online.target\n[Service]\nExecStart=${[process.execPath, script, 'start', '--managed'].map(quote).join(' ')}\nEnvironment=${quote(`PATH=${envPath}`)} ${quote(`HOME=${home()}`)} ${quote(`TDOC_SKILL_DIR=${root()}`)}\nRestart=on-failure\nRestartSec=15\n[Install]\nWantedBy=default.target\n`);
     run('systemctl', ['--user', 'daemon-reload']);
     run('systemctl', ['--user', 'enable', '--now', 'tdoc-daemon.service']);
   }
@@ -56,7 +57,6 @@ async function setup(args, deps = {}) {
   }
   const found = (deps.detect || detectClis)();
   const asked = args.cli ? String(args.cli).split(',').filter(Boolean) : found;
-  if (!asked.length) throw new Error('Install and sign in to Claude Code or Codex, then run tdoc setup again.');
   for (const cli of asked) if (!found.includes(cli)) throw new Error(`${cli} is not available on PATH. Install it and run tdoc setup again.`);
   fs.mkdirSync(dir(), { recursive: true });
   const cwd = path.join(dir(), 'connection-check');
@@ -68,9 +68,9 @@ async function setup(args, deps = {}) {
     if (result.ok && /\bTDOC_READY\b/.test(result.tail)) ready.push(cli);
     else console.error(`[tdoc] ${cli} could not answer. Open ${cli}, check its sign-in and plan, then run tdoc setup again.`);
   }
-  if (!ready.length) throw new Error('No AI passed the connection check. No background service was started.');
   const previous = readSetup();
-  fs.writeFileSync(settingsFile(), JSON.stringify({ clis: ready, checked_at: new Date().toISOString() }, null, 2) + '\n', { mode: 0o600 });
+  const runtimes = (deps.inspect || inspectLocalRuntimes)({ clis: ready });
+  fs.writeFileSync(settingsFile(), JSON.stringify({ clis: ready, runtimes, checked_at: new Date().toISOString() }, null, 2) + '\n', { mode: 0o600 });
   try { (deps.install || installService)(ready); } catch (e) {
     // A failed service install must not register a new, apparently-online device.
     if (previous) fs.writeFileSync(settingsFile(), JSON.stringify(previous));
@@ -78,6 +78,7 @@ async function setup(args, deps = {}) {
     throw e;
   }
   console.log('[tdoc] Background service started. Return to tdoc; this computer will appear automatically.');
+  if (!ready.length) console.log('[tdoc] No AI is ready yet. Choose your AI in tdoc to see installation and sign-in instructions. No tasks will run until an AI passes the connection check.');
   console.log('[tdoc] Runs while this computer is awake and you are signed in. Pause: tdoc stop. Resume: tdoc setup.');
 }
 function uninstall() {
