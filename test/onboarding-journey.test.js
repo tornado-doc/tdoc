@@ -206,7 +206,7 @@ t('bridge 1 is read off the server, and a paired account is never asked for a co
     && server.includes('const paired = Boolean(process.env.TDOC_E2E_PAIRED);'), 'both hosts say whether a terminal has connected');
   assert(gate.includes("const connected = Boolean(computer?.status === 'active')")
     && gate.includes("const runtimeReady = Boolean(chosen && computer?.status === 'active')")
-    && gate.includes('disabled={busy || (!manual && (!loaded || !runtimeReady))}'),
+    && gate.includes('disabled={busy || !loaded || !runtimeReady}'),
     'a live computer enables AI selection; only its verified runtime enables a practice doc');
   assert(gate.includes('const POLL_MS = 3000;'), '3s while waiting');
   assert(gate.includes("postOnboardingEvent('copy_clicked')"), 'copying is telemetry, not a fake connected stamp');

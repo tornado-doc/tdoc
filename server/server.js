@@ -1937,7 +1937,9 @@ const server = http.createServer(async (req, res) => {
     // Twin of the worker's `?docs=1`: only the page waiting for a doc to
     // appear pays for the walk.
     if (url.searchParams.get('docs') === '1') {
-      return json(res, 200, { record, paired, newest_doc: newestDocLocal() });
+      const newest_doc = newestDocLocal();
+      const meta = newest_doc ? readJson(path.join(ROOT, newest_doc, 'meta.json'), null) : null;
+      return json(res, 200, { record, paired, newest_doc, newest_doc_created: meta?.versions?.[0]?.created || meta?.created || null, observed_at: new Date().toISOString() });
     }
     return json(res, 200, { record, paired });
   }

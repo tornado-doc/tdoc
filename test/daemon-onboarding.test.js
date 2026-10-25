@@ -77,6 +77,13 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     assert.equal((await practice()).body.slug, slug);
     const meta = JSON.parse(await env.META.get(`meta:${slug}`));
     assert.equal(meta.access.visibility, 'private');
+    const discovered = (await call('/api/onboarding?docs=1', { cookie: owner.cookie })).body;
+    assert.equal(discovered.newest_doc, slug);
+    assert.equal(discovered.newest_doc_created, meta.versions[0].created);
+    assert.ok(Date.parse(discovered.observed_at) >= Date.parse(discovered.newest_doc_created));
+    const otherDocs = (await call('/api/onboarding?docs=1', { cookie: other.cookie })).body;
+    assert.equal(otherDocs.newest_doc, null, 'document discovery stays scoped to the signed-in account');
+
     const record = (await call('/api/onboarding', { cookie: owner.cookie })).body.record;
     assert.equal(record.first_doc, slug); assert.equal(record.revised, undefined);
     const targets = await call(`/api/notify/targets?slug=${slug}`, { cookie: owner.cookie });

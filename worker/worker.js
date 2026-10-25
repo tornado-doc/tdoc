@@ -17476,7 +17476,9 @@ const tdocHandlers = {
       // `?docs=1` costs a catalog walk, so only the page that waits for a doc
       // to appear asks for it. The connect gate's own poll stays two reads.
       if (url.searchParams.get('docs') === '1') {
-        return json({ record, paired, newest_doc: await newestDocFor(env, accountId) });
+        const newest_doc = await newestDocFor(env, accountId);
+        const meta = newest_doc ? await loadDocMeta(env, newest_doc) : null;
+        return json({ record, paired, newest_doc, newest_doc_created: meta?.versions?.[0]?.created || meta?.created || null, observed_at: new Date().toISOString() }, { headers: { 'Cache-Control': 'no-store' } });
       }
       return json({ record, paired, ...(local_agents ? { local_agents, local_computers } : {}) }, { headers: { 'Cache-Control': 'no-store' } });
     }

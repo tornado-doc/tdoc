@@ -75,7 +75,7 @@ t('automatic detection is local, while interactive conversations remain supporte
   const inventory = gate.slice(gate.indexOf('const RUNTIMES ='), gate.indexOf('export function SetupGate'));
   assert(inventory.includes("value: 'claude'") && inventory.includes("value: 'codex'"), 'managed local providers');
   assert(!/ChatGPT|Grok/.test(inventory), 'cloud conversations are not reported as detected local runtimes');
-  assert(gate.includes('Use your AI instead'), 'interactive use is optional and explicit');
+  assert(gate.includes('Use with your AI') && gate.includes('Connect for automatic updates'), 'interactive use is optional and explicit');
 });
 
 t('a refused clipboard says so instead of doing nothing', () => {
@@ -722,7 +722,7 @@ t('nothing in the column a person reads is smaller than 12.5px', () => {
 // and the two matching replays are exercised in daemon-onboarding-browser.test.js.
 t('setup asks for the terminal installer and uses server-confirmed local agents', () => {
   assert(gate.includes('bin/tdoc-install | bash'), 'official installer command');
-  assert(gate.includes('getOnboarding({ daemon: true })'), 'polls actual local agents');
+  assert(gate.includes("stage === 'connect' ? { daemon: true }"), 'polls actual local agents');
   assert(gate.includes("a.ready && a.status === 'active'"), 'both a verified AI and an active device');
   assert(!gate.includes('paired || record'), 'a historical token cannot complete setup');
 });
@@ -736,12 +736,12 @@ t('the real connection remains visible when a computer stops responding', () => 
   assert(gate.includes('window.clearTimeout(timer)'), 'unmount clears the timer');
 });
 t('the chosen AI opens a private practice doc through the account API', () => {
-  assert(gate.includes("createOnboardingPractice(manual ? { mode: 'manual' } : { device: chosen.device, cli: chosen.cli })"), 'explicit target');
+  assert(gate.includes('createOnboardingPractice({ device: chosen.device, cli: chosen.cli })'), 'explicit target');
   assert(gate.includes('location.assign(result.url)'), 'opens server-created doc');
   assert(!gate.includes('PORTRAIT_PROMPT'), 'history scanning is not required');
 });
 t('connection advances through Next instead of replacing the page', () => {
-  assert(gate.includes("setStage('manual')") && gate.includes('disabled={busy || (!manual && (!loaded || !runtimeReady))}'), 'only automatic pickup requires a live verified computer; manual practice is optional');
+  assert(gate.includes("useState(preview?.stage || 'intro')") && gate.includes('disabled={busy || !loaded || !runtimeReady}'), 'first choose a path; only automatic pickup requires a live verified computer');
   assert(!gate.includes('sg-pane-art'), 'no full-page replay');
 });
 

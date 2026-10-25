@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, MessageSquare, Monitor } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent, createOnboardingPractice } from './document/api.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { AppSelect } from './ui/select.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
 import { AppDialog } from './ui/dialog.jsx';
+import { ChoiceLinks } from './ui/choice-links.jsx';
 import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
 
 // Shared with Create a doc: existing interactive-agent authoring remains available.
@@ -16,6 +17,7 @@ export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${D
 export const SETUP_PROMPT = 'curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash';
 const INSTALL_PROMPT = `${SETUP_PROMPT} -s -- --install-only`;
 const CONNECT_PROMPT = '~/.local/bin/tdoc setup';
+export const firstDocPrompt = (subject) => `Read https://tdoc.dev/SKILL.md. Create and publish a new tdoc about ${subject.trim()}. Use browser approval to sign in if needed. Keep the doc private. Use the interactive workflow; do not install or start a background helper or daemon. Give me the published link.`;
 export const DOCTOR_PROMPT = '~/.local/bin/tdoc status';
 const POLL_MS = 3000;
 const STUCK_MS = 90000;
@@ -28,13 +30,19 @@ const RUNTIMES = [
 
 export function SetupGate({ boot, preview = null, onClose }) {
   const [open, setOpen] = useState(true);
-  const [stage, setStage] = useState(preview?.stage || 'connect');
+  const [stage, setStage] = useState(preview?.stage || 'intro');
   const [pendingAsk] = useState(() => preview ? null : peekPendingAsk());
   const [paired, setPaired] = useState(Boolean(preview?.paired));
   const [agents, setAgents] = useState(preview?.local_agents || []);
   const [computers, setComputers] = useState(preview?.local_computers || []);
   const [loaded, setLoaded] = useState(Boolean(preview));
   const [selected, setSelected] = useState('');
+  const [subject, setSubject] = useState(preview ? 'next week’s project plan' : '');
+  const [manualReady, setManualReady] = useState(Boolean(preview));
+  const [manualRequested, setManualRequested] = useState(false);
+  const [publishedDoc, setPublishedDoc] = useState(preview?.published_doc || '');
+  const manualBaseline = useRef(null);
+  const instructionRef = useRef(null);
   const [copied, setCopied] = useState('');
   const [copyFailed, setCopyFailed] = useState(false);
   const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
@@ -65,31 +73,50 @@ export function SetupGate({ boot, preview = null, onClose }) {
   const runtimeReady = Boolean(chosen && computer?.status === 'active');
   const state = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
 
+  const manual = stage === 'manual';
+  const intro = stage === 'intro';
   useEffect(() => {
-    if (!signedIn || preview) return undefined;
+    if (!signedIn || preview || (manual && (publishedDoc || (manualReady && !manualRequested)))) return undefined;
     let cancelled = false;
     let timer;
     const tick = async () => {
+      const retryError = manual ? 'Could not check for your doc. Retrying…' : 'Could not check the connection. Retrying…';
       try {
-        const result = await getOnboarding({ daemon: true });
+        const result = await getOnboarding(stage === 'connect' ? { daemon: true } : manual ? { docs: true } : undefined);
         if (!cancelled) {
-          setAgents(result?.local_agents || []);
-          setComputers(result?.local_computers || []);
+          if (stage === 'connect') {
+            setAgents(result?.local_agents || []);
+            setComputers(result?.local_computers || []);
+          }
           setPaired(Boolean(result?.paired));
-          setError((previous) => previous === 'Could not check the connection. Retrying…' ? '' : previous);
+          if (manual) {
+            if (!Number.isFinite(Date.parse(manualBaseline.current?.at))) {
+              manualBaseline.current = { slug: result?.newest_doc || null, at: result?.observed_at };
+              setManualReady(Number.isFinite(Date.parse(result?.observed_at)));
+            }
+            const baseline = manualBaseline.current;
+            // Only a newly created, server-confirmed doc from this account.
+            // A token, copying the instruction, or revising an old doc is not publication.
+            if (manualRequested && result?.newest_doc && result.newest_doc !== baseline.slug
+              && Date.parse(result.newest_doc_created) > Date.parse(baseline.at)) setPublishedDoc(result.newest_doc);
+          }
+          setError((previous) => previous === retryError ? '' : previous);
         }
-      } catch { if (!cancelled) { setAgents([]); setComputers([]); setError('Could not check the connection. Retrying…'); } }
+      } catch {
+        if (!cancelled && !intro) {
+          if (!manual) { setAgents([]); setComputers([]); }
+          setError(retryError);
+        }
+      }
       if (cancelled) return;
       setLoaded(true);
       setElapsed(Date.now() - started.current);
-      // Keep checking after connection: sleep, disconnect and expiry can change readiness.
-      timer = window.setTimeout(tick, POLL_MS);
+      if (!intro) timer = window.setTimeout(tick, POLL_MS);
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [signedIn, preview]);
+  }, [signedIn, preview, stage, manual, intro, manualReady, manualRequested, publishedDoc]);
 
-  const manual = stage === 'manual';
   // A paired reader can return and copy a question even while their helper is offline.
   // This never marks a computer ready or enables Next for a new author.
   const canReturn = Boolean(pendingAsk && paired);
@@ -109,12 +136,29 @@ export function SetupGate({ boot, preview = null, onClose }) {
     if (ok === false) selectContents(ref.current);
     if (!preview) postOnboardingEvent('copy_clicked').catch(() => {});
   };
+  const choosePath = (path) => {
+    setStage(path); setError(''); setCopied(''); setCopyFailed(false);
+    if (!preview && path !== 'intro') postOnboardingEvent('door_own_agent').catch(() => {});
+    if (path === 'connect' && !preview) {
+      setLoaded(false); setAgents([]); setComputers([]); started.current = Date.now(); setElapsed(0);
+    }
+    manualBaseline.current = null; setManualReady(Boolean(preview));
+    setManualRequested(false); setPublishedDoc('');
+  };
+  const copyInstruction = async () => {
+    if (!manualReady || !subject.trim()) return;
+    await copy(firstDocPrompt(subject), 'instruction', instructionRef);
+    if (active.current) setManualRequested(true);
+  };
+  const openPublished = () => {
+    if (!preview && publishedDoc) location.assign(`/d/${encodeURIComponent(publishedDoc)}?step=comment`);
+  };
   const practice = async () => {
-    if ((!manual && !runtimeReady) || busy || preview) return;
+    if (!runtimeReady || busy || preview) return;
     if (pendingAsk) { location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`); return; }
     setBusy(true); setError('');
     try {
-      const result = await createOnboardingPractice(manual ? { mode: 'manual' } : { device: chosen.device, cli: chosen.cli });
+      const result = await createOnboardingPractice({ device: chosen.device, cli: chosen.cli });
       if (active.current) location.assign(result.url);
     } catch (e) {
       if (!active.current) return;
@@ -125,27 +169,36 @@ export function SetupGate({ boot, preview = null, onClose }) {
 
   return (
     <AppDialog open={open} onOpenChange={(next) => { if (!next) close(); }}
-      title={manual ? 'Use your AI' : 'Connect a computer'}
+      title={intro ? 'How will you use tdoc?' : manual ? 'Use with your AI' : 'Connect a computer'}
       className="ui-setup-modal"
       eyebrow="SET UP TDOC"
-      description={manual ? 'No background helper or always-on computer required.' : 'Connect a computer to let your AI pick up comments automatically. The background helper is optional.'}
+      description={intro ? 'Start in your AI conversation, or connect for automatic updates.' : manual ? 'Copy one instruction into your AI conversation. No background helper needed.' : 'Connect a computer so its AI can pick up comments automatically.'}
       actions={<>
-        <button type="button" className="ui-setup-later" onClick={manual ? () => { setStage('connect'); setError(''); } : close}>{manual ? 'Back' : 'Later'}</button>
-        {signedIn && !manual ? <button type="button" className="ui-setup-manual-link" onClick={() => { setStage('manual'); setError(''); }}>Use your AI instead</button> : null}
+        <button type="button" className="ui-setup-later" disabled={busy} onClick={intro ? close : () => choosePath('intro')}>{intro ? 'Later' : 'Back'}</button>
         {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
           : canReturn ? <button type="button" className="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</button>
-          : <button type="button" className="primary" onClick={practice} disabled={busy || (!manual && (!loaded || !runtimeReady))}>{busy ? 'Opening your doc…' : manual ? 'Try a comment' : 'Next'}</button>}
+          : manual ? <button type="button" className="primary" onClick={publishedDoc ? openPublished : copyInstruction} disabled={!publishedDoc && (!manualReady || !subject.trim())}>{publishedDoc ? 'Open your doc' : copied === 'instruction' ? 'Copy again' : 'Copy instruction'}</button>
+            : !intro ? <button type="button" className="primary" onClick={practice} disabled={busy || !loaded || !runtimeReady}>{busy ? 'Opening your doc…' : 'Next'}</button> : null}
       </>}
     >
       {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to use tdoc.' : 'Sign-in is not configured on this host.'}</p>
-        : manual ? <div className="ui-setup-manual">
-          <p className="ui-setup-label">NO BACKGROUND HELPER NEEDED</p>
-          <h3>Try a comment with your AI.</h3>
-          <p>Leave a comment in your private practice doc. Copy its instruction into your AI conversation to ask for a revision.</p>
-          <p>Your AI needs terminal access: Cowork, Grok Bot, or a suitable ChatGPT mode. Plain chat alone cannot publish a revision.</p>
-          <p>You may be asked to approve tdoc sign-in in your browser.</p>
-          <a href="https://tdoc.dev/SKILL.md" target="_blank" rel="noreferrer">Instructions for your AI ↗</a>
-        </div>
+        : intro ? <ChoiceLinks ariaLabel="How to use tdoc" onChoose={choosePath} options={[
+          { value: 'manual', label: 'Use with your AI', icon: <MessageSquare size={24} />, description: 'Create a doc in your existing AI conversation.', detail: 'ChatGPT Work, Cowork, Grok Bot, Claude Code or Codex' },
+          { value: 'connect', label: 'Connect for automatic updates', icon: <Monitor size={24} />, description: 'Let your local AI pick up comments automatically.', detail: 'Claude Code or Codex on your computer' },
+        ]} />
+          : manual ? <div className="ui-setup-manual">
+            <label className="ui-setup-subject">What should your first doc be about?<input value={subject} placeholder="e.g. next week’s project plan" onChange={(event) => {
+              setSubject(event.target.value); setCopied(''); setCopyFailed(false);
+              if (manualRequested || publishedDoc) {
+                manualBaseline.current = null; setManualReady(Boolean(preview)); setManualRequested(false); setPublishedDoc('');
+              }
+            }} /></label>
+            <div className="ui-setup-instruction"><p ref={instructionRef}>{firstDocPrompt(subject.trim() || DOC_SUBJECT_PLACEHOLDER)}</p></div>
+            <p className="ui-setup-intro">Paste this into ChatGPT Work, Cowork, Grok Bot, Claude Code or Codex. Your AI needs terminal access.</p>
+            {publishedDoc ? <p className="ui-setup-connected" role="status">Your doc is published. Open it to leave a comment.</p>
+              : manualRequested ? <p role="status">{copyFailed ? COPY_FALLBACK : 'Instruction copied. Paste it into your AI.'} Waiting for your AI to publish…</p>
+                : !manualReady ? <p role="status">Checking your docs…</p> : null}
+          </div>
           : !loaded ? <p role="status">Checking your computers…</p> : <>
             <div className="ui-setup-toolbar"><p className="ui-setup-label"><span aria-hidden="true">›_</span> CONNECT COMMAND</p><SegmentedControl value={platform} onChange={setPlatform} ariaLabel="Your computer" options={[{ value: 'unix', label: 'macOS / Linux' }, { value: 'windows', label: 'Windows (WSL)' }]} /></div>
             <p className="ui-setup-intro">Install the tdoc CLI on this {platform === 'windows' ? 'Windows (WSL)' : 'macOS or Linux'} machine, then connect it to your account.</p>

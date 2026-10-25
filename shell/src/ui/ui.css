@@ -1207,10 +1207,25 @@ a.ui-menu-item:visited {
 .ui-setup-runtime > div p { margin: 0 0 8px; }
 .ui-setup-runtime > div button { margin-left: 8px; font-size: 11px; }
 .ui-setup-ai-select { display: flex; align-items: center; gap: 12px; font-size: 12px; }
-.ui-setup-modal .actions .ui-setup-manual-link { margin: 0; padding: 0; min-width: 0; border: 0; background: none; font-size: 12px; line-height: 1.4; white-space: nowrap; text-decoration: underline; text-underline-offset: 3px; }
-.ui-setup-manual { max-width: 580px; font-size: 14px; line-height: 1.7; }
-.ui-setup-manual h3 { margin: 18px 0 12px; font-size: 22px; line-height: 1.3; font-weight: 500; }
-.ui-setup-manual p { margin: 12px 0; }
+.ui-choice-links { display: grid; grid-auto-rows: 1fr; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-top: 18px; }
+.ui-setup-modal .ui-choice-link { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; min-height: 252px; padding: 24px; border: 1px solid var(--td-line, #ddd); border-radius: 0; background: var(--td-bg, #fff); color: var(--td-fg, #111); text-align: left; }
+.ui-choice-link:hover { background: var(--td-surface, #fafafa); border-color: var(--td-fg, #111); }
+.ui-choice-link:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 3px; }
+.ui-choice-link strong { font-size: 18px; line-height: 1.3; font-weight: 500; }
+.ui-choice-link > span:not(.ui-choice-link-icon) { font-size: 14px; line-height: 1.5; }
+.ui-choice-link small { font-size: 12px; line-height: 1.5; color: var(--td-muted, #777); }
+.ui-choice-link > svg { margin-top: auto; }
+.ui-setup-manual { max-width: 660px; font-size: 14px; line-height: 1.6; }
+.ui-setup-subject { display: grid; gap: 10px; margin: 6px 0 20px; font-size: 14px; }
+.ui-setup-subject input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--td-line, #ddd); border-radius: 0; background: var(--td-bg, #fff); color: var(--td-fg, #111); font: inherit; }
+.ui-setup-instruction { padding: 16px; border: 1px solid var(--td-line, #ddd); background: var(--td-surface, #fafafa); overflow-wrap: anywhere; font: 13px/1.7 ui-monospace, monospace; }
+.ui-setup-instruction p { margin: 0; }
+@media (max-width: 600px) {
+  .ui-choice-links { grid-template-columns: 1fr; gap: 12px; padding-top: 4px; }
+  .ui-setup-modal .ui-choice-link { min-height: 192px; padding: 18px; gap: 10px; }
+  .ui-choice-link strong { font-size: 16px; }
+  .ui-choice-link > span:not(.ui-choice-link-icon) { font-size: 13px; }
+}
 .ui-setup-details { font-size: 12px; margin-top: 16px; color: var(--td-muted, #777); }
 .ui-setup-details summary { cursor: pointer; width: fit-content; }
 .ui-setup-details p { margin-top: 12px; }

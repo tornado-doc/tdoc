@@ -4,26 +4,33 @@
 
 ## Default web onboarding — background helper is optional
 
-Open `https://tdoc.dev/setup`. A centered dialog over My docs offers an optional
-computer connection and **Use your AI instead**. Do not require a
-local AI, daemon, or always-on computer for the copy/paste workflow.
+Open `https://tdoc.dev/setup`. A centered dialog over My docs starts with two
+equal choices: **Use with your AI** and **Connect for automatic updates**.
+Neither is preselected. Local Claude Code / Codex users may choose either path.
+Do not require a daemon or always-on computer for interactive use.
 
-### Work in an existing AI conversation
+### Use with your AI
 
-Choose **Use your AI instead**, then **Try a comment**. This creates
-an owned, private practice doc without registering a computer or claiming that
-an AI is connected. Leave a comment and copy its instruction into your AI.
-An AI with terminal access can read `https://tdoc.dev/SKILL.md`, sign in with
-browser approval, read comments, and publish a revision at the same link.
-Follow the skill's interactive authoring path; do not run `tdoc setup` or install
-a background service unless the person explicitly opts into automation.
+Choose **Use with your AI**, name a topic, and copy the instruction into your
+existing ChatGPT Work, Cowork, Grok Bot, Claude Code or Codex conversation.
+The instruction reads `https://tdoc.dev/SKILL.md`, asks for a new private doc,
+and explicitly declines background-helper installation. The AI signs in with
+browser approval when needed, creates the doc and publishes it.
 
-Cowork and Grok Bot provide terminal environments. ChatGPT requires a mode with
-terminal access; plain chat alone cannot run the publishing CLI. Do not promise
-that every chat mode or platform can publish. Provider-specific sign-in and
-write access still need validation in that session.
+The dialog waits for a newly created document owned by the signed-in account,
+then enables **Open your doc**. Copying, pairing, historical docs and revisions
+to old docs do not complete this step. It captures the server's observation
+time before copying and compares the document's first-version time, so browser
+clock skew cannot make an old doc look new. Opening the published doc continues
+the shared comment → AI revision journey. This path does not create a practice
+template or register a computer.
 
-### Receive comments automatically (optional)
+Use a mode with terminal and network access. Plain chat alone cannot run the
+publishing CLI. Provider-specific sign-in and private-document access still
+need validation in that session. Do not run `tdoc setup` or install a service
+unless the person explicitly chooses automatic pickup.
+
+### Connect for automatic updates (optional)
 
 The dialog gives separate install and setup commands:
 

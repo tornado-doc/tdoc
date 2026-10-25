@@ -12,7 +12,7 @@ import './docs-hub.css';
 import './onboarding-preview.css';
 
 const identity = { name: 'Alex Morgan', email: 'alex.morgan@example.com' };
-const states = ['Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
+const states = ['Start', 'Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
 
 function TutorialPreview({ state }) {
   const [agentState, setAgentState] = useState(state.replace('Tutorial ', ''));
@@ -37,11 +37,11 @@ function TutorialPreview({ state }) {
 export default function OnboardingPreview() {
   const [state, setState] = useState(() => {
     const screen = new URLSearchParams(location.search).get('screen');
-    return states.includes(screen) ? screen : 'Connect agent';
+    return states.includes(screen) ? screen : 'Start';
   });
   const [dialogOpen, setDialogOpen] = useState(true);
   const [notice, setNotice] = useState('');
-  const setupPreview = ['Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published'].includes(state);
+  const setupPreview = ['Start', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published'].includes(state);
   let screen;
   if (state.startsWith('Tutorial ')) {
     screen = <TutorialPreview key={state} state={state} />;
@@ -55,7 +55,7 @@ export default function OnboardingPreview() {
     const choosing = ['Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published'].includes(state);
     const status = state === 'AI offline' ? 'inactive' : 'active';
     const runtimeState = state === 'AI missing' ? 'not_installed' : state === 'AI needs check' ? 'needs_check' : 'ready';
-    screen = <><DocsHub boot={{ identity, capabilities: {create: false} }} /><SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ stage: state === 'Use without helper' ? 'manual' : 'connect', record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: choosing, local_agents: choosing && runtimeState === 'ready' ? [{ device: 'alex-mac', cli: 'codex', ready: true, status }] : [], local_computers: choosing ? [{ device: 'alex-mac', status, runtimes: [{ cli: 'claude', state: 'not_installed' }, { cli: 'codex', state: runtimeState, ...(runtimeState !== 'not_installed' ? {version:'0.1.0'} : {}) }] }] : [], elapsed: state === 'Connection help' ? 95000 : 0 }} /></>;
+    screen = <><DocsHub boot={{ identity, capabilities: {create: false} }} /><SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ stage: ['Start', 'Setup sign in'].includes(state) ? 'intro' : ['Use without helper', 'First document', 'Document published'].includes(state) ? 'manual' : 'connect', published_doc: state === 'Document published' ? 'my-first-tdoc' : '', record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: choosing, local_agents: choosing && runtimeState === 'ready' ? [{ device: 'alex-mac', cli: 'codex', ready: true, status }] : [], local_computers: choosing ? [{ device: 'alex-mac', status, runtimes: [{ cli: 'claude', state: 'not_installed' }, { cli: 'codex', state: runtimeState, ...(runtimeState !== 'not_installed' ? {version:'0.1.0'} : {}) }] }] : [], elapsed: state === 'Connection help' ? 95000 : 0 }} /></>;
   } else if (state.startsWith('Checklist')) {
     screen = <div className="docs-hub op-checklist"><OnboardingChecklist key={state} record={{started:true, agent_connected:true, first_doc:state === 'Checklist' ? null : 'my-first-tdoc', commented:state === 'Checklist after commenting'}} docs={state === 'Checklist' ? [] : [{slug:'my-first-tdoc',title:'My first tdoc'}]} /></div>;
   } else {
