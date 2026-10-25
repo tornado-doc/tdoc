@@ -149,6 +149,11 @@ async function dragSelect(page, phrase) {
       desktopAskIcon = await page.locator('#tdoc-send-agent-btn .tdoc-ask-ai-mark').evaluate((el) => el.outerHTML);
       const share = page.locator('#tdoc-share-btn');
       if (await share.evaluate((el) => el.classList.contains('primary'))) throw new Error('Share is a filled primary button');
+      const askStyle = await page.locator('#tdoc-send-agent-btn').evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { background: style.backgroundColor, border: style.borderWidth };
+      });
+      if (askStyle.background !== 'rgba(0, 0, 0, 0)' || askStyle.border !== '0px') throw new Error(`Ask AI has a pill: ${JSON.stringify(askStyle)}`);
       if (await page.locator('.tdoc-account-trigger .name').isVisible()) throw new Error('the avatar shows a name');
       await page.locator('#tdoc-more-btn').click();
       await page.getByRole('menuitemradio', { name: /Comment/ }).waitFor();
@@ -175,6 +180,19 @@ async function dragSelect(page, phrase) {
       const phoneAskIcon = await page.locator('#tdoc-send-agent-btn .tdoc-ask-ai-mark').evaluate((el) => el.outerHTML);
       if (phoneAskIcon !== desktopAskIcon) throw new Error('Ask AI uses a different icon on phone');
       if (!(await page.locator('#tdoc-share-btn').isVisible())) throw new Error('no Share on a phone');
+      if (!(await page.locator('#tdoc-share-btn svg').isVisible())) throw new Error('Share icon is missing on a phone');
+      const actions = await page.evaluate(() => ['tdoc-send-agent-btn', 'tdoc-share-btn', 'tdoc-more-btn'].map((id) => {
+        const el = document.getElementById(id);
+        const box = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return { id, x: box.x, width: box.width, right: box.right, background: style.backgroundColor, border: style.borderWidth };
+      }));
+      if (actions.some((action) => action.width !== 44 || action.background !== 'rgba(0, 0, 0, 0)' || action.border !== '0px')) {
+        throw new Error(`phone actions are not matching flat icon targets: ${JSON.stringify(actions)}`);
+      }
+      if (!(actions[0].x < actions[1].x && actions[1].x < actions[2].x && actions[2].right <= width)) {
+        throw new Error(`Ask AI · Share · More do not fit in order at ${width}px: ${JSON.stringify(actions)}`);
+      }
       if (!(await page.locator('.tdoc-bar .doc-title').isVisible())) throw new Error('no title on a phone');
       if (!(await page.locator('.tdoc-bar-mark').isVisible())) throw new Error('mobile logo is missing');
       if (await page.locator('.tdoc-ask-ai-label').isVisible()) throw new Error('Ask AI label crowds the phone bar');
@@ -192,7 +210,8 @@ async function dragSelect(page, phrase) {
       await drawer.getByRole('button', { name: 'Who should answer?' }).click();
       const menu = page.locator('.tdoc-agent-menu');
       await menu.getByRole('menuitem').first().waitFor();
-      if (!(await menu.getByRole('menuitem').first().innerText()).includes('tdoc AI')) throw new Error('tdoc AI is not first');
+      if (!(await menu.getByRole('menuitem').first().innerText()).includes('Claude Code')) throw new Error('the connected agent is not first');
+      if (!(await menu.getByRole('menuitem', { name: /tdoc AI/ }).count())) throw new Error('tdoc AI fallback is missing');
       await shot(page, `ask-ai-agent-menu-${width}.png`);
       await page.keyboard.press('Escape');
       const bounds = await drawer.boundingBox();
@@ -250,6 +269,17 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
+    await t('Ask AI puts the team agent that edited this document ahead of other answerers', async () => {
+      const { context, page } = await open(bob, 'team-plan', true);
+      await page.locator('#tdoc-send-agent-btn').click();
+      const panel = page.getByRole('dialog', { name: 'Ask AI' });
+      if (!(await panel.getByRole('button', { name: 'Who should answer?' }).innerText()).includes('tdoc-bot')) throw new Error('last editor is not the default answerer');
+      await panel.getByRole('button', { name: 'Who should answer?' }).click();
+      const first = await page.locator('.tdoc-agent-menu').getByRole('menuitem').first().innerText();
+      if (!first.includes('tdoc-bot') || !first.includes('Edited last')) throw new Error(`last editor is not explained in the menu: ${first}`);
+      await context.close();
+    });
+
     await t("member on a doc Julie's agent wrote: Answers only, no control; Comment asks the team agent", async () => {
       const { context, page } = await open(bob, 'julies-draft');
       const { pop } = await compose(page, 'Can we move billing?');
@@ -284,6 +314,13 @@ async function dragSelect(page, phrase) {
       if (!(await drawer.locator('.tdoc-ask-answer-body ul li').count())) throw new Error('Markdown list did not render');
       if (!(await drawer.locator('.tdoc-ask-answer-body pre code').count())) throw new Error('code block did not render');
       if (await drawer.locator('.tdoc-ask-answer-body a[href="https://tdoc.dev/docs"]').count() !== 1) throw new Error('safe Markdown link did not render');
+      const clipped = await drawer.evaluate((root) => {
+        const right = root.getBoundingClientRect().right;
+        return [...root.querySelectorAll('.tdoc-ask-conversation, .tdoc-ask-turn, .tdoc-ask-question, .tdoc-ask-answer, .tdoc-md-pre, .tdoc-ask-turn-summary')]
+          .filter((node) => node.getBoundingClientRect().right > right + 1)
+          .map((node) => `${node.className}: ${Math.round(node.getBoundingClientRect().right - right)}px`);
+      });
+      if (clipped.length) throw new Error(`Ask AI content exceeds the phone drawer: ${clipped.join(', ')}`);
       const box = await drawer.boundingBox();
       if (!box || box.height < 800 * .69) throw new Error(`drawer is too short: ${JSON.stringify(box)}`);
       await shot(page, 'ask-ai-phone-long-answer-390.png');

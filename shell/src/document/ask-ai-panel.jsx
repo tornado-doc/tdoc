@@ -33,12 +33,12 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
         rows={2} value={draft} onChange={(event) => onDraft(event.target.value)}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); onAsk(); } }} />
       <div className="tdoc-ask-form-bottom">
-        {selected ? <AppMenu align="start" popupClassName="tdoc-agent-menu" trigger={(
+        {selected ? <AppMenu align="start" popupClassName="tdoc-agent-menu" positionerClassName="tdoc-ask-target-menu-positioner" trigger={(
           <button type="button" className="tdoc-ask-target-pill tdoc-agent-pill" aria-label="Who should answer?">
             {agentMentionName(selected.target, choices)} <ChevronDown size={12} aria-hidden="true" />
           </button>
         )}>
-          <AgentMenuItems choices={choices} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={false}
+          <AgentMenuItems choices={choices} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={false} showRelevance pinTdocAi
             onPick={(target) => onTarget(targets.find((item) => sameTarget(item.target, target))?.key || selected.key)} />
         </AppMenu> : null}
         <button type="submit" aria-label="Send question" disabled={!draft.trim() || busy || !selected || noFreeAnswers}>↑</button>

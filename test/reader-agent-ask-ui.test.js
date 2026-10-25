@@ -256,8 +256,8 @@ async function touchSelect(page, phrase) {
       const { context, page } = await open(reader, DESKTOP);
       await page.locator('#tdoc-send-agent-btn').click();
       const panel = page.getByRole('dialog', { name: 'Ask AI' });
-      await panel.getByRole('combobox', { name: 'Who should answer?' }).click();
-      await page.locator('.ui-select-popup [role=option]').nth(1).click();
+      await panel.getByRole('button', { name: 'Who should answer?' }).click();
+      await page.locator('.tdoc-agent-menu').getByRole('menuitem', { name: /Mine/ }).click();
       await panel.getByRole('textbox', { name: 'Ask about this document' }).fill('Can my agent check the Q4 plan?');
       await panel.getByRole('button', { name: 'Send question' }).click();
       let ask = null;

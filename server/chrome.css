@@ -831,7 +831,7 @@
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab.is-hidden { display: none; }
-  body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #3277ef; box-sizing: content-box; }
+  body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
   body.tdoc-narrow .tdoc-drawer-empty { padding: 28px 12px 36px; text-align: center; color: var(--td-muted); font: 14px system-ui, sans-serif; }
   body.tdoc-narrow .tdoc-drawer-empty p { margin: 0 0 14px; }
   body.tdoc-narrow .tdoc-drawer-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
@@ -993,18 +993,19 @@
   }
   .tdoc-ask-mobile-drawer[data-swiping] { transition: none; }
   .tdoc-ask-drawer-grip { display: flex; align-items: center; justify-content: center; flex: none; align-self: center; width: 64px; height: 24px; margin: -8px auto 4px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
-  .tdoc-ask-drawer-grip span { display: block; width: 36px; height: 4px; border-radius: 2px; background: #ccc; }
-  .tdoc-ask-drawer-close { position: absolute; top: 9px; right: 12px; width: 28px; height: 28px; border: 0; background: transparent; color: var(--td-muted); font: 23px/1 system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-drawer-grip span { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--td-line); }
+  .tdoc-ask-drawer-close { position: absolute; top: 2px; right: 5px; width: 44px; height: 44px; border: 0; background: transparent; color: var(--td-muted); font: 23px/1 system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-drawer-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
   .tdoc-ask-mobile-drawer .tdoc-ask-conversation { max-height: none; }
   .tdoc-ask-mobile-drawer .tdoc-ask-answer-body .text { font-size: 15px; line-height: 1.55; }
-  .tdoc-ask-mobile-drawer .tdoc-ask-question .text { font-size: 14px; line-height: 1.5; }
+  .tdoc-ask-mobile-drawer .tdoc-ask-question .text { font-size: 15px; line-height: 1.55; }
   .tdoc-ask-panel h2 { margin: 0 0 12px; font: 700 16px/1.3 Inter, system-ui, sans-serif; }
   .tdoc-ask-form { border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 8px 10px 9px; }
   .tdoc-ask-form:focus-within { border-color: var(--td-accent, #1652f0); }
-  .tdoc-ask-form textarea { display: block; width: 100%; min-height: 44px; max-height: 160px; resize: none; overflow-y: auto; padding: 2px 0; border: 0; outline: 0; background: transparent; color: var(--td-ink, #1a1a1a); font: 13px/1.5 Inter, system-ui, sans-serif; box-sizing: border-box; }
+  .tdoc-ask-form textarea { display: block; width: 100%; min-height: 44px; max-height: 160px; resize: none; overflow-y: auto; padding: 2px 0; border: 0; outline: 0; background: transparent; color: var(--td-ink, #1a1a1a); font: 16px/1.5 Inter, system-ui, sans-serif; box-sizing: border-box; }
   .tdoc-ask-form-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .tdoc-ask-form-bottom .tdoc-ask-target-pill { display: inline-flex; align-items: center; gap: 5px; max-width: calc(100% - 42px); padding: 2px 5px; border: 0; color: var(--td-accent); font: 600 12px Inter, system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tdoc-ask-form-bottom button.tdoc-ask-target-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; max-width: calc(100% - 42px); padding: 0 10px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-accent-tint); box-shadow: none; color: var(--td-accent); font: 600 13px Inter, system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .tdoc-ask-form-bottom button.tdoc-ask-target-pill:hover { background: var(--td-accent-wash); box-shadow: none; }
   .tdoc-ask-only-hint { margin-top: 5px; color: var(--td-muted, #6b6a66); font-size: 11px; }
   .tdoc-ask-form-bottom button[type="submit"] { width: 28px; height: 28px; border: 0; border-radius: 8px; background: var(--td-accent, #1652f0); color: #fff; font: 700 19px/1 Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }
@@ -1012,26 +1013,28 @@
   .tdoc-ask-notice a { color: var(--td-accent, #1652f0); font-weight: 650; }
   .tdoc-ask-ready { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
   .tdoc-ask-ready button { border: 0; padding: 0; background: transparent; color: var(--td-accent, #1652f0); font: 650 12px Inter, system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
-  .tdoc-ask-conversation { display: grid; gap: 11px; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
-  .tdoc-ask-turn { display: grid; gap: 8px; }
+  .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
+  .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }
+  .tdoc-ask-turn { display: grid; min-width: 0; gap: 8px; }
   .tdoc-margin-comment.tdoc-ask-question { position: static; width: auto; max-width: none; padding: 12px; z-index: auto; box-shadow: none; }
   .tdoc-ask-answer.tdoc-reply { padding: 2px 0 2px 12px; }
   /* Private turns read as a conversation. Posted turns keep the same comment
      and reply shape they have in the document margin. */
   .tdoc-ask-turn:not(.is-public) .tdoc-ask-question { justify-self: end; max-width: 88%; border-radius: 12px 12px 3px 12px; background: var(--td-surface-2, #f7f7f5); }
   .tdoc-ask-turn:not(.is-public) .tdoc-ask-answer { justify-self: start; max-width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 12px 12px 12px 3px; background: var(--td-surface, #fff); }
-  .tdoc-ask-answer.is-error .text { color: #9c4545; }
+  .tdoc-ask-answer.is-error .text { color: var(--td-danger); }
   .tdoc-ask-visibility { margin-top: 6px; color: var(--td-muted, #6b6a66); font-size: 11px; }
+  .tdoc-ask-answer-body, .tdoc-ask-answer-body .text { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   .tdoc-ask-answer-body .text { white-space: normal; }
   .tdoc-ask-answer-body .tdoc-md-p { display: block; margin: 0 0 8px; }
-  .tdoc-ask-answer-body .tdoc-md-pre { max-width: 100%; }
-  .tdoc-ask-turn-summary { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 10px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); font: 13px/1.4 Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
+  .tdoc-ask-answer-body .tdoc-md-pre { max-width: 100%; overflow-x: auto; box-sizing: border-box; }
+  .tdoc-ask-turn-summary { display: flex; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; box-sizing: border-box; padding: 10px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-ground); color: var(--td-ink); font: 13px/1.4 Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
   .tdoc-ask-turn-summary span:first-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .tdoc-ask-turn-summary span:last-child { flex: none; color: var(--td-accent); font-size: 11px; }
   .tdoc-ask-turn-collapse { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--td-accent); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-margin-comment .text .tdoc-md-heading, .tdoc-reply .text .tdoc-md-heading { margin: 6px 0 3px; font-size: 1em; }
   .tdoc-ask-answer-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
-  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { border: 1px solid var(--td-line, #e8e7e3); border-radius: 7px; padding: 5px 9px; background: #fff; color: var(--td-ink, #1a1a1a); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { min-height: 40px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 7px; padding: 5px 9px; background: var(--td-ground); color: var(--td-ink, #1a1a1a); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-answer-actions button.primary, .tdoc-ask-answer.is-error button { border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff; }
   .tdoc-ask-answer-actions button:disabled { opacity: .55; cursor: default; }
   .tdoc-ask-private-note { display: block; margin-top: 8px; color: var(--td-muted, #6b6a66); font-size: 11px; }
@@ -1198,7 +1201,7 @@
     border-radius: 6px;
     background: transparent;
     color: var(--td-ink, #1a1a1a);
-    font: 600 13px/1 system-ui, -apple-system, sans-serif;
+    font: 500 13.5px/1 system-ui, -apple-system, sans-serif;
     white-space: nowrap;
     cursor: pointer;
     flex-shrink: 0;
@@ -1217,8 +1220,8 @@
   }
   .tdoc-bar .tdoc-send-agent-badge {
     position: absolute;
-    top: 1px;
-    right: 4px;
+    top: 8px;
+    right: 8px;
     transform: translate(50%, -50%);
     min-width: 9px;
     height: 9px;
@@ -1269,8 +1272,10 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
    short name, a small grey tag (Mine / Team / "5 free"), a quiet check on
    the agent in the text. Connect my agent is a quiet link row. */
 .ui-menu-popup.tdoc-agent-menu { min-width: 200px; max-width: 320px; padding: 4px; background: #fff; border: 1px solid var(--td-line, #e5e5e7); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); outline: none; }
-.ui-menu-item.tdoc-agent-menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font: 13px system-ui, sans-serif; color: var(--td-ink, #1a1a1a); outline: none; }
+.ui-menu-item.tdoc-agent-menu-item { display: flex; align-items: center; gap: 8px; min-height: 40px; box-sizing: border-box; padding: 6px 8px; border-radius: 6px; font: 13px system-ui, sans-serif; color: var(--td-ink, #1a1a1a); outline: none; }
 .ui-menu-item.tdoc-agent-menu-item[data-highlighted] { background: var(--td-accent-tint, #e8eeff); }
+.ui-menu-item.tdoc-agent-menu-more { display: flex; align-items: center; justify-content: space-between; min-height: 40px; }
+.ui-menu-item.tdoc-agent-menu-more::after { content: '›'; font-size: 18px; color: var(--td-muted); }
 .tdoc-agent-menu-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .tdoc-agent-menu-tag { margin-left: auto; flex: none; color: var(--td-muted, #8a8a8a); font-size: 11px; white-space: nowrap; }
 .tdoc-mention-agent .tdoc-mention-login { flex: 0 1 auto; }
@@ -1287,6 +1292,19 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-bar .tdoc-edited:hover { background: #f0f1f4; color: #1a1a1a; }
 .tdoc-bar .tdoc-share-quiet { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #1a1a1a; font: 500 13.5px system-ui, -apple-system, sans-serif; cursor: pointer; }
 .tdoc-bar .tdoc-share-quiet:hover { background: #f0f1f4; }
+.tdoc-bar .tdoc-share-quiet svg { width: 18px; height: 18px; }
+/* Keep the three phone actions equal. These rules follow the shared desktop
+   button styles so their padding cannot reappear through the CSS cascade. */
+@media (max-width: 700px) {
+  .tdoc-bar .tdoc-send-agent-action,
+  .tdoc-bar .tdoc-share-quiet,
+  .tdoc-bar .tdoc-secondary-toggle.tdoc-mobile-overflow-trigger {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    padding: 0;
+  }
+}
 /* Avatar only: the name is the menu's title, not the bar's. */
 .tdoc-bar .tdoc-account-trigger .name { display: none; }
 .tdoc-bar .tdoc-chip.tdoc-account-trigger:not(.signin) { padding: 3px; }

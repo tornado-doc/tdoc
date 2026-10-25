@@ -14817,7 +14817,11 @@ function agentAskEvent({ slug, docTitle, askId, question, passage, publicHost, c
 async function teamAskTargets(env, gate) {
   const caller = await teamAgentCaller(env, gate);
   if (!caller) return { targets: [], reachable: [] };
-  const targets = await teamAgentTargets(env, caller.team);
+  const writer = docLastWriter(gate.meta);
+  const targets = (await teamAgentTargets(env, caller.team))
+    .map((target) => ({ ...target, last_writer: writer?.kind === 'team_agent' && target.team_agent?.id === writer.id }))
+    .sort((a, b) => Number(b.last_writer) - Number(a.last_writer)
+      || String(b.last_touched || '').localeCompare(String(a.last_touched || '')));
   return { targets, reachable: targets.filter((t) => t.provider !== 'local' || t.status === 'active') };
 }
 

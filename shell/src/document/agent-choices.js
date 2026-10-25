@@ -200,11 +200,11 @@ export function agentMentionName(t, list = null) {
 }
 
 // Ask AI is answer-only. Lead with the agent that most recently wrote this
-// document when the server identified one, then keep the rest predictable.
+// document when available. The server's remaining order reflects recent use.
 export function orderedAskAiChoices(agents, recent = null) {
   return (agents || []).filter((agent) => agent && agent.status !== 'stopped')
     .sort((a, b) => Number(Boolean(recent && sameTarget(b, recent))) - Number(Boolean(recent && sameTarget(a, recent)))
-      || agentDisplayName(a).localeCompare(agentDisplayName(b)));
+      || Number(Boolean(b.last_writer)) - Number(Boolean(a.last_writer)));
 }
 
 // The agents to offer for what is typed after `@`. With nothing typed, the

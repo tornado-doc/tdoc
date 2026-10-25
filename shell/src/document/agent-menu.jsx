@@ -24,12 +24,17 @@ export function agentTag(t, ai = null) {
 // typed-@ list's light style (Julie, 2026-10-25): the same agents typing @
 // offers.
 export function AgentMenuItems({ choices, ai = null, current = null, onPick,
-  preserveOrder = false, maxVisible = Infinity, showConnect = true }) {
+  preserveOrder = false, maxVisible = Infinity, showConnect = true, showRelevance = false, pinTdocAi = false }) {
   const list = choices || [];
   const rows = preserveOrder ? list : AGENT_GROUPS.flatMap((group) => list.filter((t) => whose(t) === group));
+  const aiRow = pinTdocAi ? rows.find((t) => t.tdoc_ai) : null;
+  const agentRows = aiRow ? rows.filter((t) => t !== aiRow) : rows;
+  const visible = agentRows.slice(0, Math.max(0, maxVisible - (aiRow ? 1 : 0)));
+  if (aiRow) visible.push(aiRow);
+  const more = agentRows.slice(visible.length - (aiRow ? 1 : 0));
   const renderRow = (t) => {
     const picked = Boolean(current) && targetKey(current) === targetKey(t);
-    const tag = agentTag(t, ai);
+    const tag = showRelevance && t.last_writer ? 'Edited last' : agentTag(t, ai);
     return (
       <AppMenuItem
         key={targetKey(t)}
@@ -46,9 +51,9 @@ export function AgentMenuItems({ choices, ai = null, current = null, onPick,
   };
   return (
     <>
-      {rows.slice(0, maxVisible).map(renderRow)}
-      {rows.length > maxVisible ? <AppSubmenu trigger="More agents" className="tdoc-agent-menu-more">
-        {rows.slice(maxVisible).map(renderRow)}
+      {visible.map(renderRow)}
+      {more.length ? <AppSubmenu trigger="More agents" className="tdoc-agent-menu-more">
+        {more.map(renderRow)}
       </AppSubmenu> : null}
       {showConnect && rows.some((t) => t.tdoc_ai) ? (
         <AppMenuLinkItem className="tdoc-agent-menu-connect" href="/start">Connect my agent</AppMenuLinkItem>

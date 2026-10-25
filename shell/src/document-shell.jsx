@@ -228,7 +228,7 @@ export function DocumentShell({ boot, config }) {
   const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
   const [agentActivityOpen, setAgentActivityOpen] = useState(false);
   const [askAiDraft, setAskAiDraft] = useState('');
-  const [askAiTargetKey, setAskAiTargetKey] = useState('tdoc-ai');
+  const [askAiTargetKey, setAskAiTargetKey] = useState('');
   const [askAiTurns, setAskAiTurns] = useState([]);
   const [askAiBusy, setAskAiBusy] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
@@ -938,8 +938,8 @@ export function DocumentShell({ boot, config }) {
     const recent = [notifyTargets.default, ...(notifyTargets.candidates || [])].find((agent) => agent?.last_writer);
     const agents = orderedAskAiChoices([...(myAgent.state?.agents || []), ...(myAgent.state?.team_agents || [])], recent);
     return [
-      ...(askEnabled ? [{ key: 'tdoc-ai', label: 'tdoc AI', target: TDOC_AI, tdocAi: true }] : []),
       ...agents.map((agent) => ({ key: targetKey(agent), label: agentDisplayName(agent, agents), target: agent, tdocAi: false })),
+      ...(askEnabled ? [{ key: 'tdoc-ai', label: 'tdoc AI', target: TDOC_AI, tdocAi: true }] : []),
     ];
   }, [askEnabled, myAgent.state?.agents, myAgent.state?.team_agents, notifyTargets.default, notifyTargets.candidates]);
   const askAiSend = async (retryText = null, retryTarget = null) => {

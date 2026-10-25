@@ -45,13 +45,13 @@ t('default, then candidates, then fallback — each agent once', () => {
   assert(box.orderedAgentChoices(null).length === 0, 'no targets offers nobody');
 });
 
-t('Ask AI ranks the last editor first and the rest alphabetically, excluding stopped agents', () => {
+t('Ask AI ranks the last editor first and keeps the server recency order, excluding stopped agents', () => {
   const alice = raft('a', 'alice');
   const charlie = raft('c', 'charlie');
   const bob = raft('b', 'bob');
   const stopped = raft('z', 'zzz', { status: 'stopped' });
   const list = box.orderedAskAiChoices([charlie, stopped, bob, alice], bob);
-  assert(JSON.stringify(list.map((agent) => agent.agent_name)) === JSON.stringify(['bob', 'alice', 'charlie']), names(list));
+  assert(JSON.stringify(list.map((agent) => agent.agent_name)) === JSON.stringify(['bob', 'charlie', 'alice']), names(list));
 });
 
 t('the dropdown and the picker read the same helper', () => {
