@@ -17527,7 +17527,7 @@ const tdocHandlers = {
           const target = local.find(t => t.device === body.device && t.cli === body.cli);
           let ready = []; try { ready = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${body.device}`)) || []; } catch {}
           if (!target || !Array.isArray(ready) || !ready.includes(body.cli) || withLocalSeen(target, seen, paused).status !== 'active') return json({ error: 'computer_not_ready' }, { status: 409 });
-          await env.META.put(`account-notify:${accountId}`, JSON.stringify([target, ...targets.filter(t => !sameNotifyTarget(t, target))]));
+          await env.META.put(`account-notify:${accountId}`, JSON.stringify([{ ...target, last_touched: new Date().toISOString() }, ...targets.filter(t => !sameNotifyTarget(t, target))]));
           return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
         }
         return json({ error: 'invalid_action' }, { status: 400 });

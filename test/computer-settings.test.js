@@ -51,6 +51,15 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
   assert.equal((await browser('/api/onboarding/practice', { device: 'my-mac', cli: 'codex' })).status, 409);
   assert.equal((await browser('/api/me/computers', { device: 'my-mac', action: 'resume' })).status, 200);
   assert.equal((await pending()).body.pending.length, 1, 'pause preserves waiting work');
+  // A linked identity's newer list must not undo a choice made in Settings.
+  const currentTargets = JSON.parse(await env.META.get(`account-notify:${owner.account_id}`));
+  await env.META.put(`account-notify:${owner.account_id}`, JSON.stringify(currentTargets.map(t => ({ ...t, last_touched: '2020-01-01T00:00:00Z' }))));
+  await env.META.put(`account-notify:${other.account_id}`, JSON.stringify([{ ...currentTargets.find(t => t.cli === 'claude'), last_touched: '2021-01-01T00:00:00Z' }]));
+  const group = { canonical: owner.account_id, ids: [owner.account_id, other.account_id] };
+  for (const id of group.ids) await env.META.put(`account-group:${id}`, JSON.stringify(group));
+  assert.equal((await browser('/api/me/computers')).body.default.cli, 'claude');
+  assert.equal((await browser('/api/me/computers', { device: 'my-mac', cli: 'codex', action: 'default' })).status, 200);
+  assert.equal((await browser('/api/me/computers')).body.default.cli, 'codex', 'the latest explicit choice wins across linked identities');
   console.log('✓ computer settings are browser-owned; ready-only default and durable server-enforced pause/resume');
 
   const { connect } = require('../bin/lib/daemon-setup'); let signedIn = 0; let calls = 0;
