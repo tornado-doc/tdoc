@@ -701,7 +701,7 @@
   .tdoc-modal .tdoc-access-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .tdoc-modal .tdoc-access-label { font-size: 14px; font-weight: 600; line-height: 1.3; }
   .tdoc-modal .tdoc-access-hint { font-size: 12px; color: #6b6b73; line-height: 1.35; }
-  .tdoc-modal .tdoc-access-sub { margin: 6px 0 0 14px; }
+  .tdoc-modal .tdoc-access-sub { margin: 6px 0 0; }
   .tdoc-modal .tdoc-access-sub .tdoc-switch-label { white-space: normal; }
   .tdoc-modal .manage-action { width: 100%; text-align: left; }
   .tdoc-modal .manage-action.danger-btn { color: var(--td-danger); border-color: #f1b8b2; }
