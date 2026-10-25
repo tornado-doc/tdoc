@@ -246,11 +246,14 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await send.click();
         const activity = page.locator('.tdoc-handoff-popover');
         await activity.waitFor();
+        const readySummary = activity.locator('.tdoc-ask-ready');
+        if (!(await readySummary.innerText()).includes('1 comment not sent')) throw new Error('the team member has no ready-to-send summary');
+        await activity.getByRole('button', { name: /Agent activity/ }).click();
         const ready = activity.locator('.tdoc-handoff-ready');
         if (!(await ready.innerText()).includes('Can you add last week for comparison?')) throw new Error('comment missing from Ready to send');
         if ((await ready.innerText()).includes('Owner-only handoff candidate')) throw new Error('team member can send the owner\'s comment');
         if ((await ready.locator('input[type="checkbox"]').count()) !== 1) throw new Error('team member sees another author\'s Ready to send checkbox');
-        await ready.locator('.tdoc-handoff-ready-send').click();
+        await readySummary.getByRole('button', { name: /Send to agent/ }).click();
         const dialog = page.getByRole('dialog', { name: 'Send to agent' });
         await dialog.waitFor();
         const recipient = await dialog.locator('.tdoc-notify-recipient').innerText();
