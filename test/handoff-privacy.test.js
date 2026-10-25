@@ -41,12 +41,17 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
   };
   const bobId = await comment(bob, 'Bob asks for a chart');
   const carolId = await comment(carol, 'Carol asks for a table');
+  const agentId = 'ta_1234567890abcdef';
+  const storedTeam = JSON.parse(await env.META.get(`team:${team.id}`));
+  storedTeam.agents = [{ id: agentId, name: 'team agent' }];
+  await env.META.put(`team:${team.id}`, JSON.stringify(storedTeam));
   await env.META.put('handoffs:handoff-private-details', JSON.stringify([{
     handoff_id: 'h_private', at: new Date().toISOString(),
     recipient: { provider: 'raft', agent_name: 'team agent', server_id: 'secret-server' },
     comment_ids: [bobId, carolId], instruction: 'Private instruction about both comments',
     delivery: { status: 'delivered', at: new Date().toISOString() },
-    resolved_ids: [carolId], by: 'internal-agent-id', sent_by: julie.account_id,
+    resolved_ids: [carolId], by: agentId, sent_by: julie.account_id,
+    team_agent: { id: agentId, name: 'team agent' },
   }]));
   const fields = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to'];
   const comments = (opts = {}, version = '1') => call(`/api/comments?slug=handoff-private-details&version=${version}`, opts);
@@ -86,4 +91,12 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
   assert.equal(foreign.body.error, 'comment_not_owned');
   assert.equal(JSON.parse(await env.META.get('handoffs:handoff-private-details')).length, 1);
   console.log('  ✓ handoff POST rejects a direct mixed-ID request from a team member');
+
+  const resend = await call('/api/notify/handoff/resend', {
+    method: 'POST', cookie: bob.cookie,
+    body: { slug: 'handoff-private-details', handoff_id: 'h_private' },
+  });
+  assert.equal(resend.status, 403);
+  assert.equal(resend.body.error, 'comment_not_owned');
+  console.log('  ✓ team member cannot resend a mixed batch containing another commenter’s request');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
