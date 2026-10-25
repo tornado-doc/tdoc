@@ -17207,6 +17207,7 @@ const tdocHandlers = {
         let ready = []; try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${target.device}`)); ready = Array.isArray(value) ? value : []; } catch {}
         if (withLocalSeen(target, seen).status !== 'active' || !ready.includes(target.cli)) return json({ error: 'computer_not_ready' }, { status: 409 });
       }
+      await stampOnboardingFor(env, accountId, 'started');
       const record = await loadOnboarding(env, accountId);
       let slug = record.daemon_practice_doc;
       if (slug) {

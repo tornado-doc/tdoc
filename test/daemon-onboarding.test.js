@@ -118,6 +118,7 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     assert.deepEqual(onboarding.local_agents, []);
     assert.equal(onboarding.record.daemon_connected, undefined);
     assert.equal(onboarding.record.first_doc, made.body.slug);
+    assert.ok(onboarding.record.started, 'explicit practice starts the comment tutorial without a helper');
     assert.equal((await call(`/api/notify/targets?slug=${made.body.slug}`, { cookie: other.cookie })).body.default, null);
     assert.equal((await manual('', origin)).status, 401);
     assert.equal((await manual(other.cookie, { Origin: 'https://other.example' })).status, 403);
