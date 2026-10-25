@@ -34,6 +34,8 @@ const CARDS = [
   base('replied', { handoff_at: iso(9 * MIN), handoff_delivery: { status: 'delivered', at: iso(9 * MIN) }, replies: [{ id: 'r', author: { kind: 'agent', login: 'claw' }, created: iso(1 * MIN) }] }),
   base('question', { handoff_at: iso(9 * MIN), handoff_delivery: { status: 'delivered', at: iso(9 * MIN) }, replies: [{ id: 'q', author: { kind: 'agent', login: 'claw' }, agent_status: 'question', created: iso(1 * MIN) }] }),
   base('resolved', { status: 'applied', handoff_at: iso(9 * MIN), handoff_delivery: { status: 'delivered', at: iso(9 * MIN) }, replies: [{ id: 'q2', author: { kind: 'agent', login: 'claw' }, agent_status: 'question', created: iso(1 * MIN) }] }),
+  base('human-followup', { handoff_at: iso(12 * MIN), handoff_delivery: { status: 'delivered', at: iso(12 * MIN) }, replies: [{ id: 'q3', author: { kind: 'agent', login: 'claw' }, agent_status: 'question', created: iso(10 * MIN) }, { id: 'h3', author: { kind: 'human', login: 'julie' }, created: iso(8 * MIN) }] }),
+  base('resent-followup', { handoff_at: iso(2 * MIN), handoff_delivery: { status: 'delivered', at: iso(2 * MIN) }, replies: [{ id: 'q4', author: { kind: 'agent', login: 'claw' }, agent_status: 'question', created: iso(10 * MIN) }, { id: 'h4', author: { kind: 'human', login: 'julie' }, created: iso(8 * MIN) }] }),
 ];
 
 function StatusCards() {

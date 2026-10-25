@@ -223,15 +223,15 @@
     flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
-    color: #6b6b70;
+    color: #3b5bdb;
     font-size: 11px;
     font-weight: 500;
     line-height: 1.25;
-    padding: 0;
+    padding: 2px 7px;
     margin: 0;
-    background: none;
+    background: #e8eeff;
     border: 0;
-    border-radius: 0;
+    border-radius: 999px;
     white-space: nowrap;
   }
   /* Homepage in-memory comment demo — same chip shape, quiet amber. */
@@ -913,10 +913,13 @@
     display: none;
     margin: 0;
   }
-  /* Ordinary agent progress is one quiet line. Color is reserved for a
-     delivery problem that needs attention. */
-  .tdoc-handoff-chip.is-failed { color: #8a3b2b; }
-  .tdoc-handoff-chip.is-stale { color: #7a5b12; }
+  /* Keep one compact pill for the current step, including the agent's reply
+     verdict. Delivery and reply are stages of one sequence, not two badges. */
+  .tdoc-handoff-chip.is-replied { color: #3b5bdb; background: #e8eeff; }
+  .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
+  .tdoc-handoff-chip.is-partial,
+  .tdoc-handoff-chip.is-stale { color: #7a5b12; background: #f7f0d8; }
+  .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
   /* The handoff line can name a long handle; it shortens, never spills. */
   .tdoc-handoff-chip.tdoc-handoff-status-text { flex: 0 1 auto; min-width: 0; max-width: 100%; gap: 0; }
   .tdoc-handoff-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

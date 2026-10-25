@@ -167,6 +167,8 @@ async function t(name, fn) {
       assert.equal((await line('replied').textContent()).trim(), 'smarter-tdoc-claw replied');
       assert.equal((await line('question').textContent()).trim(), 'smarter-tdoc-claw asked you');
       assert.equal(await page.locator('[data-comment-id="resolved"] .tdoc-handoff-chip').count(), 0, 'resolved comment repeats the agent verdict');
+      assert.equal(await page.locator('[data-comment-id="human-followup"] .tdoc-handoff-chip').count(), 0, 'human follow-up still shows the old agent question');
+      assert.equal((await line('resent-followup').textContent()).trim(), 'Delivered to smarter-tdoc-claw · 2 min ago', 'new delivery still shows the old agent question');
       for (const id of ['queued', 'picked', 'replied', 'question']) {
         assert.equal(await page.locator(`[data-comment-id="${id}"] .tdoc-handoff-chip`).count(), 1, `${id} shows more than one status`);
         const style = await line(id).evaluate((el) => ({
@@ -176,10 +178,11 @@ async function t(name, fn) {
           padding: getComputedStyle(el).padding,
           lineHeight: getComputedStyle(el).lineHeight,
           display: getComputedStyle(el).display,
+          radius: getComputedStyle(el).borderRadius,
         }));
-        assert.ok(style.background === 'rgba(0, 0, 0, 0)' || style.background === style.cardBackground,
-          `${id} still has a pill background: ${style.background}`);
-        assert.ok(style.height <= 16, `${id} status is still tall: ${JSON.stringify(style)}`);
+        assert.notEqual(style.background, style.cardBackground, `${id} lost its pill background`);
+        assert.equal(style.radius, '999px', `${id} lost its pill shape`);
+        assert.ok(style.height <= 22, `${id} status is still tall: ${JSON.stringify(style)}`);
       }
       // Buttons only where there is something to do.
       for (const id of ['queued', 'picked', 'replied']) {
