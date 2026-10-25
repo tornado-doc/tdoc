@@ -9,6 +9,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const { commentId } = require('./comment-id');
 
 
 // The server knows which Node is running it; a spawned child may not. When the
@@ -209,7 +210,7 @@ function seedFirstCommentLocal(slug) {
   const file = path.join(ROOT, slug, 'comments.json');
   const comments = readCommentFile(file);
   comments.push({
-    id: `c_${Date.now()}`, version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
+    id: commentId('c'), version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
     mentions: [], author: SEED_COMMENT_AUTHOR, status: 'open', created: new Date().toISOString(),
     replies: [], reactions: {},
   });
@@ -2023,7 +2024,7 @@ const server = http.createServer(async (req, res) => {
       // `r.version` check falls back to the parent's created_in, so replies were
       // never hidden on older versions (diverging from the worker).
       // parent_id is the immediate parent (top-level or another reply).
-      const reply = { id: `r_${Date.now()}`, parent_id, text, mentions, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
+      const reply = { id: commentId('r'), parent_id, text, mentions, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
       thread.replies.push(reply);
       writeJson(file, comments);
       if (E2E_USER) {
@@ -2041,7 +2042,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ...reply, mention_outcome: localMentionOutcome(comments, mentions) });
     }
     const entry = {
-      id: `c_${Date.now()}`,
+      id: commentId('c'),
       version: version || 1,
       anchor: anchor || null,
       text,
@@ -2106,7 +2107,7 @@ const server = http.createServer(async (req, res) => {
     const agent = agentIdentity(body, process.env);
     parent.agent_actor = agent.login;
     const reply = {
-      id: `r_${Date.now()}`,
+      id: commentId('r'),
       parent_id,
       text,
       // Scope the agent reply to the version it was applied at (falls back to
