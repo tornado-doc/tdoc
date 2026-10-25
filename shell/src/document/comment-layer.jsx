@@ -8,17 +8,17 @@ import { canSeeHandoff, handoffPinBadge, handoffWaitState, isHandoffInFlight } f
 import { isThreadUnread } from './thread-seen.js';
 
 function Pin({
-  cluster, top, left, frameTop, commentsById, seenMap, currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
+  cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
 }) {
   const single = cluster.items.length === 1 ? cluster.items[0].comment : null;
   const resolved = single?.resolved
     || (!single && cluster.items.every((item) => item.comment.resolved));
   const live = single && commentsById ? commentsById.get(single.id) : null;
-  const maySee = single && live && canSeeHandoff(live, currentUser, isOwner);
+  const maySee = single && live && canSeeHandoff(live, handoffViewer, isOwner);
   const handoff = maySee ? handoffWaitState(live, now) : null;
   const badge = maySee ? handoffPinBadge(live, now) : null;
   const waiting = isHandoffInFlight(handoff);
-  const unread = maySee && !waiting && isThreadUnread(live, seenMap, currentUser);
+  const unread = maySee && !waiting && isThreadUnread(live, seenMap, handoffViewer);
   const badgeText = { question: '❓', done: '✅', partial: '🟡', warning: '⚠' }[badge];
   const badgeLabel = { question: 'Agent asked you', done: 'Agent done', partial: 'Partially done', warning: 'Agent handoff needs attention' }[badge];
 
@@ -96,6 +96,7 @@ export function DesktopCommentLayer({
   openClusterKey,
   pinIds,
   currentUser,
+  handoffViewer = currentUser,
   isOwner,
   mentionable,
   demo = false,
@@ -137,6 +138,7 @@ export function DesktopCommentLayer({
             commentsById={commentsById}
             seenMap={seenMap}
             currentUser={currentUser}
+            handoffViewer={handoffViewer}
             isOwner={isOwner}
             hoveredAnchorId={hoveredAnchorId}
             now={now}
@@ -163,6 +165,7 @@ export function DesktopCommentLayer({
         <CommentCard
           comment={openComment}
           currentUser={currentUser}
+          handoffViewer={handoffViewer}
           isOwner={isOwner}
           mentionable={mentionable}
           demo={demo}
@@ -196,6 +199,7 @@ export function MobileCommentDrawer({
   unread = false,
   pinIds,
   currentUser,
+  handoffViewer = currentUser,
   isOwner,
   mentionable,
   demo = false,
@@ -265,6 +269,7 @@ export function MobileCommentDrawer({
                   key={comment.id}
                   comment={comment}
                   currentUser={currentUser}
+                  handoffViewer={handoffViewer}
                   isOwner={isOwner}
                   mentionable={mentionable}
                   demo={demo}

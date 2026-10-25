@@ -79,7 +79,8 @@ function ActivityDemo() {
   const [open, setOpen] = useState(false);
   const [log, setLog] = useState('');
   const phone = window.innerWidth < 700;
-  const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)));
+  const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)))
+    .map((card) => params.has('mixed') && card.id === 'failed' ? { ...card, handoff_resend_allowed: false } : card);
   const buckets = summarizeHandoffSurfaces(activityCards);
   const counts = Object.fromEntries(Object.entries(buckets).map(([state, items]) => [state, items.length]));
   const unread = params.get('unread') === '0' ? 0 : activityCards.filter((card) => isThreadUnread(card, {}, 'julie')).length;

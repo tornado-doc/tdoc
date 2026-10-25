@@ -42,9 +42,13 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
   const bobId = await comment(bob, 'Bob asks for a chart');
   const carolId = await comment(carol, 'Carol asks for a table');
   const agentId = 'ta_1234567890abcdef';
+  const agentToken = 'tdoc-team-agent-privacy-token';
+  const agentHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(agentToken))))
+    .map((byte) => byte.toString(16).padStart(2, '0')).join('');
   const storedTeam = JSON.parse(await env.META.get(`team:${team.id}`));
-  storedTeam.agents = [{ id: agentId, name: 'team agent' }];
+  storedTeam.agents = [{ id: agentId, name: 'team agent', token_hash: agentHash }];
   await env.META.put(`team:${team.id}`, JSON.stringify(storedTeam));
+  await env.META.put(`hosted-token:${agentHash}`, JSON.stringify({ account_id: agentId, team_agent: { id: agentId, team: team.id } }));
   await env.META.put('handoffs:handoff-private-details', JSON.stringify([{
     handoff_id: 'h_private', at: new Date().toISOString(),
     recipient: { provider: 'raft', agent_name: 'team agent', server_id: 'secret-server' },
@@ -67,6 +71,22 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
     }
   }
   console.log('  ✓ comments API hides all handoff fields from other readers at current and all versions');
+  for (const visibility of ['public', 'unlisted']) {
+    const meta = JSON.parse(await env.META.get('meta:handoff-private-details'));
+    meta.access.visibility = visibility;
+    await env.META.put('meta:handoff-private-details', JSON.stringify(meta));
+    for (const [token, allowedIds] of [[bob.token, [bobId]], [carol.token, [carolId]], [julie.token, [bobId, carolId]], [agentToken, [bobId, carolId]]]) {
+      const result = await comments({ token });
+      assert.equal(result.status, 200, `${visibility} token read`);
+      for (const row of result.body) {
+        assert.equal(Object.hasOwn(row, 'handoff_to'), allowedIds.includes(row.id), `${visibility} token ${row.id}`);
+      }
+    }
+  }
+  console.log('  ✓ bearer tokens keep their own or assigned handoff details on public and link-visible docs');
+
+  const bobVisible = (await comments({ cookie: bob.cookie })).body.find((row) => row.id === bobId);
+  assert.equal(bobVisible.handoff_resend_allowed, false, 'mixed batch cannot be resent by one member');
 
   const handoffs = (person) => call('/api/notify/handoffs?slug=handoff-private-details', { cookie: person.cookie });
   const adminList = await handoffs(julie);
@@ -99,4 +119,21 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
   assert.equal(resend.status, 403);
   assert.equal(resend.body.error, 'comment_not_owned');
   console.log('  ✓ team member cannot resend a mixed batch containing another commenter’s request');
+
+  const prior = JSON.parse(await env.META.get('handoffs:handoff-private-details'));
+  await env.META.put('handoffs:handoff-private-details', JSON.stringify([{
+    ...prior[0], handoff_id: 'h_bob', comment_ids: [bobId], instruction: 'Bob’s own instruction', resolved_ids: [],
+  }, ...prior]));
+  const ownBatch = await handoffs(bob);
+  assert.equal(ownBatch.body.handoffs[0].instruction, 'Bob’s own instruction');
+  assert.equal((await comments({ cookie: bob.cookie })).body.find((row) => row.id === bobId).handoff_resend_allowed, true);
+  console.log('  ✓ own-comment batch keeps its instruction and allows resend');
+
+  const unrelatedId = await comment(julie, 'An unrelated agent request');
+  await env.META.put('handoffs:handoff-private-details', JSON.stringify([{
+    ...prior[0], handoff_id: 'h_other_agent', comment_ids: [unrelatedId], by: 'ta_other_agent',
+  }, ...JSON.parse(await env.META.get('handoffs:handoff-private-details'))]));
+  const unrelated = (await comments({ token: agentToken })).body.find((row) => row.id === unrelatedId);
+  assert.equal(Object.hasOwn(unrelated, 'handoff_to'), false);
+  console.log('  ✓ team agent sees only handoffs assigned to its account');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

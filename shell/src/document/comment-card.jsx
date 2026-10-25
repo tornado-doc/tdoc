@@ -620,6 +620,7 @@ function ProductWhere({ anchor }) {
 export function CommentCard({
   comment,
   currentUser,
+  handoffViewer = currentUser,
   isOwner = false,
   mentionable = [],
   demo = false,
@@ -790,13 +791,13 @@ export function CommentCard({
       <div className="tdoc-status-row">
         {comment.status === 'applied' ? (
           <span className="tdoc-resolved-chip">
-            {comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, currentUser, isOwner)) ? '✅ Done' : comment.resolved_by
+            {comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, handoffViewer, isOwner)) ? '✅ Done' : comment.resolved_by
               ? `✓ resolved by @${comment.resolved_by}`
               : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
           </span>
         ) : null}
-        {demo || canSeeHandoff(comment, currentUser, isOwner) ? (
-          <HandoffStatusChips comment={comment} onResend={onResendHandoff} />
+        {demo || canSeeHandoff(comment, handoffViewer, isOwner) ? (
+          <HandoffStatusChips comment={comment} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
         ) : null}
       </div>
       <header className="tdoc-cc-head">

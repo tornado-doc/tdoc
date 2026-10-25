@@ -987,15 +987,16 @@ export function DocumentShell({ boot, config }) {
   };
   // Badge + send panel = comments ready to hand off (never sent, or human
   // wrote again after the last handoff). Not "open" and not "sent".
+  const handoffViewer = useMemo(() => [config.identity?.login, ...(config.identity?.linked_actor_keys || [])], [config.identity]);
   const visibleHandoffComments = useMemo(
-    () => comments.comments.filter((comment) => canSeeHandoff(comment, config.identity?.login || 'anon', Boolean(config.isOwner))),
-    [comments.comments, config.identity?.login, config.isOwner],
+    () => comments.comments.filter((comment) => canSeeHandoff(comment, handoffViewer, Boolean(config.isOwner))),
+    [comments.comments, handoffViewer, config.isOwner],
   );
   const handoffBuckets = useMemo(
     () => summarizeHandoffSurfaces(visibleHandoffComments),
     [visibleHandoffComments],
   );
-  const unreadAgentReplies = visibleHandoffComments.filter((comment) => isThreadUnread(comment, seenMap, config.identity?.login)).length;
+  const unreadAgentReplies = visibleHandoffComments.filter((comment) => isThreadUnread(comment, seenMap, handoffViewer)).length;
   const openDocNotify = (selectedIds = handoffBuckets.ready.map((c) => c.id)) => {
     setHandoffDetailsOpen(false);
     openNotifyPanel(selectedIds);
@@ -1374,8 +1375,8 @@ export function DocumentShell({ boot, config }) {
   // Only when there is something to filter.
   const openCount = comments.comments.length - resolvedCount;
   const mobileUnread = comments.comments.some((comment) => (
-    canSeeHandoff(comment, config.identity?.login || 'anon', Boolean(config.isOwner))
-    && isThreadUnread(comment, seenMap, config.identity?.login)
+    canSeeHandoff(comment, handoffViewer, Boolean(config.isOwner))
+    && isThreadUnread(comment, seenMap, handoffViewer)
   ));
   const startDocumentComment = (askAi = false) => {
     if (!config.canComment) { if (config.signInToComment) signIn(); return; }
@@ -1463,7 +1464,7 @@ export function DocumentShell({ boot, config }) {
                   slug={config.slug}
                   open={handoffDetailsOpen}
                   comments={visibleHandoffComments}
-                  currentUser={config.identity?.login || 'anon'}
+                  currentUser={handoffViewer}
                   seenMap={seenMap}
                   onClose={() => setHandoffDetailsOpen(false)}
                   onSendReady={openDocNotify}
@@ -1662,6 +1663,7 @@ export function DocumentShell({ boot, config }) {
           comments={shownComments}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
+          handoffViewer={handoffViewer}
           isOwner={Boolean(config.isOwner)}
           mentionable={mentionable}
           demo={!!config.demoComments}
@@ -1696,6 +1698,7 @@ export function DocumentShell({ boot, config }) {
           openClusterKey={openClusterKey}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
+          handoffViewer={handoffViewer}
           isOwner={Boolean(config.isOwner)}
           mentionable={mentionable}
           demo={!!config.demoComments}

@@ -93,7 +93,7 @@ export function HandoffDetailsPanel({
                     </button>
                     <span className={`tdoc-handoff-details-state is-${pillState}`}>
                       {label}
-                      {stuck ? <>
+                      {stuck && comment.handoff_resend_allowed !== false ? <>
                         <span aria-hidden="true"> · </span>
                         <button type="button" className="tdoc-handoff-details-resend" disabled={busyId === comment.id} onClick={() => resendOne(comment)}>{busyId === comment.id ? 'Resending…' : 'Resend'}</button>
                       </> : null}

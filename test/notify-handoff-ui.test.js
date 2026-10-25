@@ -276,6 +276,18 @@ async function t(name, fn) {
       await page.close();
     });
 
+    await t('a mixed team batch does not offer a resend that the server will reject', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      await page.goto(`${base}/?view=activity&failed=1&mixed=1`);
+      await page.locator('#tdoc-send-agent-btn').click();
+      const row = page.locator('.tdoc-handoff-details-row').filter({ hasText: 'Add a conclusion to the report' });
+      await row.waitFor();
+      assert.equal(await row.getByRole('button', { name: 'Resend' }).count(), 0);
+      await row.getByRole('button', { name: 'Details' }).click();
+      assert.equal(await row.getByRole('button', { name: 'Send to another agent' }).count(), 1);
+      await page.close();
+    });
+
     await t('collapsed pins show private corner markers, unread dots and hover focus without breaking clusters', async () => {
       const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
       await page.goto(`${base}/?view=pins&viewer=julie&hover=question`);

@@ -38,11 +38,15 @@ function comment(partial) {
     lastHumanAt,
     handoffWaitState,
     handoffPinBadge,
+    canSeeHandoff,
     handoffWaitMinutes,
     HANDOFF_STALE_MS,
   } = await load();
   let pass = 0;
   const ok = (n) => { console.log(`  ✓ ${n}`); pass += 1; };
+  assert.strictEqual(canSeeHandoff(comment({ author: { login: 'old-handle' } }), ['new-handle', 'old-handle'], false), true);
+  assert.strictEqual(canSeeHandoff(comment({ author: { login: 'someone-else' } }), ['new-handle', 'old-handle'], false), false);
+  ok('linked account handles keep their own handoff cues');
 
   assert.strictEqual(handoffSurfaceState(comment()), 'ready');
   ok('untouched comment is ready');

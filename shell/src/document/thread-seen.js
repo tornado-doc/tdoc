@@ -20,12 +20,14 @@ export function latestAgentActivityAt(comment) {
 }
 
 function latestViewerReplyAt(comment, viewerLogin) {
-  const viewer = String(viewerLogin || '').trim().toLowerCase();
-  if (!viewer || viewer === 'anon') return 0;
+  const viewers = (Array.isArray(viewerLogin) ? viewerLogin : [viewerLogin])
+    .map((login) => String(login || '').trim().toLowerCase())
+    .filter((login) => login && login !== 'anon');
+  if (!viewers.length) return 0;
   let latest = 0;
   for (const reply of comment?.replies || []) {
     if (!reply || reply.author?.kind === 'agent' || reply.author?.kind === 'system' || reply.agent_status) continue;
-    if (String(reply.author?.login || '').trim().toLowerCase() !== viewer) continue;
+    if (!viewers.includes(String(reply.author?.login || '').trim().toLowerCase())) continue;
     latest = Math.max(latest, Date.parse(reply.created || '') || 0);
   }
   return latest;

@@ -60,6 +60,7 @@ async function load() {
     replies: [...newer.replies, { author: { kind: 'human', login: 'julie' }, created: '2026-01-01T04:00:00Z', text: 'thanks' }],
   };
   assert.strictEqual(isThreadUnread(ownReply, {}, 'julie'), false);
+  assert.strictEqual(isThreadUnread(ownReply, {}, ['new-handle', 'julie']), false);
   assert.strictEqual(isThreadUnread(ownReply, {}, 'bob'), true);
   ok('only the viewer\'s own later reply clears the old unread agent turn');
 

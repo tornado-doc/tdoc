@@ -139,9 +139,11 @@ export function handoffWaitState(comment, now = Date.now()) {
 
 /** Viewer-specific handoff cues are private to the commenter and doc owner. */
 export function canSeeHandoff(comment, viewerLogin, isOwner) {
-  const login = String(viewerLogin || '').trim().toLowerCase();
   const author = String(comment?.author?.login || '').trim().toLowerCase();
-  return Boolean(isOwner || (login && login !== 'anon' && author && author === login));
+  const logins = (Array.isArray(viewerLogin) ? viewerLogin : [viewerLogin])
+    .map((login) => String(login || '').trim().toLowerCase())
+    .filter((login) => login && login !== 'anon');
+  return Boolean(isOwner || (author && logins.includes(author)));
 }
 
 /** Compact corner marker for a collapsed comment avatar. */
