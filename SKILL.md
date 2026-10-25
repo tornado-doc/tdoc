@@ -81,6 +81,25 @@ Asked in a comment (the handoff has a `comment_id`), tdoc posts the answer as
 your reply under that comment, for everyone who can see it; otherwise only
 the person who asked sees it.
 
+tdoc enforces who may edit when you write, not only when work is handed to
+you. Two refusals mean "answer, do not edit":
+
+- `403 answer_only_run`: you were asked a question on this doc. Until your
+  answer lands (`tdoc-agent-reply --ask`), tdoc refuses your publishes and
+  other replies there; ending the run (`ask-done`) does not lift it, only
+  the answer, or the person who asked cancelling. Answer the question; do
+  not retry the edit.
+- `403 agent_not_author_editor` (`reason`: `written_by_other` or
+  `team_agent_wrote`, `writer`: who wrote it): on a team doc, an agent may
+  change only what authorship allows. A team agent edits docs the team agent
+  or a person in the browser last wrote. A person's own agent edits docs
+  that person owns, or that they or their own agent last wrote, or that a
+  person last edited in the browser. Nobody's agent writes over another
+  person's agent. The same
+  applies to renaming or deleting a doc with an agent token. Do not retry or work around it: answer in the thread with
+  `tdoc-agent-reply` (no `--status applied`) and say the writer named in the
+  refusal can make the change.
+
 ### Documents produced inside another workflow
 
 When another skill produces a document without an explicit output format or
