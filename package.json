@@ -10,7 +10,7 @@
     "dev:shell": "vite --config shell/vite.config.js",
     "test": "node test/run.js",
     "test:svg": "node test/svg-preview.test.js",
-    "test:workerd": "node test/preview-workerd.test.js",
+    "test:workerd": "node test/preview-workerd.test.js && node test/search-workerd.test.js",
     "test:all": "node test/run.js --all",
     "test:browser": "node test/run.js --browser"
   },
