@@ -227,7 +227,7 @@ async function register(cfg, st) {
   // Only verified, still-installed runtimes may execute queued work.
   if (runtimes) st.clis = runtimes.filter((r) => r.state === 'ready').map((r) => r.cli);
   const clis = runtimes ? runtimes.filter((r) => r.state !== 'not_installed').map((r) => r.cli) : st.clis;
-  const r = await api(cfg, 'POST', '/api/notify/local/register', { device: st.device, clis, ready_clis: ready.filter((cli) => st.clis.includes(cli)), ...(runtimes ? { runtimes } : {}) });
+  const r = await api(cfg, 'POST', '/api/notify/local/register', { device: st.device, clis, ready_clis: ready.filter((cli) => st.clis.includes(cli)), ...(runtimes ? { runtimes, setup_checked_at: installed?.checked_at } : {}) });
   log(`registered ${st.clis.map((c) => `${c} on ${st.device}`).join(', ')} at ${new URL(cfg.base).host}${r.added ? ` (${r.added} new)` : ''}`);
   return r;
 }

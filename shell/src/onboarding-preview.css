@@ -1,4 +1,6 @@
 .op-preview { min-height: 100svh; display: flex; flex-direction: column; font-family: var(--td-font-display); }
+.op-setup-preview { height: 100dvh; min-height: 0; overflow: hidden; }
+.op-setup-preview > .docs-hub { flex: 1; min-height: 0; overflow: hidden; }
 .op-nav { position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; background: var(--td-surface-2); border-bottom: 1px solid var(--td-line); color: var(--td-ink); font-size: 13px; line-height: 1.5; }
 .op-nav > div { display: grid; gap: 2px; }
 .op-nav span { color: var(--td-muted); font-size: 12px; }

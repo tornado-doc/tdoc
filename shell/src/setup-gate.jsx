@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Monitor } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent, createOnboardingPractice } from './document/api.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { AgentMarks, ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 import { ChoiceCards } from './ui/choice-cards.jsx';
-import { AppSelect } from './ui/select.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
@@ -34,7 +34,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
   const [paired, setPaired] = useState(Boolean(preview?.paired));
   const [agents, setAgents] = useState(preview?.local_agents || []);
   const [computers, setComputers] = useState(preview?.local_computers || []);
-  const [selectedComputer, setSelectedComputer] = useState('');
+  const [connectedDevice, setConnectedDevice] = useState('');
   const [loaded, setLoaded] = useState(Boolean(preview));
   const [selected, setSelected] = useState('');
   const [copied, setCopied] = useState('');
@@ -56,12 +56,13 @@ export function SetupGate({ boot, preview = null, onClose }) {
   for (const agent of agents) {
     if (!detectedComputers.some((c) => c.device === agent.device)) detectedComputers.push({ device: agent.device, status: agent.status, runtimes: agents.filter((a) => a.device === agent.device).map((a) => ({ cli: a.cli, state: a.ready ? 'ready' : 'needs_check' })) });
   }
-  const computer = detectedComputers.find((c) => c.device === selectedComputer)
-    || (selectedComputer ? null : detectedComputers.find((c) => c.status === 'active' && available.some((a) => a.device === c.device)) || detectedComputers.find((c) => c.status === 'active') || detectedComputers[0]);
+  const latestComputer = [...detectedComputers].reverse().filter((c) => c.status === 'active')
+    .sort((a, b) => (Date.parse(b.connected_at || b.last_seen) || 0) - (Date.parse(a.connected_at || a.last_seen) || 0))[0];
+  const computer = connectedDevice ? detectedComputers.find((c) => c.device === connectedDevice) : latestComputer || detectedComputers[0];
   const runtime = selected || computer?.runtimes?.find((r) => r.state === 'ready')?.cli || 'claude';
   const observed = computer?.runtimes?.find((r) => r.cli === runtime);
   const chosen = available.find((a) => a.device === computer?.device && a.cli === runtime && observed?.state === 'ready') || null;
-  const connected = detectedComputers.some((c) => c.status === 'active');
+  const connected = Boolean(computer?.status === 'active');
   const runtimeReady = Boolean(chosen && computer?.status === 'active');
   const state = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
 
@@ -134,19 +135,19 @@ export function SetupGate({ boot, preview = null, onClose }) {
         {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
           : canReturn ? <button type="button" className="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</button>
           : choose ? <button type="button" className="primary" onClick={practice} disabled={busy || !runtimeReady}>{busy ? 'Opening your doc…' : pendingAsk ? 'Back to the doc' : 'Try a comment'}</button>
-            : <button type="button" className="primary" disabled={!loaded || !connected} onClick={() => setStage('choose')}>Next</button>}
+            : <button type="button" className="primary" disabled={!loaded || !connected} onClick={() => { setConnectedDevice(computer.device); setStage('choose'); }}>Next</button>}
       </>}
     >
       {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to connect this computer.' : 'Sign-in is not configured on this host.'}</p>
         : !loaded ? <p role="status">Checking your computers…</p>
           : choose ? <>
-            <AppSelect ariaLabel="Connected computer" value={computer?.device || ''} onChange={(device) => { setSelectedComputer(device); setSelected(''); setError(''); }} options={detectedComputers.map((c) => ({ value: c.device, label: `${c.device}${c.status === 'active' ? '' : ' · Offline'}` }))} disabled={busy || !detectedComputers.length} />
-            <p className="ui-setup-intro">Detected on {computer?.device || 'your connected computer'}. Uses your existing AI account.</p>
-            <ChoiceCards ariaLabel="Local AI runtimes" value={runtime} onChange={(cli) => { setSelectedComputer(computer?.device || ''); setSelected(cli); setError(''); }} disabled={busy} options={RUNTIMES.map((option) => {
+            <div className="ui-setup-computer" role="status"><Monitor size={18} aria-hidden="true" /><strong>{computer?.device || 'Your computer'}</strong><span data-online={computer?.status === 'active'}>{computer?.status === 'active' ? 'Connected' : 'Offline'}</span></div>
+            <p className="ui-setup-intro">Use an AI already installed on this computer.</p>
+            <ChoiceCards ariaLabel="Local AI runtimes" value={runtime} onChange={(cli) => { setConnectedDevice(computer?.device || ''); setSelected(cli); setError(''); }} disabled={busy} options={RUNTIMES.map((option) => {
               const found = computer?.runtimes?.find((r) => r.cli === option.value);
               const online = computer?.status === 'active';
               const verified = found?.state === 'ready' && available.some((a) => a.device === computer.device && a.cli === option.value);
-              return { ...option, description: found?.version ? `Version ${found.version}` : option.value === 'claude' ? 'Your local Claude Code CLI' : 'Your local Codex CLI', status: !online ? 'Offline' : verified ? 'Ready' : found?.state === 'not_installed' ? 'Not installed' : found ? 'Needs a check' : 'Not detected' };
+              return { ...option, description: found?.version ? `Version ${found.version}` : found?.state === 'not_installed' ? 'Install to use this AI' : 'Uses your existing account', tone: !online ? 'waiting' : verified ? 'ready' : 'attention', status: !online ? 'Offline' : verified ? 'Ready' : found?.state === 'not_installed' ? 'Not installed' : found ? 'Needs a check' : 'Not detected' };
             })} />
             <div className="ui-setup-runtime-help" role="status" aria-live="polite">
               {computer?.status !== 'active' ? <p>This computer is offline. Wake it up to check its AI.</p>
@@ -163,7 +164,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
             <div className="ui-setup-command"><code ref={connectRef}>{CONNECT_PROMPT}</code><button type="button" aria-label={copied === 'setup' ? 'Setup command copied' : 'Copy setup command'} onClick={() => copy(CONNECT_PROMPT, 'setup', connectRef)}>{copied === 'setup' ? '✓' : '⧉'}</button></div>
             <ol className="ui-setup-steps"><li>Paste the commands above into {platform === 'windows' ? 'your WSL terminal' : 'your terminal'} and press Enter.</li><li>Approve the request when it opens in your browser.</li><li>Your computer shows up here on its own. No need to refresh.</li></ol>
             <div className="ui-setup-status" role="status" aria-live="polite">
-              {connected ? <span className="ui-setup-connected">Connected · {detectedComputers.find((c) => c.status === 'active').device}</span>
+              {connected ? <span className="ui-setup-connected">Connected · {computer.device}</span>
                 : state === 'stuck' ? <><p>Still waiting? Check Terminal for a sign-in or installation error.</p><code>{DOCTOR_PROMPT}</code><button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy status command</button><p><a href="https://nodejs.org/">Node.js 18+ is required</a></p></>
                   : <><span className="sg-spin" aria-hidden="true" />{copyFailed ? COPY_FALLBACK : 'Waiting for you to run the commands and approve in your browser…'}</>}
             </div>

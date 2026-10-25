@@ -17847,8 +17847,12 @@ const tdocHandlers = {
         let computers = {};
         const computerKey = `local-computers:${accountId}`;
         try { computers = JSON.parse(await env.META.get(computerKey)) || {}; } catch {}
-        const next = { runtimes: runtimes.map((r) => ({ ...r, state: r.state === 'ready' && !readyClis.includes(r.cli) ? 'needs_check' : r.state })) };
+        const checkedAt = typeof body.setup_checked_at === 'string' && body.setup_checked_at.length <= 40 && Number.isFinite(Date.parse(body.setup_checked_at)) ? new Date(body.setup_checked_at).toISOString() : null;
+        const previous = computers[device];
+        const connectedAt = previous?.connected_at && previous.setup_checked_at === checkedAt ? previous.connected_at : new Date().toISOString();
+        const next = { connected_at: connectedAt, setup_checked_at: checkedAt, runtimes: runtimes.map((r) => ({ ...r, state: r.state === 'ready' && !readyClis.includes(r.cli) ? 'needs_check' : r.state })) };
         if (JSON.stringify(computers[device]) !== JSON.stringify(next)) {
+          if (previous?.setup_checked_at !== checkedAt) delete computers[device];
           const entries = Object.entries({ ...computers, [device]: next }).slice(-NOTIFY_AGENTS_MAX);
           await env.META.put(computerKey, JSON.stringify(Object.fromEntries(entries)));
         }

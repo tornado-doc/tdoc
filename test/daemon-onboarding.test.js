@@ -55,6 +55,21 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     await env.META.put(seenKey, JSON.stringify({ ...seen, 'inventory-mac': '2000-01-01T00:00:00Z' }));
     assert.equal((await call('/api/onboarding?daemon=1', { cookie: owner.cookie })).body.local_computers.find((c) => c.device === 'inventory-mac').status, 'inactive');
   });
+  await test('a heartbeat preserves which computer was connected most recently', async () => {
+    const runtimes = [{ cli: 'claude', state: 'not_installed' }, { cli: 'codex', state: 'not_installed' }];
+    const body = { device: 'setup-mac', clis: [], runtimes, setup_checked_at: '2026-10-25T01:00:00.000Z' };
+    const report = await call('/api/notify/local/register', { method: 'POST', token: owner.token, body });
+    const key = `local-computers:${report.body.account_id}`;
+    const stored = JSON.parse(await env.META.get(key));
+    stored['setup-mac'].connected_at = '2026-01-01T00:00:00.000Z';
+    await env.META.put(key, JSON.stringify(stored));
+    await call('/api/notify/local/register', { method: 'POST', token: owner.token, body });
+    assert.equal(JSON.parse(await env.META.get(key))['setup-mac'].connected_at, '2026-01-01T00:00:00.000Z', 'background reports cannot steal the current connection');
+    await call('/api/notify/local/register', { method: 'POST', token: owner.token, body: { ...body, setup_checked_at: '2026-10-25T02:00:00.000Z' } });
+    const next = JSON.parse(await env.META.get(key))['setup-mac'];
+    assert.notEqual(next.connected_at, '2026-01-01T00:00:00.000Z', 'explicit setup starts a new connection');
+    assert.equal(next.setup_checked_at, '2026-10-25T02:00:00.000Z');
+  });
   let slug;
   await test('practice creates one private, owned doc and resumes it on retry', async () => {
     const made = await practice();

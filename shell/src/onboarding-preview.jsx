@@ -41,6 +41,7 @@ export default function OnboardingPreview() {
   });
   const [dialogOpen, setDialogOpen] = useState(true);
   const [notice, setNotice] = useState('');
+  const setupPreview = ['Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published'].includes(state);
   let screen;
   if (state.startsWith('Tutorial ')) {
     screen = <TutorialPreview key={state} state={state} />;
@@ -50,7 +51,7 @@ export default function OnboardingPreview() {
     screen = <div className="op-dialog-stage"><button onClick={() => setDialogOpen(true)}>Open sign-in dialog</button>
       <SignInDialog open={dialogOpen} onOpenChange={setDialogOpen} onSuccess={() => {}} preview={{device:{user_code:'ABCD-1234',verification_uri:'https://github.com/login/device'},status:'Approve on GitHub, then return here.'}} />
     </div>;
-  } else if (['Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published'].includes(state)) {
+  } else if (setupPreview) {
     const choosing = ['Connected', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published'].includes(state);
     const status = state === 'AI offline' ? 'inactive' : 'active';
     const runtimeState = state === 'AI missing' ? 'not_installed' : state === 'AI needs check' ? 'needs_check' : 'ready';
@@ -67,7 +68,7 @@ export default function OnboardingPreview() {
       event.preventDefault(); event.stopPropagation(); setNotice('Preview only. No account changes.');
     }
   };
-  return <div className="op-preview" onClickCapture={keepInPreview}>
+  return <div className={`op-preview${setupPreview ? ' op-setup-preview' : ''}`} onClickCapture={keepInPreview}>
     <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding preview</strong><span>Original UI · sample data</span></div><label>Screen <AppSelect ariaLabel="Screen" value={state} onChange={next => {setState(next);setDialogOpen(true);setNotice('');const url=new URL(location.href);url.searchParams.set('screen',next);history.replaceState(null,'',url);}} options={states.map(value => ({value,label:value}))} /></label></nav>
     {notice ? <p className="op-notice" role="status">{notice}</p> : null}
     {screen}
