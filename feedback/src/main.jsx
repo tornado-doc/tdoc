@@ -574,6 +574,7 @@ ${uiCss}
         comment && comment.anchor && comment.anchor.kind === 'product' && comment.anchor.url === pageUrl),
       mentionable, signedIn,
       currentUser: (mentions && mentions.identity && mentions.identity.login) || (session.identity && session.identity.login) || 'anon',
+      handoffViewer: [mentions?.identity?.login || session.identity?.login, ...(mentions?.identity?.linked_actor_keys || session.identity?.linked_actor_keys || [])],
       isOwner: Boolean(mentions && mentions.is_owner),
     };
   }
@@ -1127,6 +1128,7 @@ ${uiCss}
           <CommentCard
             comment={openComment}
             currentUser={surface.currentUser || 'anon'}
+            handoffViewer={surface.handoffViewer || surface.currentUser || 'anon'}
             isOwner={owner}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}

@@ -235,6 +235,7 @@ async function t(name, fn) {
       await details.getByRole('button', { name: 'Details' }).first().click();
       assert.equal(await details.locator('.tdoc-handoff-details-history').count(), 1);
       assert.equal(await details.locator('.tdoc-handoff-details-unread-dot').count(), 4);
+      assert.equal(await details.getByRole('status', { name: 'New agent reply' }).count(), 4);
       assert.equal(await details.getByText('✅ Done', { exact: true }).count(), 1);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-details-desktop.png') });
       const readyChecks = details.getByRole('checkbox');
@@ -330,6 +331,18 @@ async function t(name, fn) {
       await page.close();
     });
 
+    await t('a mixed team batch does not offer a resend that the server will reject', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      await page.goto(`${base}/?view=activity&failed=1&mixed=1`);
+      await page.locator('#tdoc-send-agent-btn').click();
+      const row = page.locator('.tdoc-handoff-details-row').filter({ hasText: 'Add a conclusion to the report' });
+      await row.waitFor();
+      assert.equal(await row.getByRole('button', { name: 'Resend' }).count(), 0);
+      await row.getByRole('button', { name: 'Details' }).click();
+      assert.equal(await row.getByRole('button', { name: 'Send to another agent' }).count(), 1);
+      await page.close();
+    });
+
     await t('collapsed pins show private corner markers, unread dots and hover focus without breaking clusters', async () => {
       const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
       await page.goto(`${base}/?view=pins&viewer=julie&hover=question`);
@@ -349,6 +362,20 @@ async function t(name, fn) {
       assert.doesNotMatch(await pin('resolved').getAttribute('class'), /tdoc-pin-resolved/);
       await page.goto(`${base}/?view=pins&viewer=owner`);
       assert.equal(await pin('question').locator('.tdoc-pin-handoff-badge').textContent(), '❓');
+      await page.close();
+    });
+
+    await t('a quiet handoff pin becomes a warning when its response window passes', async () => {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+      await page.clock.install({ time: new Date('2026-10-25T09:00:00Z') });
+      await page.goto(`${base}/?view=pins&near-stale=1`);
+      const pin = page.locator('.tdoc-pin[data-id="near-stale"]');
+      await pin.waitFor();
+      assert.match(await pin.getAttribute('class'), /is-waiting-handoff/);
+      assert.equal(await pin.locator('.tdoc-pin-handoff-badge').count(), 0);
+      await page.clock.runFor(30000);
+      await pin.locator('.tdoc-pin-handoff-badge.is-warning').waitFor();
+      assert.equal(await pin.locator('.tdoc-pin-handoff-badge').textContent(), '⚠');
       await page.close();
     });
 

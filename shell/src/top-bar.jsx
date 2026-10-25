@@ -20,6 +20,7 @@ import { useNotifications } from './hooks/use-notifications.js';
 import { BrowserAlertsPrompt, NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 import { SpaceMenuItems, WorkspaceSwitcher, spaceLabel, useSpaceTeams } from './workspace-switcher.jsx';
 import { readDevMode, setDevMode } from './dev-mode.js';
+import { devOnlyFlags } from './feature-flags.js';
 
 // Sign in always asks which account: after Sign out, the provider (and
 // GitHub behind it) still remember the last one, and going straight back in
@@ -69,6 +70,8 @@ export function TopBar({
   const [devMode] = useState(readDevMode);
   const toggleDevMode = () => { setDevMode(!devMode.on).catch(() => {}); };
   const devModeLabel = devMode ? `Dev mode: ${devMode.on ? 'on' : 'off'}` : '';
+  const devFlags = devMode ? devOnlyFlags().map((flag) => flag.label) : [];
+  const devFlagsNote = devFlags.length ? <div className="tdoc-dev-mode-flags" role="note">Dev mode shows: {devFlags.join(', ')}</div> : null;
 
   useEffect(() => {
     if (!viewerKey || profile) return undefined;
@@ -246,6 +249,7 @@ export function TopBar({
                     <FlaskConical size={15} /> {devModeLabel}
                   </AppMenuItem>
                 ) : null}
+                {devFlagsNote}
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
                 </AppMenuItem>
@@ -281,6 +285,7 @@ export function TopBar({
                 {devModeLabel}
               </AppMenuItem>
             ) : null}
+            {devFlagsNote}
             {supportsTheme ? (
               <>
                 <AppMenuSeparator />

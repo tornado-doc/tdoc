@@ -60,7 +60,7 @@ t('resolution records its author without synthesizing reactions', () => {
 });
 
 t('the chip says who decided, because they are different claims', () => {
-  assert(card.includes("comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, currentUser, isOwner)) ? '✅ Done'"),
+  assert(card.includes("comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, handoffViewer, isOwner)) ? '✅ Done'"),
     'an agent handoff resolved by the agent should show Done');
   assert(/comment\.resolved_by\s*\n?\s*\? `✓ resolved by @\$\{comment\.resolved_by\}`/.test(card),
     'a person resolving should not read as "fixed"');

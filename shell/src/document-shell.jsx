@@ -1018,18 +1018,23 @@ export function DocumentShell({ boot, config }) {
   };
   // Badge + send panel = comments ready to hand off (never sent, or human
   // wrote again after the last handoff). Not "open" and not "sent".
-  const handoffBuckets = useMemo(
-    () => summarizeHandoffSurfaces(comments.comments),
-    [comments.comments],
+  const handoffViewer = useMemo(() => [config.identity?.login, ...(config.identity?.linked_actor_keys || [])], [config.identity]);
+  const visibleHandoffComments = useMemo(
+    () => comments.comments.filter((comment) => canSeeHandoff(comment, handoffViewer, Boolean(config.isOwner))),
+    [comments.comments, handoffViewer, config.isOwner],
   );
-  const unreadAgentReplies = comments.comments.filter((comment) => isThreadUnread(comment, seenMap)).length;
+  const handoffBuckets = useMemo(
+    () => summarizeHandoffSurfaces(visibleHandoffComments),
+    [visibleHandoffComments],
+  );
+  const unreadAgentReplies = visibleHandoffComments.filter((comment) => isThreadUnread(comment, seenMap, handoffViewer)).length;
   const markAgentReplyRead = (comment) => {
     if (markThreadSeen(config.slug, comment)) setSeenMap(readSeenMap(config.slug));
   };
   const markAllAgentRepliesRead = () => {
     let changed = false;
-    for (const comment of comments.comments) {
-      if (isThreadUnread(comment, seenMap)) changed = markThreadSeen(config.slug, comment) || changed;
+    for (const comment of visibleHandoffComments) {
+      if (isThreadUnread(comment, seenMap, handoffViewer)) changed = markThreadSeen(config.slug, comment) || changed;
     }
     if (changed) setSeenMap(readSeenMap(config.slug));
   };
@@ -1411,8 +1416,8 @@ export function DocumentShell({ boot, config }) {
   // Only when there is something to filter.
   const openCount = comments.comments.length - resolvedCount;
   const mobileUnread = comments.comments.some((comment) => (
-    canSeeHandoff(comment, config.identity?.login || 'anon', Boolean(config.isOwner))
-    && isThreadUnread(comment, seenMap)
+    canSeeHandoff(comment, handoffViewer, Boolean(config.isOwner))
+    && isThreadUnread(comment, seenMap, handoffViewer)
   ));
   const startDocumentComment = (askAi = false) => {
     if (!config.canComment) { if (config.signInToComment) signIn(); return; }
@@ -1498,7 +1503,8 @@ export function DocumentShell({ boot, config }) {
                 <HandoffDetailsPanel
                   slug={config.slug}
                   open={handoffDetailsOpen}
-                  comments={comments.comments}
+                  comments={visibleHandoffComments}
+                  currentUser={handoffViewer}
                   seenMap={seenMap}
                   onClose={() => setHandoffDetailsOpen(false)}
                   onSendReady={openDocNotify}
@@ -1699,6 +1705,7 @@ export function DocumentShell({ boot, config }) {
           comments={shownComments}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
+          handoffViewer={handoffViewer}
           isOwner={Boolean(config.isOwner)}
           mentionable={mentionable}
           demo={!!config.demoComments}
@@ -1733,6 +1740,7 @@ export function DocumentShell({ boot, config }) {
           openClusterKey={openClusterKey}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
+          handoffViewer={handoffViewer}
           isOwner={Boolean(config.isOwner)}
           mentionable={mentionable}
           demo={!!config.demoComments}

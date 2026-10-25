@@ -81,10 +81,11 @@ function ActivityDemo() {
   const [seenMap, setSeenMap] = useState(() => readSeenMap('doc'));
   const phone = window.innerWidth < 700;
   if (phone) document.body.classList.add('tdoc-narrow');
-  const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)));
+  const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)))
+    .map((card) => params.has('mixed') && card.id === 'failed' ? { ...card, handoff_resend_allowed: false } : card);
   const buckets = summarizeHandoffSurfaces(activityCards);
   const counts = Object.fromEntries(Object.entries(buckets).map(([state, items]) => [state, items.length]));
-  const unreadCount = activityCards.filter((card) => isThreadUnread(card, seenMap)).length;
+  const unreadCount = activityCards.filter((card) => isThreadUnread(card, seenMap, 'julie')).length;
   const visibleUnread = params.get('unread') === '0' ? 0 : unreadCount;
   const unread = Number(params.get('badge')) || visibleUnread;
   const markRead = (comment) => {
@@ -93,7 +94,7 @@ function ActivityDemo() {
   const markAllRead = () => {
     let changed = false;
     for (const comment of activityCards) {
-      if (isThreadUnread(comment, seenMap)) changed = markThreadSeen('doc', comment) || changed;
+      if (isThreadUnread(comment, seenMap, 'julie')) changed = markThreadSeen('doc', comment) || changed;
     }
     if (changed) setSeenMap(readSeenMap('doc'));
   };
@@ -103,7 +104,7 @@ function ActivityDemo() {
       <span style={{ flex: 1 }} />
       {!phone ? <span style={{ color: '#888' }}>Edited 2m ago</span> : null}
       <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen}>
-        <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} onClose={() => setOpen(false)}
+        <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} currentUser="julie" onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
           onSendElsewhere={(comment) => { setLog(`elsewhere:${comment.id}`); setOpen(false); }}
           onMarkRead={markRead} onMarkAllRead={markAllRead} />
@@ -126,11 +127,16 @@ function ActivityDemo() {
 function PinDemo({ seenMap = {} }) {
   const viewer = params.get('viewer') || 'julie';
   const pins = ['question', 'partial', 'resolved', 'failed', 'picked', 'queued', 'local-queued'];
-  const byId = new Map(CARDS.map((card) => [card.id, card]));
+  const nearStale = params.has('near-stale') ? base('near-stale', {
+    handoff_at: iso(4 * MIN + 45000),
+    handoff_delivery: { status: 'delivered', at: iso(4 * MIN + 45000), expires_at: later(24 * 60 * MIN) },
+  }) : null;
+  const byId = new Map([...CARDS, ...(nearStale ? [nearStale] : [])].map((card) => [card.id, card]));
   const item = (id) => ({ comment: { id, resolved: byId.get(id).status === 'applied' } });
   const clusters = [
     ...pins.slice(0, 5).map((id, index) => ({ key: id, y: 50 + index * 58, items: [item(id)] })),
     { key: 'group', y: 360, items: [item('queued'), item('local-queued')] },
+    ...(nearStale ? [{ key: 'near-stale', y: 410, items: [item('near-stale')] }] : []),
   ];
   return <div id="tdoc-pin-layer" style={{ position: 'relative', height: 450, width: 180 }}>
     <DesktopCommentLayer clusters={clusters} commentsById={byId} seenMap={seenMap} frameScrollY={0} frameTop={0}
