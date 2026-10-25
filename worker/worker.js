@@ -2873,22 +2873,23 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // The description stored at publish is used only for the version it was
   // computed from; any other version's page still scans its own head. The
   // A version's card URL is unique so social crawlers do not pin an older
-  // image. Nonpublic documents never expose their title in OG imagery.
+  // image.
   const preview = docMeta && docMeta.preview && typeof docMeta.preview === 'object' ? docMeta.preview : null;
   const description = (preview && typeof preview.description === 'string' && Number(preview.description_v) === Number(version))
     ? preview.description
     : ((SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180)) || '');
   // The generated/custom card is 1200x630 (summary_large_image); the logo
   // fallback is square (summary).
-  let shareImageLarge = docIndexable(access) && previewCardMatches(preview, slug, version);
+  let shareImageLarge = previewCardMatches(preview, slug, version);
   let shareImage = shareImageLarge ? preview.image : '/tdoc_logo-v2.png';
   if (shareImage && shareImage.startsWith('/') && origin) shareImage = origin + shareImage;
   // Homepage share cards: never use the slug title or the first inline SVG
   // (brand mark) — crawlers only see the shell SEO, not the framed landing.
-  let seoTitle = docIndexable(access) ? title : 'tdoc document';
-  let seoDescription = docIndexable(access)
-    ? (description || `A tdoc by ${author || 'tdoc'}.`)
-    : 'A document shared on tdoc.';
+  // This shell is only rendered for someone who may read the doc, so its
+  // title and card are no secret from them; a link they paste anywhere shows
+  // what they chose to share. Only robots (noindex) depends on Public.
+  let seoTitle = title;
+  let seoDescription = description || `A tdoc by ${author || 'tdoc'}.`;
   if (isLanding) {
     seoTitle = 'Tornado: AI Native Docs';
     seoDescription = 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.';
@@ -7020,6 +7021,15 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
     return !row.owner || row.owner === viewer;
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 
+  // Docs published before cards existed get theirs the first time their owner
+  // opens My docs: a few per load, in the background, no admin step. The
+  // pending marker in buildDocPreview keeps reloads from queueing twice.
+  if (ctx && typeof ctx.waitUntil === 'function' && env.PREVIEW_QUEUE) {
+    const missing = mine.filter((row) => !previewCardMatches(row.meta && row.meta.preview, row.slug, row.latest))
+      .slice(0, PREVIEW_FILL_PER_LOAD);
+    if (missing.length) ctx.waitUntil(fillMissingPreviewCards(env, missing.map((row) => row.slug)));
+  }
+
   const [starItems, recentItems, folderState] = viewerKey
     ? [starItemsEarly, recentItemsEarly, await folderStateP]
     : [[], [], { folders: [], docs: {} }];
@@ -7043,10 +7053,10 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
   // would make the boot payload grow with the pictures in people's docs.
   const rowPreview = (row) => {
     const preview = row.meta && row.meta.preview && typeof row.meta.preview === 'object' ? row.meta.preview : null;
-    if (!preview) return { excerpt: '', image: '/preview-card-placeholder.svg' };
+    if (!preview) return { excerpt: '', image: '' };
     const excerpt = typeof preview.excerpt === 'string' && preview.excerpt ? preview.excerpt : (typeof preview.description === 'string' ? preview.description : '');
     const image = previewCardMatches(preview, row.slug, row.latest)
-      ? preview.image : '/preview-card-placeholder.svg';
+      ? preview.image : legacyListImage(preview);
     return { excerpt: excerpt.slice(0, 220), image };
   };
   const publicRow = (row) => ({
@@ -7163,7 +7173,7 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     const cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
     const excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
     const image = previewCardMatches(cached, slug, latest)
-      ? cached.image : '/preview-card-placeholder.svg';
+      ? cached.image : legacyListImage(cached);
     docs.push({
       slug,
       title: meta.title || slug,
@@ -9073,6 +9083,17 @@ function previewCardSourceKey(slug, version, hash) {
 function previewCardStatusKey(slug, version, hash) {
   return `preview-status:${slug}:v${Number(version)}:${hash}`;
 }
+// Lists without a generated card keep what they showed before cards: the
+// doc's own first picture, or no picture (text-only row). Never the logo or a
+// generic placeholder -- a grid of identical "Document preview" tiles is worse
+// than none (Julie, 2026-10-25).
+function legacyListImage(preview) {
+  const image = preview && typeof preview.image === 'string' ? preview.image : '';
+  if (!/^(?:https?:\/\/|\/)/i.test(image)) return '';
+  if (/\/(?:tdoc_logo-v2\.png|preview-card-placeholder\.svg)$/.test(image)) return '';
+  return image;
+}
+
 function previewCardMatches(preview, slug, version) {
   return preview && Number(preview.image_v) === Number(version)
     && /^[a-f0-9]{12}$/.test(preview.image_hash || '')
@@ -9272,6 +9293,26 @@ async function processPreviewCardJob(env, job, { attempts = 3 } = {}) {
       try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
     }
     throw error;
+  }
+}
+
+const PREVIEW_FILL_PER_LOAD = 6;
+
+async function fillMissingPreviewCards(env, slugs) {
+  for (const slug of slugs) {
+    try {
+      const meta = await loadDocMeta(env, slug);
+      if (!meta) continue;
+      const version = latestVersionNumber(meta) || 1;
+      if (previewCardMatches(meta.preview, slug, version)) continue;
+      const next = await refreshDocPreview(env, slug, meta);
+      if (!previewCardMatches(next.preview, slug, version)) continue;
+      const current = await loadDocMeta(env, slug);
+      if (!current || latestVersionNumber(current) !== version) continue;
+      await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: next.preview }));
+    } catch (error) {
+      console.error('[preview-card] fill failed:', slug, error && error.message || String(error));
+    }
   }
 }
 
@@ -18886,9 +18927,8 @@ const tdocHandlers = {
         if (!isValidSlug(slug)) continue;
         scanned++;
         const meta = await loadDocMeta(env, slug);
-        if (!meta || !docIndexable(accessFromMeta(meta))) continue;
+        if (!meta) continue;
         const version = latestVersionNumber(meta) || 1;
-        const image = meta.preview && meta.preview.image;
         if (previewCardMatches(meta.preview, slug, version)) continue;
         eligible++;
         if (dryRun) continue;

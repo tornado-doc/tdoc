@@ -96,14 +96,6 @@ export function DocRow({
             />
           ) : null}
         </a>
-      ) : doc.image ? (
-        <img
-          className="doc-preview-image"
-          src={doc.image}
-          alt=""
-          loading="lazy"
-          onError={(event) => { event.currentTarget.hidden = true; }}
-        />
       ) : null}
       <div className="doc-info">
         <div className="doc-title-line">
