@@ -248,7 +248,7 @@ export function useDocumentEditor({
           baseVersion: config.version,
         }).catch(() => {});
       } else {
-        clearDraftBody(storeKey).catch(() => {});
+        clearDraftBody(storeKey, message.bodyHtml).catch(() => {});
       }
     },
     editDocument(message) {

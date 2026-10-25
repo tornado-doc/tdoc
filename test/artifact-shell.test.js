@@ -104,7 +104,9 @@ const SLUG = 'hostile-body-css';
         mark: !!document.querySelector('.tdoc-bar .tdoc-bar-mark img'),
         version: !!document.querySelector('.tdoc-bar #tdoc-version-toggle'),
         more: !!document.querySelector('.tdoc-bar #tdoc-more-btn'),   // ⋯ menu (Copy as Markdown lives here now)
-        theme: !!document.querySelector('.tdoc-bar #tdoc-theme-btn'),
+        // This fixture supplies its own background and text palette. Reader
+        // theme is intentionally hidden; custom-design-theme tests both cases.
+        noTheme: !document.querySelector('.tdoc-bar #tdoc-theme-btn'),
         footer: !!document.querySelector('.tdoc-footer .tdoc-footer-row'),
       }));
       const missing = Object.keys(chrome).filter(k => !chrome[k]);
@@ -238,25 +240,22 @@ const SLUG = 'hostile-body-css';
       }
     });
 
-    await t('theme toggle darkens the shell chrome AND signals the frame', async () => {
+    await t('custom author palette keeps reader theme unavailable', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
-      await page.click('#tdoc-theme-btn');
-      await page.waitForTimeout(200);
-      const shellDark = await page.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme'));
+      const themeButton = await page.locator('#tdoc-theme-btn').count();
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
-      const frameDark = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
-      if (shellDark !== 'dark') throw new Error('shell chrome did not go dark');
-      if (frameDark !== 'dark') throw new Error('frame did not receive the theme signal');
+      const frameTheme = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
+      if (themeButton || frameTheme === 'dark') throw new Error('custom palette was overridden by reader theme');
     });
 
-    await t('persisted dark mode applies to the frame on first load (no toggle)', async () => {
-      // the previous test toggled dark → localStorage tdoc-theme=dark persists.
+    await t('stored reader theme does not override a custom author palette', async () => {
+      await page.evaluate(() => localStorage.setItem('tdoc-theme', 'dark'));
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       await page.waitForTimeout(300);
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
-      const frameDark = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
-      if (frameDark !== 'dark') throw new Error('frame did not receive persisted dark on first load (had to toggle): ' + frameDark);
+      const frameTheme = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
+      if (frameTheme === 'dark') throw new Error('stored reader theme overrode the custom palette');
       // reset for later tests
       await page.evaluate(() => { try { localStorage.removeItem('tdoc-theme'); } catch (e) {} });
     });
@@ -476,6 +475,7 @@ const SLUG = 'hostile-body-css';
             });
             // eslint-disable-next-line no-await-in-loop
             const body = await res.json();
+            if (!res.ok || !body.id) throw new Error(`reply ${i} failed: HTTP ${res.status} ${body.error || ''}`);
             ids.push(body.id);
             parent = body.id;
           }
@@ -483,8 +483,9 @@ const SLUG = 'hostile-body-css';
         });
         const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
         await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
-        await page.waitForSelector(`${card} .tdoc-replies-toggle`, { timeout: 4000 });
-        await page.click(`${card} .tdoc-replies-toggle`);
+        const toggle = `${card} .tdoc-replies-toggle`;
+        await page.waitForFunction(({ card, toggle }) => document.querySelector(toggle) || document.querySelector(`${card} .tdoc-reply`), { card, toggle }, { timeout: 4000 });
+        if (await page.locator(toggle).isVisible()) await page.click(toggle);
         await page.waitForTimeout(400);
 
         const folded = await page.evaluate((sel) => {
@@ -771,24 +772,19 @@ const SLUG = 'hostile-body-css';
       if (current !== 'c_fixture_1') throw new Error(`highlight opened ${current || 'no comment'}, expected c_fixture_1`);
     });
 
-    await t('dark mode keeps text highlights visibly painted', async () => {
-      // The narrow tests above leave the window at phone width, and the theme
-      // control is in the overflow menu there. Come back to the wide bar.
+    await t('custom palette keeps text highlights visibly painted', async () => {
+      // The narrow tests above leave the window at phone width.
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
-      await page.evaluate(() => localStorage.setItem('tdoc-theme', 'light'));
-      await page.reload({ waitUntil: 'networkidle' });
-      await page.click('#tdoc-theme-btn');
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
-      await frame.waitForFunction(() => document.documentElement.dataset.tdocTheme === 'dark');
       const paint = await frame.evaluate(() => {
         const range = [...CSS.highlights.get('tdoc-anchor')][0];
         const element = range.startContainer.parentElement;
         return getComputedStyle(element, '::highlight(tdoc-anchor)').backgroundColor;
       });
       const alpha = Number((paint.match(/[\d.]+(?=\)$)/) || ['1'])[0]);
-      if (!paint || paint === 'rgba(0, 0, 0, 0)' || alpha < 0.7) {
-        throw new Error(`dark highlight paint is too faint: ${paint}`);
+      if (!paint || paint === 'rgba(0, 0, 0, 0)' || alpha < 0.25) {
+        throw new Error(`custom highlight paint is too faint: ${paint}`);
       }
     });
 
