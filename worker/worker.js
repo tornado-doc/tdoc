@@ -2098,6 +2098,27 @@ function skipRawTextBodyAt(html, openTag, attrs, openEnd) {
   return m ? openEnd + m.index + m[0].length : html.length;
 }
 
+// A heading label is plain text. Skip complete nested tags once and discard
+// any stray brackets left by malformed markup.
+function headingPlainText(html) {
+  const chunks = [];
+  let pos = 0;
+  while (pos < html.length) {
+    const open = html.indexOf('<', pos);
+    if (open === -1) { chunks.push(html.slice(pos)); break; }
+    chunks.push(html.slice(pos, open));
+    const close = html.indexOf('>', open + 1);
+    if (close === -1) break;
+    pos = close + 1;
+  }
+  const text = chunks.join('');
+  let clean = '';
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '<' && text[i] !== '>') clean += text[i];
+  }
+  return clean.replace(/\s+/g, ' ').trim();
+}
+
 // The former non-greedy heading regex retried the entire remaining document
 // for every unclosed <h1>/<h2>/<h3>. Preserve its first-close semantics while
 // scanning each candidate once. Once a level has no later close, no subsequent
@@ -2123,9 +2144,7 @@ function headingsFromHtml(html) {
     }
     headings.push({
       end: close.lastIndex,
-      // Malformed nested markup can leave a partial tag after tag removal;
-      // a heading is a label, so no angle bracket should survive.
-      text: html.slice(openEnd + 1, endMatch.index).replace(/<[^>]+>/g, '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim(),
+      text: headingPlainText(html.slice(openEnd + 1, endMatch.index)),
     });
     openRe.lastIndex = close.lastIndex;
   }

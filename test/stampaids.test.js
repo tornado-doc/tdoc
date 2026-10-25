@@ -51,6 +51,7 @@ function buildStamp(src, withNewHelpers) {
     sliceFn(src, 'cyrb53'),
     sliceFn(src, 'stripClosedHtmlComments'),
     sliceFn(src, 'aidFor'),
+    sliceFn(src, 'headingPlainText'),
     sliceFn(src, 'headingsFromHtml'),
     sliceConst(src, 'STAMPABLE_TAGS'),
   ];
@@ -76,7 +77,7 @@ try {
   vm.createContext(lbox);
   vm.runInContext([
     sliceFn(newSrc, 'cyrb53'), sliceFn(newSrc, 'stripClosedHtmlComments'),
-    sliceFn(newSrc, 'aidFor'), sliceFn(newSrc, 'headingsFromHtml'),
+    sliceFn(newSrc, 'aidFor'), sliceFn(newSrc, 'headingPlainText'), sliceFn(newSrc, 'headingsFromHtml'),
     sliceConst(newSrc, 'STAMPABLE_TAGS'), sliceFn(newSrc, 'stampAidsLegacy'),
   ].join('\n\n'), lbox);
   stampOld = lbox.stampAidsLegacy;
@@ -169,6 +170,7 @@ vm.runInContext([
   sliceFn(newSrc, 'cyrb53'),
   sliceFn(newSrc, 'stripClosedHtmlComments'),
   sliceFn(newSrc, 'aidFor'),
+  sliceFn(newSrc, 'headingPlainText'),
   sliceFn(newSrc, 'headingsFromHtml'),
   sliceConst(newSrc, 'STAMPABLE_TAGS'),
   sliceConst(newSrc, 'RAW_TEXT_TAGS'),
