@@ -890,4 +890,4 @@
 .tdoc-computer-runtimes { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: 13px; }
 .tdoc-computer-runtimes li { display: flex; flex-wrap: wrap; gap: 10px; }
 .tdoc-computer-runtimes span { color: var(--td-muted); }
-@media (max-width: 600px) { .tdoc-computer-row { flex-wrap: wrap; } .tdoc-computer-row .doc-info { flex: 1 1 calc(100% - 40px); } .tdoc-computer-row .tdoc-dev-actions { flex-wrap: wrap; margin-left: 34px; } #computers .tm-settings-head { flex-wrap: wrap; gap: 12px; } }
+@media (max-width: 600px) { .tdoc-computer-row { flex-wrap: wrap; } .tdoc-computer-row .doc-info { flex: 1 1 calc(100% - 40px); } .tdoc-computer-row .tdoc-dev-actions { flex-wrap: wrap; margin-left: 34px; } .tdoc-computers-head { flex-direction: column; align-items: flex-start; gap: 12px; } .tdoc-computer-row .tdoc-fbspace-btn { min-height: 44px; } }
