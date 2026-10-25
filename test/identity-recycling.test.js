@@ -30,6 +30,9 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 const ISSUER = 'https://issuer.example';
 const OIDC_ENV = {
   OIDC_ISSUER: ISSUER, OIDC_CLIENT_ID: 'cid', OIDC_CLIENT_SECRET: 'csec', OIDC_LABEL: 'Email',
+  // These cases exercise the first-party GitHub doors beside the seat, which
+  // a seat host keeps shut unless reopened (#58).
+  GITHUB_DIRECT_SIGNIN: '1',
 };
 
 const realFetch = globalThis.fetch;

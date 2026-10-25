@@ -46,8 +46,15 @@ export function ActivatePage({ boot, preview = null }) {
   const [busy, setBusy] = useState(Boolean(preview?.busy));
 
   const signIn = () => {
+    const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
+    // The provider seat first, then tdoc's own GitHub redirect; the
+    // device-code dialog only where neither exists (a seat host answers the
+    // device flow with 410).
+    if (boot.oidcAuth) {
+      location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(back)}`;
+      return;
+    }
     if (boot.webAuth) {
-      const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
       location.href = `/api/auth/web/login?return=${encodeURIComponent(back)}`;
       return;
     }

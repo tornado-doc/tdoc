@@ -1438,13 +1438,13 @@ async function listTrash(env, session, team, now = Date.now(), hints = {}) {
 // the brand onto a bare browser-styled card, and the boot JSON is the entire
 // contract: title, message, optional link-shaped actions, optional
 // request-access affordance.
-function statusPageResponse({ docTitle, title, message, error = false, status = 200, actions = null, requestAccess = null, acceptInvite = null, retry = null }) {
+function statusPageResponse({ docTitle, title, message, note = null, error = false, status = 200, actions = null, requestAccess = null, acceptInvite = null, retry = null }) {
   // A worker with no shell runtime (Vercel shim, stripped test builds) still
   // owes the visitor a working page: same content, plain HTML, the actions
   // as links. Request-access needs the shell's fetch and is simply absent.
   if (!SHELL || typeof SHELL.appHtml !== 'function') {
     const actionHtml = (actions || [])
-      .map((a) => `<p><a href="${escapeHtml(a.href)}">${escapeHtml(a.label)}</a></p>`)
+      .map((a) => `<p><a href="${escapeHtml(a.href)}"${a.external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${escapeHtml(a.label)}</a></p>`)
       .join('');
     return html(`<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1452,7 +1452,7 @@ function statusPageResponse({ docTitle, title, message, error = false, status = 
 <style>body{font:15px/1.5 system-ui,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;color:#111}
 .box{max-width:420px;padding:28px 24px;border:1px solid #e5e7eb;border-radius:12px;text-align:center}
 h1{font-size:18px;margin:0 0 8px}p{margin:0 0 12px;color:#444}a{color:#1652f0}</style>
-</head><body><div class="box"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${actionHtml}${retry ? `<p><a href="${escapeHtml(retry)}">Retry this link</a></p>` : ''}</div></body></html>`, { status });
+</head><body><div class="box"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${note ? `<p>${escapeHtml(note)}</p>` : ''}${actionHtml}${retry ? `<p><a href="${escapeHtml(retry)}">Retry this link</a></p>` : ''}</div></body></html>`, { status });
   }
   const nonce = rand(16);
   return html(SHELL.appHtml({
@@ -1464,6 +1464,7 @@ h1{font-size:18px;margin:0 0 8px}p{margin:0 0 12px;color:#444}a{color:#1652f0}</
       page: 'status',
       title,
       message,
+      ...(note ? { note } : {}),
       error,
       ...(actions ? { actions } : {}),
       ...(requestAccess ? { requestAccess } : {}),
@@ -1473,6 +1474,85 @@ h1{font-size:18px;margin:0 0 8px}p{margin:0 0 12px;color:#444}a{color:#1652f0}</
   }), {
     status,
     headers: { 'Content-Security-Policy': cspHeader(nonce) },
+  });
+}
+
+// ---- switching GitHub accounts -------------------------------------------
+// Sign-in runs tdoc → Clerk → GitHub, and GitHub silently re-approves
+// whichever account is signed in on github.com. Sign out ends tdoc's and
+// Clerk's sessions (#785) but cannot end GitHub's, and Clerk forwards no
+// prompt=select_account to GitHub, so "sign in as my other GitHub account"
+// came straight back as the same one. GitHub sign-in stays inside Clerk (one
+// Clerk user per person; see githubDirectSignIn), so what is left is telling
+// the person at the one moment it matters: the first sign-in after Sign out,
+// or a "Sign in with another account" link. tdoc's own OAuth app, which does
+// take select_account, is used only for Settings -> Sign-in methods ->
+// Connect GitHub.
+const SWITCH_COOKIE = 'tdoc_switch';
+
+// tdoc's own GitHub sign-in doors (the web redirect and the device code).
+// Where the provider seat (Clerk) is configured, GitHub sign-in goes through
+// it and these stay shut: Clerk keeps one user per person (GitHub and email
+// merged), and the first-party doors are where duplicate accounts came from
+// (#58). GITHUB_DIRECT_SIGNIN=1 reopens them beside the seat. The first-party
+// OAuth app is still used on such hosts, but only to CONNECT a GitHub account
+// to the signed-in account (Settings -> Sign-in methods).
+const GITHUB_DOOR_RETIRED = Object.freeze({
+  error: 'github_signin_moved',
+  message: 'GitHub sign-in on this host goes through the main Sign in button; the CLI signs in by pairing.',
+});
+// The seat is Clerk -- which fronts GitHub inside its own sign-in -- when the
+// issuer is a Clerk frontend API or the Clerk backend key is configured. A
+// different OIDC provider may not offer GitHub at all, so it does not close
+// tdoc's own GitHub door.
+function clerkSeat(env) {
+  const cfg = oidcConfig(env);
+  if (!cfg) return false;
+  let host = '';
+  try { host = new URL(cfg.issuer).hostname; } catch {}
+  return host.startsWith('clerk.') || host.endsWith('.clerk.accounts.dev')
+    || !!String((env && env.CLERK_SECRET_KEY) || '').trim();
+}
+function githubDirectSignIn(env, { device = false } = {}) {
+  if (!device && !(env && env.GITHUB_CLIENT_SECRET)) return false;
+  return !clerkSeat(env) || String((env && env.GITHUB_DIRECT_SIGNIN) || '') === '1';
+}
+const GITHUB_LOGOUT_URL = 'https://github.com/logout';
+
+function hasSwitchCookie(req) {
+  return new RegExp(`(?:^|;\\s*)${SWITCH_COOKIE}=1(?:;|$)`).test(req.headers.get('cookie') || '');
+}
+
+function switchAccountNotice(env, req, url) {
+  if (url.searchParams.get('continue') === '1') return null;
+  if (url.searchParams.get('switch') !== '1' && !hasSwitchCookie(req)) return null;
+  const onward = new URL(url.pathname, url.origin);
+  onward.searchParams.set('prompt', 'login');
+  onward.searchParams.set('continue', '1');
+  onward.searchParams.set('return', sanitizeReturn(url.searchParams.get('return')));
+  const continueAction = { label: 'Continue to sign in', href: `${onward.pathname}${onward.search}`, primary: true };
+  // Only Clerk is known to put GitHub behind this button. Elsewhere the
+  // provider is unknown, and tdoc's own GitHub door already shows GitHub's
+  // account picker, so the note stays generic and names no third party.
+  if (!clerkSeat(env)) {
+    return statusPageResponse({
+      docTitle: 'Sign in · tdoc',
+      title: 'Sign in to tdoc',
+      message: 'Signing in as someone else? If your sign-in provider takes you straight back to the last account, sign out there first, then continue here.',
+      status: 200,
+      actions: [continueAction],
+    });
+  }
+  return statusPageResponse({
+    docTitle: 'Sign in · tdoc',
+    title: 'Sign in to tdoc',
+    message: 'Using a different GitHub account? GitHub signs you in as whoever is signed in on github.com, so sign out there first, then continue here.',
+    note: 'Signing in with email is not affected.',
+    status: 200,
+    actions: [
+      { label: 'Sign out of github.com', href: GITHUB_LOGOUT_URL, external: true },
+      continueAction,
+    ],
   });
 }
 
@@ -1501,14 +1581,14 @@ function accessDeniedHtml({ status, title, body, slug, version, signin, invite =
       // An invitation, not an error: no red title.
       error: false,
       status,
-      actions: [{ label: 'Sign in with another account', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}` }],
+      actions: [{ label: 'Sign in with another account', href: `/api/auth/oidc/login?prompt=login&switch=1&return=${encodeURIComponent(next)}` }],
       acceptInvite: { slug, team_name: invite.team_name, next },
     });
   }
   const actions = signin === 'signin'
     ? [{ label: 'Sign in', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
     : signin === 'switch'
-      ? [{ label: 'Sign in with another account', href: `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(next)}`, primary: true }]
+      ? [{ label: 'Sign in with another account', href: `/api/auth/oidc/login?prompt=login&switch=1&return=${encodeURIComponent(next)}`, primary: true }]
       : null;
   return statusPageResponse({
     docTitle: `${title} · tdoc`,
@@ -3003,9 +3083,22 @@ function seedCommentAnchor(html) {
 async function sessionAccountId(env, session) {
   if (!session) return null;
   if (typeof session.account_id === 'string' && session.account_id) return session.account_id;
+  // A session that can vouch for a GitHub numeric id resolves by that id and
+  // never adopts an account by handle that the id does not own: a handle is
+  // renamable, and a freed one registered by somebody else used to resolve
+  // to the previous holder's account -- docs, deletes and all (#58).
+  const ghId = sessionGithubId(session);
+  if (ghId) {
+    const byId = await accountIdByIdp(env, 'github', ghId);
+    if (byId) return byId;
+  }
   const login = sessionLogin(session);
   const rec = login ? await lookupHostedAccount(env, login) : null;
-  if (rec && rec.account_id) return rec.account_id;
+  if (rec && rec.account_id) {
+    const owners = (Array.isArray(rec.identities) ? rec.identities : [])
+      .filter((i) => i && i.provider === 'github' && i.sub).map((i) => String(i.sub));
+    if (!ghId || owners.includes(ghId)) return rec.account_id;
+  }
   // The email registry, which is where an account born through the provider
   // door actually lives. `hostedAccountForEmail` writes `account-email:<addr>`
   // and `lookupHostedAccount` reads `hosted-account:` / `hosted-github:` --
@@ -3017,7 +3110,8 @@ async function sessionAccountId(env, session) {
   if (!email || !env || !env.META) return null;
   try {
     const byEmail = JSON.parse(await env.META.get(`account-email:${email}`));
-    if (byEmail && typeof byEmail.account_id === 'string' && byEmail.account_id) return byEmail.account_id;
+    if (byEmail && typeof byEmail.account_id === 'string' && byEmail.account_id
+        && (!ghId || await githubAttachable(env, byEmail.account_id, ghId, login))) return byEmail.account_id;
   } catch {}
   return null;
 }
@@ -3246,7 +3340,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, !!env.GITHUB_CLIENT_SECRET, stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), debug: await isDebugAccount(env, session) }, pageUrl), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), debug: await isDebugAccount(env, session) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce), 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
     }),
   };
@@ -3294,7 +3388,7 @@ function neutralLandingResponse(env, notice) {
     bootJson: safeJsonForScript({
       page: 'neutral-landing',
       authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
-      webAuth: !!env?.GITHUB_CLIENT_SECRET,
+      webAuth: githubDirectSignIn(env),
       oidcAuth: !!oidcConfig(env),
       oidcLabel: (oidcConfig(env) || {}).label || '',
       notice: messages[notice] || '',
@@ -3633,7 +3727,15 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
         await env.META.put(idpKey('oidc', sub), JSON.stringify({
           account_id, created: new Date().toISOString(), handle: bridged.handle || undefined,
         }));
-        if (bridged.handle) await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
+        if (bridged.handle) {
+          // Never moved off another account (#58), same as hostedAccountForGithub.
+          const pointed = await lookupHostedAccount(env, bridged.handle);
+          if (pointed && pointed.account_id && pointed.account_id !== account_id) {
+            identityConflict('handle_points_elsewhere', { account_id, existing_account_id: pointed.account_id });
+          } else {
+            await env.META.put(`hosted-account:${bridged.handle}`, JSON.stringify(rec));
+          }
+        }
       }
     }
   }
@@ -3700,7 +3802,9 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
         const named = await lookupHostedAccount(env, gh.handle);
         const ghOwner = named && (named.identities || []).find((i) => i && i.provider === 'github');
         if (!ghHandle && named && named.account_id === account_id
-            && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))) {
+            && (!ghOwner || !gh.ghId || String(ghOwner.sub) === String(gh.ghId))
+            // Disconnected in Settings: not restored behind the person's back.
+            && !(gh.ghId && await githubDisconnected(env, account_id, gh.ghId))) {
           ghHandle = gh.handle;
           // Written back so the heal is permanent — but only onto a
           // link that already exists. An email-resolved sign-in stays
@@ -3751,6 +3855,35 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
       }));
     }
   }
+  // #58: the GitHub numeric id Clerk attests for this person becomes the
+  // account-idp:github index of the account they just landed on, so every
+  // GitHub door resolves the same account (a Clerk-born account used to have
+  // none, and the first-party door minted a second one). Never written over
+  // an index that already names a different account -- logged instead.
+  let githubId = null;
+  if (ghHandle && sub) {
+    // The id cached on the oidc link is trusted only while this account's
+    // own GitHub link still names it; otherwise ask Clerk again before
+    // anything is written (a disconnect or a different connect since).
+    let known = idpRec && idpRec.account_id === account_id && idpRec.github_id ? String(idpRec.github_id) : null;
+    if (known) {
+      const link = await accountGithubLink(env, account_id);
+      if (!link || link.sub !== known) known = null;
+    }
+    const gh = known ? { ghId: known, handle: ghHandle } : await probeGithub();
+    if (gh && gh.ghId && (!gh.handle || gh.handle === ghHandle)) {
+      if (!account_id) {
+        // No account yet: carried on the session so the mint links it.
+        if (!(await accountIdByIdp(env, 'github', gh.ghId))) githubId = String(gh.ghId);
+      } else if (await linkGithubIndex(env, account_id, gh.ghId, { handle: ghHandle, sameIds: linkedAccountIds }) !== 'conflict') {
+        githubId = String(gh.ghId);
+        const cur = await accountIdpRecord(env, 'oidc', sub);
+        if (cur && cur.account_id === account_id && cur.github_id !== githubId) {
+          await env.META.put(idpKey('oidc', sub), JSON.stringify({ ...cur, github_id: githubId }));
+        }
+      }
+    }
+  }
   const sid = rand(24);
   const session = {
     name: (user.name || user.given_name || email.split('@')[0]),
@@ -3767,6 +3900,7 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
     // keep matching, @handle still reaches them. Truthful — the
     // provider attested which GitHub account this person connected.
     ...(ghHandle ? { login: ghHandle } : {}),
+    ...(githubId ? { github_id: githubId } : {}),
   };
   await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
   return redirectTo(ret, [
@@ -7586,8 +7720,9 @@ async function ghVerifiedEmail(token) {
     if (!r.ok) return null;
     const list = await r.json();
     if (!Array.isArray(list)) return null;
-    const hit = list.find((e) => e && e.primary && e.verified && typeof e.email === 'string')
-      || list.find((e) => e && e.verified && typeof e.email === 'string');
+    // The PRIMARY verified address only: it is the account-merge key, and a
+    // secondary address is easier to have been handed (#58 review).
+    const hit = list.find((e) => e && e.primary && e.verified && typeof e.email === 'string');
     return hit ? normalizeEmail(hit.email) : null;
   } catch {
     return null;
@@ -7946,7 +8081,7 @@ async function createDocForSession(env, req, session, { html, meta, version, tea
   // means the account store itself is unreachable.
   const acct = sessionLogin(session)
     ? await hostedAccountForGithub(env, session.login, session && session.email,
-        session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+        sessionGithubId(session))
     : await hostedAccountForEmail(env, session && session.email, session && session.idp);
   let actor = { kind: 'owner_session' };
   if (acct) {
@@ -8364,6 +8499,282 @@ async function accountIdByEmail(env, email) {
   return null;
 }
 
+// An identity index that already names a DIFFERENT account is never
+// rewritten: that is how one person's sign-in would start opening somebody
+// else's account (#58). The conflict is logged -- account ids only, never an
+// address -- for worker/scan-account-duplicates.mjs to pick up, and the write
+// is skipped.
+function identityConflict(kind, detail = {}) {
+  try { console.warn(JSON.stringify({ type: 'tdoc_identity_conflict', kind, ...detail })); } catch {}
+}
+
+// The reverse of account-idp:github:<id>: which GitHub account an account is
+// linked to, for Settings -> Sign-in methods and for "does this account
+// already belong to some other GitHub id" before an email hint is trusted.
+// { sub, handle, avatar_url, linked_at }.
+async function accountGithubLink(env, accountId) {
+  if (!env || !env.META || typeof accountId !== 'string' || !accountId) return null;
+  try {
+    const rec = JSON.parse(await env.META.get(`account-github:${accountId}`));
+    if (rec && typeof rec.sub === 'string' && rec.sub) return rec;
+  } catch {}
+  return null;
+}
+
+// GitHub ids disconnected from an account in Settings. A later sign-in --
+// through Clerk or tdoc's own door -- must not quietly put them back; only an
+// explicit Connect does (and it lifts only the id it connects).
+const disconnectedKey = (accountId) => `account-github-disconnected:${accountId}`;
+async function githubDisconnectedIds(env, accountId) {
+  if (!env || !env.META || !accountId) return [];
+  const raw = await env.META.get(disconnectedKey(accountId));
+  if (!raw) return [];
+  try { const list = JSON.parse(raw); if (Array.isArray(list)) return list.map(String); } catch {}
+  return [String(raw)];
+}
+async function githubDisconnected(env, accountId, sub) {
+  return (await githubDisconnectedIds(env, accountId)).includes(String(sub));
+}
+async function setGithubDisconnected(env, accountId, sub, on) {
+  const ids = (await githubDisconnectedIds(env, accountId)).filter((x) => x !== String(sub));
+  if (on) ids.push(String(sub));
+  if (ids.length) await env.META.put(disconnectedKey(accountId), JSON.stringify(ids.slice(-20)));
+  else await env.META.delete(disconnectedKey(accountId));
+}
+
+// Set once worker/backfill-clerk-github.mjs --write has written the
+// account-github reverse key for every existing account-idp:github entry.
+// Until then a missing reverse key proves nothing: every account linked
+// before #58 has none.
+const REVERSE_INDEX_COMPLETE_KEY = 'identity-reverse-index:complete';
+
+// Point account-idp:github:<id> at an account, unless it already names a
+// different one. `sameIds` are the other ids of the same person (an account
+// group), which are not a conflict. Returns 'linked' | 'same' | 'conflict'.
+async function linkGithubIndex(env, accountId, githubId, { handle = null, avatar_url = '', sameIds = [], respectDisconnect = true } = {}) {
+  const key = idpKey('github', githubId);
+  if (!key || !env || !env.META || !accountId) return 'conflict';
+  const sub = String(githubId);
+  // Disconnected in Settings: a later Clerk sign-in must not quietly put the
+  // link back. Only an explicit Connect does.
+  if (respectDisconnect && await githubDisconnected(env, accountId, sub)) return 'conflict';
+  const existing = await accountIdByIdp(env, 'github', sub);
+  if (existing && existing !== accountId && !sameIds.includes(existing)) {
+    identityConflict('github_id_linked_elsewhere', { account_id: accountId, existing_account_id: existing });
+    return 'conflict';
+  }
+  const now = new Date().toISOString();
+  const norm = normalizeGithubLogin(handle);
+  if (!existing) {
+    await env.META.put(key, JSON.stringify({ account_id: accountId, created: now, ...(norm ? { handle: norm } : {}) }));
+    // KV has no compare-and-set: two first links racing for one id can both
+    // pass the check above. Read back; if another account won, stand down
+    // and flag it (worker/scan-account-duplicates.mjs finds any left over).
+    const winner = await accountIdByIdp(env, 'github', sub);
+    if (winner && winner !== accountId && !sameIds.includes(winner)) {
+      identityConflict('github_index_race', { account_id: accountId, existing_account_id: winner });
+      return 'conflict';
+    }
+  }
+  const owner = existing || accountId;
+  const reverse = await accountGithubLink(env, owner);
+  if (!reverse) {
+    await env.META.put(`account-github:${owner}`, JSON.stringify({
+      sub, ...(norm ? { handle: norm } : {}), ...(avatar_url ? { avatar_url } : {}), linked_at: now,
+    }));
+  } else if (reverse.sub !== sub) {
+    identityConflict('account_has_other_github', { account_id: owner });
+  }
+  return existing ? 'same' : 'linked';
+}
+
+// May a GitHub id with no index yet be attached to this account through a
+// verified-email hint? Not when the account is already linked to a different
+// GitHub id -- that is a recycled mailbox, not the same person -- nor when
+// this id was disconnected from it. The reverse key answers that only once
+// it has been backfilled for every older link; before then the one shape
+// that may attach is the Clerk-born record: hosted-account:<login> naming
+// this very account with no GitHub id recorded at all.
+async function githubAttachable(env, accountId, githubId, login = null) {
+  if (await githubDisconnected(env, accountId, githubId)) return false;
+  const link = await accountGithubLink(env, accountId);
+  if (link) return link.sub === String(githubId);
+  // Parked by the backfill: a handle-only or contested account it could not
+  // resolve through Clerk. Never attached by email; a Clerk sign-in heals it.
+  try {
+    const raw = JSON.parse(await env.META.get(`account-github:${accountId}`));
+    if (raw && raw.unresolved) return false;
+  } catch {}
+  if (await env.META.get(REVERSE_INDEX_COMPLETE_KEY)) return true;
+  const norm = normalizeGithubLogin(login);
+  if (!norm) return false;
+  let rec = null;
+  try { rec = JSON.parse(await env.META.get(`hosted-account:${norm}`)); } catch {}
+  const recorded = (rec && Array.isArray(rec.identities) ? rec.identities : []).some((i) => i && i.provider === 'github');
+  return !!(rec && rec.account_id === accountId && !recorded);
+}
+
+// The account a verified email would have matched, when this GitHub id was
+// disconnected from it in Settings. Signing in with that GitHub account then
+// must neither reach the account nor quietly mint an empty second one.
+async function disconnectedEmailMatch(env, email, githubId) {
+  if (!githubId || await accountIdByIdp(env, 'github', githubId)) return null;
+  const byEmail = await accountIdByEmail(env, email);
+  return byEmail && await githubDisconnected(env, byEmail, githubId) ? byEmail : null;
+}
+const GITHUB_DISCONNECTED_MESSAGE = 'This GitHub account was disconnected from your tdoc account. Sign in with email, then use Settings → Sign-in methods → Connect GitHub to add it back.';
+
+// The GitHub numeric id a session can vouch for: the first-party GitHub
+// sign-in's own idp, or the id Clerk attested for this sign-in (stamped by
+// completeEmailSignIn only once account-idp:github names the session's own
+// account). Never anything the client sent.
+function sessionGithubId(session) {
+  const idp = session && session.idp && typeof session.idp === 'object' ? session.idp : null;
+  if (idp && idp.provider === 'github' && idp.sub) return String(idp.sub);
+  if (session && session.oidc && session.github_id) return String(session.github_id);
+  return null;
+}
+
+// ---- Settings -> Sign-in methods ---------------------------------------
+// What the signed-in account can sign in with: the verified addresses whose
+// email index names it, and the GitHub account linked to it. Read from the
+// identity indexes themselves, so the page shows what sign-in will actually
+// do, not what a session happens to remember.
+async function signInMethodsFor(env, session) {
+  const ids = sessionAccountIds(session);
+  const owned = (id) => typeof id === 'string' && ids.includes(id);
+  let github = null;
+  for (const id of ids) {
+    const link = await accountGithubLink(env, id);
+    if (link && owned(await accountIdByIdp(env, 'github', link.sub))) {
+      github = { id: link.sub, login: link.handle || '', account_id: id };
+      break;
+    }
+  }
+  const login = sessionLogin(session);
+  const rec = login ? await lookupHostedAccount(env, login) : null;
+  const recOwned = !!(rec && owned(rec.account_id));
+  if (!github) {
+    const ghId = sessionGithubId(session);
+    const recIds = recOwned ? (rec.identities || []).filter((i) => i && i.provider === 'github' && i.sub).map((i) => String(i.sub)) : [];
+    for (const cand of [ghId, ...recIds].filter(Boolean)) {
+      const owner = await accountIdByIdp(env, 'github', cand);
+      if (owned(owner)) { github = { id: cand, login: login || '', account_id: owner }; break; }
+    }
+  }
+  if (github) github.avatar_url = `https://avatars.githubusercontent.com/u/${encodeURIComponent(github.id)}?v=4`;
+  const candidates = [session && session.email];
+  if (recOwned) {
+    candidates.push(rec.email);
+    for (const i of rec.identities || []) candidates.push(i && i.email);
+  }
+  const emails = [];
+  for (const raw of candidates) {
+    const e = normalizeEmail(raw);
+    if (e && !emails.includes(e) && owned(await accountIdByEmail(env, e))) emails.push(e);
+  }
+  return { emails, github };
+}
+
+async function disconnectGithub(env, session, github) {
+  const owner = await accountIdByIdp(env, 'github', github.id);
+  if (owner && sessionAccountIds(session).includes(owner)) await env.META.delete(idpKey('github', github.id));
+  for (const id of sessionAccountIds(session)) {
+    const link = await accountGithubLink(env, id);
+    if (link && link.sub === github.id) await env.META.delete(`account-github:${id}`);
+    await setGithubDisconnected(env, id, github.id, true);
+  }
+  // The Clerk link remembers the GitHub id and handle it last saw; left in
+  // place, the next Clerk sign-in would restore both.
+  const idp = session && session.idp;
+  if (idp && idp.provider === 'oidc' && idp.sub) {
+    const rec = await accountIdpRecord(env, 'oidc', idp.sub);
+    if (rec && sessionAccountIds(session).includes(rec.account_id) && (String(rec.github_id || '') === github.id || rec.handle)) {
+      const { github_id: _g, handle: _h, ...rest } = rec;
+      await env.META.put(idpKey('oidc', idp.sub), JSON.stringify(rest));
+    }
+  }
+  const login = github.login || sessionLogin(session);
+  let rec = null;
+  try { rec = JSON.parse(await env.META.get(`hosted-account:${login}`)); } catch {}
+  if (rec && sessionAccountIds(session).includes(rec.account_id) && Array.isArray(rec.identities)) {
+    rec.identities = rec.identities.filter((i) => !(i && i.provider === 'github' && String(i.sub) === github.id));
+    await env.META.put(`hosted-account:${login}`, JSON.stringify(rec));
+  }
+}
+
+// Browser session only, same origin: never a CLI token, a feedback token or
+// a scoped agent session.
+async function signInMethodsSession(env, req, url) {
+  if (req.headers.get('authorization')) return { response: json({ error: 'browser_session_only' }, { status: 403 }) };
+  const origin = req.headers.get('origin');
+  if (req.method !== 'GET' && (!origin || origin !== url.origin)) return { response: json({ error: 'cross_origin' }, { status: 403 }) };
+  if (!parseCookie(req)) return { response: json({ error: 'sign_in_required' }, { status: 401 }) };
+  const session = await getSession(env, req);
+  if (!sessionPrincipal(session)) return { response: json({ error: 'sign_in_required' }, { status: 401 }) };
+  if (session.feedback || session.scope || session.team_agent) return { response: json({ error: 'browser_session_only' }, { status: 403 }) };
+  await ensureSessionAccount(env, session, url.origin);
+  if (!session.account_id) return { response: json({ error: 'account_required' }, { status: 403 }) };
+  return { session };
+}
+
+// Back from GitHub with a code for Connect: link that GitHub account to the
+// account that started the flow, in the same browser session -- or refuse,
+// saying why. Nothing here touches the session's login or any document.
+async function completeGithubConnect(env, req, url, code, state, pending) {
+  await env.META.delete(`oauthconnect:${state}`);
+  const ret = sanitizeReturn(pending.ret || '/me?view=settings');
+  const clear = 'tdoc_oauth=; Path=/; Max-Age=0';
+  const refuse = (title, message, status = 409) => {
+    const r = statusPageResponse({
+      docTitle: 'Connect GitHub · tdoc', title, message, error: true, status,
+      actions: [{ label: 'Back to Settings', href: ret, primary: true }],
+    });
+    r.headers.append('Set-Cookie', clear);
+    return r;
+  };
+  const session = await getSession(env, req);
+  if (!session || session.id !== pending.sid || !sessionAccountIds(session).includes(pending.account_id)) {
+    return refuse('Connect GitHub', 'You were signed out, or signed in as someone else, before GitHub answered. Sign in again and retry from Settings.', 403);
+  }
+  let user = null;
+  try {
+    const r = await ghPost('/login/oauth/access_token', {
+      client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code,
+      redirect_uri: `${url.origin}/auth/github/callback`,
+    });
+    if (r.error || !r.access_token) return refuse('Connect GitHub', 'GitHub did not complete the connection: ' + (r.error_description || r.error || 'no token returned'), 400);
+    user = await ghUser(r.access_token);
+  } catch (e) {
+    return refuse('Connect GitHub', 'GitHub could not be reached: ' + e.message, 502);
+  }
+  const ghId = user && user.id ? String(user.id) : null;
+  const login = normalizeGithubLogin(user && user.login);
+  if (!ghId || !login) return refuse('Connect GitHub', 'GitHub returned no account.', 502);
+  const mine = (id) => sessionAccountIds(session).includes(id);
+  const existing = await accountIdByIdp(env, 'github', ghId);
+  if (existing && !mine(existing)) {
+    identityConflict('connect_github_linked_elsewhere', { account_id: pending.account_id, existing_account_id: existing });
+    return refuse('That GitHub account is already in use', `GitHub @${login} is linked to a different tdoc account. Sign in with it to use that account, or disconnect it there first. If you meant another GitHub account, sign out of github.com and try again.`);
+  }
+  const link = await accountGithubLink(env, pending.account_id);
+  if (link && link.sub !== ghId) {
+    return refuse('Already connected to GitHub', `This account is already connected to GitHub${link.handle ? ` @${link.handle}` : ''}. Disconnect it first.`);
+  }
+  const named = await lookupHostedAccount(env, login);
+  if (named && named.account_id && !mine(named.account_id)) {
+    identityConflict('connect_github_handle_elsewhere', { account_id: pending.account_id, existing_account_id: named.account_id });
+    return refuse('That GitHub account is already in use', `GitHub @${login} belongs to a different tdoc account. Sign in with it to use that account.`);
+  }
+  await setGithubDisconnected(env, pending.account_id, ghId, false);
+  const out = await linkGithubIndex(env, pending.account_id, ghId, {
+    handle: login, sameIds: sessionAccountIds(session), respectDisconnect: false,
+  });
+  if (out === 'conflict') return refuse('Connect GitHub', 'That GitHub account could not be connected to this account.');
+  const sep = ret.includes('?') ? '&' : '?';
+  return redirectTo(`${ret}${sep}connected=github`, [clear]);
+}
+
 // Record how this person got in, and make that route findable next time.
 // Also moves the email index off any address this identity no longer
 // attests: leaving the old pointer live is exactly the window in which a
@@ -8382,6 +8793,10 @@ async function linkIdentity(env, account, { provider, sub, email, handle }) {
     // Same lesson the hosted-account record already learned above.
     let prev = null;
     try { prev = JSON.parse(await env.META.get(key)); } catch {}
+    if (prev && prev.account_id && prev.account_id !== account.account_id) {
+      identityConflict('idp_linked_elsewhere', { provider, account_id: account.account_id, existing_account_id: prev.account_id });
+      return account;
+    }
     const keep = prev && prev.account_id === account.account_id ? prev : null;
     await env.META.put(key, JSON.stringify({
       ...(keep || {}),
@@ -8389,6 +8804,18 @@ async function linkIdentity(env, account, { provider, sub, email, handle }) {
       created: (keep && keep.created) || now,
       ...(handle ? { handle } : {}),
     }));
+    // No compare-and-set in KV: read back, and stand down if another
+    // account's link landed on top (see linkGithubIndex).
+    const winner = await accountIdByIdp(env, provider, sub);
+    if (winner && winner !== account.account_id) {
+      identityConflict('idp_index_race', { provider, account_id: account.account_id, existing_account_id: winner });
+      return account;
+    }
+    if (provider === 'github' && !(await accountGithubLink(env, account.account_id))) {
+      await env.META.put(`account-github:${account.account_id}`, JSON.stringify({
+        sub: String(sub), ...(handle ? { handle } : {}), linked_at: now,
+      }));
+    }
   }
 
   const identities = Array.isArray(account.identities) ? account.identities.slice() : [];
@@ -8856,8 +9283,7 @@ async function ensureSessionHostedAccount(env, session) {
   const login = sessionLogin(session);
   const idp = session.idp && typeof session.idp === 'object' ? session.idp : null;
   if (login) {
-    const ghId = idp && idp.provider === 'github' && idp.sub ? String(idp.sub) : null;
-    const rec = await hostedAccountForGithub(env, login, session.email || null, ghId);
+    const rec = await hostedAccountForGithub(env, login, session.email || null, sessionGithubId(session));
     if (rec && existingId && rec.account_id !== existingId) {
       // Session already pointed at an account; don't swap under it.
       return { account_id: existingId, github_login: login };
@@ -8894,6 +9320,23 @@ async function hostedAccountForGithub(env, login, verifiedEmail = null, githubId
     // retired once every live record was backfilled with its numeric id
     // (scripts/backfill-github-identities.mjs), because the window could not
     // tell a returning owner from a squatter wearing the freed name.
+    //
+    // Before minting, the verified email: the same first-use hint the Clerk
+    // path uses, so one person arriving through a second GitHub door lands on
+    // the account they already have instead of a new empty one (#58). Not
+    // when that account is already linked to a different GitHub id.
+    if (!rec) {
+      const byEmail = await accountIdByEmail(env, verifiedEmail);
+      if (byEmail && await githubDisconnected(env, byEmail, githubId)) {
+        identityConflict('github_id_disconnected', { account_id: byEmail });
+        return null;
+      }
+      if (byEmail && await githubAttachable(env, byEmail, githubId, norm)) {
+        let named = null;
+        try { named = JSON.parse(await env.META.get(primary)); } catch {}
+        rec = named && named.account_id === byEmail ? named : { account_id: byEmail, created: new Date().toISOString() };
+      }
+    }
   }
   if (!rec && !githubId) rec = await lookupHostedAccount(env, login);
   if (!rec) {
@@ -8935,7 +9378,16 @@ async function hostedAccountForGithub(env, login, verifiedEmail = null, githubId
       }
     }
   }
-  await env.META.put(primary, JSON.stringify(rec));
+  // The handle pointer is never moved off another account: a second account
+  // minted for the same handle would otherwise capture every later lookup by
+  // handle, the original owner's included (#58).
+  let current = null;
+  try { current = JSON.parse(await env.META.get(primary)); } catch {}
+  if (current && current.account_id && current.account_id !== rec.account_id) {
+    identityConflict('handle_points_elsewhere', { account_id: rec.account_id, existing_account_id: current.account_id });
+  } else {
+    await env.META.put(primary, JSON.stringify(rec));
+  }
   return rec;
 }
 
@@ -8980,7 +9432,7 @@ async function hostedAccountForEmail(env, verifiedEmail, idp = null) {
   return rec;
 }
 
-async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null) {
+async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null, githubId = null) {
   const github_login = normalizeGithubLogin(body.login);
   // Two doors to an account, one canonical identity behind both: a GitHub
   // login keys the legacy registry; an attested email (an OIDC approver) keys
@@ -8988,7 +9440,7 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
   // comes from the session route-side, email as its own trusted argument.
   let account = null;
   if (github_login) {
-    account = await hostedAccountForGithub(env, github_login, verifiedEmail, idp && idp.provider === 'github' ? idp.sub : null);
+    account = await hostedAccountForGithub(env, github_login, verifiedEmail, githubId || (idp && idp.provider === 'github' ? idp.sub : null));
   } else if (normalizeEmail(verifiedEmail)) {
     account = await hostedAccountForEmail(env, verifiedEmail, idp);
   } else {
@@ -9456,7 +9908,16 @@ async function resolveInviteeAddress(env, invitee) {
   if (typeof invitee !== 'string' || !invitee) return null;
   if (invitee.includes('@')) return normalizeEmail(invitee);
   const rec = await lookupHostedAccount(env, invitee);
-  return rec ? normalizeEmail(rec.email) : null;
+  if (!rec) return null;
+  // A handle pointer is frozen once written (#58): if the GitHub id it
+  // records is now indexed to a different account, the handle no longer
+  // speaks for this address -- send nothing rather than mail a stranger.
+  for (const i of Array.isArray(rec.identities) ? rec.identities : []) {
+    if (!i || i.provider !== 'github' || !i.sub) continue;
+    const owner = await accountIdByIdp(env, 'github', i.sub);
+    if (owner && owner !== rec.account_id) return null;
+  }
+  return normalizeEmail(rec.email);
 }
 
 function inviteEmailBodies({ inviterName, title, docUrl, optoutUrl }) {
@@ -12841,7 +13302,7 @@ const tdocHandlers = {
           identity: sessionPrincipal(session)
             ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '', email: normalizeEmail(session.email) || '' }
             : null,
-          webAuth: !!env?.GITHUB_CLIENT_SECRET,
+          webAuth: githubDirectSignIn(env),
           authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
           oidcAuth: !!oidcConfig(env),
           oidcLabel: (oidcConfig(env) || {}).label || '',
@@ -12947,8 +13408,14 @@ const tdocHandlers = {
       if (!env.GITHUB_CLIENT_SECRET) {
         return authStatusResponse('Web sign-in is not configured on this host.', { error: true, status: 500 });
       }
+      let connect = null;
+      try { connect = JSON.parse(await env.META.get(`oauthconnect:${state}`)); } catch {}
+      if (connect && connect.account_id) return completeGithubConnect(env, req, url, code, state, connect);
       const ret = sanitizeReturn(await env.META.get(`oauthstate:${state}`));
       await env.META.delete(`oauthstate:${state}`);
+      if (!githubDirectSignIn(env)) {
+        return redirectTo(`/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(ret)}`, ['tdoc_oauth=; Path=/; Max-Age=0']);
+      }
       try {
         const r = await ghPost('/login/oauth/access_token', {
           client_id: env.GITHUB_CLIENT_ID,
@@ -12973,6 +13440,9 @@ const tdocHandlers = {
         // their numeric ids), because it handed a freed handle's account to
         // whoever registered the name next.
         const ghId = user.id ? String(user.id) : null;
+        if (await disconnectedEmailMatch(env, email, ghId)) {
+          return authStatusResponse(GITHUB_DISCONNECTED_MESSAGE, { error: true, status: 403 });
+        }
         const existing = !!(ghId && await accountIdByIdp(env, 'github', ghId));
         const account = existing ? await hostedAccountForGithub(env, user.login, email, ghId) : null;
         const sid = rand(24);
@@ -14138,7 +14608,7 @@ const tdocHandlers = {
           space,
           baseHost: url.host,
           identity: appIdentity(s),
-          doors: { oidc: !!oidc, oidcLabel: (oidc && oidc.label) || '', web: !!env.GITHUB_CLIENT_SECRET },
+          doors: { oidc: !!oidc, oidcLabel: (oidc && oidc.label) || '', web: githubDirectSignIn(env) },
           ...(origin ? {} : { error: 'Open this window from the tdoc button inside your app.' }),
         }),
       }), { status: origin ? 200 : 400, headers: { 'Content-Security-Policy': cspHeader(nonce) } });
@@ -14287,7 +14757,7 @@ const tdocHandlers = {
       // one exists — same rules as everyone else.
       const acct = sessionLogin(session)
         ? await hostedAccountForGithub(env, session.login, session && session.email,
-            session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+            sessionGithubId(session))
         : await hostedAccountForEmail(env, session && session.email, session && session.idp);
       if (acct) {
         actor = {
@@ -14391,8 +14861,13 @@ const tdocHandlers = {
     // reaches here when cfg.webAuth is on (secret configured); the guard keeps a
     // stray hit from 500ing.
     if (p === '/api/auth/web/login' && method === 'GET') {
-      if (!env.GITHUB_CLIENT_SECRET) return redirectTo('/?notice=signin');
       const ret = sanitizeReturn(url.searchParams.get('return'));
+      // Where the provider seat is configured, every GitHub sign-in goes
+      // through it (#58): old links and bookmarks to this door land there.
+      if (env.GITHUB_CLIENT_SECRET && !githubDirectSignIn(env)) {
+        return redirectTo(`/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(ret)}`);
+      }
+      if (!env.GITHUB_CLIENT_SECRET) return redirectTo('/?notice=signin');
       const nonce = rand(16);
       await env.META.put(`oauthstate:${nonce}`, ret, { expirationTtl: 600 });
       const gh = new URL('https://github.com/login/oauth/authorize');
@@ -14400,6 +14875,11 @@ const tdocHandlers = {
       gh.searchParams.set('redirect_uri', `${url.origin}/auth/github/callback`);
       gh.searchParams.set('scope', 'read:user user:email');
       gh.searchParams.set('state', nonce);
+      // GitHub otherwise re-approves whoever is signed in on github.com
+      // without asking, so "sign in with a different GitHub account" was
+      // impossible from here. select_account always shows GitHub's account
+      // picker (GitHub changelog 2024-06-07), with "use a different account".
+      gh.searchParams.set('prompt', 'select_account');
       return redirectTo(gh.toString(), [
         `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
       ]);
@@ -14463,7 +14943,7 @@ const tdocHandlers = {
       // replayed poll (or a second reader of the code) collects nothing.
       await env.META.delete(`pair:${code}`);
       const approved = record.approved || {};
-      const issued = await issueHostedToken(env, { login: approved.login, label: record.label, device: record.device, client: record.client, scope: tokenScopeOf(approved) }, approved.email, approved.idp);
+      const issued = await issueHostedToken(env, { login: approved.login, label: record.label, device: record.device, client: record.client, scope: tokenScopeOf(approved) }, approved.email, approved.idp, approved.github_id || null);
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       productEvent(env, 'token_minted', { auth_path: 'pair' });
       return json({
@@ -14533,6 +15013,7 @@ const tdocHandlers = {
       record.approved = {
         login: session.login || null,
         idp: session.idp || null,
+        ...(sessionGithubId(session) ? { github_id: sessionGithubId(session) } : {}),
         name: session.name || session.login || (session.email ? String(session.email).split('@')[0] : ''),
         email: session.email || null,
         ...(scope ? { scope } : {}),
@@ -14550,6 +15031,8 @@ const tdocHandlers = {
     if (oidcLoginMatch) {
       const cfg = oidcProvider(env, oidcLoginMatch[1]);
       if (!cfg) return redirectTo('/?notice=signin');
+      const notice = cfg.id === 'oidc' ? switchAccountNotice(env, req, url) : null;
+      if (notice) return notice;
       const nonce = rand(16);
       const ret = sanitizeReturn(url.searchParams.get('return'));
       await env.META.put(`oauthstate:${cfg.id}:${nonce}`, ret, { expirationTtl: 600 });
@@ -14574,6 +15057,7 @@ const tdocHandlers = {
       auth.searchParams.set('prompt', 'login');
       return redirectTo(auth.toString(), [
         `${cfg.stateCookie}=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+        ...(cfg.id === 'oidc' && hasSwitchCookie(req) ? [`${SWITCH_COOKIE}=; Path=/; Max-Age=0`] : []),
       ]);
     }
 
@@ -14647,6 +15131,7 @@ const tdocHandlers = {
     }
 
     if (p === '/api/auth/device/start' && method === 'POST') {
+      if (!githubDirectSignIn(env, { device: true })) return json(GITHUB_DOOR_RETIRED, { status: 410 });
       try {
         const r = await ghPost('/login/device/code', {
           client_id: env.GITHUB_CLIENT_ID,
@@ -14667,6 +15152,7 @@ const tdocHandlers = {
     }
 
     if (p === '/api/auth/device/poll' && method === 'POST') {
+      if (!githubDirectSignIn(env, { device: true })) return json(GITHUB_DOOR_RETIRED, { status: 410 });
       let body = {};
       try { body = await req.json(); } catch {}
       if (!body.device_code) return json({ error: 'device_code required' }, { status: 400 });
@@ -14697,6 +15183,9 @@ const tdocHandlers = {
         const email = await ghVerifiedEmail(r.access_token);
         const ghId = user.id ? String(user.id) : null;
         // Id only, same as the web callback: the handle fallback is retired.
+        if (await disconnectedEmailMatch(env, email, ghId)) {
+          return json({ error: 'github_disconnected', message: GITHUB_DISCONNECTED_MESSAGE }, { status: 403 });
+        }
         const existing = !!(ghId && await accountIdByIdp(env, 'github', ghId));
         const account = existing ? await hostedAccountForGithub(env, user.login, email, ghId) : null;
         const sid = rand(24);
@@ -14727,6 +15216,54 @@ const tdocHandlers = {
       }
     }
 
+    if (p === '/api/me/sign-in-methods' && method === 'GET') {
+      const g = await signInMethodsSession(env, req, url);
+      if (g.response) return g.response;
+      const m = await signInMethodsFor(env, g.session);
+      return json({
+        ok: true,
+        emails: m.emails,
+        github: m.github ? { id: m.github.id, login: m.github.login, avatar_url: m.github.avatar_url } : null,
+        can_disconnect_github: !!(m.github && m.emails.length && oidcConfig(env)),
+        connect_available: !!env.GITHUB_CLIENT_SECRET && !!env.GITHUB_CLIENT_ID && !m.github,
+      }, { headers: { 'Cache-Control': 'private, no-store' } });
+    }
+    if (p === '/api/me/sign-in-methods/github/connect' && method === 'POST') {
+      const g = await signInMethodsSession(env, req, url);
+      if (g.response) return g.response;
+      if (!env.GITHUB_CLIENT_SECRET || !env.GITHUB_CLIENT_ID) return json({ error: 'github_unavailable' }, { status: 404 });
+      const m = await signInMethodsFor(env, g.session);
+      if (m.github) return json({ error: 'already_connected', message: 'Disconnect the current GitHub account first.' }, { status: 409 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const nonce = rand(16);
+      await env.META.put(`oauthconnect:${nonce}`, JSON.stringify({
+        account_id: g.session.account_id, sid: g.session.id, ret: sanitizeReturn(body.return || '/me?view=settings'),
+      }), { expirationTtl: 600 });
+      const gh = new URL('https://github.com/login/oauth/authorize');
+      gh.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
+      gh.searchParams.set('redirect_uri', `${url.origin}/auth/github/callback`);
+      gh.searchParams.set('scope', 'read:user');
+      gh.searchParams.set('state', nonce);
+      // Always GitHub's account picker: the point is choosing which account.
+      gh.searchParams.set('prompt', 'select_account');
+      const r = json({ ok: true, url: gh.toString() });
+      r.headers.append('Set-Cookie', `tdoc_oauth=${nonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`);
+      return r;
+    }
+    if (p === '/api/me/sign-in-methods/github/disconnect' && method === 'POST') {
+      const g = await signInMethodsSession(env, req, url);
+      if (g.response) return g.response;
+      const m = await signInMethodsFor(env, g.session);
+      if (!m.github) return json({ error: 'not_connected' }, { status: 404 });
+      // An address only counts as a way in where there is an email door.
+      if (!m.emails.length || !oidcConfig(env)) {
+        return json({ error: 'last_sign_in_method', message: 'GitHub is the only way into this account, so it cannot be disconnected.' }, { status: 409 });
+      }
+      await disconnectGithub(env, g.session, m.github);
+      return json({ ok: true });
+    }
+
     if (p === '/api/auth/logout' && method === 'POST') {
       const sid = parseCookie(req);
       if (sid) await env.META.delete(`session:${sid}`);
@@ -14736,7 +15273,13 @@ const tdocHandlers = {
       // credentials, and only the browser holds Clerk's cookie.
       const issuer = String(env.OIDC_ISSUER || '').replace(/\/+$/, '');
       const providerSignout = /^https:\/\/clerk\./.test(issuer) ? `${issuer}/v1/client/sessions` : null;
-      return json({ ok: true, ...(providerSignout ? { provider_signout: providerSignout } : {}) }, { headers: { 'Set-Cookie': 'tdoc_sid=; Path=/; Max-Age=0' } });
+      // GitHub inside Clerk is the one door neither of us can reset: GitHub
+      // re-approves whoever is signed in on github.com, and Clerk passes it
+      // no prompt=select_account. The next sign-in from this browser stops
+      // once to say so (see switchAccountNotice) — the marker is that cue.
+      const out = json({ ok: true, ...(providerSignout ? { provider_signout: providerSignout } : {}) }, { headers: { 'Set-Cookie': 'tdoc_sid=; Path=/; Max-Age=0' } });
+      out.headers.append('Set-Cookie', `${SWITCH_COOKIE}=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=1800`);
+      return out;
     }
 
     // ---- inbox (signed-in, this host, all docs) ----
@@ -15471,7 +16014,7 @@ const tdocHandlers = {
       if (!sessionPrincipal(session) || session.feedback) {
         const actions = [];
         if (oidcConfig(env)) actions.push({ label: `Sign in with ${(oidcConfig(env) || {}).label || 'email'}`, href: `/api/auth/oidc/login?return=${encodeURIComponent(here)}`, primary: true });
-        if (env.GITHUB_CLIENT_SECRET) actions.push({ label: 'Sign in with GitHub', href: `/api/auth/web/login?return=${encodeURIComponent(here)}`, primary: !actions.length });
+        if (githubDirectSignIn(env)) actions.push({ label: 'Sign in with GitHub', href: `/api/auth/web/login?return=${encodeURIComponent(here)}`, primary: !actions.length });
         return statusPageResponse({ docTitle: 'tdoc - AppSumo', title: 'Sign in to use your AppSumo license', message: 'New to tdoc? Signing in creates your account. The license then turns on the Team plan for your team.', actions });
       }
       await ensureSessionAccount(env, session, url.origin);
@@ -15951,7 +16494,7 @@ const tdocHandlers = {
       // passed as its own argument so nothing in the client-controlled body
       // can pose as it. This is what gives a brand-new publisher their email
       // merge key at the moment their account is minted.
-      const issued = await issueHostedToken(env, { ...body, login, scope: null }, session && session.email, session && session.idp);
+      const issued = await issueHostedToken(env, { ...body, login, scope: null }, session && session.email, session && session.idp, sessionGithubId(session));
       if (issued.error) return json({ error: issued.error }, { status: issued.status || 401 });
       productEvent(env, 'token_minted', { auth_path: 'session' });
       return json({
@@ -16000,7 +16543,7 @@ const tdocHandlers = {
       if (!accountId) {
         const acct = sessionLogin(session)
           ? await hostedAccountForGithub(env, session.login, session && session.email,
-            session && session.idp && session.idp.provider === 'github' ? session.idp.sub : null)
+            sessionGithubId(session))
           : await hostedAccountForEmail(env, session && session.email, session && session.idp);
         accountId = acct && acct.account_id;
       }
