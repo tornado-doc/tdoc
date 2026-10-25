@@ -942,11 +942,26 @@ export function DocumentShell({ boot, config }) {
       ...(askEnabled ? [{ key: 'tdoc-ai', label: 'tdoc AI', target: TDOC_AI, tdocAi: true }] : []),
     ];
   }, [askEnabled, myAgent.state?.agents, myAgent.state?.team_agents, notifyTargets.default, notifyTargets.candidates]);
+  // Relevance controls menu order, not who receives a private question by
+  // default. A team agent (or another person's agent) cannot answer privately
+  // for this viewer, even when it wrote the latest document version.
+  const defaultAskAiTargetKey = useMemo(() => {
+    const recent = [notifyTargets.default, ...(notifyTargets.candidates || [])].find((agent) => agent?.last_writer);
+    const ownRecent = recent && !recent.team_agent
+      ? (myAgent.state?.agents || []).find((agent) => agent.status !== 'stopped' && sameTarget(agent, recent))
+      : null;
+    return (ownRecent && askAiTargets.find((item) => item.key === targetKey(ownRecent))?.key)
+      || askAiTargets.find((item) => item.tdocAi)?.key
+      || askAiTargets.find((item) => !item.target.team_agent)?.key
+      || askAiTargets[0]?.key || '';
+  }, [askAiTargets, myAgent.state?.agents, notifyTargets.default, notifyTargets.candidates]);
+  const selectedAskAiTargetKey = askAiTargets.some((item) => item.key === askAiTargetKey)
+    ? askAiTargetKey : defaultAskAiTargetKey;
   const askAiSend = async (retryText = null, retryTarget = null) => {
     const question = String(retryText || askAiDraft).trim();
     const choice = retryTarget
       ? askAiTargets.find((item) => sameTarget(item.target, retryTarget))
-      : askAiTargets.find((item) => item.key === askAiTargetKey) || askAiTargets[0];
+      : askAiTargets.find((item) => item.key === selectedAskAiTargetKey);
     if (!question || !choice || askAiBusy) return;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setAskAiBusy(true);
@@ -1555,7 +1570,7 @@ export function DocumentShell({ boot, config }) {
                   open={handoffDetailsOpen}
                   draft={askAiDraft}
                   onDraft={setAskAiDraft}
-                  targetKey={askAiTargetKey}
+                  targetKey={selectedAskAiTargetKey}
                   onTarget={setAskAiTargetKey}
                   targets={askAiTargets}
                   viewer={config.identity}

@@ -87,6 +87,10 @@ async function dragSelect(page, phrase) {
   const up = (token, slug, v, title) => api('/api/upload', { method: 'POST', token, body: { slug, version: v, html: DOC(title), meta: { title } } });
   await up(julie.token, 'launch-plan', 1, 'Launch plan');
   await api('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device: 'juliesmac', clis: ['claude'] } });
+  await up(julie.token, 'own-agent-draft', 1, 'Agent draft');
+  const ownAgentMeta = JSON.parse(env.META.map.get('meta:own-agent-draft'));
+  ownAgentMeta.versions[0].by = julie.account_id;
+  env.META.map.set('meta:own-agent-draft', JSON.stringify(ownAgentMeta));
   const team = (await api('/api/teams', { method: 'POST', cookie: julie.cookie, body: { name: 'Tdoc' } })).body.team;
   await api('/api/team/join', { method: 'POST', cookie: bob.cookie, body: { token: team.invite_url.split('/').pop() } });
   await up(julie.token, 'team-plan', 1, 'Team plan');
@@ -207,6 +211,8 @@ async function dragSelect(page, phrase) {
       await page.locator('#tdoc-send-agent-btn').click();
       const drawer = page.getByRole('dialog', { name: 'Ask AI' });
       await drawer.waitFor();
+      const clickedBackground = await page.locator('#tdoc-send-agent-btn').evaluate((el) => getComputedStyle(el).backgroundColor);
+      if (clickedBackground !== 'rgba(0, 0, 0, 0)') throw new Error(`Ask AI keeps a grey hover background after opening: ${clickedBackground}`);
       await drawer.getByRole('button', { name: 'Who should answer?' }).click();
       const menu = page.locator('.tdoc-agent-menu');
       await menu.getByRole('menuitem').first().waitFor();
@@ -269,14 +275,27 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('Ask AI puts the team agent that edited this document ahead of other answerers', async () => {
+    await t('Ask AI puts the team editor first in the menu but defaults private questions to tdoc AI', async () => {
       const { context, page } = await open(bob, 'team-plan', true);
       await page.locator('#tdoc-send-agent-btn').click();
       const panel = page.getByRole('dialog', { name: 'Ask AI' });
-      if (!(await panel.getByRole('button', { name: 'Who should answer?' }).innerText()).includes('tdoc-bot')) throw new Error('last editor is not the default answerer');
+      if (!(await panel.getByRole('button', { name: 'Who should answer?' }).innerText()).includes('tdoc AI')) throw new Error('a team editor was selected for a private question');
       await panel.getByRole('button', { name: 'Who should answer?' }).click();
       const first = await page.locator('.tdoc-agent-menu').getByRole('menuitem').first().innerText();
       if (!first.includes('tdoc-bot') || !first.includes('Edited last')) throw new Error(`last editor is not explained in the menu: ${first}`);
+      await page.keyboard.press('Escape');
+      await panel.locator('textarea').fill('Why billing first?');
+      await panel.getByRole('button', { name: 'Send question' }).click();
+      await panel.getByText('Invoices block two renewals.').waitFor();
+      if (await panel.getByText('Your agent could not be reached.').count()) throw new Error('the private question went to the team editor');
+      await context.close();
+    });
+
+    await t('Ask AI defaults to the viewer’s own agent when it last edited the document', async () => {
+      const { context, page } = await open(julie, 'own-agent-draft');
+      await page.locator('#tdoc-send-agent-btn').click();
+      const selected = await page.getByRole('dialog', { name: 'Ask AI' }).getByRole('button', { name: 'Who should answer?' }).innerText();
+      if (!selected.includes('Claude Code')) throw new Error(`own last editor was not selected: ${selected}`);
       await context.close();
     });
 
