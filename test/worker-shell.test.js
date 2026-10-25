@@ -120,6 +120,17 @@ const bundler = read('bin/tdoc-bundle');
     ]) {
       if (!doc.includes(needle)) throw new Error(`SEO shell missing ${needle}`);
     }
+    const large = shell.shellHtml({
+      title: 'Jev brief', nonceAttr: '', cfgJson: '{}', bootJson: '{}',
+      runtimeJsPath: '/shell.abc.js', runtimeCssPath: '/shell.abc.css',
+      seo: {
+        title: 'Jev brief', url: 'https://tdoc.dev/d/jev-model-brief/v/3',
+        image: 'https://tdoc.dev/d/jev-model-brief/preview/v3-abc.png', image_large: true, type: 'article',
+      },
+    });
+    if (!large.includes('name="twitter:card" content="summary_large_image"')) {
+      throw new Error('a 1200x630 preview card must use summary_large_image');
+    }
   });
 
   await t('document entry renders React components and never starts a legacy engine', async () => {

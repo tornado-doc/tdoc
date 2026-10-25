@@ -2878,9 +2878,10 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   const description = (preview && typeof preview.description === 'string' && Number(preview.description_v) === Number(version))
     ? preview.description
     : ((SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180)) || '');
-  let shareImage = docIndexable(access)
-    ? (previewCardMatches(preview, slug, version) ? preview.image : '/tdoc_logo-v2.png')
-    : '/tdoc_logo-v2.png';
+  // The generated/custom card is 1200x630 (summary_large_image); the logo
+  // fallback is square (summary).
+  let shareImageLarge = docIndexable(access) && previewCardMatches(preview, slug, version);
+  let shareImage = shareImageLarge ? preview.image : '/tdoc_logo-v2.png';
   if (shareImage && shareImage.startsWith('/') && origin) shareImage = origin + shareImage;
   // Homepage share cards: never use the slug title or the first inline SVG
   // (brand mark) — crawlers only see the shell SEO, not the framed landing.
@@ -2892,12 +2893,14 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     seoTitle = 'Tornado: AI Native Docs';
     seoDescription = 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.';
     shareImage = origin ? `${origin}/tdoc_logo-v2.png` : '/tdoc_logo-v2.png';
+    shareImageLarge = false;
   }
   const seo = origin ? {
     title: seoTitle,
     description: seoDescription,
     url: pageUrl,
     image: shareImage,
+    image_large: !!shareImageLarge,
     type: isLanding ? 'website' : 'article',
     robots: docIndexable(access) ? '' : 'noindex, nofollow',
   } : null;

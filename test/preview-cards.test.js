@@ -43,7 +43,10 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
     fs.writeFileSync(`${process.env.TDOC_PREVIEW_SAMPLES_DIR}/zh-card.png`, bytes1);
   }
   const page1 = await call('/d/preview-test/v/1');
-  assert.ok((await page1.text()).includes(`https://tdoc.dev${firstCardUrl}`));
+  const page1Html = await page1.text();
+  assert.ok(page1Html.includes(`https://tdoc.dev${firstCardUrl}`));
+  assert.ok(page1Html.includes('name="twitter:card" content="summary_large_image"'),
+    'a generated 1200x630 card uses the large Twitter card');
 
   const authored = fs.readFileSync('authoring/preview-card.svg', 'utf8')
     .replace('Your report title', 'Q3 revenue growth')
@@ -57,7 +60,10 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   assert.ok(png(bytes2));
   if (process.env.TDOC_PREVIEW_SAMPLES_DIR) fs.writeFileSync(`${process.env.TDOC_PREVIEW_SAMPLES_DIR}/en-card.png`, bytes2);
   const page2 = await call('/d/preview-test/v/2');
-  assert.ok((await page2.text()).includes(`https://tdoc.dev${secondCardUrl}`));
+  const page2Html = await page2.text();
+  assert.ok(page2Html.includes(`https://tdoc.dev${secondCardUrl}`));
+  assert.ok(page2Html.includes('name="twitter:card" content="summary_large_image"'),
+    'a custom card uses the large Twitter card');
   assert.equal((await call(firstCardUrl)).status, 404,
     'an older card follows the document history visibility');
 
@@ -222,6 +228,8 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   const linkPage = await call('/d/link-card/v/1');
   const linkHtml = await linkPage.text();
   assert.ok(linkHtml.includes('https://tdoc.dev/tdoc_logo-v2.png'));
+  assert.ok(linkHtml.includes('name="twitter:card" content="summary"'),
+    'the square logo fallback keeps the small Twitter card');
   assert.ok(!linkHtml.includes('/d/link-card/preview/v1-'));
   assert.ok(linkHtml.includes('A document shared on tdoc.'));
   assert.ok(!linkHtml.includes('property="og:title" content="Link title"'));

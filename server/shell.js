@@ -135,8 +135,9 @@
     if (title) out += '<meta property="og:title" content="' + title + '">\n';
     if (description) out += '<meta property="og:description" content="' + description + '">\n';
     if (image) out += '<meta property="og:image" content="' + image + '">\n';
-    // Logo is square; summary (not summary_large_image) matches it.
-    out += '<meta name="twitter:card" content="summary">\n';
+    // The generated/custom preview card is 1200x630 (summary_large_image);
+    // the square logo fallback keeps summary.
+    out += '<meta name="twitter:card" content="' + (image && seo.image_large ? 'summary_large_image' : 'summary') + '">\n';
     if (title) out += '<meta name="twitter:title" content="' + title + '">\n';
     if (description) out += '<meta name="twitter:description" content="' + description + '">\n';
     if (image) out += '<meta name="twitter:image" content="' + image + '">\n';
