@@ -171,7 +171,12 @@ async function touchSelect(page, phrase) {
     await page.keyboard.press('Enter');
     return { pop, row };
   };
-  const mode = (pop) => pop.locator('.tdoc-ask-mode button').evaluateAll((els) => els.map((e) => `${e.textContent}${e.classList.contains('active') ? '*' : ''}${e.disabled ? '(off)' : ''}`).join('|'));
+  // No mode control (Julie, 2026-10-24): an agent that may only answer here
+  // gets one quiet "Answers only" line.
+  const answersOnly = async (pop) => {
+    if (await pop.locator('.tdoc-ask-mode').count()) throw new Error('a mode control is back');
+    if (!(await pop.locator('.tdoc-ask-only-label', { hasText: 'Answers only' }).count())) throw new Error('no "Answers only" note');
+  };
   try {
     await t("desktop, no agent: @ → tdoc AI first; Only me on: a private answer, then Make public posts it to the thread; the quota line is the asker's alone", async () => {
       await setTier('none');
@@ -184,7 +189,7 @@ async function touchSelect(page, phrase) {
       if (labels.join('|') !== '@agent|Comment') throw new Error(`popover buttons: ${labels.join('|')}`);
       const { row } = await ask(page, 'Why billing first?');
       if (!/^tdoc AI/.test(row) || !/5 free left/.test(row)) throw new Error(`first row: ${row}`);
-      if (await mode(pop) !== 'Ask*|Ask + request change(off)') throw new Error(`mode for tdoc AI: ${await mode(pop)}`);
+      await answersOnly(pop);
       const onlyMe = pop.locator('.tdoc-only-me [role=checkbox]');
       if (await onlyMe.getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
       await shot(page, 'composer-only-me.png');
@@ -225,7 +230,7 @@ async function touchSelect(page, phrase) {
       await dragSelect(page, 'Search follows in April');
       const { pop, row } = await ask(page, 'What blocks search?');
       if (!/Mine/.test(row)) throw new Error(`first row: ${row}`);
-      if (await mode(pop) !== 'Ask*|Ask + request change(off)') throw new Error(`mode for an agent that may not edit: ${await mode(pop)}`);
+      await answersOnly(pop);
       if (await pop.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'false') throw new Error('Only me is on for an agent');
       await shot(page, 'composer-own-agent.png');
       await pop.getByRole('button', { name: 'Comment', exact: true }).click();
@@ -292,18 +297,23 @@ async function touchSelect(page, phrase) {
       await pop.waitFor();
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
       if (labels.join('|') !== '@agent|Comment') throw new Error(`owner popover buttons: ${labels.join('|')}`);
-      if (await pop.locator('.tdoc-ask-mode').count()) throw new Error('a mode before any agent is named');
+      if (await pop.locator('.tdoc-ask-row, .tdoc-agent-pill').count()) throw new Error('agent options before any agent is named');
       await pop.locator('textarea').fill('Tighten this');
+      // @agent puts the default agent in as a pill, no menu to go through.
       await pop.locator('.tdoc-composer-agent').click();
+      await pop.locator('.tdoc-agent-pill').waitFor();
+      if (await page.locator('.ui-menu-popup').count()) throw new Error('@agent opened a menu');
+      if (!/@\u2060tdoc AI/.test(await pop.locator('textarea').inputValue())) throw new Error(`default not put in: ${await pop.locator('textarea').inputValue()}`);
+      // The pill's dropdown lists the agents, tdoc AI with what is left.
+      await pop.locator('.tdoc-agent-pill').click();
       const menu = page.locator('.ui-menu-popup');
       await menu.waitFor();
       const items = await menu.innerText();
       if (!/tdoc AI/.test(items) || !/free left/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
       if (await menu.locator('a[href="/start"]').count() !== 1) throw new Error('no Connect my agent link');
       await page.keyboard.press('Escape');
-      if (!/@\u2060tdoc AI/.test(await pop.locator('textarea').inputValue())) throw new Error(`default not put in: ${await pop.locator('textarea').inputValue()}`);
       // The owner has no agent of their own here: tdoc AI only asks.
-      if (await mode(pop) !== 'Ask*|Ask + request change(off)') throw new Error(`mode: ${await mode(pop)}`);
+      await answersOnly(pop);
       if (!(await pop.locator('.tdoc-only-me').count())) throw new Error('no Only me for tdoc AI');
       await context.close();
     });

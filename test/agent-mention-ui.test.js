@@ -1,6 +1,6 @@
 // @ in the composer offers the agents Send to agent would, in its order:
-// the first two with nothing typed, every match once a name is typed, in an
-// "Agents" group above people. Picking one hands the comment to that agent,
+// all of them with nothing typed (the agent pill's list), every match once a
+// name is typed, grouped Mine / Team / tdoc AI above people. Picking one hands the comment to that agent,
 // and the tag in the text is never a GitHub @login. A reader who cannot send
 // to agents sees people only.
 const assert = require('assert/strict');
@@ -64,23 +64,23 @@ async function t(name, fn) {
 
   try {
     for (const width of [1050, 390]) {
-      await t(`@ lists two agents above people; typing searches them all; picking hands over (${width}px)`, async () => {
+      await t(`@ lists every agent above people; typing searches them all; picking hands over (${width}px)`, async () => {
         const { context, page } = await open(width);
         const box = page.locator('textarea');
         await box.click();
         await box.type('please fix @');
         await page.locator('.tdoc-mention-option').first().waitFor();
         const empty = await rows(page);
-        assert.deepEqual(empty.slice(0, 3), ['# Agents', "xiaocc · julieMine · this doc's agent", 'Claude Code · julieMine'], JSON.stringify(empty));
-        assert.equal(empty[3], '# People', JSON.stringify(empty));
-        assert.ok(empty[4].startsWith('@dana'), JSON.stringify(empty));
+        assert.deepEqual(empty.slice(0, 5), ['# Mine', "xiaocc · julieMine · this doc's agent", 'Claude Code · julieMine', 'Codex · julieMine', 'devin · julieMine'], JSON.stringify(empty));
+        assert.equal(empty[5], '# People', JSON.stringify(empty));
+        assert.ok(empty[6].startsWith('@dana'), JSON.stringify(empty));
         assert.ok(!empty.some((r) => /^@claude\b/i.test(r)), 'a fake @claude person is offered');
         if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, `agent-mention-${width}.png`) }); }
 
         await box.type('cod');
         await page.waitForFunction(() => document.querySelectorAll('.tdoc-mention-agent').length === 2);
         const typed = await rows(page);
-        assert.deepEqual(typed, ['# Agents', 'Codex · julieMine', 'Claude Code · julieMine'], JSON.stringify(typed));
+        assert.deepEqual(typed, ['# Mine', 'Codex · julieMine', 'Claude Code · julieMine'], JSON.stringify(typed));
         await page.keyboard.press('Enter');
         assert.equal(await box.inputValue(), `please fix @${JOINER}Codex · julie `);
         await page.getByRole('button', { name: 'Comment', exact: true }).click();
@@ -93,13 +93,13 @@ async function t(name, fn) {
       });
     }
 
-    await t('the fallback agent, past the first two, is found by name', async () => {
+    await t('the fallback agent is found by name', async () => {
       const { context, page } = await open(1050);
       const box = page.locator('textarea');
       await box.click();
       await box.type('@dev');
       await page.locator('.tdoc-mention-agent').first().waitFor();
-      assert.deepEqual((await rows(page)).slice(0, 2), ['# Agents', 'devin · julieMine']);
+      assert.deepEqual((await rows(page)).slice(0, 2), ['# Mine', 'devin · julieMine']);
       await context.close();
     });
 

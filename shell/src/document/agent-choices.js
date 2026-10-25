@@ -219,6 +219,13 @@ export function matchAgentChoices(choices, query, { limit = 2, labelOf = null } 
 // the picker inserted, or null. One handoff addresses one agent, so a second
 // tag does not fork the comment to a second agent.
 export function taggedAgent(text, choices) {
+  const span = taggedAgentSpan(text, choices);
+  return span ? span.target : null;
+}
+
+// The same tag with where it sits: { target, start, end } (end exclusive),
+// or null. The composers draw it as the agent pill.
+export function taggedAgentSpan(text, choices) {
   const source = String(text || '');
   const lower = source.toLowerCase();
   const list = Array.isArray(choices) ? choices : [];
@@ -243,5 +250,5 @@ export function taggedAgent(text, choices) {
       if (i !== -1 && (i < at || (i === at && tag.length > bestLength))) { at = i; best = t; bestLength = tag.length; }
     }
   }
-  return best;
+  return best ? { target: best, start: at, end: at + bestLength } : null;
 }
