@@ -743,7 +743,8 @@ a.ui-menu-item:visited {
 
 .tdoc-neutral-notice {
   position: fixed;
-  top: 16px;
+  /* Below the top bar, not over the account chip. */
+  top: 60px;
   right: 16px;
   max-width: min(360px, calc(100vw - 32px));
   padding: 10px 12px;
@@ -752,6 +753,25 @@ a.ui-menu-item:visited {
   color: var(--td-ground);
   font-size: 13px;
 }
+
+/* Edge pages (status, neutral landing, team join, activate) sit under the
+   shared top bar; the centred card fills the rest of the window. */
+.tdoc-edge-page { min-height: 100vh; background: #fff; }
+.tdoc-edge-page > .tdoc-status-page,
+.tdoc-edge-page > .tdoc-neutral-page {
+  min-height: calc(100vh - 48px);
+  min-height: calc(100dvh - 48px);
+}
+
+.tdoc-neutral-page > .tdoc-neutral-primary {
+  margin-top: 10px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--td-accent);
+  color: #fff;
+  font: 650 14px var(--td-font-display);
+}
+.tdoc-neutral-page > .tdoc-neutral-primary.is-pending { visibility: hidden; }
 
 .tdoc-status-page {
   display: grid;

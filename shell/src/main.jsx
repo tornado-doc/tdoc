@@ -7,6 +7,8 @@ import './setup-gate.css';
 import { DocsHub } from './docs-hub.jsx';
 import { FolderShare } from './folder-share.jsx';
 import { FeedbackSpace } from './feedback-space.jsx';
+import { FeedbackInstall } from './feedback-install.jsx';
+import { FeedbackConnect } from './feedback-connect.jsx';
 import { AgentsPage } from './agents-page.jsx';
 import { Profile } from './profile.jsx';
 import { DocumentShell } from './document-shell.jsx';
@@ -26,6 +28,8 @@ if (appRoot && appBoot) {
   if (appBoot.page === 'onboarding-preview') page = <Suspense fallback={<p>Loading preview…</p>}><OnboardingPreview /></Suspense>;
   else if (appBoot.page === 'docs-hub') page = <DocsHub boot={appBoot} />;
   else if (appBoot.page === 'feedback-space') page = <FeedbackSpace boot={appBoot} />;
+  else if (appBoot.page === 'feedback-install') page = <FeedbackInstall boot={appBoot} />;
+  else if (appBoot.page === 'feedback-connect') page = <FeedbackConnect boot={appBoot} />;
   else if (appBoot.page === 'agents') page = <AgentsPage boot={appBoot} />;
   else if (appBoot.page === 'folder-share') page = <FolderShare boot={appBoot} />;
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;

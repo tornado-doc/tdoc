@@ -34,6 +34,7 @@ const OFFLINE = [
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
   'ui-primitives.test.js',    // product UI uses shell/src/ui primitives; no native <select>
+  'app-header.test.js',       // every app page renders the shared TopBar; no second account chip, no worker-drawn header
   'notifications-merge.test.js', // the bell reads every linked actor key (handle + email)
   'email-notifications.test.js', // #772 mention/reply/comment emails: cooldown, cap, opt-out, switch
   'push-sw.test.js',           // #771 the shipped service worker: show, click opens the comment, no fetch handler
@@ -191,6 +192,7 @@ const BROWSER = [
   'agent-mention-ui.test.js', // @ lists real agents above people; picking one hands the comment to it
   'daemon-onboarding-browser.test.js',
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
+  'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
 ];
 
 // Existing opt-in UI suites; --all retains their broader coverage.

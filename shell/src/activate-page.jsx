@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { SignInDialog } from './sign-in-dialog.jsx';
+import { TopBar } from './top-bar.jsx';
 import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx';
 
 // The pairing approval page (/activate). A terminal showed the visitor a
@@ -109,11 +110,30 @@ export function ActivatePage({ boot, preview = null }) {
     ? [pending.client, pending.device].filter(Boolean).join(' on ') || 'This device'
     : '';
 
+  // A consent page: kept to its one question, under the shared top bar so the
+  // account being connected is the avatar in the corner. The design preview
+  // renders it without the bar (no session there), so it keeps the mark.
+  const mark = preview ? <img src="/tdoc_logo.svg" width="44" height="44" alt="" /> : null;
+  const frame = (main) => (preview ? main : (
+    <div className="tdoc-app tdoc-edge-page">
+      <TopBar
+        identity={identity}
+        authConfigured={Boolean(boot.oidcAuth || boot.authConfigured)}
+        onSignIn={() => {
+          if (!boot.oidcAuth) { signIn(); return; }
+          const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
+          location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(back)}`;
+        }}
+      />
+      {main}
+    </div>
+  ));
+
   if (approved) {
-    return (
+    return frame(
       <main className="tdoc-status-page tdoc-activate-page">
         <div className="tdoc-activate-stack">
-        <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
+        {mark}
         <h1>Access allowed</h1>
         {/* What happens next, not what this page cannot do. `window.close()`
             is ignored by every browser on a tab the script did not open --
@@ -137,11 +157,11 @@ export function ActivatePage({ boot, preview = null }) {
     );
   }
 
-  return (
+  return frame(
     <main className="tdoc-status-page tdoc-activate-page">
       <div className={`tdoc-activate-stack${!identity ? ' tdoc-activate-signin' : ''}`}>
-      <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-      <h1>{pending ? 'Allow access to tdoc' : 'Approve Device Login'}</h1>
+      {mark}
+      <h1>{pending ? 'Allow access to tdoc' : 'Approve device login'}</h1>
       {!identity ? (
         <>
           <p>{code
@@ -192,7 +212,7 @@ export function ActivatePage({ boot, preview = null }) {
           <button type="button" className="secondary" onClick={() => {
             location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate${code ? `?code=${code}` : ''}`)}`;
           }}>
-            Use Another Account
+            Use another account
           </button>
         </>
       ) : (
@@ -227,7 +247,7 @@ export function ActivatePage({ boot, preview = null }) {
           <button type="button" className="secondary" onClick={() => {
             location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate?code=${code}`)}`;
           }}>
-            Use Another Account
+            Use another account
           </button>
         </>
       )}

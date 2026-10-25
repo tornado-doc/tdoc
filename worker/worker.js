@@ -3298,6 +3298,7 @@ function neutralLandingResponse(env, notice) {
       oidcAuth: !!oidcConfig(env),
       oidcLabel: (oidcConfig(env) || {}).label || '',
       notice: messages[notice] || '',
+      noticeKind: messages[notice] ? notice : '',
     }),
   }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
 }
@@ -4490,7 +4491,7 @@ async function buildTeamFolderShareListing(env, req, shareId, index) {
   };
 }
 
-function folderSharePageResponse(env, listing) {
+function folderSharePageResponse(env, listing, identity = null) {
   const nonce = rand(16);
   return html(SHELL.appHtml({
     title: listing.folder.name,
@@ -4501,6 +4502,7 @@ function folderSharePageResponse(env, listing) {
       page: 'folder-share',
       folder: listing.folder,
       docs: listing.docs,
+      identity,
     }),
   }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
 }
@@ -8186,215 +8188,11 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
   };
 }
 
-const FEEDBACK_PAGE_CSS = `
-  :root {
-    color-scheme: light;
-    --td-accent: #1652f0;
-    --td-accent-hover: #1245d0;
-    --td-accent-tint: #e8eeff;
-    --td-accent-ring: rgba(22,82,240,.28);
-    --td-ink: #1a1a1a;
-    --td-muted: #6b6a66;
-    --td-line: #e8e7e3;
-    --hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
-  }
-  .fb-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;
-    height: 48px; padding: 0 18px; background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--td-line); }
-  .fb-bar-home { display: inline-flex; align-items: center; gap: 8px; color: var(--td-ink); text-decoration: none; font: 700 15px/1 -apple-system, system-ui, sans-serif; }
-  .fb-bar nav { display: flex; align-items: center; gap: 12px; font: 600 14px/1.2 -apple-system, system-ui, sans-serif; }
-  .fb-bar-link { color: var(--td-ink); text-decoration: none; padding: 7px 10px; border-radius: 999px; }
-  .fb-bar-link:hover { background: #f0f0ee; }
-  /* Same shapes as the app's top bar: a 6px Sign in button, an avatar chip. */
-  .fb-bar-cta { padding: 7px 14px; border-radius: 6px; background: var(--td-accent); color: #fff !important; text-decoration: none; }
-  .fb-bar-cta:hover { background: var(--td-accent-hover); }
-  .fb-bar-account { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; border-radius: 999px; background: transparent; color: #555; text-decoration: none; font-weight: 500; }
-  .fb-bar-account:hover { background: #f0f1f4; color: var(--td-ink); }
-  .fb-bar-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--td-accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font: 600 12px/1 -apple-system, system-ui, sans-serif; }
-  [hidden] { display: none !important; }
-  body { margin: 0; background: #fff; color: var(--td-ink);
-    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
-  h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .75rem; letter-spacing: -0.02em; }
-  h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
-  p { margin: 0 0 1rem; }
-  a { color: var(--td-accent); }
-  code, pre { background: #f3f3f6; border-radius: 6px; font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
-  code { padding: .12em .35em; }
-  pre { padding: .8rem 1rem; overflow-x: auto; }
-  .muted { color: var(--td-muted); }
-  button { font: inherit; background: var(--td-accent); color: #fff; border: 0; border-radius: 999px;
-    padding: .55rem 1.1rem; cursor: pointer; font-weight: 650; }
-  button:hover { background: var(--td-accent-hover); }
-  button.secondary { background: #eef0f4; color: var(--td-ink); }
-  .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
-  .card { border: 1px solid var(--td-line); border-radius: 10px; padding: 1rem 1.1rem; margin: 0 0 1rem; }
-  .err { color: #b3261e; }
-  ol { padding-left: 1.3rem; }
-  details.advanced { margin: 2rem 0 0; border-top: 1px solid var(--td-line); padding-top: 1rem; }
-  details.advanced > summary { cursor: pointer; color: var(--td-muted); font-weight: 600; list-style: none; }
-  details.advanced > summary::-webkit-details-marker { display: none; }
-  details.advanced > summary::before { content: "▸ "; }
-  details.advanced[open] > summary::before { content: "▾ "; }
-  details.advanced[open] > summary { margin-bottom: .75rem; color: var(--td-ink); }
-
-  .demo { position: relative; margin: 0 0 .85rem; border: 1px solid #c7c7cc;
-    border-radius: 12px; background: #dee1e6; overflow: hidden;
-    box-shadow: 0 8px 24px rgba(16,18,26,.08); }
-  .demo-titlebar { display: flex; align-items: center; gap: .55rem; padding: .45rem .6rem .4rem;
-    background: linear-gradient(#f6f6f7, #e8eaed); border-bottom: 1px solid #c7c7cc; }
-  .demo-dots { display: flex; gap: .35rem; flex: 0 0 auto; padding-left: .15rem; }
-  .demo-dots i { display: block; width: .7rem; height: .7rem; border-radius: 50%; }
-  .demo-dots .r { background: #ff5f57; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
-  .demo-dots .y { background: #febc2e; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
-  .demo-dots .g { background: #28c840; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
-  .demo-omnibox { flex: 1 1 auto; height: 1.55rem; border-radius: 999px; background: #fff;
-    border: 1px solid #c7c7cc; color: #3c4043; font: 12px/1.55rem system-ui, -apple-system, sans-serif;
-    padding: 0 .75rem; overflow: hidden; white-space: nowrap; }
-  .demo-bookmarks { display: flex; align-items: center; gap: .15rem; height: 1.85rem;
-    padding: 0 .45rem; background: #fff; border-bottom: 1px solid #dadce0; font: 12px system-ui, sans-serif; }
-  .demo-bm { color: #3c4043; padding: .2rem .45rem; border-radius: 4px; white-space: nowrap; }
-  .demo-bm::before { content: ""; display: inline-block; width: .65rem; height: .65rem; margin-right: .3rem;
-    border-radius: 2px; background: #dadce0; vertical-align: -1px; }
-  .demo-slot { min-width: 6.5rem; height: 1.35rem; border-radius: 999px; border: 1.5px dashed var(--td-accent);
-    background: var(--td-accent-tint); box-sizing: border-box;
-    animation: demo-slot 3.4s ease-in-out infinite; }
-  .demo-page { position: relative; height: 7.2rem; background: #fff;
-    display: flex; align-items: center; justify-content: center; }
-  .demo-ghost { display: inline-block; background: var(--td-accent); color: #fff;
-    font: 650 15px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.01em;
-    padding: .75rem 1.35rem; border-radius: 999px; opacity: .2; pointer-events: none; }
-  .bookmarklet { display: inline-block; background: var(--td-accent); color: #fff !important; text-decoration: none;
-    font: 650 15px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.01em;
-    padding: .75rem 1.35rem; border-radius: 999px; cursor: grab;
-    box-shadow: 0 8px 20px var(--td-accent-ring); user-select: none; -webkit-user-drag: element;
-    position: absolute; left: 50%; top: 1.85rem; z-index: 2; white-space: nowrap;
-    transform: translateX(-50%); transform-origin: 50% 80%; transition: background .12s; }
-  .bookmarklet:hover { background: var(--td-accent-hover); }
-  /* Outside the install page's animated demo: an ordinary pill in the flow. */
-  .bookmarklet.inline { position: static; transform: none; left: auto; top: auto; }
-  .bookmarklet:active { cursor: grabbing; }
-  .bookmarklet.demo-fly {
-    animation: demo-drag 3.4s cubic-bezier(.2,.7,.2,1) infinite;
-    filter: drop-shadow(0 4px 10px rgba(22,82,240,.22));
-  }
-  .demo:hover .bookmarklet.demo-fly,
-  .bookmarklet.demo-fly:focus-visible {
-    animation: wiggle 1.05s ease-in-out infinite;
-    top: 1.85rem;
-    opacity: 1;
-    filter: drop-shadow(0 10px 22px var(--td-accent-ring));
-  }
-  .step-1 { position: absolute; left: calc(50% + 7.2rem); top: 1.95rem; z-index: 2;
-    font: 700 1.55rem/1.1 var(--hand); color: var(--td-accent); white-space: nowrap;
-    pointer-events: none; letter-spacing: .01em; transform: rotate(-6deg); }
-  .install-steps { margin: 0 0 1rem; padding-left: 1.25rem; color: var(--td-ink);
-    font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; }
-  .install-steps li { margin: 0 0 .4rem; }
-  .install-steps li strong { color: var(--td-accent); font-weight: 650; }
-  .install-steps kbd { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; background: #f1f3f4;
-    border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem; }
-  .device-note { margin: 0 0 1rem; font-size: .92rem; }
-  .phone-only { display: none; margin: 0 0 1.25rem; padding: .85rem 1rem; border-radius: 12px;
-    background: var(--td-accent-tint); border: 1px solid color-mix(in srgb, var(--td-accent) 28%, white);
-    font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--td-ink); }
-  .phone-only strong { color: var(--td-accent); }
-  .script-path { margin: 2rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--td-line);
-    border-radius: 12px; background: #fafafa; }
-  .script-path h2 { margin-top: 0; }
-  .script-path pre { margin: 0; }
-  /* A code snippet with its Copy button: one grey box, the code scrolls, the
-     button stays put. Same outlined button as the setup gate's prompt copy. */
-  .code-copy { display: flex; align-items: center; gap: .5rem; background: #f3f3f6; border-radius: 6px;
-    padding-right: .5rem; }
-  .code-copy pre { flex: 1 1 auto; min-width: 0; margin: 0; background: transparent; }
-  .code-copy .copy-btn { flex: 0 0 auto; height: 30px; padding: 0 14px; border: 1px solid var(--td-accent);
-    border-radius: 9px; background: #fff; color: var(--td-accent); cursor: pointer;
-    font: 600 13px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
-    transition: background .12s, color .12s, border-color .12s; }
-  .code-copy .copy-btn:hover { background: var(--td-accent-tint); }
-  .code-copy .copy-btn.copied { border-color: #1a7340; color: #1a7340; background: #fff; }
-  .code-copy .copy-btn.failed { border-color: #b3261e; color: #b3261e; background: #fff; }
-  @media (max-width: 720px) {
-    .phone-only { display: block; }
-    .install-desktop { display: none !important; }
-  }
-
-  .coach[hidden] { display: none !important; }
-  .coach { position: fixed; inset: 0; z-index: 10000; }
-  .coach-frost { position: absolute; inset: 0; background: rgba(16, 18, 28, 0.38);
-    backdrop-filter: blur(10px) saturate(1.2); -webkit-backdrop-filter: blur(10px) saturate(1.2);
-    cursor: pointer; }
-  .coach-curve { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
-    overflow: visible; z-index: 1; }
-  .coach-copy { position: absolute; left: 50%; top: 18px; transform: translateX(-50%) rotate(-2deg); z-index: 1;
-    pointer-events: none; margin: 0; padding: .7rem 1.05rem; border-radius: 14px;
-    background: rgba(255,255,255,.96); color: var(--td-accent);
-    font: 700 1.45rem/1.25 var(--hand);
-    box-shadow: 0 8px 24px rgba(16,18,26,.14); text-align: left; min-width: 17rem; }
-  .coach-copy .n { display: inline-flex; align-items: center; justify-content: center;
-    width: 1.35rem; height: 1.35rem; margin-right: .45rem; border-radius: 50%;
-    background: var(--td-accent); color: #fff; font: 700 0.85rem/1 -apple-system, system-ui, sans-serif;
-    vertical-align: .05em; }
-  .coach-copy .line { display: block; white-space: nowrap; }
-  .coach-copy .line + .line { margin-top: .3rem; color: var(--td-ink); }
-  .coach-copy .line + .line .n { background: var(--td-accent-tint); color: var(--td-accent); }
-
-  body.coaching .demo { position: relative; z-index: 10001; overflow: visible;
-    background: transparent; border-color: transparent; box-shadow: none; }
-  body.coaching .demo-titlebar,
-  body.coaching .demo-bookmarks,
-  body.coaching .demo-ghost { opacity: .18; }
-  body.coaching .step-1 { visibility: hidden; }
-  body.coaching .demo-page { background: transparent; }
-  body.coaching .demo-slot { animation: none; opacity: .2; }
-  body.coaching .bookmarklet {
-    z-index: 10002; animation: wiggle 1.05s ease-in-out infinite !important;
-    top: 1.85rem; left: 50%;
-    box-shadow: 0 16px 40px var(--td-accent-ring), 0 0 0 6px var(--td-accent-tint);
-    filter: none;
-  }
-  body.coaching .install-steps { visibility: hidden; }
-
-  @keyframes demo-drag {
-    0%, 10% { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1); }
-    42%, 58% { top: -2.75rem; opacity: 1; transform: translateX(calc(-50% - 2.8rem)) scale(.92); }
-    72%, 100% { top: -2.75rem; opacity: 0; transform: translateX(calc(-50% - 2.8rem)) scale(.92); }
-  }
-  @keyframes wiggle {
-    0%, 100% { transform: translateX(-50%) rotate(0deg) scale(1.06); }
-    20% { transform: translateX(-50%) rotate(-10deg) scale(1.06); }
-    40% { transform: translateX(-50%) rotate(10deg) scale(1.06); }
-    60% { transform: translateX(-50%) rotate(-7deg) scale(1.06); }
-    80% { transform: translateX(-50%) rotate(5deg) scale(1.06); }
-  }
-  @keyframes demo-slot {
-    0%, 35% { background: var(--td-accent-tint); border-color: var(--td-accent); }
-    42%, 62% { background: color-mix(in srgb, var(--td-accent) 22%, white); border-color: var(--td-accent-hover); }
-    78%, 100% { background: var(--td-accent-tint); border-color: var(--td-accent); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .bookmarklet.demo-fly, .demo-slot, .demo:hover .bookmarklet.demo-fly, body.coaching .bookmarklet { animation: none !important; }
-    .bookmarklet.demo-fly, body.coaching .bookmarklet { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1.06); }
-  }
-`;
-
-// /feedback — where the bookmarklet is picked up, and the one-line install
-// is shown. The bookmarklet is a plain bookmark whose address is script:
-// clicking it drops /feedback.js into whatever page is open.
-// The address of a bookmark is code, and our own origin goes into it. The
-// origin comes off the request, so it is reduced to the characters an origin
-// can be made of before it is spliced in — nothing else can reach the code.
-// The static feedback pages (install, invite, connect) are not React shell
-// pages, so they carry a plain version of the same top bar: the mark home,
-// and My docs or Sign in on the right.
-function feedbackTopBar(identity, returnTo) {
-  const who = (identity && (identity.name || identity.login)) || '';
-  const right = identity
-    ? `<a class="fb-bar-account" href="/me" title="My docs"><span class="fb-bar-avatar">${escapeHtml(who.slice(0, 1).toUpperCase() || '?')}</span><span>${escapeHtml(who)}</span></a>`
-    : `<a class="fb-bar-cta" href="/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnTo || '/feedback')}">Sign in</a>`;
-  return `<header class="fb-bar"><a class="fb-bar-home" href="/me" aria-label="My docs"><img src="/favicon.svg" alt="" width="22" height="22"></a><nav>${right}</nav></header>`;
-}
-
+// /feedback, /feedback/connect: app pages (feedback-install.jsx,
+// feedback-connect.jsx) under the shared top bar. The worker only builds the
+// bookmark address. It is code, and our own origin goes into it; the origin
+// comes off the request, so it is reduced to the characters an origin can be
+// made of before it is spliced in — nothing else can reach the code.
 function feedbackScriptSrc(base) {
   const origin = String(base || '').replace(/[^A-Za-z0-9:.\-\[\]/]/g, '');
   if (!/^https?:\/\/(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.\-]+)(?::\d{1,5})?$/.test(origin)) throw new Error('feedback: bad origin');
@@ -8405,362 +8203,11 @@ function feedbackBookmarklet(src) {
   return `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='${src}?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
 }
 
-function feedbackBookmarkletPage(base, nonce, identity = null) {
-  const src = feedbackScriptSrc(base);
-  const bookmarklet = feedbackBookmarklet(src);
-  const host = escapeHtml(new URL(base).host);
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tdoc Feedback</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap" rel="stylesheet">
-<style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
-</head>
-<body>
-${feedbackTopBar(identity, '/feedback')}
-<main>
-  <h1>Leave feedback on your own app</h1>
-  <p>Click anything in the app you are building, say what is wrong, and hand it to a person or an agent.</p>
-
-  <p class="phone-only" id="phoneOnly"><strong>Desktop only for now.</strong> Setting this up needs a bookmarks bar (or editing your app’s HTML) — open this page on a computer.</p>
-
-  <div class="install-desktop" id="installDesktop">
-  <div class="bookmark-path" id="bookmarkPath">
-  <h2>Drag a bookmark</h2>
-  <p class="device-note muted">Desktop only — drag the pill onto your bookmarks bar.</p>
-  <p class="chrome-hint"><strong>Fullscreen tip.</strong> In Chrome, <kbd>⌘⇧F</kbd> keeps the top bar visible in fullscreen so the bookmarks bar has somewhere to live — or exit fullscreen, then drag.</p>
-  <div class="demo" id="demo">
-    <div class="demo-titlebar">
-      <div class="demo-dots" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i></div>
-      <div class="demo-omnibox">localhost:3000</div>
-    </div>
-    <div class="demo-bookmarks">
-      <span class="demo-bm">Docs</span>
-      <span class="demo-bm">GitHub</span>
-      <span class="demo-slot" aria-hidden="true"></span>
-    </div>
-    <div class="demo-page">
-      <span class="demo-ghost" aria-hidden="true">🌪️ tdoc</span>
-      <a id="bookmarklet" class="bookmarklet demo-fly" href="${escapeHtml(bookmarklet)}" title="Drag me to the bookmarks bar" draggable="true">🌪️ tdoc</a>
-      <span class="step-1" aria-hidden="true">1 · Click Me!</span>
-    </div>
-  </div>
-  <ol class="install-steps">
-    <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
-    <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
-    <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar)</li>
-  </ol>
-  <p class="muted step-after">After that, open your app and click the bookmark. First time opens a small ${host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
-  </div>
-
-  <div class="script-path" id="scriptPath">
-    <h2>Or one line in the app</h2>
-    <p>Add this once in your HTML (dev and preview builds). Anyone who opens that build — including on a phone — gets the comment button. You still add the line from a computer.</p>
-    <div class="code-copy"><pre><code>&lt;script src="${escapeHtml(src)}"&gt;&lt;/script&gt;</code></pre><button type="button" class="copy-btn" aria-label="Copy code">Copy</button></div>
-  </div>
-  </div>
-
-  <h2>Where it goes</h2>
-  <p>Comments land in one shared thread on ${host}, named after your app and created the first time you connect. To give feedback together, press <strong>Share</strong> in the app and send the invite link — teammates who open it join the same thread instead of starting their own.</p>
-</main>
-
-<div id="coach" class="coach" hidden>
-  <div class="coach-frost" data-dismiss="1"></div>
-  <svg class="coach-curve" aria-hidden="true">
-    <defs>
-      <marker id="coachHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-        <path d="M0 0 L7 4 L0 8 Z" fill="#1652f0"/>
-      </marker>
-    </defs>
-    <path id="coachPath" fill="none" stroke="#1652f0" stroke-width="2" stroke-linecap="round"
-      marker-end="url(#coachHead)"></path>
-  </svg>
-  <p class="coach-copy" id="coachCopy">
-    <span class="line"><span class="n">2</span>Drag onto the bookmarks bar ↑</span>
-    <span class="line"><span class="n">3</span>No bar? ⌘⇧B · Fullscreen top bar? ⌘⇧F</span>
-  </p>
-</div>
-
-<script nonce="${nonce}">
-(function () {
-  // Copy buttons on the code snippets: the text is the snippet's own, never the label.
-  function fallbackCopy(text) {
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0'; ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, text.length);
-    var ok = false;
-    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
-    document.body.removeChild(ta);
-    return ok;
-  }
-  function copyText(text) {
-    if (navigator.clipboard && window.isSecureContext) {
-      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return fallbackCopy(text); });
-    }
-    return Promise.resolve(fallbackCopy(text));
-  }
-  var boxes = document.querySelectorAll('.code-copy');
-  Array.prototype.forEach.call(boxes, function (box) {
-    var pre = box.querySelector('pre');
-    var b = box.querySelector('.copy-btn');
-    if (!pre || !b) return;
-    var timer = null;
-    b.addEventListener('click', function () {
-      copyText(pre.textContent).then(function (ok) {
-        b.textContent = ok ? 'Copied' : 'Press ⌘C';
-        b.classList.toggle('copied', !!ok);
-        b.classList.toggle('failed', !ok);
-        if (!ok) {
-          var range = document.createRange();
-          range.selectNodeContents(pre);
-          var sel = window.getSelection();
-          sel.removeAllRanges(); sel.addRange(range);
-        }
-        clearTimeout(timer);
-        timer = setTimeout(function () { b.textContent = 'Copy'; b.classList.remove('copied', 'failed'); }, 1600);
-      });
-    });
-  });
-})();
-(function () {
-  var btn = document.getElementById('bookmarklet');
-  var coach = document.getElementById('coach');
-  var path = document.getElementById('coachPath');
-  var copy = document.getElementById('coachCopy');
-  if (!btn || !coach || !path || !copy) return;
-
-  function placeArrow() {
-    var r = btn.getBoundingClientRect();
-    var x1 = r.left + r.width / 2;
-    var y1 = r.top + 4;
-    var x2 = Math.min(Math.max(window.innerWidth / 2, 48), window.innerWidth - 48);
-    var y2 = 10;
-    var c1x = x1;
-    var c1y = Math.max(y2 + 40, y1 - (y1 - y2) * 0.55);
-    var c2x = x2 + (x1 < x2 ? -36 : 36);
-    var c2y = y2 + Math.max(48, (y1 - y2) * 0.35);
-    path.setAttribute('d', 'M ' + x1 + ' ' + y1 + ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + x2 + ' ' + y2);
-  }
-
-  function openCoach() {
-    document.body.classList.add('coaching');
-    coach.hidden = false;
-    btn.classList.remove('demo-fly');
-    placeArrow();
-  }
-  function closeCoach() {
-    document.body.classList.remove('coaching');
-    coach.hidden = true;
-    btn.classList.add('demo-fly');
-  }
-
-  // Click teaches the drag; the javascript: href is for the bookmark once dropped.
-  btn.addEventListener('click', function (e) {
-    e.preventDefault();
-    openCoach();
-  });
-  btn.addEventListener('dragstart', function () {
-    openCoach();
-  });
-  window.addEventListener('resize', function () {
-    if (!document.body.classList.contains('coaching')) return;
-    placeArrow();
-  });
-  coach.addEventListener('click', function (e) {
-    if (e.target && e.target.getAttribute('data-dismiss')) closeCoach();
-  });
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closeCoach();
-  });
-})();
-</script>
-</body>
-</html>`;
-}
-
-// /feedback/connect?origin=… — the popup the client opens the first time it
-// runs on an app. Runs on our origin with the cookie: sign in if needed, make
-// or reuse the space, mint a token, hand it back to the opener and close.
-function feedbackConnectPage({ base, origin, nonce, identity, doors, error, space = null }) {
-  const host = origin ? new URL(origin).host : '';
-  const returnTo = `/feedback/connect?origin=${encodeURIComponent(origin || '')}${space ? `&space=${encodeURIComponent(space)}` : ''}`;
-  let body;
-  if (error) {
-    body = `<p class="err">${escapeHtml(error)}</p><p><a href="${escapeHtml(returnTo)}">Try again</a></p>`;
-  } else if (!identity) {
-    const links = [];
-    if (doors.oidc) links.push(`<a href="/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnTo)}"><button type="button">Sign in with ${escapeHtml(doors.oidcLabel || 'Email')}</button></a>`);
-    if (doors.web) links.push(`<a href="/api/auth/web/login?return=${encodeURIComponent(returnTo)}"><button type="button" class="${doors.oidc ? 'secondary' : ''}">Sign in with GitHub</button></a>`);
-    if (!links.length) links.push(`<a href="/?notice=signin" target="_blank" rel="opener"><button type="button">Sign in on ${escapeHtml(new URL(base).host)}</button></a> <a href="${escapeHtml(returnTo)}"><button type="button" class="secondary">I've signed in</button></a>`);
-    body = `<p>Sign in so your feedback on <strong>${escapeHtml(host)}</strong> carries your name.</p><div class="row">${links.join(' ')}</div>`;
-  } else if (space) {
-    // A site's own comment space: nothing to choose, the site chose it.
-    body = `<p>Signed in as <strong>${escapeHtml(identity.name || identity.login)}</strong>.</p>
-<div class="card">
-  <p>Your comments on <strong>${escapeHtml(host)}</strong> go to the site's comment space, under your name.</p>
-  <div class="row"><button type="button" id="connect">Continue</button><span id="status" class="muted"></span></div>
-</div>`;
-  } else {
-    body = `<p>Signed in as <strong>${escapeHtml(identity.name || identity.login)}</strong>.</p>
-<div class="card">
-  <p>Comments you leave on <strong>${escapeHtml(host)}</strong> will be saved to your tdoc account, where you can share them and hand them to an agent.</p>
-  <div class="row"><button type="button" id="connect">Connect</button><span id="status" class="muted"></span></div>
-</div>
-<p class="muted">Joining a teammate's feedback? Open the invite link they sent you first, then click the bookmark again.</p>
-<details><summary class="muted">Save to an existing doc instead</summary>
-  <p class="muted">Paste a doc link you can comment on and its comments will hold this app's feedback.</p>
-  <div class="row"><input id="doc" placeholder="https://${escapeHtml(new URL(base).host)}/d/…/v/1" style="flex:1;min-width:14rem;padding:.5rem;border:1px solid #d4d4dc;border-radius:8px;font:inherit"><button type="button" class="secondary" id="connect-doc">Use this doc</button></div>
-</details>`;
-  }
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Connect tdoc Feedback</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
-</head>
-<body>
-<main>
-  <h1>tdoc Feedback</h1>
-  ${body}
-</main>
-<script nonce="${nonce}">
-(function () {
-  var origin = ${JSON.stringify(origin)};
-  var space = ${JSON.stringify(space)};
-  var status = document.getElementById('status');
-  function say(text, bad) { if (status) { status.textContent = text; status.className = bad ? 'err' : 'muted'; } }
-  function deliver(payload) {
-    if (window.opener && !window.opener.closed) {
-      window.opener.postMessage({ type: 'tdoc-feedback-connected', origin: origin, session: payload }, origin);
-      say('Connected. You can close this window.');
-      setTimeout(function () { window.close(); }, 400);
-    } else {
-      say('Connected. Go back to your app and click the tdoc button again.');
-    }
-  }
-  function connect(body) {
-    say('Connecting…');
-    fetch('/api/feedback/connect', {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(Object.assign({ origin: origin }, space ? { space: space } : {}, body || {})),
-    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
-      .then(function (r) {
-        if (!r.ok) {
-          say((r.body && (r.body.message || r.body.error)) || 'Could not connect', true);
-          // Invited to the team that owns this space: its page is the
-          // invitation, and Accept there joins (#711).
-          if (status && r.body && r.body.accept_url) {
-            var link = document.createElement('a');
-            link.href = r.body.accept_url;
-            link.target = '_blank';
-            link.rel = 'noopener';
-            link.textContent = 'Open the invitation';
-            status.appendChild(document.createTextNode(' '));
-            status.appendChild(link);
-          }
-          return;
-        }
-        deliver(r.body);
-      })
-      .catch(function (e) { say(String(e && e.message || e), true); });
-  }
-  var button = document.getElementById('connect');
-  if (button) button.addEventListener('click', function () { connect(); });
-  var docButton = document.getElementById('connect-doc');
-  if (docButton) docButton.addEventListener('click', function () {
-    var value = (document.getElementById('doc').value || '').trim();
-    var m = /\\/d\\/([^/?#]+)/.exec(value);
-    if (!m) { say('That is not a doc link', true); return; }
-    connect({ slug: decodeURIComponent(m[1]) });
-  });
-})();
-</script>
-</body>
-</html>`;
-}
-
-// /feedback/join/<space> — where an invite lands. Three states: sign in,
-// join, then how to start (bookmark + open the app).
-function feedbackJoinPage({ base, nonce, slug, origin, identity, doors, error }) {
-  const host = origin ? new URL(origin).host : '';
-  const returnTo = slug ? `/feedback/join/${encodeURIComponent(slug)}` : '/feedback';
-  let body;
-  if (error) {
-    body = `<p class="err">${escapeHtml(error)}</p><p><a href="/feedback">What is tdoc Feedback?</a></p>`;
-  } else if (!identity) {
-    const links = [];
-    if (doors.oidc) links.push(`<a href="/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnTo)}"><button type="button">Sign in with ${escapeHtml(doors.oidcLabel || 'Email')}</button></a>`);
-    if (doors.web) links.push(`<a href="/api/auth/web/login?return=${encodeURIComponent(returnTo)}"><button type="button" class="${doors.oidc ? 'secondary' : ''}">Sign in with GitHub</button></a>`);
-    if (!links.length) links.push(`<a href="/?notice=signin"><button type="button">Sign in</button></a>`);
-    body = `<p>You're invited to leave feedback on <strong>${escapeHtml(host)}</strong> — comments you pin on the app land in one shared thread with everyone else's.</p>
-<p>Sign in first so your comments carry your name. First time here? Signing in creates your account.</p>
-<div class="row">${links.join(' ')}</div>`;
-  } else {
-    const bookmarklet = feedbackBookmarklet(feedbackScriptSrc(base));
-    body = `<p>You're invited to leave feedback on <strong>${escapeHtml(host)}</strong> — comments you pin on the app land in one shared thread with everyone else's.</p>
-<div class="card" id="step-join">
-  <p><strong>1 · Join</strong> as ${escapeHtml(identity.name || identity.login)}.</p>
-  <div class="row"><button type="button" id="join">Join</button><span id="status" class="muted"></span></div>
-</div>
-<div class="card" id="step-start" hidden>
-  <p><strong>2 · Get the bookmark</strong> — drag it to your bookmarks bar (skip if you already have it). No bar? <kbd>⌘⇧B</kbd>.</p>
-  <p><a class="bookmarklet inline" href="${escapeHtml(bookmarklet)}" draggable="true" title="Drag me to the bookmarks bar">🌪️ tdoc</a></p>
-  <p><strong>3 · Open the app and click the bookmark.</strong></p>
-  <p><a href="${escapeHtml(origin)}" target="_blank" rel="noopener"><button type="button">Open ${escapeHtml(host)}</button></a></p>
-</div>`;
-  }
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Join feedback · ${escapeHtml(host || 'tdoc')}</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<style nonce="${nonce}">${FEEDBACK_PAGE_CSS}</style>
-</head>
-<body>
-${feedbackTopBar(identity, returnTo)}
-<main>
-  <h1>Feedback on ${escapeHtml(host || 'an app')}</h1>
-  ${body}
-</main>
-<script nonce="${nonce}">
-(function () {
-  var button = document.getElementById('join');
-  if (!button) return;
-  var status = document.getElementById('status');
-  button.addEventListener('click', function () {
-    button.disabled = true;
-    status.textContent = 'Joining…';
-    fetch('/api/feedback/join', {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ slug: ${JSON.stringify(slug || '')} }),
-    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
-      .then(function (r) {
-        if (!r.ok) { button.disabled = false; status.textContent = (r.body && r.body.error) || 'Could not join'; status.className = 'err'; return; }
-        status.textContent = 'Joined.';
-        document.getElementById('step-start').hidden = false;
-      })
-      .catch(function (e) { button.disabled = false; status.textContent = String(e && e.message || e); status.className = 'err'; });
-  });
-})();
-</script>
-</body>
-</html>`;
+// The signed-in viewer as the shared top bar takes it, or null. A feedback
+// token is not a person at a browser, so it never counts.
+function appIdentity(session) {
+  if (!sessionPrincipal(session) || session.feedback) return null;
+  return { login: actorKey(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' };
 }
 
 function blankDocHtml() {
@@ -13869,7 +13316,7 @@ const tdocHandlers = {
           page: 'team-join',
           token: teamJoinMatch[1],
           team: { id: team.id, name: team.name, member_count: team.members.length },
-          identity: { login: actorKey(s), name: actorDisplayName(s) },
+          identity: appIdentity(s),
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -13919,7 +13366,7 @@ const tdocHandlers = {
           bootJson: safeJsonForScript({
             page: 'team-join',
             team: { id: team.id, name: team.name, member_count: team.members.length },
-            identity: { login: actorKey(s), name: actorDisplayName(s), label: who },
+            identity: { ...appIdentity(s), label: who },
             switch_href: switchHref,
           }),
         }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
@@ -14148,7 +13595,7 @@ const tdocHandlers = {
           url: `/f/${encodeURIComponent(shareId)}`,
         });
       }
-      return folderSharePageResponse(env, listing);
+      return folderSharePageResponse(env, listing, appIdentity(await getSession(env, req)));
     }
 
     // ---- interactive island (sandboxed widget) ----
@@ -14583,33 +14030,41 @@ const tdocHandlers = {
     }
     if (p === '/feedback' && method === 'GET') {
       const nonce = rand(16);
-      const viewer = await getSession(env, req);
-      const identity = sessionPrincipal(viewer) && !viewer.feedback ? { login: actorKey(viewer), name: actorDisplayName(viewer) } : null;
-      return html(feedbackBookmarkletPage(url.origin, nonce, identity), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+      const src = feedbackScriptSrc(url.origin);
+      return html(SHELL.appHtml({
+        title: 'tdoc Feedback',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'feedback-install',
+          identity: appIdentity(await getSession(env, req)),
+          scriptSrc: src,
+          bookmarklet: feedbackBookmarklet(src),
+          host: url.host,
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
-    // An invite: /feedback/join/<space>. Signed in, one click files this
-    // space as the person's feedback space for the app, so the next time
-    // they click the bookmark there they land in it.
+    // An invite: /feedback/join/<space>. Invites point at the space itself
+    // now (/d/<space>), whose page offers Join; links sent before that land
+    // there too. A bad link says so on the ordinary status page.
     const feedbackJoinMatch = p.match(/^\/feedback\/join\/([^/]+)\/?$/);
     if (feedbackJoinMatch && method === 'GET') {
-      const nonce = rand(16);
-      const headers = { 'Content-Security-Policy': cspHeader(nonce) };
       const slug = decodeURIComponent(feedbackJoinMatch[1]);
       const meta = isValidSlug(slug) ? await loadDocMeta(env, slug) : null;
       const origin = meta && meta.feedback && feedbackOrigin(meta.feedback.origin);
       const s = await getSession(env, req);
       if (!meta || !origin || !canReadDoc(accessFromMeta(meta), s, env, meta)) {
-        return html(feedbackJoinPage({ base: url.origin, nonce, error: 'This invite link is not valid, or the space is not shared with you.' }), { status: 404, headers });
+        return statusPageResponse({
+          docTitle: 'Feedback invite · tdoc',
+          title: 'This invite link is not valid',
+          message: 'The link is wrong, or the feedback space is not shared with you.',
+          error: true,
+          status: 404,
+          actions: [{ label: 'What is tdoc Feedback?', href: '/feedback' }],
+        });
       }
-      // Invites now point at the space itself (/d/<space>), which joins too.
-      // Links sent before that still land in the right place.
-      if (!url.searchParams.has('legacy')) return redirectTo(`/d/${encodeURIComponent(slug)}`);
-      const oidc = oidcConfig(env);
-      return html(feedbackJoinPage({
-        base: url.origin, nonce, slug, origin,
-        identity: sessionPrincipal(s) ? { login: actorKey(s), name: actorDisplayName(s) } : null,
-        doors: { oidc: !!oidc, oidcLabel: oidc && oidc.label, web: !!env.GITHUB_CLIENT_SECRET },
-      }), { headers });
+      return redirectTo(`/d/${encodeURIComponent(slug)}`);
     }
     if (p === '/api/feedback/join' && method === 'POST') {
       if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
@@ -14669,19 +14124,25 @@ const tdocHandlers = {
 
     if (p === '/feedback/connect' && method === 'GET') {
       const nonce = rand(16);
-      const headers = { 'Content-Security-Policy': cspHeader(nonce) };
       const origin = feedbackOrigin(url.searchParams.get('origin'));
-      if (!origin) {
-        return html(feedbackConnectPage({ base: url.origin, origin: null, nonce, error: 'Open this window from the tdoc button inside your app.' }), { status: 400, headers });
-      }
       const s = await getSession(env, req);
       const oidc = oidcConfig(env);
       const space = isValidSlug(url.searchParams.get('space') || '') ? url.searchParams.get('space') : null;
-      return html(feedbackConnectPage({
-        base: url.origin, origin, nonce, space,
-        identity: sessionPrincipal(s) ? { login: actorKey(s), name: actorDisplayName(s) } : null,
-        doors: { oidc: !!oidc, oidcLabel: oidc && oidc.label, web: !!env.GITHUB_CLIENT_SECRET },
-      }), { headers });
+      return html(SHELL.appHtml({
+        title: 'Connect tdoc Feedback',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'feedback-connect',
+          origin: origin || null,
+          space,
+          baseHost: url.host,
+          identity: appIdentity(s),
+          doors: { oidc: !!oidc, oidcLabel: (oidc && oidc.label) || '', web: !!env.GITHUB_CLIENT_SECRET },
+          ...(origin ? {} : { error: 'Open this window from the tdoc button inside your app.' }),
+        }),
+      }), { status: origin ? 200 : 400, headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
     if (p === '/api/feedback/connect' && method === 'POST') {
       const s = await getSession(env, req);

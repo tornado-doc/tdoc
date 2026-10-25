@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { loadWorker, makeEnv, req, putSession } = require('./helpers/worker-harness');
+const { loadWorker, makeEnv, req, putSession, bootData } = require('./helpers/worker-harness');
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -305,13 +305,18 @@ const APP = 'http://localhost:3000';
     assert(re.status === 413, `re-anchor: ${re.status}`);
   });
 
-  await t('/feedback carries the top bar: Sign in when signed out, My docs when signed in', async () => {
+  await t('/feedback is an app page under the shared top bar: no hand-rolled bar, the real avatar', async () => {
     const env = makeEnv(mod.CommentsStore);
     const anon = await (await worker.fetch(req('/feedback'), env, {})).text();
-    assert(anon.includes('class="fb-bar"') && anon.includes('Sign in'), 'signed-out bar missing');
+    assert(anon.includes('<div id="tdoc-app-root"></div>'), 'not an app page');
+    assert(!anon.includes('fb-bar'), 'the old hand-rolled bar is back');
+    const anonBoot = bootData(anon, '__TDOC_APP_BOOT__');
+    assert(anonBoot.page === 'feedback-install' && anonBoot.identity === null, `signed-out boot ${JSON.stringify(anonBoot)}`);
     const cookie = await putSession(env, 'julie');
-    const signed = await (await worker.fetch(req('/feedback', { cookie }), env, {})).text();
-    assert(signed.includes('href="/me"'), 'signed-in bar lacks My docs');
+    const signed = bootData(await (await worker.fetch(req('/feedback', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(signed.identity && signed.identity.login === 'julie' && 'avatar_url' in signed.identity, `signed-in identity ${JSON.stringify(signed.identity)}`);
+    const source = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-install.jsx'), 'utf8');
+    assert(/<TopBar identity=\{identity\} \/>/.test(source), 'install page does not render the shared TopBar');
   });
 
   await t('feedback.js is never served as a year-cached hashed asset', async () => {
@@ -326,23 +331,43 @@ const APP = 'http://localhost:3000';
   await t('/feedback offers the bookmarklet and the one line; /feedback/connect is the popup', async () => {
     const env = makeEnv(mod.CommentsStore);
     const page = await worker.fetch(req('/feedback'), env, {});
-    const html = await page.text();
-    assert(page.status === 200 && html.includes('href="javascript:') && html.includes('https://tdoc.dev/feedback.js'), 'bookmarklet missing');
-    assert(html.includes('&lt;script src="https://tdoc.dev/feedback.js"&gt;'), 'one-line install missing');
-    assert(/<div class="code-copy"><pre><code>&lt;script src="https:\/\/tdoc.dev\/feedback.js"&gt;&lt;\/script&gt;<\/code><\/pre><button type="button" class="copy-btn"[^>]*>Copy<\/button><\/div>/.test(html), 'one-line install has no Copy button beside it');
-    assert(html.includes('navigator.clipboard') && html.includes("execCommand('copy')"), 'Copy button has no clipboard code or fallback');
-    assert(/Content-Security-Policy/.test([...page.headers.keys()].join(',')) === false || page.headers.get('Content-Security-Policy').includes('nonce-'), 'page CSP is not nonced');
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(page.status === 200 && boot.scriptSrc === 'https://tdoc.dev/feedback.js', `script src ${boot.scriptSrc}`);
+    assert(boot.bookmarklet === "javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='https://tdoc.dev/feedback.js?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()", `bookmarklet ${boot.bookmarklet}`);
+    assert(boot.host === 'tdoc.dev', 'host missing');
+    assert((page.headers.get('Content-Security-Policy') || '').includes('nonce-'), 'page CSP is not nonced');
+    // The one line keeps its Copy button (#793): clipboard, the execCommand
+    // fallback, and selecting the snippet when both fail.
+    const install = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-install.jsx'), 'utf8');
+    assert(install.includes('<CodeCopy code={`<script src="${scriptSrc}"></script>`} />'), 'one-line install has no Copy button beside it');
+    assert(install.includes('navigator.clipboard') && install.includes("execCommand('copy')") && install.includes('Press ⌘C'), 'Copy button has no clipboard code or fallback');
+    // React 19 swaps a rendered javascript: href for one that throws; the
+    // bookmark address must be set on the element, never passed as a prop.
+    assert(install.includes("el.setAttribute('href', href)"), 'bookmarklet href would be blocked by React');
+    for (const file of ['feedback-install.jsx', 'feedback-space.jsx']) {
+      const src = fs.readFileSync(path.join(ROOT, 'shell/src', file), 'utf8');
+      assert(!/<a\b[^>]*href=\{bookmarklet\}/.test(src), `${file} renders the bookmarklet as an href prop`);
+    }
 
     const anon = await worker.fetch(req(`/feedback/connect?origin=${encodeURIComponent(APP)}`), env, {});
-    const anonHtml = await anon.text();
-    assert(anon.status === 200 && anonHtml.includes('Sign in') && !anonHtml.includes('id="connect"'), 'anonymous popup should ask to sign in');
+    const anonBoot = bootData(await anon.text(), '__TDOC_APP_BOOT__');
+    assert(anon.status === 200 && anonBoot.page === 'feedback-connect' && anonBoot.identity === null && anonBoot.origin === APP, 'anonymous popup should ask to sign in');
     const cookie = await putSession(env, 'julie');
     const signed = await worker.fetch(req(`/feedback/connect?origin=${encodeURIComponent(APP)}`, { cookie }), env, {});
-    const signedHtml = await signed.text();
-    assert(signed.status === 200 && signedHtml.includes('id="connect"') && signedHtml.includes('localhost:3000'), 'signed-in popup should offer Connect');
-    assert(signedHtml.includes("postMessage({ type: 'tdoc-feedback-connected'"), 'popup does not hand the token back');
+    const signedBoot = bootData(await signed.text(), '__TDOC_APP_BOOT__');
+    assert(signed.status === 200 && signedBoot.identity && signedBoot.identity.login === 'julie' && signedBoot.origin === APP, 'signed-in popup should offer Connect');
+    const connect = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-connect.jsx'), 'utf8');
+    assert(connect.includes("postMessage({ type: 'tdoc-feedback-connected', origin, session: payload }, origin)"), 'popup does not hand the token back');
+    assert(connect.includes('id="connect"') && connect.includes('<TopBar'), 'popup lost Connect or the shared top bar');
     const bad = await worker.fetch(req('/feedback/connect?origin=nope'), env, {});
-    assert(bad.status === 400, `bad origin: ${bad.status}`);
+    assert(bad.status === 400 && bootData(await bad.text(), '__TDOC_APP_BOOT__').error, `bad origin: ${bad.status}`);
+  });
+
+  await t('a bad /feedback/join link is the ordinary status page, not a page of its own', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const r = await worker.fetch(req('/feedback/join/no-such-space'), env, {});
+    const boot = bootData(await r.text(), '__TDOC_APP_BOOT__');
+    assert(r.status === 404 && boot.page === 'status' && boot.error, `bad join ${r.status} ${JSON.stringify(boot)}`);
   });
 
   await t('/feedback.js is served cross-origin; the bundle is built from feedback/src', async () => {
