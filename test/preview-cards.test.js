@@ -92,6 +92,8 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   const gradient = '\uFEFF<?xml version="1.0"?><!-- authored --><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="630"><defs><linearGradient id="ink"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect width="1200" height="630" style="fill:url(#ink)"/></svg>';
   assert.equal(previewNormalizeSvg(gradient).error, undefined, 'CLI and Worker accept safe local gradients and XML prelude');
   assert.equal(previewNormalizeSvg(gradient.replace('url(#ink)', 'url(https://example.com/a)')).error, 'unsafe_preview_svg');
+  assert.equal(previewNormalizeSvg(gradient.replace('<defs>', '<!-- inside drawing --><defs>')).error, 'unsafe_preview_svg');
+  assert.equal(previewNormalizeSvg(gradient.replace('<defs>', '<!-- split --><script></script><defs>')).error, 'unsafe_preview_svg');
   const owner = await issue(worker.default, env, 'preview-owner');
   const stranger = await issue(worker.default, env, 'preview-stranger');
   assert.equal((await call('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'owned-card', version: 1, html: doc('Owned'), meta: meta('Owned', 'public', 1) } })).status, 200);

@@ -4,7 +4,11 @@ function previewNormalizeSvg(input) {
   if (typeof input !== 'string' || input.length > 128 * 1024 || new TextEncoder().encode(input).length > 128 * 1024) {
     return { error: 'invalid_preview_svg' };
   }
-  let svg = input.replace(/^\uFEFF/, '').replace(/<\?xml\s[^?]*\?>\s*/i, '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  // Prelude comments are accepted before the drawing only. Removing comments
+  // inside markup can join otherwise harmless fragments into a new tag.
+  let svg = input.replace(/^\uFEFF/, '').trim();
+  const prelude = svg.match(/^(?:<\?xml\s[^?]*\?>\s*|<!--[\s\S]*?-->\s*)*/i);
+  svg = svg.slice(prelude[0].length);
   const root = svg.match(/^<svg\b([^>]*)>/);
   if (!root || !/(?:^|\s)xmlns\s*=\s*["']http:\/\/www\.w3\.org\/2000\/svg["']/.test(root[1])
     || !/(?:^|\s)width\s*=\s*["']1200["']/.test(root[1]) || !/(?:^|\s)height\s*=\s*["']630["']/.test(root[1])) {
@@ -26,16 +30,21 @@ function previewNormalizeSvg(input) {
     return { error: 'unsafe_preview_svg' };
   }
   const stack = [];
+  let cursor = 0;
+  let textLength = 0;
   for (const match of tags) {
+    const betweenTags = svg.slice(cursor, match.index);
+    if (betweenTags.includes('<')) return { error: 'invalid_preview_svg' };
+    textLength += betweenTags.length;
+    cursor = match.index + match[0].length;
     if (/^<\//.test(match[0])) {
       if (stack.pop() !== match[1]) return { error: 'invalid_preview_svg' };
     } else if (!/\/\s*>$/.test(match[0])) {
       stack.push(match[1]);
     }
   }
-  if (stack.length) return { error: 'invalid_preview_svg' };
-  const text = svg.replace(/<[^>]*>/g, '');
-  if (text.length > 20000 || [...svg.matchAll(/\bd\s*=\s*(["'])(.*?)\1/gs)].some((match) => match[2].length > 20000)) {
+  if (stack.length || svg.slice(cursor).trim()) return { error: 'invalid_preview_svg' };
+  if (textLength > 20000 || [...svg.matchAll(/\bd\s*=\s*(["'])(.*?)\1/gs)].some((match) => match[2].length > 20000)) {
     return { error: 'unsafe_preview_svg' };
   }
   const ids = new Set([...svg.matchAll(/\bid\s*=\s*(["'])([A-Za-z][\w.-]*)\1/g)].map((match) => match[2]));
