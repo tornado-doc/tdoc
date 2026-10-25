@@ -105,7 +105,7 @@ async function dragSelect(page, phrase) {
   const { server, base } = await startServer(worker, env);
   const browser = await chromium.launch({ headless: true });
   const open = async (who, slug, phone = false) => {
-    const context = await browser.newContext(phone ? { ...devices['iPhone 13'], defaultBrowserType: undefined } : { viewport: { width: 1280, height: 800 } });
+    const context = await browser.newContext(phone ? { ...devices['iPhone 13'], defaultBrowserType: undefined } : { viewport: { width: 1440, height: 800 } });
     if (who) await context.addCookies([{ name: 'tdoc_sid', value: who.cookie.split('=')[1], domain: '127.0.0.1', path: '/' }]);
     const page = await context.newPage();
     page.on('pageerror', (e) => { throw e; });
@@ -164,20 +164,29 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('phone bar: title; ✈ · Share icon · ⋯; the account is in ⋯; the filter heads the drawer', async () => {
+    await t('phone bar: title; Ask AI · Share · ⋯, with My docs first in the menu', async () => {
       const { context, page } = await open(julie, 'launch-plan', true);
       await page.locator('#tdoc-send-agent-btn').waitFor();
       if (!(await page.locator('#tdoc-share-btn').isVisible())) throw new Error('no Share on a phone');
       if (!(await page.locator('.tdoc-bar .doc-title').isVisible())) throw new Error('no title on a phone');
+      if (await page.locator('.tdoc-bar-mark').isVisible()) throw new Error('mobile logo still crowds the title');
       if (await page.locator('.tdoc-bar .tdoc-space-trigger').isVisible()) throw new Error('space chip crowds the phone bar');
       if (await page.locator('.tdoc-account-trigger').isVisible()) throw new Error('avatar in the phone bar');
       await page.locator('#tdoc-more-btn').click();
+      if (!/^My docs$/.test((await page.getByRole('menuitem').first().innerText()).trim())) throw new Error('My docs is not the first mobile menu item');
       await page.getByRole('menuitem', { name: /My account/ }).waitFor();
+      const unreadDot = page.locator('#tdoc-more-btn .tdoc-unread-dot');
+      if (await unreadDot.count() && await unreadDot.evaluate((el) => getComputedStyle(el).backgroundColor) !== 'rgb(22, 82, 240)') throw new Error('mobile unread dot is not blue');
       await page.keyboard.press('Escape');
+      await page.locator('#tdoc-send-agent-btn').click();
+      await page.getByRole('dialog', { name: 'Ask AI' }).waitFor();
+      await shot(page, 'ask-ai-phone-empty.png');
+      await page.locator('#tdoc-send-agent-btn').click();
       await page.locator('.tdoc-fab').click();
       await page.locator('#tdoc-comment-layer .tdoc-comment-filter').waitFor();
       const layout = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
       if (layout.scrollWidth > layout.width + 1) throw new Error(JSON.stringify(layout));
+      await shot(page, 'doc-bar-phone.png');
       await context.close();
     });
 
@@ -226,6 +235,41 @@ async function dragSelect(page, phrase) {
       if (!/tdoc AI/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
       if (!(await answersOnly(pop))) throw new Error('no "Answers only"');
       if (await pop.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
+      await context.close();
+    });
+
+    await t('Ask AI opens for a reader, answers privately, preserves follow-ups and posts only on request', async () => {
+      const { context, page } = await open(reader, 'launch-plan');
+      await page.locator('#tdoc-send-agent-btn').click();
+      const panel = page.getByRole('dialog', { name: 'Ask AI' });
+      await panel.waitFor();
+      const filterBox = await page.locator('.tdoc-comment-filter').boundingBox();
+      const panelBox = await panel.boundingBox();
+      if (filterBox && panelBox && panelBox.y < filterBox.y + filterBox.height) throw new Error('Ask AI panel overlaps the comment filters');
+      await shot(page, 'ask-ai-reader-empty.png');
+      const input = panel.getByRole('textbox', { name: 'Ask about this document' });
+      if (!(await input.evaluate((el) => document.activeElement === el))) throw new Error('Ask input did not receive focus');
+      if (await input.evaluate((el) => getComputedStyle(el).resize) !== 'none') throw new Error('textarea resize handle is visible');
+      await input.fill('What is the conclusion?');
+      await panel.getByRole('button', { name: 'Send question' }).click();
+      await panel.getByText('Billing goes first.').waitFor();
+      const before = (await api('/api/comments?slug=launch-plan&version=1', { cookie: reader.cookie })).body;
+      if (JSON.stringify(before).includes('What is the conclusion?')) throw new Error('private question was posted');
+      await panel.getByRole('button', { name: 'Keep to myself' }).click();
+      await panel.getByText('Kept private').waitFor();
+      await input.fill('What happens next?');
+      await input.press('Enter');
+      await panel.getByText('Billing goes first.').last().waitFor();
+      if (await panel.locator('.tdoc-ask-turn').count() !== 2) throw new Error('follow-up did not stay in the conversation');
+      await panel.getByRole('button', { name: 'Post as comment' }).click();
+      await panel.getByText('Posted as a comment').waitFor();
+      if (await panel.getByText('Only you can see this').count() !== 1) throw new Error('public answer still looks private');
+      const after = (await api('/api/comments?slug=launch-plan&version=1', { cookie: reader.cookie })).body;
+      if (!JSON.stringify(after).includes('What happens next?')) throw new Error('public question was not posted');
+      await page.locator('#tdoc-send-agent-btn').click();
+      await page.locator('#tdoc-send-agent-btn').click();
+      if (await page.getByRole('dialog', { name: 'Ask AI' }).locator('.tdoc-ask-turn').count() !== 2) throw new Error('conversation disappeared after closing the panel');
+      await shot(page, 'ask-ai-reader-desktop.png');
       await context.close();
     });
   } finally {

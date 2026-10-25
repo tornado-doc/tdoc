@@ -180,8 +180,8 @@
   .tdoc-connect-agent p strong { color: #fff; }
   .tdoc-connect-agent code { display: block; margin: 0 0 8px; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.14); color: #f2f2f2; font: 11.5px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
   .tdoc-connect-agent button { appearance: none; border: 0; border-radius: 6px; padding: 5px 10px; background: var(--td-accent, #1652f0); color: #fff; font: 600 12px system-ui, sans-serif; cursor: pointer; }
-  /* Only new inbox chrome: a red dot on the existing identity chip. */
-  .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; border: 1.5px solid #fff; pointer-events: none; }
+  /* A round blue dot signals unread activity across the bar. */
+  .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #1652f0; border: 1.5px solid #fff; pointer-events: none; }
   /* Inbox rows reuse cluster-row: action + preview stacked, relative time on the right. */
   #tdoc-inbox-list .tdoc-cluster-row > .muted { flex-shrink: 0; white-space: nowrap; font-size: 12px; }
 
@@ -791,6 +791,7 @@
     .tdoc-bar { padding: 0 8px; gap: 4px; }
     .tdoc-bar button { min-width: 44px; min-height: 44px; justify-content: center; }
     .tdoc-bar .tdoc-bar-mark { width: 44px; height: 44px; }
+    .tdoc-bar.tdoc-bar-hide-mobile-mark .tdoc-bar-mark { display: none; }
     .tdoc-version-wrap, .tdoc-bar #tdoc-version-toggle { display: none; }
     .tdoc-bar .doc-title { flex: 1 1 auto; font-size: 13px; }
     /* The 44px touch-target rule above centres every button in the bar, which
@@ -954,7 +955,7 @@
   }
   .tdoc-handoff-chip .tdoc-handoff-chip-action:disabled { opacity: 0.55; cursor: not-allowed; }
   .tdoc-handoff-popover {
-    width: min(360px, calc(100vw - 24px));
+    width: min(400px, calc(100vw - 24px));
     max-height: calc(100vh - 72px);
     overflow: auto;
     box-sizing: border-box;
@@ -967,6 +968,33 @@
     font: 13px/1.4 Inter, system-ui, sans-serif;
   }
   .tdoc-handoff-popover:focus { outline: none; }
+  .tdoc-ask-panel h2 { margin: 0 0 12px; font: 700 16px/1.3 Inter, system-ui, sans-serif; }
+  .tdoc-ask-form { border: 1px solid #bfd0f6; border-radius: 10px; padding: 8px 10px 9px; box-shadow: 0 0 0 3px rgba(22,82,240,.05); }
+  .tdoc-ask-form:focus-within { border-color: var(--td-accent, #1652f0); }
+  .tdoc-ask-form textarea { display: block; width: 100%; min-height: 44px; max-height: 160px; resize: none; overflow-y: auto; padding: 2px 0; border: 0; outline: 0; background: transparent; color: var(--td-ink, #1a1a1a); font: 13px/1.5 Inter, system-ui, sans-serif; box-sizing: border-box; }
+  .tdoc-ask-form-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .tdoc-ask-form-bottom .tdoc-ask-target-select { max-width: calc(100% - 42px); padding: 5px 3px; border: 0; background: transparent; color: #465a80; font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-form-bottom button[type="submit"] { width: 28px; height: 28px; border: 0; border-radius: 8px; background: var(--td-accent, #1652f0); color: #fff; font: 700 19px/1 Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }
+  .tdoc-ask-notice { margin-top: 10px; padding: 10px; border-radius: 8px; background: #f5f7fb; color: #4b5870; font-size: 12px; }
+  .tdoc-ask-notice a { color: var(--td-accent, #1652f0); font-weight: 650; }
+  .tdoc-ask-ready { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px; border: 1px solid #e0e9ff; border-radius: 8px; background: #f8faff; color: #51617e; font-size: 12px; }
+  .tdoc-ask-ready button { border: 0; padding: 0; background: transparent; color: var(--td-accent, #1652f0); font: 650 12px Inter, system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
+  .tdoc-ask-conversation { display: grid; gap: 11px; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
+  .tdoc-ask-turn { display: grid; gap: 6px; }
+  .tdoc-ask-question { max-width: 88%; justify-self: end; border-radius: 10px; padding: 7px 10px; background: #eaf0ff; color: #26488c; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tdoc-ask-answer { max-width: 96%; border-radius: 10px; padding: 10px; background: #f4f6fa; color: #344058; }
+  .tdoc-ask-answer.is-error { background: #fff7f6; color: #9c4545; }
+  .tdoc-ask-answer-heading { color: #55709e; font-size: 11px; font-weight: 700; }
+  .tdoc-ask-answer p { margin: 7px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tdoc-ask-answer-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { border: 1px solid #cbd6e8; border-radius: 7px; padding: 5px 9px; background: #fff; color: #53647e; font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-answer-actions button.primary, .tdoc-ask-answer.is-error button { border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff; }
+  .tdoc-ask-answer-actions button:disabled { opacity: .55; cursor: default; }
+  .tdoc-ask-private-note { display: block; margin-top: 8px; color: #64728b; font-size: 11px; }
+  .tdoc-ask-activity-toggle { display: flex; width: 100%; justify-content: space-between; margin-top: 14px; padding: 10px 0 0; border: 0; border-top: 1px solid #e6ebf3; background: transparent; color: #43546e; font: 650 12px Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
+  .tdoc-ask-activity-toggle span:last-child { color: var(--td-accent, #1652f0); }
+  .tdoc-ask-activity { margin-top: 12px; }
   .tdoc-handoff-details-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
   .tdoc-handoff-popover .tdoc-handoff-details-section-title { margin: 0; font-size: 13px; font-weight: 650; }
   .tdoc-handoff-popover button.tdoc-handoff-details-mark-all { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--td-accent, #1652f0); font: inherit; font-size: 11px; cursor: pointer; }
@@ -1084,6 +1112,10 @@
   .tdoc-handoff-details-state .tdoc-handoff-details-resend:disabled { opacity: .55; cursor: not-allowed; }
   .tdoc-handoff-popover button.tdoc-handoff-details-expand { border: 0; background: transparent; color: var(--td-accent, #1652f0); padding: 0; min-height: 0; font: inherit; font-size: 11px; cursor: pointer; }
   .tdoc-handoff-details-history { color: #5f6368; font-size: 11px; line-height: 1.5; padding: 5px 0 0 8px; border-left: 2px solid #e8eeff; }
+  .tdoc-handoff-details-reply-form { display: flex; gap: 6px; margin-top: 8px; }
+  .tdoc-handoff-details-reply-form input { min-width: 0; flex: 1; border: 1px solid #c9d7f5; border-radius: 7px; padding: 7px; font: 12px Inter, system-ui, sans-serif; }
+  .tdoc-handoff-details-reply-form button { border: 0; border-radius: 7px; padding: 0 10px; background: var(--td-accent, #1652f0); color: #fff; font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-handoff-details-reply-form button:disabled { opacity: .5; cursor: default; }
   .tdoc-handoff-ready { border-top: 1px solid var(--td-line, #e6e4dc); padding-top: 10px; }
   .tdoc-handoff-ready h3 { margin: 0 0 6px; color: #888; font-size: 11px; font-weight: 500; }
   .tdoc-handoff-ready-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; font-size: 12px; }
@@ -1109,45 +1141,47 @@
   .tdoc-ai-quota a:hover { color: var(--td-accent, #1652f0); }
   .tdoc-ai-answering { padding: 4px 0 0; }
 
-  /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
+  /* Ask AI and agent activity share one top-bar entry. The blue corner dot
+     signals activity; the full count stays in the accessible label and panel. */
   .tdoc-bar .tdoc-send-agent-action {
     position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
+    gap: 7px;
+    height: 32px;
+    padding: 0 11px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: linear-gradient(#fff, #fff) padding-box, linear-gradient(110deg, #4f8cff, #9b6bff 55%, #ff7aa8) border-box;
     color: var(--td-ink, #1a1a1a);
+    font: 600 13px/1 system-ui, -apple-system, sans-serif;
+    white-space: nowrap;
     cursor: pointer;
     flex-shrink: 0;
   }
   .tdoc-bar .tdoc-send-agent-action:hover {
-    background: var(--td-accent-tint, #e8eeff);
-    color: var(--td-accent, #1652f0);
+    background: linear-gradient(#f5f8ff, #f5f8ff) padding-box, linear-gradient(110deg, #4f8cff, #9b6bff 55%, #ff7aa8) border-box;
+  }
+  .tdoc-bar .tdoc-send-agent-action:focus-visible {
+    outline: 2px solid var(--td-accent, #1652f0);
+    outline-offset: 2px;
+  }
+  .tdoc-bar .tdoc-ask-ai-mark {
+    width: 18px;
+    height: 18px;
+    flex: none;
   }
   .tdoc-bar .tdoc-send-agent-badge {
     position: absolute;
-    top: 5px;
-    right: 5px;
+    top: 0;
+    right: 3px;
     transform: translate(50%, -50%);
     min-width: 9px;
     height: 9px;
     border: 1.5px solid #fff;
     border-radius: 50%;
     background: #1652f0;
-  }
-  .tdoc-bar .tdoc-send-agent-badge.is-unread {
-    min-width: 15px;
-    height: 15px;
-    padding: 0 2px;
-    background: #e5484d;
-    color: #fff;
-    font: 700 9px/13px system-ui, sans-serif;
-    text-align: center;
   }
 
 /* A navigation is under way (shell/src/nav-progress.js): a thin bar along the

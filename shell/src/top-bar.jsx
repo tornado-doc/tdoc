@@ -56,6 +56,7 @@ export function TopBar({
   onSpace = null,
   onNewTeam = null,
   onboardingTest = null,
+  hideMobileMark = false,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -169,7 +170,7 @@ export function TopBar({
   const moreOnDesktop = Boolean(overflowActions) || themeInMore;
 
   return (
-    <header className="tdoc-bar">
+    <header className={`tdoc-bar${hideMobileMark ? ' tdoc-bar-hide-mobile-mark' : ''}`}>
       <div className="tdoc-bar-left">
         <a
           className="tdoc-bar-mark"
@@ -195,6 +196,12 @@ export function TopBar({
             {notifications.unread ? <span className="tdoc-unread-dot tdoc-mobile-overflow-only" /> : null}
           </button>
         )}>
+          {hideMobileMark ? <>
+            <AppMenuLinkItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" href="/me">
+              <Library size={15} /> My docs
+            </AppMenuLinkItem>
+            <AppMenuSeparator className="tdoc-mobile-overflow-only" />
+          </> : null}
           {overflowActions}
           {supportsTheme ? (
             <>
@@ -216,9 +223,9 @@ export function TopBar({
                 Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
               </AppMenuItem>
               <AppMenuSeparator className="tdoc-mobile-overflow-only" />
-              <AppMenuLinkItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" href="/me">
+              {!hideMobileMark ? <AppMenuLinkItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" href="/me">
                 <Library size={15} /> My docs
-              </AppMenuLinkItem>
+              </AppMenuLinkItem> : null}
               {/* The space chip is hidden on a phone so ⋯ always has room;
                   its list lives here instead. */}
               <AppSubmenu

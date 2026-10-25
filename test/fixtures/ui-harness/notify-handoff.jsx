@@ -9,6 +9,7 @@ import { NotifyHandoffPanel } from '../../../shell/src/document/notify-handoff.j
 import { HandoffStatusChips } from '../../../shell/src/document/handoff-status-line.jsx';
 import { DocumentSendAgentAction } from '../../../shell/src/document/document-toolbar.jsx';
 import { HandoffDetailsPanel } from '../../../shell/src/document/handoff-details.jsx';
+import { AskAiPanel } from '../../../shell/src/document/ask-ai-panel.jsx';
 import { useCommentArea } from '../../../shell/src/document/comment-area.js';
 import { summarizeHandoffSurfaces } from '../../../shell/src/document/handoff-state.js';
 import { isThreadUnread } from '../../../shell/src/document/thread-seen.js';
@@ -78,6 +79,8 @@ function StatusCards() {
 
 function ActivityDemo() {
   const [open, setOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [askDraft, setAskDraft] = useState('');
   const [log, setLog] = useState('');
   const phone = window.innerWidth < 700;
   if (phone) document.body.classList.add('tdoc-narrow');
@@ -96,11 +99,17 @@ function ActivityDemo() {
       <span style={{ flex: 1 }} />
       {!phone ? <span style={{ color: '#888' }}>Edited 2m ago</span> : null}
       <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen}>
+        <AskAiPanel open={open} draft={askDraft} onDraft={setAskDraft} targetKey="tdoc-ai" onTarget={() => {}}
+          targets={[{ key: 'tdoc-ai', label: 'tdoc AI', tdocAi: true }]} turns={[]} busy={false} remaining={5}
+          onAsk={() => {}} onKeep={() => {}} onPost={() => {}} readyCount={counts.ready}
+          onSendReady={() => setLog(`send-ready:${buckets.ready.map((item) => item.id).join(',')}`)}
+          activityOpen={activityOpen} onActivityOpen={setActivityOpen} unreadCount={visibleUnread}>
         <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} handoffViewer="julie" onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
           onSendElsewhere={(comment) => { setLog(`elsewhere:${comment.id}`); setOpen(false); }}
           onMarkRead={commentArea.markRead} onMarkAllRead={commentArea.markAllRead} />
         <button id="activity-refresh" type="button" onClick={() => setLog('refreshed')}>Refresh comments</button>
+        </AskAiPanel>
       </DocumentSendAgentAction>
       {!phone ? <><strong>Share</strong><span>⋯</span><span style={{ color: '#888' }}>Tdoc ▾</span><span style={{ background: '#1652f0', color: '#fff', borderRadius: '50%', width: 26, height: 26, display: 'grid', placeItems: 'center' }}>J</span></> : null}
     </div>
