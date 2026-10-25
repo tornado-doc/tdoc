@@ -1193,3 +1193,17 @@ a.ui-menu-item:visited {
 .ui-checkbox-indicator { display: inline-flex; }
 .ui-checkbox-label { white-space: nowrap; }
 .ui-checkbox-hint { color: #8a8a8a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* iOS zooms the whole page when a focused text control renders below 16px.
+   Apply the floor across the shell, portaled dialogs, and feedback shadow
+   root; component styles otherwise range from 11px to 14px. Keep the larger
+   activation code legible, and leave pinch zoom available. */
+@media (max-width: 700px) {
+  :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]), textarea, select) {
+    font-size: max(16px, 1rem) !important;
+  }
+  :where(input.tdoc-activate-code) { font-size: max(22px, 1rem) !important; }
+  :where(button, a, summary, [role="button"], [role="menuitem"], [role="option"],
+    .tdoc-popup, .tdoc-modal, .ui-dialog-popup, .tdoc-handoff-popover,
+    .tdoc-ask-mobile-drawer, #tdoc-comment-layer) { touch-action: manipulation; }
+}
