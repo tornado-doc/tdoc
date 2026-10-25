@@ -222,7 +222,10 @@ t('opening the gate is beginning, whatever the browser reports', () => {
   // person who selected the line and hit cmd-C connected their agent,
   // published, and then found no checklist on My docs at all -- it renders on
   // `started`. The door is the honest signal, and the server is standing in it.
-  assert(/const who = await sessionAccountId\(env, session\);\s*\n\s*if \(who\) await stampOnboardingFor\(env, who, 'started'\);/.test(worker),
+  // A sign-in that returns here for an account already connected goes to My
+  // docs first and stamps nothing (dev-mode.test.js runs it); every other
+  // signed-in visit still starts the journey.
+  assert(/const who = await sessionAccountId\(env, session\);[\s\S]{0,400}return new Response\(null, \{ status: 302, headers: \{ Location: '\/me' \} \}\);\s*\}\s*await stampOnboardingFor\(env, who, 'started'\);/.test(worker),
     'a signed-in visit to /setup starts the journey');
   // That fixed the half of the walk that goes through the door. The other half
   // never opens it -- agent connects and publishes over the CLI, /me is the
@@ -423,8 +426,10 @@ t('the checklist is for the middle of the journey', () => {
 t('internal state switching is allowlisted, narrow and server-built', () => {
   assert(worker.includes("await env.META.get('debug-accounts')"), 'the list is KV data, not build config');
   assert(worker.includes("if (p === '/api/onboarding/state' && method === 'POST')"), 'one route');
-  assert(/if \(!sameOrigin\(req, url\)\) return json\(\{ error: 'forbidden' \}, \{ status: 403 \}\);[\s\S]{0,400}isDebugAccount/.test(worker),
-    'same-origin and allowlisted');
+  assert(/if \(!sameOrigin\(req, url\)\) return json\(\{ error: 'forbidden' \}, \{ status: 403 \}\);[\s\S]{0,200}const dev = await devModeState\(env, session\);\s*if \(!dev\) return json\(\{ error: 'forbidden' \}, \{ status: 403 \}\);[\s\S]{0,300}if \(!dev\.on\) return json\(\{ error: 'dev_mode_off' \}/.test(worker),
+    'same-origin, allowlisted, and only while dev mode is on');
+  assert(/async function devModeState\(env, session\) \{\s*if \(!\(await isDebugAccount\(env, session\)\)\) return null;/.test(worker),
+    'dev mode exists only for the allow-list');
   assert(worker.includes('const next = debugRecord(state, new Date().toISOString(), doc);'),
     'the record is built server-side; the client names a state, never a field');
   // The built states have to stand on a doc this person actually owns: a reset
@@ -523,6 +528,31 @@ t('the allow-list takes the shape the settings page gives it', () => {
   assert(worker.includes('.split(/[\\s,;]+/)'), 'and the reader takes commas, newlines, semicolons or spaces');
 });
 
+t('a page offers only the states it can show', () => {
+  // All six everywhere made most of the bar noise: the landing page looks the
+  // same at every step of the journey, so five of its six buttons changed
+  // nothing a tester could see, and pressing one on a document meant guessing
+  // which of them that document reacts to. A button whose result you cannot
+  // read is worse than no button.
+  const states = (name) => {
+    const m = bar.match(new RegExp(`${name}: (\\[[^\\]]*\\]|DEBUG_STATES)`));
+    return m ? m[1] : null;
+  };
+  assert(states('landing') === '[]', 'the landing page is the same page at every step');
+  assert(states('connect') === "['new', 'started', 'connected']", 'the gate shows waiting and connected');
+  assert(states('doc') === "['connected', 'published']", 'the second ask shows waiting and published');
+  assert(states('document') === "['published', 'commented', 'revised']", 'a doc shows its row: comment, handoff, gone');
+  assert(states('hub') === 'DEBUG_STATES', 'and the checklist has a face for all six');
+  // Each surface says which one it is.
+  assert(!/<DebugBar\b/.test(gate), 'the modal uses the docs hub debug surface behind it');
+  assert(shell.includes("surface={config.isLanding ? 'landing' : 'document'}"), 'a document names itself');
+  assert(hub.includes('surface="hub"') && /devModeBoot\(env, s\),\n\s*\]\);[\s\S]{0,2000}?\bdebug: dev\.debug,/.test(worker),
+    'and the hub, where the checklist is');
+  // Whatever the page can show, the record's current value is always printed:
+  // "you are at revised, and these are the ones this page can show you".
+  assert(bar.includes('record: {recordName(record)}'), 'the current state is always named');
+});
+
 t('letting a tester in does not need Cloudflare credentials', () => {
   // The list lived only in KV, which can only be written by somebody holding
   // Cloudflare credentials -- so "let Julie test too" was a terminal session
@@ -563,7 +593,7 @@ t('replay is new again, not just a blank record', () => {
   // that landed there could never show what `new` looks like.
   assert(shell.includes('{config.debug ? (') && shell.includes('<DebugBar'),
     'the bar is on every document, the landing page included');
-  assert(worker.includes('debug: await isDebugAccount(env, session) }'),
+  assert(worker.includes('...(await devModeBoot(env, session)) }, pageUrl)'),
     'and the server tells the document who is allow-listed');
   assert(bar.includes('location.reload();'), 'a replay stays where it was pressed');
   // The credential is the one that matters: `account-terminal:` is a marker,

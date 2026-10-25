@@ -1,0 +1,239 @@
+// Dev mode in the browser, desktop and phone. Real worker routes (in-process
+// harness) behind a local HTTP server, the real built shell, real Chromium.
+//
+//   - the account menu's "Dev mode" switch: allow-listed only, flips the
+//     server-side setting, and the Internal bar comes and goes with it
+//   - the Internal bar's "Exit dev mode" needs two presses, like replay
+//   - an account not on the list has no switch and the API refuses it
+//   - Sign out -> Sign in on the landing page brings a connected account back
+//     to My docs, not to "Connect your agent"
+//
+// TDOC_SHOTS_DIR=<dir> saves screenshots of the menu switch and the bar.
+const assert = require('assert/strict');
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
+const { loadWorker, makeEnv } = require('./helpers/worker-harness');
+const { loadRuntimeAssets } = require('../server/runtime-assets');
+const { chromium } = requirePlaywrightOrSkip('dev-mode-ui.test.js');
+
+const JULIE = 'c3'.repeat(16);
+const BOB = 'd4'.repeat(16);
+const SHOTS = process.env.TDOC_SHOTS_DIR || '';
+const ENV = {
+  TDOC_DEBUG_ACCOUNTS: 'julie@example.com',
+  OIDC_ISSUER: 'https://idp.example', OIDC_CLIENT_ID: 'cid', OIDC_CLIENT_SECRET: 'csec', OIDC_LABEL: 'Email',
+};
+
+async function seed(env) {
+  const session = (email, account_id) => JSON.stringify({
+    email, account_id, name: email.split('@')[0], avatar_url: '', created: new Date().toISOString(),
+    idp: { provider: 'oidc', sub: email },
+  });
+  await env.META.put(`account-email:julie@example.com`, JSON.stringify({ account_id: 'acct-julie' }));
+  await env.META.put(`account-email:bob@example.com`, JSON.stringify({ account_id: 'acct-bob' }));
+  await env.META.put(`session:${JULIE}`, session('julie@example.com', 'acct-julie'));
+  await env.META.put(`session:${BOB}`, session('bob@example.com', 'acct-bob'));
+  // Julie is a long-time user: her agent connected months ago and she has
+  // docs, from before the journey existed, so her record says only that.
+  // Nothing about her should look like onboarding -- until a visit to /setup
+  // stamps `started`, which is what put the checklist back on My docs.
+  await env.META.put('account-terminal:acct-julie', JSON.stringify({ first: '2026-03-01T00:00:00Z', last: '2026-10-01T00:00:00Z' }));
+  await env.META.put('account-onboarding:acct-julie', JSON.stringify({ agent_connected: '2026-03-01T00:00:00Z' }));
+  for (const [slug, title, account_id] of [['julie-notes', 'Julie notes', 'acct-julie'], ['tornado-doc', 'tdoc', 'acct-julie']]) {
+    await env.META.put(`meta:${slug}`, JSON.stringify({
+      title, slug, created: '2026-03-01T00:00:00Z', versions: [{ n: 1, created: '2026-03-01T00:00:00Z' }],
+      hosted: { account_id, owner_key: 'email:julie@example.com' },
+      access: { visibility: 'public', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
+    }));
+    await env.DOCS.put(`docs/${slug}/v1/index.html`, `<!doctype html><html><body><h1>${title}</h1><p>Prompt-native documents, for people and their agents.</p></body></html>`);
+  }
+}
+
+async function startServer(worker, env) {
+  const assets = loadRuntimeAssets();
+  const byPath = new Map(assets.all.map((asset) => [asset.path, asset]));
+  const server = http.createServer(async (req, res) => {
+    const pathname = req.url.split('?')[0];
+    const asset = byPath.get(pathname);
+    if (asset) {
+      res.setHeader('content-type', asset.type);
+      return res.end(fs.readFileSync(asset.file));
+    }
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const headers = { ...req.headers, host: 'tdoc.dev' };
+    if (headers.origin) headers.origin = 'https://tdoc.dev';
+    delete headers.referer;
+    const response = await worker.fetch(new Request(`https://tdoc.dev${req.url}`, {
+      method: req.method,
+      headers,
+      body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.concat(chunks),
+      redirect: 'manual',
+    }), env, { waitUntil() {} });
+    const type = response.headers.get('content-type') || '';
+    let body = Buffer.from(await response.arrayBuffer());
+    if (type.includes('text/html')) {
+      body = Buffer.from(body.toString('utf8')
+        .replaceAll('__TDOC_SHELL_RUNTIME_JS_PATH__', assets.js.path)
+        .replaceAll('__TDOC_SHELL_RUNTIME_CSS_PATH__', assets.css.path));
+    }
+    response.headers.forEach((value, key) => {
+      if (!['content-length', 'content-encoding', 'content-security-policy'].includes(key)) res.setHeader(key, value);
+    });
+    res.statusCode = response.status;
+    res.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return { server, base: `http://127.0.0.1:${server.address().port}` };
+}
+
+(async () => {
+  console.log('Dev mode UI');
+  const mod = await loadWorker();
+  const worker = mod.default;
+  const browser = await chromium.launch({ headless: true });
+  if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+  let failed = 0;
+  const t = async (name, fn) => {
+    try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.stack || error.message}`); }
+  };
+
+  for (const [label, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+    const phone = viewport.width < 600;
+    const env = makeEnv(mod.CommentsStore, ENV);
+    await seed(env);
+    const { server, base } = await startServer(worker, env);
+    const newContext = async (sid) => {
+      const context = await browser.newContext({ viewport, ...(phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}) });
+      if (sid) await context.addCookies([{ name: 'tdoc_sid', value: sid, url: base }]);
+      return context;
+    };
+    const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${label}-${name}.png`) }); };
+    // The account menu: the avatar chip on a desktop, ⋯ -> My account on a phone.
+    const openAccountMenu = async (page) => {
+      if (!phone) await page.locator('.tdoc-account-trigger').click();
+      else {
+        await page.locator('#tdoc-more-btn').click();
+        await page.getByRole('menuitem', { name: 'My account' }).click();
+      }
+    };
+    const devItem = (page) => page.getByRole('menuitemcheckbox', { name: /Dev mode/ });
+    const bar = (page) => page.locator('.sg-debug');
+
+    try {
+      await t(`${label}: the menu switch turns dev mode off and on, and the bar follows`, async () => {
+        const context = await newContext(JULIE);
+        const page = await context.newPage();
+        const errors = [];
+        page.on('pageerror', (e) => errors.push(e.message));
+        await page.goto(`${base}/me`);
+        await bar(page).waitFor();
+        await openAccountMenu(page);
+        await devItem(page).waitFor();
+        assert.equal(await devItem(page).getAttribute('aria-checked'), 'true');
+        assert.match(await devItem(page).innerText(), /Dev mode: on/);
+        await shot(page, 'menu-on');
+        await Promise.all([page.waitForEvent('load'), devItem(page).click()]);
+        assert.equal(await env.META.get('dev-mode:julie@example.com'), 'off', 'kept on the server');
+        await page.locator(phone ? '#tdoc-more-btn' : '.tdoc-account-trigger').waitFor();
+        assert.equal(await bar(page).count(), 0, 'no Internal bar while off');
+        await openAccountMenu(page);
+        await devItem(page).waitFor();
+        assert.equal(await devItem(page).getAttribute('aria-checked'), 'false');
+        assert.match(await devItem(page).innerText(), /Dev mode: off/);
+        await shot(page, 'menu-off');
+        await Promise.all([page.waitForEvent('load'), devItem(page).click()]);
+        await bar(page).waitFor();
+        assert.equal(await env.META.get('dev-mode:julie@example.com'), null, 'on again');
+        await shot(page, 'bar');
+        assert.deepEqual(errors, []);
+        await context.close();
+      });
+
+      await t(`${label}: Exit dev mode on the Internal bar needs a second press`, async () => {
+        const context = await newContext(JULIE);
+        const page = await context.newPage();
+        await page.goto(`${base}/me`);
+        const exit = bar(page).locator('.sg-debug-exit');
+        await exit.waitFor();
+        await exit.click();
+        assert.match(await exit.innerText(), /exit dev mode\?/i, 'first press arms it and says so');
+        if (SHOTS) await page.waitForTimeout(400); // let the colour change settle for the picture
+        await shot(page, 'bar-exit-armed');
+        assert.equal(await env.META.get('dev-mode:julie@example.com'), null, 'one press changes nothing');
+        await Promise.all([page.waitForEvent('load'), exit.click()]);
+        assert.equal(await env.META.get('dev-mode:julie@example.com'), 'off', 'the second press turns it off');
+        await page.locator(phone ? '#tdoc-more-btn' : '.tdoc-account-trigger').waitFor();
+        assert.equal(await bar(page).count(), 0, 'and the bar is gone');
+        // It disarms itself: a lone press, then a pause, is not half of an exit.
+        await env.META.delete('dev-mode:julie@example.com');
+        await page.reload();
+        await exit.waitFor();
+        await exit.click();
+        await page.waitForTimeout(4300);
+        assert.match(await exit.innerText(), /^Exit dev mode$/, 'disarmed after a few seconds');
+        await context.close();
+      });
+
+      await t(`${label}: an account not on the list has no switch, and the API refuses it`, async () => {
+        const context = await newContext(BOB);
+        const page = await context.newPage();
+        await page.goto(`${base}/me`);
+        await page.locator(phone ? '#tdoc-more-btn' : '.tdoc-account-trigger').waitFor();
+        assert.equal(await bar(page).count(), 0, 'no Internal bar');
+        await openAccountMenu(page);
+        await page.getByRole('menuitem', { name: /Sign out/ }).waitFor();
+        assert.equal(await devItem(page).count(), 0, 'no Dev mode item');
+        const status = await page.evaluate(async () => (await fetch('/api/me/dev-mode', {
+          method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: true }),
+        })).status);
+        assert.equal(status, 403);
+        const state = await page.evaluate(async () => (await fetch('/api/onboarding/state', {
+          method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'new' }),
+        })).status);
+        assert.equal(state, 403);
+        await context.close();
+      });
+
+      await t(`${label}: Sign out, then Sign in on the landing page, lands a connected account on My docs`, async () => {
+        await env.META.put('dev-mode:julie@example.com', 'off');
+        const context = await newContext(JULIE);
+        const page = await context.newPage();
+        // The provider round trip: sign the person in and go where `return` says.
+        let returned = '';
+        await page.route('**/api/auth/oidc/login**', async (route) => {
+          const url = new URL(route.request().url());
+          returned = url.searchParams.get('return') || '';
+          const sid = 'e5'.repeat(16);
+          await env.META.put(`session:${sid}`, JSON.stringify({
+            email: 'julie@example.com', account_id: 'acct-julie', name: 'julie', created: new Date().toISOString(),
+          }));
+          await context.addCookies([{ name: 'tdoc_sid', value: sid, url: base }]);
+          await route.fulfill({ status: 302, headers: { Location: `${base}${returned}` } });
+        });
+        await page.goto(`${base}/me`);
+        await openAccountMenu(page);
+        await Promise.all([page.waitForURL(`${base}/`), page.getByRole('menuitem', { name: /Sign out/ }).click()]);
+        const signIn = phone
+          ? async () => { await page.locator('#tdoc-more-btn').click(); await page.getByRole('menuitem', { name: 'Sign in' }).click(); }
+          : async () => page.locator('.tdoc-account-trigger.signin').click();
+        await Promise.all([page.waitForURL(/\/me$/), signIn()]);
+        assert.equal(returned, '/setup?via=signin', 'the landing page returns into the gate, marked as a sign-in');
+        assert.equal(await page.getByRole('heading', { name: 'Connect your agent' }).count(), 0, 'not shown the gate');
+        const rec = JSON.parse(await env.META.get('account-onboarding:acct-julie'));
+        assert.ok(!rec.started, 'signing in again did not start an onboarding journey');
+        await page.locator('.doc-row[data-slug="julie-notes"]').waitFor();
+        assert.equal(await page.locator('.onb-card, .onb-chip').count(), 0, 'no onboarding checklist on My docs');
+        await context.close();
+      });
+    } finally {
+      server.close();
+    }
+  }
+
+  await browser.close();
+  if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
+  console.log('\nall passed');
+})().catch((error) => { console.error(error); process.exit(1); });
