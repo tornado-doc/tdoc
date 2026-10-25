@@ -9,6 +9,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const esbuild = require('esbuild');
 const { requirePlaywrightOrSkip, reservePort } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('feedback-browser.test.js');
 
@@ -43,7 +44,11 @@ const APP_HTML = `<!doctype html>
 <nav><b>Dashboard</b> · Projects · Settings</nav>
 <section class="card"><h2>Weekly active users</h2><p>1,284 · +12%</p></section>
 <section class="card"><h2>Invite teammates</h2><button id="invite">Send invite</button> <button id="open-modal">Settings</button></section>
-</main></body></html>`;
+</main><script>
+window.__fbRoot = () => document.getElementById('tdoc-feedback-root')?.shadowRoot?.getElementById('tdoc-feedback-root');
+window.__fb = (selector) => window.__fbRoot()?.querySelector(selector);
+window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || [];
+</script></body></html>`;
 
 (async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-feedback-'));
@@ -51,6 +56,10 @@ const APP_HTML = `<!doctype html>
   const appPort = await reservePort();
   const tdocBase = `http://localhost:${tdocPort}`;
   const appBase = `http://127.0.0.1:${appPort}`;
+  const libraryBundle = (await esbuild.build({
+    entryPoints: [path.join(__dirname, 'fixtures', 'feedback-host-libraries.jsx')],
+    bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
+  })).outputFiles[0].contents;
 
   const serverPath = path.join(__dirname, '..', 'server', 'server.js');
   const server = spawn(process.execPath, [serverPath], {
@@ -58,6 +67,16 @@ const APP_HTML = `<!doctype html>
     stdio: 'ignore',
   });
   const app = http.createServer((req, res) => {
+    if (req.url === '/libraries.js') {
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
+      res.end(libraryBundle);
+      return;
+    }
+    if (req.url === '/libraries') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<!doctype html><meta charset="utf-8"><style>body{font:16px system-ui}.modal-overlay{position:fixed;inset:0;background:#0005}.modal-content{position:fixed;top:18%;left:20%;min-width:400px;padding:24px;background:white;z-index:30}</style><div id="host-app"></div><script src="/libraries.js"></script>');
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(APP_HTML);
   });
@@ -169,7 +188,7 @@ const APP_HTML = `<!doctype html>
       const banner = page.locator('#tdoc-feedback-root .tdoc-fb-banner');
       await banner.waitFor({ timeout: 3000 });
       const feedbackWins = await page.evaluate(() => {
-        const banner = document.querySelector('#tdoc-feedback-root .tdoc-fb-banner');
+        const banner = window.__fb('.tdoc-fb-banner');
         const r = banner.getBoundingClientRect();
         const nav = document.querySelector('nav');
         return {
@@ -197,13 +216,13 @@ const APP_HTML = `<!doctype html>
       await panel.waitFor({ timeout: 3000 });
       await page.waitForTimeout(200);
       const overlay = await page.evaluate(() => {
-        const panel = document.querySelector('#tdoc-feedback-root .tdoc-fb-panel');
+        const panel = window.__fb('.tdoc-fb-panel');
         const p = panel.getBoundingClientRect();
         const m = document.querySelector('main').getBoundingClientRect();
         return {
           marginRight: document.documentElement.style.marginRight,
           main: m.toJSON(), panel: p.toJSON(),
-          topRightIsPanel: Boolean(document.elementFromPoint(innerWidth - 8, 8)?.closest('.tdoc-fb-panel')),
+          topRightIsPanel: Boolean(document.getElementById('tdoc-feedback-root').shadowRoot.elementFromPoint(innerWidth - 8, 8)?.closest('.tdoc-fb-panel')),
         };
       });
       assert(overlay.marginRight === before.marginRight && overlay.main.left === before.main.left && overlay.main.width === before.main.width,
@@ -213,16 +232,16 @@ const APP_HTML = `<!doctype html>
       // The header wraps instead of overflowing: the close button is inside
       // the viewport and is what a click there hits.
       const close = await page.evaluate(() => {
-        const x = document.querySelector('#tdoc-feedback-root .tdoc-fb-panel .x');
+        const x = window.__fb('.tdoc-fb-panel .x');
         const r = x.getBoundingClientRect();
-        return { r: r.toJSON(), vw: document.documentElement.clientWidth, hit: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === x };
+        return { r: r.toJSON(), vw: document.documentElement.clientWidth, hit: document.getElementById('tdoc-feedback-root').shadowRoot.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === x };
       });
       assert(close.r.right <= close.vw && close.r.left >= 0 && close.hit, `panel close button is cut off or covered: ${JSON.stringify(close)}`);
       // The composer stacks above the panel.
       const order = await page.evaluate(() => {
-        const z = (sel) => Number(getComputedStyle(document.querySelector(sel) || document.body).zIndex) || 0;
-        const probe = document.createElement('div'); probe.className = 'tdoc-popup'; document.getElementById('tdoc-feedback-root').appendChild(probe);
-        const out = { popup: Number(getComputedStyle(probe).zIndex), panel: z('#tdoc-feedback-root .tdoc-fb-panel') };
+        const z = (sel) => Number(getComputedStyle(window.__fb(sel) || document.body).zIndex) || 0;
+        const probe = document.createElement('div'); probe.className = 'tdoc-popup'; window.__fbRoot().appendChild(probe);
+        const out = { popup: Number(getComputedStyle(probe).zIndex), panel: z('.tdoc-fb-panel') };
         probe.remove(); return out;
       });
       assert(order.popup > order.panel, `composer is under the comments panel: ${JSON.stringify(order)}`);
@@ -265,7 +284,7 @@ const APP_HTML = `<!doctype html>
       await c.first().fill('Save is disabled');
       const countBeforeSave = await page.locator('#tdoc-feedback-root .tdoc-pin').count();
       await page.locator('#tdoc-feedback-root .tdoc-popup button.submit').last().click();
-      await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length > n, countBeforeSave);
+      await page.waitForFunction((n) => window.__fbAll('.tdoc-pin').length > n, countBeforeSave);
       const slug = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).slug, `tdoc-feedback:${tdocBase}`);
       const comments = JSON.parse(fs.readFileSync(path.join(root, slug, 'comments.json'), 'utf8'));
       const onModal = comments.find((x) => x.text === 'Save is disabled');
@@ -282,9 +301,9 @@ const APP_HTML = `<!doctype html>
         m.remove();
         return html;
       });
-      await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length === n - 1, before);
+      await page.waitForFunction((n) => window.__fbAll('.tdoc-pin').length === n - 1, before);
       await page.evaluate((html) => document.body.insertAdjacentHTML('beforeend', html), saved);
-      await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length === n, before);
+      await page.waitForFunction((n) => window.__fbAll('.tdoc-pin').length === n, before);
       await page.evaluate(() => document.getElementById('modal').remove());
       await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
     });
@@ -311,7 +330,7 @@ const APP_HTML = `<!doctype html>
     });
 
     await test('a transformed, clipped modal <dialog> does not shrink the layer; removing it without close brings the layer back', async () => {
-      const dockAt = () => page.evaluate(() => { const b = document.querySelector('#tdoc-feedback-root .tdoc-feedback-dock').getBoundingClientRect(); return [b.x, b.y, b.width, b.height].join(); });
+      const dockAt = () => page.evaluate(() => { const b = window.__fb('.tdoc-feedback-dock').getBoundingClientRect(); return [b.x, b.y, b.width, b.height].join(); });
       const dockBefore = await dockAt();
       await page.evaluate(() => {
         const d = document.createElement('dialog'); d.id = 'td';
@@ -322,8 +341,8 @@ const APP_HTML = `<!doctype html>
       await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'td');
       const layout = await page.evaluate(() => {
         const r = document.getElementById('tdoc-feedback-root').getBoundingClientRect();
-        const dock = document.querySelector('#tdoc-feedback-root .tdoc-feedback-dock').getBoundingClientRect();
-        const hit = document.elementFromPoint(dock.x + dock.width / 2, dock.y + dock.height / 2);
+        const dock = window.__fb('.tdoc-feedback-dock').getBoundingClientRect();
+        const hit = document.getElementById('tdoc-feedback-root').shadowRoot.elementFromPoint(dock.x + dock.width / 2, dock.y + dock.height / 2);
         return { r: [r.x, r.y, r.width, r.height], vw: innerWidth, vh: innerHeight, dockHit: Boolean(hit && hit.closest('#tdoc-feedback-root')) };
       });
       assert(layout.r[0] === 0 && layout.r[1] === 0 && layout.r[2] === layout.vw && layout.r[3] === layout.vh, `layer shrank to the dialog: ${layout.r}`);
@@ -381,12 +400,12 @@ const APP_HTML = `<!doctype html>
         const d = document.createElement('div');
         d.id = 'capture-modal'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true');
         d.style.cssText = 'position:fixed;top:120px;left:200px;padding:24px;background:#fff;border:1px solid #ccc;z-index:100';
-        d.innerHTML = '<div id="headlessui-dialog-panel-example"><h2>Billing settings</h2><input value="Example"></div>';
+        d.innerHTML = '<div id="custom-billing-panel" data-headlessui-state="open"><h2>Billing settings</h2><input value="Example"></div>';
         document.body.appendChild(d);
         window.__captureModalClosed = false;
         window.__captureModalOutside = (e) => {
           // Headless UI checks the panel, not its role=dialog wrapper.
-          if (!d.isConnected || d.querySelector('[id^="headlessui-dialog-panel-"]').contains(e.target)) return;
+          if (!d.isConnected || d.querySelector('#custom-billing-panel').contains(e.target)) return;
           window.__captureModalClosed = true;
           d.remove();
         };
@@ -412,6 +431,89 @@ const APP_HTML = `<!doctype html>
           document.removeEventListener('focusin', window.__captureModalOutside, true);
           document.getElementById('capture-modal')?.remove();
         });
+      }
+    });
+
+    await test('hidden mounted dialogs and non-modal popovers never capture feedback; hidden ancestors release it', async () => {
+      await page.evaluate(() => {
+        const popover = document.createElement('div');
+        popover.id = 'nonmodal-popover'; popover.setAttribute('role', 'dialog');
+        popover.innerHTML = '<input id="popover-input">';
+        document.body.appendChild(popover);
+        const wrapper = document.createElement('div');
+        wrapper.id = 'modal-wrapper';
+        wrapper.innerHTML = '<div id="active-modal" role="dialog" aria-modal="true"><input id="modal-input"></div>';
+        document.body.appendChild(wrapper);
+        const hidden = document.createElement('div');
+        hidden.id = 'mounted-modal'; hidden.setAttribute('role', 'dialog'); hidden.setAttribute('aria-modal', 'true');
+        hidden.style.visibility = 'hidden';
+        document.body.appendChild(hidden);
+      });
+      try {
+        await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'active-modal');
+        await page.locator('#popover-input').focus();
+        assert(await page.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'active-modal'), 'non-modal dialog stole feedback');
+        await page.evaluate(() => { document.getElementById('modal-wrapper').hidden = true; });
+        await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
+        assert(await page.locator('#tdoc-feedback-root .tdoc-feedback-dock').isVisible(), 'feedback disappeared with hidden wrapper');
+        await page.evaluate(() => { document.getElementById('modal-wrapper').hidden = false; });
+        await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'active-modal');
+      } finally {
+        await page.evaluate(() => {
+          document.getElementById('modal-wrapper')?.remove();
+          document.getElementById('mounted-modal')?.remove();
+          document.getElementById('nonmodal-popover')?.remove();
+        });
+      }
+      await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
+    });
+
+    await test('feedback clicks and typing do not trigger host modal handlers', async () => {
+      await page.evaluate(() => {
+        const modal = document.createElement('div');
+        modal.id = 'event-modal'; modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
+        modal.innerHTML = '<h2 id="event-target">Comment here</h2>';
+        document.body.appendChild(modal);
+        window.__feedbackLeaked = { click: 0, keydown: 0, input: 0 };
+        for (const kind of Object.keys(window.__feedbackLeaked)) modal.addEventListener(kind, () => window.__feedbackLeaked[kind]++);
+      });
+      try {
+        const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+        await pick.click(); // also clears any composer left by the previous case
+        if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
+        await page.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
+        await page.locator('#event-target').click();
+        const textarea = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+        const debugState = await page.evaluate(() => ({ parent: document.getElementById('tdoc-feedback-root').parentElement.id, picking: window.__fb('.tdoc-feedback-dock button.primary')?.className, banner: !!window.__fb('.tdoc-fb-banner'), selected: !!window.__fb('.tdoc-popup') }));
+        assert(debugState.selected, `click did not open composer: ${JSON.stringify(debugState)}`);
+        await textarea.fill('Keep modal events local');
+        await textarea.press('Enter');
+        await page.locator('#tdoc-feedback-root .tdoc-popup button.submit').click();
+        const leaked = await page.evaluate(() => window.__feedbackLeaked);
+        assert(Object.values(leaked).every((count) => count === 0), `host modal received feedback events: ${JSON.stringify(leaked)}`);
+      } finally {
+        await page.evaluate(() => document.getElementById('event-modal')?.remove());
+      }
+    });
+
+    await test('host modal CSS cannot restyle feedback controls', async () => {
+      await page.evaluate(() => {
+        const style = document.createElement('style');
+        style.id = 'host-modal-css';
+        style.textContent = '[role="dialog"] * { font-family: fantasy !important; text-transform: uppercase !important; }';
+        document.head.appendChild(style);
+        const modal = document.createElement('div');
+        modal.id = 'css-modal'; modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
+        modal.innerHTML = '<h2>Appearance</h2>';
+        document.body.appendChild(modal);
+      });
+      try {
+        await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'css-modal');
+        const style = await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first()
+          .evaluate((button) => ({ font: getComputedStyle(button).fontFamily, transform: getComputedStyle(button).textTransform }));
+        assert(!style.font.includes('fantasy') && style.transform !== 'uppercase', `host CSS leaked into feedback: ${JSON.stringify(style)}`);
+      } finally {
+        await page.evaluate(() => { document.getElementById('css-modal')?.remove(); document.getElementById('host-modal-css')?.remove(); });
       }
     });
 
@@ -460,23 +562,23 @@ const APP_HTML = `<!doctype html>
         await dialog.getByRole('button', { name: 'Cancel' }).click();
         await dialog.waitFor({ state: 'detached' });
         assert(await me.locator('#tdoc-feedback-root .tdoc-feedback-dock').isVisible(), 'the dock went away with the dialog');
-        for (const width of [1512, 390]) {
+        for (const width of [1512, 650, 390]) {
           await me.setViewportSize({ width, height: 823 });
           await me.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
           const panel = me.locator('#tdoc-feedback-root .tdoc-fb-panel');
           await panel.waitFor();
           await me.waitForTimeout(200); // let the slide-in clip-path finish
           const layout = await me.evaluate(() => {
-            const panel = document.querySelector('#tdoc-feedback-root .tdoc-fb-panel');
+            const panel = document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-fb-panel');
             const close = panel.querySelector('button.x');
             const r = panel.getBoundingClientRect();
             const x = close.getBoundingClientRect();
             return {
               panel: r.toJSON(), close: x.toJSON(), vw: innerWidth,
-              closeHit: document.elementFromPoint(x.x + x.width / 2, x.y + x.height / 2) === close,
+              closeHit: document.getElementById('tdoc-feedback-root').shadowRoot.elementFromPoint(x.x + x.width / 2, x.y + x.height / 2) === close,
             };
           });
-          assert(layout.panel.right === width && layout.panel.left === (width <= 600 ? 0 : width - 340)
+          assert(layout.panel.right === width && layout.panel.left === (width <= 700 ? 0 : width - 340)
             && layout.close.right <= width && layout.closeHit,
           `feedback panel is clipped or under the top bar at ${width}px: ${JSON.stringify(layout)}`);
           await me.screenshot({ path: path.join(os.tmpdir(), `tdoc-feedback-panel-${width}.png`) });
@@ -521,6 +623,87 @@ const APP_HTML = `<!doctype html>
       const target = await page.locator('main h2', { hasText: 'Weekly active users' }).boundingBox();
       const pins = await page.locator('#tdoc-feedback-root .tdoc-pin').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
       assert(pins.some((top) => Math.abs(top + 14 - target.y) < 6), `no pin next to the moved heading (heading y=${target.y}, pins ${pins})`);
+    });
+
+    await test('opening the comment list keeps a half-written comment', async () => {
+      const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+      if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
+      await page.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
+      await page.locator('main h2').first().click();
+      const draft = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+      await draft.fill('Please keep this draft');
+      await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+      await page.locator('#tdoc-feedback-root .tdoc-fb-panel').waitFor();
+      assert((await draft.inputValue()) === 'Please keep this draft', 'opening the list discarded the comment draft');
+      await page.locator('#tdoc-feedback-root .tdoc-fb-panel button.x').click();
+      await page.keyboard.press('Escape');
+      if (await pick.evaluate((button) => button.classList.contains('on'))) await pick.click();
+    });
+
+    await test('real MUI, Radix, and Headless UI dialogs keep feedback usable and isolated', async () => {
+      const libs = await context.newPage();
+      const libraryErrors = [];
+      libs.on('pageerror', (error) => libraryErrors.push(error.message));
+      try {
+        await libs.goto(`${appBase}/libraries`);
+        await libs.addScriptTag({ url: `${tdocBase}/feedback.js` });
+        const dock = libs.locator('#tdoc-feedback-root .tdoc-feedback-dock');
+        await dock.waitFor({ timeout: 5000 });
+        assert(await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement), 'closed MUI keepMounted dialog captured feedback');
+
+        await libs.locator('#popover-open').click();
+        await libs.locator('#radix-popover').waitFor();
+        assert(await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement), 'non-modal Radix Popover captured feedback');
+        await libs.locator('#popover-open').click();
+
+        await libs.locator('#mui-open').click();
+        await libs.locator('#mui-target').waitFor();
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.closest('[role="dialog"]'));
+        const muiRoot = await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement.closest('.MuiDialog-root')?.className || '');
+        assert(muiRoot, 'feedback did not follow the open MUI Dialog');
+        await libs.evaluate(() => { document.querySelector('.MuiDialog-root').hidden = true; });
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
+        await libs.evaluate(() => { document.querySelector('.MuiDialog-root').hidden = false; });
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.closest('.MuiDialog-root'));
+        await libs.getByRole('button', { name: 'Close MUI' }).click();
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
+
+        await libs.locator('#radix-open').click();
+        await libs.locator('#radix-target').waitFor();
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'radix-content', null, { timeout: 3000 });
+        const pick = dock.locator('button.primary');
+        await pick.click();
+        await libs.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
+        await libs.locator('#radix-target').click();
+        const radixDraft = libs.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+        await radixDraft.fill('Radix modal feedback');
+        await radixDraft.press('Enter');
+        await radixDraft.press('Meta+Enter');
+        assert(await libs.evaluate(() => window.__libraryEvents.radixKeys === 0), 'feedback keys reached Radix dialog handler');
+        assert(await libs.locator('#radix-content').isVisible(), 'feedback closed Radix dialog');
+        await libs.getByRole('button', { name: 'Close Radix' }).click();
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
+
+        await libs.locator('#headless-open').click();
+        await libs.locator('#headless-target').waitFor();
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'custom-headless-panel', null, { timeout: 3000 });
+        if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
+        await libs.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
+        await libs.locator('#headless-target').click();
+        const headlessDraft = libs.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+        await headlessDraft.fill('Headless modal feedback');
+        await headlessDraft.press('Enter');
+        const events = await libs.evaluate(() => window.__libraryEvents);
+        assert(events.headlessKeys === 0 && events.headlessSubmits === 0, `feedback events reached Headless UI form: ${JSON.stringify(events)}`);
+        assert(await libs.locator('#custom-headless-panel').isVisible(), 'feedback closed Headless UI dialog');
+        await libs.keyboard.press('Escape');
+        await libs.keyboard.press('Escape');
+        await libs.getByRole('button', { name: 'Close Headless UI' }).click();
+        await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root')?.parentElement === document.documentElement, null, { timeout: 3000 });
+        assert(libraryErrors.length === 0, libraryErrors.join('\n'));
+      } finally {
+        await libs.close();
+      }
     });
 
     await test('no console errors on the app page', async () => {

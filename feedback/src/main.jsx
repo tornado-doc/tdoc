@@ -99,7 +99,7 @@ ${uiCss}
       font: 13px/1.45 system-ui, -apple-system, sans-serif;
       animation: tdoc-fb-panel-in .16s ease-out;
     }
-    @media (max-width: 600px) {
+    @media (max-width: 700px) {
       #tdoc-feedback-root .tdoc-feedback-dock.panel-open { display: none; }
       #tdoc-feedback-root .tdoc-fb-panel { width: 100vw; }
     }
@@ -160,10 +160,16 @@ ${uiCss}
       z-index: 2147483647 !important;
     }
   `;
-  document.head.appendChild(style);
-
   const host = document.createElement('div');
   host.id = 'tdoc-feedback-root';
+  // The layer lives in an open shadow tree: host applications often style
+  // every descendant of a dialog, sometimes with !important. Moving our
+  // light-DOM root into their dialog would otherwise restyle the composer.
+  const shadow = host.attachShadow({ mode: 'open' });
+  const feedbackRoot = document.createElement('div');
+  feedbackRoot.id = 'tdoc-feedback-root';
+  shadow.append(style, feedbackRoot);
+  host.style.cssText = 'position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;margin:0!important;padding:0!important;border:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;visibility:visible!important';
   document.documentElement.appendChild(host);
 
   // Keep the feedback layer inside the active modal, including script-driven
@@ -172,22 +178,53 @@ ${uiCss}
   // The popover puts the layer above a native dialog and avoids clipping by a
   // transformed modal. Move it back when the modal closes or unmounts.
   (function followModals() {
-    const modalSelector = 'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+    const modalSelector = 'dialog[open], [aria-modal="true"], [role="dialog"][data-state="open"]';
     const isHostNode = (node) => node === host || host.contains(node);
     const hasModal = (node) => node instanceof Element && !isHostNode(node)
       && (node.matches(modalSelector) || !!node.querySelector(modalSelector));
-    const isModalDialog = (node) => {
-      if (node.localName !== 'dialog') return true;
-      try { return node.matches(':modal'); } catch (_) { return false; }
+    const isVisibleModal = (node) => {
+      if (node.localName === 'dialog') {
+        try { if (!node.matches(':modal')) return false; } catch (_) { return false; }
+      }
+      // Radix Dialog marks its content role=dialog/data-state=open, but does
+      // not set aria-modal. Its modal mode locks scrolling; Radix Popover has
+      // the same role/state without the lock and must not capture this layer.
+      if (node.matches('[role="dialog"][data-state="open"]') && node.getAttribute('aria-modal') !== 'true'
+        && (!document.body.hasAttribute('data-scroll-locked') || node.closest('[data-radix-popper-content-wrapper]'))) return false;
+      if (!node.getClientRects().length) return false;
+      for (let el = node; el instanceof Element; el = el.parentElement) {
+        if (el.hidden || el.hasAttribute('inert') || el.getAttribute('aria-hidden') === 'true') return false;
+        const css = getComputedStyle(el);
+        if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse') return false;
+      }
+      return true;
+    };
+    const modalPriority = (node) => {
+      try { if (node.matches(':modal')) return 1_000_000_000; } catch (_) {}
+      let z = 0;
+      for (let el = node; el instanceof Element; el = el.parentElement) {
+        const parsed = Number.parseInt(getComputedStyle(el).zIndex, 10);
+        if (Number.isFinite(parsed)) z = Math.max(z, parsed);
+      }
+      return z + (node.contains(document.activeElement) ? 100_000_000 : 0);
+    };
+    const modalContent = (dialog) => {
+      // Headless UI's DialogPanel can have a caller-supplied id. Its state
+      // attribute, or the focused child when present, identifies the panel.
+      const panels = [...dialog.querySelectorAll('[data-headlessui-dialog-panel], [id^="headlessui-dialog-panel-"], [data-headlessui-state]')]
+        .filter((node) => isVisibleModal(node) && !node.matches('h1,h2,h3,h4,h5,h6,[id^="headlessui-dialog-title-"]'));
+      if (panels.length) {
+        return panels.find((node) => node.contains(document.activeElement)) || panels[0];
+      }
+      return dialog;
     };
     const activeModal = () => {
-      const dialog = [...document.querySelectorAll(modalSelector)].reverse().find((node) =>
-        !isHostNode(node) && node.getClientRects().length > 0
-        && node.getAttribute('aria-hidden') !== 'true'
-        && isModalDialog(node));
+      const dialog = [...document.querySelectorAll(modalSelector)]
+        .filter((node) => !isHostNode(node) && isVisibleModal(node))
+        .sort((a, b) => modalPriority(a) - modalPriority(b)).at(-1);
       // Headless UI puts role=dialog on a wrapper, but outside-press tests
       // against DialogPanel. The layer must be inside that panel too.
-      return dialog?.querySelector('[id^="headlessui-dialog-panel-"], [data-headlessui-dialog-panel]') || dialog;
+      return dialog ? modalContent(dialog) : null;
     };
     const lift = () => {
       if (!host.showPopover || host.matches(':popover-open')) return;
@@ -203,7 +240,11 @@ ${uiCss}
       const modal = activeModal();
       if (modal) {
         if (host.parentNode !== modal) { lower(); modal.appendChild(host); }
-        lift();
+        // Only a native <dialog> needs the browser top layer. A popover over
+        // a script modal can intercept its own buttons despite our transparent
+        // host, especially when the modal panel is a <form>.
+        if (modal.closest('dialog')) lift();
+        else lower();
       } else if (host.parentNode !== document.documentElement) {
         lower();
         document.documentElement.appendChild(host);
@@ -213,10 +254,10 @@ ${uiCss}
       if (records.some((r) => r.type === 'childList'
         ? [...r.addedNodes, ...r.removedNodes].some(hasModal)
         : r.target !== host && !isHostNode(r.target)
-          && r.target instanceof Element && r.target.matches(modalSelector))) place();
+          && r.target instanceof Element && (r.target.contains(host) || hasModal(r.target)))) place();
       if (host.hasAttribute('inert')) host.removeAttribute('inert');
       if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
-    }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'inert', 'aria-hidden', 'class', 'style', 'data-state'] });
+    }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'hidden', 'inert', 'aria-hidden', 'aria-modal', 'class', 'style', 'data-state'] });
     document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
     // A dialog removed without closing (a React unmount) takes the layer with it.
     new MutationObserver(() => { if (!host.isConnected) place(); }).observe(document.documentElement, { childList: true, subtree: true });
@@ -224,7 +265,7 @@ ${uiCss}
     // outside them and pull focus back inside. Presses and focus on the layer
     // stay on the layer, so commenting on a modal neither closes it nor loses
     // the typing.
-    ['pointerdown', 'mousedown', 'touchstart', 'focusin', 'focusout'].forEach((type) => {
+    ['pointerdown', 'mousedown', 'touchstart', 'focusin', 'focusout', 'click', 'dblclick', 'keydown', 'keyup', 'keypress', 'beforeinput', 'input', 'change', 'submit'].forEach((type) => {
       host.addEventListener(type, (e) => e.stopPropagation());
     });
     // Focus leaving the modal for the layer is announced on the modal's own
@@ -637,7 +678,7 @@ ${uiCss}
     // comment here is whoever it lets in.
     const shareUrl = session && session.share_url;
     return (
-      <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen ? { right: PANEL_WIDTH + 18 } : null}>
+      <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && innerWidth > 700 ? { right: PANEL_WIDTH + 18 } : null}>
         <button type="button" className={panelOpen ? 'on' : ''} onClick={onList} title="All comments on this app">
           <MessagesSquare aria-hidden="true" /> <strong>{openCount}</strong> open
         </button>
@@ -1133,7 +1174,7 @@ ${uiCss}
           openCount={openCount}
           panelOpen={panelOpen}
           picking={picking}
-          onList={() => { setSelected(null); setPanelOpen((v) => !v); }}
+          onList={() => setPanelOpen((v) => !v)}
           onPick={() => { setOpenId(null); setSelected(null); setPanelOpen(false); setPicking((v) => !v); }}
           onHide={hide}
           sendCount={ready.length}
@@ -1159,6 +1200,6 @@ ${uiCss}
   const appBox = document.createElement('div');
   const portals = document.createElement('div');
   portals.className = 'tdoc-fb-portals';
-  host.append(appBox, portals);
+  feedbackRoot.append(appBox, portals);
   createRoot(appBox).render(<PortalContainerContext.Provider value={portals}><AgentButtonsContext.Provider value><FeedbackApp /></AgentButtonsContext.Provider></PortalContainerContext.Provider>);
 }
