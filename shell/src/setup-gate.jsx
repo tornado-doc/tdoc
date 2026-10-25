@@ -33,7 +33,6 @@ export function SetupGate({ boot, preview = null, onClose }) {
   const [paired, setPaired] = useState(Boolean(preview?.paired));
   const [agents, setAgents] = useState(preview?.local_agents || []);
   const [computers, setComputers] = useState(preview?.local_computers || []);
-  const [connectedDevice, setConnectedDevice] = useState('');
   const [loaded, setLoaded] = useState(Boolean(preview));
   const [selected, setSelected] = useState('');
   const [copied, setCopied] = useState('');
@@ -57,8 +56,9 @@ export function SetupGate({ boot, preview = null, onClose }) {
   }
   const latestComputer = [...detectedComputers].reverse()
     .sort((a, b) => (Date.parse(b.connected_at || b.last_seen) || 0) - (Date.parse(a.connected_at || a.last_seen) || 0))[0];
-  const computer = connectedDevice ? detectedComputers.find((c) => c.device === connectedDevice) : latestComputer || detectedComputers[0];
-  const runtime = selected || computer?.runtimes?.find((r) => r.state === 'ready')?.cli || 'claude';
+  const computer = latestComputer || detectedComputers[0];
+  const readyOnComputer = available.filter((a) => a.device === computer?.device && computer?.runtimes?.some((r) => r.cli === a.cli && r.state === 'ready'));
+  const runtime = readyOnComputer.some((a) => a.cli === selected) ? selected : readyOnComputer[0]?.cli || selected || 'claude';
   const observed = computer?.runtimes?.find((r) => r.cli === runtime);
   const chosen = available.find((a) => a.device === computer?.device && a.cli === runtime && observed?.state === 'ready') || null;
   const connected = Boolean(computer?.status === 'active');
@@ -90,7 +90,6 @@ export function SetupGate({ boot, preview = null, onClose }) {
   }, [signedIn, preview]);
 
   const manual = stage === 'manual';
-  const readyOnComputer = available.filter((a) => a.device === computer?.device && computer?.runtimes?.some((r) => r.cli === a.cli && r.state === 'ready'));
   // A paired reader can return and copy a question even while their helper is offline.
   // This never marks a computer ready or enables Next for a new author.
   const canReturn = Boolean(pendingAsk && paired);
@@ -174,7 +173,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
                 </section>}
               {readyOnComputer.length > 1 ? <label className="ui-setup-ai-select">AI <AppSelect ariaLabel="AI for this doc" value={runtime} onChange={setSelected} options={RUNTIMES.filter((r) => readyOnComputer.some((a) => a.cli === r.value))} /></label> : null}
             </> : null}
-            {connectedDevice && !connected ? <p role="status">This computer is offline. Wake it up to check its AI.</p> : null}
+            {computer && !connected ? <p role="status">This computer is offline. Wake it up to check its AI.</p> : null}
             {copyFailed ? <p role="status">{COPY_FALLBACK}</p> : null}
             {canReturn ? <p>Your agent is already linked. You can return to your question and copy it while this computer is offline.</p> : null}
             <button type="button" className="ui-setup-manual-link" onClick={() => { setStage('manual'); setError(''); }}>Use without a background helper →</button>
