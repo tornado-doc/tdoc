@@ -201,3 +201,14 @@
 .tm-agent-command { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
 .tm-agent-command code { flex: 1; min-width: 0; padding: 10px; border-radius: 8px; background: #1e1e1e; color: #e6e6e6; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .tm-agent-row .tm-person-text > span { white-space: normal; overflow-wrap: anywhere; }
+
+/* Settings -> Sign-in methods (#58). */
+.tm-sim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.tm-sim-list li { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tm-sim-icon { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--td-surface-2); color: var(--td-ink); }
+.tm-sim-avatar { flex: none; border-radius: 50%; }
+.tm-sim-main { flex: 1; min-width: 0; display: grid; font-size: 13px; }
+.tm-sim-main span { color: var(--td-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-sim-muted { margin: 10px 0 0; color: var(--td-muted); font-size: 12px; }
+.tm-sim-list .tm-sim-muted { margin: 0; flex: none; }
+.tm-sim-notice { margin: 12px 0 0; font-size: 13px; }

@@ -56,6 +56,7 @@ export function StatusPage({ boot }) {
       <main className={`tdoc-status-page${boot.error ? ' error' : ''}`}>
         <h1>{boot.title}</h1>
         <p>{boot.message}</p>
+        {boot.note ? <p className="tdoc-status-note">{boot.note}</p> : null}
         {hasActions ? (
           <div className="tdoc-status-actions">
             {boot.acceptInvite ? (
@@ -64,7 +65,14 @@ export function StatusPage({ boot }) {
               </button>
             ) : null}
             {(boot.actions || []).map((action) => (
-              <a key={action.href} className={action.primary ? 'primary' : 'secondary'} href={action.href}>
+              <a
+                key={action.href}
+                className={action.primary ? 'primary' : 'secondary'}
+                href={action.href}
+                // An off-site step (signing out of github.com) opens beside
+                // this page, so the way back into tdoc stays right here.
+                {...(action.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+              >
                 {action.label}
               </a>
             ))}
