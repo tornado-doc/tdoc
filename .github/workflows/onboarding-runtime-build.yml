@@ -20,10 +20,12 @@ jobs:
       - run: npm run build:sw
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: onboarding-runtime-74c999b
+          name: onboarding-runtime-55ffa67
           path: server/runtime/
           retention-days: 1
           if-no-files-found: error
+      - run: node test/agent-authorship.test.js
+      - run: node test/comment-wipe-authorship.test.js
       - run: node test/computer-settings.test.js
       - run: node test/tdoc-start.test.js
       - run: node test/ui-primitives.test.js
