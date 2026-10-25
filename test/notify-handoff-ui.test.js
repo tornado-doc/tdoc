@@ -235,7 +235,7 @@ async function t(name, fn) {
       await details.getByRole('button', { name: 'Details' }).first().click();
       assert.equal(await details.locator('.tdoc-handoff-details-history').count(), 1);
       assert.equal(await details.locator('.tdoc-handoff-details-unread-dot').count(), 4);
-      assert.equal(await details.getByRole('status', { name: 'New agent reply' }).count(), 4);
+      assert.equal(await details.getByRole('button', { name: 'Mark as read' }).count(), 4);
       assert.equal(await details.getByText('✅ Done', { exact: true }).count(), 1);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-details-desktop.png') });
       const readyChecks = details.getByRole('checkbox');
