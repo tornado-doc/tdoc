@@ -158,13 +158,29 @@ async function t(name, fn) {
       const errors = [];
       page.on('pageerror', (e) => errors.push(e.message));
       await page.goto(`${base}/?view=status`);
-      const line = (id) => page.locator(`[data-comment-id="${id}"] .tdoc-handoff-line`);
+      const line = (id) => page.locator(`[data-comment-id="${id}"] .tdoc-handoff-status-text`);
       await line('queued').waitFor();
-      assert.equal((await line('queued').textContent()).trim(), 'Sent to smarter-tdoc-claw · queued in Raft · 2 min ago');
-      assert.equal((await line('picked').textContent()).trim(), 'smarter-tdoc-claw picked it up · 3 min ago');
+      assert.equal((await line('queued').textContent()).trim(), 'Delivered to smarter-tdoc-claw · 2 min ago');
+      assert.equal((await line('picked').textContent()).trim(), 'smarter-tdoc-claw is on it · 3 min ago');
       assert.equal((await line('stale').textContent()).trim(), 'No response for 7 min');
       assert.equal((await line('expired').textContent()).trim(), 'Expired — the agent never picked it up');
-      assert.equal((await line('replied').textContent()).trim(), 'Agent replied');
+      assert.equal((await line('replied').textContent()).trim(), 'smarter-tdoc-claw replied');
+      assert.equal((await line('question').textContent()).trim(), 'smarter-tdoc-claw asked you');
+      assert.equal(await page.locator('[data-comment-id="resolved"] .tdoc-handoff-chip').count(), 0, 'resolved comment repeats the agent verdict');
+      for (const id of ['queued', 'picked', 'replied', 'question']) {
+        assert.equal(await page.locator(`[data-comment-id="${id}"] .tdoc-handoff-chip`).count(), 1, `${id} shows more than one status`);
+        const style = await line(id).evaluate((el) => ({
+          background: getComputedStyle(el).backgroundColor,
+          cardBackground: getComputedStyle(el.closest('.tdoc-margin-comment')).backgroundColor,
+          height: el.getBoundingClientRect().height,
+          padding: getComputedStyle(el).padding,
+          lineHeight: getComputedStyle(el).lineHeight,
+          display: getComputedStyle(el).display,
+        }));
+        assert.ok(style.background === 'rgba(0, 0, 0, 0)' || style.background === style.cardBackground,
+          `${id} still has a pill background: ${style.background}`);
+        assert.ok(style.height <= 16, `${id} status is still tall: ${JSON.stringify(style)}`);
+      }
       // Buttons only where there is something to do.
       for (const id of ['queued', 'picked', 'replied']) {
         assert.equal(await page.locator(`[data-comment-id="${id}"] .tdoc-handoff-nudge`).count(), 0, `${id} has actions`);
@@ -182,6 +198,7 @@ async function t(name, fn) {
         assert.ok(chip.x + chip.width <= card.x + card.width + 0.5, `${id} line overflows its card`);
       }
       if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'handoff-status-ladder.png'), clip: { x: 0, y: 0, width: 340, height: 720 } }); }
+      if (SHOTS) { await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: path.join(SHOTS, 'handoff-status-phone.png'), fullPage: true }); }
       await stale.first().click();
       await page.getByText('Resending…').waitFor();
       await page.waitForFunction(() => document.getElementById('log').textContent === 'resend:stale');

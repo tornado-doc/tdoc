@@ -1,8 +1,8 @@
 // The handoff line on a comment card: where a "Send to agent" stands, in the
 // order it happens --
-//   Sent to <agent> · queued in Raft · 2 min ago
-//   <agent> picked it up · 3 min ago
-//   Agent replied
+//   Delivered to <agent> · 2 min ago
+//   <agent> is on it · 3 min ago
+//   <agent> replied
 // and, when nothing comes back, what to do about it: after
 // HANDOFF_STALE_MS unacknowledged, "No response for N min" with Resend and
 // Send to another agent; once the provider's expiresAt passes unacknowledged,
@@ -30,25 +30,21 @@ function latestAgentVerdict(comment) {
 // card; the tail (where it is, how long ago) always shows.
 function handoffStatusParts(comment, state, now) {
   const who = readableHandle(comment?.handoff_to);
-  const provider = comment?.handoff_to?.provider || 'raft';
   if (state === 'waiting') {
     const d = comment.handoff_delivery;
     const ago = d?.at && !d.deduped
       ? formatHandoffAgo(d.at)
       : (comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '');
-    // Where it sits meanwhile: Raft's inbox, or the daemon's next poll.
-    const where = provider === 'raft' ? 'queued in Raft' : (provider === 'local' ? 'waiting for the daemon' : '');
-    const tail = [where, ago].filter(Boolean).join(' · ');
-    return [`Sent to ${who || 'your agent'}`, tail ? ` · ${tail}` : ''];
+    return [`Delivered to ${who || 'your agent'}`, ago ? ` · ${ago}` : ''];
   }
   if (state === 'stale') return [`No response for ${Math.max(1, handoffWaitMinutes(comment, now))} min`, ''];
   if (state === 'expired') return ['Expired — the agent never picked it up', ''];
   if (state === 'received') {
     const ago = comment.handoff_acked_at ? formatHandoffAgo(comment.handoff_acked_at) : '';
-    return [`${who || 'Agent'} picked it up`, ago ? ` · ${ago}` : ''];
+    return [`${who || 'Agent'} is on it`, ago ? ` · ${ago}` : ''];
   }
   if (state === 'failed') return ['Not delivered', ''];
-  if (state === 'replied') return ['Agent replied', ''];
+  if (state === 'replied') return [`${who || 'Agent'} replied`, ''];
   return ['', ''];
 }
 
@@ -85,36 +81,29 @@ export function HandoffStatusChips({ comment, onResend = null, onSendElsewhere =
     return () => window.clearInterval(id);
   }, [ticking]);
 
-  const chips = [];
-  const [lead, tail] = handoffStatusParts(comment, state, now);
+  // A reply verdict is more current than the delivery receipt. One comment
+  // shows one status, never both "sent" and "asked you" at the same time.
+  const displayState = state === 'replied' && (verdict === 'question' || verdict === 'partial' || verdict === 'answered')
+    ? verdict : state;
+  const who = readableHandle(comment?.handoff_to) || 'Agent';
+  const [lead, tail] = displayState === 'question' ? [`${who} asked you`, '']
+    : displayState === 'partial' ? [`${who} needs your input`, '']
+      : displayState === 'answered' ? [`${who} answered`, '']
+        : handoffStatusParts(comment, state, now);
   const text = lead + tail;
-  const showState = state && state !== 'ready'
-    && !(state === 'replied' && verdict && verdict !== 'answered');
-  if (showState && text) {
-    chips.push(
-      <span
-        key="state"
-        className={`tdoc-handoff-chip tdoc-handoff-line ${CHIP_CLASS[state] || ''}`}
-        data-handoff-state={state}
-        title={state === 'failed' ? (deliveryErrorText(comment.handoff_delivery?.error) || undefined) : text}
-      >
-        <span className="tdoc-handoff-line-text">{lead}</span>
-        {tail ? <span className="tdoc-handoff-line-tail">{tail}</span> : null}
-      </span>,
-    );
-  }
-
-  if (verdict === 'partial') {
-    chips.push(<span key="partial" className="tdoc-handoff-chip is-partial">Partial — needs you</span>);
-  } else if (verdict === 'question') {
-    chips.push(
-      <span key="question" className="tdoc-handoff-chip is-question" title="The agent needs your answer before it can continue">
-        Agent asked you
-      </span>,
-    );
-  } else if (verdict === 'answered' && state !== 'replied') {
-    chips.push(<span key="answered" className="tdoc-handoff-chip is-replied">Agent answered</span>);
-  }
+  const chipClass = displayState === 'question' ? 'is-question'
+    : displayState === 'partial' ? 'is-partial'
+      : displayState === 'answered' ? 'is-replied' : CHIP_CLASS[state] || '';
+  const status = displayState && displayState !== 'ready' && text ? (
+    <span
+      className={`tdoc-handoff-chip tdoc-handoff-status-text ${chipClass}`}
+      data-handoff-state={displayState}
+      title={state === 'failed' ? (deliveryErrorText(comment.handoff_delivery?.error) || undefined) : text}
+    >
+      <span className="tdoc-handoff-line-text">{lead}</span>
+      {tail ? <span className="tdoc-handoff-line-tail">{tail}</span> : null}
+    </span>
+  ) : null;
   // handoff_status resolved is folded into state === 'replied' — no separate
   // "Agent done" pill (redundant with the reply / this chip).
 
@@ -139,6 +128,6 @@ export function HandoffStatusChips({ comment, onResend = null, onSendElsewhere =
     </span>
   ) : null;
 
-  if (!chips.length) return null;
-  return <>{chips}{actions}</>;
+  if (!status) return null;
+  return <>{status}{actions}</>;
 }

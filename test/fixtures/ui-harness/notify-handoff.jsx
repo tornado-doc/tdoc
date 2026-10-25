@@ -32,6 +32,8 @@ const CARDS = [
   base('stale', { handoff_at: iso(7 * MIN), handoff_delivery: { status: 'delivered', at: iso(7 * MIN), expires_at: later(60 * MIN) } }),
   base('expired', { handoff_at: iso(25 * 60 * MIN), handoff_delivery: { status: 'delivered', at: iso(25 * 60 * MIN), expires_at: iso(60 * MIN) } }),
   base('replied', { handoff_at: iso(9 * MIN), handoff_delivery: { status: 'delivered', at: iso(9 * MIN) }, replies: [{ id: 'r', author: { kind: 'agent', login: 'claw' }, created: iso(1 * MIN) }] }),
+  base('question', { handoff_at: iso(9 * MIN), handoff_delivery: { status: 'delivered', at: iso(9 * MIN) }, replies: [{ id: 'q', author: { kind: 'agent', login: 'claw' }, agent_status: 'question', created: iso(1 * MIN) }] }),
+  base('resolved', { status: 'applied', handoff_at: iso(9 * MIN), handoff_delivery: { status: 'delivered', at: iso(9 * MIN) }, replies: [{ id: 'q2', author: { kind: 'agent', login: 'claw' }, agent_status: 'question', created: iso(1 * MIN) }] }),
 ];
 
 function StatusCards() {

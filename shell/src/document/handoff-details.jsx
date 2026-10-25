@@ -22,7 +22,7 @@ const STATE_LABEL = {
   replied: 'Agent replied',
 };
 
-// In-flight rows say what the card says: queued, picked up, or no response.
+// In-flight rows say what the card says: delivered, in progress, or no response.
 function rowLabel(comment, state) {
   if (state === 'waiting' || state === 'received') {
     return handoffStatusText(comment, handoffWaitState(comment)) || STATE_LABEL[state];

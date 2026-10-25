@@ -204,9 +204,7 @@
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
   /* Parent-level resolved chip (distinct from the per-reply status chip). */
-  /* Same chip geometry for comment-axis (✓ fixed) and handoff-axis pills. */
-  .tdoc-resolved-chip,
-  .tdoc-handoff-chip {
+  .tdoc-resolved-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -219,7 +217,23 @@
     white-space: nowrap;
   }
   .tdoc-resolved-chip { background: #e8f5ed; color: #1a7340; }
-  .tdoc-handoff-chip { color: #5a5a56; background: #f0efea; }
+  .tdoc-handoff-chip {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    color: #6b6b70;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.25;
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    white-space: nowrap;
+  }
   /* Homepage in-memory comment demo — same chip shape, quiet amber. */
   .tdoc-demo-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #f5efe0; color: #7a5c14; }
   /* Re-anchor is a ⋯ menu item now. Its old inline-button dress — 10px, grey,
@@ -892,33 +906,19 @@
     flex-wrap: nowrap;
     align-items: center;
     gap: 4px;
-    margin: 0 0 6px;
+    margin: 0 0 4px;
     min-width: 0;
   }
   .tdoc-status-row:not(:has(.tdoc-resolved-chip, .tdoc-handoff-chip)) {
     display: none;
     margin: 0;
   }
-  /* Agent done stays neutral gray — green is reserved for comment-axis ✓ fixed. */
-  .tdoc-handoff-chip.is-resolved { color: #5a5a56; background: #f0efea; }
-  .tdoc-handoff-chip.is-replied { color: #3b5bdb; background: #e8eeff; }
-  .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
-  .tdoc-handoff-chip.is-received {
-    color: #1a3f8f;
-    background: #e8eeff;
-    animation: tdoc-handoff-pulse 1.1s ease-in-out infinite;
-  }
-  .tdoc-handoff-chip.is-waiting {
-    color: #1a3f8f;
-    background: #e8eeff;
-    animation: tdoc-handoff-pulse 1.1s ease-in-out infinite;
-  }
-  .tdoc-handoff-chip.is-partial { color: #7a5b12; background: #f7f0d8; }
-  /* No response / expired: still, not pulsing -- nothing is happening. */
-  .tdoc-handoff-chip.is-stale { color: #7a5b12; background: #f7f0d8; }
+  /* Ordinary agent progress is one quiet line. Color is reserved for a
+     delivery problem that needs attention. */
+  .tdoc-handoff-chip.is-failed { color: #8a3b2b; }
+  .tdoc-handoff-chip.is-stale { color: #7a5b12; }
   /* The handoff line can name a long handle; it shortens, never spills. */
-  .tdoc-handoff-chip.tdoc-handoff-line { flex: 0 1 auto; min-width: 0; max-width: 100%; }
-  .tdoc-handoff-chip.tdoc-handoff-line { gap: 0; }
+  .tdoc-handoff-chip.tdoc-handoff-status-text { flex: 0 1 auto; min-width: 0; max-width: 100%; gap: 0; }
   .tdoc-handoff-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-handoff-line-tail { flex: 0 0 auto; white-space: pre; }
   .tdoc-status-row:has(.tdoc-handoff-nudge) { flex-wrap: wrap; }
@@ -940,22 +940,6 @@
     padding: 0;
   }
   .tdoc-handoff-nudge .text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-  .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
-  @keyframes tdoc-handoff-pulse {
-    0%, 100% {
-      opacity: 1;
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-accent, #1652f0) 40%, transparent);
-    }
-    50% {
-      opacity: 1;
-      box-shadow: 0 0 0 6px color-mix(in srgb, var(--td-accent, #1652f0) 0%, transparent);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .tdoc-handoff-chip.is-waiting,
-    .tdoc-handoff-chip.is-received { animation: none; }
-  }
-
   .tdoc-handoff-banner {
     display: flex;
     align-items: center;
