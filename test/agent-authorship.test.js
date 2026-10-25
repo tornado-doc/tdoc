@@ -121,8 +121,8 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     await call('/api/agent/ask-done', { method: 'POST', token: agentToken, body: { slug: 'busy-doc', ask_id: a2 } });
     const up = await upload(agentToken, 'busy-doc');
     assert(up.status === 403 && up.body.error === 'answer_only_run', `first still open: ${up.status} ${up.text}`);
-    await call('/api/agent/ask-done', { method: 'POST', token: agentToken, body: { slug: 'busy-doc', ask_id: a1 } });
-    assert((await upload(agentToken, 'busy-doc')).status === 200, 'both ended');
+    await call('/api/agent/ask-reply', { method: 'POST', token: agentToken, body: { slug: 'busy-doc', ask_id: a1, text: 'one' } });
+    assert((await upload(agentToken, 'busy-doc')).status === 200, 'both answered');
   });
 
   await t('the lock fails closed when its storage cannot be read', async () => {
@@ -143,7 +143,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       env.META.get = realGet;
       env.COMMENTS.get = realNs;
     }
-    await call('/api/agent/ask-done', { method: 'POST', token: agentToken, body: { slug: 'busy-doc', ask_id: id } });
+    await call('/api/agent/ask-reply', { method: 'POST', token: agentToken, body: { slug: 'busy-doc', ask_id: id, text: 'three' } });
   });
 
   await t("a member asking their own agent (Only me) locks that agent's edits on the doc until the answer lands", async () => {
@@ -181,6 +181,113 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 403 && r.body.error === 'agent_not_author_editor', `team agent over bob's agent: ${r.status}`);
     const m = await upload(bob.token, 'agent-doc');
     assert(m.status === 403 && m.body.error === 'agent_not_author_editor' && m.body.reason === 'team_agent_wrote', `bob's agent over the team agent: ${m.status} ${m.text}`);
+  });
+
+  // ---- security review of #829 ----
+  const second = (await call('/api/team/agents', { method: 'POST', cookie: julie.cookie, headers: origin, body: { id: team.id, name: 'acme-two' } })).body;
+  const agentTwo = (await call('/api/team/agents/connect', { method: 'POST', body: { code: second.setup_code, device: 'two-box' } })).body.token;
+  const html2 = (slug) => `<!doctype html><html><body><h1>${slug}</h1><p>${slug}: a sentence to comment on, saved</p></body></html>`;
+  const saveVersion = (opts, slug) => call('/api/doc/versions', { method: 'POST', ...opts, body: { slug, baseVersion: versions[slug], html: html2(slug) } });
+
+  await t('H1: /api/doc/versions takes no token: an admin\'s agent cannot save as a "browser edit" to open a doc', async () => {
+    const r = await saveVersion({ token: julie.token }, 'agent-doc');
+    assert(r.status === 403 && r.body.error === 'browser_session_required', `admin token saved: ${r.status} ${r.text}`);
+    const t2 = await saveVersion({ token: agentToken }, 'agent-doc');
+    assert(t2.status === 403, `team agent token saved: ${t2.status}`);
+    // A person in the browser still saves.
+    const ok = await saveVersion({ cookie: julie.cookie, headers: origin }, 'agent-doc');
+    assert(ok.status === 200, `browser save: ${ok.status} ${ok.text}`);
+    versions['agent-doc'] += 1;
+    // and it is a person's edit: the team agent may write it again.
+    assert((await upload(agentToken, 'agent-doc')).status === 200, 'team agent after a browser save');
+  });
+
+  await t('H1: rename and delete with an agent token follow authorship (sharing stays the admin\'s)', async () => {
+    const title = await call('/api/doc/title', { method: 'PATCH', token: julie.token, body: { slug: 'agent-doc', title: 'Renamed by an agent' } });
+    assert(title.status === 403 && title.body.error === 'agent_not_author_editor', `rename: ${title.status} ${title.text}`);
+    const del = await call('/api/doc?slug=agent-doc', { method: 'DELETE', token: julie.token });
+    assert(del.status === 403 && del.body.error === 'agent_not_author_editor', `delete: ${del.status} ${del.text}`);
+    // The owner's token on their own doc still renames.
+    const own = await call('/api/doc/title', { method: 'PATCH', token: julie.token, body: { slug: 'julies-doc', title: 'Julie renames hers' } });
+    assert(own.status === 200, `owner rename: ${own.status} ${own.text}`);
+  });
+
+  await t('H2: a client cannot mark a doc a feedback space (or unmark one) by upload meta', async () => {
+    const r = await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: 'julies-doc', version: versions['julies-doc'] + 1, html: html('julies-doc', 9), meta: { title: 'julies-doc', created_from: 'feedback', feedback: { origin: 'https://evil.example' } } } });
+    assert(r.status === 200, r.text);
+    versions['julies-doc'] += 1;
+    const meta = JSON.parse(env.META.map.get('meta:julies-doc'));
+    assert(meta.created_from !== 'feedback' && !meta.feedback, `stored: ${meta.created_from} ${JSON.stringify(meta.feedback)}`);
+    const bobs = await upload(bob.token, 'julies-doc');
+    assert(bobs.status === 403, `bob's agent after the feedback trick: ${bobs.status}`);
+    // nor whitewash a version as a person's or a blank scaffold
+    const w = await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: 'julies-doc', version: versions['julies-doc'] + 1, html: html('julies-doc', 10), meta: { title: 'julies-doc', versions: [{ n: versions['julies-doc'] + 1, blank: true, human: true, source: 'browser' }] } } });
+    assert(w.status === 200, w.text);
+    versions['julies-doc'] += 1;
+    assert((await upload(agentToken, 'julies-doc')).status === 403, 'a client-claimed blank/human version opened the doc');
+  });
+
+  await t('M1: a blank doc made in the browser is nobody\'s agent\'s: the team agent may write it', async () => {
+    const made = await call('/api/doc/create', { method: 'POST', cookie: julie.cookie, headers: origin, body: { team: team.id } });
+    assert(made.status === 200 && made.body.slug, made.text);
+    versions[made.body.slug] = 1;
+    const r = await upload(agentToken, made.body.slug);
+    assert(r.status === 200, `team agent on a blank doc: ${r.status} ${r.text}`);
+  });
+
+  await t('M2: a legacy version that does not say who wrote it locks nobody out', async () => {
+    assert((await upload(julie.token, 'legacy-doc')).status === 200, 'seed');
+    await call('/api/team/move', { method: 'POST', token: julie.token, body: { team: team.id, slugs: ['legacy-doc'] } });
+    const meta = JSON.parse(env.META.map.get('meta:legacy-doc'));
+    for (const v of meta.versions) { delete v.by; delete v.token; }
+    env.META.map.set('meta:legacy-doc', JSON.stringify(meta));
+    assert((await upload(bob.token, 'legacy-doc')).status === 200, "a teammate's agent on a legacy doc");
+  });
+
+  await t('M3: the asked agent cannot end its own lock with ask-done; only its answer (or the asker) does', async () => {
+    const c = await comment(bob, 'agent-doc', 'stuck?');
+    const id = (await handOff(bob, 'agent-doc', { ask_only: true, comment_id: c, recipient: teamTarget })).body.ask.ask_id;
+    await call('/api/agent/ask-done', { method: 'POST', token: agentToken, body: { slug: 'agent-doc', ask_id: id } });
+    const up = await upload(agentToken, 'agent-doc');
+    assert(up.status === 403 && up.body.error === 'answer_only_run', `done lifted the lock: ${up.status}`);
+    // M4: the asker cancels it.
+    const cancel = await call('/api/docs/agent-doc/my-agent/cancel', { method: 'POST', cookie: bob.cookie, headers: origin, body: { ask_id: id } });
+    assert(cancel.status === 200 && cancel.body.ok, `cancel: ${cancel.status} ${cancel.text}`);
+    assert((await upload(agentToken, 'agent-doc')).status === 200, 'after cancel');
+  });
+
+  await t('M4: the doc owner / a team admin can clear stuck locks; a stranger cannot cancel', async () => {
+    const c = await comment(bob, 'agent-doc', 'stuck again?');
+    const id = (await handOff(bob, 'agent-doc', { ask_only: true, comment_id: c, recipient: teamTarget })).body.ask.ask_id;
+    const carl = await issue(worker, env, 'carl');
+    const no = await call('/api/docs/agent-doc/my-agent/cancel', { method: 'POST', cookie: carl.cookie, headers: origin, body: { ask_id: id } });
+    assert(no.status !== 200, `a stranger cancelled: ${no.status}`);
+    const all = await call('/api/docs/agent-doc/my-agent/cancel', { method: 'POST', cookie: julie.cookie, headers: origin, body: { all: true } });
+    assert(all.status === 200 && all.body.cleared >= 1, `admin clear: ${all.status} ${all.text}`);
+    assert((await upload(agentToken, 'agent-doc')).status === 200, 'after the admin cleared it');
+  });
+
+  await t('M4: a question that fails to be recorded leaves no lock behind', async () => {
+    const c = await comment(bob, 'agent-doc', 'will it record?');
+    const realPut = env.META.put.bind(env.META);
+    env.META.put = async (key, ...rest) => { if (String(key).startsWith('agent-asks:agent-doc:')) throw new Error('kv put down'); return realPut(key, ...rest); };
+    let r;
+    try { r = await handOff(bob, 'agent-doc', { ask_only: true, comment_id: c, recipient: teamTarget }); } finally { env.META.put = realPut; }
+    assert(r.status >= 500, `ask: ${r.status} ${r.text}`);
+    assert((await upload(agentToken, 'agent-doc')).status === 200, 'an orphaned lock holds the agent');
+  });
+
+  await t('LOW (kept): another agent of the same team may continue a team agent\'s doc, as handoffs offer it', async () => {
+    assert((await upload(agentTwo, 'agent-doc')).status === 200, 'second team agent');
+  });
+
+  await t('LOW: a refused agent cannot reopen a resolved comment with an answer status', async () => {
+    const c = await comment(julie, 'julies-doc', 'resolved one');
+    await call('/api/comments', { method: 'PATCH', cookie: julie.cookie, headers: origin, body: { slug: 'julies-doc', version: 1, id: c, resolved: true } });
+    const r = await agentReply(agentToken, 'julies-doc', c, 'answered');
+    assert(r.status === 403 && r.body.error === 'agent_not_author_editor', `reopened: ${r.status} ${r.text}`);
+    const list = (await call('/api/comments?slug=julies-doc&version=1', { cookie: julie.cookie })).body;
+    assert(list.find((x) => x.id === c).status === 'applied', 'it was reopened');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

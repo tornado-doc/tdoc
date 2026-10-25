@@ -52,6 +52,18 @@ file and `.claude-plugin/plugin.json`.
   write (`503 answer_lock_unavailable`). The doc's owner asking their own
   agent is not locked out of their own doc. SKILL.md tells agents to answer
   instead of retrying.
+  After a security review: `/api/doc/versions` (the browser editor's save,
+  recorded as a person's edit) refuses upload and agent tokens. Rename and
+  delete with an agent token follow authorship (sharing stays the admin's). Upload no longer
+  takes `created_from` / `feedback` (or `blank` / `human` on versions) from
+  the client. A blank doc made in the browser, a duplicate, and versions from
+  before `by` was recorded lock nobody out, and a refused agent cannot
+  reopen a resolved comment. Ending
+  a run (`ask-done`) no longer lifts its lock: the answer does, or the asker
+  cancelling (`POST /api/docs/<slug>/my-agent/cancel`; the doc's owner or a
+  team admin may clear all). A question that fails to be recorded leaves no
+  lock behind. `tdoc-publish` and `tdoc-agent-reply` say what the refusals
+  mean.
 
 - **A calmer document bar, and agents from the comment composer (Julie,
   2026-10-24).** The bar had grown to nine controls. Now, left: logo · space /
