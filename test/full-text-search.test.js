@@ -396,6 +396,93 @@ const SAME = { Origin: 'https://tdoc.dev' };
     assert(!body.ok, `a doc's store answered: ${JSON.stringify(body)}`);
   });
 
+  // ---- re-review of #835 ----
+  await t('N1: a 200KB comment indexes in under 200ms (no quadratic email scrub)', async () => {
+    // Written straight into the doc's comment store: the comment API caps
+    // length, but the indexer must not depend on that.
+    const store = env.COMMENTS.stateFor('bob-public').storage.map;
+    const list = store.get('list') || [];
+    const huge = (id, text) => ({ id, created_in: 1, events: [{ kind: 'created', at_version: 1, text, eid: id }] });
+    store.set('list', [...list,
+      huge('huge-a', 'hugeword ' + 'a'.repeat(200000)),
+      huge('huge-b', 'hugemail ' + ('a'.repeat(5000) + '@' + 'b'.repeat(5000) + '.' + 'c'.repeat(3000) + ' ').repeat(15)),
+    ]);
+    const poke = await call('/api/comments', { method: 'POST', cookie: carol.cookie, body: { slug: 'bob-public', version: 1, text: 'poke', anchor: null } });
+    assert(poke.status === 200, `poke ${poke.status}`);
+    while (waits.length) await Promise.all(waits.splice(0));
+    const started = Date.now();
+    await env.COMMENTS.runAlarms();
+    const ms = Date.now() - started;
+    assert(ms < 200, `indexing the 200KB comments took ${ms}ms`);
+    assert(slugs(await search(alice, 'hugeword', 'all')).join() === 'bob-public', 'the huge comment is searchable');
+    const mail = await search(alice, 'hugemail', 'all');
+    assert(!JSON.stringify(mail.body.results).includes('bbbbbbbbbb'), 'the part after @ was kept');
+    store.set('list', list);
+  });
+
+  await t('N3: a doc moved out and back is reindexed, not trusted by version', async () => {
+    const team = (await call('/api/teams', { cookie: alice.cookie })).body.teams.find((x) => x.name === 'Acme');
+    assert(team, 'alice is in Acme');
+    assert((await publish(alice, 'roundtrip', '<p>roundtrip body words</p>')).status === 200, 'publish');
+    await settle();
+    // Removals from the old store are lost (a timeout, an outage).
+    const realGet = env.COMMENTS.get.bind(env.COMMENTS);
+    env.COMMENTS.get = (id) => {
+      const stub = realGet(id);
+      if (!String(id).startsWith('__tdoc-search__')) return stub;
+      return { fetch: async (url, init) => {
+        const body = JSON.parse(init.body);
+        if (body.op && body.op.kind === 'remove') return new Response(JSON.stringify({ ok: false }));
+        return stub.fetch(url, init);
+      } };
+    };
+    try {
+      assert((await call('/api/team/move', { method: 'POST', token: alice.token, body: { slugs: ['roundtrip'], team: team.id } })).status === 200, 'move in');
+      await settle();
+      const c = await call('/api/comments', { method: 'POST', cookie: alice.cookie, body: { slug: 'roundtrip', version: 1, text: 'teamtime wombatcomment', anchor: null } });
+      assert(c.status === 200, 'comment in team');
+      await settle();
+      const back = await call('/api/team/move', { method: 'POST', cookie: carol.cookie, body: { slugs: ['roundtrip'], team: null } });
+      assert(back.status === 200, `move back ${back.status} ${back.text}`);
+      await settle();
+    } finally { env.COMMENTS.get = realGet; }
+    // Back in alice's personal space (the team admin moved it out; the
+    // doc is still alice's), where the pre-move copy was left behind.
+    assert(slugs(await search(alice, 'wombatcomment')).join() === 'roundtrip', 'stale pre-move copy served after moving back');
+  });
+
+  await t('N2: the viewer\'s own and team stores are always asked; a capped search says so', async () => {
+    const env2 = makeEnv(mod.CommentsStore, { TDOC_SEARCH_CACHE_MS: '0' });
+    const waits2 = [];
+    const ctx2 = { waitUntil(p) { waits2.push(Promise.resolve(p).catch(() => {})); } };
+    const call2 = async (path, opts = {}) => {
+      const r = await worker.fetch(req(path, opts), env2, ctx2);
+      const text = await r.clone().text();
+      let body = null; try { body = JSON.parse(text); } catch {}
+      return { status: r.status, body, text };
+    };
+    const viewer = await issue(worker, env2, 'viewer');
+    assert((await call2('/api/upload', { method: 'POST', token: viewer.token, body: { slug: 'viewer-own', version: 1, html: '<p>sharedword mine</p>', meta: { title: 'Viewer own', access: { visibility: 'private' } } } })).status === 200, 'own doc');
+    for (let i = 0; i < 18; i++) {
+      const owner = await issue(worker, env2, `owner${i}`);
+      for (const n of [0, 1]) {
+        const slug = `shared-${i}-${n}`;
+        assert((await call2('/api/upload', { method: 'POST', token: owner.token, body: { slug, version: 1, html: `<p>sharedword ${slug}</p>`, meta: { title: slug, access: { visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] } } } })).status === 200, `publish ${slug}`);
+        assert((await call2('/api/star', { method: 'POST', cookie: viewer.cookie, body: { slug, starred: true } })).status === 200, `star ${slug}`);
+      }
+    }
+    for (let round = 0; round < 3; round++) {
+      await call2('/api/search?q=sharedword', { cookie: viewer.cookie });
+      while (waits2.length) await Promise.all(waits2.splice(0));
+      await env2.COMMENTS.runAlarms();
+    }
+    const r = await call2('/api/search?q=sharedword', { cookie: viewer.cookie });
+    const own = await call2('/api/search?q=sharedword%20mine', { cookie: viewer.cookie });
+    assert(r.status === 200, `search ${r.status}`);
+    assert(own.body.results.some((x) => x.slug === 'viewer-own'), `own doc missing: ${own.text.slice(0, 300)}`);
+    assert(r.body.partial === true && r.body.skipped >= 1, `partial flag ${JSON.stringify({ partial: r.body.partial, skipped: r.body.skipped })}`);
+  });
+
   await t('rate limit: 60 searches a minute per person, then 429', async () => {
     let limited = null;
     for (let i = 0; i < 70 && !limited; i++) {

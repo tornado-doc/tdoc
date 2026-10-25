@@ -9488,6 +9488,12 @@ function searchScopeFromIdx(idx) {
   if (idx.o) return `l:${idx.o}`;
   return 'n';
 }
+// Which life of a slug an index row belongs to: a slug purged and published
+// again starts over at v1, and must not inherit the old v1's row.
+function searchEpoch(meta) {
+  const versions = meta && Array.isArray(meta.versions) ? meta.versions : [];
+  return String((meta && meta.created) || versions[0]?.created || '');
+}
 function searchScopeOf(meta) {
   return meta && typeof meta === 'object' ? searchScopeFromIdx(docMetaIndex(meta)) : '';
 }
@@ -9529,6 +9535,11 @@ async function searchIndexTouch(env, slug, meta, priorIdx) {
     kind: 'touch',
     slug,
     version: latestVersionNumber(meta) || 1,
+    epoch: searchEpoch(meta),
+    // Arriving from another owner's store: whatever this store held for the
+    // slug may be a copy left behind by an earlier move (its removal can
+    // time out), so it is read again rather than trusted by version.
+    moved: Boolean(prior && prior !== scope),
     title: String(meta.title || slug),
     gone: isTrashedMeta(meta) || meta.created_from === 'feedback',
   })];
@@ -9606,19 +9617,39 @@ function searchPlainText(html, cap = SEARCH_BODY_CAP) {
 // addresses per viewer (redactCommentEmails); a search result cannot know
 // who may see which, so the index never holds one: `@name@host` becomes
 // `@name`, a bare address its local part.
-const SEARCH_EMAIL_RE = /([^\s@<>"'(),;:]+)@[^\s@<>"'(),;:]+\.[^\s@<>"'(),;:]+/g;
+// Linear: the text is capped first (each comment, then all of them), split
+// on whitespace, and only a token holding an @ is looked at -- with bounded
+// quantifiers on a bounded token. A token too long to be an address keeps
+// only what comes before its @.
+const SEARCH_COMMENT_CAP = 5000;
+const SEARCH_EMAIL_TOKEN_RE = /([^@\s]{1,64})@[^@\s]{1,255}\.[^@\s]{1,63}/g;
+function searchScrubEmails(text) {
+  return text.split(/(\s+)/).map((token) => {
+    const at = token.indexOf('@');
+    if (at === -1) return token;
+    if (token.length > 400) return token.slice(0, Math.min(at, 64));
+    return token.replace(SEARCH_EMAIL_TOKEN_RE, '$1');
+  }).join('');
+}
 function searchCommentsText(list) {
   const parts = [];
+  let total = 0;
+  const add = (text) => {
+    if (!text || total >= SEARCH_COMMENTS_CAP) return;
+    const part = String(text).slice(0, SEARCH_COMMENT_CAP);
+    parts.push(part);
+    total += part.length + 3;
+  };
   try {
     for (const c of historyList(Array.isArray(list) ? list : [])) {
-      if (c.text) parts.push(String(c.text));
+      add(c.text);
       for (const r of Array.isArray(c.replies) ? c.replies : []) {
-        if (r && !r.deleted && r.text) parts.push(String(r.text));
+        if (r && !r.deleted) add(r.text);
       }
     }
   } catch { return ''; }
-  const text = parts.join(' · ').replace(SEARCH_EMAIL_RE, '$1').replace(/\s+/g, ' ').trim();
-  return text.length > SEARCH_COMMENTS_CAP ? text.slice(0, SEARCH_COMMENTS_CAP) : text;
+  const joined = parts.join(' · ').slice(0, SEARCH_COMMENTS_CAP);
+  return searchScrubEmails(joined).replace(/\s+/g, ' ').trim();
 }
 
 // Terms: whitespace separated, "quoted phrases" kept whole; at most eight,
@@ -9689,7 +9720,7 @@ function searchSql(store) {
   const sql = storage && storage.sql;
   if (!sql || typeof sql.exec !== 'function') throw new Error('search_sql_unavailable');
   if (!store._searchReady) {
-    sql.exec('CREATE TABLE IF NOT EXISTS search_docs (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL DEFAULT \'\', updated TEXT NOT NULL DEFAULT \'\')');
+    sql.exec('CREATE TABLE IF NOT EXISTS search_docs (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 0, epoch TEXT NOT NULL DEFAULT \'\', title TEXT NOT NULL DEFAULT \'\', updated TEXT NOT NULL DEFAULT \'\')');
     sql.exec('CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(title, body, comments, tokenize = \'trigram case_sensitive 0 remove_diacritics 1\')');
     sql.exec('CREATE TABLE IF NOT EXISTS search_pending (slug TEXT PRIMARY KEY, at INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 0)');
     // Versions given up on after SEARCH_MAX_TRIES: not queued again until
@@ -9765,9 +9796,9 @@ async function searchStoreHandle(store, name, op) {
   if (kind === 'touch') {
     if (!slugOk(op.slug)) return { ok: false };
     if (op.gone) { searchRemove(sql, op.slug); return { ok: true, removed: true }; }
-    const row = searchRows(sql, 'SELECT id, version, title FROM search_docs WHERE slug = ?', op.slug)[0];
+    const row = searchRows(sql, 'SELECT id, version, epoch, title FROM search_docs WHERE slug = ?', op.slug)[0];
     const pending = searchRows(sql, 'SELECT 1 AS p FROM search_pending WHERE slug = ?', op.slug).length > 0;
-    if (row && !pending && Number(row.version) === Number(op.version)) {
+    if (row && !pending && !op.moved && Number(row.version) === Number(op.version) && String(row.epoch) === String(op.epoch || '')) {
       const title = String(op.title || '').slice(0, 500);
       if (title && title !== row.title) {
         // FTS5 has no partial-column update of a contentful table that
@@ -9952,9 +9983,9 @@ async function searchIndexDoc(store, sql, scope, slug, ticket) {
   if (row) {
     id = row.id;
     sql.exec('DELETE FROM search_fts WHERE rowid = ?', id);
-    sql.exec('UPDATE search_docs SET version = ?, title = ?, updated = ? WHERE id = ?', version, title, updated, id);
+    sql.exec('UPDATE search_docs SET version = ?, epoch = ?, title = ?, updated = ? WHERE id = ?', version, searchEpoch(meta), title, updated, id);
   } else {
-    sql.exec('INSERT INTO search_docs (slug, version, title, updated) VALUES (?, ?, ?, ?)', slug, version, title, updated);
+    sql.exec('INSERT INTO search_docs (slug, version, epoch, title, updated) VALUES (?, ?, ?, ?, ?)', slug, version, searchEpoch(meta), title, updated);
     id = searchRows(sql, 'SELECT id FROM search_docs WHERE slug = ?', slug)[0].id;
   }
   sql.exec('INSERT INTO search_fts (rowid, title, body, comments) VALUES (?, ?, ?, ?)', id, title, body, comments);
@@ -10029,9 +10060,23 @@ function searchHubRows(data, session, space) {
   return out;
 }
 
-// Rows grouped by the store their index lives in, the viewer's own and
-// biggest groups first; at most SEARCH_MAX_SCOPES stores are asked.
-function searchGroupByScope(rows, scopes) {
+// The stores that are the viewer's own: their accounts, their handle, their
+// teams, and (for the deploy operator) the ownerless pool.
+function searchOwnScopes(env, session) {
+  const own = new Set();
+  for (const id of sessionAccountIds(session)) own.add(`p:${id}`);
+  const login = sessionLogin(session);
+  if (login) own.add(`l:${login}`);
+  for (const id of (session && session.team_ids) || []) own.add(`w:${id}`);
+  if (isOwnerSession(env, session)) own.add('n');
+  return own;
+}
+
+// Rows grouped by the store their index lives in. The viewer's own and team
+// stores are always asked; other people's (docs shared with the viewer)
+// fill the rest, biggest first, up to SEARCH_MAX_SCOPES stores in all. What
+// is left out is counted, so the caller can say the search was partial.
+function searchGroupByScope(rows, scopes, own = new Set()) {
   const groups = new Map();
   for (const row of rows) {
     const scope = scopes && scopes.get(row.slug);
@@ -10039,7 +10084,13 @@ function searchGroupByScope(rows, scopes) {
     if (!groups.has(scope)) groups.set(scope, []);
     groups.get(scope).push({ slug: row.slug, version: row.latest });
   }
-  return [...groups.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, SEARCH_MAX_SCOPES);
+  const entries = [...groups.entries()];
+  const mine = entries.filter(([scope]) => own.has(scope)).sort((a, b) => b[1].length - a[1].length);
+  const others = entries.filter(([scope]) => !own.has(scope)).sort((a, b) => b[1].length - a[1].length);
+  const room = Math.max(0, SEARCH_MAX_SCOPES - mine.length);
+  const out = [...mine, ...others.slice(0, room)];
+  out.skipped = Math.max(0, others.length - room);
+  return out;
 }
 
 // A burst of keystrokes would rebuild the whole hub catalog each time; a
@@ -15403,7 +15454,8 @@ const tdocHandlers = {
       const rows = searchHubRows(data, s, space);
       const bySlug = new Map(rows.map((row) => [row.slug, row]));
       // Each owner store is asked only about this viewer's docs in it.
-      const answers = await Promise.all(searchGroupByScope(rows, data.search_scopes).map(([scope, docs]) => (
+      const groups = searchGroupByScope(rows, data.search_scopes, searchOwnScopes(env, s));
+      const answers = await Promise.all(groups.map(([scope, docs]) => (
         searchStoreOp(env, scope, { kind: 'query', q, limit: SEARCH_RESULT_LIMIT, docs }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS })
       )));
       if (rows.length && !answers.some(Boolean)) return json({ error: 'search_unavailable' }, { status: 503, headers });
@@ -15434,7 +15486,10 @@ const tdocHandlers = {
           snippet: hit.snippet,
         };
       }))).filter(Boolean);
-      return json({ ok: true, q, results, indexing: Number(out.pending) || 0 }, { headers });
+      // Stores left out past SEARCH_MAX_SCOPES, or that did not answer in
+      // time: say the search was partial rather than look complete.
+      const skipped = groups.skipped + answers.filter((a) => !a).length;
+      return json({ ok: true, q, results, indexing: Number(out.pending) || 0, ...(skipped ? { partial: true, skipped } : {}) }, { headers });
     }
 
     if (p === '/api/me/feedback' && method === 'GET') {

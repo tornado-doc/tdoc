@@ -173,6 +173,20 @@ async function startServer(worker, env, waits) {
         assert.equal(await page.evaluate(() => window.__xss), undefined, 'doc text ran');
       });
 
+      await t(`${label}: a capped search says some shared docs were not searched`, async () => {
+        await page.route('**/api/search?*', (route) => route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ ok: true, q: 'partialword', indexing: 0, partial: true, skipped: 3, results: [
+            { slug: 'launch-retro', title: 'Launch retro', title_marks: [{ text: 'Launch retro', hit: false }], workspace_id: '', folder: '', owner: '', mine: true, updated: '2026-10-12T09:00:00.000Z', where: 'body', snippet: [{ text: 'a ', hit: false }, { text: 'partialword', hit: true }] },
+          ] }),
+        }));
+        try {
+          await input.fill('partialword');
+          await page.locator('.text-search').getByText('Some shared docs weren’t searched.').waitFor();
+          await input.fill('');
+        } finally { await page.unroute('**/api/search?*'); }
+      });
+
       await t(`${label}: nothing on the page overflows, and a result opens its doc`, async () => {
         await input.fill('Slack threads');
         const row = page.locator('.text-search-row[data-slug="interview-notes"]');

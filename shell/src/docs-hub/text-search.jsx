@@ -27,7 +27,7 @@ export function useTextSearch(query, space) {
           const body = await r.json().catch(() => null);
           if (r.status === 429) return setState({ q, space, status: 'limited', results: [], indexing: 0 });
           if (!r.ok || !body || !Array.isArray(body.results)) return setState({ q, space, status: 'unavailable', results: [], indexing: 0 });
-          return setState({ q, space, status: 'done', results: body.results, indexing: Number(body.indexing) || 0 });
+          return setState({ q, space, status: 'done', results: body.results, indexing: Number(body.indexing) || 0, partial: body.partial === true });
         })
         .catch((error) => {
           if (error && error.name === 'AbortError') return;
@@ -57,7 +57,7 @@ export function TextSearchResults({ search, exclude, pathFor }) {
   if (loading && !results.length) note = 'Searching document text…';
   else if (search.status === 'limited') note = 'Too many searches at once. Try again in a minute.';
   // Nothing more to say: the list above (or its empty notice) is the answer.
-  else if (!results.length && !search.indexing) return null;
+  else if (!results.length && !search.indexing && !search.partial) return null;
   return (
     <section className={`text-search${loading ? ' is-loading' : ''}`} aria-label="Results in document text" aria-busy={loading}>
       <h2 className="text-search-hd">Results in document text</h2>
@@ -90,6 +90,7 @@ export function TextSearchResults({ search, exclude, pathFor }) {
           })}
         </div>
       ) : null}
+      {search.partial && !loading ? <p className="text-search-note">Some shared docs weren&rsquo;t searched.</p> : null}
     </section>
   );
 }
