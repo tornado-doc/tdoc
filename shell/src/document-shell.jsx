@@ -1617,6 +1617,7 @@ export function DocumentShell({ boot, config }) {
         ref={bridge.frameRef}
         className="tdoc-doc-frame"
         aria-label="Document content"
+        onMouseLeave={() => setHoveredAnchorId(null)}
         sandbox="allow-scripts"
         src={boot.frameSrc}
       />
