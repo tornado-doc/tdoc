@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send, RefreshCw } from 'lucide-react';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { AgentButtonsContext } from '../../shell/src/document/mention-field.jsx';
-import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
-import { avatarFor } from '../../shell/src/document/model.js';
+import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
+import { avatarFor, TOP_BAR_HEIGHT } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText } from '../../shell/src/document/notify-handoff.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from '../../shell/src/document/handoff-state.js';
 import { resendNotifyHandoff, setApiTransport } from '../../shell/src/document/api.js';
@@ -99,6 +99,10 @@ ${uiCss}
       font: 13px/1.45 system-ui, -apple-system, sans-serif;
       animation: tdoc-fb-panel-in .16s ease-out;
     }
+    @media (max-width: 600px) {
+      #tdoc-feedback-root .tdoc-feedback-dock.panel-open { display: none; }
+      #tdoc-feedback-root .tdoc-fb-panel { width: 100vw; }
+    }
     @keyframes tdoc-fb-panel-in { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
     @media (prefers-reduced-motion: reduce) { #tdoc-feedback-root .tdoc-fb-panel { animation: none; } }
     /* The header wraps instead of running past the panel: title, refresh and
@@ -118,6 +122,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-refresh:hover { background: #f0f0ee; color: #1a1a1a; }
     #tdoc-feedback-root .tdoc-fb-refresh svg { width: 15px; height: 15px; }
     #tdoc-feedback-root .tdoc-fb-refresh[aria-busy="true"] svg { animation: tdoc-fb-spin .7s linear infinite; }
+    #tdoc-feedback-root .tdoc-fb-add { appearance: none; border: 0; border-radius: 6px; background: #1652f0; color: #fff; cursor: pointer; padding: 5px 8px; font: 600 11.5px system-ui, sans-serif; }
     @keyframes tdoc-fb-spin { to { transform: rotate(360deg); } }
     #tdoc-feedback-root .tdoc-fb-scroll { flex: 1; overflow-y: auto; padding: 6px 8px 16px; overscroll-behavior: contain; }
     #tdoc-feedback-root .tdoc-fb-scroll h4 { margin: 14px 8px 6px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: #8a8985; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -161,14 +166,29 @@ ${uiCss}
   host.id = 'tdoc-feedback-root';
   document.documentElement.appendChild(host);
 
-  // A host's modal <dialog> sits in the top layer and makes everything
-  // outside it inert, so the feedback layer ends up underneath and
-  // unclickable: nobody could comment on a modal. While a modal is open the
-  // layer moves inside it, and goes back when it closes. Inside, it opens as
-  // a popover: that puts it in the top layer above the dialog, over the whole
-  // viewport, where a dialog's transform or overflow cannot shrink or clip
-  // it. A modal library's inert/aria-hidden on the layer is removed as well.
+  // Keep the feedback layer inside the active modal, including script-driven
+  // dialogs. Outside-press and focus traps often run in document capture;
+  // stopping an event on our host in bubble is too late for those libraries.
+  // The popover puts the layer above a native dialog and avoids clipping by a
+  // transformed modal. Move it back when the modal closes or unmounts.
   (function followModals() {
+    const modalSelector = 'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+    const isHostNode = (node) => node === host || host.contains(node);
+    const hasModal = (node) => node instanceof Element && !isHostNode(node)
+      && (node.matches(modalSelector) || !!node.querySelector(modalSelector));
+    const isModalDialog = (node) => {
+      if (node.localName !== 'dialog') return true;
+      try { return node.matches(':modal'); } catch (_) { return false; }
+    };
+    const activeModal = () => {
+      const dialog = [...document.querySelectorAll(modalSelector)].reverse().find((node) =>
+        !isHostNode(node) && node.getClientRects().length > 0
+        && node.getAttribute('aria-hidden') !== 'true'
+        && isModalDialog(node));
+      // Headless UI puts role=dialog on a wrapper, but outside-press tests
+      // against DialogPanel. The layer must be inside that panel too.
+      return dialog?.querySelector('[id^="headlessui-dialog-panel-"], [data-headlessui-dialog-panel]') || dialog;
+    };
     const lift = () => {
       if (!host.showPopover || host.matches(':popover-open')) return;
       host.popover = 'manual';
@@ -180,7 +200,7 @@ ${uiCss}
       host.removeAttribute('popover');
     };
     const place = () => {
-      const modal = [...document.querySelectorAll('dialog[open]')].reverse().find((d) => { try { return d.matches(':modal'); } catch (_) { return false; } });
+      const modal = activeModal();
       if (modal) {
         if (host.parentNode !== modal) { lower(); modal.appendChild(host); }
         lift();
@@ -190,10 +210,13 @@ ${uiCss}
       }
     };
     new MutationObserver((records) => {
-      if (records.some((r) => r.target !== host && r.target.localName === 'dialog')) place();
+      if (records.some((r) => r.type === 'childList'
+        ? [...r.addedNodes, ...r.removedNodes].some(hasModal)
+        : r.target !== host && !isHostNode(r.target)
+          && r.target instanceof Element && r.target.matches(modalSelector))) place();
       if (host.hasAttribute('inert')) host.removeAttribute('inert');
       if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
-    }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['open', 'inert', 'aria-hidden'] });
+    }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'inert', 'aria-hidden', 'class', 'style', 'data-state'] });
     document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
     // A dialog removed without closing (a React unmount) takes the layer with it.
     new MutationObserver(() => { if (!host.isConnected) place(); }).observe(document.documentElement, { childList: true, subtree: true });
@@ -210,6 +233,7 @@ ${uiCss}
     window.addEventListener('focusout', (e) => {
       if (e.relatedTarget instanceof Node && host.contains(e.relatedTarget)) e.stopImmediatePropagation();
     }, true);
+    place();
   })();
 
   // Where we came from is where the comments go: the worker that served this
@@ -613,7 +637,7 @@ ${uiCss}
     // comment here is whoever it lets in.
     const shareUrl = session && session.share_url;
     return (
-      <div className="tdoc-feedback-dock" role="toolbar" aria-label="tdoc feedback" style={panelOpen ? { right: PANEL_WIDTH + 18 } : null}>
+      <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen ? { right: PANEL_WIDTH + 18 } : null}>
         <button type="button" className={panelOpen ? 'on' : ''} onClick={onList} title="All comments on this app">
           <MessagesSquare aria-hidden="true" /> <strong>{openCount}</strong> open
         </button>
@@ -674,6 +698,7 @@ ${uiCss}
               <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>
             ))}
           </span>
+          <button type="button" className="tdoc-fb-add" onClick={onPick}>+ Comment</button>
           <button type="button" className="tdoc-fb-refresh" aria-label="Refresh feedback" title="Refresh feedback" aria-busy={refreshing ? 'true' : 'false'} onClick={onRefresh}><RefreshCw aria-hidden="true" /></button>
           <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
         </header>
@@ -967,6 +992,7 @@ ${uiCss}
 
     const hoverRect = (picking || reanchorId) ? hovered?.getBoundingClientRect() : null;
     const rightInset = panelOpen ? Math.min(PANEL_WIDTH, innerWidth) : 0;
+    const composerRect = selected?.getBoundingClientRect();
     const placeCard = (element) => {
       const rect = element?.getBoundingClientRect();
       const width = innerWidth - rightInset;
@@ -1019,8 +1045,14 @@ ${uiCss}
         })}
 
         {selected ? (
+          /* The shared composer adds the document shell's 48px bar. Feedback
+             already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
-            selection={{ kind: 'element', label: labelOf(contextFor(selected)), rect: selected.getBoundingClientRect() }}
+            selection={{ kind: 'element', label: labelOf(contextFor(selected)), rect: {
+              top: composerRect.top - TOP_BAR_HEIGHT,
+              bottom: composerRect.bottom - TOP_BAR_HEIGHT,
+              left: Math.min(composerRect.left, Math.max(8, innerWidth - rightInset - COMPOSER_WIDTH - 8)),
+            } }}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
             connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
@@ -1071,7 +1103,7 @@ ${uiCss}
             filter={filter}
             setFilter={setFilter}
             agent={agent}
-            onPick={() => { setOpenId(null); setPicking(true); }}
+            onPick={() => { setOpenId(null); setPanelOpen(false); setPicking(true); }}
             onOpen={openFromList}
             onClose={() => setPanelOpen(false)}
             onRefresh={refresh}
@@ -1101,8 +1133,8 @@ ${uiCss}
           openCount={openCount}
           panelOpen={panelOpen}
           picking={picking}
-          onList={() => setPanelOpen((v) => !v)}
-          onPick={() => { setOpenId(null); setSelected(null); setPicking((v) => !v); }}
+          onList={() => { setSelected(null); setPanelOpen((v) => !v); }}
+          onPick={() => { setOpenId(null); setSelected(null); setPanelOpen(false); setPicking((v) => !v); }}
           onHide={hide}
           sendCount={ready.length}
           onSend={owner && session && session.notify ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}

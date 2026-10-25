@@ -271,10 +271,22 @@ const APP_HTML = `<!doctype html>
       const onModal = comments.find((x) => x.text === 'Save is disabled');
       assert(onModal && onModal.anchor.state && onModal.anchor.state.dialog === 'Team settings', `state not recorded: ${JSON.stringify(onModal && onModal.anchor.state)}`);
       const before = await page.locator('#tdoc-feedback-root .tdoc-pin').count();
-      const saved = await page.evaluate(() => { const m = document.getElementById('modal'); const html = m.outerHTML; m.remove(); return html; });
+      const saved = await page.evaluate(() => {
+        const m = document.getElementById('modal');
+        const copy = m.cloneNode(true);
+        // The feedback host lives inside an open modal so capture-phase
+        // outside-press handlers see its controls as part of the modal. It is
+        // a live app root, not part of the modal's saved HTML.
+        copy.querySelector('#tdoc-feedback-root')?.remove();
+        const html = copy.outerHTML;
+        m.remove();
+        return html;
+      });
       await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length === n - 1, before);
       await page.evaluate((html) => document.body.insertAdjacentHTML('beforeend', html), saved);
       await page.waitForFunction((n) => document.querySelectorAll('#tdoc-feedback-root .tdoc-pin').length === n, before);
+      await page.evaluate(() => document.getElementById('modal').remove());
+      await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
     });
 
     await test('a native modal <dialog> can be commented on; the layer goes back when it closes', async () => {
@@ -364,6 +376,45 @@ const APP_HTML = `<!doctype html>
       if (await pick.evaluate((b) => b.classList.contains('on'))) await pick.click();
     });
 
+    await test('a modal whose outside-press boundary is its nested panel stays open through commenting', async () => {
+      await page.evaluate(() => {
+        const d = document.createElement('div');
+        d.id = 'capture-modal'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true');
+        d.style.cssText = 'position:fixed;top:120px;left:200px;padding:24px;background:#fff;border:1px solid #ccc;z-index:100';
+        d.innerHTML = '<div id="headlessui-dialog-panel-example"><h2>Billing settings</h2><input value="Example"></div>';
+        document.body.appendChild(d);
+        window.__captureModalClosed = false;
+        window.__captureModalOutside = (e) => {
+          // Headless UI checks the panel, not its role=dialog wrapper.
+          if (!d.isConnected || d.querySelector('[id^="headlessui-dialog-panel-"]').contains(e.target)) return;
+          window.__captureModalClosed = true;
+          d.remove();
+        };
+        // Modal libraries can decide that a press is outside during capture,
+        // before the feedback host's bubble listeners get a chance to stop it.
+        document.addEventListener('pointerdown', window.__captureModalOutside, true);
+        document.addEventListener('focusin', window.__captureModalOutside, true);
+      });
+      try {
+        const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+        if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
+        assert(await page.locator('#capture-modal').isVisible(), 'opening feedback closed the modal');
+        await page.locator('#capture-modal h2').click();
+        const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+        await c.fill('Show the billing period');
+        assert(await page.locator('#capture-modal').isVisible(), 'typing in feedback closed the modal');
+        await page.locator('#tdoc-feedback-root .tdoc-popup button.submit').click();
+        assert(await page.locator('#capture-modal').isVisible(), 'posting feedback closed the modal');
+        assert(!await page.evaluate(() => window.__captureModalClosed), 'the outside handler ran on feedback UI');
+      } finally {
+        await page.evaluate(() => {
+          document.removeEventListener('pointerdown', window.__captureModalOutside, true);
+          document.removeEventListener('focusin', window.__captureModalOutside, true);
+          document.getElementById('capture-modal')?.remove();
+        });
+      }
+    });
+
     await test("tdoc's own Base UI dialog on My docs can be commented on: it stays open, the composer keeps the typing", async () => {
       const slug = 'quarterly-plan';
       fs.mkdirSync(path.join(root, slug, 'v1'), { recursive: true });
@@ -409,6 +460,43 @@ const APP_HTML = `<!doctype html>
         await dialog.getByRole('button', { name: 'Cancel' }).click();
         await dialog.waitFor({ state: 'detached' });
         assert(await me.locator('#tdoc-feedback-root .tdoc-feedback-dock').isVisible(), 'the dock went away with the dialog');
+        for (const width of [1512, 390]) {
+          await me.setViewportSize({ width, height: 823 });
+          await me.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+          const panel = me.locator('#tdoc-feedback-root .tdoc-fb-panel');
+          await panel.waitFor();
+          await me.waitForTimeout(200); // let the slide-in clip-path finish
+          const layout = await me.evaluate(() => {
+            const panel = document.querySelector('#tdoc-feedback-root .tdoc-fb-panel');
+            const close = panel.querySelector('button.x');
+            const r = panel.getBoundingClientRect();
+            const x = close.getBoundingClientRect();
+            return {
+              panel: r.toJSON(), close: x.toJSON(), vw: innerWidth,
+              closeHit: document.elementFromPoint(x.x + x.width / 2, x.y + x.height / 2) === close,
+            };
+          });
+          assert(layout.panel.right === width && layout.panel.left === (width <= 600 ? 0 : width - 340)
+            && layout.close.right <= width && layout.closeHit,
+          `feedback panel is clipped or under the top bar at ${width}px: ${JSON.stringify(layout)}`);
+          await me.screenshot({ path: path.join(os.tmpdir(), `tdoc-feedback-panel-${width}.png`) });
+          await panel.locator('.tdoc-fb-add').click();
+          await panel.waitFor({ state: 'detached' });
+          await me.locator('h1').first().click();
+          const composer = me.locator('#tdoc-feedback-root .tdoc-popup');
+          await composer.waitFor();
+          const box = await composer.boundingBox();
+          const heading = await me.locator('h1').first().boundingBox();
+          assert(box.x >= 0 && box.x + box.width <= width && box.y >= 48 && box.y + box.height <= 823,
+            `feedback composer is offscreen or behind the top bar at ${width}px: ${JSON.stringify(box)}`);
+          assert(Math.abs(box.y - (heading.y + heading.height + 8)) < 2,
+            `feedback composer retained the document shell's 48px offset at ${width}px: ${JSON.stringify({ box, heading })}`);
+          await me.screenshot({ path: path.join(os.tmpdir(), `tdoc-feedback-composer-${width}.png`) });
+          await me.keyboard.press('Escape');
+          await composer.waitFor({ state: 'detached' });
+          const pick = me.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+          if (await pick.evaluate((b) => b.classList.contains('on'))) await pick.click();
+        }
         assert(errors.length === 0, errors.join('\n'));
       } finally {
         await me.close();
