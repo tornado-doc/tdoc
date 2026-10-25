@@ -742,7 +742,7 @@ t('the chosen AI opens a private practice doc through the account API', () => {
   assert(!gate.includes('PORTRAIT_PROMPT'), 'history scanning is not required');
 });
 t('connection advances through Next instead of replacing the page', () => {
-  assert(gate.includes("setStage('choose')") && gate.includes('disabled={!loaded || !connected}'), 'Next requires a live verified computer');
+  assert(gate.includes("setStage('manual')") && gate.includes('disabled={busy || (!manual && (!loaded || !runtimeReady))}'), 'only automatic pickup requires a live verified computer; manual practice is optional');
   assert(!gate.includes('sg-pane-art'), 'no full-page replay');
 });
 

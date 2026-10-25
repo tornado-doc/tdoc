@@ -16683,12 +16683,17 @@ const tdocHandlers = {
       const accountId = await sessionAccountId(env, session);
       if (!accountId) return json({ error: 'account_required' }, { status: 403 });
       let body = {}; try { body = await req.json(); } catch {}
-      const current = await accountNotifyTargets(env, accountId);
-      const target = current.find((t) => t.provider === 'local' && t.device === body.device && t.cli === body.cli);
-      if (!target) return json({ error: 'local_agent_required' }, { status: 409 });
-      const seen = await localSeenMap(env, accountId);
-      let ready = []; try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${target.device}`)); ready = Array.isArray(value) ? value : []; } catch {}
-      if (withLocalSeen(target, seen).status !== 'active' || !ready.includes(target.cli)) return json({ error: 'computer_not_ready' }, { status: 409 });
+      // Manual practice is an explicit copy/paste workflow, not evidence of a
+      // connected computer. Never attach or mark an agent ready on this path.
+      let target = null;
+      if (body.mode !== 'manual') {
+        const current = await accountNotifyTargets(env, accountId);
+        target = current.find((t) => t.provider === 'local' && t.device === body.device && t.cli === body.cli);
+        if (!target) return json({ error: 'local_agent_required' }, { status: 409 });
+        const seen = await localSeenMap(env, accountId);
+        let ready = []; try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${target.device}`)); ready = Array.isArray(value) ? value : []; } catch {}
+        if (withLocalSeen(target, seen).status !== 'active' || !ready.includes(target.cli)) return json({ error: 'computer_not_ready' }, { status: 409 });
+      }
       const record = await loadOnboarding(env, accountId);
       let slug = record.daemon_practice_doc;
       if (slug) {
@@ -16697,9 +16702,9 @@ const tdocHandlers = {
       }
       if (!slug) {
         const made = await createDocForSession(env, req, session, {
-          html: '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Your first tdoc</title><style>body{background:#fff}</style></head><body><div class="wrap"><h1>Your first tdoc</h1><p>A good project update tells readers what changed, what is next, and where help is needed.</p><h2>Try a change</h2><p>Highlight the sentence above and leave a comment, such as “Make this shorter.” Then use Send to agent to ask your AI to revise it.</p><h2>Keep working here</h2><p>Your AI publishes a new version at this same link and replies to your comment. You can review earlier versions whenever you need them.</p></div></body></html>',
+          html: '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Your first tdoc</title><style>body{background:#fff}</style></head><body><div class="wrap"><h1>Your first tdoc</h1><p>A good project update tells readers what changed, what is next, and where help is needed.</p><h2>Try a change</h2><p>Highlight the sentence above and leave a comment, such as “Make this shorter.” Then copy the instruction on your comment into your AI conversation, or use Send to agent if you connected a background helper.</p><h2>Keep working here</h2><p>Your AI publishes a new version at this same link and replies to your comment. You can review earlier versions whenever you need them.</p></div></body></html>',
           meta: { title: 'Your first tdoc', created_from: 'daemon-practice', access: { visibility: 'private', commenting: 'owner', history_visibility: 'owner' } },
-          version: { prompt: 'Practice commenting and revising with your connected AI' },
+          version: { prompt: 'Practice commenting and revising with your AI' },
         });
         if (!made.ok) return made.response;
         slug = made.slug;
@@ -16708,7 +16713,7 @@ const tdocHandlers = {
         await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({ ...next, daemon_practice_doc: slug }));
       }
       // An explicit choice, scoped to this practice doc. Other docs keep their agent.
-      await touchDocAgent(env, slug, target);
+      if (target) await touchDocAgent(env, slug, target);
       return json({ ok: true, slug, url: `/d/${slug}?step=comment` });
     }
     // Puts the caller's own onboarding record into a named state, so the

@@ -106,6 +106,29 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     assert.equal((await practice()).body.error, 'computer_not_ready');
   });
 
+  await test('manual practice needs no helper and preserves account, privacy and origin boundaries', async () => {
+    const manual = (cookie = other.cookie, headers = origin) => call('/api/onboarding/practice', { method: 'POST', cookie, headers, body: { mode: 'manual' } });
+    const made = await manual();
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    assert.notEqual(made.body.slug, slug);
+    assert.equal((await manual()).body.slug, made.body.slug);
+    const meta = JSON.parse(await env.META.get(`meta:${made.body.slug}`));
+    assert.equal(meta.access.visibility, 'private');
+    const onboarding = (await call('/api/onboarding?daemon=1', { cookie: other.cookie })).body;
+    assert.deepEqual(onboarding.local_agents, []);
+    assert.equal(onboarding.record.daemon_connected, undefined);
+    assert.equal(onboarding.record.first_doc, made.body.slug);
+    assert.equal((await call(`/api/notify/targets?slug=${made.body.slug}`, { cookie: other.cookie })).body.default, null);
+    assert.equal((await manual('', origin)).status, 401);
+    assert.equal((await manual(other.cookie, { Origin: 'https://other.example' })).status, 403);
+    assert.notEqual((await worker.fetch(req(`/d/${made.body.slug}/raw`), env, {})).status, 200);
+    const comment = await call('/api/comments', { method: 'POST', cookie: other.cookie, body: { slug: made.body.slug, version: 1, text: 'Make this shorter.' } });
+    assert.equal(comment.status, 200);
+    const published = await call('/api/upload', { method: 'POST', token: other.token, body: { slug: made.body.slug, version: 2, html: '<h1>A shorter update</h1>' } });
+    assert.equal(published.status, 200);
+    assert.ok((await call('/api/onboarding', { cookie: other.cookie })).body.record.revised);
+  });
+
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-setup-check-'));
   process.env.TDOC_DAEMON_DIR = temp;
   const { setup, readSetup } = require('../bin/lib/daemon-setup');
