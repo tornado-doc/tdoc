@@ -9,8 +9,9 @@ import { NotifyHandoffPanel } from '../../../shell/src/document/notify-handoff.j
 import { HandoffStatusChips } from '../../../shell/src/document/handoff-status-line.jsx';
 import { DocumentSendAgentAction } from '../../../shell/src/document/document-toolbar.jsx';
 import { HandoffDetailsPanel } from '../../../shell/src/document/handoff-details.jsx';
+import { useCommentArea } from '../../../shell/src/document/comment-area.js';
 import { summarizeHandoffSurfaces } from '../../../shell/src/document/handoff-state.js';
-import { isThreadUnread, markThreadSeen, readSeenMap } from '../../../shell/src/document/thread-seen.js';
+import { isThreadUnread } from '../../../shell/src/document/thread-seen.js';
 import { DesktopCommentLayer, MobileCommentDrawer } from '../../../shell/src/document/comment-layer.jsx';
 import { CommentComposer } from '../../../shell/src/document/comment-composer.jsx';
 import { AgentMentionContext } from '../../../shell/src/document/mention-field.jsx';
@@ -78,36 +79,27 @@ function StatusCards() {
 function ActivityDemo() {
   const [open, setOpen] = useState(false);
   const [log, setLog] = useState('');
-  const [seenMap, setSeenMap] = useState(() => readSeenMap('doc'));
   const phone = window.innerWidth < 700;
   if (phone) document.body.classList.add('tdoc-narrow');
   const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)))
     .map((card) => params.has('mixed') && card.id === 'failed' ? { ...card, handoff_resend_allowed: false } : card);
+  const commentArea = useCommentArea({ comments: activityCards, slug: 'doc', handoffViewer: 'julie', isOwner: true });
+  const { seenMap } = commentArea;
   const buckets = summarizeHandoffSurfaces(activityCards);
   const counts = Object.fromEntries(Object.entries(buckets).map(([state, items]) => [state, items.length]));
   const unreadCount = activityCards.filter((card) => isThreadUnread(card, seenMap, 'julie')).length;
   const visibleUnread = params.get('unread') === '0' ? 0 : unreadCount;
   const unread = Number(params.get('badge')) || visibleUnread;
-  const markRead = (comment) => {
-    if (markThreadSeen('doc', comment)) setSeenMap(readSeenMap('doc'));
-  };
-  const markAllRead = () => {
-    let changed = false;
-    for (const comment of activityCards) {
-      if (isThreadUnread(comment, seenMap, 'julie')) changed = markThreadSeen('doc', comment) || changed;
-    }
-    if (changed) setSeenMap(readSeenMap('doc'));
-  };
   return <>
     <div className="tdoc-bar" style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 18, height: 48, padding: '0 16px', background: '#fff', borderBottom: '1px solid #e8e7e3' }}>
       <span>🌪</span><strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>RaftBench pricing plan</strong>
       <span style={{ flex: 1 }} />
       {!phone ? <span style={{ color: '#888' }}>Edited 2m ago</span> : null}
       <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen}>
-        <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} currentUser="julie" onClose={() => setOpen(false)}
+        <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} handoffViewer="julie" onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
           onSendElsewhere={(comment) => { setLog(`elsewhere:${comment.id}`); setOpen(false); }}
-          onMarkRead={markRead} onMarkAllRead={markAllRead} />
+          onMarkRead={commentArea.markRead} onMarkAllRead={commentArea.markAllRead} />
         <button id="activity-refresh" type="button" onClick={() => setLog('refreshed')}>Refresh comments</button>
       </DocumentSendAgentAction>
       {!phone ? <><strong>Share</strong><span>⋯</span><span style={{ color: '#888' }}>Tdoc ▾</span><span style={{ background: '#1652f0', color: '#fff', borderRadius: '50%', width: 26, height: 26, display: 'grid', placeItems: 'center' }}>J</span></> : null}

@@ -28,7 +28,7 @@ function history(comment) {
 }
 
 export function HandoffDetailsPanel({
-  slug, open, onClose, comments, seenMap = {}, currentUser = '', onJump, onRefresh, onToast, onSendReady, onSendElsewhere, onMarkRead, onMarkAllRead,
+  slug, open, onClose, comments, seenMap = {}, handoffViewer = '', onJump, onRefresh, onToast, onSendReady, onSendElsewhere, onMarkRead, onMarkAllRead,
 }) {
   const buckets = useMemo(() => summarizeHandoffSurfaces(comments), [comments]);
   const sentRows = useMemo(() => {
@@ -57,7 +57,7 @@ export function HandoffDetailsPanel({
     wasOpen.current = open;
   }, [open, buckets.ready]);
   const selected = selectedIds.filter((id) => buckets.ready.some((comment) => comment.id === id));
-  const hasUnread = (comments || []).some((comment) => isThreadUnread(comment, seenMap, currentUser));
+  const hasUnread = (comments || []).some((comment) => isThreadUnread(comment, seenMap, handoffViewer));
 
   const resendOne = async (comment) => {
     if (!comment?.handoff_id || busyId) return;
@@ -78,7 +78,7 @@ export function HandoffDetailsPanel({
       {sentRows.length || hasUnread ? <>
         <div className="tdoc-handoff-details-header">
           <h3 className="tdoc-handoff-details-section-title">{sentRows.length ? 'Sent to agent' : 'Agent replies'}</h3>
-          {hasUnread && onMarkAllRead ? <button type="button" className="tdoc-handoff-details-mark-all" onClick={onMarkAllRead}>Mark all as read</button> : null}
+          {hasUnread && onMarkAllRead ? <button type="button" className="tdoc-handoff-details-mark-all" onClick={() => onMarkAllRead()}>Mark all as read</button> : null}
         </div>
         {sentRows.length ? <ul className="tdoc-handoff-details-list">
           {sentRows.map(({ comment, state }) => {
@@ -86,7 +86,7 @@ export function HandoffDetailsPanel({
             const stuck = ['failed', 'stale', 'expired'].includes(waitState);
             const label = state === 'resolved' ? '✅ Done' : compactHandoffText(comment, waitState);
             const pillState = label.startsWith('❓') ? 'question' : label.startsWith('🟡') ? 'partial' : waitState;
-            const unread = isThreadUnread(comment, seenMap, currentUser);
+            const unread = isThreadUnread(comment, seenMap, handoffViewer);
             const expanded = expandedId === comment.id;
             return (
               <li key={comment.id} className="tdoc-handoff-details-row">

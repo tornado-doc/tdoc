@@ -1471,7 +1471,7 @@ export function DocumentShell({ boot, config }) {
                   slug={config.slug}
                   open={handoffDetailsOpen}
                   comments={visibleHandoffComments}
-                  currentUser={handoffViewer}
+                  handoffViewer={handoffViewer}
                   seenMap={seenMap}
                   onClose={() => setHandoffDetailsOpen(false)}
                   onSendReady={openDocNotify}
