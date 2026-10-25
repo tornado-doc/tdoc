@@ -23,7 +23,8 @@
 - [ ] If I added a new component/pattern anyway, the PR explains why: what the existing one
       can't do, what I tried, and screenshots of both.
 - [ ] No new colors, borders or type sizes outside the `--td-*` tokens and existing classes.
-- [ ] Same icons on desktop and phone (phone may hide labels, never swap the icon).
+- [ ] Desktop and phone are one design: same components, icons, colors and wording; phone only
+      adapts size/placement (drawer vs popover, hidden label). Screenshots of both side by side.
 - [ ] Clicked through every changed control at 1440 and at 390/430 (WebKit + Chromium),
       including drawers, keyboard-open and overlap with other floating UI; screenshots attached.
 - [ ] New or uncertain feature is behind a flag in `shell/src/feature-flags.js`.
