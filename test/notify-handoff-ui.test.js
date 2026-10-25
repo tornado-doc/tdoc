@@ -246,12 +246,14 @@ async function t(name, fn) {
       assert.match(await plane.getAttribute('title'), /to send.*waiting for agent.*new agent replies/);
       assert.equal(await page.locator('.tdoc-handoff-banner').count(), 0);
       assert.equal(await plane.locator('.tdoc-send-agent-badge').count(), 1);
-      assert.equal(await plane.locator('.tdoc-send-agent-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(229, 72, 77)');
-      assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '4');
+      assert.equal(await plane.locator('.tdoc-send-agent-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(22, 82, 240)');
+      assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '');
+      assert.match(await plane.getAttribute('aria-label'), /4 new agent replies/);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-desktop.png') });
       await plane.click();
-      const details = page.getByRole('dialog', { name: 'Agent activity' });
+      const details = page.getByRole('dialog', { name: 'Ask AI' });
       await details.waitFor();
+      await details.getByRole('button', { name: /Agent activity/ }).click();
       await details.getByText('❓ Asked you').waitFor();
       assert.equal(await details.locator('.tdoc-handoff-details-preview').filter({ hasText: 'please fix this' }).count() > 0, true);
       await details.getByRole('button', { name: 'Details' }).first().click();
@@ -283,11 +285,13 @@ async function t(name, fn) {
         page.on('pageerror', (e) => errors.push(e.message));
         await page.goto(`${base}/?view=activity`);
         const plane = page.locator('#tdoc-send-agent-btn');
-        assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '4');
+        assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '');
+        assert.match(await plane.getAttribute('aria-label'), /4 new agent replies/);
         if (width === 390) assert.equal(await page.locator('.tdoc-fab-unread-dot').count(), 1);
         else assert.equal(await page.locator('.tdoc-pin-unread-dot').count(), 3);
         await plane.click();
-        const details = page.getByRole('dialog', { name: 'Agent activity' });
+        const details = page.getByRole('dialog', { name: 'Ask AI' });
+        await details.getByRole('button', { name: /Agent activity/ }).click();
         await details.getByRole('button', { name: 'Mark all as read' }).waitFor();
         if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `handoff-read-${width}.png`) });
         const question = details.locator('.tdoc-handoff-details-row').filter({ hasText: 'Should pricing be per seat?' });
@@ -295,7 +299,7 @@ async function t(name, fn) {
         assert.equal(await dot.getAttribute('title'), 'Mark as read');
         await dot.click();
         assert.equal(await question.getByRole('button', { name: 'Mark as read' }).count(), 0);
-        assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '3');
+        assert.match(await plane.getAttribute('aria-label'), /3 new agent replies/);
         if (width === 1440) assert.equal(await page.locator('.tdoc-pin[data-id="question"] .tdoc-pin-unread-dot').count(), 0);
         await details.getByRole('button', { name: 'Mark all as read' }).click();
         assert.equal(await details.getByRole('button', { name: 'Mark all as read' }).count(), 0);
@@ -308,23 +312,27 @@ async function t(name, fn) {
       }
     });
 
-    await t('paper plane count and ready dot share the same anchor on phone and desktop', async () => {
+    await t('Ask AI activity uses one round blue dot without a numeral on phone and desktop', async () => {
       for (const width of [390, 1440]) {
-        for (const [query, label] of [['unread=0', ''], ['badge=1', '1'], ['badge=9', '9'], ['badge=10', '9+']]) {
+        for (const [query, count] of [['unread=0', 0], ['badge=1', 1], ['badge=9', 9], ['badge=10', 10]]) {
           const page = await browser.newPage({ viewport: { width, height: 844 } });
           await page.goto(`${base}/?view=activity&${query}`);
           const geometry = await page.locator('#tdoc-send-agent-btn').evaluate((button) => {
             const outer = button.getBoundingClientRect();
             const badge = button.querySelector('.tdoc-send-agent-badge');
             const inner = badge.getBoundingClientRect();
-            return { label: badge.textContent, x: inner.x + inner.width / 2, y: inner.y + inner.height / 2,
-              expectedX: outer.right - 5, expectedY: outer.top + 5 };
+            return { label: badge.textContent, width: inner.width, height: inner.height,
+              x: inner.x + inner.width / 2, y: inner.y + inner.height / 2,
+              expectedX: outer.right - 4, expectedY: outer.top + 1 };
           });
-          assert.equal(geometry.label, label);
+          assert.equal(geometry.label, '');
+          assert.equal(geometry.width, geometry.height, `badge not round: ${JSON.stringify(geometry)}`);
+          assert.match(await page.locator('#tdoc-send-agent-btn').getAttribute('aria-label'),
+            count ? new RegExp(`${count} new agent repl`) : /^Ask AI/);
           assert.ok(Math.abs(geometry.x - geometry.expectedX) < 1, `${width}px ${query} badge x: ${JSON.stringify(geometry)}`);
           assert.ok(Math.abs(geometry.y - geometry.expectedY) < 1, `${width}px ${query} badge y: ${JSON.stringify(geometry)}`);
           if (SHOTS && (query === 'unread=0' || query === 'badge=10')) {
-            await page.screenshot({ path: path.join(SHOTS, `handoff-badge-${query === 'unread=0' ? 'ready' : '9plus'}-${width}.png`) });
+            await page.locator('.tdoc-bar').screenshot({ path: path.join(SHOTS, `ask-ai-bar-${query === 'unread=0' ? 'ready' : 'unread'}-${width}.png`) });
           }
           await page.close();
         }
@@ -341,7 +349,8 @@ async function t(name, fn) {
       assert.match(await plane.getAttribute('title'), /1 not delivered/);
       assert.equal(await plane.locator('.tdoc-send-agent-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(22, 82, 240)');
       await plane.click();
-      const details = page.getByRole('dialog', { name: 'Agent activity' });
+      const details = page.getByRole('dialog', { name: 'Ask AI' });
+      await details.getByRole('button', { name: /Agent activity/ }).click();
       await details.locator('.tdoc-handoff-details-state.is-failed').waitFor();
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-details-phone.png') });
       const failedRow = details.locator('.tdoc-handoff-details-row').filter({ hasText: 'Add a conclusion to the report' });
@@ -357,6 +366,7 @@ async function t(name, fn) {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
       await page.goto(`${base}/?view=activity&failed=1&mixed=1`);
       await page.locator('#tdoc-send-agent-btn').click();
+      await page.getByRole('dialog', { name: 'Ask AI' }).getByRole('button', { name: /Agent activity/ }).click();
       const row = page.locator('.tdoc-handoff-details-row').filter({ hasText: 'Add a conclusion to the report' });
       await row.waitFor();
       assert.equal(await row.getByRole('button', { name: 'Resend' }).count(), 0);

@@ -10,7 +10,7 @@ import {
   FolderInput,
   History,
   Share2,
-  Send,
+  Sparkles,
   Star,
   Trash2,
   Upload,
@@ -154,7 +154,7 @@ export function DocumentPrimaryAction({
 
 // One document-level entry for handoff activity and unsent comments. The
 // comment card itself carries the state of that one comment.
-export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, children }) {
+export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, narrow = false, children }) {
   const portalContainer = usePortalContainer();
   const ready = counts.ready || 0;
   const waiting = (counts.waiting || 0) + (counts.received || 0);
@@ -165,7 +165,7 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
     unread ? `${unread} new agent ${unread === 1 ? 'reply' : 'replies'}` : null,
     failed ? `${failed} not delivered` : null,
   ].filter(Boolean).join(' · ');
-  const label = `Agent activity${details ? ` · ${details}` : ''}`;
+  const label = `Ask AI${details ? ` · ${details}` : ''}`;
   return <Popover.Root open={open} onOpenChange={onOpenChange}>
     <Popover.Trigger
       id="tdoc-send-agent-btn"
@@ -174,13 +174,16 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
       aria-label={label}
       title={label}
     >
-      <Send size={16} aria-hidden="true" />
-      {unread ? <span className="tdoc-send-agent-badge is-unread" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>
+      <Sparkles className="tdoc-ask-ai-mark" size={18} strokeWidth={2} color="url(#tdoc-ask-ai-gradient)" aria-hidden="true">
+        <defs><linearGradient id="tdoc-ask-ai-gradient" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#4f8cff" /><stop offset=".55" stopColor="#9b6bff" /><stop offset="1" stopColor="#ff7aa8" /></linearGradient></defs>
+      </Sparkles>
+      <span className="tdoc-ask-ai-label">Ask AI</span>
+      {unread ? <span className="tdoc-send-agent-badge is-unread" aria-hidden="true" />
         : ready ? <span className="tdoc-send-agent-badge is-ready" aria-hidden="true" /> : null}
     </Popover.Trigger>
     <Popover.Portal container={portalContainer}>
-      <Popover.Positioner side="bottom" align="end" sideOffset={8} collisionPadding={8} positionMethod="fixed" className="tdoc-picker-positioner">
-        <Popover.Popup className="tdoc-handoff-popover" aria-label="Agent activity">
+      <Popover.Positioner side="bottom" align="end" sideOffset={narrow ? 8 : 48} collisionPadding={8} positionMethod="fixed" className="tdoc-picker-positioner">
+        <Popover.Popup className="tdoc-handoff-popover" aria-label="Ask AI">
           {children}
         </Popover.Popup>
       </Popover.Positioner>

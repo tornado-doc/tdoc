@@ -28,7 +28,7 @@ function history(comment) {
 }
 
 export function HandoffDetailsPanel({
-  slug, open, onClose, comments, seenMap = {}, handoffViewer = '', onJump, onRefresh, onToast, onSendReady, onSendElsewhere, onMarkRead, onMarkAllRead,
+  slug, open, onClose, comments, seenMap = {}, handoffViewer = '', showReady = true, onJump, onRefresh, onToast, onSendReady, onSendElsewhere, onMarkRead, onMarkAllRead, onReply, onViewChanges,
 }) {
   const buckets = useMemo(() => summarizeHandoffSurfaces(comments), [comments]);
   const sentRows = useMemo(() => {
@@ -43,6 +43,8 @@ export function HandoffDetailsPanel({
   }, [buckets, comments]);
   const [busyId, setBusyId] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [replyDrafts, setReplyDrafts] = useState({});
+  const [replyBusy, setReplyBusy] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [now, setNow] = useState(() => Date.now());
   const wasOpen = useRef(false);
@@ -115,16 +117,30 @@ export function HandoffDetailsPanel({
                       {history(comment).map(([event, at], index) => <div key={`${event}-${index}`}>{event}{eventTime(at) ? ` · ${eventTime(at)}` : ''}</div>)}
                       {latestAgentReply(comment)?.text ? <div>{shortCommentPreview(latestAgentReply(comment).text)}</div> : null}
                       {comment.handoff_delivery?.status === 'failed' ? <div>Delivery failed: {deliveryErrorText(comment.handoff_delivery.error) || 'Unknown reason'}</div> : null}
-                      {stuck && onSendElsewhere ? <button type="button" className="tdoc-handoff-details-elsewhere" onClick={() => onSendElsewhere(comment)}>Send to another agent</button> : null}
+                        {stuck && onSendElsewhere ? <button type="button" className="tdoc-handoff-details-elsewhere" onClick={() => onSendElsewhere(comment)}>Send to another agent</button> : null}
+                        {state === 'resolved' && comment.applied_in && onViewChanges ? <button type="button" className="tdoc-handoff-details-elsewhere" onClick={onViewChanges}>Updated to v{comment.applied_in} · View changes</button> : null}
                     </div>
                   ) : null}
+                  {pillState === 'question' && onReply ? <form className="tdoc-handoff-details-reply-form" onSubmit={async (event) => {
+                      event.preventDefault();
+                      const text = String(replyDrafts[comment.id] || '').trim();
+                      if (!text || replyBusy) return;
+                      setReplyBusy(comment.id);
+                      try {
+                        if (await onReply(comment, text)) setReplyDrafts((drafts) => ({ ...drafts, [comment.id]: '' }));
+                      } finally { setReplyBusy(null); }
+                    }}>
+                      <input aria-label={`Reply to agent about ${shortCommentPreview(comment.text)}`} placeholder="Answer your agent…"
+                        value={replyDrafts[comment.id] || ''} onChange={(event) => setReplyDrafts((drafts) => ({ ...drafts, [comment.id]: event.target.value }))} />
+                      <button type="submit" disabled={!String(replyDrafts[comment.id] || '').trim() || Boolean(replyBusy)}>{replyBusy === comment.id ? 'Sending…' : 'Reply'}</button>
+                  </form> : null}
                 </div>
               </li>
             );
           })}
         </ul> : null}
       </> : null}
-      {buckets.ready.length ? <section className="tdoc-handoff-ready">
+      {showReady && buckets.ready.length ? <section className="tdoc-handoff-ready">
         <h3>Ready to send</h3>
         {buckets.ready.map((comment) => <label key={comment.id} className="tdoc-handoff-ready-row">
           <input type="checkbox" checked={selected.includes(comment.id)} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...ids, comment.id] : ids.filter((id) => id !== comment.id))} />
@@ -136,7 +152,7 @@ export function HandoffDetailsPanel({
           </button>
         ) : null}
       </section> : null}
-      {!sentRows.length && !buckets.ready.length && !hasUnread ? <p className="manage-hint">No agent activity yet.</p> : null}
+      {!sentRows.length && !(showReady && buckets.ready.length) && !hasUnread ? <p className="manage-hint">No agent activity yet.</p> : null}
     </div>
   );
 }
