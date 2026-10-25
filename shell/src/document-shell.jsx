@@ -1446,7 +1446,6 @@ export function DocumentShell({ boot, config }) {
         identity={config.identity}
         space={config.teamManage?.team?.id || ''}
         currentTeam={config.teamManage?.team || null}
-        spaceSwitcher={false}
         theme={supportsTheme ? theme : 'light'}
         supportsTheme={supportsTheme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
