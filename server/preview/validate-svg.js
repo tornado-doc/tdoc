@@ -14,7 +14,8 @@ function previewNormalizeSvg(input) {
     || !/(?:^|\s)width\s*=\s*["']1200["']/.test(root[1]) || !/(?:^|\s)height\s*=\s*["']630["']/.test(root[1])) {
     return { error: 'invalid_preview_dimensions' };
   }
-  if (!/<\/svg\s*>\s*$/.test(svg) || /<\s*[!?]/.test(svg) || /\b(?:on[a-z]+|href|filter|mask|opacity|stroke-dasharray)\s*=/i.test(svg)) {
+  if (!/<\/svg\s*>\s*$/.test(svg) || /<\s*[!?]/.test(svg)
+    || /(?:^|[\s<])(?:on[a-z]+|href|filter|mask|opacity|stroke-dasharray)\s*=|\bxlink:href\s*=/i.test(svg)) {
     return { error: 'unsafe_preview_svg' };
   }
   // No external resources, scriptable CSS or custom entities. Local paint
@@ -29,6 +30,37 @@ function previewNormalizeSvg(input) {
   if (!tags.length || tags.length > 500 || tags.some((match) => !allowed.has(match[1]))) {
     return { error: 'unsafe_preview_svg' };
   }
+  const paintTags = new Set(['rect', 'circle', 'ellipse', 'line', 'path', 'polygon', 'polyline', 'text', 'tspan']);
+  let paintCount = 0;
+  let paintedRectArea = 0;
+  let geometryLength = 0;
+  const numericAttribute = (tag, name, fullScale = 1) => {
+    const raw = tag.match(new RegExp(`\\s${name}\\s*=\\s*(["'])(.*?)\\1`, 'i'));
+    if (!raw) return null;
+    const value = raw[2].trim();
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?%?$/i.test(value)) return NaN;
+    return value.endsWith('%') ? Number(value.slice(0, -1)) * fullScale / 100 : Number(value);
+  };
+  for (const match of tags) {
+    if (match[0].startsWith('</')) continue;
+    if (paintTags.has(match[1])) paintCount += 1;
+    const geometry = match[0].match(/\s(?:d|points)\s*=\s*(["'])(.*?)\1/s);
+    if (geometry) geometryLength += geometry[2].length;
+    const strokeWidth = numericAttribute(match[0], 'stroke-width');
+    if (strokeWidth !== null && (!Number.isFinite(strokeWidth) || strokeWidth > 64)) return { error: 'unsafe_preview_svg' };
+    if (/\bspreadMethod\s*=\s*["'](?:reflect|repeat)["']/i.test(match[0])) return { error: 'unsafe_preview_svg' };
+    if (match[1] === 'radialGradient') {
+      const radius = numericAttribute(match[0], 'r', 1);
+      if (radius !== null && (!Number.isFinite(radius) || radius < 0.1)) return { error: 'unsafe_preview_svg' };
+    }
+    if (match[1] === 'rect') {
+      const width = numericAttribute(match[0], 'width', 1200);
+      const height = numericAttribute(match[0], 'height', 630);
+      if ((width !== null && !Number.isFinite(width)) || (height !== null && !Number.isFinite(height))) return { error: 'unsafe_preview_svg' };
+      paintedRectArea += (width == null ? 1200 : width) * (height == null ? 630 : height);
+    }
+  }
+  if (paintCount > 96 || paintedRectArea > 1200 * 630 * 10 || geometryLength > 20000) return { error: 'unsafe_preview_svg' };
   const stack = [];
   let cursor = 0;
   let textLength = 0;
@@ -48,14 +80,17 @@ function previewNormalizeSvg(input) {
     return { error: 'unsafe_preview_svg' };
   }
   const ids = new Set([...svg.matchAll(/\bid\s*=\s*(["'])([A-Za-z][\w.-]*)\1/g)].map((match) => match[2]));
+  let paintRefs = 0;
   for (const match of svg.matchAll(/url\s*\(\s*([^)]*)\)/gi)) {
+    paintRefs += 1;
     const local = match[1].trim().match(/^#([A-Za-z][\w.-]*)$/);
     if (!local || !ids.has(local[1])) return { error: 'unsafe_preview_svg' };
   }
+  if (paintRefs > 16) return { error: 'unsafe_preview_svg' };
   // The renderer should never see a URI or costly effects hidden inside CSS.
   if (/\bstyle\s*=\s*(["'])(.*?)\1/gs.test(svg)) {
     for (const [, , style] of svg.matchAll(/\bstyle\s*=\s*(["'])(.*?)\1/gs)) {
-      if (/(?:filter|mask|opacity|stroke-dasharray|animation|import|background|content)\s*:/i.test(style)) return { error: 'unsafe_preview_svg' };
+      if (/(?:^|[;\s])(?:filter|mask|opacity|stroke-width|stroke-dasharray|animation|import|background|content)\s*:/i.test(style)) return { error: 'unsafe_preview_svg' };
     }
   }
   return { svg };

@@ -340,6 +340,37 @@ require_wrangler() {
       "Install Cloudflare wrangler globally so tdoc can publish: run 'npm i -g wrangler' (or 'pnpm add -g wrangler'). After it's installed, run '/tdoc publish --platform cloudflare $SLUG' again."
   fi
 }
+ensure_preview_queue_config() {
+  local cfg="$WORKER_DIR/wrangler.toml"
+  [ -f "$cfg" ] || return 0
+  if (cd "$WORKER_DIR" &&
+      { wrangler queues create tdoc-previews >/dev/null 2>&1 || wrangler queues info tdoc-previews >/dev/null 2>&1; } &&
+      { wrangler queues create tdoc-previews-dlq >/dev/null 2>&1 || wrangler queues info tdoc-previews-dlq >/dev/null 2>&1; }); then
+    if ! grep -q '^binding = "PREVIEW_QUEUE"' "$cfg"; then
+      cat >> "$cfg" <<'TDOC_PREVIEW_QUEUE'
+
+# BEGIN PREVIEW_QUEUE
+[[queues.producers]]
+binding = "PREVIEW_QUEUE"
+queue = "tdoc-previews"
+
+[[queues.consumers]]
+queue = "tdoc-previews"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 2
+dead_letter_queue = "tdoc-previews-dlq"
+# END PREVIEW_QUEUE
+TDOC_PREVIEW_QUEUE
+    fi
+  elif grep -q '^# BEGIN PREVIEW_QUEUE$' "$cfg"; then
+    # A free or restricted Cloudflare account may not have Queues. Keep
+    # publishing available; the Worker serves its static logo as the card.
+    awk '/^# BEGIN PREVIEW_QUEUE$/ {skip=1; next} /^# END PREVIEW_QUEUE$/ {skip=0; next} !skip {print}' "$cfg" > "$cfg.tmp" \
+      && mv "$cfg.tmp" "$cfg"
+    echo '[tdoc] preview queue unavailable; publish continues with the logo card' >&2
+  fi
+}
 require_vercel() {
   if ! command -v vercel >/dev/null 2>&1; then
     fail_with_agent_prompt "the vercel CLI is not installed" \
@@ -1195,6 +1226,7 @@ first_time_setup() {
     -e "s/PLACEHOLDER_KV_ID/${kv_id}/g" \
     -e "s/PLACEHOLDER_OWNER/${owner_login}/g" \
     "$WORKER_DIR/wrangler.toml.template" > "$WORKER_DIR/wrangler.toml"
+  ensure_preview_queue_config
 
   # 7. bundle + deploy
   SKILL_DIR="$SKILL_DIR" bundle_worker
@@ -1546,6 +1578,7 @@ globs = ["**/*.ttf"]
 fallthrough = true
 TDOCRULES
       fi
+      ensure_preview_queue_config
       SKILL_DIR="$SKILL_DIR" bundle_worker
       (cd "$WORKER_DIR" && wrangler deploy)
       jq --arg sha "$DESIRED_BUNDLE_SHA" '.worker_bundle_sha256 = $sha' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" \

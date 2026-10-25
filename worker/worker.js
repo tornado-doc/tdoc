@@ -944,7 +944,13 @@ async function loadDocRecord(env, slug) {
 
 async function loadDocMeta(env, slug) {
   const meta = await loadDocRecord(env, slug);
-  return meta && !isTrashedMeta(meta) ? meta : null;
+  if (!meta || isTrashedMeta(meta)) return null;
+  const card = meta.preview;
+  if (card && card.image_source_custom && previewCardMatches(card, slug, card.image_v) && env.META) {
+    const status = await env.META.get(previewCardStatusKey(slug, card.image_v, card.image_hash));
+    return { ...meta, preview: { ...card, image_custom: status === 'ready:custom' } };
+  }
+  return meta;
 }
 
 // ─────────────────────────────── Trash ───────────────────────────────
@@ -9064,6 +9070,12 @@ function previewCardUrl(slug, version, hash) {
 function previewCardKey(slug, version, hash) {
   return `docs/${slug}/v${Number(version)}/preview-${hash}.png`;
 }
+function previewCardSourceKey(slug, version, hash) {
+  return `docs/${slug}/v${Number(version)}/preview-${hash}.svg`;
+}
+function previewCardStatusKey(slug, version, hash) {
+  return `preview-status:${slug}:v${Number(version)}:${hash}`;
+}
 function previewCardMatches(preview, slug, version) {
   return preview && Number(preview.image_v) === Number(version)
     && /^[a-f0-9]{12}$/.test(preview.image_hash || '')
@@ -9132,67 +9144,126 @@ async function renderPreviewPng(svg) {
 async function buildDocPreview(env, html, { slug, version, title, svg = null, onRenderTask = null, existingPreview = null } = {}) {
   const preview = docPreviewFromHtml(html, { slug, version, title });
   // The unbundled source is used by in-process tests; only the deploy bundle
-  // carries the renderer. This path is also a safe fallback for a bad build.
+  // carries the renderer. A missing renderer must never block publishing.
   if (!PREVIEW_RENDERER || typeof PREVIEW_RENDERER !== 'object') {
     preview.image = '/tdoc_logo-v2.png';
     return preview;
   }
-  const oldVersion = Number(existingPreview && existingPreview.image_v);
-  if (svg == null && existingPreview && existingPreview.image_custom && previewCardMatches(existingPreview, slug, oldVersion)) {
-    const hash = existingPreview.image_hash;
-    if (oldVersion === Number(version)) {
-      return { ...preview, image: existingPreview.image, image_v: Number(version), image_hash: hash, image_custom: true };
-    }
-    if (oldVersion < Number(version) && await env.DOCS.head(previewCardKey(slug, oldVersion, hash))) {
-      const copyCard = async () => {
-        try {
-          const old = await env.DOCS.get(previewCardKey(slug, oldVersion, hash));
-          if (!old) return;
-          await env.DOCS.put(previewCardKey(slug, version, hash), new Uint8Array(await old.arrayBuffer()), { httpMetadata: { contentType: 'image/png' } });
-        } catch (error) { console.error('[preview-card] carrying authored card failed:', slug, error && error.message || String(error)); }
-      };
-      if (onRenderTask) onRenderTask(copyCard);
-      else await copyCard();
-      return { ...preview, image: previewCardUrl(slug, version, hash), image_v: Number(version), image_hash: hash, image_custom: true };
-    }
-  }
-  const checked = svg == null ? null : previewNormalizeSvg(svg);
-  if (checked && checked.error) console.warn('[preview-card] rejected authored SVG; using automatic card:', slug, checked.error);
-  const card = checked && !checked.error ? checked.svg : defaultPreviewSvg(title, preview.excerpt || preview.description);
-  const automatic = defaultPreviewSvg(title, preview.excerpt || preview.description);
   try {
+    const oldVersion = Number(existingPreview && existingPreview.image_v);
+    let authored = null;
+    let carryExisting = svg == null && existingPreview
+      && (existingPreview.image_source_custom || existingPreview.image_custom)
+      && previewCardMatches(existingPreview, slug, oldVersion);
+    if (carryExisting && existingPreview.image_source_custom && env.META) {
+      const oldStatus = await env.META.get(previewCardStatusKey(slug, oldVersion, existingPreview.image_hash));
+      if (oldStatus === 'failed' || oldStatus === 'ready:auto'
+        || (!oldStatus && !await env.DOCS.head(previewCardKey(slug, oldVersion, existingPreview.image_hash)))) {
+        carryExisting = false;
+      }
+    }
+    if (svg != null) {
+      const checked = previewNormalizeSvg(svg);
+      if (checked.error) console.warn('[preview-card] rejected authored SVG; using automatic card:', slug, checked.error);
+      else authored = checked.svg;
+    } else if (carryExisting) {
+      if (oldVersion === Number(version)) return {
+        ...preview,
+        image: existingPreview.image, image_v: Number(version), image_hash: existingPreview.image_hash,
+        image_source_custom: !!(existingPreview.image_source_custom || existingPreview.image_custom),
+        image_custom: !!existingPreview.image_custom,
+      };
+      if (oldVersion < Number(version)) {
+        const oldSource = await env.DOCS.get(previewCardSourceKey(slug, oldVersion, existingPreview.image_hash));
+        if (oldSource) {
+          const checked = previewNormalizeSvg(await oldSource.text());
+          if (!checked.error) authored = checked.svg;
+        } else {
+          // Cards created before SVG sources were retained can still be carried.
+          const oldPng = await env.DOCS.get(previewCardKey(slug, oldVersion, existingPreview.image_hash));
+          if (oldPng) {
+            const hash = existingPreview.image_hash;
+            await env.DOCS.put(previewCardKey(slug, version, hash), new Uint8Array(await oldPng.arrayBuffer()), { httpMetadata: { contentType: 'image/png' } });
+            return { ...preview, image: previewCardUrl(slug, version, hash), image_v: Number(version), image_hash: hash, image_custom: true };
+          }
+        }
+      }
+    }
+    const automatic = defaultPreviewSvg(title, preview.excerpt || preview.description);
+    const card = authored || automatic;
     const reason = validatePreviewSvg(card);
     if (reason) throw new Error(reason);
     const hash = await previewCardHash(card);
-    const writeCard = async () => {
-      const failureKey = `preview-failed:${slug}:v${Number(version)}:${hash}`;
+    const imageKey = previewCardKey(slug, version, hash);
+    const sourceKey = previewCardSourceKey(slug, version, hash);
+    const statusKey = previewCardStatusKey(slug, version, hash);
+    const imageExists = !!await env.DOCS.head(imageKey);
+    const oldStatus = env.META ? await env.META.get(statusKey) : null;
+    // Store the source before META commits. A browser edit can advance the
+    // version while this card is still queued; it must be able to carry SVG.
+    if (!await env.DOCS.head(sourceKey)) {
+      await env.DOCS.put(sourceKey, card, { httpMetadata: { contentType: 'image/svg+xml' } });
+    }
+    if (!imageExists && oldStatus !== 'pending' && oldStatus !== 'failed' && env.META) {
+      await env.META.put(statusKey, 'pending', { expirationTtl: 300 });
+    }
+    const enqueueCard = async () => {
+      if (imageExists || oldStatus === 'pending' || oldStatus === 'failed') return;
       try {
-        if (env.META && await env.META.get(failureKey)) return false;
-        let bytes;
-        try { bytes = await renderPreviewPng(card); }
-        catch (error) {
-          console.error('[preview-card] authored render failed; using automatic card:', slug, version, error && error.message || String(error));
-          bytes = await renderPreviewPng(automatic);
-        }
-        await env.DOCS.put(previewCardKey(slug, version, hash), bytes, { httpMetadata: { contentType: 'image/png' } });
-        return true;
+        if (!env.PREVIEW_QUEUE) throw new Error('preview_queue_unavailable');
+        await env.PREVIEW_QUEUE.send({ v: 1, kind: 'preview', slug, version: Number(version), hash, custom: !!authored, automatic });
       } catch (error) {
-        console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
-        try { if (env.META) await env.META.put(failureKey, '1', { expirationTtl: 60 * 60 }); } catch { /* image failure is already logged */ }
-        return false;
+        console.error('[preview-card] enqueue failed:', slug, version, error && error.message || String(error));
+        try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
       }
     };
-    if (onRenderTask) onRenderTask(writeCard);
-    else if (!await writeCard()) { preview.image = '/tdoc_logo-v2.png'; return preview; }
+    if (onRenderTask) onRenderTask(enqueueCard);
+    else await enqueueCard();
     preview.image = previewCardUrl(slug, version, hash);
     preview.image_v = Number(version);
     preview.image_hash = hash;
-    preview.image_custom = !!(checked && !checked.error);
+    preview.image_source_custom = !!authored;
+    preview.image_custom = !!(authored && imageExists && oldStatus === 'ready:custom');
   } catch (error) {
     console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
     preview.image = '/tdoc_logo-v2.png';
   }
   return preview;
+}
+
+async function processPreviewCardJob(env, job) {
+  const { slug, version, hash } = job || {};
+  if (!isValidSlug(slug) || !Number.isInteger(version) || version < 1 || !/^[a-f0-9]{12}$/.test(hash || '')) return;
+  const statusKey = previewCardStatusKey(slug, version, hash);
+  try {
+    if (await env.DOCS.head(previewCardKey(slug, version, hash))) {
+      if (env.META && await env.META.get(statusKey) === 'pending') {
+        await env.META.put(statusKey, job.custom ? 'ready:custom' : 'ready:auto');
+      }
+      return;
+    }
+    const source = await env.DOCS.get(previewCardSourceKey(slug, version, hash));
+    if (!source) throw new Error('preview_source_missing');
+    const checked = previewNormalizeSvg(await source.text());
+    if (checked.error || await previewCardHash(checked.svg) !== hash) throw new Error('preview_source_invalid');
+    let bytes;
+    let custom = !!job.custom;
+    try { bytes = await renderPreviewPng(checked.svg); }
+    catch (error) {
+      if (!custom) throw error;
+      console.error('[preview-card] authored render failed; using automatic card:', slug, version, error && error.message || String(error));
+      const fallback = previewNormalizeSvg(job.automatic);
+      if (fallback.error) throw new Error('preview_fallback_invalid');
+      bytes = await renderPreviewPng(fallback.svg);
+      custom = false;
+    }
+    await env.DOCS.put(previewCardKey(slug, version, hash), bytes, { httpMetadata: { contentType: 'image/png' } });
+    if (env.META) await env.META.put(statusKey, custom ? 'ready:custom' : 'ready:auto');
+  } catch (error) {
+    console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
+    try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
+    throw error;
+  }
 }
 
 async function refreshDocPreview(env, slug, meta) {
@@ -12715,6 +12786,7 @@ export class CommentsStore {
         ...(op.actorLogin ? { author: op.actorLogin } : {}),
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
+      let pendingPreviewTask = null;
       await putDocMetaJson(this.env, slug, JSON.stringify({
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
@@ -12723,8 +12795,11 @@ export class CommentsStore {
           slug,
           version: reservation.next,
           title: nextTitle || meta.title || slug,
+          existingPreview: meta.preview,
+          onRenderTask: (task) => { pendingPreviewTask = task; },
         }),
       }));
+      if (pendingPreviewTask) await pendingPreviewTask();
       committed = true;
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
       // reporting a failed save after META committed would make the browser
@@ -14870,8 +14945,8 @@ const tdocHandlers = {
         const currentCard = version === latest && previewCardMatches(gate.meta && gate.meta.preview, slug, version)
           && gate.meta.preview.image_hash === hash;
         if (!currentCard) return text('not found', { status: 404 });
-        const failed = env.META && await env.META.get(`preview-failed:${slug}:v${version}:${hash}`);
-        if (!failed) return text('preview pending', { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '2' } });
+        const status = env.META && await env.META.get(previewCardStatusKey(slug, version, hash));
+        if (status === 'pending') return text('preview pending', { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '2' } });
       }
       const bytes = obj ? await obj.arrayBuffer() : previewDecodeBase64(TDOC_LOGO_PNG_B64);
       return new Response(method === 'HEAD' ? null : bytes, {
@@ -19612,11 +19687,16 @@ const tdocHandlers = {
     for (const message of batch.messages || []) {
       const job = message && message.body;
       try {
+        if (job && job.kind === 'preview') {
+          await processPreviewCardJob(env, job);
+          if (typeof message.ack === 'function') message.ack();
+          continue;
+        }
         await teamBackupJob(env, job);
         if (typeof message.ack === 'function') message.ack();
       } catch (error) {
-        console.error('[team-backup] sync failed:', error && error.message ? error.message : String(error));
-        if (job && validTeamId(job.team)) {
+        console.error(job && job.kind === 'preview' ? '[preview-card] queued job failed:' : '[team-backup] sync failed:', error && error.message ? error.message : String(error));
+        if (job && job.kind !== 'preview' && validTeamId(job.team)) {
           try {
             await saveTeamBackupStatus(env, job.team, {
               state: 'error', last_error: String((error && error.message) || error).slice(0, 240),

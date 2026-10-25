@@ -47,6 +47,21 @@ max_batch_timeout = 5
 max_retries = 10
 dead_letter_queue = "tdoc-backups-dlq"
 
+# Preview rendering runs outside the upload request so complex SVG cannot
+# consume publish CPU. The Worker also consumes this queue.
+# BEGIN PREVIEW_QUEUE
+[[queues.producers]]
+binding = "PREVIEW_QUEUE"
+queue = "tdoc-previews"
+
+[[queues.consumers]]
+queue = "tdoc-previews"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 2
+dead_letter_queue = "tdoc-previews-dlq"
+# END PREVIEW_QUEUE
+
 # Invitation emails need ONE of two delivery plugs, and BOTH are optional —
 # with neither, the worker sends nothing and invitations stay in-app only:
 #   - Secret: RESEND_API_KEY (`wrangler secret put RESEND_API_KEY`) sends

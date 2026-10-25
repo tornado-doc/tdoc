@@ -6,9 +6,18 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   const worker = await loadWorker({ previewRenderer: true });
   const env = makeEnv(worker.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-test-token' });
   const pending = [];
+  const queued = [];
+  env.PREVIEW_QUEUE = { async send(job) { queued.push(job); } };
+  const drain = async () => {
+    await Promise.all(pending.splice(0));
+    while (queued.length) {
+      const job = queued.shift();
+      await worker.default.queue({ messages: [{ body: job, ack() {}, retry() {} }] }, env);
+    }
+  };
   const call = async (path, opts = {}) => {
     const response = await worker.default.fetch(req(path, opts), env, { waitUntil(task) { pending.push(task); } });
-    await Promise.all(pending.splice(0));
+    await drain();
     return response;
   };
   const cardUrl = async (slug) => JSON.parse(await env.META.get(`meta:${slug}`)).preview.image;
@@ -59,7 +68,7 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   assert.equal(nextWithoutSvg.status, 200, await nextWithoutSvg.text());
   const carriedUrl = await cardUrl('preview-test');
   assert.match(carriedUrl, /\/preview\/v3-[a-f0-9]{12}\.png$/);
-  assert.equal(JSON.parse(await env.META.get('meta:preview-test')).preview.image_custom, true);
+  assert.equal(await env.META.get(`preview-status:preview-test:v3:${carriedUrl.match(/-([a-f0-9]{12})\.png$/)[1]}`), 'ready:custom');
   assert.ok(png(Buffer.from(await (await call(carriedUrl)).arrayBuffer())));
 
   for (const [slug, title, filename] of [
@@ -92,44 +101,74 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   const gradient = '\uFEFF<?xml version="1.0"?><!-- authored --><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="630"><defs><linearGradient id="ink"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect width="1200" height="630" style="fill:url(#ink)"/></svg>';
   assert.equal(previewNormalizeSvg(gradient).error, undefined, 'CLI and Worker accept safe local gradients and XML prelude');
   assert.equal(previewNormalizeSvg(gradient.replace('url(#ink)', 'url(https://example.com/a)')).error, 'unsafe_preview_svg');
+  assert.equal(previewNormalizeSvg(gradient.replace('fill:url(#ink)', 'fill-opacity:.5;fill:url(#ink)')).error, undefined);
   assert.equal(previewNormalizeSvg(gradient.replace('<defs>', '<!-- inside drawing --><defs>')).error, 'unsafe_preview_svg');
   assert.equal(previewNormalizeSvg(gradient.replace('<defs>', '<!-- split --><script></script><defs>')).error, 'unsafe_preview_svg');
+  const costlyGradient = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><defs><radialGradient id="g" r="0.01" spreadMethod="reflect"><stop offset="0" stop-color="#fff"/></radialGradient></defs>' + '<rect width="1200" height="630" fill="url(#g)" stroke-width="2000"/>'.repeat(90) + '</svg>';
+  assert.equal(previewNormalizeSvg(costlyGradient).error, 'unsafe_preview_svg', 'full-canvas gradient/stroke work is bounded');
+  assert.equal(previewNormalizeSvg(gradient.replace('style="fill:url(#ink)"', 'style="stroke-width:2000;fill:url(#ink)"')).error, 'unsafe_preview_svg');
+  assert.equal(previewNormalizeSvg(gradient.replace('width="1200" height="630" style=', 'width="1e9" height="630" style=')).error, 'unsafe_preview_svg');
+  assert.equal(previewNormalizeSvg(costlyGradient.replace('r="0.01" spreadMethod="reflect"', 'r=".01"')).error, 'unsafe_preview_svg');
   const owner = await issue(worker.default, env, 'preview-owner');
   const stranger = await issue(worker.default, env, 'preview-stranger');
-  assert.equal((await call('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'owned-card', version: 1, html: doc('Owned'), meta: meta('Owned', 'public', 1) } })).status, 200);
+  assert.equal((await call('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'owned-card', version: 1, html: doc('Owned'), meta: meta('Owned', 'public', 1), preview_svg: authored } })).status, 200);
+  const saved = await call('/api/doc/versions', { method: 'POST', cookie: owner.cookie, body: { slug: 'owned-card', baseVersion: 1, html: doc('Owned and edited') } });
+  assert.equal(saved.status, 200, await saved.text());
+  assert.match(await cardUrl('owned-card'), /\/preview\/v2-[a-f0-9]{12}\.png$/, 'browser edits keep the authored card');
+  assert.ok(png(Buffer.from(await (await call(await cardUrl('owned-card'))).arrayBuffer())));
+  const raceUpload = await worker.default.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'race-card', version: 1, html: doc('Queued original'), meta: meta('Queued original', 'public', 1), preview_svg: authored } }), env, { waitUntil(task) { pending.push(task); } });
+  assert.equal(raceUpload.status, 200);
+  await Promise.all(pending.splice(0));
+  const raceSave = await worker.default.fetch(req('/api/doc/versions', { method: 'POST', cookie: owner.cookie, body: { slug: 'race-card', baseVersion: 1, html: doc('Edited before original render') } }), env, {});
+  assert.equal(raceSave.status, 200, await raceSave.text());
+  const raceUrl = await cardUrl('race-card');
+  assert.match(raceUrl, /\/preview\/v2-[a-f0-9]{12}\.png$/);
+  assert.equal(queued.length, 2, 'both versions are independently queued');
+  queued.reverse();
+  await drain();
+  assert.ok(png(Buffer.from(await (await call(raceUrl)).arrayBuffer())), 'new version keeps the card even when old render finishes last');
   const deniedUpload = await call('/api/upload', { method: 'POST', token: stranger.token, body: { slug: 'owned-card', version: 2, html: doc('Stolen'), meta: meta('Stolen', 'public', 2), preview_svg: expensive } });
   assert.equal(deniedUpload.status, 403, 'write access is checked before preview validation or rendering');
   const originalPut = env.DOCS.put.bind(env.DOCS);
   let failedRenders = 0;
   env.DOCS.put = async (key, value, options) => {
-    if (key.startsWith('docs/failure-card/') && key.includes('/preview-')) { failedRenders++; throw new Error('simulated preview store failure'); }
+    if (key.startsWith('docs/failure-card/') && key.endsWith('.png')) { failedRenders++; throw new Error('simulated preview store failure'); }
     return originalPut(key, value, options);
   };
   try {
-    const failedCardBody = { slug: 'failure-card', version: 1, html: doc('Failure cache'), meta: meta('Failure cache', 'public', 1) };
+    const failedCardBody = { slug: 'failure-card', version: 1, html: doc('Failure cache'), meta: meta('Failure cache', 'public', 1), preview_svg: authored };
     assert.equal((await call('/api/upload', { method: 'POST', token: 'admin-test-token', body: failedCardBody })).status, 200);
     assert.equal((await call('/api/upload', { method: 'POST', token: 'admin-test-token', body: { ...failedCardBody, replace: true } })).status, 200);
     assert.equal(failedRenders, 1, 'a failed render is negatively cached for repeat uploads');
     assert.equal((await call(await cardUrl('failure-card'))).status, 200, 'missing card reads fall back to the logo');
+    const failedMeta = JSON.parse(await env.META.get('meta:failure-card'));
+    assert.equal(failedMeta.preview.image_custom, false, 'a failed authored render is never marked custom');
   } finally { env.DOCS.put = originalPut; }
-  let releasePendingCard;
-  const holdCard = new Promise((resolve) => { releasePendingCard = resolve; });
-  let pendingRender;
-  env.DOCS.put = async (key, value, options) => {
-    if (key.startsWith('docs/pending-card/') && key.includes('/preview-')) await holdCard;
-    return originalPut(key, value, options);
-  };
+  const uploaded = await worker.default.fetch(req('/api/upload', { method: 'POST', token: 'admin-test-token', body: { slug: 'pending-card', version: 1, html: doc('Pending card'), meta: meta('Pending card', 'public', 1) } }), env, { waitUntil(task) { pending.push(task); } });
+  assert.equal(uploaded.status, 200);
+  await Promise.all(pending.splice(0));
+  assert.equal(queued.length, 1, 'upload only enqueues rendering after the metadata commit');
+  const pendingImage = await worker.default.fetch(req(await cardUrl('pending-card')), env);
+  assert.equal(pendingImage.status, 503, 'a crawler should retry while the queue job is pending');
+  assert.equal(pendingImage.headers.get('Retry-After'), '2');
+  const pendingHash = (await cardUrl('pending-card')).match(/-([a-f0-9]{12})\.png$/)[1];
+  const pendingStatusKey = `preview-status:pending-card:v1:${pendingHash}`;
+  await env.META.delete(pendingStatusKey);
+  assert.equal((await worker.default.fetch(req(await cardUrl('pending-card')), env)).status, 200,
+    'an expired pending marker falls back to a PNG instead of a permanent 503');
+  await env.META.put(pendingStatusKey, 'pending', { expirationTtl: 300 });
+  await drain();
+  assert.ok(png(Buffer.from(await (await call(await cardUrl('pending-card'))).arrayBuffer())));
+
+  const previewQueue = env.PREVIEW_QUEUE;
+  delete env.PREVIEW_QUEUE;
   try {
-    const uploaded = await worker.default.fetch(req('/api/upload', { method: 'POST', token: 'admin-test-token', body: { slug: 'pending-card', version: 1, html: doc('Pending card'), meta: meta('Pending card', 'public', 1) } }), env, { waitUntil(task) { pendingRender = task; } });
-    assert.equal(uploaded.status, 200);
-    assert.ok(pendingRender, 'upload schedules rendering after the metadata commit');
-    const pendingImage = await call(await cardUrl('pending-card'));
-    assert.equal(pendingImage.status, 503, 'a crawler should retry until the card is ready');
-    assert.equal(pendingImage.headers.get('Retry-After'), '2');
-    releasePendingCard();
-    await pendingRender;
-    assert.ok(png(Buffer.from(await (await call(await cardUrl('pending-card'))).arrayBuffer())));
-  } finally { releasePendingCard(); env.DOCS.put = originalPut; }
+    const noQueue = await call('/api/upload', { method: 'POST', token: 'admin-test-token', body: { slug: 'no-queue-card', version: 1, html: doc('Publish anyway'), meta: meta('Publish anyway', 'public', 1) } });
+    assert.equal(noQueue.status, 200, 'a missing queue binding cannot fail publishing');
+    const fallback = await call(await cardUrl('no-queue-card'));
+    assert.equal(fallback.status, 200, 'a missing queue binding serves the logo PNG');
+    assert.ok(png(Buffer.from(await fallback.arrayBuffer())));
+  } finally { env.PREVIEW_QUEUE = previewQueue; }
 
   const privateDoc = await call('/api/upload', { method: 'POST', token: 'admin-test-token', body: { slug: 'private-card', version: 1, html: doc('Secret title'), meta: meta('Secret title', 'private', 1) } });
   assert.equal(privateDoc.status, 200, await privateDoc.text());

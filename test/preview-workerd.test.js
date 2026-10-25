@@ -1,5 +1,5 @@
-// Prove the vendored renderer and binary module imports work in workerd. Node
-// allows runtime WASM compilation, so the ordinary Worker harness misses this.
+// Exercise the deployed bundle's renderPreviewPng in workerd. Node allows
+// runtime WASM compilation, so the ordinary Worker harness misses this.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -21,21 +21,23 @@ const { spawn, execFileSync } = require('node:child_process');
   for (const name of ['resvg.wasm', 'NotoSansSC-Regular.ttf', 'NotoSansSC-Bold.ttf']) {
     fs.copyFileSync(path.join(previewDir, name), path.join(dir, name));
   }
-  const renderer = fs.readFileSync(path.join(previewDir, 'resvg.mjs'), 'utf8')
-    .replace(/export\s*\{\s*Resvg2 as Resvg,\s*initWasm\s*\};?\s*$/, 'return { Resvg: Resvg2, initWasm };');
-  const source = `import WASM from './resvg.wasm';
-import REGULAR from './NotoSansSC-Regular.ttf';
-import BOLD from './NotoSansSC-Bold.ttf';
-const R = (() => { ${renderer} })();
-let ready;
-export default { async fetch() {
+  fs.appendFileSync(path.join(dir, '_worker.bundled.js'), '\nexport { renderPreviewPng };\n');
+  const source = `import worker, { renderPreviewPng } from './_worker.bundled.js';
+export default { async fetch(req) {
   try {
-    if (!ready) ready = R.initWasm(WASM);
-    await ready;
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><rect width="1200" height="630" fill="#fff"/><text x="80" y="160" font-size="60">季度报告</text></svg>';
-    const image = new R.Resvg(svg, { font: { fontBuffers: [new Uint8Array(REGULAR), new Uint8Array(BOLD)] } });
-    try { const rendered = image.render(); try { return new Response(rendered.asPng(), { headers: { 'Content-Type': 'image/png' } }); } finally { rendered.free(); } }
-    finally { image.free(); }
+    if (new URL(req.url).pathname === '/queue') {
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(svg)))].slice(0, 6).map((n) => n.toString(16).padStart(2, '0')).join('');
+      let png = null, status = '';
+      const env = {
+        DOCS: { async head() { return null; }, async get() { return { text: async () => svg }; }, async put(key, bytes) { png = bytes; } },
+        META: { async put(key, value) { status = value; } },
+      };
+      await worker.queue({ messages: [{ body: { v: 1, kind: 'preview', slug: 'workerd-card', version: 1, hash, custom: true, automatic: svg }, ack() {} }] }, env);
+      if (!png) return new Response('queue produced no PNG: ' + status, { status: 500 });
+      return new Response(png, { headers: { 'Content-Type': 'image/png', 'X-Preview-Status': status } });
+    }
+    return new Response(await renderPreviewPng(svg), { headers: { 'Content-Type': 'image/png' } });
   } catch (error) { return new Response(String(error && error.stack || error), { status: 500 }); }
 } };`;
   fs.writeFileSync(path.join(dir, 'worker.mjs'), source);
@@ -45,7 +47,7 @@ export default { async fetch() {
   await new Promise((resolve) => server.close(resolve));
   fs.writeFileSync(path.join(dir, 'config.capnp'), `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (services = [(name = "main", worker = .w)], sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "main")]);
-const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker.mjs"), (name = "resvg.wasm", wasm = embed "resvg.wasm"), (name = "NotoSansSC-Regular.ttf", data = embed "NotoSansSC-Regular.ttf"), (name = "NotoSansSC-Bold.ttf", data = embed "NotoSansSC-Bold.ttf")], compatibilityDate = "2025-01-01");
+const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker.mjs"), (name = "_worker.bundled.js", esModule = embed "_worker.bundled.js"), (name = "resvg.wasm", wasm = embed "resvg.wasm"), (name = "NotoSansSC-Regular.ttf", data = embed "NotoSansSC-Regular.ttf"), (name = "NotoSansSC-Bold.ttf", data = embed "NotoSansSC-Bold.ttf")], compatibilityDate = "2025-01-01");
 `);
   const child = spawn(binary, ['serve', 'config.capnp'], { cwd: dir, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
@@ -60,7 +62,12 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     if (response.status !== 200) assert.fail(`workerd returned ${response.status}: ${await response.text()}`);
     const bytes = Buffer.from(await response.arrayBuffer());
     assert.ok(bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && bytes.length > 5_000);
-    console.log('✓ workerd imports compiled WASM and font data modules and renders a CJK PNG');
+    const queued = await fetch(`http://127.0.0.1:${port}/queue`);
+    if (queued.status !== 200) assert.fail(`workerd queue returned ${queued.status}: ${await queued.text()}`);
+    assert.equal(queued.headers.get('x-preview-status'), 'ready:custom');
+    const queuedBytes = Buffer.from(await queued.arrayBuffer());
+    assert.ok(queuedBytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && queuedBytes.length > 5_000);
+    console.log('✓ deployed bundle and queue consumer render CJK PNGs in workerd');
   } finally {
     child.kill();
     fs.rmSync(dir, { recursive: true, force: true });

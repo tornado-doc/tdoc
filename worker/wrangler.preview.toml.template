@@ -7,6 +7,8 @@
 #   wrangler deploy -c worker/wrangler.preview.toml
 #
 # Do not bind tdoc-docs or the production META namespace.
+# Preview URLs cannot consume Queues; leave PREVIEW_QUEUE unbound so a PR
+# preview never sends work to another version's consumer. Cards use the logo.
 
 name = "tdoc-preview"
 main = "_worker.bundled.js"
