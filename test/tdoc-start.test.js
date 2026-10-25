@@ -97,7 +97,7 @@ t('the tutorial describes private practice and a direct handoff', () => {
 });
 
 t('the gate waits for a verified local device rather than a historical token', () => {
-  assert(dialog.includes('getOnboarding({ daemon: true })'), 'live local-agent status');
+  assert(dialog.includes("stage === 'connect' ? { daemon: true }"), 'automatic updates query live local-agent status');
   assert(dialog.includes("a.ready && a.status === 'active'"), 'checks readiness and heartbeat');
 });
 
