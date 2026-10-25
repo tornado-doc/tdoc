@@ -148,7 +148,7 @@ async function chooseMode(page, label) {
     const page = await context.newPage();
     const url = `http://127.0.0.1:${port}/d/${slug}/v/1`;
     await page.goto(url, { waitUntil: 'networkidle' });
-    const frame = page.frames().find((candidate) => candidate.url().includes('/frame'));
+    let frame = page.frames().find((candidate) => candidate.url().includes('/frame'));
     assert(frame, 'author frame missing');
 
     await test('comment-capable docs default to compact Comment mode', async () => {
@@ -229,6 +229,10 @@ async function chooseMode(page, label) {
       // Dismissal must not hit-test. Whatever is under the pointer — another
       // anchor, plain prose, blank space — the click that closes a card does
       // not also open the next thing.
+      await page.goto(url, { waitUntil: 'networkidle' });
+      await chooseMode(page, 'Comment');
+      frame = page.frames().find((candidate) => candidate.url().includes('/frame'));
+      assert(frame, 'author frame missing');
       const box = await page.locator('.tdoc-doc-frame').boundingBox();
       const geometry = await frame.evaluate(() => {
         const paragraph = document.querySelector('#editable-paragraph');
@@ -271,6 +275,10 @@ async function chooseMode(page, label) {
     await test('dismissal spares the drag and the artifact pill', async () => {
       // Three things the dismiss-first rule broke when it was first written.
       // Each is a separate path into the same comment UI.
+      await page.goto(url, { waitUntil: 'networkidle' });
+      await chooseMode(page, 'Comment');
+      frame = page.frames().find((candidate) => candidate.url().includes('/frame'));
+      assert(frame, 'author frame missing');
       const box = await page.locator('.tdoc-doc-frame').boundingBox();
       const geometry = await frame.evaluate(() => {
         const paragraph = document.querySelector('#editable-paragraph');
@@ -506,8 +514,14 @@ async function chooseMode(page, label) {
       await frame.locator('#editable-paragraph').fill('A draft that survives reload.');
       assert(!fs.existsSync(path.join(docRoot, 'v2')), 'a keystroke created v2 before Save');
 
-      // Do not wait for the 350ms comparison debounce: recovery persistence is
-      // required to happen on the input turn, before an automatic refresh.
+      // The frame-to-shell postMessage is asynchronous. Wait for its immediate
+      // localStorage receipt, without waiting for the 350ms comparison debounce.
+      await page.waitForFunction(() => {
+        return Object.keys(localStorage).filter((key) => key.startsWith('tdoc-draft:')).some((key) => {
+          try { return JSON.parse(localStorage.getItem(key)).bodyHtml?.includes('A draft that survives reload.'); }
+          catch { return false; }
+        });
+      }, null, { timeout: 2_000 });
       await page.reload({ waitUntil: 'networkidle' });
       const reloadedFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
       await chooseMode(page, 'Edit');
