@@ -199,6 +199,7 @@ export function MobileCommentDrawer({
   agentSetupHref = null,
   onOpenChange,
   onStartComment = null,
+  onAskAi = null,
   onReply,
   onReact,
   onDelete,
@@ -248,7 +249,10 @@ export function MobileCommentDrawer({
               {filter ? <div className="tdoc-comment-filter-row">{filter}</div> : null}
               {!comments.length ? <div className="tdoc-drawer-empty">
                 <p>No comments here yet.</p>
-                {onStartComment ? <button type="button" onClick={() => { onOpenChange(false); onStartComment(); }}>Leave a comment or ask AI</button> : null}
+                <div className="tdoc-drawer-empty-actions">
+                  {onStartComment ? <button type="button" onClick={() => { onOpenChange(false); onStartComment(); }}>Leave a comment</button> : null}
+                  {onAskAi ? <button type="button" onClick={() => { onOpenChange(false); onAskAi(); }}>Ask AI</button> : null}
+                </div>
               </div> : null}
               {comments.map((comment) => (
                 <CommentCard

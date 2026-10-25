@@ -13,6 +13,9 @@ import { summarizeHandoffSurfaces } from '../../../shell/src/document/handoff-st
 import { isThreadUnread } from '../../../shell/src/document/thread-seen.js';
 import { DesktopCommentLayer, MobileCommentDrawer } from '../../../shell/src/document/comment-layer.jsx';
 import { CommentComposer } from '../../../shell/src/document/comment-composer.jsx';
+import { AgentMentionContext } from '../../../shell/src/document/mention-field.jsx';
+import { TDOC_AI } from '../../../shell/src/document/ai-answerer.js';
+import { AGENT_TAG_JOINER, agentMentionName } from '../../../shell/src/document/agent-choices.js';
 import { anchorFromSelection } from '../../../shell/src/document/model.js';
 
 const params = new URLSearchParams(location.search);
@@ -121,7 +124,7 @@ function PinDemo() {
 
 function MobileFabDemo() {
   const [open, setOpen] = useState(false);
-  const [composing, setComposing] = useState(false);
+  const [composing, setComposing] = useState(null);
   const [posted, setPosted] = useState('');
   const active = params.get('state') === 'active';
   const visible = active ? [CARDS.find((c) => c.id === 'replied'), CARDS.find((c) => c.id === 'question')]
@@ -131,10 +134,15 @@ function MobileFabDemo() {
     <div className="tdoc-bar" style={{ height: 48, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 12, background: '#fff', borderBottom: '1px solid #e8e7e3' }}><span>🌪</span><strong>RaftBench pricing plan</strong></div>
     <main style={{ padding: '32px 20px', fontSize: 16, lineHeight: 1.8 }}><h1>RaftBench pricing plan</h1><p>We propose charging per team seat, with a free personal tier and team seats at $8 per month.</p><p>The third section compares three options. The final recommendation is a seat based plan.</p></main>
     <MobileCommentDrawer open={open} onOpenChange={setOpen} comments={visible} openCount={active ? 2 : 0} unread={active}
-      pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => setComposing(true)} />
-    {composing ? <CommentComposer selection={{ kind: 'document', rect: { top: 600, bottom: 600, left: 16 } }}
-      onSubmit={async (text) => { setPosted(JSON.stringify({ text, anchor: anchorFromSelection({ kind: 'document' }) })); setComposing(false); }}
-      onClose={() => setComposing(false)} /> : null}
+      pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => setComposing('comment')}
+      onAskAi={() => setComposing('ask-ai')} />
+    {composing ? <AgentMentionContext.Provider value={{ choices: [TDOC_AI], ai: { offered: true, remaining: 10 } }}>
+      <CommentComposer selection={{ kind: 'document', rect: { top: 600, bottom: 600, left: 16 } }}
+        initialText={composing === 'ask-ai' ? `@${AGENT_TAG_JOINER}${agentMentionName(TDOC_AI, [TDOC_AI])} ` : ''}
+        initialMode={composing === 'ask-ai' ? 'ask' : null}
+        onSubmit={async (text) => { setPosted(JSON.stringify({ text, anchor: anchorFromSelection({ kind: 'document' }) })); setComposing(null); }}
+        onClose={() => setComposing(null)} />
+    </AgentMentionContext.Provider> : null}
     <output id="mobile-comment-log">{posted}</output>
   </>;
 }

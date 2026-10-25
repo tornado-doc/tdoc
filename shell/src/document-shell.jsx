@@ -1373,6 +1373,21 @@ export function DocumentShell({ boot, config }) {
     canSeeHandoff(comment, config.identity?.login || 'anon', Boolean(config.isOwner))
     && isThreadUnread(comment, seenMap)
   ));
+  const startDocumentComment = (askAi = false) => {
+    if (!config.canComment) { if (config.signInToComment) signIn(); return; }
+    if (editor.mode === 'edit' && editor.dirty) {
+      showToast('Save or discard the draft before commenting', true);
+      return;
+    }
+    if (askAi && !agentChoices.length) {
+      showToast('Connect an agent to ask AI', true);
+      return;
+    }
+    editor.changeMode('comment');
+    setDrawerOpen(false);
+    const y = window.innerHeight - 80;
+    setComposer({ kind: 'document', intent: askAi ? 'ask-ai' : 'comment', rect: { top: y, bottom: y, left: 16 } });
+  };
   const commentFilterControl = resolvedCount ? (
     <SegmentedControl
       className="tdoc-comment-filter"
@@ -1649,17 +1664,8 @@ export function DocumentShell({ boot, config }) {
           canSendToAgent={canSendToAgent}
           agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
           onOpenChange={setDrawerOpen}
-          onStartComment={config.canComment || config.signInToComment ? () => {
-            if (!config.canComment) { signIn(); return; }
-            if (editor.mode === 'edit' && editor.dirty) {
-              showToast('Save or discard the draft before commenting', true);
-              return;
-            }
-            editor.changeMode('comment');
-            setDrawerOpen(false);
-            const y = window.innerHeight - 80;
-            setComposer({ kind: 'document', rect: { top: y, bottom: y, left: 16 } });
-          } : null}
+          onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
+          onAskAi={config.canComment || config.signInToComment ? () => startDocumentComment(true) : null}
           onReply={replyTo}
           onEdit={editComment}
           onReact={reactTo}
@@ -1712,6 +1718,9 @@ export function DocumentShell({ boot, config }) {
       {composer ? (
         <CommentComposer
           selection={composer}
+          initialText={composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices[0]
+            ? `@${AGENT_TAG_JOINER}${agentMentionName(agentChoices[0], agentChoices)} ` : ''}
+          initialMode={composer.kind === 'document' && composer.intent === 'ask-ai' ? 'ask' : null}
           mentionable={mentionable}
           demo={!!config.demoComments}
           canSendToAgent={canSendToAgent}

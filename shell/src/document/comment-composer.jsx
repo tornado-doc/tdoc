@@ -65,6 +65,8 @@ export function composerPosition(rect, viewport) {
 
 export function CommentComposer({
   selection,
+  initialText = '',
+  initialMode = null,
   onSubmit,
   onClose,
   mentionable = [],
@@ -83,8 +85,8 @@ export function CommentComposer({
   privateAsk = null,
   onMakePublic = null,
 }) {
-  const [text, setText] = useState('');
-  const [mode, setMode] = useState(null);
+  const [text, setText] = useState(initialText);
+  const [mode, setMode] = useState(initialMode);
   const [onlyMe, setOnlyMe] = useState(null);
   const [connectOpen, setConnectOpen] = useState(false);
   const [viewport, setViewport] = useState(readViewport);

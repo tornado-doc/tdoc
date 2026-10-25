@@ -841,7 +841,9 @@
   body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #3277ef; box-sizing: content-box; }
   body.tdoc-narrow .tdoc-drawer-empty { padding: 28px 12px 36px; text-align: center; color: var(--td-muted); font: 14px system-ui, sans-serif; }
   body.tdoc-narrow .tdoc-drawer-empty p { margin: 0 0 14px; }
-  body.tdoc-narrow .tdoc-drawer-empty button { border: 0; border-radius: 999px; background: var(--td-accent); color: #fff; padding: 10px 16px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
+  body.tdoc-narrow .tdoc-drawer-empty button { border: 1px solid var(--td-accent); border-radius: 999px; background: #fff; color: var(--td-accent); padding: 10px 16px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  body.tdoc-narrow .tdoc-drawer-empty button:last-child { background: var(--td-accent); color: #fff; }
   body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
   body.tdoc-narrow .tdoc-modal { padding: 20px; }
