@@ -181,7 +181,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
       actions={<>
         {done ? <>
           <button type="button" disabled={busy} onClick={tutorial}>{busy ? 'Opening tutorial…' : 'Try the tutorial'}</button>
-          <button type="button" className="primary" onClick={close}>Go to my docs</button>
+          <button type="button" className="primary" onClick={() => { if (!preview) location.assign('/me'); else close(); }}>Go to my docs</button>
         </> : <>
           <button type="button" className="ui-setup-later" disabled={busy} onClick={intro ? close : () => choosePath('intro')}>{intro ? 'Later' : 'Back'}</button>
           {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>

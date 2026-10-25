@@ -11845,6 +11845,14 @@ function localHandoffDone(h) {
   const done = new Set(Array.isArray(h.resolved_ids) ? h.resolved_ids : []);
   return (h.comment_ids || []).every((id) => done.has(id));
 }
+async function localPausedMap(env, accountId) {
+  const group = await accountGroup(env, accountId);
+  try {
+    const value = JSON.parse(await env.META.get(`local-computer-paused:${group.canonical}`));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
 async function localSeenMap(env, accountId) {
   try {
     const m = JSON.parse((await env.META.get(`local-agents-seen:${accountId}`)) || '{}');
@@ -11872,18 +11880,19 @@ async function localTouchSeen(env, accountId, device) {
 async function decorateLocalSeen(env, accountId, lists) {
   if (!accountId || !lists.some((l) => l.some((t) => t && t.provider === 'local'))) return;
   const seen = await localSeenMap(env, accountId);
+  const paused = await localPausedMap(env, accountId);
   for (const list of lists) {
     for (let i = 0; i < list.length; i++) {
       const t = list[i];
       if (!t || t.provider !== 'local') continue;
-      list[i] = withLocalSeen(t, seen);
+      list[i] = withLocalSeen(t, seen, paused);
     }
   }
 }
-function withLocalSeen(t, seen) {
+function withLocalSeen(t, seen, paused = {}) {
   const at = seen[t.device] || null;
   const fresh = at && Date.now() - (Date.parse(at) || 0) < LOCAL_STALE_MS;
-  return { ...t, last_seen: at, status: fresh ? 'active' : 'inactive' };
+  return { ...t, last_seen: at, status: paused[t.device] === true ? 'paused' : fresh ? 'active' : 'inactive' };
 }
 
 // The parts of Raft's agent-events answer worth keeping; anything malformed
@@ -17448,6 +17457,92 @@ const tdocHandlers = {
       });
     }
 
+    // A browser-owned setup attempt, confirmed by the tools using this same
+    // account's upload credential. Old tokens/heartbeats cannot finish it.
+    if (p === '/api/onboarding/connect/complete' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) return json({ error: 'account_token_required' }, { status: 403 });
+      let body = {}; try { body = await req.json(); } catch {}
+      if (!/^[a-f0-9]{32}$/.test(body.code || '')) return json({ error: 'invalid_code' }, { status: 400 });
+      const key = `onboarding-connect:${body.code}`;
+      let attempt; try { attempt = JSON.parse(await env.META.get(key)); } catch {}
+      if (!attempt || Date.parse(attempt.expires) <= Date.now()) return json({ error: 'setup_expired' }, { status: 410 });
+      if (!(await accountGroup(env, auth.actor.account_id)).ids.includes(attempt.account_id)) return json({ error: 'wrong_account' }, { status: 403 });
+      if (!attempt.ready) {
+        attempt.ready = new Date().toISOString();
+        await env.META.put(key, JSON.stringify(attempt), { expirationTtl: 900 });
+        await stampOnboardingFor(env, attempt.account_id, 'agent_connected');
+      }
+      return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (p === '/api/onboarding/connect' && ['GET', 'POST'].includes(method)) {
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'account_required' }, { status: 403 });
+      if (method === 'POST') {
+        if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+        const code = rand(16);
+        const expires = new Date(Date.now() + 900000).toISOString();
+        await env.META.put(`onboarding-connect:${code}`, JSON.stringify({ account_id: accountId, expires }), { expirationTtl: 900 });
+        return json({ code, expires, ready: false }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      const code = url.searchParams.get('code') || '';
+      if (!/^[a-f0-9]{32}$/.test(code)) return json({ error: 'invalid_code' }, { status: 400 });
+      let attempt; try { attempt = JSON.parse(await env.META.get(`onboarding-connect:${code}`)); } catch {}
+      if (!attempt || Date.parse(attempt.expires) <= Date.now()) return json({ error: 'setup_expired' }, { status: 410 });
+      if (!(await accountGroup(env, accountId)).ids.includes(attempt.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      return json({ ready: Boolean(attempt.ready) }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    // Browser-only controls survive helper restarts and new inventory reports.
+    // Pausing gates the queue; it cannot kill a run already executing locally.
+    if (p === '/api/me/computers' && ['GET', 'POST'].includes(method)) {
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'account_required' }, { status: 403 });
+      const group = await accountGroup(env, accountId);
+      const targets = await accountNotifyTargets(env, accountId);
+      const local = targets.filter(isLocalTarget);
+      const paused = await localPausedMap(env, accountId);
+      const seen = await localSeenMap(env, accountId);
+      let inventory = {};
+      for (const id of group.ids) {
+        try { inventory = { ...inventory, ...JSON.parse(await env.META.get(`local-computers:${id}`)) }; } catch {}
+      }
+      const devices = [...new Set([...Object.keys(inventory), ...local.map(t => t.device)])];
+      if (method === 'POST') {
+        if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+        let body = {}; try { body = await req.json(); } catch {}
+        if (!devices.includes(body.device)) return json({ error: 'computer_not_found' }, { status: 404 });
+        if (body.action === 'pause' || body.action === 'resume') {
+          if (body.action === 'pause') paused[body.device] = true;
+          else delete paused[body.device];
+          await env.META.put(`local-computer-paused:${group.canonical}`, JSON.stringify(paused));
+          return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+        }
+        if (body.action === 'default') {
+          const target = local.find(t => t.device === body.device && t.cli === body.cli);
+          let ready = []; try { ready = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${body.device}`)) || []; } catch {}
+          if (!target || !ready.includes(body.cli) || withLocalSeen(target, seen, paused).status !== 'active') return json({ error: 'computer_not_ready' }, { status: 409 });
+          await env.META.put(`account-notify:${accountId}`, JSON.stringify([target, ...targets.filter(t => !sameNotifyTarget(t, target))]));
+          return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+        }
+        return json({ error: 'invalid_action' }, { status: 400 });
+      }
+      const computers = [];
+      for (const device of devices) {
+        let ready = []; try { ready = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${device}`)) || []; } catch {}
+        const record = inventory[device] || {};
+        const runtimes = (record.runtimes || local.filter(t => t.device === device).map(t => ({ cli: t.cli, state: ready.includes(t.cli) ? 'ready' : 'needs_check' })))
+          .map(r => ({ ...r, state: r.state === 'ready' && (!ready.includes(r.cli) || !local.some(t => t.device === device && t.cli === r.cli)) ? 'needs_check' : r.state }));
+        computers.push(withLocalSeen({ device, runtimes, paused: paused[device] === true, connected_at: record.connected_at || null }, seen, paused));
+      }
+      return json({ computers, default: targets[0] || null }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
     // ---- onboarding ----
     if (p === '/api/onboarding' && method === 'GET') {
       const session = await getSession(env, req);
@@ -17462,16 +17557,17 @@ const tdocHandlers = {
       if (url.searchParams.get('daemon') === '1') {
         const targets = (await accountNotifyTargets(env, accountId)).filter(isLocalTarget);
         const seen = await localSeenMap(env, accountId);
+        const paused = await localPausedMap(env, accountId);
         const ready = new Map();
         for (const t of targets) {
           if (!ready.has(t.device)) {
             try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${t.device}`)); ready.set(t.device, Array.isArray(value) ? value : []); } catch { ready.set(t.device, []); }
           }
         }
-        local_agents = targets.map((t) => ({ ...withLocalSeen(t, seen), ready: ready.get(t.device).includes(t.cli) }));
+        local_agents = targets.map((t) => ({ ...withLocalSeen(t, seen, paused), ready: ready.get(t.device).includes(t.cli) }));
         let computers = {};
         try { computers = JSON.parse(await env.META.get(`local-computers:${accountId}`)) || {}; } catch {}
-        local_computers = Object.entries(computers).map(([device, computer]) => withLocalSeen({ device, ...computer }, seen));
+        local_computers = Object.entries(computers).map(([device, computer]) => withLocalSeen({ device, ...computer }, seen, paused));
       }
       // `?docs=1` costs a catalog walk, so only the page that waits for a doc
       // to appear asks for it. The connect gate's own poll stays two reads.
@@ -17498,7 +17594,7 @@ const tdocHandlers = {
         if (!target) return json({ error: 'local_agent_required' }, { status: 409 });
         const seen = await localSeenMap(env, accountId);
         let ready = []; try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${target.device}`)); ready = Array.isArray(value) ? value : []; } catch {}
-        if (withLocalSeen(target, seen).status !== 'active' || !ready.includes(target.cli)) return json({ error: 'computer_not_ready' }, { status: 409 });
+        if (withLocalSeen(target, seen, await localPausedMap(env, accountId)).status !== 'active' || !ready.includes(target.cli)) return json({ error: 'computer_not_ready' }, { status: 409 });
       }
       await stampOnboardingFor(env, accountId, 'started');
       const record = await loadOnboarding(env, accountId);
@@ -18711,10 +18807,12 @@ const tdocHandlers = {
       const accountIds = (await accountGroup(env, auth.actor.account_id)).ids;
       for (const id of accountIds) {
         const list = await loadLocalPending(env, id);
+        const paused = await localPausedMap(env, id);
         if (!list.length) continue;
         const keep = [];
         for (const e of list) {
           if (!isValidSlug(e.slug)) continue;
+          if (paused[e.device] === true) { keep.push(e); continue; }
           // A question this account asked about somebody's doc: same rules,
           // its own record (see handleMyAgent). Answered privately, never
           // with an edit or a comment.
