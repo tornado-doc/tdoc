@@ -152,12 +152,26 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert((await call('/d/daily-report/raw', { cookie: bob.cookie })).status === 200, 'members cannot read it');
   });
 
+  // A person's edit in the browser, as the latest version (what the
+  // browser editor stamps: source browser, the author's login).
+  const browserEdit = (slug, login = 'julie') => {
+    const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+    const last = meta.versions.reduce((a, b) => (Number(b.n) > Number(a.n) ? b : a));
+    Object.assign(last, { source: 'browser', author: login });
+    delete last.by;
+    env.META.map.set(`meta:${slug}`, JSON.stringify(meta));
+  };
   const register = () => call('/api/notify/local/register', { method: 'POST', token: agentToken, body: { device: 'befreed-box', clis: ['claude'] } });
   const pendingFor = (token) => call('/api/notify/local/pending?device=befreed-box', { token });
   let target = null;
   // The team agent edits what it wrote (agentEditPolicy): befreed-report's
   // latest version is the agent's from here on.
   await t('a team doc the team agent wrote is one members may send it', async () => {
+    // Authorship at write time: the team agent may not write over Julie's
+    // agent's v1, only over a person's browser edit (or its own version).
+    const refused = await upload(agentToken, 'befreed-report', { version: 2 });
+    assert(refused.status === 403 && refused.body.error === 'agent_not_author_editor', `over julie's agent: ${refused.status} ${refused.text}`);
+    browserEdit('befreed-report');
     const r = await upload(agentToken, 'befreed-report', { version: 2 });
     assert(r.status === 200, r.text);
   });
@@ -254,6 +268,11 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     // The owner keeps her own agent, and only that.
     const julies = await call('/api/notify/targets?slug=befreed-report', { cookie: julie.cookie });
     assert(!JSON.stringify(julies.body).includes('vid3o'), `owner offered the team agent on a doc her agent wrote: ${julies.text}`);
+    // Nor may the team agent write over it (authorship at write time) --
+    // until a person edits it in the browser.
+    const over = await upload(agentToken, 'befreed-report', { version: 5 });
+    assert(over.status === 403 && over.body.error === 'agent_not_author_editor', `team agent over julie's agent: ${over.status} ${over.text}`);
+    browserEdit('befreed-report');
     assert((await upload(agentToken, 'befreed-report', { version: 5 })).status === 200, 'agent v5');
     const again = await call('/api/notify/targets?slug=befreed-report', { cookie: bob.cookie });
     assert(again.body.default && again.body.default.team_agent && again.body.default.last_writer, `bob after the agent wrote it again: ${again.text}`);
@@ -408,6 +427,15 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
     for (const u of [ben, cat]) await call2('/api/team/join', { method: 'POST', cookie: u.cookie, body: { token: crew.invite_url.split('/').pop() } });
     await call2('/api/upload', { method: 'POST', token: ann.token, body: { slug: 'crew-doc', version: 1, html: html('crew-doc'), meta: { title: 'crew-doc', access: { visibility: 'private' } } } });
     await call2('/api/team/move', { method: 'POST', token: ann.token, body: { team: crew.id, slugs: ['crew-doc'] } });
+    {
+      // Ann's last edit was in the browser, so the team's agents may write it
+      // (authorship at write time).
+      const meta = JSON.parse(env2.META.map.get('meta:crew-doc'));
+      const last = meta.versions[meta.versions.length - 1];
+      Object.assign(last, { source: 'browser', author: 'ann' });
+      delete last.by;
+      env2.META.map.set('meta:crew-doc', JSON.stringify(meta));
+    }
     const teamNow = () => JSON.parse(env2.META.map.get(`team:${crew.id}`));
     const add = async (name) => (await call2('/api/team/agents', { method: 'POST', cookie: ann.cookie, headers: origin, body: { id: crew.id, name } })).body;
     const connect = (code, device = 'box') => call2('/api/team/agents/connect', { method: 'POST', body: { code, device } });

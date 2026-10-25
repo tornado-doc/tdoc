@@ -295,7 +295,11 @@ const SAME = { Origin: 'https://tdoc.dev' };
   await t('a team doc: only admins delete it or erase it; its author still sees it in the team Trash', async () => {
     const byMember = await call('/api/doc?slug=team-plan', { method: 'DELETE', token: bob.token });
     assert(byMember.status === 403, `a member deleted a team doc: ${byMember.status}`);
-    assert((await call('/api/doc?slug=team-plan', { method: 'DELETE', token: alice.token })).status === 200, 'admin delete');
+    // Bob's agent wrote it: an admin's agent token may not delete it
+    // (authorship at write time); the admin herself, in the browser, may.
+    const byAdminAgent = await call('/api/doc?slug=team-plan', { method: 'DELETE', token: alice.token });
+    assert(byAdminAgent.status === 403 && byAdminAgent.body.error === 'agent_not_author_editor', `admin's agent deleted it: ${byAdminAgent.status}`);
+    assert((await call('/api/doc?slug=team-plan', { method: 'DELETE', cookie: alice.cookie, headers: SAME })).status === 200, 'admin delete');
     assert((await call('/d/team-plan/raw', { token: bob.token })).status === 404, 'team member still reads it');
     const memberPublish = await publish(bob, 'team-plan', 2);
     assert(memberPublish.status === 409 && /team admin/.test(memberPublish.body.message), `member publish ${memberPublish.status} ${memberPublish.text}`);
