@@ -83,7 +83,7 @@ async function startServer(worker, env) {
 
 (async () => {
   console.log('Profile picks UI');
-  const mod = await loadWorker();
+  const mod = await loadWorker({ previewRenderer: true });
   const worker = mod.default;
   const browser = await chromium.launch({ headless: true });
   let failed = 0;
@@ -102,6 +102,10 @@ async function startServer(worker, env) {
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(`${base}/@owner`);
     await page.locator('.profile-picks').waitFor();
+    if (process.env.TDOC_UI_SHOTS && !more) {
+      await page.waitForFunction(() => [...document.images].every((img) => img.complete));
+      await page.screenshot({ path: `${process.env.TDOC_UI_SHOTS}/profile-picks-${width}.png`, fullPage: true });
+    }
     const pins = async () => JSON.parse(await env.META.get('account-profile:acct-owner')).pins;
     const close = async () => { await context.close(); server.close(); };
     return { env, page, errors, pins, close };
