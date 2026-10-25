@@ -18721,7 +18721,11 @@ const tdocHandlers = {
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
       let handoffs = await loadHandoffs(env, slug);
       if (gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && gate.actor?.kind === 'team_member') {
-        const own = await ownCommentIds(env, slug, gate.session);
+        const list = await readComments(env, slug);
+        ensureMigrated(list);
+        const keys = actorKeys(gate.session);
+        const own = new Set(list.filter((comment) => authoredBy(keys, comment)).map((comment) => comment.id));
+        const resendable = handoffThreadIds(list, keys);
         handoffs = handoffs.flatMap((handoff) => {
           const sent = handoffSentBySession(handoff, gate.session);
           const commentIds = (handoff.comment_ids || []).filter((id) => sent || own.has(id));
@@ -18731,6 +18735,9 @@ const tdocHandlers = {
             ...handoff,
             comment_ids: commentIds,
             resolved_ids: (handoff.resolved_ids || []).filter((id) => ids.has(id)),
+            // The list can show only this member's slice of a mixed batch,
+            // but Resend submits the original batch and would be rejected.
+            handoff_resend_allowed: (handoff.comment_ids || []).length > 0 && handoff.comment_ids.every((id) => resendable.has(id)),
             // A batch instruction can describe somebody else's comments.
             instruction: commentIds.length === (handoff.comment_ids || []).length ? handoff.instruction : '',
             by: undefined,

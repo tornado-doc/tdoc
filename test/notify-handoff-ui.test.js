@@ -55,11 +55,11 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  async function open({ ids, deliver = 'delivered', targets = null, query = '' }) {
-    const page = await browser.newPage({ viewport: { width: 900, height: 720 } });
+  async function open({ ids, deliver = 'delivered', targets = null, query = '', history = null, width = 900 }) {
+    const page = await browser.newPage({ viewport: { width, height: 720 } });
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
-    let handoffs = [{ handoff_id: 'h1', at: new Date(Date.now() - 20 * 60000).toISOString(), recipient: SMARTER, comment_ids: ['c0'], delivery: { status: 'delivered' } }];
+    let handoffs = history || [{ handoff_id: 'h1', at: new Date(Date.now() - 20 * 60000).toISOString(), recipient: SMARTER, comment_ids: ['c0'], delivery: { status: 'delivered' } }];
     const posts = [];
     await page.route('**/api/notify/targets*', (r) => r.fulfill({ json: targets || { default: SMARTER, candidates: [DEVIN], fallback: DEVIN, reason: null } }));
     await page.route('**/api/notify/handoffs*', (r) => r.fulfill({ json: { handoffs } }));
@@ -127,6 +127,28 @@ async function t(name, fn) {
       await primary.click();
       await page.getByText(/Not delivered to tdoc-claw-devin/).waitFor();
       assert.equal(posts.length, 2, 'Retry did not send again');
+      await page.close();
+    });
+
+    await t('a mixed team handoff explains failure without offering a rejected Resend', async () => {
+      for (const width of [390, 1440]) {
+        const { page, dialog, errors } = await open({ ids: [], width, history: [{
+          handoff_id: 'mixed', at: new Date().toISOString(), recipient: SMARTER,
+          comment_ids: ['own-comment'], handoff_resend_allowed: false,
+          delivery: { status: 'failed', error: 'request_403' },
+        }] });
+        assert.match(await dialog.locator('.tdoc-send-notice').textContent(), /was not delivered/);
+        assert.equal(await dialog.getByRole('button', { name: 'Resend' }).count(), 0);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `mixed-resend-hidden-${width}.png`) });
+        assert.deepEqual(errors, []);
+        await page.close();
+      }
+      const { page, dialog } = await open({ ids: [], history: [{
+        handoff_id: 'own', at: new Date().toISOString(), recipient: SMARTER,
+        comment_ids: ['own-comment'], handoff_resend_allowed: true,
+        delivery: { status: 'failed', error: 'request_403' },
+      }] });
+      assert.equal(await dialog.getByRole('button', { name: 'Resend' }).count(), 1);
       await page.close();
     });
     await t('a stopped agent is flagged in the picker and before sending, and sending still works', async () => {

@@ -96,6 +96,7 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
     const result = await handoffs(person);
     assert.equal(result.status, 200);
     assert.deepEqual(result.body.handoffs[0].comment_ids, [ownId]);
+    assert.equal(result.body.handoffs[0].handoff_resend_allowed, false);
     assert(!JSON.stringify(result.body).includes(otherId));
     assert.equal(result.body.handoffs[0].instruction, '');
     assert(!Object.hasOwn(result.body.handoffs[0], 'by'));
@@ -126,6 +127,7 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
   }, ...prior]));
   const ownBatch = await handoffs(bob);
   assert.equal(ownBatch.body.handoffs[0].instruction, 'Bob’s own instruction');
+  assert.equal(ownBatch.body.handoffs[0].handoff_resend_allowed, true);
   assert.equal((await comments({ cookie: bob.cookie })).body.find((row) => row.id === bobId).handoff_resend_allowed, true);
   console.log('  ✓ own-comment batch keeps its instruction and allows resend');
 
