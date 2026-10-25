@@ -137,6 +137,30 @@ export function handoffWaitState(comment, now = Date.now()) {
   return 'waiting';
 }
 
+/** Viewer-specific handoff cues are private to the commenter and doc owner. */
+export function canSeeHandoff(comment, viewerLogin, isOwner) {
+  const login = String(viewerLogin || '').trim().toLowerCase();
+  const author = String(comment?.author?.login || '').trim().toLowerCase();
+  return Boolean(isOwner || (login && login !== 'anon' && author && author === login));
+}
+
+/** Compact corner marker for a collapsed comment avatar. */
+export function handoffPinBadge(comment, now = Date.now()) {
+  if (!comment?.handoff_at || comment.deleted) return null;
+  if (comment.status === 'applied') return comment.resolved_by ? null : 'done';
+  const state = handoffWaitState(comment, now);
+  if (state === 'failed' || state === 'stale' || state === 'expired') return 'warning';
+  if (state !== 'replied') return null;
+  const replies = comment.replies || [];
+  for (let i = replies.length - 1; i >= 0; i -= 1) {
+    const verdict = replies[i]?.agent_status;
+    if (verdict === 'question') return 'question';
+    if (verdict === 'partial') return 'partial';
+    if (verdict === 'applied' || verdict === 'answered') return 'done';
+  }
+  return null;
+}
+
 /** Whole minutes since the handoff was last sent (0 when unknown). */
 export function handoffWaitMinutes(comment, now = Date.now()) {
   const sent = handoffSentAt(comment);

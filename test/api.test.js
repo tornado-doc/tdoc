@@ -183,7 +183,7 @@ function waitReady(port, ms = 5000) {
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
     const c = after.body[0];
     if (c.agent_actor !== 'codex-pm') throw new Error(`wrong parent agent_actor ${c.agent_actor}`);
-    if (!c.reactions['✅']?.includes('codex-pm')) throw new Error('agent verdict reaction did not use agent login');
+    if (Object.keys(c.reactions || {}).length) throw new Error('agent verdict added an automatic reaction');
     const historical = (await req('GET', `/api/comments?slug=${SLUG}&version=1`)).body.find(c => c.id === topId);
     if (historical.status !== 'open') throw new Error('future fix leaked into old version');
     if (historical.replies.some(reply => reply.id === r.body.id)) throw new Error('future reply text leaked into old version');

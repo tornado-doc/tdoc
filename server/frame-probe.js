@@ -1027,6 +1027,30 @@
     }
     return null;
   }
+  // CSS Highlights are paint-only and have no mouseenter target. Send the id
+  // under the pointer so the outer shell can light up the matching avatar,
+  // without adding any status text to the highlighted document itself.
+  var _hoverAnchorId = null, _hoverTimer = null, _hoverPoint = null;
+  function reportAnchorHover(id) {
+    if (id === _hoverAnchorId) return;
+    _hoverAnchorId = id;
+    post({ type: 'tdoc:anchorHover', id: id });
+  }
+  document.addEventListener('pointermove', function (event) {
+    if (event.pointerType === 'touch' || interactionMode === 'edit') return;
+    _hoverPoint = { x: event.clientX, y: event.clientY };
+    if (_hoverTimer) return;
+    _hoverTimer = setTimeout(function () {
+      _hoverTimer = null;
+      reportAnchorHover(_hoverPoint ? anchorIdAtPoint(_hoverPoint.x, _hoverPoint.y) : null);
+    }, 50);
+  }, { passive: true });
+  document.addEventListener('pointerleave', function () {
+    if (_hoverTimer) clearTimeout(_hoverTimer);
+    _hoverTimer = null; _hoverPoint = null;
+    reportAnchorHover(null);
+  });
+  window.addEventListener('scroll', function () { reportAnchorHover(null); }, { passive: true });
   function setActiveAnchor(id, scroll) {
     var target = id && _anchorTargets[id];
     _activeAnchorId = target ? id : null;

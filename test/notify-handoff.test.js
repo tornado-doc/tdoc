@@ -703,7 +703,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 200 && b.agent_status === 'answered', `reply: ${r.status} ${JSON.stringify(b)}`);
     const list = await (await worker.fetch(req('/api/comments?slug=ans&version=1', { cookie: reader }), env, {})).json();
     assert(list[0].status !== 'applied', 'answered must not resolve the comment');
-    assert(list[0].reactions && list[0].reactions['💬'], `no 💬 on the comment: ${JSON.stringify(list[0].reactions)}`);
+    assert(Object.keys(list[0].reactions || {}).length === 0, 'answered added an automatic reaction');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
