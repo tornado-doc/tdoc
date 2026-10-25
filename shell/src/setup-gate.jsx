@@ -17,7 +17,7 @@ export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${D
 export const SETUP_PROMPT = 'curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash';
 const INSTALL_PROMPT = `${SETUP_PROMPT} -s -- --install-only`;
 const CONNECT_PROMPT = '~/.local/bin/tdoc setup';
-export const firstDocPrompt = (subject) => `Read https://tdoc.dev/SKILL.md. Create and publish a new tdoc about ${subject.trim()}. Use browser approval to sign in if needed. Keep the doc private. Use the interactive workflow; do not install or start a background helper or daemon. Give me the published link.`;
+export const firstDocPrompt = (subject) => `Read https://tdoc.dev/SKILL.md. Create a new private tdoc about ${subject.trim()} with tdoc-new --first-doc, then publish it. Sign in with browser approval if needed. Do not install or start a background helper or daemon. Return the published link.`;
 export const DOCTOR_PROMPT = '~/.local/bin/tdoc status';
 const POLL_MS = 3000;
 const STUCK_MS = 90000;
@@ -193,11 +193,11 @@ export function SetupGate({ boot, preview = null, onClose }) {
                 manualBaseline.current = null; setManualReady(Boolean(preview)); setManualRequested(false); setPublishedDoc('');
               }
             }} /></label>
-            <div className="ui-setup-instruction"><p ref={instructionRef}>{firstDocPrompt(subject.trim() || DOC_SUBJECT_PLACEHOLDER)}</p></div>
-            <p className="ui-setup-intro">Paste this into ChatGPT Work, Cowork, Grok Bot, Claude Code or Codex. Your AI needs terminal access.</p>
             {publishedDoc ? <p className="ui-setup-connected" role="status">Your doc is published. Open it to leave a comment.</p>
               : manualRequested ? <p role="status">{copyFailed ? COPY_FALLBACK : 'Instruction copied. Paste it into your AI.'} Waiting for your AI to publish…</p>
                 : !manualReady ? <p role="status">Checking your docs…</p> : null}
+            <div className="ui-setup-instruction"><p ref={instructionRef}>{firstDocPrompt(subject.trim() || DOC_SUBJECT_PLACEHOLDER)}</p></div>
+            <p className="ui-setup-intro">Paste into your AI and approve tdoc sign-in if asked.</p>
           </div>
           : !loaded ? <p role="status">Checking your computers…</p> : <>
             <div className="ui-setup-toolbar"><p className="ui-setup-label"><span aria-hidden="true">›_</span> CONNECT COMMAND</p><SegmentedControl value={platform} onChange={setPlatform} ariaLabel="Your computer" options={[{ value: 'unix', label: 'macOS / Linux' }, { value: 'windows', label: 'Windows (WSL)' }]} /></div>

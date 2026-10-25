@@ -137,6 +137,22 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     assert.ok((await call('/api/onboarding', { cookie: other.cookie })).body.record.revised);
   });
 
+  await test('interactive first-doc publication adopts the real doc without a helper', async () => {
+    const slug = 'interactive-first-doc';
+    const made = await call('/api/upload', { method: 'POST', token: other.token, body: { slug, version: 1, html: '<h1>Our project plan</h1><p>Ship the next milestone this week.</p>', meta: { origin: 'first-doc', access: { visibility: 'private', commenting: 'owner', history_visibility: 'owner' } } } });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    const own = (await call('/api/onboarding?docs=1', { cookie: other.cookie })).body;
+    assert.equal(own.newest_doc, slug);
+    assert.equal(own.record.first_doc, slug, 'the published first-doc marker replaces an earlier practice doc');
+    assert.equal(own.record.revised, undefined, 'the revision step belongs to this new doc');
+    assert.equal(own.record.daemon_connected, undefined);
+    const comment = await call('/api/comments', { method: 'POST', cookie: other.cookie, body: { slug, version: 1, text: 'Make this more concrete.' } });
+    assert.equal(comment.status, 200);
+    const revised = await call('/api/upload', { method: 'POST', token: other.token, body: { slug, version: 2, html: '<h1>Our project plan</h1><p>Ship the new editor on Friday.</p>' } });
+    assert.equal(revised.status, 200);
+    assert.ok((await call('/api/onboarding', { cookie: other.cookie })).body.record.revised);
+  });
+
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-setup-check-'));
   process.env.TDOC_DAEMON_DIR = temp;
   const { setup, readSetup } = require('../bin/lib/daemon-setup');
