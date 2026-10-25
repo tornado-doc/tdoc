@@ -4,7 +4,6 @@ import { getOnboarding, postOnboardingEvent } from './document/api.js';
 import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_LINE, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
 import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
-import { DebugBar } from './debug-bar.jsx';
 import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
 import { TopBar } from './top-bar.jsx';
 
@@ -367,7 +366,19 @@ export function SetupGate({ boot, preview = null }) {
           laid over its top edge: the same mark home and the same account
           chip as every other page. The design preview has no session, so it
           keeps the plain mark. */}
-      {preview ? null : <div className="sg-topbar"><TopBar identity={identity} /></div>}
+      {preview ? null : <div className="sg-topbar"><TopBar
+        identity={identity}
+        onboardingTest={boot?.debug ? {
+          record,
+          surface: step === 'doc' ? 'doc' : 'connect',
+          onState: async () => {
+            setCopied(false); setCopyFailed(false);
+            waitingSince.current = Date.now(); setElapsed(0);
+            const result = await getOnboarding().catch(() => null);
+            setRecord(result?.record || {});
+          },
+        } : null}
+      /></div>}
       <section className="sg-pane-form">
         {preview ? <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a> : null}
         <div className="sg-mid">
@@ -529,22 +540,6 @@ export function SetupGate({ boot, preview = null }) {
           </div>
         </div>
       </section>
-
-      {/* On every page a walk passes through, not just this one -- a new
-          reader starts at the landing page, and everything between there and
-          here is part of what is being tested. */}
-      {boot?.debug ? (
-        <DebugBar
-          record={record}
-          surface={step === 'doc' ? 'doc' : 'connect'}
-          onState={async () => {
-            setCopied(false); setCopyFailed(false);
-            waitingSince.current = Date.now(); setElapsed(0);
-            const result = await getOnboarding().catch(() => null);
-            setRecord(result?.record || {});
-          }}
-        />
-      ) : null}
 
       <aside className="sg-pane-art">
         <div className="sg-stage">

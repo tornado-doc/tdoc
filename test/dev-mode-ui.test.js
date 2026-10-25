@@ -2,8 +2,8 @@
 // harness) behind a local HTTP server, the real built shell, real Chromium.
 //
 //   - the account menu's "Dev mode" switch: allow-listed only, flips the
-//     server-side setting, and the Internal bar comes and goes with it
-//   - the Internal bar's "Exit dev mode" needs two presses, like replay
+//     server-side setting; onboarding controls live in a submenu, not a bar
+//   - exiting through the Dev mode row needs two presses, like replay
 //   - flagged features (shell/src/feature-flags.js) show only in dev mode:
 //     doc thumbnails in the My docs grid and on /@handle cards; off, the
 //     cards are text (title, excerpt, date) and the menu says what dev mode adds
@@ -11,7 +11,7 @@
 //   - Sign out -> Sign in on the landing page brings a connected account back
 //     to My docs, not to "Connect your agent"
 //
-// TDOC_SHOTS_DIR=<dir> saves screenshots of the menu switch and the bar.
+// TDOC_SHOTS_DIR=<dir> saves desktop and phone menu screenshots.
 const assert = require('assert/strict');
 const http = require('http');
 const fs = require('fs');
@@ -150,34 +150,43 @@ async function startServer(worker, env) {
       }
     };
     const devItem = (page) => page.getByRole('menuitemcheckbox', { name: /Dev mode/ });
-    const bar = (page) => page.locator('.sg-debug');
+    const onboarding = (page) => page.getByRole('menuitem', { name: /Onboarding test/ });
 
     try {
-      await t(`${label}: the menu switch turns dev mode off and on, and the bar follows`, async () => {
+      await t(`${label}: onboarding controls stay in the account submenu, and dev mode still turns off and on`, async () => {
         const context = await newContext(JULIE);
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', (e) => errors.push(e.message));
         await page.goto(`${base}/me`);
-        await bar(page).waitFor();
+        assert.equal(await page.locator('.sg-debug').count(), 0, 'no floating testing strip');
         await openAccountMenu(page);
         await devItem(page).waitFor();
         assert.equal(await devItem(page).getAttribute('aria-checked'), 'true');
         assert.match(await devItem(page).innerText(), /Dev mode: on/);
         await shot(page, 'menu-on');
+        await onboarding(page).click();
+        await page.getByRole('menuitem', { name: 'replay' }).waitFor();
+        assert.match(await page.locator('.tdoc-onboarding-test-status').innerText(), /Current: connected/);
+        await shot(page, 'onboarding-test');
+        await page.keyboard.press('Escape');
+        await devItem(page).click();
+        assert.match(await devItem(page).innerText(), /Dev mode: exit\?/);
+        assert.equal(await env.META.get('dev-mode:julie@example.com'), null, 'first press only arms exit');
         await Promise.all([page.waitForEvent('load'), devItem(page).click()]);
         assert.equal(await env.META.get('dev-mode:julie@example.com'), 'off', 'kept on the server');
         await page.locator(phone ? '#tdoc-more-btn' : '.tdoc-account-trigger').waitFor();
-        assert.equal(await bar(page).count(), 0, 'no Internal bar while off');
+        assert.equal(await page.locator('.sg-debug').count(), 0, 'no testing strip while off');
         await openAccountMenu(page);
         await devItem(page).waitFor();
         assert.equal(await devItem(page).getAttribute('aria-checked'), 'false');
         assert.match(await devItem(page).innerText(), /Dev mode: off/);
+        assert.equal(await onboarding(page).count(), 0, 'testing submenu hidden while off');
         await shot(page, 'menu-off');
         await Promise.all([page.waitForEvent('load'), devItem(page).click()]);
-        await bar(page).waitFor();
+        await openAccountMenu(page);
+        await onboarding(page).waitFor();
         assert.equal(await env.META.get('dev-mode:julie@example.com'), null, 'on again');
-        await shot(page, 'bar');
         assert.deepEqual(errors, []);
         await context.close();
       });
@@ -253,28 +262,27 @@ async function startServer(worker, env) {
         await context.close();
       });
 
-      await t(`${label}: Exit dev mode on the Internal bar needs a second press`, async () => {
+      await t(`${label}: Exit dev mode in the account menu needs a second press`, async () => {
         const context = await newContext(JULIE);
         const page = await context.newPage();
         await page.goto(`${base}/me`);
-        const exit = bar(page).locator('.sg-debug-exit');
-        await exit.waitFor();
-        await exit.click();
-        assert.match(await exit.innerText(), /exit dev mode\?/i, 'first press arms it and says so');
+        await openAccountMenu(page);
+        await devItem(page).click();
+        assert.match(await devItem(page).innerText(), /Dev mode: exit\?/i, 'first press arms it and says so');
         if (SHOTS) await page.waitForTimeout(400); // let the colour change settle for the picture
-        await shot(page, 'bar-exit-armed');
+        await shot(page, 'menu-exit-armed');
         assert.equal(await env.META.get('dev-mode:julie@example.com'), null, 'one press changes nothing');
-        await Promise.all([page.waitForEvent('load'), exit.click()]);
+        await Promise.all([page.waitForEvent('load'), devItem(page).click()]);
         assert.equal(await env.META.get('dev-mode:julie@example.com'), 'off', 'the second press turns it off');
         await page.locator(phone ? '#tdoc-more-btn' : '.tdoc-account-trigger').waitFor();
-        assert.equal(await bar(page).count(), 0, 'and the bar is gone');
+        assert.equal(await page.locator('.sg-debug').count(), 0, 'and there is no bar');
         // It disarms itself: a lone press, then a pause, is not half of an exit.
         await env.META.delete('dev-mode:julie@example.com');
         await page.reload();
-        await exit.waitFor();
-        await exit.click();
+        await openAccountMenu(page);
+        await devItem(page).click();
         await page.waitForTimeout(4300);
-        assert.match(await exit.innerText(), /^Exit dev mode$/, 'disarmed after a few seconds');
+        assert.match(await devItem(page).innerText(), /^Dev mode: on$/, 'disarmed after a few seconds');
         await context.close();
       });
 
@@ -283,10 +291,11 @@ async function startServer(worker, env) {
         const page = await context.newPage();
         await page.goto(`${base}/me`);
         await page.locator(phone ? '#tdoc-more-btn' : '.tdoc-account-trigger').waitFor();
-        assert.equal(await bar(page).count(), 0, 'no Internal bar');
+        assert.equal(await page.locator('.sg-debug').count(), 0, 'no Internal bar');
         await openAccountMenu(page);
         await page.getByRole('menuitem', { name: /Sign out/ }).waitFor();
         assert.equal(await devItem(page).count(), 0, 'no Dev mode item');
+        assert.equal(await onboarding(page).count(), 0, 'no onboarding test submenu');
         const status = await page.evaluate(async () => (await fetch('/api/me/dev-mode', {
           method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: true }),
         })).status);
@@ -327,6 +336,42 @@ async function startServer(worker, env) {
         assert.ok(!rec.started, 'signing in again did not start an onboarding journey');
         await page.locator('.doc-row[data-slug="julie-notes"]').waitFor();
         assert.equal(await page.locator('.onb-card, .onb-chip').count(), 0, 'no onboarding checklist on My docs');
+        await context.close();
+      });
+
+      await t(`${label}: document and setup pages expose only their relevant onboarding states`, async () => {
+        await seed(env);
+        await env.META.delete('dev-mode:julie@example.com');
+        const context = await newContext(JULIE);
+        const page = await context.newPage();
+        await page.goto(`${base}/d/julie-notes`);
+        await openAccountMenu(page);
+        await onboarding(page).click();
+        await page.getByRole('menuitem', { name: 'published' }).waitFor();
+        assert.equal(await page.getByRole('menuitem', { name: 'new', exact: true }).count(), 0, 'document has only its own states');
+        await shot(page, 'document-onboarding-test');
+        await page.goto(`${base}/setup`);
+        await openAccountMenu(page);
+        await onboarding(page).click();
+        await page.getByRole('menuitem', { name: 'connected' }).waitFor();
+        assert.equal(await page.getByRole('menuitem', { name: 'commented' }).count(), 0, 'setup has only connect states');
+        await shot(page, 'setup-onboarding-test');
+        await context.close();
+      });
+
+      await t(`${label}: replay in the submenu still needs two presses`, async () => {
+        await seed(env);
+        await env.META.delete('dev-mode:julie@example.com');
+        const context = await newContext(JULIE);
+        const page = await context.newPage();
+        await page.goto(`${base}/me`);
+        await openAccountMenu(page);
+        await onboarding(page).click();
+        await page.getByRole('menuitem', { name: 'replay' }).click();
+        assert.equal(await page.getByRole('menuitem', { name: 'replay?' }).count(), 1, 'first press arms replay without closing the submenu');
+        assert.ok(JSON.parse(await env.META.get('account-onboarding:acct-julie')).agent_connected, 'first press changes nothing');
+        await Promise.all([page.waitForEvent('load'), page.getByRole('menuitem', { name: 'replay?' }).click()]);
+        assert.equal(Boolean(JSON.parse(await env.META.get('account-onboarding:acct-julie') || '{}').agent_connected), false, 'second press resets the journey');
         await context.close();
       });
     } finally {
