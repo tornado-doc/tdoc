@@ -7,7 +7,8 @@ import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { usePortalContainer } from '../ui/portal.js';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
-import { agentFacts, agentName, agentOwner, taggedAgent } from './agent-choices.js';
+import { agentFacts, agentName, agentOwner } from './agent-choices.js';
+import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
@@ -175,29 +176,53 @@ function ReplyForm({
   // button share the lock, so a second press while the first reply is still
   // in flight does not post a twin.
   const [busy, setBusy] = useState(false);
-  const agents = useContext(AgentMentionContext);
   const agentButtons = useContext(AgentButtonsContext);
+  // The same @agent as the new-comment composer (agent-ask.jsx): the button
+  // that puts the default agent's pill in, the pill's dropdown, Only me. The
+  // feedback overlay keeps its own @agent buttons (AgentButtonsContext).
+  const field = useRef(null);
+  const ask = useAgentAsk(text, setText, field);
+  const { agents, target } = ask;
+  const v4 = !agentButtons && !demo;
+  // An "Only me" question asked from this reply box: its answer shows here.
+  const privateAsk = agents.privateReply && agents.privateReply.parentId === commentId ? agents.privateReply : null;
+  // Asked: the question has gone, so the box it came from starts empty.
+  useEffect(() => { if (privateAsk) setText(''); }, [Boolean(privateAsk)]);
 
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
     setBusy(true);
     try {
-      // An agent picked after @ (a bare @AI: the list's first) gets the
-      // thread: to edit when it may edit this doc, else to answer under
-      // this reply.
-      const target = taggedAgent(text, agents.choices) || (mentionsAi(text) ? (agents.choices || [])[0] || null : null);
-      const recipient = canSendToAgent && target && target.can_edit !== false ? target : null;
+      let opts;
+      let body = text;
+      if (v4) {
+        // ⌘⇧Enter puts the default agent in, then sends. A named agent that
+        // may edit gets the thread to answer or change; one that may not (or
+        // Only me) answers only, under this reply or to the asker alone.
+        const out = ask.outgoing(sendToAgent);
+        body = out.text;
+        const recipient = canSendToAgent && out.target && !out.askOnly ? out.target : null;
+        opts = { sendToAgent: Boolean(recipient), recipient, target: out.target, askOnly: out.askOnly, onlyMe: out.onlyMe };
+      } else {
+        opts = { sendToAgent: canSendToAgent && sendToAgent, recipient: null, target: null, askOnly: false, onlyMe: false };
+      }
       // onReply resolves false when the shell reported a failure; keep the draft.
-      const ok = await onReply(commentId, target || mentionsAi(text) ? joinAiTags(text) : text, {
-        sendToAgent: canSendToAgent && (sendToAgent || Boolean(recipient)),
-        recipient,
+      const ok = await onReply(commentId, opts.target || mentionsAi(body) ? joinAiTags(body) : body, {
+        ...opts,
         handoffCommentId: handoffCommentId || commentId,
-        target,
-        askOnly: Boolean(target) && target.can_edit === false,
       });
       if (ok !== false) setText('');
     } finally { setBusy(false); }
   };
+
+  if (privateAsk) {
+    return (
+      <div className="tdoc-reply-form open tdoc-private-ask" data-parent-id={commentId}>
+        {replyingTo ? <div className="tdoc-reply-to">Replying to @{replyingTo}</div> : null}
+        <PrivateAnswer privateAsk={privateAsk} onMakePublic={agents.onMakePublic} onClose={agents.onClosePrivate} submitClassName="tdoc-reply-submit" />
+      </div>
+    );
+  }
 
   return (
     <div className="tdoc-reply-form open" data-parent-id={commentId}>
@@ -207,17 +232,21 @@ function ReplyForm({
         // clicking Reply put a composer on screen and left the caret wherever
         // it was, so the first thing you do is click the thing you just opened.
         autoFocus
-        placeholder={demo ? 'Reply… GitHub @ or @email' : 'Reply… (@ to notify someone)'}
+        fieldRef={field}
+        placeholder={demo ? 'Reply… GitHub @ or @email'
+          : v4 && (agents.choices || []).length ? 'Reply, or type @ to ask an agent' : 'Reply… (@ to notify someone)'}
         value={text}
         people={mentionable}
         onChange={setText}
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
+      {v4 ? <AgentAskRow ask={ask} hint={agentAskHint(ask)} /> : null}
       <div className="tdoc-reply-form-foot">
         <span className="hint">
           {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
         </span>
         <div className="tdoc-reply-form-actions">
+          {v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent" /> : null}
           {agentButtons && !canSendToAgent && agentSetupHref ? (
             <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
           ) : null}
@@ -481,7 +510,7 @@ function ReplyCard({
       mentionable={mentionable}
       demo={demo}
       canSendToAgent={canSendToAgent}
-            agentSetupHref={agentSetupHref}
+      agentSetupHref={agentSetupHref}
       replyTarget={replyTarget}
       onReplyTarget={onReplyTarget}
       editTarget={editTarget}

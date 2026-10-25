@@ -95,15 +95,19 @@ const TEAMS = [
             await ctx.close();
           });
         }
-        await t(`${engine} 1280px: the doc page has no space chip; Switch space and Dark mode are in the account menu`, async () => {
+        await t(`${engine} 1280px: the doc page has the space chip, as on My docs; Dark mode is in the account menu`, async () => {
           const { ctx, page, errors } = await open(1280, TEAMS);
           const account = page.locator('.tdoc-bar .tdoc-account-trigger');
           await account.waitFor();
-          assert.equal(await page.locator('.tdoc-bar .tdoc-space-trigger').count(), 0, 'space chip on a document page');
           assert.equal(await page.locator('.tdoc-bar .tdoc-theme-btn, #tdoc-theme-btn').count(), 0, 'standalone theme button is back');
           await account.click();
           await page.getByRole('menuitem', { name: /Dark mode|Light mode/ }).waitFor();
-          await page.getByRole('menuitem', { name: /Switch space/ }).click();
+          assert.equal(await page.getByRole('menuitem', { name: /Switch space/ }).count(), 0, 'Switch space duplicated in the account menu beside the chip');
+          await page.keyboard.press('Escape');
+          await page.locator('.ui-menu-popup').first().waitFor({ state: 'detached' }).catch(() => {});
+          const chip = page.locator('.tdoc-bar .tdoc-space-trigger');
+          assert(await chip.isVisible(), 'no space chip on a document page');
+          await chip.click();
           const names = page.locator('.ui-menu-popup .tdoc-space-item-name');
           await names.first().waitFor({ timeout: 5000 });
           assert.deepEqual((await names.allTextContents()).map((s) => s.trim()), ['My docs', ...TEAMS.map((x) => x.name), 'Workspace settings', 'New team']);
