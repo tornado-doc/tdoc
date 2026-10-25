@@ -64,7 +64,7 @@ import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTarg
 import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
-import { summarizeHandoffSurfaces } from './document/handoff-state.js';
+import { canSeeHandoff, summarizeHandoffSurfaces } from './document/handoff-state.js';
 import { isThreadUnread, markThreadSeen, readSeenMap } from './document/thread-seen.js';
 import { DebugBar } from './debug-bar.jsx';
 import { VersionDiffView } from './document/version-diff.jsx';
@@ -752,6 +752,10 @@ export function DocumentShell({ boot, config }) {
     reportMentions(value);
     // The new card opens: it is where the next instruction lives.
     if (value?.id) setOpenCommentId(value.id);
+    if (value?.id && selection?.kind === 'document') {
+      setCommentFilterState('open');
+      setDrawerOpen(true);
+    }
     if (!value?.id) return;
     if (target && opts.askOnly) { await askOn(value.id, text, selection, target); return; }
     // To edit: the agent named after @, or (⌘⇧Enter) the default one.
@@ -1365,6 +1369,10 @@ export function DocumentShell({ boot, config }) {
   // Open / Resolved / All, in the comments area (it was a switch in the bar).
   // Only when there is something to filter.
   const openCount = comments.comments.length - resolvedCount;
+  const mobileUnread = comments.comments.some((comment) => (
+    canSeeHandoff(comment, config.identity?.login || 'anon', Boolean(config.isOwner))
+    && isThreadUnread(comment, seenMap)
+  ));
   const commentFilterControl = resolvedCount ? (
     <SegmentedControl
       className="tdoc-comment-filter"
@@ -1624,6 +1632,8 @@ export function DocumentShell({ boot, config }) {
         <MobileCommentDrawer
           filter={commentFilterControl}
           open={drawerOpen && !comparing}
+          openCount={openCount}
+          unread={mobileUnread}
           // shownComments, not the raw list: hiding resolved threads took the
           // pins out of the document but left every one of them in the drawer,
           // which on a phone IS the comment list. "Hide resolved" appeared to
@@ -1639,6 +1649,17 @@ export function DocumentShell({ boot, config }) {
           canSendToAgent={canSendToAgent}
           agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
           onOpenChange={setDrawerOpen}
+          onStartComment={config.canComment || config.signInToComment ? () => {
+            if (!config.canComment) { signIn(); return; }
+            if (editor.mode === 'edit' && editor.dirty) {
+              showToast('Save or discard the draft before commenting', true);
+              return;
+            }
+            editor.changeMode('comment');
+            setDrawerOpen(false);
+            const y = window.innerHeight - 80;
+            setComposer({ kind: 'document', rect: { top: y, bottom: y, left: 16 } });
+          } : null}
           onReply={replyTo}
           onEdit={editComment}
           onReact={reactTo}

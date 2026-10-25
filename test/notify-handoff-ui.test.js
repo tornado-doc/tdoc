@@ -293,6 +293,35 @@ async function t(name, fn) {
       assert.equal(await pin('question').locator('.tdoc-pin-handoff-badge').textContent(), '❓');
       await page.close();
     });
+
+    await t('mobile FAB shows open count and unread dot, then a direct comment CTA when all are resolved', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(`${base}/?view=mobile-fab&state=active`);
+      const fab = page.locator('.tdoc-fab');
+      await fab.waitFor();
+      assert.equal((await fab.textContent()).trim(), '2');
+      assert.equal(await fab.locator('.tdoc-fab-unread-dot').count(), 1);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-fab-active.png') });
+      await fab.click();
+      await page.locator('#tdoc-comment-layer').waitFor();
+      await page.goto(`${base}/?view=mobile-fab&state=resolved`);
+      await fab.waitFor();
+      assert.equal((await fab.textContent()).trim(), 'Leave a comment or ask AI');
+      assert.equal(await fab.locator('#tdoc-fab-count').count(), 0);
+      assert.equal(await fab.locator('.tdoc-fab-unread-dot').count(), 0);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-fab-cta.png') });
+      await fab.click();
+      await page.locator('.tdoc-popup').getByText('On this document').waitFor();
+      await page.locator('.tdoc-popup textarea').fill('Please clarify the pricing');
+      await page.locator('.tdoc-popup').getByRole('button', { name: 'Comment', exact: true }).click();
+      assert.deepEqual(JSON.parse(await page.locator('#mobile-comment-log').textContent()), { text: 'Please clarify the pricing', anchor: null });
+      await page.goto(`${base}/?view=mobile-fab&state=empty`);
+      assert.equal((await fab.textContent()).trim(), 'Leave a comment or ask AI');
+      assert.deepEqual(errors, []);
+      await page.close();
+    });
   } finally {
     await browser.close();
     server.close();

@@ -11,7 +11,9 @@ import { DocumentSendAgentAction } from '../../../shell/src/document/document-to
 import { HandoffDetailsPanel } from '../../../shell/src/document/handoff-details.jsx';
 import { summarizeHandoffSurfaces } from '../../../shell/src/document/handoff-state.js';
 import { isThreadUnread } from '../../../shell/src/document/thread-seen.js';
-import { DesktopCommentLayer } from '../../../shell/src/document/comment-layer.jsx';
+import { DesktopCommentLayer, MobileCommentDrawer } from '../../../shell/src/document/comment-layer.jsx';
+import { CommentComposer } from '../../../shell/src/document/comment-composer.jsx';
+import { anchorFromSelection } from '../../../shell/src/document/model.js';
 
 const params = new URLSearchParams(location.search);
 const ids = JSON.parse(params.get('ids') || '[]');
@@ -117,6 +119,26 @@ function PinDemo() {
   </div>;
 }
 
+function MobileFabDemo() {
+  const [open, setOpen] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [posted, setPosted] = useState('');
+  const active = params.get('state') === 'active';
+  const visible = active ? [CARDS.find((c) => c.id === 'replied'), CARDS.find((c) => c.id === 'question')]
+    : params.get('state') === 'empty' ? [] : [CARDS.find((c) => c.id === 'resolved')];
+  document.body.classList.add('tdoc-narrow');
+  return <>
+    <div className="tdoc-bar" style={{ height: 48, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 12, background: '#fff', borderBottom: '1px solid #e8e7e3' }}><span>🌪</span><strong>RaftBench pricing plan</strong></div>
+    <main style={{ padding: '32px 20px', fontSize: 16, lineHeight: 1.8 }}><h1>RaftBench pricing plan</h1><p>We propose charging per team seat, with a free personal tier and team seats at $8 per month.</p><p>The third section compares three options. The final recommendation is a seat based plan.</p></main>
+    <MobileCommentDrawer open={open} onOpenChange={setOpen} comments={visible} openCount={active ? 2 : 0} unread={active}
+      pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => setComposing(true)} />
+    {composing ? <CommentComposer selection={{ kind: 'document', rect: { top: 600, bottom: 600, left: 16 } }}
+      onSubmit={async (text) => { setPosted(JSON.stringify({ text, anchor: anchorFromSelection({ kind: 'document' }) })); setComposing(false); }}
+      onClose={() => setComposing(false)} /> : null}
+    <output id="mobile-comment-log">{posted}</output>
+  </>;
+}
+
 createRoot(document.getElementById('root')).render(
   params.get('view') === 'status'
     ? <StatusCards />
@@ -124,5 +146,7 @@ createRoot(document.getElementById('root')).render(
       ? <ActivityDemo />
       : params.get('view') === 'pins'
         ? <PinDemo />
+      : params.get('view') === 'mobile-fab'
+        ? <MobileFabDemo />
       : <NotifyHandoffPanel slug="doc" open commentIds={ids} avoid={avoid} onClose={() => {}} />,
 );

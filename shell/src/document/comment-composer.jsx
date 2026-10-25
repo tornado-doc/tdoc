@@ -107,7 +107,9 @@ export function CommentComposer({
   const { top, left } = composerPosition(selection.rect || {}, viewport);
 
   const quoted = String(selection.text || '');
-  const preview = selection.kind === 'element'
+  const preview = selection.kind === 'document'
+    ? 'On this document'
+    : selection.kind === 'element'
     ? selection.label || 'Selected element'
     : `"${quoted.slice(0, 80)}${quoted.length > 80 ? '…' : ''}"`;
 

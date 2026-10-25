@@ -838,6 +838,8 @@
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  body.tdoc-narrow .tdoc-fab-cta { max-width: calc(100vw - 32px); }
+  body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #3277ef; box-sizing: content-box; }
   body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
   body.tdoc-narrow .tdoc-modal { padding: 20px; }

@@ -186,6 +186,8 @@ export function MobileCommentDrawer({
   filter = null,
   open,
   comments,
+  openCount = comments.length,
+  unread = false,
   pinIds,
   currentUser,
   isOwner,
@@ -196,6 +198,7 @@ export function MobileCommentDrawer({
   canSendToAgent = false,
   agentSetupHref = null,
   onOpenChange,
+  onStartComment = null,
   onReply,
   onReact,
   onDelete,
@@ -228,14 +231,25 @@ export function MobileCommentDrawer({
     return () => cancelAnimationFrame(raf);
   }, [open, openCommentId]);
 
-  if (!comments.length && !filter) return null;
+  if (!comments.length && !filter && !onStartComment) return null;
+
+  const fab = openCount > 0 ? (
+    <Drawer.Trigger className="tdoc-fab" aria-label={`${openCount} open comments${unread ? ', new agent reply' : ''}`}>
+      <CommentIcon size={16} />
+      <span id="tdoc-fab-count">{openCount}</span>
+      {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
+    </Drawer.Trigger>
+  ) : onStartComment ? (
+    <button type="button" className="tdoc-fab tdoc-fab-cta" onClick={onStartComment}>
+      <CommentIcon size={16} />
+      <span>Leave a comment or ask AI</span>
+      {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
+    </button>
+  ) : null;
 
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
-      <Drawer.Trigger className="tdoc-fab">
-        <CommentIcon size={16} />
-        <span id="tdoc-fab-count">{comments.length}</span>
-      </Drawer.Trigger>
+      {fab}
       <Drawer.Portal>
         <Drawer.Backdrop className="tdoc-drawer-backdrop" />
         <Drawer.Viewport className="tdoc-drawer-viewport">
