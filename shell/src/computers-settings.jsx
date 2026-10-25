@@ -45,13 +45,14 @@ export function ComputersBody({ identity, preview = null }) {
   const computers = data?.computers || [];
   const options = computers.flatMap(c => c.status === 'active' && !c.paused ? c.runtimes.filter(r => r.state === 'ready').map(r => ({ value: `${c.device}/${r.cli}`, label: `${aiName(r.cli)} · ${c.device}` })) : []);
   const current = data?.default?.provider === 'local' ? `${data.default.device}/${data.default.cli}` : '';
+  const canChoose = options.length > 0;
   if (current && !options.some(o => o.value === current)) options.push({ value: current, label: `${aiName(data.default.cli)} · ${data.default.device} (unavailable)` });
   const selected = current || '';
   return <>
     <div className="tm-settings-head tdoc-computers-head"><div><h2>Computers &amp; AI</h2><p>Manage automatic comment updates here, any time.</p></div><button type="button" className="new-folder-btn" onClick={() => setSetup(true)}>Connect a computer</button></div>
     {notice ? <p role="status" className="muted">{notice}</p> : null}
     {!data ? <p role="status">Loading your computers…</p> : !computers.length ? <p className="empty">No computers connected. You can still use tdoc in your AI conversation.</p> : <>
-      <label className="tdoc-computer-default">AI for new docs <AppSelect ariaLabel="AI for new docs" disabled={busy || !options.length} value={selected} options={[{ value: '', label: data.default && !selected ? 'Keep current agent' : 'Choose an AI' }, ...options]} onChange={value => { if (value && value !== current) { const [device, cli] = value.split('/'); update({ device, cli, action: 'default' }); } }} /></label>
+      <label className="tdoc-computer-default">AI for new docs <AppSelect ariaLabel="AI for new docs" disabled={busy || !canChoose} value={selected} options={[{ value: '', label: data.default && !selected ? 'Keep current agent' : 'Choose an AI' }, ...options]} onChange={value => { if (value && value !== current) { const [device, cli] = value.split('/'); update({ device, cli, action: 'default' }); } }} /></label>
       <div className="pane">{computers.map(c => <section className="doc-row tdoc-computer-row" key={c.device} aria-label={c.device}>
         <Monitor size={20} aria-hidden="true" />
         <div className="doc-info"><strong className="doc-title">{c.device}</strong><p className="doc-meta">{c.paused ? 'Automatic updates paused' : c.status === 'active' ? 'Connected' : 'Offline · wake this computer to receive updates'}</p>
