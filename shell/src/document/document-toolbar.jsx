@@ -15,7 +15,6 @@ import {
   Upload,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
-import { SpaceMenuItems, useSpaceTeams } from '../workspace-switcher.jsx';
 
 // The label after a version number. "current" read as "latest" from an old
 // version (round-4 tester), so the two facts get their own words: where you
@@ -93,45 +92,14 @@ export function editedAgo(iso, now = Date.now()) {
   return `Edited ${new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 }
 
-// The space a doc sits in, as the first crumb: its team, or My docs for the
-// owner. A click opens the space switcher (the same rows as the account
-// menu's Switch space).
-function SpaceCrumb({ config, label, space, currentTeam }) {
-  const teams = useSpaceTeams(null, Boolean(config.identity));
-  return (
-    <AppMenu
-      align="start"
-      trigger={(
-        <button type="button" className="tdoc-crumb tdoc-crumb-space" aria-label={`Space: ${label}. Switch space`}>
-          {label}
-        </button>
-      )}
-    >
-      <SpaceMenuItems space={space} teams={teams} currentTeam={currentTeam} />
-    </AppMenu>
-  );
-}
-
-// The bar's left side after the logo: space / folder / title. The space is
-// the doc's team (for its members), My docs (for its owner), or whose doc it
-// is (for anyone else); the folder goes to that folder's list. Version and
-// star moved: the version is behind "Edited …" on the right, the star in ⋯.
+// The bar's left side after the logo: the document's title, renameable by its
+// owner. No space or folder crumbs (they led nowhere -- there is no sidebar
+// behind them); the space is the switcher chip on the right, as on My docs.
+// Version and star moved: the version is behind "Edited …" on the right, the
+// star in ⋯.
 export function DocumentBreadcrumbs({ config, title, onRename }) {
   if (config.isLanding) return null;
-  const team = config.teamManage?.team || null;
-  const sep = <span className="tdoc-crumb-sep" aria-hidden="true">/</span>;
-  const space = team
-    ? <SpaceCrumb config={config} label={team.name} space={team.id} currentTeam={team} />
-    : config.isOwner && config.identity
-      ? <SpaceCrumb config={config} label="My docs" space="" currentTeam={null} />
-      : config.author ? <span className="tdoc-crumb doc-author">{config.author}</span> : null;
-  return (
-    <nav className="tdoc-crumbs" aria-label="Breadcrumb">
-      {space ? <>{space}{sep}</> : null}
-      {config.folder ? <><a className="tdoc-crumb tdoc-crumb-folder" href={config.folder.href}>{config.folder.name}</a>{sep}</> : null}
-      <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
-    </nav>
-  );
+  return <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />;
 }
 
 // "Edited 3m ago", muted, on the right: the version on screen. A click lists

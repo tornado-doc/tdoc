@@ -187,7 +187,7 @@ const BROWSER = [
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
-  'doc-bar-composer-ui.test.js', // the doc bar (crumbs, Edited, quiet Share, modes in ⋯, comments filter) and the composer's @agent / Ask / Ask + request change / Only me, desktop + phone, team docs
+  'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, modes in ⋯, comments filter) and the composer's @agent / Ask / Ask + request change / Only me, desktop + phone, team docs
   'phone-top-bar-ui.test.js', // signed in on a phone: ⋯ stays on screen, spaces under ⋯ → Switch space
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
   'share-access-ui.test.js', // Share panel: specific people / anyone with the link / public, sign-in switch, desktop + phone

@@ -1,9 +1,9 @@
 // The document page as Julie approved it (2026-10-24), in the real shell
 // against the real worker, desktop and phone:
-//   bar       logo · space / folder / title; Edited … · ✈ (owner / admin) ·
-//             Share (quiet) · ⋯ · avatar only. No mode dropdown, no Resolved
-//             switch, no space chip: the modes head ⋯, the filter (Open /
-//             Resolved / All) heads the comments
+//   bar       logo · title; Edited … · ✈ (owner / admin) · Share (quiet) ·
+//             ⋯ · space chip (as on My docs) · avatar only. No space / folder
+//             crumbs, no mode dropdown, no Resolved switch: the modes head ⋯,
+//             the filter (Open / Resolved / All) heads the comments
 //   composer  Comment + @agent. @agent puts the default agent in; its menu
 //             is Mine / Team / tdoc AI (with "Connect my agent"). "Ask" or
 //             "Ask + request change" -- the second only where that agent may
@@ -123,10 +123,12 @@ async function dragSelect(page, phrase) {
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
 
   try {
-    await t('desktop bar: logo · My docs / title; Edited · ✈ · Share · ⋯ · avatar; modes in ⋯; the filter heads the comments', async () => {
+    await t('desktop bar: logo · title; Edited · ✈ · Share · ⋯ · space chip · avatar; modes in ⋯; the filter heads the comments', async () => {
       const { context, page } = await open(julie, 'launch-plan');
-      await page.locator('.tdoc-crumb-space', { hasText: 'My docs' }).waitFor();
-      if (await page.locator('.tdoc-mode-trigger, #tdoc-show-resolved, .tdoc-space-trigger, #tdoc-theme-btn, #tdoc-star-btn').count()) throw new Error('an old bar control is back');
+      await page.locator('.tdoc-bar .tdoc-space-trigger', { hasText: 'My docs' }).waitFor();
+      if (await page.locator('.tdoc-crumbs, .tdoc-crumb').count()) throw new Error('space / folder crumbs are back');
+      if (!(await page.locator('.tdoc-bar-left .doc-title').isVisible())) throw new Error('no title on the left');
+      if (await page.locator('.tdoc-mode-trigger, #tdoc-show-resolved, #tdoc-theme-btn, #tdoc-star-btn').count()) throw new Error('an old bar control is back');
       if (!/^Edited /.test((await page.locator('#tdoc-version-toggle').textContent()).trim())) throw new Error('no Edited …');
       await page.locator('#tdoc-send-agent-btn').waitFor();
       const share = page.locator('#tdoc-share-btn');
@@ -143,7 +145,7 @@ async function dragSelect(page, phrase) {
       await filter.getByRole('radio', { name: /Resolved/ }).click();
       await page.waitForFunction(() => document.querySelectorAll('.tdoc-pin').length === 1);
       await filter.getByRole('radio', { name: /All/ }).click();
-      await page.locator('.tdoc-crumb-space').click();
+      await page.locator('.tdoc-bar .tdoc-space-trigger').click();
       await page.locator('.ui-menu-popup .tdoc-space-item-name', { hasText: 'Tdoc' }).waitFor();
       await shot(page, 'doc-bar-desktop.png');
       await context.close();
@@ -153,7 +155,8 @@ async function dragSelect(page, phrase) {
       const { context, page } = await open(julie, 'launch-plan', true);
       await page.locator('#tdoc-send-agent-btn').waitFor();
       if (!(await page.locator('#tdoc-share-btn').isVisible())) throw new Error('no Share on a phone');
-      if (await page.locator('.tdoc-crumb').first().isVisible()) throw new Error('crumbs crowd the phone bar');
+      if (!(await page.locator('.tdoc-bar .doc-title').isVisible())) throw new Error('no title on a phone');
+      if (await page.locator('.tdoc-bar .tdoc-space-trigger').isVisible()) throw new Error('space chip crowds the phone bar');
       if (await page.locator('.tdoc-account-trigger').isVisible()) throw new Error('avatar in the phone bar');
       await page.locator('#tdoc-more-btn').click();
       await page.getByRole('menuitem', { name: /My account/ }).waitFor();
