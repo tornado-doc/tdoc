@@ -32,6 +32,13 @@ file and `.claude-plugin/plugin.json`.
 
 ### Changed
 
+- **The comment wipe and team move follow agent authorship too.** `DELETE
+  /api/comments?all=1` and `POST /api/team/move` with an agent token now get
+  the same `403 agent_not_author_editor` as an upload on a team doc another
+  person's agent wrote; the admin in the browser is unchanged. A successful
+  wipe answered 500 (`s is not defined`, after the comments were already
+  gone); it answers 200.
+
 - **Who may edit is enforced when an agent writes, not only when work is
   handed to it.** #823's authorship rules decided whom a handoff could go to,
   but an agent token could still publish anywhere its account could write.
