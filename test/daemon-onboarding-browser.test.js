@@ -131,12 +131,16 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await page.getByRole('heading',{name:'Connect a computer'}).waitFor();
    const scroll=await page.evaluate(()=>({page:document.documentElement.scrollHeight,viewport:innerHeight,body:document.querySelector('.ui-setup-modal .ui-dialog-body').scrollHeight,bodyViewport:document.querySelector('.ui-setup-modal .ui-dialog-body').clientHeight}));
    assert.ok(scroll.page<=scroll.viewport+1,`preview does not add a page of scroll: ${JSON.stringify(scroll)}`);
-   assert.ok(scroll.body<=scroll.bodyViewport+1,`connection progress fits without scrolling: ${JSON.stringify(scroll)}`);
+   assert.ok(await page.getByRole('button',{name:'Use your AI instead'}).isVisible(),'manual route stays outside scrolling instructions');
+   const footer=await page.getByRole('button',{name:'Next',exact:true}).boundingBox();
+   assert.ok(footer.y+footer.height<=850,'connection footer remains visible');
    if(SHOTS) await page.screenshot({path:path.join(SHOTS,`preview-${width}.png`)});
    if(width===1280){
     await page.setViewportSize({width,height:650});
     const short=await page.evaluate(()=>({page:document.documentElement.scrollHeight,viewport:innerHeight,body:document.querySelector('.ui-setup-modal .ui-dialog-body').scrollHeight,bodyViewport:document.querySelector('.ui-setup-modal .ui-dialog-body').clientHeight}));
-    assert.ok(short.page<=short.viewport+1 && short.body<=short.bodyViewport+1,`short desktop fits connection progress: ${JSON.stringify(short)}`);
+    assert.ok(short.page<=short.viewport+1,`short desktop keeps scroll inside the dialog: ${JSON.stringify(short)}`);
+    const next=await page.getByRole('button',{name:'Next',exact:true}).boundingBox();
+    assert.ok(next.y+next.height<=650,'fixed footer remains visible on a short desktop');
    }
    assert.deepEqual(errors,[]);
    await context.close();passed++;console.log(`✓ automatic runtime detection → retry → private practice; optional manual route at ${width}px`);
