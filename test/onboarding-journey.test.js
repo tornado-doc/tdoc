@@ -203,8 +203,10 @@ t('bridge 1 is read off the server, and a paired account is never asked for a co
   assert(worker.includes("const paired = await accountPaired(env, accountId);")
     && worker.includes("if (await env.META.get(`account-terminal:${id}`)) return true;")
     && server.includes('const paired = Boolean(process.env.TDOC_E2E_PAIRED);'), 'both hosts say whether a terminal has connected');
-  assert(gate.includes('const connected = Boolean(chosen);'),
-    'and the gate is done when any of the three says so');
+  assert(gate.includes("detectedComputers.some((c) => c.status === 'active')")
+    && gate.includes("const runtimeReady = Boolean(chosen && computer?.status === 'active')")
+    && gate.includes('disabled={busy || !runtimeReady}'),
+    'a live computer enables AI selection; only its verified runtime enables a practice doc');
   assert(gate.includes('const POLL_MS = 3000;'), '3s while waiting');
   assert(gate.includes("postOnboardingEvent('copy_clicked')"), 'copying is telemetry, not a fake connected stamp');
   assert(gate.includes('COPY_FALLBACK') && gate.includes('selectContents(ref.current)'),
