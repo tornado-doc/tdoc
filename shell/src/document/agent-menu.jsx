@@ -2,7 +2,7 @@ import React from 'react';
 import { Check } from 'lucide-react';
 import { agentDisplayName, agentMentionName, targetKey } from './agent-choices.js';
 import { ProviderMark } from './notify-handoff.jsx';
-import { AppMenuItem, AppMenuLinkItem } from '../ui/menu.jsx';
+import { AppMenuItem, AppMenuLinkItem, AppSubmenu } from '../ui/menu.jsx';
 import { FEW_FREE_LEFT } from './ai-answerer.js';
 
 // Whose an agent is, the order both agent lists keep: Mine, Team, tdoc AI.
@@ -23,29 +23,39 @@ export function agentTag(t, ai = null) {
 // tdoc AI is offered. The agent pill's dropdown in both composers, in the
 // typed-@ list's light style (Julie, 2026-10-25): the same agents typing @
 // offers.
-export function AgentMenuItems({ choices, ai = null, current = null, onPick }) {
+export function AgentMenuItems({ choices, ai = null, current = null, onPick,
+  preserveOrder = false, maxVisible = Infinity, showConnect = true, showRelevance = false, pinTdocAi = false }) {
   const list = choices || [];
-  const rows = AGENT_GROUPS.flatMap((group) => list.filter((t) => whose(t) === group));
+  const rows = preserveOrder ? list : AGENT_GROUPS.flatMap((group) => list.filter((t) => whose(t) === group));
+  const aiRow = pinTdocAi ? rows.find((t) => t.tdoc_ai) : null;
+  const agentRows = aiRow ? rows.filter((t) => t !== aiRow) : rows;
+  const visible = agentRows.slice(0, Math.max(0, maxVisible - (aiRow ? 1 : 0)));
+  if (aiRow) visible.push(aiRow);
+  const more = agentRows.slice(visible.length - (aiRow ? 1 : 0));
+  const renderRow = (t) => {
+    const picked = Boolean(current) && targetKey(current) === targetKey(t);
+    const tag = showRelevance && t.last_writer ? 'Edited last' : agentTag(t, ai);
+    return (
+      <AppMenuItem
+        key={targetKey(t)}
+        className="tdoc-agent-menu-item"
+        title={agentDisplayName(t, list)}
+        onClick={() => onPick(t)}
+      >
+        <span className="tdoc-mention-agent-mark"><ProviderMark target={t} size={14} /></span>
+        <span className="tdoc-agent-menu-name">{agentMentionName(t, list)}</span>
+        {tag ? <span className="tdoc-agent-menu-tag">{tag}</span> : null}
+        <span className="tdoc-agent-menu-check">{picked ? <Check size={13} aria-label="Picked" /> : null}</span>
+      </AppMenuItem>
+    );
+  };
   return (
     <>
-      {rows.map((t) => {
-        const picked = Boolean(current) && targetKey(current) === targetKey(t);
-        const tag = agentTag(t, ai);
-        return (
-          <AppMenuItem
-            key={targetKey(t)}
-            className="tdoc-agent-menu-item"
-            title={agentDisplayName(t, list)}
-            onClick={() => onPick(t)}
-          >
-            <span className="tdoc-mention-agent-mark"><ProviderMark target={t} size={14} /></span>
-            <span className="tdoc-agent-menu-name">{agentMentionName(t, list)}</span>
-            {tag ? <span className="tdoc-agent-menu-tag">{tag}</span> : null}
-            <span className="tdoc-agent-menu-check">{picked ? <Check size={13} aria-label="Picked" /> : null}</span>
-          </AppMenuItem>
-        );
-      })}
-      {rows.some((t) => t.tdoc_ai) ? (
+      {visible.map(renderRow)}
+      {more.length ? <AppSubmenu trigger="More agents" className="tdoc-agent-menu-more">
+        {more.map(renderRow)}
+      </AppSubmenu> : null}
+      {showConnect && rows.some((t) => t.tdoc_ai) ? (
         <AppMenuLinkItem className="tdoc-agent-menu-connect" href="/start">Connect my agent</AppMenuLinkItem>
       ) : null}
     </>

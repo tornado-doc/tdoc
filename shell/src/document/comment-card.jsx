@@ -100,6 +100,15 @@ export function Author({ author, timestamp }) {
   );
 }
 
+// The same safe body is used by comments, replies, and private Ask AI turns.
+export function CommentMessageText({ text, mentions = [] }) {
+  return <div className="text"><MentionText text={text} mentions={mentions} /></div>;
+}
+
+export function ReplyMessage({ author, text, mentions = [] }) {
+  return <><Author author={author} /><CommentMessageText text={text} mentions={mentions} /></>;
+}
+
 function ReactionPicker({ onPick }) {
   return (
     <Popover.Root>
@@ -569,11 +578,10 @@ function ReplyCard({
       {flattened ? (
         <div className="tdoc-reply-to">Replying to @{answers(replies, reply, rootComment)}</div>
       ) : null}
-      <Author author={reply.author} />
       {editTarget === reply.id ? (
-        <EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} />
+        <><Author author={reply.author} /><EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} /></>
       ) : (
-        <div className="text"><MentionText text={reply.text} mentions={reply.mentions} /></div>
+        <ReplyMessage author={reply.author} text={reply.text} mentions={reply.mentions} />
       )}
       <TdocAiQuota reply={reply} currentUser={currentUser} />
       {reacted ? <Reactions item={reply} me={currentUser} onReact={onReact} /> : null}
@@ -897,7 +905,7 @@ export function CommentCard({
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
       ) : (
-        <div className="text"><MentionText text={comment.text} mentions={comment.mentions} /></div>
+        <CommentMessageText text={comment.text} mentions={comment.mentions} />
       )}
       {reactionCount ? (
         <Reactions item={comment} me={currentUser} onReact={onReact} />

@@ -195,6 +195,7 @@ export function MobileCommentDrawer({
   canSendToAgent = false,
   agentSetupHref = null,
   onOpenChange,
+  hideFab = false,
   onStartComment = null,
   onAskAi = null,
   onReply,
@@ -231,7 +232,7 @@ export function MobileCommentDrawer({
 
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
-      <Drawer.Trigger className="tdoc-fab" aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
+      <Drawer.Trigger className={`tdoc-fab${hideFab ? ' is-hidden' : ''}`} aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
         <CommentIcon size={16} />
         {openCount > 0 ? <span id="tdoc-fab-count">{openCount}</span> : null}
         {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}

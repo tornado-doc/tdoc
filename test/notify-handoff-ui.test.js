@@ -323,7 +323,7 @@ async function t(name, fn) {
             const inner = badge.getBoundingClientRect();
             return { label: badge.textContent, width: inner.width, height: inner.height,
               x: inner.x + inner.width / 2, y: inner.y + inner.height / 2,
-              expectedX: outer.right - 4, expectedY: outer.top + 1 };
+              expectedX: outer.right - 6 - inner.width / 2, expectedY: outer.top + 8 + inner.height / 2 };
           });
           assert.equal(geometry.label, '');
           assert.equal(geometry.width, geometry.height, `badge not round: ${JSON.stringify(geometry)}`);

@@ -61,7 +61,7 @@ import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sameTarget, taggedAgentSpan } from './document/agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel } from './document/ask-ai-panel.jsx';
@@ -228,7 +228,7 @@ export function DocumentShell({ boot, config }) {
   const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
   const [agentActivityOpen, setAgentActivityOpen] = useState(false);
   const [askAiDraft, setAskAiDraft] = useState('');
-  const [askAiTargetKey, setAskAiTargetKey] = useState('tdoc-ai');
+  const [askAiTargetKey, setAskAiTargetKey] = useState('');
   const [askAiTurns, setAskAiTurns] = useState([]);
   const [askAiBusy, setAskAiBusy] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
@@ -934,17 +934,34 @@ export function DocumentShell({ boot, config }) {
     notifyTargets,
     mine: myAgent.state ? { ...myAgent.state, tdoc_ai: Boolean(myAgent.state.tdoc_ai) && askEnabled } : null,
   }) : []), [config.identity, canSendToAgent, notifyTargets.default, notifyTargets.candidates, notifyTargets.fallback, myAgent.state, askEnabled]);
-  const askAiTargets = useMemo(() => [
-    ...(askEnabled ? [{ key: 'tdoc-ai', label: 'tdoc AI', target: TDOC_AI, tdocAi: true }] : []),
-    ...(myAgent.state?.agents || []).filter((agent) => agent.status !== 'stopped').map((agent, index) => ({
-      key: `my-agent-${index}`, label: agentDisplayName(agent) || 'My agent', target: agent, tdocAi: false,
-    })),
-  ], [askEnabled, myAgent.state?.agents]);
+  const askAiTargets = useMemo(() => {
+    const recent = [notifyTargets.default, ...(notifyTargets.candidates || [])].find((agent) => agent?.last_writer);
+    const agents = orderedAskAiChoices([...(myAgent.state?.agents || []), ...(myAgent.state?.team_agents || [])], recent);
+    return [
+      ...agents.map((agent) => ({ key: targetKey(agent), label: agentDisplayName(agent, agents), target: agent, tdocAi: false })),
+      ...(askEnabled ? [{ key: 'tdoc-ai', label: 'tdoc AI', target: TDOC_AI, tdocAi: true }] : []),
+    ];
+  }, [askEnabled, myAgent.state?.agents, myAgent.state?.team_agents, notifyTargets.default, notifyTargets.candidates]);
+  // Relevance controls menu order, not who receives a private question by
+  // default. A team agent (or another person's agent) cannot answer privately
+  // for this viewer, even when it wrote the latest document version.
+  const defaultAskAiTargetKey = useMemo(() => {
+    const recent = [notifyTargets.default, ...(notifyTargets.candidates || [])].find((agent) => agent?.last_writer);
+    const ownRecent = recent && !recent.team_agent
+      ? (myAgent.state?.agents || []).find((agent) => agent.status !== 'stopped' && sameTarget(agent, recent))
+      : null;
+    return (ownRecent && askAiTargets.find((item) => item.key === targetKey(ownRecent))?.key)
+      || askAiTargets.find((item) => item.tdocAi)?.key
+      || askAiTargets.find((item) => !item.target.team_agent)?.key
+      || askAiTargets[0]?.key || '';
+  }, [askAiTargets, myAgent.state?.agents, notifyTargets.default, notifyTargets.candidates]);
+  const selectedAskAiTargetKey = askAiTargets.some((item) => item.key === askAiTargetKey)
+    ? askAiTargetKey : defaultAskAiTargetKey;
   const askAiSend = async (retryText = null, retryTarget = null) => {
     const question = String(retryText || askAiDraft).trim();
     const choice = retryTarget
       ? askAiTargets.find((item) => sameTarget(item.target, retryTarget))
-      : askAiTargets.find((item) => item.key === askAiTargetKey) || askAiTargets[0];
+      : askAiTargets.find((item) => item.key === selectedAskAiTargetKey);
     if (!question || !choice || askAiBusy) return;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setAskAiBusy(true);
@@ -1526,7 +1543,6 @@ export function DocumentShell({ boot, config }) {
       <AgentMentionContext.Provider value={agentMentions}>
       <TopBar
         identity={config.identity}
-        hideMobileMark={!config.isLanding}
         onboardingTest={config.debug ? {
           record: onboardingRecord,
           surface: config.isLanding ? 'landing' : 'document',
@@ -1547,16 +1563,17 @@ export function DocumentShell({ boot, config }) {
                 counts={Object.fromEntries(Object.entries(handoffBuckets).map(([state, list]) => [state, list.length]))}
                 unread={unreadAgentReplies}
                 open={handoffDetailsOpen}
-                onOpenChange={(open) => { setHandoffDetailsOpen(open); if (open) setAgentActivityOpen(false); }}
+                onOpenChange={(open) => { setHandoffDetailsOpen(open); if (open) { setAgentActivityOpen(false); setDrawerOpen(false); } }}
                 narrow={narrow}
               >
                 <AskAiPanel
                   open={handoffDetailsOpen}
                   draft={askAiDraft}
                   onDraft={setAskAiDraft}
-                  targetKey={askAiTargetKey}
+                  targetKey={selectedAskAiTargetKey}
                   onTarget={setAskAiTargetKey}
                   targets={askAiTargets}
+                  viewer={config.identity}
                   turns={askAiTurns}
                   busy={askAiBusy}
                   remaining={aiRemaining}
@@ -1772,7 +1789,8 @@ export function DocumentShell({ boot, config }) {
           expandReplies={deepReply}
           canSendToAgent={canSendToAgent}
           agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
-          onOpenChange={setDrawerOpen}
+          onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
+          hideFab={handoffDetailsOpen}
           onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
           onAskAi={config.canComment || config.signInToComment ? () => startDocumentComment(true) : null}
           onReply={replyTo}

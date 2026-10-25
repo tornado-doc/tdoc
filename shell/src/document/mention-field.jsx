@@ -393,7 +393,7 @@ function renderInline(nodes, mentions, keyPrefix) {
     if (node.type === 'link') {
       return (
         <a key={key} className="tdoc-md-link" href={node.value} target="_blank" rel="noopener noreferrer">
-          {node.value}
+          {node.label || node.value}
         </a>
       );
     }
@@ -407,13 +407,18 @@ function renderRichBlocks(blocks, mentions, keyPrefix) {
     if (block.type === 'fence') {
       return <pre key={key} className="tdoc-md-pre"><code>{block.value}</code></pre>;
     }
+    if (block.type === 'heading') {
+      const Tag = `h${Math.min(6, Math.max(1, block.level || 1))}`;
+      return <Tag key={key} className="tdoc-md-heading">{renderInline(block.children, mentions, key)}</Tag>;
+    }
     if (block.type === 'list') {
+      const Tag = block.ordered ? 'ol' : 'ul';
       return (
-        <ul key={key} className="tdoc-md-list">
+        <Tag key={key} className="tdoc-md-list">
           {(block.items || []).map((item, i) => (
             <li key={`${key}-li-${i}`}>{renderInline(item, mentions, `${key}-li-${i}`)}</li>
           ))}
-        </ul>
+        </Tag>
       );
     }
     if (block.type === 'break') return <React.Fragment key={key}>{'\n\n'}</React.Fragment>;
