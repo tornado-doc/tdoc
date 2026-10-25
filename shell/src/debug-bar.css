@@ -29,3 +29,7 @@
    product's own accent and starts looking like the warning it is. */
 .sg-debug .sg-debug-replay.armed { background: #b42318; }
 .sg-debug-now { color: #a8a8a3; padding-left: 4px; }
+/* Leaving dev mode: quiet at rest, set apart from the record line, and armed
+   it says what the second press will do. */
+.sg-debug .sg-debug-exit { margin-left: 6px; background: transparent; border: 1px solid #d8d8d3; color: #6b6a66; }
+.sg-debug .sg-debug-exit.armed { background: #1a1a1a; border-color: #1a1a1a; color: #fff; }

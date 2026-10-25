@@ -3,6 +3,7 @@ import { readStored, writeStored } from './safe-storage.js';
 import {
   Bell,
   ChevronRight,
+  FlaskConical,
   Layers,
   Library,
   LogIn,
@@ -18,6 +19,7 @@ import { isPlainNavigationClick, startNavigationProgress } from './nav-progress.
 import { useNotifications } from './hooks/use-notifications.js';
 import { BrowserAlertsPrompt, NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 import { SpaceMenuItems, WorkspaceSwitcher, spaceLabel, useSpaceTeams } from './workspace-switcher.jsx';
+import { readDevMode, setDevMode } from './dev-mode.js';
 
 // Sign in always asks which account: after Sign out, the provider (and
 // GitHub behind it) still remember the last one, and going straight back in
@@ -63,6 +65,10 @@ export function TopBar({
   const viewerKey = identity?.login || '';
   const activeProfile = profile || (viewerProfile?.viewerKey === viewerKey ? viewerProfile.profile : null);
   const spaceTeams = useSpaceTeams(teams, Boolean(identity));
+  // Only an allow-listed account has the switch; the boot says so.
+  const [devMode] = useState(readDevMode);
+  const toggleDevMode = () => { setDevMode(!devMode.on).catch(() => {}); };
+  const devModeLabel = devMode ? `Dev mode: ${devMode.on ? 'on' : 'off'}` : '';
 
   useEffect(() => {
     if (!viewerKey || profile) return undefined;
@@ -220,6 +226,11 @@ export function TopBar({
                 <AppMenuLinkItem className="tdoc-action-menu-item" href="/me?view=settings#agents">
                   <TerminalSquare size={15} /> Agents
                 </AppMenuLinkItem>
+                {devMode ? (
+                  <AppMenuItem className="tdoc-action-menu-item tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} onClick={toggleDevMode}>
+                    <FlaskConical size={15} /> {devModeLabel}
+                  </AppMenuItem>
+                ) : null}
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
                 </AppMenuItem>
@@ -253,6 +264,11 @@ export function TopBar({
               <AppMenuItem onClick={openPublicProfile}>{publicProfileLabel}</AppMenuItem>
             ) : null}
             <AppMenuLinkItem href="/me?view=settings#agents">Agents</AppMenuLinkItem>
+            {devMode ? (
+              <AppMenuItem className="tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} onClick={toggleDevMode}>
+                {devModeLabel}
+              </AppMenuItem>
+            ) : null}
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
         ) : authConfigured ? (

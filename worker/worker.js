@@ -2817,6 +2817,9 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     // part of what is being tested. Rides in the options seat rather than
     // becoming a nineteenth positional argument.
     debug: !!(oidc && oidc.debug),
+    // The account menu's Dev mode switch: present only for an allow-listed
+    // account, and saying whether it is on.
+    devMode: (oidc && oidc.devMode) || null,
     // Ask this doc: shown only where the server has a model key. Only the
     // availability and the allowance size reach the page, never the key.
     ask: (oidc && oidc.ask && oidc.ask.available && !isLanding) ? { available: true, limit: oidc.ask.limit } : null,
@@ -2978,6 +2981,33 @@ async function isDebugAccount(env, session) {
   return named(raw);
 }
 
+// Dev mode: the allow-listed account's own switch between "tester" and
+// "person". Being on the list used to BE being in test mode -- the Internal
+// bar on every page and the state switcher armed -- so a tester who is also a
+// long-time user had no way to see the product the way anybody else sees it,
+// and could not tell a real onboarding bug from the testing furniture.
+//
+// Per account (the list names emails, so the switch is keyed the same way),
+// on the server rather than in one browser: off on the laptop is off on the
+// phone. On by default, so the list keeps meaning what it meant. Somebody not
+// on the list has no switch at all -- `null` -- and the route refuses them.
+function devModeKey(session) {
+  const email = normalizeEmail(session && session.email);
+  return email ? `dev-mode:${email}` : null;
+}
+async function devModeState(env, session) {
+  if (!(await isDebugAccount(env, session))) return null;
+  let stored = null;
+  try { stored = await env.META.get(devModeKey(session)); } catch {}
+  return { on: stored !== 'off' };
+}
+// What the boot carries: `debug` (the Internal bar) only while dev mode is on,
+// `devMode` (the menu switch) for anybody on the list, on or off.
+async function devModeBoot(env, session) {
+  const dev = await devModeState(env, session);
+  return { debug: Boolean(dev && dev.on), devMode: dev };
+}
+
 // A person's own word that a checklist row is finished. Detection misses
 // real completions (a skill set up on another machine, a doc made before the
 // journey began), and a row that stays open after the person has done it reads
@@ -3115,11 +3145,98 @@ async function sessionAccountId(env, session) {
   } catch {}
   return null;
 }
-async function loadOnboarding(env, accountId) {
+// One journey per person, not per account id. A person whose identities were
+// linked (a GitHub account and an email account, merged into one group) has
+// one canonical id in the browser -- the session is canonicalised on read --
+// while an old CLI token still carries the id it was minted under, and every
+// stamp the agent caused (`agent_connected`, `published_first`) landed under
+// THAT id. The browser then read an empty record under the canonical one and
+// the gate asked a long-connected person to connect their agent, after every
+// sign-in. So the record is read across the whole group, canonical first, and
+// always written under the canonical id.
+//
+// Only ids that are provably this person's. `linkAccountGroup` writes the same
+// group record to every member, so a real link is symmetric: each member's
+// own record names the same canonical id and lists the asker. A one-sided or
+// stale claim -- one account's record naming an id whose own record does not
+// name it back -- is not a link, and that id's record is never read, merged,
+// moved or deleted from here. If the canonical id itself does not agree, the
+// asker keeps its own record alone.
+async function onboardingGroup(env, accountId) {
+  const alone = { canonical: accountId, others: [] };
+  try {
+    const group = await accountGroup(env, accountId);
+    if (group.ids.length <= 1) return alone;
+    const verified = [];
+    for (const id of group.ids) {
+      if (id === accountId) { verified.push(id); continue; }
+      const theirs = await accountGroup(env, id);
+      if (theirs.canonical === group.canonical && theirs.ids.includes(accountId)) verified.push(id);
+    }
+    if (!verified.includes(group.canonical)) return alone;
+    return { canonical: group.canonical, others: verified.filter((id) => id !== group.canonical) };
+  } catch { return alone; }
+}
+async function readOnboardingKey(env, accountId) {
   try {
     const rec = JSON.parse(await env.META.get(`account-onboarding:${accountId}`));
-    return rec && typeof rec === 'object' ? rec : {};
-  } catch { return {}; }
+    return rec && typeof rec === 'object' && !Array.isArray(rec) ? rec : null;
+  } catch { return null; }
+}
+// Stamps are first-writer-wins, so a merge keeps the canonical record's
+// value and fills only what it lacks; the person's own ticks are a union.
+function mergeOnboardingRecords(records) {
+  const out = {};
+  for (const rec of records) {
+    if (!rec) continue;
+    for (const [key, value] of Object.entries(rec)) {
+      if (key === 'checked') continue;
+      if (out[key] === undefined || out[key] === null) out[key] = value;
+    }
+    if (rec.checked && typeof rec.checked === 'object' && !Array.isArray(rec.checked)) {
+      out.checked = { ...rec.checked, ...(out.checked || {}) };
+    }
+  }
+  return out;
+}
+async function loadOnboarding(env, accountId) {
+  if (!env || !env.META || !accountId) return {};
+  const { canonical, others } = await onboardingGroup(env, accountId);
+  const records = [await readOnboardingKey(env, canonical)];
+  for (const id of others) records.push(await readOnboardingKey(env, id));
+  return mergeOnboardingRecords(records);
+}
+// The one writer. Under the canonical id, and a member's stray copy goes:
+// left behind, it would be merged back in on the next read, and a debug reset
+// to `new` would come back as whatever the old copy said. The copies go only
+// after the record (which every caller built from the merged read) is safely
+// written -- a failed put throws before anything is deleted -- and only for
+// verified members of this person's group (see onboardingGroup).
+async function saveOnboarding(env, accountId, record) {
+  const { canonical, others } = await onboardingGroup(env, accountId);
+  await env.META.put(`account-onboarding:${canonical}`, JSON.stringify(record));
+  for (const id of others) {
+    try { if (await env.META.get(`account-onboarding:${id}`)) await env.META.delete(`account-onboarding:${id}`); } catch {}
+  }
+  return record;
+}
+// Has any identity of this person ever connected a terminal. The marker is
+// written under the id the token was minted for, which for a linked person is
+// not necessarily the canonical one the browser asks with.
+async function accountPaired(env, accountId) {
+  if (!env || !env.META || !accountId) return false;
+  const { canonical, others } = await onboardingGroup(env, accountId);
+  for (const id of [canonical, ...others]) {
+    try { if (await env.META.get(`account-terminal:${id}`)) return true; } catch {}
+  }
+  return false;
+}
+// Somebody for whom the gate has nothing left to ask: an agent of theirs has
+// connected, or the journey already has a doc. Used to keep a returning person
+// out of onboarding when they sign in again (see `/setup?via=signin`).
+function onboardingConnected(record, paired) {
+  const r = record || {};
+  return Boolean(paired || r.agent_connected || r.published_first || r.first_doc);
 }
 async function stampOnboardingFor(env, accountId, step, extra) {
   if (!env || !env.META || !accountId) return null;
@@ -3128,7 +3245,7 @@ async function stampOnboardingFor(env, accountId, step, extra) {
   const next = stampOnboarding(prev, step, at, extra);
   // Steps stamp once. Most calls (every My docs load, every agent pull,
   // every comment) find the step already there; KV writes are a daily quota.
-  if (JSON.stringify(next) !== JSON.stringify(prev)) await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+  if (JSON.stringify(next) !== JSON.stringify(prev)) await saveOnboarding(env, accountId, next);
   return next;
 }
 // Is this doc the one FIRST-DOC.md produced? tdoc-write --first-doc marks the
@@ -3148,7 +3265,7 @@ async function adoptFirstDocFor(env, accountId, slug) {
   const record = await loadOnboarding(env, accountId);
   const next = { ...record, first_doc: slug, published_first: new Date().toISOString() };
   for (const key of ['commented', 'revised', 'seeded_comment', 'comments_read']) delete next[key];
-  await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+  await saveOnboarding(env, accountId, next);
   return next;
 }
 // Every action the page saw, one row each. The funnel and each step's
@@ -3340,7 +3457,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), debug: await isDebugAccount(env, session) }, pageUrl), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), ...(await devModeBoot(env, session)) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce), 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
     }),
   };
@@ -13332,7 +13449,8 @@ const tdocHandlers = {
       // second one. The page still shows the first to anyone who has not done
       // it, so the link is safe to hand to anybody.
       const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';
-      const here = step === 'doc' ? '/setup?step=doc' : '/setup';
+      const via = url.searchParams.get('via') === 'signin' ? 'via=signin' : '';
+      const here = step === 'doc' ? `/setup?step=doc${via ? `&${via}` : ''}` : `/setup${via ? `?${via}` : ''}`;
       if (!sessionPrincipal(session) && oidcConfig(env)) {
         return new Response(null, {
           status: 302,
@@ -13346,9 +13464,25 @@ const tdocHandlers = {
       // signal, and the server is standing in it. A CLI-first publisher who
       // never loads this page still never starts, which is what keeps tdoc's
       // seeded question off the doc of somebody who did not ask to be onboarded.
+      //
+      // But only for somebody the gate still has something to ask. Signing in
+      // from the landing page returns here (`?via=signin`), and so does Sign
+      // out -> Sign in, which lands on the landing page first. A person whose
+      // agent connected months ago was shown "Step 1 of 4 -- Connect your
+      // agent" after every sign-in, and the visit stamped `started`, which is
+      // what puts the onboarding checklist on My docs: onboarding reappearing
+      // for a long-time user, on every re-login. So a sign-in that comes back
+      // for an account that is already connected goes to My docs, before
+      // anything is stamped. Opening /setup on purpose is unchanged.
       try {
         const who = await sessionAccountId(env, session);
-        if (who) await stampOnboardingFor(env, who, 'started');
+        if (who) {
+          if (url.searchParams.get('via') === 'signin'
+            && onboardingConnected(await loadOnboarding(env, who), await accountPaired(env, who))) {
+            return new Response(null, { status: 302, headers: { Location: '/me' } });
+          }
+          await stampOnboardingFor(env, who, 'started');
+        }
       } catch {}
       const nonce = rand(16);
       return html(SHELL.appHtml({
@@ -13370,7 +13504,7 @@ const tdocHandlers = {
             : null,
           oidcAuth: !!oidcConfig(env),
           oidcLabel: (oidcConfig(env) || {}).label || '',
-          debug: await isDebugAccount(env, session),
+          ...(await devModeBoot(env, session)),
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -13876,7 +14010,7 @@ const tdocHandlers = {
       const identity = { login: actorKey(s), avatar_url: s.avatar_url || '', name: actorDisplayName(s) };
       // Independent reads, side by side: My docs used to wait for each in
       // turn after the catalog, and a slow page reads as a dead click.
-      const [data, profile, onboarding, debug] = await Promise.all([
+      const [data, profile, onboarding, dev] = await Promise.all([
         indexData(env, s, url.origin, { ctx }),
         hostedRegistrationEnabled(env, url.origin) ? profileBootForSession(env, s) : null,
         (async () => {
@@ -13885,7 +14019,7 @@ const tdocHandlers = {
             return id ? await loadOnboarding(env, id) : null;
           } catch { return null; }
         })(),
-        isDebugAccount(env, s),
+        devModeBoot(env, s),
       ]);
       const pinSet = new Set((profile && profile.pins) || []);
       const docs = (data.docs || []).map((row) => ({
@@ -13907,7 +14041,10 @@ const tdocHandlers = {
           onboarding,
           // The checklist lives here, so every state reads differently on this
           // page -- it is the one surface that has a face for all six.
-          debug,
+          // Only while dev mode is on; off, this account sees My docs the
+          // way anybody else does.
+          debug: dev.debug,
+          devMode: dev.devMode,
           ...(profile ? { profile } : {}),
           ...data,
           docs,
@@ -16513,8 +16650,7 @@ const tdocHandlers = {
       if (!accountId) return json({ anonymous: true, record: null });
       // `paired`: has a terminal ever connected to this account. A paired
       // agent never shows a code again, so the page must not wait for one.
-      let paired = false;
-      try { paired = Boolean(await env.META.get(`account-terminal:${accountId}`)); } catch {}
+      const paired = await accountPaired(env, accountId);
       const record = await loadOnboarding(env, accountId);
       // `?docs=1` costs a catalog walk, so only the page that waits for a doc
       // to appear asks for it. The connect gate's own poll stays two reads.
@@ -16528,10 +16664,30 @@ const tdocHandlers = {
     // names a state; the record is built here from a fixed table, so no field
     // arrives from the client. Allowlisted accounts only, same-origin, and the
     // account id comes from the session — it can reach no record but yours.
+    // The dev mode switch. Allow-listed accounts only, same-origin for the
+    // write; everybody else gets 403 whether they ask or tell.
+    if (p === '/api/me/dev-mode' && (method === 'GET' || method === 'POST')) {
+      if (method === 'POST' && !sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      const dev = await devModeState(env, session);
+      if (!dev) return json({ error: 'forbidden' }, { status: 403 });
+      if (method === 'GET') return json({ ok: true, on: dev.on });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      if (typeof body.on !== 'boolean') return json({ error: 'on_required' }, { status: 400 });
+      // The default is on, so on is the absence of the key.
+      if (body.on) await env.META.delete(devModeKey(session));
+      else await env.META.put(devModeKey(session), 'off');
+      return json({ ok: true, on: body.on });
+    }
     if (p === '/api/onboarding/state' && method === 'POST') {
       if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
       const session = await getSession(env, req);
-      if (!(await isDebugAccount(env, session))) return json({ error: 'forbidden' }, { status: 403 });
+      const dev = await devModeState(env, session);
+      if (!dev) return json({ error: 'forbidden' }, { status: 403 });
+      // Off means this account is being a person, not a tester: a tab left
+      // open from before the switch cannot reset the record behind its back.
+      if (!dev.on) return json({ error: 'dev_mode_off' }, { status: 403 });
       // Mint on first use, the way creating a doc does. An account record is
       // only written when somebody first publishes or creates something, so a
       // tester who has just signed in and done nothing else has no account id
@@ -16560,7 +16716,7 @@ const tdocHandlers = {
       // affordance, pressed by hand, never polled.
       const doc = (prior && prior.first_doc) || await newestDocFor(env, accountId);
       const next = debugRecord(state, new Date().toISOString(), doc);
-      await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+      await saveOnboarding(env, accountId, next);
       // The pairing marker moves with the state. `paired` -- has this account
       // ever connected a terminal -- is half of what the gate calls connected,
       // and it is only ever written, so an account that has paired once could
@@ -16568,12 +16724,17 @@ const tdocHandlers = {
       // identical on /setup, and the waiting and stuck branches were
       // unreachable. This is the marker, not the credential: the token lives
       // under `hosted-token:` and is untouched, so a paired CLI keeps working.
+      // Every identity in the group: the gate asks across all of them.
+      const terminalIds = await (async () => {
+        const { canonical, others } = await onboardingGroup(env, accountId);
+        return [canonical, ...others];
+      })();
       try {
         const key = `account-terminal:${accountId}`;
         if (next && next.agent_connected) {
-          if (!(await env.META.get(key))) await env.META.put(key, JSON.stringify({ first: next.agent_connected, last: next.agent_connected }));
+          if (!(await accountPaired(env, accountId))) await env.META.put(key, JSON.stringify({ first: next.agent_connected, last: next.agent_connected }));
         } else {
-          await env.META.delete(key);
+          for (const id of terminalIds) await env.META.delete(`account-terminal:${id}`);
         }
       } catch {}
       // --- replay ---
@@ -16610,7 +16771,7 @@ const tdocHandlers = {
             if (!owner) {
               try { owner = (JSON.parse(await env.META.get(k.name)) || {}).account_id; } catch {}
             }
-            if (owner === accountId) {
+            if (terminalIds.includes(owner)) {
               await env.META.delete(k.name);
               await env.META.delete(tokenUsedKey(k.name.slice('hosted-token:'.length)));
               cleared.tokens += 1;
@@ -16619,7 +16780,7 @@ const tdocHandlers = {
           cursor = r.cursor;
           if (r.list_complete) break;
         } while (cursor);
-        try { await env.META.delete(`account-terminal:${accountId}`); } catch {}
+        for (const id of terminalIds) { try { await env.META.delete(`account-terminal:${id}`); } catch {} }
       }
       if (body.purge === true && prior && prior.first_doc) {
         // Only the journey's own doc, and only after checking this account
@@ -16652,7 +16813,7 @@ const tdocHandlers = {
         const at = new Date().toISOString();
         const next = checkOnboardingStep(await loadOnboarding(env, accountId), body.step, action === 'step_checked', at);
         if (!next) return json({ error: 'unknown_step' }, { status: 400 });
-        await env.META.put(`account-onboarding:${accountId}`, JSON.stringify(next));
+        await saveOnboarding(env, accountId, next);
         await logOnboardingEvent(env, accountId, action, { step: body.step });
         return json({ ok: true, record: next });
       }

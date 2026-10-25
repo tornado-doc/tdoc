@@ -1445,7 +1445,10 @@ export function DocumentShell({ boot, config }) {
         // The top bar's Sign in on the landing returns into the onboarding:
         // a new account lands on the first screen; one that has finished or
         // skipped is let straight through (the wizard closes itself).
-        onSignIn={() => signIn(config.onboarding ? '/setup' : undefined)}
+        // `via=signin` lets the server send a returning account to My docs
+        // instead: Sign out lands here, so every re-login came back through
+        // this button and was shown "Connect your agent" again.
+        onSignIn={() => signIn(config.onboarding ? '/setup?via=signin' : undefined)}
       >
         <DocumentBreadcrumbs
           config={config}
