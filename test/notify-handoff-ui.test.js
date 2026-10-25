@@ -253,6 +253,61 @@ async function t(name, fn) {
       await page.close();
     });
 
+    await t('one reply or all replies can be marked read from the plane', async () => {
+      for (const width of [1440, 390]) {
+        const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 900 } });
+        const errors = [];
+        page.on('pageerror', (e) => errors.push(e.message));
+        await page.goto(`${base}/?view=activity`);
+        const plane = page.locator('#tdoc-send-agent-btn');
+        assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '4');
+        if (width === 390) assert.equal(await page.locator('.tdoc-fab-unread-dot').count(), 1);
+        else assert.equal(await page.locator('.tdoc-pin-unread-dot').count(), 3);
+        await plane.click();
+        const details = page.getByRole('dialog', { name: 'Agent activity' });
+        await details.getByRole('button', { name: 'Mark all as read' }).waitFor();
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `handoff-read-${width}.png`) });
+        const question = details.locator('.tdoc-handoff-details-row').filter({ hasText: 'Should pricing be per seat?' });
+        const dot = question.getByRole('button', { name: 'Mark as read' });
+        assert.equal(await dot.getAttribute('title'), 'Mark as read');
+        await dot.click();
+        assert.equal(await question.getByRole('button', { name: 'Mark as read' }).count(), 0);
+        assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '3');
+        if (width === 1440) assert.equal(await page.locator('.tdoc-pin[data-id="question"] .tdoc-pin-unread-dot').count(), 0);
+        await details.getByRole('button', { name: 'Mark all as read' }).click();
+        assert.equal(await details.getByRole('button', { name: 'Mark all as read' }).count(), 0);
+        assert.equal(await details.getByRole('button', { name: 'Mark as read' }).count(), 0);
+        assert.equal(await plane.locator('.tdoc-send-agent-badge.is-unread').count(), 0);
+        if (width === 390) assert.equal(await page.locator('.tdoc-fab-unread-dot').count(), 0);
+        else assert.equal(await page.locator('.tdoc-pin-unread-dot').count(), 0);
+        assert.deepEqual(errors, []);
+        await page.close();
+      }
+    });
+
+    await t('paper plane count and ready dot share the same anchor on phone and desktop', async () => {
+      for (const width of [390, 1440]) {
+        for (const [query, label] of [['unread=0', ''], ['badge=1', '1'], ['badge=9', '9'], ['badge=10', '9+']]) {
+          const page = await browser.newPage({ viewport: { width, height: 844 } });
+          await page.goto(`${base}/?view=activity&${query}`);
+          const geometry = await page.locator('#tdoc-send-agent-btn').evaluate((button) => {
+            const outer = button.getBoundingClientRect();
+            const badge = button.querySelector('.tdoc-send-agent-badge');
+            const inner = badge.getBoundingClientRect();
+            return { label: badge.textContent, x: inner.x + inner.width / 2, y: inner.y + inner.height / 2,
+              expectedX: outer.right - 5, expectedY: outer.top + 5 };
+          });
+          assert.equal(geometry.label, label);
+          assert.ok(Math.abs(geometry.x - geometry.expectedX) < 1, `${width}px ${query} badge x: ${JSON.stringify(geometry)}`);
+          assert.ok(Math.abs(geometry.y - geometry.expectedY) < 1, `${width}px ${query} badge y: ${JSON.stringify(geometry)}`);
+          if (SHOTS && (query === 'unread=0' || query === 'badge=10')) {
+            await page.screenshot({ path: path.join(SHOTS, `handoff-badge-${query === 'unread=0' ? 'ready' : '9plus'}-${width}.png`) });
+          }
+          await page.close();
+        }
+      }
+    });
+
     await t('the plane shows a red dot for failed delivery and fits a phone', async () => {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
       const errors = [];

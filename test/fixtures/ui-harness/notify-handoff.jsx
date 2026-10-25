@@ -10,7 +10,7 @@ import { HandoffStatusChips } from '../../../shell/src/document/handoff-status-l
 import { DocumentSendAgentAction } from '../../../shell/src/document/document-toolbar.jsx';
 import { HandoffDetailsPanel } from '../../../shell/src/document/handoff-details.jsx';
 import { summarizeHandoffSurfaces } from '../../../shell/src/document/handoff-state.js';
-import { isThreadUnread } from '../../../shell/src/document/thread-seen.js';
+import { isThreadUnread, markThreadSeen, readSeenMap } from '../../../shell/src/document/thread-seen.js';
 import { DesktopCommentLayer, MobileCommentDrawer } from '../../../shell/src/document/comment-layer.jsx';
 import { CommentComposer } from '../../../shell/src/document/comment-composer.jsx';
 import { AgentMentionContext } from '../../../shell/src/document/mention-field.jsx';
@@ -78,20 +78,35 @@ function StatusCards() {
 function ActivityDemo() {
   const [open, setOpen] = useState(false);
   const [log, setLog] = useState('');
+  const [seenMap, setSeenMap] = useState(() => readSeenMap('doc'));
   const phone = window.innerWidth < 700;
+  if (phone) document.body.classList.add('tdoc-narrow');
   const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)));
   const buckets = summarizeHandoffSurfaces(activityCards);
   const counts = Object.fromEntries(Object.entries(buckets).map(([state, items]) => [state, items.length]));
-  const unread = params.get('unread') === '0' ? 0 : activityCards.filter((card) => isThreadUnread(card, {})).length;
+  const unreadCount = activityCards.filter((card) => isThreadUnread(card, seenMap)).length;
+  const visibleUnread = params.get('unread') === '0' ? 0 : unreadCount;
+  const unread = Number(params.get('badge')) || visibleUnread;
+  const markRead = (comment) => {
+    if (markThreadSeen('doc', comment)) setSeenMap(readSeenMap('doc'));
+  };
+  const markAllRead = () => {
+    let changed = false;
+    for (const comment of activityCards) {
+      if (isThreadUnread(comment, seenMap)) changed = markThreadSeen('doc', comment) || changed;
+    }
+    if (changed) setSeenMap(readSeenMap('doc'));
+  };
   return <>
     <div className="tdoc-bar" style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 18, height: 48, padding: '0 16px', background: '#fff', borderBottom: '1px solid #e8e7e3' }}>
       <span>🌪</span><strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>RaftBench pricing plan</strong>
       <span style={{ flex: 1 }} />
       {!phone ? <span style={{ color: '#888' }}>Edited 2m ago</span> : null}
       <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen}>
-        <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={{}} onClose={() => setOpen(false)}
+        <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
-          onSendElsewhere={(comment) => { setLog(`elsewhere:${comment.id}`); setOpen(false); }} />
+          onSendElsewhere={(comment) => { setLog(`elsewhere:${comment.id}`); setOpen(false); }}
+          onMarkRead={markRead} onMarkAllRead={markAllRead} />
         <button id="activity-refresh" type="button" onClick={() => setLog('refreshed')}>Refresh comments</button>
       </DocumentSendAgentAction>
       {!phone ? <><strong>Share</strong><span>⋯</span><span style={{ color: '#888' }}>Tdoc ▾</span><span style={{ background: '#1652f0', color: '#fff', borderRadius: '50%', width: 26, height: 26, display: 'grid', placeItems: 'center' }}>J</span></> : null}
@@ -101,12 +116,14 @@ function ActivityDemo() {
       <p>We propose charging per team seat, with a free personal tier and team seats at $8 per month.</p>
       <p>The third section compares three options. The final recommendation is a seat based plan.</p>
     </main>
-    {!phone ? <div style={{ position: 'absolute', left: '72%', top: 145 }}><PinDemo /></div> : null}
+    {!phone ? <div style={{ position: 'absolute', left: '72%', top: 145 }}><PinDemo seenMap={seenMap} /></div>
+      : <MobileCommentDrawer open={false} onOpenChange={() => {}} comments={activityCards} openCount={activityCards.length}
+          unread={visibleUnread > 0} pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => {}} />}
     <output id="activity-log">{log}</output>
   </>;
 }
 
-function PinDemo() {
+function PinDemo({ seenMap = {} }) {
   const viewer = params.get('viewer') || 'julie';
   const pins = ['question', 'partial', 'resolved', 'failed', 'picked', 'queued', 'local-queued'];
   const byId = new Map(CARDS.map((card) => [card.id, card]));
@@ -116,7 +133,7 @@ function PinDemo() {
     { key: 'group', y: 360, items: [item('queued'), item('local-queued')] },
   ];
   return <div id="tdoc-pin-layer" style={{ position: 'relative', height: 450, width: 180 }}>
-    <DesktopCommentLayer clusters={clusters} commentsById={byId} seenMap={{}} frameScrollY={0} frameTop={0}
+    <DesktopCommentLayer clusters={clusters} commentsById={byId} seenMap={seenMap} frameScrollY={0} frameTop={0}
       pinLeft={60} openComment={null} openClusterKey={null} pinIds={new Set(pins)}
       currentUser={viewer} isOwner={viewer === 'owner'} hoveredAnchorId={params.get('hover') || null}
       onOpenComment={() => {}} onOpenCluster={() => {}} />
