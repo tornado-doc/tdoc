@@ -1,13 +1,13 @@
-name: Onboarding runtime build
+name: Onboarding full verification
 on:
   push:
     branches: [serena/onboarding-setup-build]
 permissions:
   contents: read
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -18,28 +18,21 @@ jobs:
       - run: npm run build:shell
       - run: npm run build:feedback
       - run: npm run build:sw
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: onboarding-runtime-fa505a8
-          path: server/runtime/
-          retention-days: 1
-          if-no-files-found: error
-      - run: node test/agent-authorship.test.js
-      - run: node test/comment-wipe-authorship.test.js
-      - run: node test/computer-settings.test.js
-      - run: node test/tdoc-start.test.js
-      - run: node test/ui-primitives.test.js
-      - run: node test/daemon-onboarding.test.js
-      - run: node test/onboarding-journey.test.js
-      - run: node test/dev-mode.test.js
-      - run: node test/setup-gate.test.js
-      - run: npx playwright install --with-deps chromium
-      - run: node test/daemon-onboarding-browser.test.js
+      - run: git diff --exit-code -- server/runtime
+      - run: npm test
+      - run: node test/preview-workerd.test.js
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:browser
         env:
-          TDOC_UI_SHOTS: /tmp/onboarding-runtime-shots
+          TDOC_UI_SHOTS: /tmp/onboarding-final-ui-shots
+      - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/custom-design-theme.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/visual-viewer.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/reply-activity-ui.test.js
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: onboarding-runtime-shots
-          path: /tmp/onboarding-runtime-shots/
+          name: onboarding-final-ui-shots
+          path: /tmp/onboarding-final-ui-shots/
           retention-days: 1
