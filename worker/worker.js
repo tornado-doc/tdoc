@@ -17451,6 +17451,11 @@ const tdocHandlers = {
       const gate = await teamSession(env, req, url.origin, { bearer: true });
       if (!gate.ok) return gate.response;
       const s = gate.session;
+      // Through an agent token (no browser session), moving a doc follows
+      // authorship like any other agent write: an admin's agent does not move
+      // another person's agent-written doc out of (or across) its team.
+      const viaAgent = Boolean(req.headers.get('authorization')) && !(await getSession(env, req));
+      const agentActor = viaAgent ? { kind: 'hosted', account_id: s.account_id, linked_account_ids: s.linked_account_ids } : null;
       let body = {};
       try { body = await req.json(); } catch {}
       const teamId = body.team == null ? null : String(body.team);
@@ -17471,6 +17476,8 @@ const tdocHandlers = {
         // and a member who is not the team's admin must not fail on that.
         if (meta && team && meta.workspace_id === team.id) continue;
         if (!meta || !isDocOwnerSession(env, s, meta)) return json({ error: 'not_owner', slug }, { status: 403 });
+        const authorship = agentActor ? agentWriteRefusal(meta, agentActor) : null;
+        if (authorship) return agentWriteRefusalResponse(env, meta, authorship);
         metas.push([slug, meta]);
       }
       if (team) {
@@ -18160,9 +18167,16 @@ const tdocHandlers = {
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
       if (!writeGate.ok) return writeGate.response;
       if (writeGate.teamDoc && !writeGate.teamAdmin) return json({ error: 'not_doc_owner' }, { status: 403 });
+      // Wiping a doc's comments with an agent token follows authorship
+      // (agentWriteRefusal): an admin's agent does not clear the comments on
+      // a doc another person's agent wrote.
+      const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
+      if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
-      return commentPrivacyJson(env, s, slug, res.body, { status: res.status });
+      // The answer says how it went; there are no comments in it to filter
+      // for a reader (and no session here: this route is token-only).
+      return json(res.body, { status: res.status });
     }
     // Soft-delete: append a `deleted` event at the current version. The
     // record is preserved; older versions still see the comment as it was.
