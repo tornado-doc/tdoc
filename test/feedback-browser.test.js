@@ -74,7 +74,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
     }
     if (req.url === '/libraries') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<!doctype html><meta charset="utf-8"><style>body{font:16px system-ui}.modal-overlay{position:fixed;inset:0;background:#0005}.modal-content{position:fixed;top:18%;left:20%;min-width:400px;padding:24px;background:white;z-index:30}</style><div id="host-app"></div><script src="/libraries.js"></script>');
+      res.end('<!doctype html><meta charset="utf-8"><style>body{font:16px system-ui}.modal-overlay{position:fixed;inset:0;background:#0005}.modal-content{position:fixed;top:18%;left:20%;min-width:400px;padding:24px;background:white;z-index:30}#custom-headless-panel{transition:opacity .5s}#custom-headless-panel[data-closed]{opacity:0}</style><div id="host-app"></div><script src="/libraries.js"></script>');
       return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -551,7 +551,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await foreign.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor();
         await foreign.evaluate(() => {
           const style = document.createElement('style');
-          style.textContent = '[role="dialog"] * { font-family: fantasy !important; color: rgb(244, 0, 0) !important; text-transform: uppercase !important; direction: rtl !important; line-height: 3 !important; }';
+          style.textContent = '[role="dialog"] * { font-family: fantasy !important; color: rgb(244, 0, 0) !important; text-transform: uppercase !important; direction: rtl !important; line-height: 7 !important; letter-spacing: 12px !important; word-spacing: 14px !important; white-space: nowrap !important; }';
           document.head.appendChild(style);
           const modal = document.createElement('div');
           modal.id = 'css-modal'; modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
@@ -564,12 +564,16 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
           const root = window.__fbRoot();
           const button = window.__fb('.tdoc-feedback-dock button');
           const css = getComputedStyle(button);
-          return { accent: getComputedStyle(root).getPropertyValue('--td-accent').trim(), hostFont: getComputedStyle(host).fontFamily,
-            font: css.fontFamily, color: css.color, transform: css.textTransform, direction: css.direction, lineHeight: css.lineHeight };
+          const hostStyle = getComputedStyle(host);
+          return { accent: getComputedStyle(root).getPropertyValue('--td-accent').trim(), hostFont: hostStyle.fontFamily,
+            hostLineHeight: hostStyle.lineHeight, letterSpacing: hostStyle.letterSpacing, wordSpacing: hostStyle.wordSpacing,
+            whiteSpace: hostStyle.whiteSpace, font: css.fontFamily, color: css.color, transform: css.textTransform, direction: css.direction, lineHeight: css.lineHeight };
         });
         assert(styles.accent === '#1652f0' && !styles.hostFont.includes('fantasy') && !styles.font.includes('fantasy')
           && styles.color !== 'rgb(244, 0, 0)' && styles.transform !== 'uppercase' && styles.direction === 'ltr'
-          && styles.lineHeight !== '3', `host CSS or missing tokens changed feedback: ${JSON.stringify(styles)}`);
+          && styles.lineHeight !== '7' && styles.hostLineHeight !== '7' && styles.letterSpacing === 'normal'
+          && (styles.wordSpacing === 'normal' || styles.wordSpacing === '0px') && styles.whiteSpace === 'normal',
+          `host CSS or missing tokens changed feedback: ${JSON.stringify(styles)}`);
         const pick = foreign.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
         if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
         await foreign.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
@@ -753,6 +757,12 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
 
         await libs.locator('#headless-open').click();
+        await libs.locator('#custom-headless-panel[data-closed]').waitFor({ state: 'attached', timeout: 3000 });
+        const entering = await libs.locator('#custom-headless-panel').evaluate((panel) => ({
+          opacity: Number(getComputedStyle(panel).opacity), parent: document.getElementById('tdoc-feedback-root').parentElement.id,
+        }));
+        assert(entering.opacity === 0 && entering.parent !== 'custom-headless-panel',
+          `Headless UI fixture did not exercise transparent entry before feedback moves: ${JSON.stringify(entering)}`);
         await libs.locator('#headless-target').waitFor();
         await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'custom-headless-panel', null, { timeout: 3000 });
         if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();

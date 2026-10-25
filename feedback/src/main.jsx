@@ -168,7 +168,7 @@ ${uiCss}
   const feedbackRoot = document.createElement('div');
   feedbackRoot.id = 'tdoc-feedback-root';
   shadow.append(style, feedbackRoot);
-  host.style.cssText = 'position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;margin:0!important;padding:0!important;border:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;visibility:visible!important;font:13px/1.45 system-ui,-apple-system,sans-serif!important;color:#1a1a1a!important;text-transform:none!important;direction:ltr!important;text-align:left!important';
+  host.style.cssText = 'position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;margin:0!important;padding:0!important;border:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;visibility:visible!important;font:13px/1.45 system-ui,-apple-system,sans-serif!important;color:#1a1a1a!important;text-transform:none!important;direction:ltr!important;text-align:left!important;letter-spacing:normal!important;word-spacing:normal!important;white-space:normal!important;line-height:1.45!important';
   document.documentElement.appendChild(host);
 
   // Keep the feedback layer inside the active modal, including script-driven
@@ -225,6 +225,10 @@ ${uiCss}
       // against DialogPanel. The layer must be inside that panel too.
       return dialog ? modalContent(dialog) : null;
     };
+    const withinActiveModal = (node) => {
+      const modal = activeModal();
+      return !!modal && (modal === node || modal.contains(node));
+    };
     const lift = () => {
       if (!host.showPopover || host.matches(':popover-open')) return;
       host.popover = 'manual';
@@ -251,13 +255,13 @@ ${uiCss}
       if (records.some((r) => r.type === 'childList'
         ? [...r.addedNodes, ...r.removedNodes].some(hasModal)
         : r.target !== host && !isHostNode(r.target)
-          && r.target instanceof Element && (r.target.contains(host) || hasModal(r.target)))) place();
+          && r.target instanceof Element && (r.target.contains(host) || hasModal(r.target) || withinActiveModal(r.target)))) place();
       if (host.hasAttribute('inert')) host.removeAttribute('inert');
       if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
-    }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'hidden', 'inert', 'aria-hidden', 'aria-modal', 'class', 'style', 'data-state'] });
+    }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'hidden', 'inert', 'aria-hidden', 'aria-modal', 'class', 'style', 'data-state', 'data-closed', 'data-enter', 'data-leave'] });
     document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
-    document.addEventListener('transitionend', (e) => { if (e.target instanceof Element && hasModal(e.target)) place(); }, true);
-    document.addEventListener('animationend', (e) => { if (e.target instanceof Element && hasModal(e.target)) place(); }, true);
+    document.addEventListener('transitionend', (e) => { if (e.target instanceof Element && (hasModal(e.target) || withinActiveModal(e.target))) place(); }, true);
+    document.addEventListener('animationend', (e) => { if (e.target instanceof Element && (hasModal(e.target) || withinActiveModal(e.target))) place(); }, true);
     // A dialog removed without closing (a React unmount) takes the layer with it.
     new MutationObserver(() => { if (!host.isConnected) place(); }).observe(document.documentElement, { childList: true, subtree: true });
     // Script-driven modals (Base UI, Radix, Headless UI) close on a press

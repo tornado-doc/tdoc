@@ -36,7 +36,7 @@ function LibraryHost() {
     </RadixDialog.Root>
     <HeadlessDialog open={headlessOpen} onClose={setHeadlessOpen} className="modal-wrapper">
       <div className="modal-overlay" aria-hidden="true" />
-      <DialogPanel as="form" id="custom-headless-panel" className="modal-content"
+      <DialogPanel as="form" id="custom-headless-panel" transition className="modal-content"
         onKeyDown={() => window.__libraryEvents.headlessKeys++}
         onSubmit={(event) => { event.preventDefault(); window.__libraryEvents.headlessSubmits++; }}>
         <DialogTitle>Headless settings</DialogTitle>
