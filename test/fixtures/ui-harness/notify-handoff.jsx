@@ -92,6 +92,7 @@ function ActivityDemo() {
         <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={{}} onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
           onSendElsewhere={(comment) => { setLog(`elsewhere:${comment.id}`); setOpen(false); }} />
+        <button id="activity-refresh" type="button" onClick={() => setLog('refreshed')}>Refresh comments</button>
       </DocumentSendAgentAction>
       {!phone ? <><strong>Share</strong><span>⋯</span><span style={{ color: '#888' }}>Tdoc ▾</span><span style={{ background: '#1652f0', color: '#fff', borderRadius: '50%', width: 26, height: 26, display: 'grid', placeItems: 'center' }}>J</span></> : null}
     </div>

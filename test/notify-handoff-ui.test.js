@@ -242,6 +242,9 @@ async function t(name, fn) {
       assert.equal(await readyChecks.first().isChecked(), true);
       await readyChecks.nth(1).uncheck();
       assert.equal(await details.getByRole('button', { name: /Send 1 comment/ }).count(), 1);
+      await details.locator('#activity-refresh').click();
+      assert.equal(await readyChecks.nth(1).isChecked(), false, 'comment refresh selected a comment the user unchecked');
+      assert.equal(await details.getByRole('button', { name: /Send 1 comment/ }).count(), 1);
       await readyChecks.nth(1).check();
       await details.getByRole('button', { name: /Send 2 comments/ }).click();
       assert.equal(await page.locator('#activity-log').textContent(), 'send-ready:human-followup,new-comment');

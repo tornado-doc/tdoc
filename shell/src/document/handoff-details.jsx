@@ -1,5 +1,5 @@
 // One place to inspect sent comments and send selected unsent comments.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { deliveryErrorText, readableHandle, resendResultText } from './notify-handoff.jsx';
 import { compactHandoffText } from './handoff-status-line.jsx';
 import { resendNotifyHandoff } from './api.js';
@@ -44,8 +44,10 @@ export function HandoffDetailsPanel({
   const [busyId, setBusyId] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) setSelectedIds(buckets.ready.map((comment) => comment.id));
+    if (open && !wasOpen.current) setSelectedIds(buckets.ready.map((comment) => comment.id));
+    wasOpen.current = open;
   }, [open, buckets.ready]);
   const selected = selectedIds.filter((id) => buckets.ready.some((comment) => comment.id === id));
 
