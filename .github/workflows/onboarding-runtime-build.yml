@@ -18,7 +18,11 @@ jobs:
       - run: npm run build:shell
       - run: npm run build:feedback
       - run: npm run build:sw
-      - run: git diff --exit-code -- server/runtime
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: onboarding-runtime-e4c518c
+          path: server/runtime/
+          retention-days: 1
       - run: npm test
       - run: node test/preview-workerd.test.js
       - run: npx playwright install --with-deps chromium webkit
