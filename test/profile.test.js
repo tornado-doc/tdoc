@@ -364,7 +364,7 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(boot.page === 'profile' && boot.handle === 'sam', 'claimed profile boot');
     assert(boot.docs.map((d) => d.slug).join(',') === 'sam-open', `docs ${JSON.stringify(boot.docs)}`);
     assert(/Opening paragraph/.test(boot.docs[0].excerpt || ''), 'boot carries excerpt from meta');
-    assert(boot.docs[0].image === '/preview-card-placeholder.svg', 'boot carries styled placeholder');
+    assert(boot.docs[0].image === '', 'no card yet: text-only, no placeholder');
   });
 
   await t('/@ shows a placeholder for old pins without generating a preview', async () => {
@@ -394,7 +394,7 @@ async function seedPins(env, accountId, pins, extra = {}) {
     const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
     assert(boot.docs.length === 1 && boot.docs[0].slug === 'old-pin', JSON.stringify(boot.docs));
     assert(boot.docs[0].excerpt === '', 'no document read on profile page');
-    assert(boot.docs[0].image === '/preview-card-placeholder.svg', 'styled placeholder for old pin');
+    assert(boot.docs[0].image === '', 'old pin: text-only, no placeholder');
     const metaAfter = JSON.parse(await env.META.get('meta:old-pin'));
     assert(!metaAfter.preview, 'profile read does not mutate meta');
   });

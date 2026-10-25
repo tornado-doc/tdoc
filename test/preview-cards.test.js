@@ -227,12 +227,12 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   assert.equal(unlisted.status, 200, await unlisted.text());
   const linkPage = await call('/d/link-card/v/1');
   const linkHtml = await linkPage.text();
-  assert.ok(linkHtml.includes('https://tdoc.dev/tdoc_logo-v2.png'));
-  assert.ok(linkHtml.includes('name="twitter:card" content="summary"'),
-    'the square logo fallback keeps the small Twitter card');
-  assert.ok(!linkHtml.includes('/d/link-card/preview/v1-'));
-  assert.ok(linkHtml.includes('A document shared on tdoc.'));
-  assert.ok(!linkHtml.includes('property="og:title" content="Link title"'));
+  // Anyone who can open a link doc may see its title; a pasted link shows
+  // the real card and title (Julie, 2026-10-25).
+  assert.ok(linkHtml.includes('/d/link-card/preview/v1-'), 'link doc uses its card');
+  assert.ok(linkHtml.includes('name="twitter:card" content="summary_large_image"'));
+  assert.ok(linkHtml.includes('property="og:title" content="Link title"'));
+  assert.ok(linkHtml.includes('name="robots" content="noindex, nofollow"'), 'still not indexed');
   assert.ok(linkHtml.includes('<title>Link title'), 'browser tab keeps the real title');
   assert.equal((await call(await cardUrl('link-card'))).status, 200);
 
