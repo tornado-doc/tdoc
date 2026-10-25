@@ -9,6 +9,9 @@ export const FLAGS = Object.freeze({
   // until the cards are real page screenshots. Link previews (OG / Twitter
   // cards) are server-side and always use the card.
   docThumbnails: Object.freeze({ label: 'Doc thumbnails', owner: 'julie', added: '2026-10-25', default: false }),
+  // "Results in document text" under the hub search: body and comment
+  // matches from /api/search. Indexing runs regardless; this gates the UI.
+  fullTextSearch: Object.freeze({ label: 'Full-text search', owner: 'julie', added: '2026-10-25', default: false }),
 });
 
 export function isFeatureOn(name, devMode = readDevMode()) {

@@ -74,6 +74,7 @@ const OFFLINE = [
   'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
   'docs-hub-unified.test.js',   // My docs + team use one toolbar/list and cached previews
   'catalog-search.test.js',      // all-folder document search + field prefixes + nested paths
+  'full-text-search.test.js',    // body + comment search: CJK, ranking, snippets as text, only docs the viewer's hub lists
   'folder-move-to-team.test.js', // a whole My docs folder into a team: batches, re-runs, stale reads
   'team-backup.test.js',         // customer-owned S3/R2 mirror: encryption, queue, retries, tombstones
   'backup-cli.test.js',          // open-format portability copy download + checksum verification
@@ -173,6 +174,7 @@ const BROWSER = [
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments
   'profile-picks-ui.test.js', // /@handle owner removes picks: card control + Undo, every pin in the picker, errors shown
+  'full-text-search-ui.test.js', // My docs search: text results from /api/search, English + Chinese, marked passages, doc markup shown as text
   'trash-ui.test.js',          // Delete → Trash with Undo, link gone, Trash tab Restore / Delete forever, folders, desktop + phone
   'agent-view-ui.test.js', // doc text for agents: no visible space without JS, removed once the app starts
   'layout-preflight.test.js', // development-only Raft geometry audit

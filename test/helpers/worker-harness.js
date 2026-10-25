@@ -97,8 +97,29 @@ class FakeR2 {
   }
 }
 
+// SQLite-backed Durable Object storage's sql.exec, on node:sqlite (Node 22+),
+// for the full-text search store. Absent on older Node: storage.sql is then
+// undefined, exactly like a KV-backed Durable Object, and search degrades.
+let nodeSqlite = null;
+try { nodeSqlite = require('node:sqlite'); } catch {}
+function fakeSql() {
+  if (!nodeSqlite) return undefined;
+  const db = new nodeSqlite.DatabaseSync(':memory:');
+  return {
+    exec(query, ...params) {
+      const rows = db.prepare(query).all(...params.map((p) => (p === undefined ? null : p)));
+      const plain = rows.map((row) => ({ ...row }));
+      return { toArray: () => plain, one: () => plain[0], [Symbol.iterator]: () => plain[Symbol.iterator]() };
+    },
+  };
+}
+
 class FakeStorage {
-  constructor() { this.map = new Map(); this.queue = Promise.resolve(); }
+  constructor() { this.map = new Map(); this.queue = Promise.resolve(); this.alarmAt = null; this._sql = undefined; }
+  get sql() { if (this._sql === undefined) this._sql = fakeSql() || null; return this._sql || undefined; }
+  async getAlarm() { return this.alarmAt; }
+  async setAlarm(at) { this.alarmAt = Number(at); }
+  async deleteAlarm() { this.alarmAt = null; }
   async transaction(fn) {
     const run = this.queue.then(() => {
       const txn = {
@@ -123,6 +144,23 @@ class FakeDurableNamespace {
   stateFor(id) {
     if (!this.states.has(id)) this.states.set(id, { storage: new FakeStorage() });
     return this.states.get(id);
+  }
+  // Run every armed alarm until none is left (or `max` runs), as the
+  // runtime would after their delays.
+  async runAlarms(max = 100) {
+    let runs = 0;
+    for (let again = true; again && runs < max;) {
+      again = false;
+      for (const [id, state] of this.states) {
+        if (state.storage.alarmAt == null) continue;
+        state.storage.alarmAt = null;
+        const store = new this.StoreClass(state, this.env);
+        if (typeof store.alarm === 'function') await store.alarm();
+        runs += 1;
+        again = true;
+      }
+    }
+    return runs;
   }
   get(id) {
     return {

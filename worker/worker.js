@@ -915,6 +915,7 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
     } while (kvCursor);
   }
   await env.META.delete(`meta:${slug}`);
+  await searchStoreOp(env, searchScopeFromIdx(idx), { kind: 'remove', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
   // Free the hosted slug reservation so it can be republished. Data is already
   // gone; this goes after it. If COMMENTS is absent (Vercel) there was never a
   // hostedOwner key -- the caller ignores the 503.
@@ -6572,6 +6573,9 @@ async function putDocMetaJson(env, slug, json, { restore = false } = {}) {
     }
   }
   await env.META.put(`meta:${slug}`, json, idx ? { metadata: idx } : undefined);
+  // Full-text search follows every record write: a new version is queued
+  // for reindexing, a rename retitles, Trash takes the doc out. Best-effort.
+  if (parsed) await searchIndexTouch(env, slug, parsed, priorIdx);
   if (sync) {
     try { await sync.after(); } catch {}
     if (sync.failed.length) await unbuildDocIndexes(env, sync.failed);
@@ -6884,7 +6888,7 @@ async function joinedFeedbackSpaceSlugs(env, session) {
   return slugs.filter((s) => typeof s === 'string' && isValidSlug(s));
 }
 
-async function indexData(env, session, origin, { ctx = null } = {}) {
+async function indexData(env, session, origin, { ctx = null, searchScopes: searchScopesWanted = false } = {}) {
   const defer = deferIndexWork(ctx);
   // Which rows this viewer could possibly see, decided from the index alone:
   // their own (by account, handle or owner key), their teams', and the ones
@@ -7113,6 +7117,16 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
     };
   };
 
+  // Docs indexed before full-text search, or whose index fell behind, are
+  // queued the first time their hub lists them: one call per owner store,
+  // after the response; each store's alarm reads them a few at a time.
+  const searchScopes = new Map(catalog.map((row) => [row.slug, searchScopeOf(row.meta)]));
+  if (ctx && typeof ctx.waitUntil === 'function' && env.COMMENTS) {
+    for (const [scope, docs] of searchGroupByScope([...mine, ...teamDocs], searchScopes)) {
+      ctx.waitUntil(searchStoreOp(env, scope, { kind: 'ensure', docs }));
+    }
+  }
+
   // Feedback spaces stay out of My docs, but they need a home: the Feedback
   // tab. Listed here without counts — the catalog must not read comments per
   // row — and counted by /api/me/feedback when the tab is opened.
@@ -7130,6 +7144,9 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
       team.id, teamFolderStates.get(team.id).folders.map((folder) => publicTeamFolder(folder, session, team)),
     ])),
     team_invites: await invitesP,
+    // Which store each row's search index lives in: for /api/search only,
+    // never serialized (it names owners' account ids).
+    ...(searchScopesWanted ? { search_scopes: searchScopes } : {}),
   };
 }
 
@@ -9417,6 +9434,688 @@ async function refreshDocPreview(env, slug, meta) {
   } catch {
     return meta;
   }
+}
+
+// ─────────────── full-text search ───────────────
+//
+// Title, body text and comments of every doc, in SQLite FTS5 indexes held by
+// CommentsStore instances under reserved names (like the index bookkeeping
+// store above): a SQLite-backed Durable Object the deploy already has, so
+// search needs no new Cloudflare resource, no new binding and no migration,
+// and a BYOK worker gets it with the same bundle.
+//
+// One store per owner scope -- a person's account (p:), a team (w:), a
+// handle with no account (l:), docs with no owner at all (n) -- so one
+// person's docs never share a database, a queue or a CPU budget with
+// anyone else's, and no store grows with the platform. A search asks only
+// the stores of the docs the viewer's hub lists.
+//
+// The trigram tokenizer indexes every three-character window, which is what
+// makes Chinese searchable at all (no word breaks to split on) and gives
+// substring matches in every language. A term shorter than three characters
+// (most two-character Chinese words) cannot use the trigram index and is
+// matched with LIKE instead, over the rows the viewer may read.
+//
+// The index never decides who may read what. Every query names the slugs the
+// viewer's hub lists (searchHubRows) and the SQL cannot return a row outside
+// them; the route re-checks each result against the doc's current record.
+//
+// Writes never wait on search: a record write or comment change marks the
+// doc pending in its store with a short timeout, and the store's alarm reads
+// docs a few at a time, bounded by bytes. Docs that were never indexed (or
+// whose mark was lost to that timeout) are queued when a viewer's hub or
+// search lists them (ensure).
+const SEARCH_STORE_PREFIX = '__tdoc-search__';
+const SEARCH_INDEX_BATCH = 8;
+const SEARCH_ALARM_BYTES = 1500000;
+const SEARCH_HTML_CAP = 1500000;
+const SEARCH_ENSURE_PER_CALL = 40;
+const SEARCH_BODY_CAP = 400000;
+const SEARCH_COMMENTS_CAP = 100000;
+const SEARCH_RATE_LIMIT = 60;
+const SEARCH_RATE_WINDOW = 60;
+const SEARCH_RESULT_LIMIT = 20;
+const SEARCH_MAX_TRIES = 4;
+const SEARCH_MAX_SCOPES = 16;
+const SEARCH_WRITE_TIMEOUT_MS = 500;
+const SEARCH_QUERY_TIMEOUT_MS = 5000;
+
+// Which store a doc's index lives in, from its record (or its index entry).
+function searchScopeFromIdx(idx) {
+  if (!idx) return '';
+  if (idx.w) return `w:${idx.w}`;
+  if (idx.a) return `p:${idx.a}`;
+  if (idx.o) return `l:${idx.o}`;
+  return 'n';
+}
+// Which life of a slug an index row belongs to: a slug purged and published
+// again starts over at v1, and must not inherit the old v1's row.
+function searchEpoch(meta) {
+  const versions = meta && Array.isArray(meta.versions) ? meta.versions : [];
+  return String((meta && meta.created) || versions[0]?.created || '');
+}
+function searchScopeOf(meta) {
+  return meta && typeof meta === 'object' ? searchScopeFromIdx(docMetaIndex(meta)) : '';
+}
+
+function searchWithin(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function searchStoreOp(env, scope, op, { timeoutMs = 0 } = {}) {
+  if (!env || !env.COMMENTS || !scope) return null;
+  const name = `${SEARCH_STORE_PREFIX}:${scope}`;
+  const run = (async () => {
+    try {
+      const stub = env.COMMENTS.get(env.COMMENTS.idFromName(name));
+      const r = await stub.fetch('https://do/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: name, op }),
+      });
+      const out = await r.json();
+      return out && out.ok ? out : null;
+    } catch { return null; }
+  })();
+  return timeoutMs > 0 ? searchWithin(run, timeoutMs) : run;
+}
+
+// Every write of a doc's record lands here (putDocMetaJson): a new version
+// queues a reindex, a rename only retitles, Trash takes it out, and a move
+// between owners (to a team, back) takes it out of the old scope's store.
+// Bounded by a short timeout and never fails the write that called it.
+async function searchIndexTouch(env, slug, meta, priorIdx) {
+  if (!env || !env.COMMENTS || !meta || typeof meta !== 'object') return;
+  const scope = searchScopeOf(meta);
+  const prior = searchScopeFromIdx(priorIdx);
+  const ops = [searchStoreOp(env, scope, {
+    kind: 'touch',
+    slug,
+    version: latestVersionNumber(meta) || 1,
+    epoch: searchEpoch(meta),
+    // Arriving from another owner's store: whatever this store held for the
+    // slug may be a copy left behind by an earlier move (its removal can
+    // time out), so it is read again rather than trusted by version.
+    moved: Boolean(prior && prior !== scope),
+    title: String(meta.title || slug),
+    gone: isTrashedMeta(meta) || meta.created_from === 'feedback',
+  })];
+  if (prior && prior !== scope) ops.push(searchStoreOp(env, prior, { kind: 'remove', slug }));
+  await searchWithin(Promise.all(ops), SEARCH_WRITE_TIMEOUT_MS);
+}
+
+const SEARCH_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', middot: '·', copy: '©' };
+const SEARCH_SKIP_TAGS = ['head', 'script', 'style', 'noscript', 'template'];
+const SEARCH_INLINE_TAGS = new Set(['a', 'abbr', 'b', 'bdi', 'bdo', 'cite', 'code', 'data', 'dfn', 'em', 'i', 'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'var']);
+
+// The words a reader sees, one space between them. One forward scan with
+// indexOf -- every search starts where the last one ended, so the cost is
+// linear in the input whatever it holds (an unclosed <script, ten thousand
+// `<!--`): a doc cannot make indexing slow for anyone. Input is capped before
+// the scan. Entities are decoded in a single pass (never twice), and the
+// text only ever leaves as data: snippets are segments the client renders as
+// text, not HTML.
+function searchPlainText(html, cap = SEARCH_BODY_CAP) {
+  if (typeof html !== 'string' || !html) return '';
+  const src = html.length > SEARCH_HTML_CAP ? html.slice(0, SEARCH_HTML_CAP) : html;
+  // ASCII-only lower case keeps every index equal to the original's.
+  const lower = src.replace(/[A-Z]+/g, (s) => s.toLowerCase());
+  const out = [];
+  let pos = 0;
+  const n = src.length;
+  while (pos < n) {
+    const lt = src.indexOf('<', pos);
+    if (lt === -1) { out.push(src.slice(pos)); break; }
+    if (lt > pos) out.push(src.slice(pos, lt));
+    if (lower.startsWith('<!--', lt)) {
+      const end = lower.indexOf('-->', lt + 4);
+      if (end === -1) break;
+      out.push(' ');
+      pos = end + 3;
+      continue;
+    }
+    // <!doctype ...>, <![CDATA[ ...>, <?xml ...?>: declarations, not text.
+    if (src[lt + 1] === '!' || src[lt + 1] === '?') {
+      const end = src.indexOf('>', lt + 2);
+      if (end === -1) break;
+      out.push(' ');
+      pos = end + 1;
+      continue;
+    }
+    let m = lt + 1;
+    if (src[m] === '/') m += 1;
+    let nameEnd = m;
+    while (nameEnd < n && nameEnd - m < 16 && /[a-z0-9]/.test(lower[nameEnd])) nameEnd += 1;
+    const name = lower.slice(m, nameEnd);
+    if (!name) { out.push('<'); pos = lt + 1; continue; }
+    const gt = src.indexOf('>', nameEnd);
+    if (gt === -1) break;
+    if (src[lt + 1] !== '/' && SEARCH_SKIP_TAGS.includes(name)) {
+      const close = lower.indexOf(`</${name}`, gt + 1);
+      if (close === -1) break;
+      const closeEnd = src.indexOf('>', close + name.length + 2);
+      if (closeEnd === -1) break;
+      out.push(' ');
+      pos = closeEnd + 1;
+      continue;
+    }
+    // Inline tags sit inside words (`<b>re</b>port`); block tags separate them.
+    out.push(SEARCH_INLINE_TAGS.has(name) ? '' : ' ');
+    pos = gt + 1;
+  }
+  const text = out.join('')
+    .replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]{1,10});/gi, (all, ent) => {
+      if (ent[0] === '#') {
+        const code = ent[1] === 'x' || ent[1] === 'X' ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+        return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : ' ';
+      }
+      const key = ent.toLowerCase();
+      return Object.prototype.hasOwnProperty.call(SEARCH_ENTITIES, key) ? SEARCH_ENTITIES[key] : ' ';
+    })
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > cap ? text.slice(0, cap) : text;
+}
+
+// Live comments and replies, every version's: what a reader of the doc can
+// read in its comment list -- minus email addresses. Comment reads redact
+// addresses per viewer (redactCommentEmails); a search result cannot know
+// who may see which, so the index never holds one: `@name@host` becomes
+// `@name`, a bare address its local part.
+// Linear: the text is capped first (each comment, then all of them), split
+// on whitespace, and only a token holding an @ is looked at -- with bounded
+// quantifiers on a bounded token. A token too long to be an address keeps
+// only what comes before its @.
+const SEARCH_COMMENT_CAP = 5000;
+const SEARCH_EMAIL_TOKEN_RE = /([^@\s]{1,64})@[^@\s]{1,255}\.[^@\s]{1,63}/g;
+function searchScrubEmails(text) {
+  return text.split(/(\s+)/).map((token) => {
+    const at = token.indexOf('@');
+    if (at === -1) return token;
+    if (token.length > 400) return token.slice(0, Math.min(at, 64));
+    return token.replace(SEARCH_EMAIL_TOKEN_RE, '$1');
+  }).join('');
+}
+function searchCommentsText(list) {
+  const parts = [];
+  let total = 0;
+  const add = (text) => {
+    if (!text || total >= SEARCH_COMMENTS_CAP) return;
+    const part = String(text).slice(0, SEARCH_COMMENT_CAP);
+    parts.push(part);
+    total += part.length + 3;
+  };
+  try {
+    for (const c of historyList(Array.isArray(list) ? list : [])) {
+      add(c.text);
+      for (const r of Array.isArray(c.replies) ? c.replies : []) {
+        if (r && !r.deleted) add(r.text);
+      }
+    }
+  } catch { return ''; }
+  const joined = parts.join(' · ').slice(0, SEARCH_COMMENTS_CAP);
+  return searchScrubEmails(joined).replace(/\s+/g, ' ').trim();
+}
+
+// Terms: whitespace separated, "quoted phrases" kept whole; at most eight,
+// each at most 100 characters, case-folded duplicates dropped.
+function searchTerms(q) {
+  const out = [];
+  const seen = new Set();
+  const re = /"([^"]+)"|(\S+)/g;
+  let m;
+  while ((m = re.exec(String(q || ''))) && out.length < 8) {
+    const term = String(m[1] || m[2] || '').replace(/["\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+    const key = term.toLowerCase();
+    if (!term || seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+  }
+  return out;
+}
+
+function searchTermRegex(terms) {
+  const parts = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length);
+  return parts.length ? new RegExp(parts.join('|'), 'giu') : null;
+}
+
+// Text split into [{ text, hit }] segments with every term marked. Data, not
+// markup: the client renders each segment as text, so nothing a doc says can
+// become HTML on the results page.
+function searchSegments(text, terms) {
+  const re = searchTermRegex(terms);
+  const out = [];
+  if (!re) return [{ text, hit: false }];
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    if (!m[0]) { re.lastIndex += 1; continue; }
+    if (m.index > last) out.push({ text: text.slice(last, m.index), hit: false });
+    out.push({ text: m[0], hit: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), hit: false });
+  return out;
+}
+
+// The passage around the first match, ~200 characters, as segments.
+function searchSnippet(text, terms, { before = 60, after = 140 } = {}) {
+  if (!text) return null;
+  const re = searchTermRegex(terms);
+  const m = re && re.exec(text);
+  if (!m) return null;
+  let start = Math.max(0, m.index - before);
+  let end = Math.min(text.length, m.index + m[0].length + after);
+  if (start > 0) {
+    const space = text.indexOf(' ', start);
+    if (space !== -1 && space < m.index && space - start < 20) start = space + 1;
+  }
+  if (end < text.length) {
+    const space = text.lastIndexOf(' ', end);
+    if (space > m.index + m[0].length && end - space < 20) end = space;
+  }
+  const segments = searchSegments(text.slice(start, end), terms);
+  if (start > 0) segments.unshift({ text: '…', hit: false });
+  if (end < text.length) segments.push({ text: '…', hit: false });
+  return segments;
+}
+
+function searchSql(store) {
+  const storage = store && store.state && store.state.storage;
+  const sql = storage && storage.sql;
+  if (!sql || typeof sql.exec !== 'function') throw new Error('search_sql_unavailable');
+  if (!store._searchReady) {
+    sql.exec('CREATE TABLE IF NOT EXISTS search_docs (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 0, epoch TEXT NOT NULL DEFAULT \'\', title TEXT NOT NULL DEFAULT \'\', updated TEXT NOT NULL DEFAULT \'\')');
+    sql.exec('CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(title, body, comments, tokenize = \'trigram case_sensitive 0 remove_diacritics 1\')');
+    sql.exec('CREATE TABLE IF NOT EXISTS search_pending (slug TEXT PRIMARY KEY, at INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 0)');
+    // Versions given up on after SEARCH_MAX_TRIES: not queued again until
+    // the doc changes.
+    sql.exec('CREATE TABLE IF NOT EXISTS search_failed (slug TEXT PRIMARY KEY, version INTEGER NOT NULL)');
+    sql.exec('CREATE TABLE IF NOT EXISTS search_rate (bucket TEXT PRIMARY KEY, win INTEGER NOT NULL, n INTEGER NOT NULL)');
+    sql.exec('CREATE TABLE IF NOT EXISTS search_store (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+    store._searchReady = true;
+  }
+  return sql;
+}
+
+function searchRows(sql, query, ...params) {
+  return [...sql.exec(query, ...params)];
+}
+
+// A pending mark is a ticket: the alarm deletes only the ticket it took, so a
+// touch that lands while a doc is being read queues it again rather than
+// being swallowed by the older run.
+let searchTicketSeq = 0;
+function searchTicket() {
+  searchTicketSeq = (searchTicketSeq + 1) % 1000;
+  return Date.now() * 1000 + searchTicketSeq;
+}
+
+async function searchArm(store, delay = 500) {
+  const storage = store.state.storage;
+  if (typeof storage.setAlarm !== 'function') return;
+  try {
+    const current = await storage.getAlarm();
+    if (current == null || current > Date.now() + delay) await storage.setAlarm(Date.now() + delay);
+  } catch {}
+}
+
+function searchQueue(sql, slug, version = 0) {
+  sql.exec('INSERT INTO search_pending (slug, at, tries, version) VALUES (?, ?, 0, ?) ON CONFLICT(slug) DO UPDATE SET at = excluded.at, tries = 0, version = excluded.version', slug, searchTicket(), Number(version) || 0);
+}
+
+function searchRemove(sql, slug) {
+  for (const row of searchRows(sql, 'SELECT id FROM search_docs WHERE slug = ?', slug)) {
+    sql.exec('DELETE FROM search_fts WHERE rowid = ?', row.id);
+  }
+  sql.exec('DELETE FROM search_docs WHERE slug = ?', slug);
+  sql.exec('DELETE FROM search_pending WHERE slug = ?', slug);
+}
+
+function searchPendingCount(sql) {
+  const row = searchRows(sql, 'SELECT count(*) AS n FROM search_pending')[0];
+  return Number(row && row.n) || 0;
+}
+
+// The scope this store serves, from the reserved name it is reached by.
+// Only names under SEARCH_STORE_PREFIX are search stores: a doc's own
+// CommentsStore never answers a search op.
+function searchStoreScope(store, name) {
+  const prefix = `${SEARCH_STORE_PREFIX}:`;
+  if (typeof name !== 'string' || !name.startsWith(prefix) || name.length <= prefix.length || name.length > 300) return '';
+  const id = store && store.state && store.state.id;
+  if (id && typeof id.name === 'string' && id.name !== name) return '';
+  return name.slice(prefix.length);
+}
+
+async function searchStoreHandle(store, name, op) {
+  const scope = searchStoreScope(store, name);
+  if (!scope) return { ok: false, error: 'not_a_search_store' };
+  const sql = searchSql(store);
+  if (!store._searchScopeSaved) {
+    sql.exec('INSERT INTO search_store (k, v) VALUES (\'scope\', ?) ON CONFLICT(k) DO NOTHING', scope);
+    store._searchScopeSaved = true;
+  }
+  const kind = op && op.kind;
+  const slugOk = (s) => isValidSlug(s);
+  if (kind === 'touch') {
+    if (!slugOk(op.slug)) return { ok: false };
+    if (op.gone) { searchRemove(sql, op.slug); return { ok: true, removed: true }; }
+    const row = searchRows(sql, 'SELECT id, version, epoch, title FROM search_docs WHERE slug = ?', op.slug)[0];
+    const pending = searchRows(sql, 'SELECT 1 AS p FROM search_pending WHERE slug = ?', op.slug).length > 0;
+    if (row && !pending && !op.moved && Number(row.version) === Number(op.version) && String(row.epoch) === String(op.epoch || '')) {
+      const title = String(op.title || '').slice(0, 500);
+      if (title && title !== row.title) {
+        // FTS5 has no partial-column update of a contentful table that
+        // keeps the other columns; rewrite the row with the stored text.
+        const prev = searchRows(sql, 'SELECT body, comments FROM search_fts WHERE rowid = ?', row.id)[0] || { body: '', comments: '' };
+        sql.exec('DELETE FROM search_fts WHERE rowid = ?', row.id);
+        sql.exec('INSERT INTO search_fts (rowid, title, body, comments) VALUES (?, ?, ?, ?)', row.id, title, prev.body || '', prev.comments || '');
+        sql.exec('UPDATE search_docs SET title = ? WHERE id = ?', title, row.id);
+      }
+      return { ok: true, queued: false };
+    }
+    searchQueue(sql, op.slug, op.version);
+    await searchArm(store);
+    return { ok: true, queued: true };
+  }
+  if (kind === 'comments') {
+    if (!slugOk(op.slug)) return { ok: false };
+    searchQueue(sql, op.slug, 0);
+    await searchArm(store);
+    return { ok: true, queued: true };
+  }
+  if (kind === 'remove') {
+    if (slugOk(op.slug)) {
+      searchRemove(sql, op.slug);
+      sql.exec('DELETE FROM search_failed WHERE slug = ?', op.slug);
+    }
+    return { ok: true };
+  }
+  if (kind === 'ensure' || kind === 'enqueue') {
+    const docs = (Array.isArray(op.docs) ? op.docs : []).filter((d) => d && slugOk(d.slug));
+    const queued = searchEnsure(sql, docs, kind === 'enqueue' ? docs.length : SEARCH_ENSURE_PER_CALL, kind === 'enqueue');
+    if (queued) await searchArm(store);
+    return { ok: true, queued, pending: searchPendingCount(sql) };
+  }
+  if (kind === 'rate') {
+    const bucket = String(op.bucket || '').slice(0, 200);
+    if (!bucket) return { ok: true, limited: false };
+    const windowSeconds = Math.max(1, Number(op.window) || SEARCH_RATE_WINDOW);
+    const limit = Math.max(1, Number(op.limit) || SEARCH_RATE_LIMIT);
+    const win = Math.floor(Date.now() / (windowSeconds * 1000));
+    const row = searchRows(sql, 'SELECT win, n FROM search_rate WHERE bucket = ?', bucket)[0];
+    const n = row && Number(row.win) === win ? Number(row.n) : 0;
+    if (n >= limit) return { ok: true, limited: true };
+    sql.exec('INSERT INTO search_rate (bucket, win, n) VALUES (?, ?, ?) ON CONFLICT(bucket) DO UPDATE SET win = excluded.win, n = excluded.n', bucket, win, n + 1);
+    return { ok: true, limited: false };
+  }
+  if (kind === 'query') {
+    const docs = (Array.isArray(op.docs) ? op.docs : []).filter((d) => d && slugOk(d.slug));
+    const queued = searchEnsure(sql, docs, SEARCH_ENSURE_PER_CALL, false);
+    if (queued) await searchArm(store);
+    const results = searchQuery(sql, String(op.q || ''), docs.map((d) => d.slug), Math.max(1, Math.min(50, Number(op.limit) || SEARCH_RESULT_LIMIT)));
+    return { ok: true, results, pending: searchPendingCount(sql) };
+  }
+  if (kind === 'stats') {
+    const docs = searchRows(sql, 'SELECT count(*) AS n FROM search_docs')[0];
+    return { ok: true, docs: Number(docs && docs.n) || 0, pending: searchPendingCount(sql) };
+  }
+  return { ok: false };
+}
+
+// Queue the docs whose indexed version is behind (or that were never
+// indexed), at most `cap`. A version given up on is not queued again.
+// `force` queues them all (the admin bulk path).
+function searchEnsure(sql, docs, cap, force) {
+  if (!docs.length || cap <= 0) return 0;
+  const have = new Map();
+  const failed = new Map();
+  const pending = new Set();
+  const slugs = JSON.stringify(docs.map((d) => d.slug));
+  for (const row of searchRows(sql, 'SELECT slug, version FROM search_docs WHERE slug IN (SELECT value FROM json_each(?))', slugs)) have.set(row.slug, Number(row.version));
+  for (const row of searchRows(sql, 'SELECT slug, version FROM search_failed WHERE slug IN (SELECT value FROM json_each(?))', slugs)) failed.set(row.slug, Number(row.version));
+  for (const row of searchRows(sql, 'SELECT slug FROM search_pending WHERE slug IN (SELECT value FROM json_each(?))', slugs)) pending.add(row.slug);
+  let queued = 0;
+  for (const d of docs) {
+    if (queued >= cap) break;
+    if (pending.has(d.slug)) continue;
+    const version = Number(d.version || 0);
+    if (!force && have.has(d.slug) && have.get(d.slug) === version) continue;
+    if (!force && failed.has(d.slug) && failed.get(d.slug) === version) continue;
+    searchQueue(sql, d.slug, version);
+    pending.add(d.slug);
+    queued += 1;
+  }
+  return queued;
+}
+
+// Matching rows among `slugs` only: the slug list is a bound parameter of
+// every statement, so no query can reach a doc the caller did not name. With
+// no full-text term the viewer's rows drive the join (CROSS JOIN fixes the
+// order), so LIKE only ever reads the rows the viewer may read.
+function searchQuery(sql, q, slugs, limit) {
+  const terms = searchTerms(q);
+  if (!terms.length || !slugs.length) return [];
+  const long = terms.filter((t) => [...t].length >= 3);
+  const short = terms.filter((t) => [...t].length < 3);
+  const where = ['d.slug IN (SELECT value FROM json_each(?))'];
+  const params = [JSON.stringify(slugs)];
+  if (long.length) {
+    where.push('search_fts MATCH ?');
+    params.push(long.map((t) => `"${t.replace(/"/g, '""')}"`).join(' AND '));
+  }
+  for (const t of short) {
+    const like = `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where.push("(f.title LIKE ? ESCAPE '\\' OR f.body LIKE ? ESCAPE '\\' OR f.comments LIKE ? ESCAPE '\\')");
+    params.push(like, like, like);
+  }
+  const score = long.length ? 'bm25(search_fts, 8.0, 1.0, 0.5)' : '0';
+  const from = long.length
+    ? 'search_fts f JOIN search_docs d ON d.id = f.rowid'
+    : 'search_docs d CROSS JOIN search_fts f ON f.rowid = d.id';
+  let candidates;
+  try {
+    candidates = searchRows(sql, `SELECT d.id AS id, d.slug AS slug, d.title AS title, d.updated AS updated, ${score} AS score
+      FROM ${from}
+      WHERE ${where.join(' AND ')}
+      ORDER BY score ASC, d.updated DESC LIMIT 200`, ...params);
+  } catch (error) {
+    console.error('[search] query failed:', error && error.message || String(error));
+    return [];
+  }
+  // Relevance first: every term in the title beats a body match; then the
+  // FTS rank; then the most recently updated.
+  const lowerTerms = terms.map((t) => t.toLowerCase());
+  const titleHits = (title) => lowerTerms.filter((t) => String(title || '').toLowerCase().includes(t)).length;
+  for (const row of candidates) row.title_hits = titleHits(row.title);
+  candidates.sort(searchRank);
+  return candidates.slice(0, limit).map((row) => {
+    const text = searchRows(sql, 'SELECT body, comments FROM search_fts WHERE rowid = ?', row.id)[0] || {};
+    let snippet = searchSnippet(String(text.body || ''), terms);
+    let where = 'body';
+    if (!snippet) {
+      snippet = searchSnippet(String(text.comments || ''), terms);
+      where = snippet ? 'comments' : 'title';
+    }
+    if (!snippet) {
+      const lead = String(text.body || '').slice(0, 180);
+      snippet = lead ? [{ text: lead + (String(text.body || '').length > 180 ? '…' : ''), hit: false }] : [];
+    }
+    return { slug: row.slug, title: row.title, updated: row.updated, where, snippet, score: Number(row.score) || 0, title_hits: row.title_hits };
+  });
+}
+
+function searchRank(a, b) {
+  return (Number(b.title_hits) - Number(a.title_hits))
+    || (Number(a.score) - Number(b.score))
+    || String(b.updated).localeCompare(String(a.updated));
+}
+
+// Index one doc. Returns how many bytes of HTML it read (the alarm's budget).
+async function searchIndexDoc(store, sql, scope, slug, ticket) {
+  const env = store.env;
+  const meta = await loadDocMeta(env, slug);
+  const stillMine = () => searchRows(sql, 'SELECT at FROM search_pending WHERE slug = ?', slug).some((r) => Number(r.at) === ticket);
+  // Gone, a feedback space, or moved to another owner's store since it was
+  // queued (that store was told by the write that moved it).
+  if (!meta || meta.created_from === 'feedback' || searchScopeOf(meta) !== scope) {
+    if (stillMine()) searchRemove(sql, slug);
+    return 0;
+  }
+  const version = latestVersionNumber(meta) || 1;
+  sql.exec('UPDATE search_pending SET version = ? WHERE slug = ? AND at = ?', version, slug, ticket);
+  const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+  let html = obj ? await obj.text() : '';
+  const bytes = html.length;
+  if (html.length > SEARCH_HTML_CAP) html = html.slice(0, SEARCH_HTML_CAP);
+  let body = searchPlainText(html);
+  html = '';
+  // Most docs open with their title as the heading; the title is indexed on
+  // its own, and a passage should start with what follows it.
+  const docTitle = String(meta.title || '').trim();
+  if (docTitle && body.slice(0, docTitle.length).toLowerCase() === docTitle.toLowerCase()) body = body.slice(docTitle.length).trimStart();
+  let comments = '';
+  try { comments = searchCommentsText(await readComments(env, slug)); } catch {}
+  // A newer touch, or a delete, landed while this one read: leave it to the
+  // run that owns the newer ticket.
+  if (!stillMine()) return bytes;
+  const versions = Array.isArray(meta.versions) ? meta.versions : [];
+  const updated = String(versions[versions.length - 1]?.created || meta.created || '');
+  const title = String(meta.title || slug).slice(0, 500);
+  const row = searchRows(sql, 'SELECT id FROM search_docs WHERE slug = ?', slug)[0];
+  let id;
+  if (row) {
+    id = row.id;
+    sql.exec('DELETE FROM search_fts WHERE rowid = ?', id);
+    sql.exec('UPDATE search_docs SET version = ?, epoch = ?, title = ?, updated = ? WHERE id = ?', version, searchEpoch(meta), title, updated, id);
+  } else {
+    sql.exec('INSERT INTO search_docs (slug, version, epoch, title, updated) VALUES (?, ?, ?, ?, ?)', slug, version, searchEpoch(meta), title, updated);
+    id = searchRows(sql, 'SELECT id FROM search_docs WHERE slug = ?', slug)[0].id;
+  }
+  sql.exec('INSERT INTO search_fts (rowid, title, body, comments) VALUES (?, ?, ?, ?)', id, title, body, comments);
+  sql.exec('DELETE FROM search_pending WHERE slug = ? AND at = ?', slug, ticket);
+  sql.exec('DELETE FROM search_failed WHERE slug = ?', slug);
+  return bytes;
+}
+
+// The alarm: a few docs a run, bounded by bytes read, then again shortly
+// while any are left. Each attempt is written down (tries + 1, to the back
+// of the queue) and flushed BEFORE the doc is read, so a run the runtime
+// kills mid-doc still counts against that doc -- one bad doc cannot hold the
+// queue. After SEARCH_MAX_TRIES the doc leaves the index (its stale text
+// with it) and that version is not queued again until the doc changes.
+async function searchStoreAlarm(store) {
+  let sql;
+  try { sql = searchSql(store); } catch { return; }
+  const scopeRow = searchRows(sql, "SELECT v FROM search_store WHERE k = 'scope'")[0];
+  const scope = scopeRow ? String(scopeRow.v) : '';
+  if (!scope) return;
+  const batch = searchRows(sql, 'SELECT slug, at, tries, version FROM search_pending ORDER BY at ASC LIMIT ?', SEARCH_INDEX_BATCH);
+  let bytes = 0;
+  for (const item of batch) {
+    if (Number(item.tries) >= SEARCH_MAX_TRIES) {
+      console.error('[search] giving up on', item.slug, 'v' + item.version);
+      searchRemove(sql, item.slug);
+      sql.exec('INSERT INTO search_failed (slug, version) VALUES (?, ?) ON CONFLICT(slug) DO UPDATE SET version = excluded.version', item.slug, Number(item.version) || 0);
+      continue;
+    }
+    const ticket = searchTicket();
+    sql.exec('UPDATE search_pending SET tries = tries + 1, at = ? WHERE slug = ? AND at = ?', ticket, item.slug, item.at);
+    if (!searchRows(sql, 'SELECT 1 AS p FROM search_pending WHERE slug = ? AND at = ?', item.slug, ticket).length) continue;
+    try { if (typeof store.state.storage.sync === 'function') await store.state.storage.sync(); } catch {}
+    try {
+      bytes += await searchIndexDoc(store, sql, scope, item.slug, ticket);
+    } catch (error) {
+      console.error('[search] index failed:', item.slug, error && error.message || String(error));
+    }
+    if (bytes >= SEARCH_ALARM_BYTES) break;
+  }
+  // Rate windows from earlier minutes are dead weight.
+  sql.exec('DELETE FROM search_rate WHERE win < ?', Math.floor(Date.now() / (SEARCH_RATE_WINDOW * 1000)) - 1);
+  if (searchPendingCount(sql)) await searchArm(store, 250);
+}
+
+// The docs a search may return: exactly the rows the viewer's hub lists
+// (their own, their teams', and the ones they opened or starred), scoped the
+// way /api/me scopes a workspace token, then narrowed to one space.
+//   space ''      My docs (personal rows)
+//   space <team>  that team's rows
+//   space 'all'   both
+function searchHubRows(data, session, space) {
+  const scope = session && session.scope;
+  const reach = scope
+    ? (row) => (row.workspace_id ? scope.teams.includes(row.workspace_id) : scope.me && row.mine === true)
+    : () => true;
+  const rows = [
+    ...(scope && !scope.me ? [] : (data.docs || [])),
+    ...(data.team_docs || []).map((row) => ({ ...row, workspace_id: row.workspace_id || row.team })),
+    ...(data.recent || []),
+    ...(data.starred || []),
+  ];
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    if (!row || !row.slug || seen.has(row.slug) || !reach(row)) continue;
+    const ws = row.workspace_id || '';
+    if (space !== 'all' && ws !== space) continue;
+    seen.add(row.slug);
+    out.push(row);
+  }
+  return out;
+}
+
+// The stores that are the viewer's own: their accounts, their handle, their
+// teams, and (for the deploy operator) the ownerless pool.
+function searchOwnScopes(env, session) {
+  const own = new Set();
+  for (const id of sessionAccountIds(session)) own.add(`p:${id}`);
+  const login = sessionLogin(session);
+  if (login) own.add(`l:${login}`);
+  for (const id of (session && session.team_ids) || []) own.add(`w:${id}`);
+  if (isOwnerSession(env, session)) own.add('n');
+  return own;
+}
+
+// Rows grouped by the store their index lives in. The viewer's own and team
+// stores are always asked; other people's (docs shared with the viewer)
+// fill the rest, biggest first, up to SEARCH_MAX_SCOPES stores in all. What
+// is left out is counted, so the caller can say the search was partial.
+function searchGroupByScope(rows, scopes, own = new Set()) {
+  const groups = new Map();
+  for (const row of rows) {
+    const scope = scopes && scopes.get(row.slug);
+    if (!scope) continue;
+    if (!groups.has(scope)) groups.set(scope, []);
+    groups.get(scope).push({ slug: row.slug, version: row.latest });
+  }
+  const entries = [...groups.entries()];
+  const mine = entries.filter(([scope]) => own.has(scope)).sort((a, b) => b[1].length - a[1].length);
+  const others = entries.filter(([scope]) => !own.has(scope)).sort((a, b) => b[1].length - a[1].length);
+  const room = Math.max(0, SEARCH_MAX_SCOPES - mine.length);
+  const out = [...mine, ...others.slice(0, room)];
+  out.skipped = Math.max(0, others.length - room);
+  return out;
+}
+
+// A burst of keystrokes would rebuild the whole hub catalog each time; a
+// viewer's rows are kept for a few seconds per isolate. Only which docs to
+// search comes from here -- every result is checked again against its
+// current record before it is returned.
+const SEARCH_ROWS_TTL_MS = 5000;
+const searchRowsCache = new Map();
+async function searchViewerData(env, session, origin, ctx) {
+  const ttl = env && env.TDOC_SEARCH_CACHE_MS != null && Number.isFinite(Number(env.TDOC_SEARCH_CACHE_MS)) ? Number(env.TDOC_SEARCH_CACHE_MS) : SEARCH_ROWS_TTL_MS;
+  const key = `${origin}|${(session && session.id) || actorKey(session) || ''}|${JSON.stringify([(session && session.scope) || null, (session && session.team_ids) || []])}`;
+  const hit = searchRowsCache.get(key);
+  if (hit && Date.now() - hit.at < ttl) return hit.data;
+  const data = await indexData(env, session, origin, { ctx, searchScopes: true });
+  if (searchRowsCache.size > 200) searchRowsCache.clear();
+  searchRowsCache.set(key, { at: Date.now(), data });
+  return data;
 }
 
 // Pins live on the account group's canonical profile record: that is the one
@@ -12834,6 +13533,9 @@ async function mutateComments(env, slug, op) {
   }
   if (result && result.status === 200) {
     const meta = await loadDocMeta(env, slug);
+    // Comment text is searchable, a wipe included: queue the doc for
+    // reindexing in its owner's store. Bounded; never fails the comment.
+    if (meta) await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
     if (meta && validTeamId(meta.workspace_id)) {
       await enqueueTeamBackup(env, { kind: 'comments', team: meta.workspace_id, slug });
     }
@@ -12920,6 +13622,9 @@ async function versionReservationOp(env, slug, op) {
 // backstop. All same-slug reads/writes funnel through this one instance.
 export class CommentsStore {
   constructor(state, env) { this.state = state; this.env = env; }
+
+  // Only search stores (SEARCH_STORE_PREFIX) ever set an alarm.
+  async alarm() { await searchStoreAlarm(this); }
 
   // Resolve the list for `slug` from DO storage INSIDE transaction txn, doing
   // the one-time legacy-KV migration on first touch. DO storage is the SOLE
@@ -13115,6 +13820,17 @@ export class CommentsStore {
     let payload;
     try { payload = await req.json(); } catch { return Response.json({ list: [] }); }
     const { slug, op } = payload;
+
+    // FULL-TEXT SEARCH: one store per owner scope (searchStoreHandle),
+    // reached under reserved names no slug can take; any other instance
+    // refuses the op.
+    if (u.pathname === '/search') {
+      try { return Response.json(await searchStoreHandle(this, slug, op)); }
+      catch (error) {
+        console.error('[search] store op failed:', error && error.message || String(error));
+        return Response.json({ ok: false });
+      }
+    }
 
     // INDEX BOOKKEEPING: the one place on the platform that counts how many
     // index markers the lazy backfill may still write today, and which
@@ -14722,6 +15438,68 @@ const tdocHandlers = {
     // Agents (hosted Bearer) use GET /api/me — same catalog as the HTML /me
     // hub, without needing a cookie. Cookie sessions also work so browser
     // tools can fetch JSON.
+    // Full-text search over the docs this viewer's hub lists (searchHubRows):
+    // title, body and comments, ranked, with a marked passage per result.
+    //   GET /api/search?q=<text>&space=<''|team id|all>
+    if (p === '/api/search' && method === 'GET') {
+      const s = await getViewerSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin) || s.feedback) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, { status: sessionPrincipal(s) ? 403 : 401 });
+      }
+      const q = String(url.searchParams.get('q') || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      const rawSpace = String(url.searchParams.get('space') || '');
+      const space = rawSpace === 'all' || validTeamId(rawSpace) ? rawSpace : '';
+      const headers = { 'Cache-Control': 'private, no-store' };
+      if ([...q].length < 2) return json({ ok: true, q, results: [], indexing: 0 }, { headers });
+      if (!env.COMMENTS) return json({ error: 'search_unavailable' }, { status: 503, headers });
+      // Counted in a store of the searcher's own: no KV write, and nobody
+      // else's searches share the counter.
+      const bucket = actorKey(s) || s.id || clientIp(req);
+      const rate = await searchStoreOp(env, `r:${bucket}`, { kind: 'rate', bucket, limit: SEARCH_RATE_LIMIT, window: SEARCH_RATE_WINDOW }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS });
+      if (!rate) return json({ error: 'search_unavailable' }, { status: 503, headers });
+      if (rate.limited) return json({ error: 'rate_limited', message: 'Too many searches; wait a moment.' }, { status: 429, headers: { ...headers, 'Retry-After': String(SEARCH_RATE_WINDOW) } });
+      const data = await searchViewerData(env, s, url.origin, ctx);
+      const rows = searchHubRows(data, s, space);
+      const bySlug = new Map(rows.map((row) => [row.slug, row]));
+      // Each owner store is asked only about this viewer's docs in it.
+      const groups = searchGroupByScope(rows, data.search_scopes, searchOwnScopes(env, s));
+      const answers = await Promise.all(groups.map(([scope, docs]) => (
+        searchStoreOp(env, scope, { kind: 'query', q, limit: SEARCH_RESULT_LIMIT, docs }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS })
+      )));
+      if (rows.length && !answers.some(Boolean)) return json({ error: 'search_unavailable' }, { status: 503, headers });
+      const out = {
+        results: answers.filter(Boolean).flatMap((a) => a.results || []).sort(searchRank).slice(0, SEARCH_RESULT_LIMIT),
+        pending: answers.reduce((n, a) => n + (a ? Number(a.pending) || 0 : 0), 0),
+      };
+      const terms = searchTerms(q);
+      // The index is a cache: each result is checked against the doc's
+      // current record before a word of it is returned.
+      const results = (await Promise.all((out.results || []).map(async (hit) => {
+        const row = bySlug.get(hit.slug);
+        if (!row) return null;
+        const meta = await loadDocMeta(env, hit.slug);
+        if (!meta || meta.created_from === 'feedback' || !docReadableBy(env, s, meta)) return null;
+        if (String(meta.workspace_id || '') !== String(row.workspace_id || '')) return null;
+        const title = String(meta.title || hit.slug);
+        return {
+          slug: hit.slug,
+          title,
+          title_marks: searchSegments(title, terms),
+          workspace_id: row.workspace_id || '',
+          folder: row.folder || '',
+          owner: row.owner || '',
+          mine: !!row.mine,
+          updated: row.updated || hit.updated || '',
+          where: hit.where,
+          snippet: hit.snippet,
+        };
+      }))).filter(Boolean);
+      // Stores left out past SEARCH_MAX_SCOPES, or that did not answer in
+      // time: say the search was partial rather than look complete.
+      const skipped = groups.skipped + answers.filter((a) => !a).length;
+      return json({ ok: true, q, results, indexing: Number(out.pending) || 0, ...(skipped ? { partial: true, skipped } : {}) }, { headers });
+    }
+
     if (p === '/api/me/feedback' && method === 'GET') {
       const s = await getSession(env, req);
       if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -19322,6 +20100,41 @@ const tdocHandlers = {
         actorLogin: sessionLogin(auth.session) || '',
       });
       return json(result.body, { status: result.status });
+    }
+
+    // Admin-only, cursor-paged: queue every doc on a page of records for the
+    // search index. Dry-run by default; the store's alarm does the reading.
+    if (p === '/api/admin/search/reindex' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      if (!auth.actor || auth.actor.kind !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      if (!env.COMMENTS) return json({ error: 'search_unavailable' }, { status: 503 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const dryRun = body.apply !== true;
+      const limit = Math.max(1, Math.min(1000, Number(body.limit) || 200));
+      const page = await env.META.list({ prefix: 'meta:', limit, ...(body.cursor ? { cursor: String(body.cursor) } : {}) });
+      const slugs = (page.keys || []).map((item) => String(item.name || '').slice(5)).filter(isValidSlug);
+      // Each doc goes to its owner's store.
+      const byScope = new Map();
+      for (const slug of slugs) {
+        const meta = await loadDocMeta(env, slug);
+        const scope = meta && meta.created_from !== 'feedback' ? searchScopeOf(meta) : '';
+        if (!scope) continue;
+        if (!byScope.has(scope)) byScope.set(scope, []);
+        byScope.get(scope).push({ slug, version: latestVersionNumber(meta) || 1 });
+      }
+      let queued = 0, indexed = 0, pending = 0;
+      for (const [scope, docs] of byScope) {
+        if (!dryRun) {
+          const out = await searchStoreOp(env, scope, { kind: 'enqueue', docs });
+          if (!out) return json({ error: 'search_unavailable' }, { status: 503 });
+          queued += out.queued;
+        }
+        const stats = await searchStoreOp(env, scope, { kind: 'stats' });
+        if (stats) { indexed += stats.docs; pending += stats.pending; }
+      }
+      return json({ ok: true, dry_run: dryRun, scanned: slugs.length, stores: byScope.size, queued, indexed, pending, cursor: page.list_complete ? null : page.cursor });
     }
 
     // Admin-only, cursor-paged backfill. Dry-run is the default and never
