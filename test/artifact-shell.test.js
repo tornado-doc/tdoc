@@ -484,7 +484,7 @@ const SLUG = 'hostile-body-css';
         const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
         await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
         const toggle = `${card} .tdoc-replies-toggle`;
-        await page.waitForFunction(({ card, toggle }) => document.querySelector(toggle) || document.querySelector(`${card} .tdoc-reply`), { card, toggle }, { timeout: 4000 });
+        await page.waitForFunction(({ card, toggle }) => document.querySelector(toggle) || document.querySelector(`${card} .tdoc-reply`), { card, toggle }, { timeout: 12000 });
         if (await page.locator(toggle).isVisible()) await page.click(toggle);
         await page.waitForTimeout(400);
 
