@@ -26,7 +26,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          # 22: node:sqlite stands in for the search store's Durable Object
+          # SQLite (full-text-search.test.js); the deploy already tests on 22.
+          node-version: '22'
       # jq is needed by the CLI tests that drive bin/tdoc-* hermetically.
       - name: Ensure jq
         run: jq --version || sudo apt-get update && sudo apt-get install -y jq
@@ -87,7 +89,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          # 22 for node:sqlite (full-text-search-ui.test.js).
+          node-version: '22'
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium webkit
