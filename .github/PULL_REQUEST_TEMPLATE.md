@@ -16,6 +16,16 @@
 - [ ] If I changed the version, I bumped `VERSION` **and** `.claude-plugin/plugin.json`
       together (the manifest test enforces this).
 
+## UI review (skip if no UI change)
+
+- [ ] Reused existing components instead of new ones (name them): `ui/` primitives,
+      CommentCard / reply, composer agent pill + menu, handoff status line, comment-area.
+- [ ] No new colors, borders or type sizes outside the `--td-*` tokens and existing classes.
+- [ ] Same icons on desktop and phone (phone may hide labels, never swap the icon).
+- [ ] Clicked through every changed control at 1440 and at 390/430 (WebKit + Chromium),
+      including drawers, keyboard-open and overlap with other floating UI; screenshots attached.
+- [ ] New or uncertain feature is behind a flag in `shell/src/feature-flags.js`.
+
 ## Security note
 
 <!-- Required if you touched overlay.js / worker.js / bin/*. These run in
