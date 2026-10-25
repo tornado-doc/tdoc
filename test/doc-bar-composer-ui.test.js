@@ -4,11 +4,12 @@
 //             Share (quiet) · ⋯ · avatar only. No mode dropdown, no Resolved
 //             switch, no space chip: the modes head ⋯, the filter (Open /
 //             Resolved / All) heads the comments
-//   composer  Comment + @agent. @agent puts the default agent in; its menu
-//             is Mine / Team / tdoc AI (with "Connect my agent"). "Ask" or
-//             "Ask + request change" -- the second only where that agent may
-//             edit (authorship); "Only me" for Ask to one's own agent or
-//             tdoc AI, never a team agent.
+//   composer  Comment + @agent. @agent puts the default agent in as a pill;
+//             the pill's menu is Mine / Team / tdoc AI (with "Connect my
+//             agent"). No mode to pick: the agent answers or edits from the
+//             text, where authorship lets it edit; elsewhere it answers only
+//             ("Answers only"). "Only me" for one's own agent or tdoc AI,
+//             never a team agent.
 // Each case checks what reached the server: an edit handoff, or a question.
 // Run with: node test/doc-bar-composer-ui.test.js
 
@@ -113,20 +114,22 @@ async function dragSelect(page, phrase) {
     return { context, page };
   };
   const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${name}` }); } };
-  const mode = (pop) => pop.locator('.tdoc-ask-mode button').evaluateAll((els) => els.map((e) => `${e.textContent}${e.classList.contains('active') ? '*' : ''}${e.disabled ? '(off)' : ''}`).join('|'));
   const compose = async (page, text) => {
     await dragSelect(page, 'Billing ships first');
     const pop = page.locator('.tdoc-popup');
     await pop.waitFor();
     await pop.locator('textarea').fill(text);
     await pop.locator('.tdoc-composer-agent').click();
+    await pop.locator('.tdoc-agent-pill').click();
     const menu = page.locator('.ui-menu-popup');
     await menu.waitFor();
     const items = await menu.innerText();
     await page.keyboard.press('Escape');
-    await pop.locator('.tdoc-ask-mode').waitFor();
+    await menu.waitFor({ state: 'detached' });
+    if (await pop.locator('.tdoc-ask-mode').count()) throw new Error('a mode control is back');
     return { pop, items };
   };
+  const answersOnly = (pop) => pop.locator('.tdoc-ask-only-label').count();
   const comments = async (slug, v = 1) => { const r = await api(`/api/comments?slug=${slug}&version=${v}`, { cookie: julie.cookie }); return Array.isArray(r.body) ? r.body : r.body.comments; };
   const pending = async (device, token) => (await api(`/api/notify/local/pending?device=${device}`, { token })).body.pending;
   let failed = 0;
@@ -175,12 +178,11 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('owner on own doc: @agent puts in their agent; Ask + request change hands the comment to it to edit', async () => {
+    await t('owner on own doc: @agent puts in their agent; Comment hands it to them to answer or edit', async () => {
       const { context, page } = await open(julie, 'launch-plan');
       const { pop, items } = await compose(page, 'Tighten this line');
       if (!/Mine/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
-      if (await mode(pop) !== 'Ask|Ask + request change*') throw new Error(`mode: ${await mode(pop)}`);
-      if (await pop.locator('.tdoc-only-me').count()) throw new Error('Only me beside an edit');
+      if (await answersOnly(pop)) throw new Error('"Answers only" for an agent that may edit');
       await pop.getByRole('button', { name: 'Comment', exact: true }).click();
       let queued = [];
       for (let i = 0; i < 40 && !queued.length; i++) { queued = (await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask'); if (!queued.length) await page.waitForTimeout(250); }
@@ -188,38 +190,38 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('member on a doc the team agent wrote: Team first, both modes; Ask has no Only me and asks the team agent', async () => {
+    await t('member on a doc the team agent wrote: Team first; no Only me; Comment hands it to the team agent', async () => {
       const { context, page } = await open(bob, 'team-plan');
-      const { pop, items } = await compose(page, 'Why billing first?');
+      const { pop, items } = await compose(page, 'Add last week');
       if (!/Team/.test(items) || !/tdoc-bot/.test(items)) throw new Error(`menu: ${items}`);
-      if (await mode(pop) !== 'Ask|Ask + request change*') throw new Error(`mode: ${await mode(pop)}`);
-      await shot(page, 'composer-team-edit.png');
-      await pop.locator('.tdoc-ask-mode button', { hasText: /^Ask$/ }).click();
+      if (await answersOnly(pop)) throw new Error('"Answers only" for the team agent on its own doc');
       if (await pop.locator('.tdoc-only-me').count()) throw new Error('Only me for a team agent');
+      await shot(page, 'composer-team-edit.png');
+      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      let queued = [];
+      for (let i = 0; i < 40 && !queued.length; i++) { queued = (await pending('team-box', agentToken)).filter((h) => h.kind !== 'ask'); if (!queued.length) await page.waitForTimeout(250); }
+      if (queued.length !== 1) throw new Error(`not handed to the team agent: ${JSON.stringify(queued)}`);
+      await context.close();
+    });
+
+    await t("member on a doc Julie's agent wrote: Answers only, no control; Comment asks the team agent", async () => {
+      const { context, page } = await open(bob, 'julies-draft');
+      const { pop } = await compose(page, 'Can we move billing?');
+      if (!(await answersOnly(pop))) throw new Error('no "Answers only"');
+      await shot(page, 'composer-ask-only-locked.png');
       await pop.getByRole('button', { name: 'Comment', exact: true }).click();
       let asks = [];
       for (let i = 0; i < 40 && !asks.length; i++) { asks = (await pending('team-box', agentToken)).filter((h) => h.kind === 'ask'); if (!asks.length) await page.waitForTimeout(250); }
-      const posted = (await comments('team-plan', 2)).find((c) => c.text.startsWith('Why billing first?'));
+      const posted = (await comments('julies-draft')).find((c) => c.text.startsWith('Can we move billing?'));
       if (asks.length !== 1 || !posted || asks[0].comment_id !== posted.id) throw new Error(JSON.stringify({ asks, posted: posted && posted.id }));
-      if ((await pending('team-box', agentToken)).some((h) => h.kind !== 'ask')) throw new Error('an edit handoff reached the team agent');
       await context.close();
     });
 
-    await t("member on a doc Julie's agent wrote: Ask only (Ask + request change disabled, with why)", async () => {
-      const { context, page } = await open(bob, 'julies-draft');
-      const { pop } = await compose(page, 'Can we move billing?');
-      if (await mode(pop) !== 'Ask*|Ask + request change(off)') throw new Error(`mode: ${await mode(pop)}`);
-      const why = await pop.locator('.tdoc-ask-mode button[disabled]').getAttribute('title');
-      if (!/can’t edit/.test(why || '')) throw new Error(`no reason: ${why}`);
-      await shot(page, 'composer-ask-only-locked.png');
-      await context.close();
-    });
-
-    await t('reader with no agent: tdoc AI with Connect my agent; Ask only; Only me on', async () => {
+    await t('reader with no agent: tdoc AI with Connect my agent; Answers only; Only me on', async () => {
       const { context, page } = await open(reader, 'launch-plan');
       const { pop, items } = await compose(page, 'Why billing first?');
       if (!/tdoc AI/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
-      if (await mode(pop) !== 'Ask*|Ask + request change(off)') throw new Error(`mode: ${await mode(pop)}`);
+      if (!(await answersOnly(pop))) throw new Error('no "Answers only"');
       if (await pop.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
       await context.close();
     });

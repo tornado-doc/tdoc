@@ -61,7 +61,7 @@ import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName } from './document/agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sameTarget, taggedAgentSpan } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffBanner } from './document/handoff-banner.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
@@ -777,9 +777,16 @@ export function DocumentShell({ boot, config }) {
       setSendToAgentBusy(false);
     }
   };
+  // The agent's tag as the text holds it (a draft may hold an older, longer
+  // form), else as the picker would put it in.
+  const askTagIn = (text, target) => {
+    const span = taggedAgentSpan(text, agentChoices);
+    return span && sameTarget(span.target, target) ? String(text).slice(span.start, span.end)
+      : `@${AGENT_TAG_JOINER}${agentMentionName(target, agentChoices)}`;
+  };
   // Ask only, in the thread: the answer is the reply under this comment.
   const askOn = async (commentId, text, selection, target) => {
-    const question = withoutAskTags(text, `@${AGENT_TAG_JOINER}${agentMentionName(target, agentChoices)}`);
+    const question = withoutAskTags(text, askTagIn(text, target));
     const passage = selection && selection.text ? selection : null;
     const label = agentDisplayName(target);
     setAiThinking({ id: commentId, label, agent: !target.tdoc_ai });
@@ -803,11 +810,13 @@ export function DocumentShell({ boot, config }) {
 
   // "Only me": the question goes to the agent and nothing is posted; the
   // composer shows the answer to its asker alone, with Make public.
-  const askPrivately = async (text, selection, target) => {
-    const question = withoutAskTags(text, `@${AGENT_TAG_JOINER}${agentMentionName(target, agentChoices)}`);
+  // From a reply box, `parentId` is the reply's parent: the answer shows in
+  // that box, and Make public posts the question as a reply there.
+  const askPrivately = async (text, selection, target, parentId = null) => {
+    const question = withoutAskTags(text, askTagIn(text, target));
     const passage = selection && selection.text ? selection : null;
     const kind = target.tdoc_ai ? 'tdoc-ai' : 'agent';
-    setPrivateAsk({ kind, label: agentDisplayName(target), question, selection, answer: '', error: '' });
+    setPrivateAsk({ kind, label: agentDisplayName(target), question, selection, parentId, answer: '', error: '' });
     try {
       const body = await handOff(config.slug, { ask_only: true, only_me: true, question, passage, version: config.version, recipient: recipientFor(target) });
       if (body?.ask) {
@@ -832,7 +841,9 @@ export function DocumentShell({ boot, config }) {
     const ask = privateAskView;
     if (!ask?.askId || !ask.answer) return;
     setPrivateAsk((cur) => ({ ...cur, publishing: true }));
-    const { ok, value } = await attempt(() => comments.addComment(ask.selection, ask.question));
+    const { ok, value } = await attempt(() => (ask.parentId
+      ? comments.addReply(ask.parentId, ask.question)
+      : comments.addComment(ask.selection, ask.question)));
     if (!ok || !value?.id) { setPrivateAsk((cur) => ({ ...cur, publishing: false })); return; }
     try {
       await publishAsk(config.slug, ask.kind === 'tdoc-ai' ? 'ask' : 'my-agent', { askId: ask.askId, commentId: value.id });
@@ -840,12 +851,25 @@ export function DocumentShell({ boot, config }) {
       showToast(error.message || 'Posted the question; could not post the answer', true);
     }
     markCommented();
+    if (ask.parentId) {
+      setPrivateAsk(null);
+      await comments.refresh();
+      return;
+    }
     closeComposer();
     await comments.refresh();
     setOpenCommentId(value.id);
   };
 
   const replyTo = async (parentId, text, opts = {}) => {
+    // Only me from a reply box: nothing is posted; the question goes with the
+    // passage the thread hangs on, and the answer shows in that box.
+    if (opts.target && opts.askOnly && opts.onlyMe) {
+      const root = comments.comments.find((c) => c.id === parentId || (c.replies || []).some((r) => r.id === parentId));
+      const anchorText = root?.anchor?.text || root?.anchor?.fallback?.text || '';
+      await askPrivately(text, anchorText ? { text: anchorText } : null, opts.target, parentId);
+      return false;
+    }
     const { ok, value } = await attempt(() => comments.addReply(parentId, text));
     if (!ok) return false;
     markCommented();
@@ -941,13 +965,6 @@ export function DocumentShell({ boot, config }) {
     return () => { live = false; };
   }, [askEnabled, config.slug]);
 
-  // What @ offers (agentChoices) and what tdoc AI has left / who is
-  // answering where, for the composers and the cards.
-  const agentMentions = useMemo(() => ({
-    choices: agentChoices,
-    preselected: agentChoices[0] || null,
-    ai: { remaining: aiRemaining, thinking: aiThinking, offered: offersTdocAi },
-  }), [agentChoices, aiRemaining, aiThinking, offersTdocAi]);
   // The "Only me" question as the composer shows it: an agent answers on its
   // own time, so its answer is read from the asks list.
   const privateAgentAsk = privateAsk?.kind === 'agent' && privateAsk.askId
@@ -958,6 +975,20 @@ export function DocumentShell({ boot, config }) {
     error: privateAsk.error || (privateAgentAsk?.delivery?.status === 'failed' ? `${privateAsk.label} did not answer.` : ''),
     status: privateAsk.kind === 'agent' ? (privateAgentAsk?.acked_at ? 'Working on it…' : 'Sent · waiting for the answer…') : 'Thinking…',
   } : null;
+
+  const makePublicRef = useRef(null);
+  makePublicRef.current = makePublic;
+  // What @ offers (agentChoices) and what tdoc AI has left / who is
+  // answering where, for the composers and the cards.
+  const agentMentions = useMemo(() => ({
+    choices: agentChoices,
+    preselected: agentChoices[0] || null,
+    ai: { remaining: aiRemaining, thinking: aiThinking, offered: offersTdocAi },
+    // An Only me question asked from a reply box, which shows its answer.
+    privateReply: privateAskView && privateAskView.parentId ? privateAskView : null,
+    onMakePublic: () => makePublicRef.current(),
+    onClosePrivate: () => setPrivateAsk(null),
+  }), [agentChoices, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);
@@ -1681,7 +1712,7 @@ export function DocumentShell({ boot, config }) {
               : null
           }
           connectAgentPrompt={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
-          privateAsk={privateAskView}
+          privateAsk={privateAskView && !privateAskView.parentId ? privateAskView : null}
           onMakePublic={makePublic}
           onSubmit={postComment}
           onClose={closeComposer}

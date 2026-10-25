@@ -233,6 +233,66 @@ const MODEL = 'https://model.invalid/v1';
     assert(r.status === 403 && r.body.error === 'written_by_other' && /last written by julie/.test(r.body.message), r.text);
   });
 
+  // ---- from a reply box: the same door, the same rules ----
+  const replyTo = async (who, slug, parentId, text, version = 1) => (await call('/api/comments', { method: 'POST', cookie: who.cookie, headers: origin, body: { slug, version, parent_id: parentId, text } })).body.id;
+
+  await t('reply: edit hand-off of the thread follows authorship (team agent on its doc yes; on Julie\'s no)', async () => {
+    const root1 = await comment(julie, 'agent-doc', 'thread on agent-doc');
+    await replyTo(bob, 'agent-doc', root1, 'add last week');
+    const ok = await handOff(bob, 'agent-doc', { ask_only: false, comment_id: root1, recipient: teamTarget });
+    assert(ok.status === 200 && ok.body.handoff_id, ok.text);
+    const root2 = await comment(julie, 'julies-doc', 'thread on julies-doc');
+    const r2 = await replyTo(bob, 'julies-doc', root2, 'add last week');
+    for (const id of [root2, r2]) {
+      const no = await handOff(bob, 'julies-doc', { ask_only: false, comment_id: id, recipient: teamTarget });
+      assert(no.status === 403 && no.body.error === 'written_by_other', `${id}: ${no.text}`);
+    }
+  });
+
+  await t('reply: ask only to the team agent answers under the reply, asks the stored reply, spends no tdoc AI', async () => {
+    const before = modelCalls;
+    const root = await comment(julie, 'julies-doc', 'Is March 14 firm?');
+    const r = await replyTo(bob, 'julies-doc', root, 'Why not April?');
+    const sent = await handOff(bob, 'julies-doc', { ask_only: true, comment_id: r, question: 'FORGED', recipient: teamTarget });
+    assert(sent.status === 200 && sent.body.ask.question === 'Why not April?' && sent.body.ask.comment_id === r, sent.text);
+    const id = sent.body.ask.ask_id;
+    await call('/api/agent/ask-ack', { method: 'POST', token: agentToken, body: { slug: 'julies-doc', ask_id: id } });
+    const up = await upload(agentToken, 'julies-doc', 2);
+    assert(up.status === 403 && up.body.error === 'answer_only_run', `upload during a reply's answer run: ${up.status}`);
+    const ans = await call('/api/agent/ask-reply', { method: 'POST', token: agentToken, body: { slug: 'julies-doc', ask_id: id, text: 'REPLY-ANSWER' } });
+    assert(ans.status === 200 && ans.body.reply_id, ans.text);
+    await call('/api/agent/ask-done', { method: 'POST', token: agentToken, body: { slug: 'julies-doc', ask_id: id } });
+    const thread = (await call('/api/comments?slug=julies-doc&version=1', { cookie: julie.cookie })).body.find((c) => c.id === root);
+    const answer = (thread.replies || []).find((x) => x.id === ans.body.reply_id);
+    assert(answer && answer.parent_id === r && answer.author.team_agent, JSON.stringify(answer));
+    assert(modelCalls === before, 'tdoc AI ran');
+  });
+
+  await t("reply: only the reply's author may ask on it; tdoc AI on a reply spends the asker's quota once", async () => {
+    const root = await comment(julie, 'personal', 'Thread for carl');
+    const r = await replyTo(carl, 'personal', root, 'Why billing first, really?');
+    const notMine = await handOff(julie, 'personal', { ask_only: true, comment_id: r, recipient: { tdoc_ai: true } });
+    assert(notMine.status === 403 && notMine.body.error === 'not_your_comment', notMine.text);
+    const used = usedOf(carl);
+    const ok = await handOff(carl, 'personal', { ask_only: true, comment_id: r, recipient: { tdoc_ai: true } });
+    assert(ok.status === 200 && ok.body.reply && ok.body.reply.parent_id === r, ok.text);
+    assert(usedOf(carl) === used + 1, `charged ${usedOf(carl) - used}`);
+    const again = await handOff(carl, 'personal', { ask_only: true, comment_id: r, recipient: { tdoc_ai: true } });
+    assert(again.status === 200 && again.body.skipped && usedOf(carl) === used + 1, again.text);
+  });
+
+  await t("reply: Only me, then Make public under a reply that quotes the question", async () => {
+    // A fresh asker: carl has spent his free answers by now.
+    const dana = await issue(worker, env, 'dana');
+    await env.META.delete(`account-terminal:${dana.account_id}`);
+    const root = await comment(julie, 'personal', 'Another thread');
+    const priv = await handOff(dana, 'personal', { ask_only: true, only_me: true, question: 'Private in a reply?', passage: { text: 'a sentence' }, recipient: { tdoc_ai: true } });
+    assert(priv.status === 200 && priv.body.ask_id, priv.text);
+    const q = await replyTo(dana, 'personal', root, 'Private in a reply?');
+    const pub = await call('/api/docs/personal/ask/publish', { method: 'POST', cookie: dana.cookie, headers: origin, body: { ask_id: priv.body.ask_id, comment_id: q } });
+    assert(pub.status === 200 && pub.body.reply && pub.body.reply.parent_id === q, pub.text);
+  });
+
   await t('the door needs our Origin and a comment unless only me', async () => {
     assert((await handOff(bob, 'julies-doc', { ask_only: true, question: 'q', recipient: teamTarget }, {})).status === 403, 'no Origin');
     assert((await handOff(bob, 'julies-doc', { ask_only: true, question: 'q', recipient: teamTarget })).status === 400, 'no comment_id');
