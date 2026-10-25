@@ -65,7 +65,6 @@ import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, sameTarget, tagge
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { useCommentArea } from './document/comment-area.js';
-import { DebugBar } from './debug-bar.jsx';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { useMyAgent } from './document/my-agent.js';
@@ -1446,6 +1445,14 @@ export function DocumentShell({ boot, config }) {
       <AgentMentionContext.Provider value={agentMentions}>
       <TopBar
         identity={config.identity}
+        onboardingTest={config.debug ? {
+          record: onboardingRecord,
+          surface: config.isLanding ? 'landing' : 'document',
+          onState: async () => {
+            const result = await getOnboarding().catch(() => null);
+            setOnboardingRecord(result?.record || null);
+          },
+        } : null}
         space={config.teamManage?.team?.id || ''}
         currentTeam={config.teamManage?.team || null}
         theme={supportsTheme ? theme : 'light'}
@@ -1629,21 +1636,6 @@ export function DocumentShell({ boot, config }) {
         sandbox="allow-scripts"
         src={boot.frameSrc}
       />
-
-      {/* The internal bar, for an allow-listed account. It matters most here:
-          a new reader starts at the landing page, and a replay pressed at the
-          gate skips everything between the two -- the call to action, the
-          sign-in, the first sight of the product. */}
-      {config.debug ? (
-        <DebugBar
-          record={onboardingRecord}
-          surface={config.isLanding ? 'landing' : 'document'}
-          onState={async () => {
-            const result = await getOnboarding().catch(() => null);
-            setOnboardingRecord(result?.record || null);
-          }}
-        />
-      ) : null}
 
       <DocumentFooter visible={bridge.layout.footerVisible} />
 

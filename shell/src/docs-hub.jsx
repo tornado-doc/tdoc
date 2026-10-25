@@ -10,7 +10,6 @@ import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { ConnectorsBody } from './connectors-page.jsx';
 import { DevicesBody } from './tokens-page.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
-import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
 import { QuotaBumpDialog } from './document/document-dialogs.jsx';
@@ -973,6 +972,7 @@ export function DocsHub({ boot }) {
         identity={boot.identity}
         profile={boot.profile || null}
         onClaimProfile={boot.profile ? () => setModal({ type: 'claim-handle' }) : null}
+        onboardingTest={boot.debug ? { record: boot.onboarding, surface: 'hub', onState: () => location.reload() } : null}
         space={space}
         teams={teams}
         onSpace={pickSpace}
@@ -1086,11 +1086,6 @@ export function DocsHub({ boot }) {
         <>
 
         <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
-        {/* The checklist is on this page, so all six states show a difference
-            here -- this is the one surface that has a face for every one. */}
-        {boot.debug ? (
-          <DebugBar record={boot.onboarding} surface="hub" onState={() => location.reload()} />
-        ) : null}
         {view === 'docs' ? (
           <section className="pane" id="pane-mine">
             <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>

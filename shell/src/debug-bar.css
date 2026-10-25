@@ -1,35 +1,7 @@
-/* Internal only, and it floats over the page. This reserves room under the
-   column so the strip does not come to rest on the last control. It does not
-   help on a window too short to hold the column -- there the page scrolls and
-   the strip crosses whatever is in the middle of it, which is the price of an
-   internal affordance and not worth a layout for. */
-.sg-split:has(.sg-debug) .sg-mid { padding-bottom: 64px; }
-/* On a short window this strip is competing with the page's only button for
-   the same pixels, and the bar is the one that is not the product. It keeps
-   clear of the column; it does not get to push it off the screen. */
-@media (max-height: 790px) { .sg-split:has(.sg-debug) .sg-mid { padding-bottom: 50px; } }
-@media (max-height: 710px) { .sg-split:has(.sg-debug) .sg-mid { padding-bottom: 44px; } }
-.sg-debug {
-  position: fixed; left: 14px; bottom: 14px; z-index: 30;
-  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
-  padding: 7px 9px; border-radius: 12px;
-  background: #fff; border: 1px dashed #c9c9c4;
-  box-shadow: 0 2px 10px rgba(26,26,26,.06);
-  font: 11.5px -apple-system, system-ui, sans-serif;
+.tdoc-onboarding-test-trigger .tdoc-submenu-chevron { margin-left: auto; }
+.tdoc-onboarding-test-status {
+  padding: 7px 12px 5px;
+  color: var(--td-muted);
+  font-size: 11px;
 }
-.sg-debug-tag { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #b0b0ab; padding-right: 2px; }
-.sg-debug button { border: 0; border-radius: 999px; padding: 5px 10px; cursor: pointer; background: #f0f0ee; color: #6b6a66; font: 600 11.5px inherit; }
-.sg-debug button[aria-pressed="true"] { background: #1a1a1a; color: #fff; }
-.sg-debug button:disabled { opacity: .4; cursor: default; }
-.sg-debug .sg-debug-reset { background: #fdeceb; color: #b42318; }
-/* Replay is not one of the states -- it throws away a credential and a doc,
-   so it does not sit in the row of things that only move a record. */
-.sg-debug .sg-debug-replay { margin-left: 6px; background: var(--td-accent, #1652f0); color: #fff; }
-/* Armed, it is about to delete a document, so it stops looking like the
-   product's own accent and starts looking like the warning it is. */
-.sg-debug .sg-debug-replay.armed { background: #b42318; }
-.sg-debug-now { color: #a8a8a3; padding-left: 4px; }
-/* Leaving dev mode: quiet at rest, set apart from the record line, and armed
-   it says what the second press will do. */
-.sg-debug .sg-debug-exit { margin-left: 6px; background: transparent; border: 1px solid #d8d8d3; color: #6b6a66; }
-.sg-debug .sg-debug-exit.armed { background: #1a1a1a; border-color: #1a1a1a; color: #fff; }
+.ui-menu-item.tdoc-onboarding-test-armed { color: #b42318; }
