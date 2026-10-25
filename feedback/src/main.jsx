@@ -19,7 +19,7 @@ if (window.top === window && !window.__TDOC_FEEDBACK__) {
 
   const style = document.createElement('style');
   style.id = 'tdoc-feedback-styles';
-  style.textContent = `${chromeCss}
+  style.textContent = `${chromeCss.replace(/:root\s*\{/, ':host { all: initial; display: block; font: 13px/1.45 system-ui, -apple-system, sans-serif; color: #1a1a1a; direction: ltr; text-transform: none; text-align: left;')}
 ${uiCss}
     /* The feedback layer is injected into arbitrary products. Put its single
        stacking context at the browser maximum and append it last, so even a
@@ -149,8 +149,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-agent code { display: block; margin: 0 0 8px; padding: 8px; border-radius: 6px; background: #fff; border: 1px solid #e8e7e3; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
     #tdoc-feedback-root .tdoc-fb-agent button { appearance: none; border: 0; border-radius: 8px; padding: 6px 12px; background: #1652f0; color: #fff; font: 600 12px system-ui, sans-serif; cursor: pointer; }
     #tdoc-feedback-root .ui-dialog-backdrop, #tdoc-feedback-root .ui-dialog-viewport { z-index: 2147483647 !important; }
-    /* The host app's own button and text rules still reach our dialogs.
-       Pin the few that matter. */
+    /* Keep the dialog controls consistent with the rest of feedback UI. */
     #tdoc-feedback-root .ui-dialog-popup.tdoc-modal { color: #1a1a1a; font: 14px/1.45 system-ui, -apple-system, sans-serif; text-align: left; }
     #tdoc-feedback-root .ui-dialog-popup.tdoc-modal button { font: 600 13px/1.2 system-ui, -apple-system, sans-serif; text-transform: none; letter-spacing: normal; box-shadow: none; }
     #tdoc-feedback-root .ui-dialog-popup.tdoc-modal .actions button:not(.primary):not(.danger) { background: #fff !important; color: #1a1a1a !important; border: 1px solid #d9d8d4 !important; }
@@ -169,7 +168,7 @@ ${uiCss}
   const feedbackRoot = document.createElement('div');
   feedbackRoot.id = 'tdoc-feedback-root';
   shadow.append(style, feedbackRoot);
-  host.style.cssText = 'position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;margin:0!important;padding:0!important;border:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;visibility:visible!important';
+  host.style.cssText = 'position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;margin:0!important;padding:0!important;border:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;visibility:visible!important;font:13px/1.45 system-ui,-apple-system,sans-serif!important;color:#1a1a1a!important;text-transform:none!important;direction:ltr!important;text-align:left!important';
   document.documentElement.appendChild(host);
 
   // Keep the feedback layer inside the active modal, including script-driven
@@ -191,11 +190,11 @@ ${uiCss}
       // the same role/state without the lock and must not capture this layer.
       if (node.matches('[role="dialog"][data-state="open"]') && node.getAttribute('aria-modal') !== 'true'
         && (!document.body.hasAttribute('data-scroll-locked') || node.closest('[data-radix-popper-content-wrapper]'))) return false;
-      if (!node.getClientRects().length) return false;
+      if (!node.getClientRects().length || getComputedStyle(node).pointerEvents === 'none') return false;
       for (let el = node; el instanceof Element; el = el.parentElement) {
         if (el.hidden || el.hasAttribute('inert') || el.getAttribute('aria-hidden') === 'true') return false;
         const css = getComputedStyle(el);
-        if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse') return false;
+        if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || Number(css.opacity) === 0) return false;
       }
       return true;
     };
@@ -240,11 +239,9 @@ ${uiCss}
       const modal = activeModal();
       if (modal) {
         if (host.parentNode !== modal) { lower(); modal.appendChild(host); }
-        // Only a native <dialog> needs the browser top layer. A popover over
-        // a script modal can intercept its own buttons despite our transparent
-        // host, especially when the modal panel is a <form>.
-        if (modal.closest('dialog')) lift();
-        else lower();
+        // A script modal may use transform/filter/overflow on its panel, which
+        // would otherwise shrink or clip our fixed-position viewport layer.
+        lift();
       } else if (host.parentNode !== document.documentElement) {
         lower();
         document.documentElement.appendChild(host);
@@ -259,6 +256,8 @@ ${uiCss}
       if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
     }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'hidden', 'inert', 'aria-hidden', 'aria-modal', 'class', 'style', 'data-state'] });
     document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
+    document.addEventListener('transitionend', (e) => { if (e.target instanceof Element && hasModal(e.target)) place(); }, true);
+    document.addEventListener('animationend', (e) => { if (e.target instanceof Element && hasModal(e.target)) place(); }, true);
     // A dialog removed without closing (a React unmount) takes the layer with it.
     new MutationObserver(() => { if (!host.isConnected) place(); }).observe(document.documentElement, { childList: true, subtree: true });
     // Script-driven modals (Base UI, Radix, Headless UI) close on a press

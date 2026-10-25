@@ -365,6 +365,44 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       if (await pick.evaluate((b) => b.classList.contains('on'))) await pick.click();
     });
 
+    await test('a transformed, clipped script modal keeps the feedback layer at viewport size', async () => {
+      await page.evaluate(() => {
+        const modal = document.createElement('div');
+        modal.id = 'transformed-script-modal';
+        modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
+        modal.style.cssText = 'position:fixed;left:50%;top:50%;width:440px;height:142px;transform:translate(-50%,-50%);filter:blur(0);overflow:hidden;background:white;z-index:100';
+        modal.innerHTML = '<h2 id="transformed-target">Comment on this panel</h2><button id="transformed-action">Host action</button>';
+        document.body.appendChild(modal);
+        window.__transformedAction = 0;
+        modal.querySelector('button').onclick = () => window.__transformedAction++;
+      });
+      try {
+        await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'transformed-script-modal');
+        const bounds = await page.evaluate(() => {
+          const host = document.getElementById('tdoc-feedback-root');
+          const r = host.getBoundingClientRect();
+          const dock = window.__fb('.tdoc-feedback-dock').getBoundingClientRect();
+          return { host: [r.x, r.y, r.width, r.height], viewport: [innerWidth, innerHeight], dock: dock.toJSON(), popover: host.matches(':popover-open') };
+        });
+        assert(bounds.popover && bounds.host.join() === [0, 0, ...bounds.viewport].join(), `script modal clipped feedback: ${JSON.stringify(bounds)}`);
+        assert(bounds.dock.right <= bounds.viewport[0] && bounds.dock.bottom <= bounds.viewport[1], `dock left viewport: ${JSON.stringify(bounds)}`);
+        await page.locator('#transformed-action').click();
+        assert(await page.evaluate(() => window.__transformedAction === 1), 'feedback layer blocked a host modal button');
+        const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+        if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
+        await page.locator('#transformed-target').click();
+        const composer = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+        await composer.fill('The modal heading needs context');
+        assert(await composer.inputValue() === 'The modal heading needs context', 'composer clipped by transformed script modal');
+      } finally {
+        await page.evaluate(() => document.getElementById('transformed-script-modal')?.remove());
+        await page.keyboard.press('Escape');
+        const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+        if (await pick.evaluate((button) => button.classList.contains('on'))) await pick.click();
+      }
+      await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
+    });
+
     await test('a script modal with a focus trap and Escape/outside-press dismissal stays open while you comment on it', async () => {
       // How Radix and Headless UI behave: focus leaving the dialog is pulled
       // back, Escape and a press outside close it.
@@ -448,6 +486,10 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         hidden.id = 'mounted-modal'; hidden.setAttribute('role', 'dialog'); hidden.setAttribute('aria-modal', 'true');
         hidden.style.visibility = 'hidden';
         document.body.appendChild(hidden);
+        const faded = document.createElement('div');
+        faded.id = 'faded-modal'; faded.setAttribute('role', 'dialog'); faded.setAttribute('aria-modal', 'true');
+        faded.style.cssText = 'position:fixed;left:20px;top:20px;opacity:0;pointer-events:none';
+        document.body.appendChild(faded);
       });
       try {
         await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'active-modal');
@@ -456,12 +498,17 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await page.evaluate(() => { document.getElementById('modal-wrapper').hidden = true; });
         await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
         assert(await page.locator('#tdoc-feedback-root .tdoc-feedback-dock').isVisible(), 'feedback disappeared with hidden wrapper');
+        await page.evaluate(() => { document.getElementById('faded-modal').style.cssText = 'position:fixed;left:20px;top:20px;opacity:1;pointer-events:auto'; });
+        await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'faded-modal');
+        await page.evaluate(() => { document.getElementById('faded-modal').style.opacity = '0'; });
+        await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement);
         await page.evaluate(() => { document.getElementById('modal-wrapper').hidden = false; });
         await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'active-modal');
       } finally {
         await page.evaluate(() => {
           document.getElementById('modal-wrapper')?.remove();
           document.getElementById('mounted-modal')?.remove();
+          document.getElementById('faded-modal')?.remove();
           document.getElementById('nonmodal-popover')?.remove();
         });
       }
@@ -497,23 +544,44 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
     });
 
     await test('host modal CSS cannot restyle feedback controls', async () => {
-      await page.evaluate(() => {
-        const style = document.createElement('style');
-        style.id = 'host-modal-css';
-        style.textContent = '[role="dialog"] * { font-family: fantasy !important; text-transform: uppercase !important; }';
-        document.head.appendChild(style);
-        const modal = document.createElement('div');
-        modal.id = 'css-modal'; modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
-        modal.innerHTML = '<h2>Appearance</h2>';
-        document.body.appendChild(modal);
-      });
+      const foreign = await context.newPage();
       try {
-        await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'css-modal');
-        const style = await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first()
-          .evaluate((button) => ({ font: getComputedStyle(button).fontFamily, transform: getComputedStyle(button).textTransform }));
-        assert(!style.font.includes('fantasy') && style.transform !== 'uppercase', `host CSS leaked into feedback: ${JSON.stringify(style)}`);
+        await foreign.goto(appBase);
+        await foreign.addScriptTag({ url: `${tdocBase}/feedback.js` });
+        await foreign.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor();
+        await foreign.evaluate(() => {
+          const style = document.createElement('style');
+          style.textContent = '[role="dialog"] * { font-family: fantasy !important; color: rgb(244, 0, 0) !important; text-transform: uppercase !important; direction: rtl !important; line-height: 3 !important; }';
+          document.head.appendChild(style);
+          const modal = document.createElement('div');
+          modal.id = 'css-modal'; modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
+          modal.innerHTML = '<h2>Appearance</h2>';
+          document.body.appendChild(modal);
+        });
+        await foreign.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'css-modal');
+        const styles = await foreign.evaluate(() => {
+          const host = document.getElementById('tdoc-feedback-root');
+          const root = window.__fbRoot();
+          const button = window.__fb('.tdoc-feedback-dock button');
+          const css = getComputedStyle(button);
+          return { accent: getComputedStyle(root).getPropertyValue('--td-accent').trim(), hostFont: getComputedStyle(host).fontFamily,
+            font: css.fontFamily, color: css.color, transform: css.textTransform, direction: css.direction, lineHeight: css.lineHeight };
+        });
+        assert(styles.accent === '#1652f0' && !styles.hostFont.includes('fantasy') && !styles.font.includes('fantasy')
+          && styles.color !== 'rgb(244, 0, 0)' && styles.transform !== 'uppercase' && styles.direction === 'ltr'
+          && styles.lineHeight !== '3', `host CSS or missing tokens changed feedback: ${JSON.stringify(styles)}`);
+        const pick = foreign.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+        if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
+        await foreign.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
+        await foreign.locator('#css-modal h2').click();
+        const accent = await foreign.evaluate(() => ({
+          button: getComputedStyle(window.__fb('.tdoc-popup button.submit')).backgroundColor,
+          textarea: getComputedStyle(window.__fb('.tdoc-popup textarea')).borderTopColor,
+        }));
+        assert(accent.button === 'rgb(22, 82, 240)' && accent.textarea === 'rgb(22, 82, 240)',
+          `comment controls lost their accent on a foreign page: ${JSON.stringify(accent)}`);
       } finally {
-        await page.evaluate(() => { document.getElementById('css-modal')?.remove(); document.getElementById('host-modal-css')?.remove(); });
+        await foreign.close();
       }
     });
 
