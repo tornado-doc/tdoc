@@ -213,9 +213,10 @@ const EXTENDED_BROWSER = [
 ];
 
 const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
+const RUNTIME = ['preview-workerd.test.js']; // needs npm ci; real workerd WASM and font modules
 const runAll = process.argv.includes('--all');
 const runBrowser = process.argv.includes('--browser');
-const files = runAll ? [...OFFLINE, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
+const files = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
 if (runAll || runBrowser) {
   // A requested browser suite must never report success by skipping every test.
   const probe = spawnSync(process.execPath, ['-e',

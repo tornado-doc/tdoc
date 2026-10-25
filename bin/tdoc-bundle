@@ -10,6 +10,7 @@
 //   TDOC_GENERATED_BY   provenance label (default: tdoc-bundle)
 //   TDOC_SOURCE_SHA     optional override for source_sha (CI passes github.sha)
 //   TDOC_PREVIEW=1      un-export CommentsStore so Cloudflare will mint preview URLs
+//   TDOC_BUNDLE_PLATFORM=vercel  inline binary assets for Node/Vercel's module loader
 
 const fs = require('fs');
 const path = require('path');
@@ -19,6 +20,7 @@ const cp = require('child_process');
 const skill = process.env.SKILL_DIR || path.join(__dirname, '..');
 const outDir = process.env.OUT_DIR || path.join(skill, 'worker');
 const generatedBy = process.env.TDOC_GENERATED_BY || 'tdoc-bundle';
+const vercelBundle = process.env.TDOC_BUNDLE_PLATFORM === 'vercel';
 
 const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
 // The shell builder runs server-side in the worker; the framework-free probe is
@@ -58,17 +60,19 @@ if (!fs.existsSync(pushSwFile)) {
   process.exit(1);
 }
 const pushSwJs = fs.readFileSync(pushSwFile, 'utf8');
-// The renderer and font are lazy: parsing the Worker never instantiates WASM
-// or decodes the font. Keep them vendored so BYOK publishes need no npm install.
+// Keep the renderer vendored. WASM and fonts are binary Worker modules: workerd
+// disallows compiling WASM bytes at runtime, and parsing base64 slows every cold start.
 const previewDir = path.join(skill, 'server/preview');
 const previewRendererJs = fs.readFileSync(path.join(previewDir, 'resvg.mjs'), 'utf8')
   .replace(/export\s*\{\s*Resvg2 as Resvg,\s*initWasm\s*\};?\s*$/, 'return { Resvg: Resvg2, initWasm };');
 if (!previewRendererJs.includes('return { Resvg: Resvg2, initWasm };')) {
   throw new Error('bundle: preview renderer exports changed');
 }
-const previewWasm = fs.readFileSync(path.join(previewDir, 'resvg.wasm'), 'base64');
-const previewFonts = ['Regular', 'Bold'].map((weight) => fs.readFileSync(path.join(previewDir, `NotoSansSC-${weight}.ttf`), 'base64'));
+const previewWasm = fs.readFileSync(path.join(previewDir, 'resvg.wasm'));
+const previewFonts = ['Regular', 'Bold'].map((weight) => fs.readFileSync(path.join(previewDir, `NotoSansSC-${weight}.ttf`)));
 const previewCoverage = JSON.parse(fs.readFileSync(path.join(previewDir, 'coverage.json'), 'utf8'));
+const previewValidator = fs.readFileSync(path.join(previewDir, 'validate-svg.js'), 'utf8');
+const bundlerSource = fs.readFileSync(__filename, 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -83,7 +87,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha([worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewWasm, ...previewFonts, JSON.stringify(previewCoverage)].join('\0'));
+const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, JSON.stringify(previewCoverage)].join('\0')), previewWasm, ...previewFonts]));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -118,12 +122,13 @@ replaced = mustReplace(replaced, /const PUSH_SW_JS = `__TDOC_PUSH_SW_JS__`;/, 'c
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";/, 'const SHELL_RUNTIME_EXTRA_ASSETS = ' + JSON.stringify(extraAssets) + ';', 'SHELL_RUNTIME_EXTRA_ASSETS');
 replaced = mustReplace(replaced, /const PREVIEW_RENDERER = "__TDOC_PREVIEW_RENDERER__";/,
   'const PREVIEW_RENDERER = (() => {\n' + previewRendererJs + '\n})();', 'PREVIEW_RENDERER');
-replaced = mustReplace(replaced, /const PREVIEW_WASM_B64 = "__TDOC_PREVIEW_WASM_B64__";/,
-  'const PREVIEW_WASM_B64 = ' + JSON.stringify(previewWasm) + ';', 'PREVIEW_WASM_B64');
-replaced = mustReplace(replaced, /const PREVIEW_FONTS_B64 = "__TDOC_PREVIEW_FONTS_B64__";/,
-  'const PREVIEW_FONTS_B64 = ' + JSON.stringify(previewFonts) + ';', 'PREVIEW_FONTS_B64');
+replaced = mustReplace(replaced, /const PREVIEW_WASM = "__TDOC_PREVIEW_WASM__";/,
+  vercelBundle ? 'const PREVIEW_WASM = ' + JSON.stringify(previewWasm.toString('base64')) + ';' : 'const PREVIEW_WASM = TDOC_PREVIEW_WASM;', 'PREVIEW_WASM');
+replaced = mustReplace(replaced, /const PREVIEW_FONTS = "__TDOC_PREVIEW_FONTS__";/,
+  vercelBundle ? 'const PREVIEW_FONTS = ' + JSON.stringify(previewFonts.map((font) => font.toString('base64'))) + ';' : 'const PREVIEW_FONTS = [TDOC_PREVIEW_FONT_REGULAR, TDOC_PREVIEW_FONT_BOLD];', 'PREVIEW_FONTS');
 replaced = mustReplace(replaced, /const PREVIEW_FONT_COVERAGE = "__TDOC_PREVIEW_FONT_COVERAGE__";/,
   'const PREVIEW_FONT_COVERAGE = ' + JSON.stringify(previewCoverage) + ';', 'PREVIEW_FONT_COVERAGE');
+replaced = mustReplace(replaced, '/* __TDOC_PREVIEW_VALIDATOR__ */', previewValidator, 'PREVIEW_VALIDATOR');
 
 let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,
@@ -146,6 +151,12 @@ if (process.env.TDOC_PREVIEW === '1') {
 }
 
 fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(path.join(outDir, '_worker.bundled.js'), withBuild);
+const moduleImports = vercelBundle ? '' : 'import TDOC_PREVIEW_WASM from "./resvg.wasm";\nimport TDOC_PREVIEW_FONT_REGULAR from "./NotoSansSC-Regular.ttf";\nimport TDOC_PREVIEW_FONT_BOLD from "./NotoSansSC-Bold.ttf";\n';
+fs.writeFileSync(path.join(outDir, '_worker.bundled.js'), moduleImports + withBuild);
+if (!vercelBundle) {
+  fs.writeFileSync(path.join(outDir, 'resvg.wasm'), previewWasm);
+  fs.writeFileSync(path.join(outDir, 'NotoSansSC-Regular.ttf'), previewFonts[0]);
+  fs.writeFileSync(path.join(outDir, 'NotoSansSC-Bold.ttf'), previewFonts[1]);
+}
 fs.writeFileSync(path.join(outDir, '_worker.bundled.sha256'), bundleSha + '\n');
 console.log('bundled: ' + path.join(outDir, '_worker.bundled.js'));

@@ -244,16 +244,12 @@ fi
 if [ -n "$PREVIEW_FILE" ]; then
   [ "$(wc -c < "$PREVIEW_FILE" | tr -d ' ')" -le 131072 ] || die "--preview-file exceeds 128 KB"
   cp "$PREVIEW_FILE" "$STAGE_DIR/v$VERSION_N/preview.svg" || die "could not read --preview-file '$PREVIEW_FILE'"
-  python3 - "$STAGE_DIR/v$VERSION_N/preview.svg" <<'PY' || die "--preview-file must be a valid 1200×630 SVG"
-import sys
-import xml.etree.ElementTree as ET
-try:
-    root = ET.parse(sys.argv[1]).getroot()
-    assert root.tag == '{http://www.w3.org/2000/svg}svg'
-    assert root.attrib.get('width') == '1200' and root.attrib.get('height') == '630'
-except (ET.ParseError, AssertionError):
-    sys.exit(1)
-PY
+  node - "$STAGE_DIR/v$VERSION_N/preview.svg" "$(cd "$(dirname "$0")/.." && pwd)/server/preview/validate-svg.js" <<'JS' || die "--preview-file must be a safe 1200×630 SVG"
+const fs = require('fs');
+const { previewNormalizeSvg } = require(process.argv[3]);
+const result = previewNormalizeSvg(fs.readFileSync(process.argv[2], 'utf8'));
+if (result.error) process.exit(1);
+JS
 fi
 
 if [ ! -s "$STAGE_HTML" ]; then

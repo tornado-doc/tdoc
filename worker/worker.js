@@ -28,9 +28,10 @@ const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;
 const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";
 // Lazy SVG rasterizer and CJK font, inlined by bin/tdoc-bundle.
 const PREVIEW_RENDERER = "__TDOC_PREVIEW_RENDERER__";
-const PREVIEW_WASM_B64 = "__TDOC_PREVIEW_WASM_B64__";
-const PREVIEW_FONTS_B64 = "__TDOC_PREVIEW_FONTS_B64__";
+const PREVIEW_WASM = "__TDOC_PREVIEW_WASM__";
+const PREVIEW_FONTS = "__TDOC_PREVIEW_FONTS__";
 const PREVIEW_FONT_COVERAGE = "__TDOC_PREVIEW_FONT_COVERAGE__";
+/* __TDOC_PREVIEW_VALIDATOR__ */
 // The in-page feedback client (feedback/src/main.jsx → server/runtime/feedback.js),
 // served at /feedback.js for the one-line install and the bookmarklet.
 const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;
@@ -2878,8 +2879,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     ? preview.description
     : ((SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180)) || '');
   let shareImage = docIndexable(access)
-    ? (Number(preview && preview.image_v) === Number(version) && preview.image === previewCardUrl(slug, version)
-      ? previewCardUrl(slug, version) : '/tdoc_logo-v2.png')
+    ? (previewCardMatches(preview, slug, version) ? preview.image : '/tdoc_logo-v2.png')
     : '/tdoc_logo-v2.png';
   if (shareImage && shareImage.startsWith('/') && origin) shareImage = origin + shareImage;
   // Homepage share cards: never use the slug title or the first inline SVG
@@ -2902,7 +2902,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     robots: docIndexable(access) ? '' : 'noindex, nofollow',
   } : null;
   return SHELL.shellHtml({
-    title: seoTitle,
+    title,
     nonceAttr,
     cfgJson: safeJsonForScript(cfg),
     bootJson: safeJsonForScript({
@@ -7042,7 +7042,7 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
     const preview = row.meta && row.meta.preview && typeof row.meta.preview === 'object' ? row.meta.preview : null;
     if (!preview) return { excerpt: '', image: '/preview-card-placeholder.svg' };
     const excerpt = typeof preview.excerpt === 'string' && preview.excerpt ? preview.excerpt : (typeof preview.description === 'string' ? preview.description : '');
-    const image = Number(preview.image_v) === Number(row.latest) && preview.image === previewCardUrl(row.slug, row.latest)
+    const image = previewCardMatches(preview, row.slug, row.latest)
       ? preview.image : '/preview-card-placeholder.svg';
     return { excerpt: excerpt.slice(0, 220), image };
   };
@@ -7159,7 +7159,7 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     // Older pins get the same-size placeholder until the explicit backfill.
     const cached = meta.preview && typeof meta.preview === 'object' ? meta.preview : null;
     const excerpt = cached && typeof cached.excerpt === 'string' ? cached.excerpt : '';
-    const image = Number(cached && cached.image_v) === Number(latest) && cached.image === previewCardUrl(slug, latest)
+    const image = previewCardMatches(cached, slug, latest)
       ? cached.image : '/preview-card-placeholder.svg';
     docs.push({
       slug,
@@ -9058,13 +9058,20 @@ function docPreviewFromHtml(html, { slug, version, title } = {}) {
   return preview;
 }
 
-const PREVIEW_CARD_MAX_BYTES = 128 * 1024;
-const PREVIEW_CARD_TAGS = new Set(['svg', 'g', 'defs', 'linearGradient', 'radialGradient', 'stop', 'rect', 'circle', 'ellipse', 'line', 'path', 'polygon', 'polyline', 'text', 'tspan']);
-function previewCardUrl(slug, version) {
-  return `/d/${encodeURIComponent(slug)}/preview/v${Number(version)}.png`;
+function previewCardUrl(slug, version, hash) {
+  return `/d/${encodeURIComponent(slug)}/preview/v${Number(version)}-${hash}.png`;
 }
-function previewCardKey(slug, version) {
-  return `docs/${slug}/v${Number(version)}/preview.png`;
+function previewCardKey(slug, version, hash) {
+  return `docs/${slug}/v${Number(version)}/preview-${hash}.png`;
+}
+function previewCardMatches(preview, slug, version) {
+  return preview && Number(preview.image_v) === Number(version)
+    && /^[a-f0-9]{12}$/.test(preview.image_hash || '')
+    && preview.image === previewCardUrl(slug, version, preview.image_hash);
+}
+async function previewCardHash(svg) {
+  const bytes = new TextEncoder().encode(svg);
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].slice(0, 6).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 function xmlCardText(value) {
   return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
@@ -9090,16 +9097,7 @@ function defaultPreviewSvg(title, excerpt) {
   const excerptSvg = cardLines(excerpt, 46, 2).map((line, i) => `<text x="94" y="${424 + i * 38}" font-size="28" fill="#42635b">${xmlCardText(line)}</text>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><rect width="1200" height="630" fill="#f3f8f4"/><rect x="42" y="42" width="1116" height="546" rx="34" fill="#fff"/><rect x="42" y="42" width="12" height="546" rx="6" fill="#198052"/><circle cx="1080" cy="132" r="92" fill="#e1f4e8"/><circle cx="1080" cy="132" r="49" fill="#bce4ca"/><text x="92" y="129" font-size="26" font-weight="700" fill="#198052">tdoc</text>${titleSvg}${excerptSvg}<line x1="92" y1="532" x2="1108" y2="532" stroke="#dce9df" stroke-width="2"/><text x="94" y="569" font-size="20" fill="#729385">tdoc.dev</text></svg>`;
 }
-function validatePreviewSvg(svg) {
-  if (typeof svg !== 'string' || !svg.startsWith('<svg') || utf8ByteLength(svg) > PREVIEW_CARD_MAX_BYTES) return 'invalid_preview_svg';
-  const root = svg.match(/^<svg\b([^>]*)>/);
-  if (!root || !/\bwidth=["']1200["']/.test(root[1]) || !/\bheight=["']630["']/.test(root[1])) return 'invalid_preview_dimensions';
-  const withoutNamespace = svg.replace(/\bxmlns=["']http:\/\/www\.w3\.org\/2000\/svg["']/, '');
-  if (/<\s*[!?]/.test(svg) || /\b(?:on[a-z]+|href|style|filter|mask)\s*=/i.test(withoutNamespace) || /(?:url\s*\(|data:|https?:|&#|&(?!(?:amp|lt|gt|quot|apos);))/i.test(withoutNamespace)) return 'unsafe_preview_svg';
-  const tags = [...svg.matchAll(/<\/?\s*([A-Za-z][\w:-]*)\b/g)];
-  if (!tags.length || tags.some((match) => !PREVIEW_CARD_TAGS.has(match[1]))) return 'unsafe_preview_svg';
-  return null;
-}
+function validatePreviewSvg(svg) { return previewNormalizeSvg(svg).error || null; }
 let previewRendererReady = null;
 let previewFontBytes = null;
 let previewSupportedGlyphs = null;
@@ -9118,9 +9116,9 @@ function previewTextWithFallback(svg) {
 }
 async function renderPreviewPng(svg) {
   if (!PREVIEW_RENDERER || typeof PREVIEW_RENDERER !== 'object') throw new Error('preview_renderer_unavailable');
-  if (!previewRendererReady) previewRendererReady = PREVIEW_RENDERER.initWasm(previewDecodeBase64(PREVIEW_WASM_B64));
+  if (!previewRendererReady) previewRendererReady = PREVIEW_RENDERER.initWasm(typeof PREVIEW_WASM === 'string' ? previewDecodeBase64(PREVIEW_WASM) : PREVIEW_WASM);
   await previewRendererReady;
-  if (!previewFontBytes) previewFontBytes = PREVIEW_FONTS_B64.map(previewDecodeBase64);
+  if (!previewFontBytes) previewFontBytes = PREVIEW_FONTS.map((font) => typeof font === 'string' ? previewDecodeBase64(font) : new Uint8Array(font));
   const renderer = new PREVIEW_RENDERER.Resvg(previewTextWithFallback(svg), {
     background: '#ffffff',
     font: { fontBuffers: previewFontBytes, defaultFontFamily: 'tdoc Preview CJK' },
@@ -9131,7 +9129,7 @@ async function renderPreviewPng(svg) {
     try { return image.asPng(); } finally { image.free(); }
   } finally { renderer.free(); }
 }
-async function buildDocPreview(env, html, { slug, version, title, svg = null, png = null } = {}) {
+async function buildDocPreview(env, html, { slug, version, title, svg = null, onRenderTask = null, existingPreview = null } = {}) {
   const preview = docPreviewFromHtml(html, { slug, version, title });
   // The unbundled source is used by in-process tests; only the deploy bundle
   // carries the renderer. This path is also a safe fallback for a bad build.
@@ -9139,16 +9137,58 @@ async function buildDocPreview(env, html, { slug, version, title, svg = null, pn
     preview.image = '/tdoc_logo-v2.png';
     return preview;
   }
-  const card = svg || defaultPreviewSvg(title, preview.excerpt || preview.description);
+  const oldVersion = Number(existingPreview && existingPreview.image_v);
+  if (svg == null && existingPreview && existingPreview.image_custom && previewCardMatches(existingPreview, slug, oldVersion)) {
+    const hash = existingPreview.image_hash;
+    if (oldVersion === Number(version)) {
+      return { ...preview, image: existingPreview.image, image_v: Number(version), image_hash: hash, image_custom: true };
+    }
+    if (oldVersion < Number(version) && await env.DOCS.head(previewCardKey(slug, oldVersion, hash))) {
+      const copyCard = async () => {
+        try {
+          const old = await env.DOCS.get(previewCardKey(slug, oldVersion, hash));
+          if (!old) return;
+          await env.DOCS.put(previewCardKey(slug, version, hash), new Uint8Array(await old.arrayBuffer()), { httpMetadata: { contentType: 'image/png' } });
+        } catch (error) { console.error('[preview-card] carrying authored card failed:', slug, error && error.message || String(error)); }
+      };
+      if (onRenderTask) onRenderTask(copyCard);
+      else await copyCard();
+      return { ...preview, image: previewCardUrl(slug, version, hash), image_v: Number(version), image_hash: hash, image_custom: true };
+    }
+  }
+  const checked = svg == null ? null : previewNormalizeSvg(svg);
+  if (checked && checked.error) console.warn('[preview-card] rejected authored SVG; using automatic card:', slug, checked.error);
+  const card = checked && !checked.error ? checked.svg : defaultPreviewSvg(title, preview.excerpt || preview.description);
+  const automatic = defaultPreviewSvg(title, preview.excerpt || preview.description);
   try {
     const reason = validatePreviewSvg(card);
     if (reason) throw new Error(reason);
-    const bytes = png || await renderPreviewPng(card);
-    await env.DOCS.put(previewCardKey(slug, version), bytes, { httpMetadata: { contentType: 'image/png' } });
-    preview.image = previewCardUrl(slug, version);
+    const hash = await previewCardHash(card);
+    const writeCard = async () => {
+      const failureKey = `preview-failed:${slug}:v${Number(version)}:${hash}`;
+      try {
+        if (env.META && await env.META.get(failureKey)) return false;
+        let bytes;
+        try { bytes = await renderPreviewPng(card); }
+        catch (error) {
+          console.error('[preview-card] authored render failed; using automatic card:', slug, version, error && error.message || String(error));
+          bytes = await renderPreviewPng(automatic);
+        }
+        await env.DOCS.put(previewCardKey(slug, version, hash), bytes, { httpMetadata: { contentType: 'image/png' } });
+        return true;
+      } catch (error) {
+        console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
+        try { if (env.META) await env.META.put(failureKey, '1', { expirationTtl: 60 * 60 }); } catch { /* image failure is already logged */ }
+        return false;
+      }
+    };
+    if (onRenderTask) onRenderTask(writeCard);
+    else if (!await writeCard()) { preview.image = '/tdoc_logo-v2.png'; return preview; }
+    preview.image = previewCardUrl(slug, version, hash);
     preview.image_v = Number(version);
+    preview.image_hash = hash;
+    preview.image_custom = !!(checked && !checked.error);
   } catch (error) {
-    if (svg || png) throw error;
     console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
     preview.image = '/tdoc_logo-v2.png';
   }
@@ -9166,6 +9206,7 @@ async function refreshDocPreview(env, slug, meta) {
       slug,
       version: latest,
       title: meta.title || slug,
+      existingPreview: meta.preview,
     });
     return { ...meta, preview };
   } catch {
@@ -14809,10 +14850,11 @@ const tdocHandlers = {
 
     // A card is versioned for social crawlers, but checked against CURRENT
     // visibility on every read. Public docs can later become private.
-    const previewImageMatch = p.match(/^\/d\/([^/]+)\/preview\/v(\d+)\.png$/);
+    const previewImageMatch = p.match(/^\/d\/([^/]+)\/preview\/v(\d+)-([a-f0-9]{12})\.png$/);
     if (previewImageMatch && (method === 'GET' || method === 'HEAD')) {
       const slug = previewImageMatch[1];
       const version = Number(previewImageMatch[2]);
+      const hash = previewImageMatch[3];
       if (!isValidSlug(slug) || !Number.isInteger(version) || version < 1) return text('not found', { status: 404 });
       const gate = await enforceDocAccess(env, req, slug, version);
       if (!gate.ok) return text('not found', { status: 404 });
@@ -14823,22 +14865,13 @@ const tdocHandlers = {
       if (version !== latest && !gate.ownerToken && !canSeeHistory(gate.access, gate.session, env, gate.meta)) {
         return text('not found', { status: 404 });
       }
-      let obj = await env.DOCS.get(previewCardKey(slug, version));
+      const obj = await env.DOCS.get(previewCardKey(slug, version, hash));
       if (!obj) {
-        const source = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
-        if (!source) return text('not found', { status: 404 });
-        const preview = await buildDocPreview(env, await source.text(), {
-          slug, version, title: (gate.meta && gate.meta.title) || slug,
-        });
-        if (preview.image === previewCardUrl(slug, version)) {
-          obj = await env.DOCS.get(previewCardKey(slug, version));
-          if (gate.meta && latestVersionNumber(gate.meta) === version) {
-            const current = await loadDocMeta(env, slug);
-            if (current && latestVersionNumber(current) === version) {
-              try { await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview })); } catch { /* image is already stored */ }
-            }
-          }
-        }
+        const currentCard = version === latest && previewCardMatches(gate.meta && gate.meta.preview, slug, version)
+          && gate.meta.preview.image_hash === hash;
+        if (!currentCard) return text('not found', { status: 404 });
+        const failed = env.META && await env.META.get(`preview-failed:${slug}:v${version}:${hash}`);
+        if (!failed) return text('preview pending', { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '2' } });
       }
       const bytes = obj ? await obj.arrayBuffer() : previewDecodeBase64(TDOC_LOGO_PNG_B64);
       return new Response(method === 'HEAD' ? null : bytes, {
@@ -18772,14 +18805,14 @@ const tdocHandlers = {
         if (!meta || !docIndexable(accessFromMeta(meta))) continue;
         const version = latestVersionNumber(meta) || 1;
         const image = meta.preview && meta.preview.image;
-        if (Number(meta.preview && meta.preview.image_v) === version && image === previewCardUrl(slug, version)) continue;
+        if (previewCardMatches(meta.preview, slug, version)) continue;
         eligible++;
         if (dryRun) continue;
         try {
           const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
           if (!obj) { failed++; continue; }
           const preview = await buildDocPreview(env, await obj.text(), { slug, version, title: meta.title || slug });
-          if (preview.image !== previewCardUrl(slug, version)) { failed++; continue; }
+          if (!previewCardMatches(preview, slug, version)) { failed++; continue; }
           const current = await loadDocMeta(env, slug);
           if (!current || latestVersionNumber(current) !== version) { failed++; continue; }
           await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview }));
@@ -18809,13 +18842,7 @@ const tdocHandlers = {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const verNum = Number(version);
       if (!Number.isInteger(verNum) || verNum < 1) return json({ error: 'invalid_version' }, { status: 400 });
-      let suppliedPreviewPng = null;
-      if (body.preview_svg != null) {
-        const reason = validatePreviewSvg(body.preview_svg);
-        if (reason) return json({ error: reason }, { status: 400 });
-        try { suppliedPreviewPng = await renderPreviewPng(body.preview_svg); }
-        catch { return json({ error: 'invalid_preview_svg_render' }, { status: 400 }); }
-      }
+      let previewWarning = null;
       const mediaRefusal = inlineMediaRejection(doc);
       if (mediaRefusal) return mediaRefusal;
       // `replace: true` asks to rewrite the doc's LATEST version in place
@@ -18831,6 +18858,7 @@ const tdocHandlers = {
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
       if (await teamAskRunActive(env, auth.actor, slug)) return json(ANSWER_ONLY_RUN, { status: 403 });
+      previewWarning = body.preview_svg == null ? null : validatePreviewSvg(body.preview_svg);
       // Where a new doc from a workspace-scoped token lands, so it never
       // exists somewhere the token could not see it again: the team the
       // client names (`team`, id or name: the CLI's --team) if the token
@@ -19050,6 +19078,7 @@ const tdocHandlers = {
         }
       }
       if (incoming && writesLatestMeta) {
+        let pendingPreviewTask = null;
         try {
           // Remote storage is authoritative. Preserve versions that a browser
           // editor may have created since this local checkout was last pulled.
@@ -19101,13 +19130,18 @@ const tdocHandlers = {
               version: verNum,
               title: (incoming && incoming.title) || (currentMeta && currentMeta.title) || slug,
               svg: body.preview_svg || null,
-              png: suppliedPreviewPng,
+              existingPreview: currentMeta && currentMeta.preview,
+              onRenderTask: (task) => { pendingPreviewTask = task; },
             }),
           }));
         } catch (e) {
           try { await finishVersionReservation(false); } catch {}
           console.error('[upload] META put failed:', e.message);
           return json({ error: 'meta_put_failed', message: e.message || String(e) }, { status: 500 });
+        }
+        if (pendingPreviewTask) {
+          if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(pendingPreviewTask());
+          else await pendingPreviewTask();
         }
         try {
           await finishVersionReservation(true);
@@ -19248,6 +19282,7 @@ const tdocHandlers = {
         ok: true, url: `/d/${slug}/v/${verNum}`, size: verify.size, aids: aids.length, sha: uploadSha, mergedComments: mergedLocal,
         new_doc: !writeGate.meta,
         team: (writeGate.meta && writeGate.meta.workspace_id) || scopedNewTeam || null,
+        ...(previewWarning ? { preview_warning: previewWarning } : {}),
         // A connection limited to some workspaces: the server placed a new
         // doc already, so the CLI must not apply its default team on top.
         ...(auth.actor && auth.actor.scope ? { scoped: true } : {}),

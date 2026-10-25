@@ -1049,25 +1049,21 @@ bundle_worker() {
 }
 
 worker_bundle_sha() {
-  node -e '
-    const fs = require("fs");
-    const path = require("path");
-    const crypto = require("crypto");
-    const skill = process.env.SKILL_DIR;
-    const worker = fs.readFileSync(path.join(skill, "worker/worker.js"), "utf8");
-    const overlay = fs.readFileSync(path.join(skill, "server/overlay.js"), "utf8");
-    process.stdout.write(crypto.createHash("sha256").update(worker + "\0" + overlay).digest("hex"));
-  '
+  bundle_worker >/dev/null
+  cat "$WORKER_DIR/_worker.bundled.sha256"
 }
 
 vercel_bundle_sha() {
+  TDOC_BUNDLE_PLATFORM=vercel bundle_worker "$VERCEL_APP_DIR" >/dev/null
   node -e '
     const fs = require("fs");
     const path = require("path");
     const crypto = require("crypto");
     const skill = process.env.SKILL_DIR;
+    const app = process.argv[1];
     const h = crypto.createHash("sha256");
-    for (const rel of ["worker/worker.js", "server/overlay.js", "shared/github-oauth.js"]) {
+    h.update(fs.readFileSync(path.join(app, "_worker.bundled.sha256")));
+    for (const rel of ["shared/github-oauth.js"]) {
       h.update(rel); h.update("\0"); h.update(fs.readFileSync(path.join(skill, rel))); h.update("\0");
     }
     const dir = path.join(skill, "vercel");
@@ -1084,7 +1080,7 @@ vercel_bundle_sha() {
     };
     walk(dir);
     process.stdout.write(h.digest("hex"));
-  '
+  ' "$VERCEL_APP_DIR"
 }
 
 first_time_setup() {
@@ -1260,7 +1256,7 @@ sync_vercel_app() {
   # a ../../shared hop (vercel-app is outside the skill checkout).
   cp "$SKILL_DIR/shared/github-oauth.js" "$VERCEL_APP_DIR/lib/github-oauth.js"
   cp "$SKILL_DIR/vercel/vercel.json" "$SKILL_DIR/vercel/package.json" "$VERCEL_APP_DIR/"
-  SKILL_DIR="$SKILL_DIR" bundle_worker "$VERCEL_APP_DIR"
+  TDOC_BUNDLE_PLATFORM=vercel SKILL_DIR="$SKILL_DIR" bundle_worker "$VERCEL_APP_DIR"
 }
 
 # Deploy $VERCEL_APP_DIR to production. Prints the deployment URL on stdout
@@ -1530,6 +1526,26 @@ else
           echo "[tdoc] updated GITHUB_CLIENT_ID to org OAuth SoT ($_gh)"
         fi
       fi
+      # Existing self-hosted installs keep their wrangler.toml. Teach those
+      # installs the binary module types before the new bundle is deployed.
+      if [ -f "$WORKER_DIR/wrangler.toml" ] && ! grep -q 'type = "CompiledWasm"' "$WORKER_DIR/wrangler.toml"; then
+        cat >> "$WORKER_DIR/wrangler.toml" <<'TDOCRULES'
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+TDOCRULES
+      fi
+      if [ -f "$WORKER_DIR/wrangler.toml" ] && ! grep -q 'type = "Data"' "$WORKER_DIR/wrangler.toml"; then
+        cat >> "$WORKER_DIR/wrangler.toml" <<'TDOCRULES'
+
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true
+TDOCRULES
+      fi
       SKILL_DIR="$SKILL_DIR" bundle_worker
       (cd "$WORKER_DIR" && wrangler deploy)
       jq --arg sha "$DESIRED_BUNDLE_SHA" '.worker_bundle_sha256 = $sha' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" \
@@ -1700,6 +1716,11 @@ upload_version() {
     [ "$(printf '%s' "$resp" | json_get scoped)" = "true" ] && UP_SCOPED=1
     UP_TEAM="$(printf '%s' "$resp" | json_get team)"
     merged="$(printf '%s' "$resp" | json_get mergedComments)"; merged="${merged:-0}"
+    local preview_warning
+    preview_warning="$(printf '%s' "$resp" | json_get preview_warning)"
+    if [ -n "$preview_warning" ] && [ "$preview_warning" != "null" ]; then
+      echo "[tdoc] preview.svg was rejected ($preview_warning); an automatic preview card was used" >&2
+    fi
     if [ "$merged" != "0" ] && [ "$merged" != "null" ]; then
       echo "[tdoc] v$v uploaded (${_sz:-?} bytes, +$merged local comment(s) merged)"
     else

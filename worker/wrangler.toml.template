@@ -154,3 +154,13 @@ RAFT_INSTALLATION_IDS = '{"1ed923e0-27a4-47ff-b09a-ea27efe06877":"b3177b35-c920-
 # Secret: APPSUMO_API_KEY        — the product's Licensing API key; also signs webhooks
 # Secret: APPSUMO_CLIENT_ID      — OAuth client id, shown once both URLs validate
 # Secret: APPSUMO_CLIENT_SECRET  — OAuth client secret
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true

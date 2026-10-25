@@ -151,16 +151,17 @@ async function loadWorker({ previewRenderer = false } = {}) {
   const probeJs = require(path.join(root, 'server', 'frame-probe-source.js'))();
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
   src = src.replace('/* __TDOC_NOTIFICATION_TEXT__ */', fs.readFileSync(path.join(root, 'shell', 'src', 'notification-text.js'), 'utf8').replace(/^export /gm, ''));
+  src = src.replace('/* __TDOC_PREVIEW_VALIDATOR__ */', fs.readFileSync(path.join(root, 'server', 'preview', 'validate-svg.js'), 'utf8'));
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
   if (previewRenderer) {
     const dir = path.join(root, 'server', 'preview');
     const resvg = fs.readFileSync(path.join(dir, 'resvg.mjs'), 'utf8')
       .replace(/export\s*\{\s*Resvg2 as Resvg,\s*initWasm\s*\};?\s*$/, 'return { Resvg: Resvg2, initWasm };');
     src = src.replace(/const PREVIEW_RENDERER = "__TDOC_PREVIEW_RENDERER__";/, 'const PREVIEW_RENDERER = (() => {\n' + resvg + '\n})();');
-    src = src.replace(/const PREVIEW_WASM_B64 = "__TDOC_PREVIEW_WASM_B64__";/,
-      'const PREVIEW_WASM_B64 = ' + JSON.stringify(fs.readFileSync(path.join(dir, 'resvg.wasm'), 'base64')) + ';');
-    src = src.replace(/const PREVIEW_FONTS_B64 = "__TDOC_PREVIEW_FONTS_B64__";/,
-      'const PREVIEW_FONTS_B64 = ' + JSON.stringify(['Regular', 'Bold'].map((weight) => fs.readFileSync(path.join(dir, `NotoSansSC-${weight}.ttf`), 'base64'))) + ';');
+    src = src.replace(/const PREVIEW_WASM = "__TDOC_PREVIEW_WASM__";/,
+      'const PREVIEW_WASM = ' + JSON.stringify(fs.readFileSync(path.join(dir, 'resvg.wasm'), 'base64')) + ';');
+    src = src.replace(/const PREVIEW_FONTS = "__TDOC_PREVIEW_FONTS__";/,
+      'const PREVIEW_FONTS = ' + JSON.stringify(['Regular', 'Bold'].map((weight) => fs.readFileSync(path.join(dir, `NotoSansSC-${weight}.ttf`), 'base64'))) + ';');
     src = src.replace(/const PREVIEW_FONT_COVERAGE = "__TDOC_PREVIEW_FONT_COVERAGE__";/,
       'const PREVIEW_FONT_COVERAGE = ' + fs.readFileSync(path.join(dir, 'coverage.json'), 'utf8') + ';');
   }
