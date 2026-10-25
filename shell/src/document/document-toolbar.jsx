@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Popover } from '@base-ui/react/popover';
 import {
   Check,
   ChevronRight,
@@ -15,6 +16,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
+import { usePortalContainer } from '../ui/portal.js';
 
 // The label after a version number. "current" read as "latest" from an old
 // version (round-4 tester), so the two facts get their own words: where you
@@ -150,25 +152,40 @@ export function DocumentPrimaryAction({
   );
 }
 
-// Always-visible Send to agent entry (desktop + mobile). Badge = comments
-// still on handoff_status note (not yet sent). Prefer a paper-plane over a bottom strip.
-export function DocumentSendAgentAction({ count = 0, onClick }) {
-  const label = count > 0 ? `Send to agent (${count} open)` : 'Send to agent';
-  return (
-    <button
+// One document-level entry for handoff activity and unsent comments. The
+// comment card itself carries the state of that one comment.
+export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, children }) {
+  const portalContainer = usePortalContainer();
+  const ready = counts.ready || 0;
+  const waiting = (counts.waiting || 0) + (counts.received || 0);
+  const failed = counts.failed || 0;
+  const details = [
+    ready ? `${ready} to send` : null,
+    waiting ? `${waiting} waiting for agent` : null,
+    unread ? `${unread} new agent ${unread === 1 ? 'reply' : 'replies'}` : null,
+    failed ? `${failed} not delivered` : null,
+  ].filter(Boolean).join(' · ');
+  const label = `Agent activity${details ? ` · ${details}` : ''}`;
+  return <Popover.Root open={open} onOpenChange={onOpenChange}>
+    <Popover.Trigger
       id="tdoc-send-agent-btn"
       type="button"
       className="tdoc-send-agent-action"
       aria-label={label}
       title={label}
-      onClick={onClick}
     >
       <Send size={16} aria-hidden="true" />
-      {count > 0 ? (
-        <span className="tdoc-send-agent-badge">{count > 99 ? '99+' : count}</span>
-      ) : null}
-    </button>
-  );
+      {unread ? <span className="tdoc-send-agent-badge is-unread" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>
+        : ready ? <span className="tdoc-send-agent-badge is-ready" aria-hidden="true" /> : null}
+    </Popover.Trigger>
+    <Popover.Portal container={portalContainer}>
+      <Popover.Positioner side="bottom" align="end" sideOffset={8} collisionPadding={8} positionMethod="fixed" className="tdoc-picker-positioner">
+        <Popover.Popup className="tdoc-handoff-popover" aria-label="Agent activity">
+          {children}
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>;
 }
 
 export function DocumentOverflowActions({

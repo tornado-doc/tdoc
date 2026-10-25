@@ -60,6 +60,7 @@ export function composerPosition(rect, viewport) {
 
 export function CommentComposer({
   selection,
+  initialText = '',
   onSubmit,
   onClose,
   mentionable = [],
@@ -78,7 +79,7 @@ export function CommentComposer({
   privateAsk = null,
   onMakePublic = null,
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialText);
   const [connectOpen, setConnectOpen] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
   const agentButtons = useContext(AgentButtonsContext);
@@ -100,7 +101,9 @@ export function CommentComposer({
   const { top, left } = composerPosition(selection.rect || {}, viewport);
 
   const quoted = String(selection.text || '');
-  const preview = selection.kind === 'element'
+  const preview = selection.kind === 'document'
+    ? 'On this document'
+    : selection.kind === 'element'
     ? selection.label || 'Selected element'
     : `"${quoted.slice(0, 80)}${quoted.length > 80 ? '…' : ''}"`;
 

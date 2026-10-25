@@ -7189,11 +7189,8 @@ async function profileData(env, account, { includePrivate = false } = {}) {
   return docs;
 }
 
-// Agent verdict → emoji, rendered at fold time by snapshotAt (never stored as
-// a reaction event) so the ✅/🟡/❓ on a card is per-version like any status.
-// answered: the comment asked something and the reply answers it; nothing
-// in the doc needed to change. question is the reverse — the AGENT needs an
-// answer from a person before it can act.
+// Recognized agent verdicts. The reply's agent_status and comment resolution
+// carry the state; reactions belong only to people who explicitly add one.
 const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓', answered: '💬' };
 
 function isFiniteVersion(v) {
@@ -7371,17 +7368,12 @@ function snapshotAt(c, V) {
         if (e.reset_status) { snap.status = 'open'; snap.applied_in = undefined; }
         break;
       // A person and an agent both write these events, and they mean different
-      // things. An agent's carries a verdict, which the fold turns into the
-      // ✅/🟡/❓ reaction below; a person's is a decision, so it must not put an
-      // emoji in their name. `human` is what tells them apart — absent on every
-      // event written before people could resolve, which is why the agent path
-      // stays the default.
+      // things. A person's decision records who resolved it; an agent's
+      // verdict stays on its reply. Neither action adds a reaction.
       case 'marked_applied':
         snap.status = 'applied';
         snap.applied_in = e.applied_in || e.at_version;
         snap.resolved_by = e.human ? (e.by || '') : '';
-        snap._agentVerdict = e.human ? null : (e.agent_status || 'applied');
-        snap._agentActor = e.by || 'tdoc-agent';
         // WHO closed this, for both kinds of actor. `resolved_by` stays
         // human-only because callers already read it that way; this is the
         // answer to "a human and an agent may both resolve, so record which".
@@ -7404,8 +7396,6 @@ function snapshotAt(c, V) {
         snap.status = 'open';
         snap.applied_in = undefined;
         snap.resolved_by = '';
-        snap._agentVerdict = e.human ? null : (e.agent_status || null);
-        snap._agentActor = e.by || 'tdoc-agent';
         snap.resolution = {
           state: 'reopened',
           by: e.by || (e.human ? '' : 'tdoc-agent'),
@@ -7478,16 +7468,6 @@ function snapshotAt(c, V) {
       }
     }
   }
-  // Apply the agent emoji synthetically so the UI behavior (✅/🟡/❓ on the
-  // parent card) matches today without storing it as a real reaction event.
-  if (snap._agentVerdict && AGENT_STATUS_EMOJI[snap._agentVerdict]) {
-    const emoji = AGENT_STATUS_EMOJI[snap._agentVerdict];
-    const actor = snap._agentActor || 'tdoc-agent';
-    const u = snap.reactions[emoji] || [];
-    if (!u.includes(actor)) u.push(actor);
-    snap.reactions[emoji] = u;
-  }
-  delete snap._agentVerdict;
   if (!snap.resolution) snap.resolution = { state: 'none', by: '', kind: null, at: '', at_version: null };
   snap.replies = keepThread(replyOrder, replyById).map(r => (hasNoWords(r) ? asTombstone(r) : r));
   return snap;

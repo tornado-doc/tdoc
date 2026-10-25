@@ -199,9 +199,7 @@
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
   /* Parent-level resolved chip (distinct from the per-reply status chip). */
-  /* Same chip geometry for comment-axis (✓ fixed) and handoff-axis pills. */
-  .tdoc-resolved-chip,
-  .tdoc-handoff-chip {
+  .tdoc-resolved-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -213,8 +211,24 @@
     margin: 0;
     white-space: nowrap;
   }
-  .tdoc-resolved-chip { background: #e8f5ed; color: #1a7340; }
-  .tdoc-handoff-chip { color: #5a5a56; background: #f0efea; }
+  .tdoc-resolved-chip { background: #eaf6ee; color: #1d7a3a; }
+  .tdoc-handoff-chip {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    color: #555;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.25;
+    padding: 2px 7px;
+    margin: 0;
+    background: #f1f1ef;
+    border: 0;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
   /* Homepage in-memory comment demo — same chip shape, quiet amber. */
   .tdoc-demo-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #f5efe0; color: #7a5c14; }
   /* Re-anchor is a ⋯ menu item now. Its old inline-button dress — 10px, grey,
@@ -354,7 +368,7 @@
      how they would drift.) */
 
   .tdoc-pin { position: absolute; pointer-events: auto; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #cdd3dc; box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; transition: transform .12s, border-color .12s, box-shadow .12s; box-sizing: border-box; }
-  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active { transform: scale(1.12); border-color: var(--td-accent); box-shadow: 0 2px 8px var(--td-accent-ring-soft); z-index: 1; }
+  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active, .tdoc-pin.tdoc-pin-anchor-hover { transform: scale(1.12); border-color: var(--td-accent); box-shadow: 0 2px 8px var(--td-accent-ring-soft); z-index: 1; }
   .tdoc-pin img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
   .tdoc-pin .tdoc-pin-anon { width: 100%; height: 100%; border-radius: 50%; background: #8a93a2; }
   /* Resolved pins get a green ring + a small ✓ overlay badge. */
@@ -365,15 +379,24 @@
     border-color: var(--td-accent, #1652f0);
     animation: tdoc-pin-wait 1.1s ease-in-out infinite;
   }
-  .tdoc-pin.is-failed-handoff { border-color: #c45c45; }
-  /* Unread = solid dot you clear by opening — not a permanent "replied" badge. */
-  .tdoc-pin.is-unread-handoff::after {
-    content: "";
+  .tdoc-pin.is-waiting-handoff.tdoc-pin-anchor-hover { animation: none; transform: scale(1.12); box-shadow: 0 0 0 4px var(--td-accent-ring-soft); }
+  /* One corner marker for the agent's latest result; unread is a separate dot. */
+  .tdoc-pin .tdoc-pin-handoff-badge {
+    position: absolute; right: -6px; bottom: -5px;
+    display: flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; box-sizing: border-box;
+    border: 1px solid #fff; border-radius: 50%;
+    background: #fff; font: 11px/1 system-ui, sans-serif;
+    box-shadow: 0 1px 3px rgba(0,0,0,.16);
+  }
+  .tdoc-pin .tdoc-pin-handoff-badge.is-warning { color: #8a5a00; background: #fdf3dc; }
+  .tdoc-pin .tdoc-pin-unread-dot {
     position: absolute; right: -2px; top: -2px;
     width: 10px; height: 10px; border-radius: 50%;
-    background: #3b5bdb;
+    background: #1652f0;
     border: 2px solid #fff;
-    box-shadow: 0 0 0 1px color-mix(in srgb, #3b5bdb 35%, transparent);
+    box-sizing: border-box;
+    box-shadow: 0 0 0 1px color-mix(in srgb, #1652f0 35%, transparent);
   }
   @keyframes tdoc-pin-wait {
     0%, 100% {
@@ -805,6 +828,12 @@
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #3277ef; box-sizing: content-box; }
+  body.tdoc-narrow .tdoc-drawer-empty { padding: 28px 12px 36px; text-align: center; color: var(--td-muted); font: 14px system-ui, sans-serif; }
+  body.tdoc-narrow .tdoc-drawer-empty p { margin: 0 0 14px; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
+  body.tdoc-narrow .tdoc-drawer-empty button { border: 1px solid var(--td-accent); border-radius: 999px; background: #fff; color: var(--td-accent); padding: 10px 16px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  body.tdoc-narrow .tdoc-drawer-empty button:last-child { background: var(--td-accent); color: #fff; }
   body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
   body.tdoc-narrow .tdoc-modal { padding: 20px; }
@@ -882,177 +911,164 @@
     flex-wrap: nowrap;
     align-items: center;
     gap: 4px;
-    margin: 0 0 6px;
+    margin: 0 0 4px;
     min-width: 0;
   }
   .tdoc-status-row:not(:has(.tdoc-resolved-chip, .tdoc-handoff-chip)) {
     display: none;
     margin: 0;
   }
-  /* Agent done stays neutral gray — green is reserved for comment-axis ✓ fixed. */
-  .tdoc-handoff-chip.is-resolved { color: #5a5a56; background: #f0efea; }
-  .tdoc-handoff-chip.is-replied { color: #3b5bdb; background: #e8eeff; }
-  .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
-  .tdoc-handoff-chip.is-received {
-    color: #1a3f8f;
-    background: #e8eeff;
-    animation: tdoc-handoff-pulse 1.1s ease-in-out infinite;
-  }
-  .tdoc-handoff-chip.is-waiting {
-    color: #1a3f8f;
-    background: #e8eeff;
-    animation: tdoc-handoff-pulse 1.1s ease-in-out infinite;
-  }
-  .tdoc-handoff-chip.is-partial { color: #7a5b12; background: #f7f0d8; }
-  /* No response / expired: still, not pulsing -- nothing is happening. */
-  .tdoc-handoff-chip.is-stale { color: #7a5b12; background: #f7f0d8; }
+  /* Keep one compact pill for the current step, including the agent's reply
+     verdict. Delivery and reply are stages of one sequence, not two badges. */
+  .tdoc-handoff-chip.is-done { color: #1d7a3a; background: #eaf6ee; }
+  .tdoc-handoff-chip.is-question { color: #1652f0; background: #eef2fe; }
+  .tdoc-handoff-chip.is-partial,
+  .tdoc-handoff-chip.is-stale,
+  .tdoc-handoff-chip.is-failed { color: #8a5a00; background: #fdf3dc; }
   /* The handoff line can name a long handle; it shortens, never spills. */
-  .tdoc-handoff-chip.tdoc-handoff-line { flex: 0 1 auto; min-width: 0; max-width: 100%; }
-  .tdoc-handoff-chip.tdoc-handoff-line { gap: 0; }
+  .tdoc-handoff-chip.tdoc-handoff-status-text { flex: 0 1 auto; min-width: 0; max-width: 100%; gap: 2px; }
   .tdoc-handoff-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-handoff-line-tail { flex: 0 0 auto; white-space: pre; }
-  .tdoc-status-row:has(.tdoc-handoff-nudge) { flex-wrap: wrap; }
-  .tdoc-handoff-nudge {
-    flex: 1 0 100%;
-    display: flex;
-    gap: 12px;
-    padding: 2px 0 0 2px;
-  }
-  .tdoc-handoff-nudge .text-btn {
+  .tdoc-handoff-chip .tdoc-handoff-chip-action {
     appearance: none;
     border: 0;
     background: transparent;
-    color: var(--td-accent, #1652f0);
+    color: inherit;
     font: inherit;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     padding: 0;
+    margin-left: 2px;
+    line-height: 1;
   }
-  .tdoc-handoff-nudge .text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-  .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
-  @keyframes tdoc-handoff-pulse {
-    0%, 100% {
-      opacity: 1;
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-accent, #1652f0) 40%, transparent);
-    }
-    50% {
-      opacity: 1;
-      box-shadow: 0 0 0 6px color-mix(in srgb, var(--td-accent, #1652f0) 0%, transparent);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .tdoc-handoff-chip.is-waiting,
-    .tdoc-handoff-chip.is-received { animation: none; }
-  }
-
-  .tdoc-handoff-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 8px 16px;
-    font-size: 13px;
-    color: var(--td-ink, #1a1a1a);
-    background: var(--td-accent-tint, #e8eeff);
-    border-bottom: 1px solid var(--td-line, #e6e4dc);
+  .tdoc-handoff-chip .tdoc-handoff-chip-action:disabled { opacity: 0.55; cursor: not-allowed; }
+  .tdoc-handoff-popover {
+    width: min(360px, calc(100vw - 24px));
+    max-height: calc(100vh - 72px);
+    overflow: auto;
     box-sizing: border-box;
+    padding: 12px;
+    border: 1px solid var(--td-line, #e6e4dc);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--td-ink, #1a1a1a);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
+    font: 13px/1.4 Inter, system-ui, sans-serif;
   }
-  .tdoc-handoff-banner.is-failed {
-    background: #f7ebe7;
-  }
-  .tdoc-handoff-banner-text { font-weight: 600; }
-  .tdoc-handoff-banner-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .tdoc-handoff-banner .text-btn {
-    appearance: none;
-    border: 0;
-    background: transparent;
-    color: var(--td-accent, #1652f0);
-    font: inherit;
-    font-weight: 650;
-    cursor: pointer;
-    padding: 0;
-  }
-  .tdoc-handoff-banner .text-btn:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .tdoc-handoff-banner.is-failed .text-btn { color: #8a3b2b; }
-
+  .tdoc-handoff-popover:focus { outline: none; }
+  .tdoc-handoff-popover .tdoc-handoff-details-section-title { margin: 0 0 8px; font-size: 13px; font-weight: 650; }
   .tdoc-handoff-details-list {
     list-style: none;
     margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    max-height: min(60vh, 420px);
+    gap: 0;
+    max-height: min(50vh, 430px);
     overflow: auto;
   }
   .tdoc-handoff-details-row {
     display: flex;
     align-items: flex-start;
     gap: 8px;
-    padding: 8px 10px;
-    border: 1px solid var(--td-line, #e6e4dc);
-    border-radius: 8px;
-    background: #fafaf8;
+    padding: 7px 2px;
+    border-bottom: 1px solid var(--td-line, #e6e4dc);
+    background: transparent;
   }
-  .tdoc-handoff-details-jump {
+  .tdoc-handoff-details-main { flex: 1 1 auto; min-width: 0; }
+  .tdoc-handoff-details-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tdoc-handoff-details-meta { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+  .tdoc-handoff-details-recipient { color: #888; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-handoff-popover button.tdoc-handoff-details-jump {
     flex: 1 1 auto;
     min-width: 0;
     appearance: none;
     border: 0;
+    border-radius: 0;
     background: transparent;
     text-align: left;
     cursor: pointer;
     padding: 0;
+    min-width: 0;
+    min-height: 0;
     font: inherit;
     color: inherit;
   }
   .tdoc-handoff-details-jump:hover .tdoc-handoff-details-preview { color: var(--td-accent, #1652f0); }
   .tdoc-handoff-details-state {
-    display: block;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 100%;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #f0efea;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 11px;
     font-weight: 650;
     color: #5a5a56;
-    margin-bottom: 2px;
+    margin-bottom: 0;
+    flex: 0 0 auto;
   }
-  .tdoc-handoff-details-state.is-failed { color: #8a3b2b; }
-  .tdoc-handoff-details-state.is-waiting { color: #3b5bdb; }
-  .tdoc-handoff-details-state.is-received { color: #3b5bdb; }
-  .tdoc-handoff-details-state.is-ready { color: #1a7340; }
+  .tdoc-handoff-details-state.is-failed { color: #8a5a00; background: #fdf3dc; }
+  .tdoc-handoff-details-state.is-stale,
+  .tdoc-handoff-details-state.is-expired { color: #7a5b12; background: #f7f0d8; }
+  .tdoc-handoff-details-state.is-waiting,
+  .tdoc-handoff-details-state.is-received,
+  .tdoc-handoff-details-state.is-replied { color: #555; background: #f1f1ef; }
+  .tdoc-handoff-details-state.is-question { color: #1652f0; background: #eef2fe; }
+  .tdoc-handoff-details-state.is-partial { color: #8a6100; background: #fdf6e3; }
+  .tdoc-handoff-details-state.is-ready { color: #1a7340; background: #e8f5ed; }
+  .tdoc-handoff-details-state.is-resolved { color: #1d7a3a; background: #eaf6ee; }
+  .tdoc-handoff-details-unread-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-left: 0;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #1652f0;
+    vertical-align: middle;
+  }
   .tdoc-handoff-details-preview {
     display: block;
     font-size: 13px;
     line-height: 1.35;
     color: #202124;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tdoc-handoff-details-reply {
+    display: block;
+    color: #5f6368;
+    font-size: 12px;
+    line-height: 1.35;
     word-break: break-word;
   }
-  .tdoc-handoff-details-actions {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding-top: 1px;
-  }
-  .tdoc-handoff-details-actions .text-btn {
+  .tdoc-handoff-details-state .tdoc-handoff-details-resend,
+  .tdoc-handoff-details-history .tdoc-handoff-details-elsewhere {
     appearance: none;
     border: 0;
     background: transparent;
     color: var(--td-accent, #1652f0);
     font: inherit;
-    font-size: 12px;
     font-weight: 650;
     cursor: pointer;
     padding: 0;
   }
-  .tdoc-handoff-details-actions .text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .tdoc-handoff-details-state .tdoc-handoff-details-resend:disabled { opacity: .55; cursor: not-allowed; }
+  .tdoc-handoff-popover button.tdoc-handoff-details-expand { border: 0; background: transparent; color: var(--td-accent, #1652f0); padding: 0; min-height: 0; font: inherit; font-size: 11px; cursor: pointer; }
+  .tdoc-handoff-details-history { color: #5f6368; font-size: 11px; line-height: 1.5; padding: 5px 0 0 8px; border-left: 2px solid #e8eeff; }
+  .tdoc-handoff-ready { border-top: 1px solid var(--td-line, #e6e4dc); padding-top: 10px; }
+  .tdoc-handoff-ready h3 { margin: 0 0 6px; color: #888; font-size: 11px; font-weight: 500; }
+  .tdoc-handoff-ready-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; font-size: 12px; }
+  .tdoc-handoff-ready-row input { flex: 0 0 auto; }
+  .tdoc-handoff-ready-send { display: block; width: 100%; margin-top: 8px; padding: 7px 10px; border: 0; border-radius: 7px; background: var(--td-accent, #1652f0); color: #fff; font: 600 12px/1.4 Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-handoff-ready-send:hover { background: var(--td-accent-hover, #1245d0); }
 
   /* Asking in the comment composer: @ hands a comment to an agent; tagging
      the answerer (their own agent, answers only, or tdoc AI) shows "Only me",
@@ -1094,17 +1110,24 @@
   }
   .tdoc-bar .tdoc-send-agent-badge {
     position: absolute;
-    top: 2px;
+    top: 4px;
+    right: 3px;
+    min-width: 9px;
+    height: 9px;
+    border: 1.5px solid #fff;
+    border-radius: 50%;
+    background: #1652f0;
+  }
+  .tdoc-bar .tdoc-send-agent-badge.is-unread {
+    top: 1px;
     right: 0;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 999px;
-    background: var(--td-accent, #1652f0);
+    min-width: 15px;
+    height: 15px;
+    padding: 0 2px;
+    background: #e5484d;
     color: #fff;
-    font: 650 10px/16px inherit;
+    font: 700 9px/13px system-ui, sans-serif;
     text-align: center;
-    box-sizing: border-box;
   }
 
 /* A navigation is under way (shell/src/nav-progress.js): a thin bar along the

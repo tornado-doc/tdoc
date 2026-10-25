@@ -26,7 +26,7 @@ const OFFLINE = [
   'comment-notification-failure.test.js', // inbox KV trouble never turns a saved comment into HTTP 500
   'event-convergence.test.js',// eid dedup convergence + fold ordering
   'reconcile.test.js',        // anchor reconcile branches + compaction
-  'agent-status-emoji.test.js',// agent verdict emoji constant must exist (v>=2 folds)
+  'agent-status-emoji.test.js',// agent verdict folds without synthetic reactions
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'link-sharing.test.js',     // anyone with the link: noindex everywhere, unlisted by default, require sign-in, public->link migration

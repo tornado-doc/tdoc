@@ -147,7 +147,7 @@ t('IDEMPOTENT: re-stamping already-stamped HTML yields the same aids', () => {
 const driftBox = {};
 vm.createContext(driftBox);
 // measureAidDrift folds the live anchor via snapshotAt, so include the fold
-// helper chain too. AGENT_STATUS_EMOJI is referenced by snapshotAt.
+// helper chain too. The sandbox keeps the legacy mapping for old fixtures.
 driftBox.AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
 function driftRegion(fromFn, toFn) {
   const s = newSrc.indexOf(`function ${fromFn}(`);
