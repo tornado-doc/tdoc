@@ -11936,6 +11936,14 @@ function localHandoffDone(h) {
   const done = new Set(Array.isArray(h.resolved_ids) ? h.resolved_ids : []);
   return (h.comment_ids || []).every((id) => done.has(id));
 }
+async function localPausedMap(env, accountId) {
+  const group = await accountGroup(env, accountId);
+  try {
+    const value = JSON.parse(await env.META.get(`local-computer-paused:${group.canonical}`));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
 async function localSeenMap(env, accountId) {
   try {
     const m = JSON.parse((await env.META.get(`local-agents-seen:${accountId}`)) || '{}');
@@ -11963,18 +11971,19 @@ async function localTouchSeen(env, accountId, device) {
 async function decorateLocalSeen(env, accountId, lists) {
   if (!accountId || !lists.some((l) => l.some((t) => t && t.provider === 'local'))) return;
   const seen = await localSeenMap(env, accountId);
+  const paused = await localPausedMap(env, accountId);
   for (const list of lists) {
     for (let i = 0; i < list.length; i++) {
       const t = list[i];
       if (!t || t.provider !== 'local') continue;
-      list[i] = withLocalSeen(t, seen);
+      list[i] = withLocalSeen(t, seen, paused);
     }
   }
 }
-function withLocalSeen(t, seen) {
+function withLocalSeen(t, seen, paused = {}) {
   const at = seen[t.device] || null;
   const fresh = at && Date.now() - (Date.parse(at) || 0) < LOCAL_STALE_MS;
-  return { ...t, last_seen: at, status: fresh ? 'active' : 'inactive' };
+  return { ...t, last_seen: at, status: paused[t.device] === true ? 'paused' : fresh ? 'active' : 'inactive' };
 }
 
 // The parts of Raft's agent-events answer worth keeping; anything malformed
@@ -14511,6 +14520,7 @@ const tdocHandlers = {
           await stampOnboardingFor(env, who, 'started');
         }
       } catch {}
+      if (sessionPrincipal(session)) return new Response(null, { status: 302, headers: { Location: '/me?setup=1' } });
       const nonce = rand(16);
       return html(SHELL.appHtml({
         // One title for both steps. `?step=doc` is a request, not a fact: the
@@ -17712,6 +17722,93 @@ const tdocHandlers = {
       });
     }
 
+    // A browser-owned setup attempt, confirmed by the tools using this same
+    // account's upload credential. Old tokens/heartbeats cannot finish it.
+    if (p === '/api/onboarding/connect/complete' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) return json({ error: 'account_token_required' }, { status: 403 });
+      let body = {}; try { body = await req.json(); } catch {}
+      if (!/^[a-f0-9]{32}$/.test(body.code || '')) return json({ error: 'invalid_code' }, { status: 400 });
+      const key = `onboarding-connect:${body.code}`;
+      let attempt; try { attempt = JSON.parse(await env.META.get(key)); } catch {}
+      if (!attempt || Date.parse(attempt.expires) <= Date.now()) return json({ error: 'setup_expired' }, { status: 410 });
+      if (!(await accountGroup(env, auth.actor.account_id)).ids.includes(attempt.account_id)) return json({ error: 'wrong_account' }, { status: 403 });
+      if (!attempt.ready) {
+        attempt.ready = new Date().toISOString();
+        await env.META.put(key, JSON.stringify(attempt), { expirationTtl: 900 });
+        await stampOnboardingFor(env, attempt.account_id, 'agent_connected');
+      }
+      return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (p === '/api/onboarding/connect' && ['GET', 'POST'].includes(method)) {
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'account_required' }, { status: 403 });
+      if (method === 'POST') {
+        if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+        const code = rand(16);
+        const expires = new Date(Date.now() + 900000).toISOString();
+        await env.META.put(`onboarding-connect:${code}`, JSON.stringify({ account_id: accountId, expires }), { expirationTtl: 900 });
+        return json({ code, expires, ready: false }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      const code = url.searchParams.get('code') || '';
+      if (!/^[a-f0-9]{32}$/.test(code)) return json({ error: 'invalid_code' }, { status: 400 });
+      let attempt; try { attempt = JSON.parse(await env.META.get(`onboarding-connect:${code}`)); } catch {}
+      if (!attempt || Date.parse(attempt.expires) <= Date.now()) return json({ error: 'setup_expired' }, { status: 410 });
+      if (!(await accountGroup(env, accountId)).ids.includes(attempt.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      return json({ ready: Boolean(attempt.ready) }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    // Browser-only controls survive helper restarts and new inventory reports.
+    // Pausing gates the queue; it cannot kill a run already executing locally.
+    if (p === '/api/me/computers' && ['GET', 'POST'].includes(method)) {
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'account_required' }, { status: 403 });
+      const group = await accountGroup(env, accountId);
+      const targets = await accountNotifyTargets(env, accountId);
+      const local = targets.filter(isLocalTarget);
+      const paused = await localPausedMap(env, accountId);
+      const seen = await localSeenMap(env, accountId);
+      let inventory = {};
+      for (const id of group.ids) {
+        try { inventory = { ...inventory, ...JSON.parse(await env.META.get(`local-computers:${id}`)) }; } catch {}
+      }
+      const devices = [...new Set([...Object.keys(inventory), ...local.map(t => t.device)])];
+      if (method === 'POST') {
+        if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+        let body = {}; try { body = await req.json(); } catch {}
+        if (!devices.includes(body.device)) return json({ error: 'computer_not_found' }, { status: 404 });
+        if (body.action === 'pause' || body.action === 'resume') {
+          if (body.action === 'pause') paused[body.device] = true;
+          else delete paused[body.device];
+          await env.META.put(`local-computer-paused:${group.canonical}`, JSON.stringify(paused));
+          return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+        }
+        if (body.action === 'default') {
+          const target = local.find(t => t.device === body.device && t.cli === body.cli);
+          let ready = []; try { ready = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${body.device}`)) || []; } catch {}
+          if (!target || !Array.isArray(ready) || !ready.includes(body.cli) || withLocalSeen(target, seen, paused).status !== 'active') return json({ error: 'computer_not_ready' }, { status: 409 });
+          await env.META.put(`account-notify:${accountId}`, JSON.stringify([{ ...target, last_touched: new Date().toISOString() }, ...targets.filter(t => !sameNotifyTarget(t, target))]));
+          return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
+        }
+        return json({ error: 'invalid_action' }, { status: 400 });
+      }
+      const computers = [];
+      for (const device of devices) {
+        let ready = []; try { ready = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${device}`)) || []; } catch {}
+        if (!Array.isArray(ready)) ready = [];
+        const record = inventory[device] || {};
+        const runtimes = (record.runtimes || local.filter(t => t.device === device).map(t => ({ cli: t.cli, state: ready.includes(t.cli) ? 'ready' : 'needs_check' })))
+          .map(r => ({ ...r, state: r.state === 'ready' && (!ready.includes(r.cli) || !local.some(t => t.device === device && t.cli === r.cli)) ? 'needs_check' : r.state }));
+        computers.push(withLocalSeen({ device, runtimes, paused: paused[device] === true, connected_at: record.connected_at || null }, seen, paused));
+      }
+      return json({ computers, default: targets[0] || null }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
     // ---- onboarding ----
     if (p === '/api/onboarding' && method === 'GET') {
       const session = await getSession(env, req);
@@ -17721,12 +17818,72 @@ const tdocHandlers = {
       // agent never shows a code again, so the page must not wait for one.
       const paired = await accountPaired(env, accountId);
       const record = await loadOnboarding(env, accountId);
+      let local_agents;
+      let local_computers;
+      if (url.searchParams.get('daemon') === '1') {
+        const targets = (await accountNotifyTargets(env, accountId)).filter(isLocalTarget);
+        const seen = await localSeenMap(env, accountId);
+        const paused = await localPausedMap(env, accountId);
+        const ready = new Map();
+        for (const t of targets) {
+          if (!ready.has(t.device)) {
+            try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${t.device}`)); ready.set(t.device, Array.isArray(value) ? value : []); } catch { ready.set(t.device, []); }
+          }
+        }
+        local_agents = targets.map((t) => ({ ...withLocalSeen(t, seen, paused), ready: ready.get(t.device).includes(t.cli) }));
+        let computers = {};
+        try { computers = JSON.parse(await env.META.get(`local-computers:${accountId}`)) || {}; } catch {}
+        local_computers = Object.entries(computers).map(([device, computer]) => withLocalSeen({ device, ...computer }, seen, paused));
+      }
       // `?docs=1` costs a catalog walk, so only the page that waits for a doc
       // to appear asks for it. The connect gate's own poll stays two reads.
       if (url.searchParams.get('docs') === '1') {
-        return json({ record, paired, newest_doc: await newestDocFor(env, accountId) });
+        const newest_doc = await newestDocFor(env, accountId);
+        const meta = newest_doc ? await loadDocMeta(env, newest_doc) : null;
+        return json({ record, paired, newest_doc, newest_doc_created: meta?.versions?.[0]?.created || meta?.created || null, observed_at: new Date().toISOString() }, { headers: { 'Cache-Control': 'no-store' } });
       }
-      return json({ record, paired });
+      return json({ record, paired, ...(local_agents ? { local_agents, local_computers } : {}) }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (p === '/api/onboarding/practice' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const session = await getSession(env, req);
+      if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      const accountId = await sessionAccountId(env, session);
+      if (!accountId) return json({ error: 'account_required' }, { status: 403 });
+      let body = {}; try { body = await req.json(); } catch {}
+      // Manual practice is an explicit copy/paste workflow, not evidence of a
+      // connected computer. Never attach or mark an agent ready on this path.
+      let target = null;
+      if (body.mode !== 'manual') {
+        const current = await accountNotifyTargets(env, accountId);
+        target = current.find((t) => t.provider === 'local' && t.device === body.device && t.cli === body.cli);
+        if (!target) return json({ error: 'local_agent_required' }, { status: 409 });
+        const seen = await localSeenMap(env, accountId);
+        let ready = []; try { const value = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${target.device}`)); ready = Array.isArray(value) ? value : []; } catch {}
+        if (withLocalSeen(target, seen, await localPausedMap(env, accountId)).status !== 'active' || !ready.includes(target.cli)) return json({ error: 'computer_not_ready' }, { status: 409 });
+      }
+      await stampOnboardingFor(env, accountId, 'started');
+      const record = await loadOnboarding(env, accountId);
+      let slug = record.daemon_practice_doc;
+      if (slug) {
+        const meta = await loadDocMeta(env, slug);
+        if (!(meta && meta.hosted && meta.hosted.account_id === accountId)) slug = null;
+      }
+      if (!slug) {
+        const made = await createDocForSession(env, req, session, {
+          html: '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Your first tdoc</title><style>body{background:#fff}</style></head><body><div class="wrap"><h1>Your first tdoc</h1><p>A good project update tells readers what changed, what is next, and where help is needed.</p><h2>Try a change</h2><p>Highlight the sentence above and leave a comment, such as “Make this shorter.” Then copy the instruction on your comment into your AI conversation, or use Send to agent if you connected a background helper.</p><h2>Keep working here</h2><p>Your AI publishes a new version at this same link and replies to your comment. You can review earlier versions whenever you need them.</p></div></body></html>',
+          meta: { title: 'Your first tdoc', created_from: 'daemon-practice', access: { visibility: 'private', commenting: 'owner', history_visibility: 'owner' } },
+          version: { prompt: 'Practice commenting and revising with your AI' },
+        });
+        if (!made.ok) return made.response;
+        slug = made.slug;
+        const next = await loadOnboarding(env, accountId);
+        await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({ ...next, daemon_practice_doc: slug }));
+      }
+      if (record.first_doc !== slug) await adoptFirstDocFor(env, accountId, slug);
+      // An explicit choice, scoped to this practice doc. Other docs keep their agent.
+      if (target) await touchDocAgent(env, slug, target);
+      return json({ ok: true, slug, url: `/d/${slug}?step=comment` });
     }
     // Puts the caller's own onboarding record into a named state, so the
     // journey's branches can be walked without hand-editing storage. The body
@@ -18858,7 +19015,14 @@ const tdocHandlers = {
       const device = String(body.device || '').trim().toLowerCase();
       if (!LOCAL_DEVICE_RE.test(device)) return json({ error: 'invalid_device', message: 'device: 1-40 chars, a-z 0-9 and dashes.' }, { status: 400 });
       const clis = [...new Set((Array.isArray(body.clis) ? body.clis : []).map((c) => String(c || '').trim().toLowerCase()))].slice(0, 4);
-      if (!clis.length || !clis.every((c) => LOCAL_CLI_RE.test(c))) return json({ error: 'invalid_clis', message: 'clis: one to four names like "claude" or "codex".' }, { status: 400 });
+      const runtimeNames = ['claude', 'codex'];
+      // Optional inventory from the managed helper. Rebuild an allowlisted
+      // shape: no local paths, credential details or probe output is stored.
+      const runtimes = Array.isArray(body.runtimes) && body.runtimes.length === runtimeNames.length
+        && runtimeNames.every((cli) => body.runtimes.filter((r) => r?.cli === cli).length === 1)
+        && body.runtimes.every((r) => ['ready', 'needs_check', 'not_installed'].includes(r.state))
+        ? body.runtimes.map((r) => ({ cli: r.cli, state: r.state, ...(typeof r.version === 'string' && /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(r.version) && r.version.length <= 64 ? { version: r.version } : {}) })) : null;
+      if ((body.runtimes !== undefined && !runtimes) || (!clis.length && !runtimes) || !clis.every((c) => LOCAL_CLI_RE.test(c))) return json({ error: 'invalid_clis', message: 'clis: supported installed runtimes, or a complete managed runtime inventory.' }, { status: 400 });
       const accountId = auth.actor.account_id;
       const wanted = clis.map((cli) => normalizeNotifyTarget({ provider: 'local', device, cli, agent_name: localAgentName(device, cli) }));
       const current = await accountNotifyTargets(env, accountId);
@@ -18874,6 +19038,31 @@ const tdocHandlers = {
       // started the daemon on again is back.
       await unremoveTargets(env, accountId, (k) => wanted.some((w) => notifyKey(w) === k));
       await localTouchSeen(env, accountId, device);
+      // Sent only after a CLI answered the installer's harmless connection check.
+      // Missing on older daemons: registering a binary alone is not proof it can run.
+      const readyClis = Array.isArray(body.ready_clis) ? clis.filter((c) => body.ready_clis.includes(c) && (!runtimes || runtimes.some((r) => r.cli === c && r.state === 'ready'))) : [];
+      const readyKey = `local-agent-ready:${accountId}:${device}`;
+      const priorReady = await env.META.get(readyKey);
+      if (JSON.stringify(readyClis) !== priorReady) await env.META.put(readyKey, JSON.stringify(readyClis));
+      if (runtimes) {
+        let computers = {};
+        const computerKey = `local-computers:${accountId}`;
+        try { computers = JSON.parse(await env.META.get(computerKey)) || {}; } catch {}
+        const checkedAt = typeof body.setup_checked_at === 'string' && body.setup_checked_at.length <= 40 && Number.isFinite(Date.parse(body.setup_checked_at)) ? new Date(body.setup_checked_at).toISOString() : null;
+        const previous = computers[device];
+        const connectedAt = previous?.connected_at && previous.setup_checked_at === checkedAt ? previous.connected_at : new Date().toISOString();
+        const next = { connected_at: connectedAt, setup_checked_at: checkedAt, runtimes: runtimes.map((r) => ({ ...r, state: r.state === 'ready' && !readyClis.includes(r.cli) ? 'needs_check' : r.state })) };
+        if (JSON.stringify(computers[device]) !== JSON.stringify(next)) {
+          if (previous?.setup_checked_at !== checkedAt) delete computers[device];
+          const entries = Object.entries({ ...computers, [device]: next }).slice(-NOTIFY_AGENTS_MAX);
+          await env.META.put(computerKey, JSON.stringify(Object.fromEntries(entries)));
+        }
+      }
+      if (readyClis.length) {
+        await stampOnboardingFor(env, accountId, 'started');
+        await stampOnboardingFor(env, accountId, 'agent_connected');
+        await stampOnboardingFor(env, accountId, 'daemon_connected');
+      }
       return json({ ok: true, device, account_id: accountId, targets: wanted, added: missing.length }, { headers: { 'Cache-Control': 'no-store' } });
     }
 
@@ -18893,10 +19082,12 @@ const tdocHandlers = {
       const accountIds = (await accountGroup(env, auth.actor.account_id)).ids;
       for (const id of accountIds) {
         const list = await loadLocalPending(env, id);
+        const paused = await localPausedMap(env, id);
         if (!list.length) continue;
         const keep = [];
         for (const e of list) {
           if (!isValidSlug(e.slug)) continue;
+          if (paused[e.device] === true) { keep.push(e); continue; }
           // A question this account asked about somebody's doc: same rules,
           // its own record (see handleMyAgent). Answered privately, never
           // with an edit or a comment.

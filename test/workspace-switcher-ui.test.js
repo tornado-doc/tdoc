@@ -167,7 +167,8 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await page.getByRole('heading', { name: 'Agents' }).waitFor();
       const text = await page.locator('#agents').textContent();
       assert.match(text, /Raft · acme.*This computer · juliesmac/s);
-      assert.match(text, /install-launchd/);
+      assert.equal(await page.locator('#agents').getByRole('link', { name: 'Connect a computer', exact: true }).getAttribute('href'), '/setup', 'local setup starts through the guided connection flow');
+      assert.equal(await page.getByRole('link', { name: 'Open guided setup' }).getAttribute('href'), '/setup');
       await page.getByRole('heading', { name: 'Agent access' }).waitFor();
       await page.close();
     });

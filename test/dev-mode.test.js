@@ -56,7 +56,7 @@ const record = async (env, id) => JSON.parse((await env.META.get(`account-onboar
     assert(after.agent_connected === before.agent_connected, 'logout does not reset onboarding');
     // Opening /setup on purpose still works and still starts the journey.
     const direct = await call(env, '/setup', { cookie });
-    assert(direct.status === 200, 'the gate itself still opens');
+    assert(direct.status === 302 && direct.headers.get('location') === '/me?setup=1', 'an explicit setup visit opens the modal over My docs');
   });
 
   await t('re-login: a brand-new account signing in still lands on the gate', async () => {
@@ -65,7 +65,7 @@ const record = async (env, id) => JSON.parse((await env.META.get(`account-onboar
     const cookie = `tdoc_sid=${hex('b')}`;
     await env.META.put(`session:${hex('b')}`, JSON.stringify({ login: 'newbie', account_id: 'acct-new', name: 'newbie', created: new Date().toISOString() }));
     const r = await call(env, '/setup?via=signin', { cookie });
-    assert(r.status === 200, `new account sees the gate, got ${r.status}`);
+    assert(r.status === 302 && r.headers.get('location') === '/me?setup=1', `new account opens setup over My docs, got ${r.status}`);
     assert((await record(env, 'acct-new')).started, 'and the visit starts the journey');
   });
 
@@ -147,8 +147,10 @@ const record = async (env, id) => JSON.parse((await env.META.get(`account-onboar
     const cookie = await emailSession(env, hex('d'), { email: 'julie@example.com', account_id: 'acct-julie' });
     const me = bootData(await (await call(env, '/me', { cookie })).text(), '__TDOC_APP_BOOT__');
     assert(me.debug === true && me.devMode && me.devMode.on === true, `on by default: ${JSON.stringify({ debug: me.debug, devMode: me.devMode })}`);
-    const setup = bootData(await (await call(env, '/setup', { cookie })).text(), '__TDOC_APP_BOOT__');
-    assert(setup.debug === true && setup.devMode.on === true, '/setup carries it too');
+    const setupRoute = await call(env, '/setup', { cookie });
+    assert(setupRoute.status === 302 && setupRoute.headers.get('location') === '/me?setup=1', 'setup uses the docs hub');
+    const setup = bootData(await (await call(env, setupRoute.headers.get('location'), { cookie })).text(), '__TDOC_APP_BOOT__');
+    assert(setup.debug === true && setup.devMode.on === true, 'the hub beneath setup carries it too');
     const get = await (await call(env, '/api/me/dev-mode', { cookie })).json();
     assert(get.ok && get.on === true, 'GET says on');
   });

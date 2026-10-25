@@ -1,6 +1,70 @@
 # Onboarding tdoc
 
-> **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. Execute every step in order, ask the user for confirmation on browser-side actions, and re-probe state with `bin/tdoc-doctor --json` after each step.
+> **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. For new tdoc.dev users, follow Default web onboarding below. Background automation is optional; its portrait recipe is optional. Ask for confirmation on browser-side actions and re-probe state with `bin/tdoc-doctor --json` when using that manual path.
+
+## Default web onboarding — background helper is optional
+
+Open `https://tdoc.dev/setup`. A centered dialog over My docs starts with two
+equal choices: **Use with your AI** and **Connect for automatic updates**.
+Neither is preselected. Local Claude Code / Codex users may choose either path.
+Do not require a daemon or always-on computer for interactive use.
+
+### Use with your AI
+
+Copy the setup instruction into an existing ChatGPT Work, Cowork, Grok Bot,
+Claude Code or Codex conversation with command and network access. The AI reads
+`https://tdoc.dev/SKILL.md`, installs/prepares the official tools without a
+background service, signs in through browser approval when needed, then runs
+`~/.local/bin/tdoc connect CODE` using the exact fresh code from the instruction.
+
+The browser waits for that account's tools to confirm this setup attempt.
+Copying, an old token, a historical doc or an unrelated computer heartbeat does
+not complete it. Codes expire after 15 minutes and another account cannot use
+them. The confirmation creates no document and starts no daemon. Cloud session
+files may be temporary; do not promise skills persist beyond that environment.
+
+### Connect for automatic updates (optional)
+
+The default action copies one setup instruction into Claude Code or Codex on
+the computer being connected. The AI installs the official tdoc skill and tools,
+connects the account through browser approval, checks the existing AI account,
+and starts a user service. **Use Terminal instead** exposes the alternate flow:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash -s -- --install-only
+~/.local/bin/tdoc setup
+```
+
+The first command installs the tools and skill, preserving an existing skill.
+The second checks AI execution and starts launchd on macOS or systemd on Linux
+(Windows uses WSL). Node.js 18+, curl and tar are required. Installation alone
+never starts a service. The computer must stay awake to pick up work.
+
+Runtime detection stays in the connection step. There is no computer dropdown
+or separate Choose AI page. Missing/sign-in guidance stays inline. Only a live,
+verified AI enables **Finish setup**, which saves the chosen AI as the fallback
+for docs with no selected agent. It does not create a practice doc.
+
+### Setup ends here; the tutorial is optional
+
+Both paths finish at **You’re ready**. **Go to my docs** exits setup without
+creating anything. **Try the tutorial** separately starts the existing first-doc
+recipe for interactive use, or a private practice doc for automatic updates.
+Document creation, comments and AI revision belong to that tutorial.
+
+### Manage later in tdoc
+
+**My docs → Settings → Computers & AI** shows every connected computer, its
+connection state and detected AI versions/readiness. Choose **AI for new docs**,
+**Pause updates**, **Resume updates**, **Check setup** or **Connect a computer**
+without restarting onboarding. A pause survives helper restarts/registrations,
+stops new queued work from being picked up, and preserves waiting comments.
+A run already executing can finish. Account access is managed separately in
+**Agent access**. Pausing does not uninstall the service or revoke credentials.
+
+The CLI commands `~/.local/bin/tdoc status`, `stop`, `setup` and `uninstall` remain
+available. Uninstall keeps docs, logs and sign-in. Self-hosting and manual skill
+installation remain below; a portrait is never required for web onboarding.
 
 ## What you are installing
 

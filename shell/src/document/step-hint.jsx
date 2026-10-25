@@ -55,7 +55,7 @@ export function docStep(record, slug, canHandoff = true) {
 // version says what to do with a mouse and what will happen when they do.
 const LINES = {
   comment: 'Select a sentence to comment.',
-  handoff: 'Ask your agent to fix it.',
+  handoff: 'Send your comment to your AI.',
   waiting: 'Waiting for your agent…',
   reading: 'Your agent is reading…',
   stuck: 'Check your agent’s window.',

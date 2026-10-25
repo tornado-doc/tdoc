@@ -35,7 +35,7 @@ if (appRoot && appBoot) {
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;
   else if (appBoot.page === 'activate') page = <ActivatePage boot={appBoot} />;
-  else if (appBoot.page === 'setup') page = <SetupGate boot={appBoot} />;
+  else if (appBoot.page === 'setup') page = <><DocsHub boot={appBoot} /><SetupGate boot={appBoot} /></>;
   else if (appBoot.page === 'team-join') page = <TeamJoinPage boot={appBoot} />;
   else page = <NeutralLanding boot={appBoot} />;
   createRoot(appRoot).render(page);

@@ -13,8 +13,10 @@
 //                     [--runner cli|oar]
 //   tdoc-daemon once  [same flags]      one poll, for cron or launchd
 //   tdoc-daemon status                  what is registered, running, pending
-//   tdoc-daemon install [flags]         macOS: run it at login (LaunchAgent)
-//   tdoc-daemon uninstall               stop it and remove the LaunchAgent
+//   tdoc-daemon connect CODE             connect this conversation, no service
+//   tdoc-daemon setup [--cli claude,codex] sign in, verify AI, start at login
+//   tdoc-daemon stop | uninstall         pause / remove the background service
+//   tdoc-daemon install [flags]         macOS: run it at login
 //   tdoc-daemon state                   local state as JSON, no network
 //   tdoc-daemon install-launchd [flags] print a LaunchAgent plist (not loaded)
 //   tdoc-daemon connect-team CODE [--base URL] [--no-start]
@@ -38,6 +40,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { connect, setup, uninstall, stopService, readSetup } = require('./daemon-setup.js');
+const { inspectLocalRuntimes } = require('./local-runtimes.js');
 const { runAgentVia, detectClis, knownClis, findOnPath, RUNNERS, claudeAllowedTools, TDOC_ASK_SCRIPTS } = require('./agent-runners.js');
 
 const HOME = process.env.HOME || os.homedir();
@@ -102,6 +106,7 @@ function settings(args) {
   return {
     device: deviceName(args.device),
     clis,
+    managed: args.managed === 'true',
     interval: Math.max(15, Number(args.interval) || 60),
     workdir: args.workdir ? path.resolve(String(args.workdir)) : path.join(DAEMON_DIR, 'work'),
     timeoutMs: Math.max(60, Number(args.timeout) || 1800) * 1000,
@@ -217,7 +222,14 @@ function buildAskPrompt({ handoff, device }) {
 let stopping = false; // set by SIGINT/SIGTERM in `start`; the current run finishes
 
 async function register(cfg, st) {
-  const r = await api(cfg, 'POST', '/api/notify/local/register', { device: st.device, clis: st.clis });
+  const installed = readSetup();
+  const ready = Array.isArray(installed?.clis) ? installed.clis : [];
+  const runtimes = st.managed ? inspectLocalRuntimes(installed || {}) : null;
+  // A managed service can report a connected computer with no usable AI.
+  // Only verified, still-installed runtimes may execute queued work.
+  if (runtimes) st.clis = runtimes.filter((r) => r.state === 'ready').map((r) => r.cli);
+  const clis = runtimes ? runtimes.filter((r) => r.state !== 'not_installed').map((r) => r.cli) : st.clis;
+  const r = await api(cfg, 'POST', '/api/notify/local/register', { device: st.device, clis, ready_clis: ready.filter((cli) => st.clis.includes(cli)), ...(runtimes ? { runtimes, setup_checked_at: installed?.checked_at } : {}) });
   log(`registered ${st.clis.map((c) => `${c} on ${st.device}`).join(', ')} at ${new URL(cfg.base).host}${r.added ? ` (${r.added} new)` : ''}`);
   return r;
 }
@@ -359,7 +371,7 @@ function runningPid() {
 async function cmdStart(args) {
   const cfg = readConfig();
   const st = settings(args);
-  if (!st.clis.length) throw new Error(`no CLI found on PATH (looked for ${knownClis().join(', ')}); pass --cli or install one`);
+  if (!st.clis.length && !st.managed) throw new Error(`no CLI found on PATH (looked for ${knownClis().join(', ')}); pass --cli or install one`);
   const other = runningPid();
   if (other) throw new Error(`a tdoc-daemon is already running (pid ${other}); stop it first or use \`once\``);
   ensureDir(DAEMON_DIR);
@@ -371,7 +383,7 @@ async function cmdStart(args) {
   process.on('SIGTERM', () => stop('SIGTERM'));
   let first = true;
   while (!stopping) {
-    try { await once(cfg, st, state, { registerFirst: first }); first = false; }
+    try { await once(cfg, st, state, { registerFirst: first || st.managed }); first = false; }
     catch (e) {
       log(`poll failed: ${e.message}`);
       if (e.status === 401) { log(cfg.teamAgent ? 'this team agent was removed; stopping' : 'this sign-in is no longer valid; sign in again with tdoc-publish --signin-only'); break; }
@@ -389,7 +401,7 @@ async function cmdStart(args) {
 async function cmdOnce(args) {
   const cfg = readConfig();
   const st = settings(args);
-  if (!st.clis.length) throw new Error(`no CLI found on PATH (looked for ${knownClis().join(', ')}); pass --cli or install one`);
+  if (!st.clis.length && !st.managed) throw new Error(`no CLI found on PATH (looked for ${knownClis().join(', ')}); pass --cli or install one`);
   const state = loadState();
   const n = await once(cfg, st, state);
   if (!n) log('nothing pending');
@@ -622,12 +634,15 @@ function localState() {
   const cmd = args._[0];
   if (args.help || !cmd) { console.log(usage()); process.exit(cmd ? 0 : 2); }
   try {
-    if (cmd === 'start') await cmdStart(args);
+    if (cmd === 'connect') await connect(args._[1]);
+    else if (cmd === 'setup') await setup(args);
+    else if (cmd === 'stop') { stopService(); console.log('Background service paused. Resume with tdoc setup.'); }
+    else if (cmd === 'uninstall') { if (readSetup()) uninstall(); else cmdUninstall(); }
+    else if (cmd === 'start') await cmdStart(args);
     else if (cmd === 'once') await cmdOnce(args);
     else if (cmd === 'status') await cmdStatus(args);
     else if (cmd === 'install-launchd') cmdInstallLaunchd(args);
     else if (cmd === 'install') await cmdInstall(args);
-    else if (cmd === 'uninstall') cmdUninstall();
     else if (cmd === 'state') console.log(JSON.stringify(localState()));
     else if (cmd === 'connect-team') await cmdConnectTeam(args);
     else { console.error(`unknown command: ${cmd}\n\n${usage()}`); process.exit(2); }

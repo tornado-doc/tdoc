@@ -1534,3 +1534,7 @@ line and continue. If it reports `TDOC_UPDATE_AVAILABLE`, tell the user before
 the rest of the work and offer `/tdoc update --yes`. If it reports
 `TDOC_UPDATE_DIVERGED`, tell them to commit/stash or re-clone; do not run
 `--yes`. Quiet dirty-tree skips need no user-facing warning.
+
+### Connect a conversation without a background helper
+
+When a person gives you a tdoc onboarding instruction with a connection code, finish setup before offering to create a document. Read this skill and prepare its tools. If needed install the official tools and skill with `curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash -s -- --install-only`, then run `~/.local/bin/tdoc connect CODE` using the exact code from their instruction. Ask them to approve the tdoc account in their browser when requested. This confirms the tools can reach that same account; it does not start a service, register a local runtime, or create a doc. Do not replace this with `tdoc setup`, which enables automatic background updates. When confirmed, tell the person to return to tdoc. Creating a doc and trying comments are separate, optional tutorial steps. A cloud conversation's files or skills may be temporary: do not promise installation persists beyond that environment.

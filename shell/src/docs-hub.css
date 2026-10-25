@@ -887,3 +887,10 @@
 /* /f/<share>: the folder icon sits on the title's baseline. */
 .tdoc-folder-share-icon { vertical-align: -4px; margin-right: 8px; }
 .tdoc-folder-share-meta { margin-top: 0; }
+
+.tdoc-computer-default { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+.tdoc-computer-row { align-items: flex-start; gap: 14px; padding: 18px; }
+.tdoc-computer-runtimes { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: 13px; }
+.tdoc-computer-runtimes li { display: flex; flex-wrap: wrap; gap: 10px; }
+.tdoc-computer-runtimes span { color: var(--td-muted); }
+@media (max-width: 600px) { .tdoc-computer-row { flex-wrap: wrap; } .tdoc-computer-row .doc-info { flex: 1 1 calc(100% - 40px); } .tdoc-computer-row .tdoc-dev-actions { flex-wrap: wrap; margin-left: 34px; } .tdoc-computers-head { flex-direction: column; align-items: flex-start; gap: 12px; } .tdoc-computer-row .tdoc-fbspace-btn { min-height: 44px; } }

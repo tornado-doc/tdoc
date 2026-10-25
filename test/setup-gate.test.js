@@ -54,10 +54,11 @@ const server = read('server/server.js');
 
 console.log('\nsetup gate + onboarding');
 
-t('the gate is a route on both hosts, not a modal', () => {
+t('setup opens the shared dialog over the docs hub', () => {
   assert(worker.includes("if (p === '/setup' && (method === 'GET' || method === 'HEAD'))"), 'worker serves /setup');
   assert(server.includes("if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD'))"), 'the local server serves it too');
-  assert(worker.includes("page: 'setup'") && server.includes("page: 'setup'"), 'both boot the same page');
+  assert(worker.includes("Location: '/me?setup=1'"), 'signed-in setup opens over the real docs hub');
+  assert(gate.includes('<AppDialog open={open}'), 'shared modal surface');
 });
 
 t('a host that can sign people in does not ask them to say so twice', () => {
@@ -70,35 +71,15 @@ t('a host that can sign people in does not ask them to say so twice', () => {
   assert(gate.includes("Sign-in is not configured on this host."), 'and says so plainly where there is none');
 });
 
-t('only the record moves the gate, and `paired` counts', () => {
-  // An account whose agent already holds a token waits forever if the page
-  // reads only the record's own stamps: nothing re-stamps a connection that
-  // already happened, and clearing the record puts anyone in that state.
-  assert(gate.includes('const connected = Boolean(paired || record?.agent_connected || record?.published_first);'),
-    'paired is what this page is asking about');
-  assert(gate.includes('const POLL_MS = 3000'), 'it asks the server, it does not wait for a reload');
-});
-
-t('the prompt is the one line /start shows, and that line connects first', () => {
-  // One paste everywhere. FIRST-DOC.md signs the machine in (its Step 1b)
-  // before it reads anything, so the gate still sees the agent turn up early.
-  assert(gate.includes('export const SETUP_PROMPT = FIRST_DOC_LINE;'), '/setup has its own line again');
-  assert(copy.includes('export const FIRST_DOC_LINE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;'), 'the shared line drifted');
-  const firstDoc = read('FIRST-DOC.md');
-  const connect = firstDoc.indexOf('## Step 1b — connect first');
-  assert(connect > 0 && connect < firstDoc.indexOf('## The clock') && firstDoc.includes('--signin-only'), 'installing is not connecting');
-});
-
-t('works with: Claude Code and Codex only', () => {
-  assert(gate.includes('<span className="sg-sr">Claude Code and Codex</span>'), 'the screen-reader list still names other apps');
-  assert(!/ChatGPT|Grok/.test(gate.slice(gate.indexOf('function WorksWith'), gate.indexOf('function ChatWindow'))), 'works with still names ChatGPT or Grok');
-  const marks = read('shell/src/agent-marks.jsx');
-  const cluster = marks.slice(marks.indexOf('export function AgentMarks'));
-  assert(cluster.includes('<ClaudeMark') && cluster.includes('<OpenAIMark') && !cluster.includes('<GrokMark'), 'the cluster is not Claude Code + Codex');
+t('automatic detection is local, while interactive conversations remain supported', () => {
+  const inventory = gate.slice(gate.indexOf('const RUNTIMES ='), gate.indexOf('export function SetupGate'));
+  assert(inventory.includes("value: 'claude'") && inventory.includes("value: 'codex'"), 'managed local providers');
+  assert(!/ChatGPT|Grok/.test(inventory), 'cloud conversations are not reported as detected local runtimes');
+  assert(gate.includes('Use with your AI') && gate.includes('Connect for automatic updates'), 'interactive use is optional and explicit');
 });
 
 t('a refused clipboard says so instead of doing nothing', () => {
-  assert(gate.includes('selectContents(promptRef.current)') && gate.includes('COPY_FALLBACK'),
+  assert(gate.includes('selectContents(ref.current)') && gate.includes('COPY_FALLBACK'),
     'the line is left selected and the status says why');
 });
 
@@ -216,11 +197,11 @@ t('a row cannot come before the row it depends on', () => {
   const ids = (r) => steps(r, '/d/x').filter((s) => s.locked).map((s) => s.id);
   assert(JSON.stringify(ids({})) === JSON.stringify(['create', 'comment', 'revise']),
     `nothing but the connect row is offered to an empty record: ${JSON.stringify(ids({}))}`);
-  assert(JSON.stringify(ids({ agent_connected: 'X' })) === JSON.stringify(['comment', 'revise']),
+  assert(JSON.stringify(ids({ daemon_connected: 'X' })) === JSON.stringify(['comment', 'revise']),
     'a connected agent unlocks making a doc, and nothing past it');
-  assert(JSON.stringify(ids({ agent_connected: 'X', first_doc: 'd' })) === JSON.stringify(['revise']),
+  assert(JSON.stringify(ids({ daemon_connected: 'X', first_doc: 'd' })) === JSON.stringify(['revise']),
     'a doc unlocks commenting on it');
-  assert(ids({ agent_connected: 'X', first_doc: 'd', commented: 'X' }).length === 0,
+  assert(ids({ daemon_connected: 'X', first_doc: 'd', commented: 'X' }).length === 0,
     'and a comment unlocks the handoff');
   // You cannot comment on a doc that does not exist, or ask an agent to fix
   // comments nobody has left. A locked row is shown and not offered.
@@ -233,44 +214,6 @@ t('a row cannot come before the row it depends on', () => {
     'and hovering one does not trade its strike for an underline');
   assert(list.includes("step.done ? 'done' : step.locked ? 'locked' : ''"), 'and says so in its class');
   assert(listCss.includes('.onb-card li.locked .onb-label'), 'which the stylesheet greys');
-});
-
-t('an unfinished row is a way forward, never a dead line', () => {
-  // The person who started setup, left and came back lands here. Without a
-  // link, the row naming the thing they have not done offers them nothing.
-  assert(/id: 'connect'[^}]*href: '\/setup'/.test(list), 'the connect row leads back to the gate');
-  // Making a doc is asking an agent for one, so the row leads to the page that
-  // does that -- not to a fork asking which kind of doc they would like.
-  // Every row opens the page for its own step, finished or not: that page is
-  // where the step's state is written, and a finished one should say so.
-  assert(/id: 'create'[^}]*href: '\/setup\?step=doc'/.test(list), 'the create row leads to its own page, always');
-  const rows = list.match(/\{ id: '[a-z]+', label:[^\n]*\},/g) || [];
-  assert(rows.length === 4 && rows.every((row) => row.includes('href:')),
-    'every row carries an href — no row is a dead line while its neighbours are links');
-  // That page exists to watch a FIRST doc arrive. Somebody who has one and
-  // wants another is served by Create a doc, at the top of this same page.
-  assert(!gate.includes('Make another tdoc'), 'the gate no longer offers a second doc');
-  assert(!list.includes('onCreate'), 'and the row does not reach into the hub\'s menu');
-});
-
-t('the second ask is the same ask, on the same route', () => {
-  // Two pages would mean two of everything: two layouts, two polls, two sets
-  // of words for "paste this and watch". It is one page with a second line.
-  assert(worker.includes("const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';"), 'the worker reads the step');
-  assert(server.includes("const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';"), 'and so does the local server');
-  assert(worker.includes('          step,') && server.includes("step: step === 'doc' ? 'doc' : 'connect',"), 'both boot it');
-  // One title for both steps, on both hosts. `?step=doc` is a request, not a
-  // fact -- the page falls back to step 1 for anybody who has not connected
-  // yet, and a tab reading "make a doc" over a screen headed "Connect your
-  // agent" is the URL talking over the product. Telling them apart needs the
-  // account's record, which this route renders before reading.
-  assert(worker.includes("title: 'tdoc - set up',") && server.includes("title: 'tdoc - set up',"),
-    'neither host lets the URL name a step the page may not be on');
-  assert(!worker.includes("title: step === 'doc'") && !server.includes("title: step === 'doc'"),
-    'and neither picks the title from the query string');
-  assert(gate.includes("const step = wantsDoc && connected ? 'doc' : 'connect';"),
-    'and an unconnected visitor is asked to connect first, whichever link they arrived on');
-  assert(gate.includes('export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;'), 'the doc line is the skill\'s own, reused not rewritten');
 });
 
 t('opening the gate is beginning, whatever the browser reports', () => {
@@ -294,115 +237,6 @@ t('opening the gate is beginning, whatever the browser reports', () => {
   // asked to be onboarded.
   assert(worker.includes("if (!(record && record.started && !record.seeded_comment)) return;"), 'the seeded question still waits for a journey');
   assert(!/if \(step && step !== 'started'/.test(worker), 'and no step quietly implies one');
-});
-
-t('the wait is timed from the page, not from a button', () => {
-  // The page cannot see a paste, and cannot see a selection copied by hand
-  // either. Timing the doctor line from a click meant the one person most
-  // likely to be stuck -- the one who never pressed Copy -- was the one it
-  // never appeared for.
-  assert(gate.includes('const waitingSince = useRef(null);') && !gate.includes('copiedAt'), 'the clock is the page\'s');
-  assert(gate.includes("if (loaded && signedIn && state !== 'done' && !waitingSince.current) waitingSince.current = Date.now();"),
-    'and it starts when the waiting does');
-  assert(gate.includes('if (waitingSince.current) setElapsed(Date.now() - waitingSince.current);'), 'the poll reads it');
-  assert(!/copied \? \(step === 'doc'/.test(gate) && !gate.includes("'Waiting for you to paste the prompt.'"),
-    'and the status stops claiming to know whether they pasted');
-});
-
-t('the second ask is the one place with a choice in it', () => {
-  // Marching everybody through the same portrait is what made the old version
-  // feel like a kidnapping to anyone who already knew what they wanted.
-  assert(/DOC_CHOICES = \[[\s\S]*?id: 'own'[\s\S]*?id: 'portrait'[\s\S]*?\]/.test(gate), 'two live choices');
-  assert(gate.includes('const [choice, setChoice] = useState(null);'), 'and neither is chosen for them');
-  // Choosing is the question this screen asks; everything downstream of it
-  // waits until it has been answered.
-  assert(gate.includes("{step === 'doc' && !choice ? null : ("), 'no instructions before there is something to paste');
-  // The replay is a recording of pasting THIS line, so it cannot run before
-  // there is one -- not for a visitor with no account to paste into, and not
-  // before they have said what the doc is about.
-  // Before there is a line, the same desk is shown with no app open -- which
-  // is true, and is the same desk. A different window in a different style
-  // here was two windows in one product.
-  assert(gate.includes("? <ConnectReplay prompt={null} />"),
-    'and the picture beside them types nothing either — nor for somebody with no account to use it');
-  assert(replay.includes('const idle = !prompt;'), 'no line, no app open');
-  // A doc that already exists is not a question. The whole ask goes, rather
-  // than sitting there under a line saying it is already done.
-  assert(gate.includes("{state === 'waiting' && !(step === 'doc' && !choice) ? ("), 'and no wait either');
-});
-
-t('a subject typed on the page composes the line, and an empty one does not', () => {
-  // Run the real thing rather than grepping it: the prefix and the suffix are
-  // the two halves a reader has to trust.
-  // eslint-disable-next-line no-new-func
-  const compose = new Function(`${gate.match(/export const DOC_SUBJECT_PREFIX[\s\S]*?export const docSubjectPrompt = [^;]+;/)[0].replace(/export /g, '')}; return docSubjectPrompt;`)();
-  // A sentence, not a slash command: the line is pasted into a conversation
-  // with an agent, and the skill's own front matter says a plain request is
-  // enough -- "no need for the word tdoc". Naming it is still worth doing, so
-  // an agent with many skills does not have to guess which one this is.
-  assert(compose('pricing') === 'Use tdoc to write a doc about pricing, publish it, and give me the link',
-    `the prefix and suffix wrap what they typed: ${compose('pricing')}`);
-  assert(!gate.includes("'/tdoc new"), 'and no slash command is handed to anybody');
-  assert(gate.includes("const promptReady = step !== 'doc' || choice === 'portrait' || Boolean(subjectTrimmed);"),
-    'an untyped subject is not a line anybody should be handed');
-  assert(/className=\{`sg-prompt-copy\$\{copied \? ' copied' : ''\}`\}\s*\n\s*onClick=\{copy\}\s*\n\s*disabled=\{!promptReady\}/.test(gate),
-    'so Copy is refused until it is one');
-});
-
-t('the portrait line drops a preamble that is false by then', () => {
-  // FIRST_DOC_RECIPE opens with "Set up tdoc and", which is true on the
-  // landing page and a lie on a screen only a connected account can reach.
-  assert(gate.includes('export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;'), 'same recipe, no setup preamble');
-  assert(!/docPrompt[\s\S]{0,80}FIRST_DOC_RECIPE/.test(gate) && !gate.includes("import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_RECIPE"),
-    'and the landing page\'s line is not what gets copied here');
-  assert(copy.includes("export const RECIPE_URL ="), 'the URL itself lives in the shared copy, imported not retyped');
-});
-
-t('forking is drawn and deliberately not wired', () => {
-  // Its whole value was a first doc in ten seconds with no agent, and the
-  // seeding delivers exactly that, earlier and with no click. The only
-  // forkable template today is the one already in their Onboarding folder.
-  assert(/DOC_CHOICES[\s\S]{0,400}?\]/.test(gate) && !gate.includes("id: 'fork'"), 'no fork choice ships');
-  assert(!worker.includes('seedOnboardingDocFor'), 'and nothing is forked into their account behind their back either');
-  assert(gate.includes('second thing to fork'), 'and the reason is written down, not lost');
-});
-
-t('nothing is drawn before the server has answered once', () => {
-  // An empty record reads as "not connected", so a page asked for the doc step
-  // paints the connect step for a beat first. Same class of flicker as the one
-  // the old wizard had: a guess rendered while the answer is in flight.
-  assert(gate.includes('const [loaded, setLoaded] = useState(Boolean(preview));') && gate.includes('preview = null') && gate.includes('if (!cancelled) setLoaded(true);'),
-    'the first poll is what opens the page');
-  assert(gate.includes("{signedIn && !loaded ? null : ("), 'the heading waits for it');
-  assert(gate.includes("{signedIn && !loaded ? null : signedIn ? ("), 'and so does the column under it');
-  assert(gate.includes("const scene = signedIn && !loaded ? null"), 'the scene beside them waits too');
-});
-
-t('both steps are one layout with a status line under it', () => {
-  // Swapping the doc step into a second, emptier face when its doc arrived
-  // made a page out of a sentence: whoever landed on it was told their first
-  // tdoc is live and offered nothing to do, and whoever wanted another one had
-  // to find their way back to the question.
-  assert(!gate.includes('docDone') && !gate.includes('const asking'), 'no second face');
-  assert(gate.includes("{step === 'doc' ? (\n                  <div className=\"sg-choices\""), 'the ask stays on the doc step');
-  assert(gate.includes("{state === 'done' ? (\n                    <div className=\"sg-status done\">"), 'and the line below it changes');
-  assert(/sg-primary\$\{state === 'done' \? '' : ' off'\}/.test(gate), 'one button, off until the step is done — the same as connect');
-  // Read once, not live: the heading must not rename itself from "your first"
-  // to "another" in front of somebody watching their first arrive.
-  assert(list.includes("done: Boolean(r.first_doc)"), 'and row 2 reads the same field the gate does');
-});
-
-t('the doc step answers on arrival', () => {
-  // It briefly asked a harder question -- "did a doc appear since this page
-  // opened" -- because it also had to serve somebody making their SECOND one,
-  // and a record whose doc stamps are written once cannot see a second doc.
-  // That job moved to Create a doc, so the hard question went with it.
-  assert(gate.includes("const ownDoc = record?.first_doc || null;"), 'the journey names the doc');
-  assert(gate.includes("? (ownDoc ? 'done' : 'waiting')"), 'and having one is what done means');
-  // Which is what lets row 2 open this page after it is finished and be told
-  // so, rather than being asked again for something it already has.
-  assert(!gate.includes('newestDoc') && !gate.includes('known.current'), 'no catalog, no memory of what was here before');
-  assert(!gate.includes("getOnboarding(wantsDoc"), 'and the poll is back to two reads');
 });
 
 t('a deleted seed doc does not leave rows pointing at a 404', () => {
@@ -709,7 +543,7 @@ t('a page offers only the states it can show', () => {
   assert(states('document') === "['published', 'commented', 'revised']", 'a doc shows its row: comment, handoff, gone');
   assert(states('hub') === 'DEBUG_STATES', 'and the checklist has a face for all six');
   // Each surface says which one it is.
-  assert(gate.includes("surface={step === 'doc' ? 'doc' : 'connect'}"), 'the gate names its step');
+  assert(!/<DebugBar\b/.test(gate), 'the modal uses the docs hub debug surface behind it');
   assert(shell.includes("surface={config.isLanding ? 'landing' : 'document'}"), 'a document names itself');
   assert(hub.includes('surface="hub"') && /devModeBoot\(env, s\),\n\s*\]\);[\s\S]{0,2000}?\bdebug: dev\.debug,/.test(worker),
     'and the hub, where the checklist is');
@@ -806,20 +640,6 @@ t('a config file is a claim, not a fact', () => {
   assert(cli.includes("grep -qE 'invalid_token|sign_in_required|token_required'"), 'and a publish that hits one says what to do');
 });
 
-t('a finished gate stops asking, and the column fits a laptop', () => {
-  // The poll asks the server what the agent has done. Once it has done it the
-  // question stops being a question, and the page was still asking it every
-  // three seconds for as long as the tab stayed open.
-  assert(gate.includes('if (!settled.current) timer = window.setTimeout(tick, POLL_MS);'), 'the loop ends when the answer arrives');
-  assert(gate.includes("settled.current = state === 'done';"), 'and it reads the current state, not the one the effect closed over');
-  // The tallest this column gets -- the second ask with a subject typed into
-  // it -- was measured 32px past the bottom of an 800px window, which put the
-  // only button on the screen out of sight. A vh clamp cannot buy that back:
-  // the overflow is one fixed column against a shrinking window.
-  assert(/@media \(max-height: 870px\) \{[^}]*\.sg-mid \{ padding-top: 26px; \}/s.test(gateCss),
-    'a short window gets the top margin back');
-});
-
 t('one window, drawn from a real one', () => {
   // There was a copy of the window per scene, which is how the second one
   // ended up bouncing an app in a dock on a screen where no app is launched.
@@ -850,64 +670,6 @@ t('one window, drawn from a real one', () => {
   assert(/<Composer typing=\{typing\} \/>/.test(windowElement)
     && /typing=\{[^}]*phase\(t, T\.paste\)[^}]*\}/.test(replay),
     'and what is being pasted goes into it, before it is sent');
-});
-
-t('the dock only launches on the script that has a launch in it', () => {
-  // The bounce and the running-dot are the connect script's own beat -- the
-  // click that opens the app. The doc script has no such beat: the window is
-  // already open and the person is typing into it. Overriding `wake` alone
-  // left the icon jumping at 1650ms of a timeline it was not on, drifting
-  // against the typing because that script's length moves with the line.
-  assert(replay.includes('function Dock({ t, wake: fixed, launch = true })'), 'the beat is a parameter');
-  assert(replay.includes('const press = launch ? phase(t, T.dockPress) : 0;'), 'and it is the only thing that presses the icon');
-  assert(replay.includes('<Dock t={t} wake={1} launch={false} />'), 'the doc replay opens no app');
-});
-
-t('every replay is wound up before it is started', () => {
-  // A clock with no length is a stopped clock: `% undefined` is NaN, every
-  // style derived from it is dropped by the browser as invalid, and the scene
-  // holds its t=0 frame for ever. Step 1 shipped like that for exactly as long
-  // as it took to run the journey by hand -- an empty desk with an approval
-  // card floating on it -- because the hook grew a `total` for the doc step and
-  // this call site was not updated. Neither the hook nor a default can catch
-  // that; only counting the call sites can.
-  const calls = replay.match(/useClock\([^)]*\)/g) || [];
-  assert(calls.length >= 2, `expected a clock per scene, found ${calls.length}`);
-  for (const call of calls) {
-    if (call.startsWith('useClock(running')) continue;
-    assert(call.split(',').length >= 2, `${call} starts a clock with no length`);
-  }
-  assert(replay.includes('useClock(!reduced && !idle, REPLAY_MS)'), 'the connect replay runs for REPLAY_MS, and not at all with no line');
-  // The doc replay is also gated on the reader having stopped typing: the
-  // composer mirrors the field keystroke for keystroke, and the take is held
-  // until the line settles. Sending on a timer posted a half-typed subject and
-  // published a doc about it mid-word.
-  assert(/useClock\(!reduced && settled, s\.total, line,/.test(replay),
-    'and the doc replay only once the line has stopped changing, restarting on every keystroke');
-  assert(/const SETTLE_MS = \d+;/.test(replay) && /setTimeout\(\(\) => setSettled\(true\), SETTLE_MS\)/.test(replay),
-    'settling is a timer on the line, not a beat in the script');
-  // And a line is not the same as a subject. Until one is typed the prompt is
-  // composed from the field's PLACEHOLDER -- a complete sentence nobody wrote
-  // -- and the take played it in full, publishing a doc about "what it should
-  // be about" while the field was still empty. The Copy button already refuses
-  // that same line.
-  assert(/if \(!line \|\| !ready\) return undefined;/.test(replay),
-    'no take until there is a subject, not merely a line');
-  assert(/<DocReplay prompt=\{prompt\} slug=\{replaySlug\} ready=\{promptReady\} \/>/.test(gate),
-    'and the gate passes the same readiness the Copy button uses');
-  assert(/typing=\{!ready \? null :/.test(replay),
-    'nor is the placeholder line typed into the composer');
-  // Nor left on screen from the clock's resting frame. A stopped clock parks
-  // at `total - 2200` -- the published-and-done still, which is right for
-  // `prefers-reduced-motion` and wrong for a take that has not started: it
-  // showed a finished document about the placeholder next to an empty field.
-  // The two stops mean opposite things, so the caller says where to rest.
-  assert(/useClock\(running, total, restart, restingAt\)/.test(replay), 'the clock takes a resting frame');
-  assert(/setT\(restingAt === undefined \? total - 2200 : restingAt\)/.test(replay),
-    'and uses it, defaulting to the finished still');
-  assert(/useClock\(!reduced && settled, s\.total, line, reduced \? undefined : 0\)/.test(replay),
-    'the doc take rests at the beginning unless motion is the thing being avoided');
-  assert(!/\btype: \[t0/.test(replay), 'and nothing re-types what the reader already typed');
 });
 
 t('the one button on the gate is never below the fold', () => {
@@ -952,6 +714,37 @@ t('nothing in the column a person reads is smaller than 12.5px', () => {
     .map((m) => parseFloat(m.match(/([0-9.]+)px/)[1]));
   const small = sizes.filter((n) => n > 0 && n < 12.5);
   assert(!small.length, `sub-12.5px type on the gate: ${small.join(', ')}`);
+});
+
+
+// Daemon setup supersedes the old prompt/portrait gate. Route behavior and
+// ownership are exercised in daemon-onboarding.test.js; browser transitions
+// and the two matching replays are exercised in daemon-onboarding-browser.test.js.
+t('setup asks for the terminal installer and uses server-confirmed local agents', () => {
+  assert(gate.includes('bin/tdoc-install | bash'), 'official installer command');
+  assert(gate.includes("stage === 'connect' ? { daemon: true }"), 'polls actual local agents');
+  assert(gate.includes("a.ready && a.status === 'active'"), 'both a verified AI and an active device');
+  assert(!gate.includes('paired || record'), 'a historical token cannot complete setup');
+});
+t('connection errors remain actionable, and clipboard refusal preserves manual copy', () => {
+  assert(gate.includes('Ask your AI to check the setup and tdoc sign-in.'), 'points at the real install surface');
+  assert(gate.includes('~/.local/bin/tdoc status'), 'diagnostics run outside agent chat');
+  assert(gate.includes('selectContents(ref.current)'), 'manual copy fallback');
+});
+t('the real connection remains visible when a computer stops responding', () => {
+  assert(gate.includes('timer = window.setTimeout(tick, POLL_MS)'), 'does not stop polling on historical success');
+  assert(gate.includes('window.clearTimeout(timer)'), 'unmount clears the timer');
+});
+t('the chosen AI opens a private practice doc through the account API', () => {
+  assert(gate.includes('createOnboardingPractice({ device: chosen.device, cli: chosen.cli })'), 'explicit target');
+  assert(gate.includes('location.assign(result.url)'), 'opens server-created doc');
+  assert(!gate.includes('PORTRAIT_PROMPT'), 'history scanning is not required');
+});
+t('setup ends before the optional tutorial', () => {
+  assert(gate.includes('useState(preview?.stage || startAt)') && gate.includes('if (!runtimeReady || busy) return;') && gate.includes("setCompletedPath('connect'); setStage('done');"), 'automatic setup ends only after a verified connection');
+  assert(gate.includes('Try the tutorial') && gate.includes('Go to my docs'), 'tutorial is optional after setup');
+  assert(gate.includes('conversationSetupStatus(code)') && !gate.includes('setPublishedDoc'), 'interactive setup waits for tool confirmation, not publication');
+  assert(!gate.includes('sg-pane-art'), 'no full-page replay');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

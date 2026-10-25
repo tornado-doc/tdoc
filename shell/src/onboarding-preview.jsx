@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { ActivatePage } from './activate-page.jsx';
+import { AppSelect } from './ui/select.jsx';
+import { ComputersBody } from './computers-settings.jsx';
 import { SetupGate } from './setup-gate.jsx';
+import { DocsHub } from './docs-hub.jsx';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { StatusPage } from './status-page.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
@@ -10,7 +13,7 @@ import './docs-hub.css';
 import './onboarding-preview.css';
 
 const identity = { name: 'Alex Morgan', email: 'alex.morgan@example.com' };
-const states = ['Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
+const states = ['Start', 'Connect your AI', 'AI ready', 'Computer ready', 'Computers & AI', 'Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
 
 function TutorialPreview({ state }) {
   const [agentState, setAgentState] = useState(state.replace('Tutorial ', ''));
@@ -33,11 +36,17 @@ function TutorialPreview({ state }) {
 // The original components and markup, with local sample state only.
 // This gallery is served only by the PR preview Worker, never production.
 export default function OnboardingPreview() {
-  const [state, setState] = useState('Approved');
+  const [state, setState] = useState(() => {
+    const screen = new URLSearchParams(location.search).get('screen');
+    return states.includes(screen) ? screen : 'Start';
+  });
   const [dialogOpen, setDialogOpen] = useState(true);
   const [notice, setNotice] = useState('');
+  const setupPreview = ['Start', 'Connect your AI', 'AI ready', 'Computer ready', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published'].includes(state);
   let screen;
-  if (state.startsWith('Tutorial ')) {
+  if (state === 'Computers & AI') {
+    screen = <div className="docs-hub"><main className="wrap"><section className="tm-settings"><section className="tm-settings-card"><ComputersBody identity={identity} preview={{ default: {provider:'local',device:'alex-mac',cli:'codex'}, computers:[{device:'alex-mac',status:'active',paused:false,runtimes:[{cli:'claude',state:'not_installed'},{cli:'codex',state:'ready',version:'0.1.0'}]},{device:'office-mac',status:'paused',paused:true,runtimes:[{cli:'claude',state:'ready',version:'2.1.0'},{cli:'codex',state:'needs_check'}]}] }} /></section></section></main></div>;
+  } else if (state.startsWith('Tutorial ')) {
     screen = <TutorialPreview key={state} state={state} />;
   } else if (state === 'Sign-in complete' || state === 'Sign-in error') {
     screen = <StatusPage boot={state === 'Sign-in complete' ? { title: 'Signed in', message: 'Your account is connected. You can return to your agent.', actions: [{ label: 'Go to my docs', href: '/me', primary: true }] } : { title: 'Sign-in expired', message: 'This sign-in request has expired. Start again from your agent.', error: true, actions: [{ label: 'Return to tdoc', href: '/', primary: true }] }} />;
@@ -45,8 +54,11 @@ export default function OnboardingPreview() {
     screen = <div className="op-dialog-stage"><button onClick={() => setDialogOpen(true)}>Open sign-in dialog</button>
       <SignInDialog open={dialogOpen} onOpenChange={setDialogOpen} onSuccess={() => {}} preview={{device:{user_code:'ABCD-1234',verification_uri:'https://github.com/login/device'},status:'Approve on GitHub, then return here.'}} />
     </div>;
-  } else if (['Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'First document', 'Document published'].includes(state)) {
-    screen = <SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: ['Connected', 'First document', 'Document published'].includes(state), elapsed: state === 'Connection help' ? 65000 : 0 }} />;
+  } else if (setupPreview) {
+    const choosing = ['Computer ready', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published'].includes(state);
+    const status = state === 'AI offline' ? 'inactive' : 'active';
+    const runtimeState = state === 'AI missing' ? 'not_installed' : state === 'AI needs check' ? 'needs_check' : 'ready';
+    screen = <><DocsHub boot={{ identity, capabilities: {create: false} }} /><SetupGate key={state} boot={{ identity:state === 'Setup sign in' ? null : identity, oidcAuth: true, step: ['First document','Document published'].includes(state) ? 'doc' : 'connect' }} preview={{ stage: ['AI ready', 'Computer ready', 'Document published'].includes(state) ? 'done' : ['Start', 'Setup sign in'].includes(state) ? 'intro' : ['Connect your AI', 'Use without helper', 'First document'].includes(state) ? 'manual' : 'connect', path: state === 'Computer ready' ? 'connect' : 'manual', record: { started: true, first_doc:state === 'Document published' ? 'my-first-tdoc' : null }, paired: choosing, local_agents: choosing && runtimeState === 'ready' ? [{ device: 'alex-mac', cli: 'codex', ready: true, status }] : [], local_computers: choosing ? [{ device: 'alex-mac', status, runtimes: [{ cli: 'claude', state: 'not_installed' }, { cli: 'codex', state: runtimeState, ...(runtimeState !== 'not_installed' ? {version:'0.1.0'} : {}) }] }] : [], elapsed: state === 'Connection help' ? 95000 : 0 }} /></>;
   } else if (state.startsWith('Checklist')) {
     screen = <div className="docs-hub op-checklist"><OnboardingChecklist key={state} record={{started:true, agent_connected:true, first_doc:state === 'Checklist' ? null : 'my-first-tdoc', commented:state === 'Checklist after commenting'}} docs={state === 'Checklist' ? [] : [{slug:'my-first-tdoc',title:'My first tdoc'}]} /></div>;
   } else {
@@ -59,8 +71,8 @@ export default function OnboardingPreview() {
       event.preventDefault(); event.stopPropagation(); setNotice('Preview only. No account changes.');
     }
   };
-  return <div className="op-preview" onClickCapture={keepInPreview}>
-    <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding preview</strong><span>Original UI · sample data</span></div><label>Screen <select value={state} onChange={e => {setState(e.target.value);setDialogOpen(true);setNotice('');}}>{states.map(s => <option key={s}>{s}</option>)}</select></label></nav>
+  return <div className={`op-preview${setupPreview ? ' op-setup-preview' : ''}`} onClickCapture={keepInPreview}>
+    <nav className="op-nav" aria-label="Onboarding preview states"><div><strong>Onboarding preview</strong><span>Original UI · sample data</span></div><label>Screen <AppSelect ariaLabel="Screen" value={state} onChange={next => {setState(next);setDialogOpen(true);setNotice('');const url=new URL(location.href);url.searchParams.set('screen',next);history.replaceState(null,'',url);}} options={states.map(value => ({value,label:value}))} /></label></nav>
     {notice ? <p className="op-notice" role="status">{notice}</p> : null}
     {screen}
   </div>;

@@ -94,7 +94,7 @@ t('a person can tick a row themselves, beside the stamps and never as one', () =
   const src = list.slice(list.indexOf('export function onboardingSteps'), list.indexOf("// Notion's rows carry a thumbnail"));
   // eslint-disable-next-line no-new-func
   const steps = new Function(`${src.replace('export ', '')}; return onboardingSteps;`)();
-  const rows = steps({ agent_connected: 'A', checked: { create: 'T', revise: 'T' } }, '/d/x');
+  const rows = steps({ daemon_connected: 'A', checked: { create: 'T', revise: 'T' } }, '/d/x');
   const by = Object.fromEntries(rows.map((r) => [r.id, r]));
   assert(by.connect.done && by.connect.auto, 'a stamped row is done by the server');
   assert(by.create.done && !by.create.auto, 'a ticked row is done by the person');
@@ -196,7 +196,7 @@ t('a visitor with no session still sees a way to comment, and it is the sign-in'
   assert(shell.includes('signInToComment: Boolean(config.signInToComment)') && /value === 'comment' && !config\.canComment && config\.signInToComment \? signIn\(\)/.test(shell), 'the shell wires it');
 });
 
-t('bridge 1 is read off the server, and a paired account is never asked for a code', () => {
+t('connection readiness comes from the server; history alone cannot finish setup', () => {
   // The five-step pop-up that used to render this is gone. What it was reading
   // is not: the record, the pairing stamp, and the recipe the agent follows.
   // Across the account's linked identities: the marker sits under whichever id
@@ -204,11 +204,13 @@ t('bridge 1 is read off the server, and a paired account is never asked for a co
   assert(worker.includes("const paired = await accountPaired(env, accountId);")
     && worker.includes("if (await env.META.get(`account-terminal:${id}`)) return true;")
     && server.includes('const paired = Boolean(process.env.TDOC_E2E_PAIRED);'), 'both hosts say whether a terminal has connected');
-  assert(gate.includes('const connected = Boolean(paired || record?.agent_connected || record?.published_first);'),
-    'and the gate is done when any of the three says so');
+  assert(gate.includes("const connected = Boolean(computer?.status === 'active')")
+    && gate.includes("const runtimeReady = Boolean(chosen && computer?.status === 'active')")
+    && gate.includes('if (!runtimeReady || busy) return;') && gate.includes('Finish setup'),
+    'only a live, verified runtime can finish automatic setup');
   assert(gate.includes('const POLL_MS = 3000;'), '3s while waiting');
-  assert(gate.includes("postOnboardingEvent('door_own_agent')"), 'copying the line is the first stamp');
-  assert(gate.includes('COPY_FALLBACK') && gate.includes('selectContents(promptRef.current)'),
+  assert(gate.includes("postOnboardingEvent('copy_clicked')"), 'copying is telemetry, not a fake connected stamp');
+  assert(gate.includes('COPY_FALLBACK') && gate.includes('selectContents(ref.current)'),
     'a refused clipboard leaves the line selected and says so');
   // The agent's own instructions, which no page renders: it connects before it
   // reads anything, and the first doc is a fill-in template with a clock on it.
@@ -363,7 +365,7 @@ t('resuming reads the record, not localStorage', () => {
   // and nothing opens itself. "Continue / start over / never ask again" was
   // the wizard's problem, and it went with the wizard.
   const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
-  assert(/done: Boolean\(r\.agent_connected \|\| r\.published_first\)/.test(list)
+  assert(/done: Boolean\(r\.daemon_connected\)/.test(list)
     && /done: Boolean\(r\.first_doc\)/.test(list)
     && /done: Boolean\(r\.commented \|\| r\.revised\)/.test(list)
     && /done: Boolean\(r\.revised\)/.test(list), 'every row is a stamp on the account');

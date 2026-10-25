@@ -54,8 +54,7 @@ t('Copy the line copies the line, and opens no pop-up', () => {
   assert(!/href="\/start"[^>]*>Copy the line/.test(html), 'Copy the line is a link again');
   assert(/<button[^>]*data-tdoc-copy="#first-line"[^>]*data-tdoc-copy-done="Copied"[^>]*>Copy the line<\/button>/.test(html),
     'Copy the line is not wired to the copy trigger');
-  assert(/<span id="first-line">Set up tdoc and make my first doc: https:\/\/github\.com\/tornado-doc\/tdoc\/blob\/main\/FIRST-DOC\.md<\/span>/.test(html),
-    'the copied element is not exactly the line');
+  assert(html.includes('<span id="first-line">curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash</span>'), 'tutorial copies the terminal installer');
   assert(/\.term-bd \{[^}]*user-select:all/.test(html) && /click the line above to select it/.test(text),
     'no hand-copy fallback when the clipboard refuses');
   assert(/config\.onboarding/.test(documentShell) && /href === '\/start'/.test(documentShell),
@@ -72,21 +71,16 @@ t('mobile onboarding actions keep names and 44px touch targets', () => {
   assert(/tdoc-onboarding-link[\s\S]*min-height: 44px/.test(uiCss), 'mobile tutorial link is undersized');
 });
 
-t('the short prompt points to FIRST-DOC and never embeds a credential', () => {
-  assert(/FIRST-DOC\.md/.test(dialog), 'FIRST-DOC link missing');
-  assert(!/token\s*(is|=)|Authorization|Bearer/.test(dialog), 'credential leaked into the prompt');
-  assert(dialog.includes('export const SETUP_PROMPT = FIRST_DOC_LINE;'), '/setup and /start hand out different lines');
-  assert(dialog.includes('FIRST_DOC_LINE = `Set up tdoc and make my first doc: ${RECIPE_URL}`')
-    && html.includes('Set up tdoc and make my first doc: https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md'),
-    'the /start line is not FIRST_DOC_LINE');
-  assert(/copyText\(prompt\)/.test(dialog) && /PORTRAIT_PROMPT = `Make my first doc: \$\{RECIPE_URL\}`/.test(dialog),
-    'copy is wired to the line the gate composed');
+t('the installer line matches setup and carries no credentials', () => {
+  assert(dialog.includes('bin/tdoc-install | bash') && html.includes('bin/tdoc-install | bash'), 'one official installer');
+  assert(!/token\s*(is|=)|Authorization|Bearer/.test(dialog), 'no embedded credential');
+  assert(dialog.includes('copyText(command)') && dialog.includes("copy(INSTALL_PROMPT, 'install', promptRef)") && dialog.includes("copy(CONNECT_PROMPT, 'setup', connectRef)"), 'each copy action uses its corresponding command');
 });
 
 t('a newcomer is told what to have before pasting', () => {
   assert(/Before you start/.test(text), 'no Before you start box');
   assert(/href="https:\/\/code\.claude\.com\/docs\/en\/overview"/.test(html), 'no Claude Code install link');
-  assert(/Open\s+Terminal/.test(text) && /<code>claude<\/code>/.test(html), 'does not say where to paste');
+  assert(/Open\s+Terminal/.test(text) && /install command below into Terminal/.test(text), 'does not say where to paste');
   assert(/nodejs\.org/.test(html) && !/brew install/.test(html), 'Node is not offered as the nodejs.org installer');
   assert(/not work in the claude\.ai or ChatGPT chat/.test(text), 'does not say which chats are unsupported');
 });
@@ -96,18 +90,15 @@ t('commenting sign-in names every method, not only GitHub', () => {
   assert(/email, Google, or GitHub/.test(text), 'missing email, Google, or GitHub');
 });
 
-t('the tutorial promises the same private personal AI portrait as FIRST-DOC', () => {
-  assert(/personal AI portrait/i.test(text), 'tutorial does not name the current first-doc outcome');
-  assert(/What does AI know about me\?/i.test(text), 'tutorial first-doc title is stale');
-  assert(/traces you choose to share/i.test(text), 'tutorial omits the portrait privacy boundary');
-  assert(!/You get a Game of Life/i.test(text), 'tutorial still promises the old first doc');
+t('the tutorial describes private practice and a direct handoff', () => {
+  assert(/private practice doc/.test(text), 'private first experience');
+  assert(/No activity history is read/.test(text), 'no required history scan');
+  assert(/Click Send to agent/.test(text), 'no manual copy-back');
 });
 
-t('the gate reads the journey record, not a capability probe', () => {
-  assert(!/fetch\('\/api\/hosted\/token'/.test(dialog), 'the old capability probe is back');
-  assert(/getOnboarding\(\)/.test(dialog), 'the gate does not read the journey record');
-  // Only the record moves the page: no step is advanced by a click.
-  assert(/const connected = Boolean\(paired \|\| record\?\.agent_connected/.test(dialog), 'the gate does not move with the record');
+t('the gate waits for a verified local device rather than a historical token', () => {
+  assert(dialog.includes("stage === 'connect' ? { daemon: true }"), 'automatic updates query live local-agent status');
+  assert(dialog.includes("a.ready && a.status === 'active'"), 'checks readiness and heartbeat');
 });
 
 t('self-hosting remains an explicit alternate in the recipe and the tutorial', () => {

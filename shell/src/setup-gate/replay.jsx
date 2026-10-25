@@ -212,7 +212,7 @@ const LAUNCH_INDEX = APPS.findIndex((a) => a.id === LAUNCHES);
 // typing into it), so it says so rather than inheriting a bounce from a
 // timeline it is not on. Overriding `wake` alone left the icon jumping and its
 // running-dot lighting up at 1650ms of a script that had moved on.
-function Dock({ t, wake: fixed, launch = true }) {
+function Dock({ t, wake: fixed, launch = true, terminal = false }) {
   // Two different things, and conflating them cost the dock its existence.
   //
   // `shown` is whether the dock is on screen at all -- it slides up at the
@@ -227,7 +227,8 @@ function Dock({ t, wake: fixed, launch = true }) {
   const press = launch ? phase(t, T.dockPress) : 0;
   return (
     <div className="rp-dock" style={{ opacity: shown, transform: `translate(-50%, ${(1 - shown) * 26}px)` }}>
-      {APPS.map((app, i) => {
+      {APPS.map((original, i) => {
+        const app = terminal && original.id === 'codex' ? { ...original, src: null, bg: '#202124', name: 'Terminal', mark: () => <span className="rp-terminal-icon">›_</span> } : original;
         if (app.separator) return <i key={app.id} className="rp-dock-sep" />;
         // Magnification is the pointer's doing, so it only happens on the
         // script where a pointer goes there. On the other one the dock sits
@@ -415,7 +416,7 @@ function ApprovalSheet({ t }) {
       ) : (
         <>
           <h3>Allow access to tdoc</h3>
-          <p>Signed in as <b>serenatan1125@gmail.com</b>.</p>
+          <p>Signed in as <b>alex@example.com</b>.</p>
           <div className="rp-code">WXNB-7QKD</div>
           <button type="button" className="rp-approve" style={{ transform: `scale(${1 - press * 0.04})` }}>
             Allow
@@ -427,7 +428,7 @@ function ApprovalSheet({ t }) {
 }
 
 // ------------------------------------------------------------------- the set
-export function ConnectReplay({ prompt }) {
+export function ConnectReplay({ prompt, terminal = false }) {
   // No line yet: the desk, the dock, and no app open. Running the script
   // would be a recording of pasting something that does not exist.
   const idle = !prompt;
@@ -447,7 +448,7 @@ export function ConnectReplay({ prompt }) {
         {/* Whatever is in front. Before the icon is pressed nothing is open but
             Finder, which is always running -- naming the app that has not
             launched yet was the bar describing a window that was not there. */}
-        <MenuBar app={!idle && phase(t, T.windowIn) > 0.5 ? 'ChatGPT' : 'Finder'} clock="Fri Sep 12  2:59 AM" />
+        <MenuBar app={!idle && phase(t, T.windowIn) > 0.5 ? (terminal ? 'Terminal' : 'ChatGPT') : 'Finder'} clock="Fri Sep 12  2:59 AM" />
         {/* The app opens when the icon is pressed, not before. Lifting the
             window into a shared component dropped its entrance: it was drawn
             from the first frame, so the pointer was still walking to a dock
@@ -463,15 +464,16 @@ export function ConnectReplay({ prompt }) {
             transform: `scale(${0.965 + phase(t, T.windowIn) * 0.035})`,
           }}
         >
-          <CodexWindow
+          {terminal ? <div className="rp-terminal">
+            <div className="rp-terminal-bar"><span>● ● ●</span> Terminal — Connect tdoc</div>
+            <pre>{phase(t, T.paste) > 0 ? `$ ${prompt}` : '$ '}{after(t, T.send) ? '\n[tdoc] Connecting this computer…' : ''}{after(t, T.cli) ? '\n[tdoc] Approve the sign-in in your browser.' : ''}{after(t, T.signedIn) ? '\n[tdoc] Checking Codex…' : ''}{after(t, T.summary) ? '\n[tdoc] Background service started.\nReturn to tdoc; this computer will appear automatically.' : ''}</pre>
+          </div> : <CodexWindow
             title="Install tdoc and connect account"
             typing={!idle && phase(t, T.paste) > 0 && !after(t, T.send) ? prompt : null}
-          >
-            <ConnectTurns t={t} prompt={prompt} />
-          </CodexWindow>
+          ><ConnectTurns t={t} prompt={prompt} /></CodexWindow>}
         </div>
         {idle ? null : <ApprovalSheet t={t} />}
-        <Dock t={t} wake={idle ? 1 : undefined} launch={!idle} />
+        <Dock t={t} wake={idle ? 1 : undefined} launch={!idle} terminal={terminal} />
         {idle ? null : <Cursor t={t} />}
       </div>
       </div>
@@ -596,4 +598,23 @@ export function DocReplay({ prompt, slug, ready = true }) {
       </div>
     </div>
   );
+}
+
+// A browser-only loop: select text, comment, send to the connected AI, see v2.
+// This is an illustration; it never changes the real connection state on the left.
+export function PracticeReplay({ agent = 'Codex' }) {
+  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const t = useClock(!reduced, REPLAY_MS);
+  const commented = t > 5000;
+  const sent = t > 9000;
+  const revised = t > 14000;
+  return <div className="rp-view" aria-hidden="true"><div className="rp-lens" style={{ transform: 'scale(.85) translate(-320px, -360px)' }}><div className="rp-canvas">
+    <MenuBar app="Safari" clock="Today" />
+    <div className="rp-app-window rp-practice">
+      <div className="rp-practice-bar"><img src="/tdoc_logo.svg" width="20" height="20" alt="" />Your first tdoc <span>v{revised ? '2' : '1'}</span></div>
+      <div className="rp-practice-page"><h2>Your first tdoc</h2><p><mark className={t > 2500 ? 'selected' : ''}>{revised ? 'A good update explains progress, next steps, and blockers.' : 'A good project update tells readers what changed, what is next, and where help is needed.'}</mark></p><h3>Keep working here</h3><p>Your comments and every version stay at this link.</p></div>
+      {commented ? <div className="rp-practice-comment"><b>You</b><p>Make this shorter.</p>{!sent ? <button type="button" tabIndex={-1}>Send to {agent}</button> : revised ? <><b>{agent} · Applied in v2</b><p>Shortened the sentence.</p></> : <p>{agent} is revising…</p>}</div> : null}
+    </div>
+    <Dock t={t} wake={1} launch={false} />
+  </div></div></div>;
 }
