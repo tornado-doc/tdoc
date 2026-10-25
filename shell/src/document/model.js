@@ -20,8 +20,9 @@ export const QUICK_REACTIONS = [
 export function avatarFor(author) {
   const key = String(author?.login || author?.name || '').toLowerCase();
   // Product seed ("First reader here") and other system/tdoc rows use the
-  // global mark — even when older comments stored an empty avatar_url.
-  if (key === 'tdoc' || author?.kind === 'system') {
+  // global mark — even when older comments stored an empty avatar_url. So
+  // does tdoc AI's answer in a thread (Ask AI in a comment).
+  if (key === 'tdoc' || key === 'tdoc-ai' || author?.kind === 'system') {
     // Filled light square (white field). Empty avatar_url on older seed rows
     // must not fall back to the stroke-only chrome mark.
     return author?.avatar_url || '/tdoc_logo.png';

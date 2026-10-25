@@ -178,6 +178,8 @@ export function DesktopCommentLayer({
 }
 
 export function MobileCommentDrawer({
+  // The Open / Resolved / All control, above the list.
+  filter = null,
   open,
   comments,
   pinIds,
@@ -222,7 +224,7 @@ export function MobileCommentDrawer({
     return () => cancelAnimationFrame(raf);
   }, [open, openCommentId]);
 
-  if (!comments.length) return null;
+  if (!comments.length && !filter) return null;
 
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
@@ -237,6 +239,7 @@ export function MobileCommentDrawer({
             <Drawer.Title className="tdoc-visually-hidden">Comments</Drawer.Title>
             <Drawer.Close className="tdoc-drawer-handle" aria-label="Close comments" />
             <Drawer.Content className="tdoc-drawer-list">
+              {filter ? <div className="tdoc-comment-filter-row">{filter}</div> : null}
               {comments.map((comment) => (
                 <CommentCard
                   key={comment.id}

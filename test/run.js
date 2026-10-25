@@ -45,6 +45,8 @@ const OFFLINE = [
   'doc-head-redirect.test.js', // bare /d/<slug> → 302 to latest, access-gated
   'ask-doc.test.js',           // Ask this doc: off without a key, browser readers only, read gate, 5 per account, no address to the model
   'reader-agent-ask.test.js',  // Send to my agent: a reader's own agents only, never anyone else's; the answer is the asker's alone
+  'ask-in-thread.test.js',     // Ask AI in a comment: tdoc AI or the commenter's own agent answers as a reply in the thread, seen by all
+  'hand-off.test.js',          // one door: Ask only decides edit (authorship) or answer (own / team agent / tdoc AI), never another's agent
   'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
   'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
   'me-management.test.js',    // /me remote SoT management UI guard
@@ -138,6 +140,7 @@ const OFFLINE = [
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
   'agent-choices.test.js',    // @ offers the Send to agent list: same order, top 2, typed search, tag is no @login
+  'ai-answerer.test.js',      // composer @ list: edit agents first, then ask-only own/team; tdoc AI last resort; @AI never a login
   'rich-text.test.js',        // comment markdown subset (bold/code/list/link)
   'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
@@ -183,8 +186,8 @@ const BROWSER = [
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
-  'ask-panel-ui.test.js', // Ask this doc: bar + ⋯ entry, side panel / bottom sheet, thinking, post as comment, limit line; Send to / Copy for my agent faces
-  'reader-agent-ask-ui.test.js', // Comment / Ask AI / Send to my agent in the real shell: three tiers, desktop + phone, anchored posts, private answers
+  'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
+  'doc-bar-composer-ui.test.js', // the doc bar (crumbs, Edited, quiet Share, modes in ⋯, comments filter) and the composer's @agent / Ask / Ask + request change / Only me, desktop + phone, team docs
   'phone-top-bar-ui.test.js', // signed in on a phone: ⋯ stays on screen, spaces under ⋯ → Switch space
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
   'share-access-ui.test.js', // Share panel: specific people / anyone with the link / public, sign-in switch, desktop + phone

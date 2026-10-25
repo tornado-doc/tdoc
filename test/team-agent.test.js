@@ -155,6 +155,12 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   const register = () => call('/api/notify/local/register', { method: 'POST', token: agentToken, body: { device: 'befreed-box', clis: ['claude'] } });
   const pendingFor = (token) => call('/api/notify/local/pending?device=befreed-box', { token });
   let target = null;
+  // The team agent edits what it wrote (agentEditPolicy): befreed-report's
+  // latest version is the agent's from here on.
+  await t('a team doc the team agent wrote is one members may send it', async () => {
+    const r = await upload(agentToken, 'befreed-report', { version: 2 });
+    assert(r.status === 200, r.text);
+  });
   await t('every member sees "Send to team agent" on a team doc once its daemon checked in', async () => {
     const before = await call('/api/notify/targets?slug=befreed-report', { cookie: bob.cookie });
     assert(before.status === 200 && !before.body.default && before.body.reason === 'no_team_agent', `before register: ${before.text}`);
@@ -226,16 +232,33 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   });
 
   await t('its edits are attributed to it on the version', async () => {
-    const r = await upload(agentToken, 'befreed-report', { version: 2 });
+    const r = await upload(agentToken, 'befreed-report', { version: 3 });
     assert(r.status === 200, r.text);
     const meta = JSON.parse(env.META.map.get('meta:befreed-report'));
-    const v2 = meta.versions.find((v) => v.n === 2);
+    const v2 = meta.versions.find((v) => v.n === 3);
     assert(v2 && v2.team_agent && v2.team_agent.name === 'vid3o', JSON.stringify(v2));
     assert(meta.hosted.github_login === 'julie', 'a teammate\'s version moved the byline');
   });
 
   // Review #817 (4): a person's narrowed connection that registered a
   // computer became that person's default Send to agent target everywhere.
+  await t('authorship: once a person\'s own agent writes the doc, members cannot hand it to the team agent; when the agent writes again, they can', async () => {
+    assert((await upload(julie.token, 'befreed-report', { version: 4 })).status === 200, 'julie v4');
+    const meta = JSON.parse(env.META.map.get('meta:befreed-report'));
+    assert(meta.versions.find((v) => v.n === 4).by === julie.account_id, 'v4 names the account whose agent wrote it');
+    const bobs = await call('/api/notify/targets?slug=befreed-report', { cookie: bob.cookie });
+    assert(bobs.status === 200 && !bobs.body.default && bobs.body.reason === 'written_by_other', `bob after julie's agent wrote it: ${bobs.text}`);
+    const fresh = await comment(bob.cookie, 'befreed-report', 'one more thing');
+    const sent = await call('/api/notify/handoff', { method: 'POST', cookie: bob.cookie, body: { slug: 'befreed-report', comment_ids: [fresh], recipient: target } });
+    assert(sent.status === 403 && sent.body.error === 'written_by_other', `bob handed julie's doc to the team agent: ${sent.status} ${sent.text}`);
+    // The owner keeps her own agent, and only that.
+    const julies = await call('/api/notify/targets?slug=befreed-report', { cookie: julie.cookie });
+    assert(!JSON.stringify(julies.body).includes('vid3o'), `owner offered the team agent on a doc her agent wrote: ${julies.text}`);
+    assert((await upload(agentToken, 'befreed-report', { version: 5 })).status === 200, 'agent v5');
+    const again = await call('/api/notify/targets?slug=befreed-report', { cookie: bob.cookie });
+    assert(again.body.default && again.body.default.team_agent && again.body.default.last_writer, `bob after the agent wrote it again: ${again.text}`);
+  });
+
   await t('a person\'s narrowed connection cannot run a daemon (register, poll, fail): only a team agent can', async () => {
     const scoped = (await call('/api/hosted/token/scoped', { method: 'POST', token: julie.token, body: { team: abby.id } })).body.token;
     for (const [path, opts] of [
@@ -281,7 +304,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(!left.length, `keys left behind: ${left}`);
     const targets = await call('/api/notify/targets?slug=befreed-report', { cookie: bob.cookie });
     // bob is an admin now, so it is his own (empty) connections that speak.
-    assert(!targets.body.default && !targets.text.includes('vid3o'), targets.text);
+    assert(!targets.body.default && !(targets.body.candidates || []).length && !JSON.stringify(targets.body.candidates || []).includes('vid3o'), targets.text);
   });
 
   // The machine's half for real: bin/tdoc-daemon against this worker over

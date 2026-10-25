@@ -1,14 +1,18 @@
-// Comment / Ask AI / Send to my agent, in the real shell against the real
-// worker (in-process harness behind a local HTTP server, built runtime), at
-// desktop and phone width, for each of the reader's three tiers:
-//   none     the popover and the bar say "Connect my agent"; it goes to
-//            /start with the question kept, the setup page leads back, and
-//            the doc opens with the question ready for the new agent
-//   online   "Send to my agent" sends the popover's question with its
-//            passage to the reader's own daemon; the answer (posted on the
-//            reader's own token) shows to them alone, and posts anchored
-//   offline  "Copy for my agent" copies the line in one click
-// plus Ask AI from the popover, anchored to the passage when posted.
+// Asking in a comment, in the real shell against the real worker
+// (in-process harness behind a local HTTP server, built runtime), desktop and
+// phone. The composer has one button, Comment; @ opens the list, whose first
+// row is the default agent, and Enter picks it. "Ask only" (answer, never
+// edit) is ticked and locked for an agent that may not edit this doc:
+//   no agent     tdoc AI ("Cloud"). "Only me" starts on: nothing is
+//                posted, the answer shows in the composer to its asker alone,
+//                and Make public posts the question as their comment with the
+//                kept answer as tdoc AI's reply. One muted quota line under
+//                it, for the asker only.
+//   agent online the reader's own agent ("Mine"); "Only me"
+//                starts off: the comment posts and its answer, on the
+//                reader's own token, is the reply everyone sees
+//   phone        same composer, fits the screen; Only me off → in the thread
+//   owner        keeps the paper plane; nothing else new in the bar
 // Run with: node test/reader-agent-ask-ui.test.js
 
 const fs = require('fs');
@@ -100,7 +104,7 @@ async function touchSelect(page, phrase) {
 }
 
 (async () => {
-  console.log('Comment / Ask AI / Send to my agent (real shell)');
+  console.log('Ask AI in a comment (real shell)');
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init = {}) => {
     const u = typeof input === 'string' ? input : input.url;
@@ -147,141 +151,160 @@ async function touchSelect(page, phrase) {
     return { context, page };
   };
   const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${name}` }); } };
+  const noBarAsk = async (page) => {
+    for (const sel of ['#tdoc-ask-btn', '#tdoc-my-agent-btn', '.tdoc-ask-panel']) {
+      if (await page.locator(sel).count()) throw new Error(`${sel} is back`);
+    }
+  };
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
   const DESKTOP = { viewport: { width: 1280, height: 800 } };
   const PHONE = { ...devices['iPhone 13'], defaultBrowserType: undefined };
 
+  // Typing @ by hand: the list's first row is the default; Enter picks it.
+  const ask = async (page, text) => {
+    const pop = page.locator('.tdoc-popup');
+    await pop.locator('textarea').pressSequentially(`${text} @`);
+    const first = page.locator('.tdoc-mention-option').first();
+    await first.waitFor();
+    const row = (await first.textContent()).trim();
+    await page.keyboard.press('Enter');
+    return { pop, row };
+  };
+  const mode = (pop) => pop.locator('.tdoc-ask-mode button').evaluateAll((els) => els.map((e) => `${e.textContent}${e.classList.contains('active') ? '*' : ''}${e.disabled ? '(off)' : ''}`).join('|'));
   try {
-    await t('desktop, no agent: bar and popover read Comment / Ask AI / Connect my agent; Ask AI about the passage posts anchored', async () => {
+    await t("desktop, no agent: @ → tdoc AI first; Only me on: a private answer, then Make public posts it to the thread; the quota line is the asker's alone", async () => {
       await setTier('none');
       const { context, page } = await open(reader, DESKTOP);
-      await page.getByRole('button', { name: 'Connect my agent' }).waitFor();
+      await noBarAsk(page);
       await dragSelect(page, 'Billing ships first');
       const pop = page.locator('.tdoc-popup');
       await pop.waitFor();
-      const labels = await pop.locator('.tdoc-composer-foot-actions button').allTextContents();
-      if (labels.join('|') !== 'Ask AI|Connect my agent|Comment') throw new Error(`popover: ${labels.join('|')}`);
-      await shot(page, 'reader-none-popover.png');
-      await pop.locator('textarea').fill('Why billing first?');
-      await pop.getByRole('button', { name: 'Ask AI' }).click();
-      const dialog = page.getByRole('dialog', { name: 'Ask this doc' });
-      await dialog.locator('.tdoc-ask-answer-text').waitFor({ timeout: 10000 });
-      await dialog.getByRole('button', { name: 'Post as comment' }).click();
-      await dialog.getByRole('button', { name: 'Posted as comment' }).waitFor();
-      const posted = (await comments()).find((c) => /^Q: Why billing first\?/.test(c.text));
+      const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
+      if (labels.join('|') !== '@agent|Comment') throw new Error(`popover buttons: ${labels.join('|')}`);
+      const { row } = await ask(page, 'Why billing first?');
+      if (!/^tdoc AI/.test(row) || !/5 free left/.test(row)) throw new Error(`first row: ${row}`);
+      if (await mode(pop) !== 'Ask*|Ask + request change(off)') throw new Error(`mode for tdoc AI: ${await mode(pop)}`);
+      const onlyMe = pop.locator('.tdoc-only-me [role=checkbox]');
+      if (await onlyMe.getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
+      await shot(page, 'composer-only-me.png');
+      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      const card = page.locator('.tdoc-private-ask');
+      await card.getByText('invoices block renewals').waitFor({ timeout: 10000 });
+      await card.getByText('Only you can see this').waitFor();
+      if ((await comments()).some((c) => c.text.includes('Why billing first?'))) throw new Error('an Only me question was posted');
+      await shot(page, 'composer-private-answer.png');
+      await card.getByRole('button', { name: 'Make public' }).click();
+      const open_ = page.locator('.tdoc-margin-comment.active');
+      await open_.waitFor({ timeout: 10000 });
+      let posted = null;
+      for (let i = 0; i < 40 && !(posted && (posted.replies || []).length); i++) {
+        posted = (await comments()).find((c) => c.text.startsWith('Why billing first?'));
+        if (!(posted && (posted.replies || []).length)) await page.waitForTimeout(250);
+      }
       if (!posted || posted.anchor?.text !== 'Billing ships first') throw new Error(`not anchored: ${JSON.stringify(posted && posted.anchor)}`);
+      if (/@/.test(posted.text)) throw new Error(`the question kept its tag: ${posted.text}`);
+      if (!(posted.replies || []).some((r) => r.author?.name === 'tdoc AI' && r.text.includes('invoices block renewals'))) throw new Error(`no tdoc AI reply: ${JSON.stringify(posted.replies)}`);
+      const toggle = open_.locator('.tdoc-replies-toggle:not(.open)');
+      if (await toggle.count()) await toggle.click();
+      await open_.locator('.tdoc-ai-quota').getByText(/tdoc AI · 4 free left/).waitFor();
+      await shot(page, 'thread-tdoc-ai-reply.png');
+      const peer = await open(other, DESKTOP);
+      await peer.page.locator('.tdoc-pin').first().click();
+      await peer.page.locator('.tdoc-margin-comment.active .tdoc-replies-toggle').click();
+      await peer.page.getByText('invoices block renewals').waitFor({ timeout: 10000 });
+      if (await peer.page.locator('.tdoc-ai-quota').count()) throw new Error("another reader sees the asker's quota line");
+      await peer.context.close();
       await context.close();
     });
 
-    await t('desktop, no agent: Connect my agent keeps the question through /start and setup, then hands it to the new agent', async () => {
-      await setTier('none');
-      const { context, page } = await open(reader, DESKTOP);
-      await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
-      await dragSelect(page, 'The mobile app waits for Q4');
-      await page.locator('.tdoc-popup textarea').fill('Why does mobile wait?');
-      await page.locator('.tdoc-popup').getByRole('button', { name: 'Connect my agent' }).click();
-      await page.waitForURL((u) => u.pathname === '/start' && u.searchParams.get('return') === `/d/${SLUG}`);
-      // The agent is connected (paired, helper not running yet).
-      await setTier('offline');
-      await page.goto(`${base}/setup`);
-      await page.getByRole('button', { name: 'Back to the doc' }).click();
-      await page.waitForURL(`${base}/d/${SLUG}`);
-      const dialog = page.getByRole('dialog', { name: 'Copy for my agent' });
-      await dialog.waitFor({ timeout: 10000 });
-      if (await dialog.getByRole('textbox').inputValue() !== 'Why does mobile wait?') throw new Error('question lost');
-      await dialog.getByRole('button', { name: 'Copy for my agent' }).click();
-      const copied = await page.evaluate(() => navigator.clipboard.readText());
-      if (copied !== `Read ${base}/d/${SLUG} and answer: Why does mobile wait?\n\nAbout this passage: "The mobile app waits for Q4"`) throw new Error(`copied: ${copied}`);
-      // Handed over once: a reload does not ask again.
-      await page.reload();
-      await page.frameLocator('iframe').locator('h1').waitFor();
-      await page.waitForTimeout(500);
-      if (await page.getByRole('dialog').count()) throw new Error('the pending question came back');
-      // Used up: the setup page no longer leads back to the doc.
-      await page.goto(`${base}/setup`);
-      await page.getByRole('button', { name: 'Next', exact: true }).waitFor({ timeout: 10000 });
-      if (!await page.getByRole('button', { name: 'Next', exact: true }).isDisabled()) throw new Error('an offline historical pairing enabled Next');
-      if (await page.getByRole('button', { name: 'Back to the doc' }).count()) throw new Error('setup still offers the way back');
-      await context.close();
-    });
-
-    await t('desktop, no agent: Later on the setup page dismisses the waiting question', async () => {
-      await setTier('none');
-      const { context, page } = await open(reader, DESKTOP);
-      await page.getByRole('button', { name: 'Connect my agent' }).click();
-      await page.waitForURL((u) => u.pathname === '/start');
-      await setTier('offline');
-      await page.goto(`${base}/setup`);
-      await page.getByRole('button', { name: 'Back to the doc' }).waitFor({ timeout: 10000 });
-      await page.getByRole('button', { name: 'Later', exact: true }).click();
-      await page.waitForURL((u) => u.pathname !== '/setup');
-      await page.goto(`${base}/setup`);
-      await page.getByRole('button', { name: 'Next', exact: true }).waitFor({ timeout: 10000 });
-      if (!await page.getByRole('button', { name: 'Next', exact: true }).isDisabled()) throw new Error('an offline historical pairing enabled Next');
-      await context.close();
-    });
-
-    await t('desktop, agent online: Send to my agent → own daemon → private answer, posted anchored; nobody else sees it', async () => {
+    await t("desktop, agent online: @ → own agent first (Mine, answers only); Only me off: the daemon's answer is the reply everyone sees", async () => {
       await setTier('online');
       const { context, page } = await open(reader, DESKTOP);
-      await page.getByRole('button', { name: 'Send to my agent' }).waitFor();
+      await noBarAsk(page);
       await dragSelect(page, 'Search follows in April');
-      await page.locator('.tdoc-popup textarea').fill('What blocks search?');
-      await page.locator('.tdoc-popup').getByRole('button', { name: 'Send to my agent' }).click();
-      const dialog = page.getByRole('dialog', { name: 'Send to my agent' });
-      await dialog.getByText(/Sent to .* on readerbox · waiting for the answer/).waitFor({ timeout: 10000 });
-      // The reader's own daemon picks it up and answers on the reader's token.
-      const pending = (await api('/api/notify/local/pending?device=readerbox', { token: reader.token })).body.pending;
-      if (pending.length !== 1 || pending[0].kind !== 'ask' || pending[0].selection !== 'Search follows in April') throw new Error(JSON.stringify(pending));
-      const r = await api('/api/agent/ask-reply', { method: 'POST', token: reader.token, body: { slug: SLUG, ask_id: pending[0].ask_id, text: 'PRIVATE: the new index is still in beta.' } });
-      if (r.status !== 200) throw new Error(`reply ${r.status}`);
-      await dialog.getByText('PRIVATE: the new index is still in beta.').waitFor({ timeout: 12000 });
-      await shot(page, 'reader-online-answer.png');
-      if ((await comments()).some((c) => c.text.includes('PRIVATE'))) throw new Error('the answer is a comment before posting');
-      const peer = await open(other, DESKTOP);
-      await peer.page.waitForTimeout(800);
-      if ((await peer.page.content()).includes('PRIVATE')) throw new Error('another reader sees it');
-      await peer.context.close();
-      await dialog.getByRole('button', { name: 'Post as comment' }).click();
-      await dialog.getByRole('button', { name: 'Posted as comment' }).waitFor();
-      const posted = (await comments()).find((c) => c.text.includes('PRIVATE'));
-      if (!posted || posted.anchor?.text !== 'Search follows in April' || !/^Q: What blocks search\?\n\nAnswer from my agent \(/.test(posted.text)) throw new Error(JSON.stringify(posted));
+      const { pop, row } = await ask(page, 'What blocks search?');
+      if (!/Mine/.test(row)) throw new Error(`first row: ${row}`);
+      if (await mode(pop) !== 'Ask*|Ask + request change(off)') throw new Error(`mode for an agent that may not edit: ${await mode(pop)}`);
+      if (await pop.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'false') throw new Error('Only me is on for an agent');
+      await shot(page, 'composer-own-agent.png');
+      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      let pending = [];
+      for (let i = 0; i < 40 && !pending.length; i++) {
+        pending = (await api('/api/notify/local/pending?device=readerbox', { token: reader.token })).body.pending;
+        if (!pending.length) await page.waitForTimeout(250);
+      }
+      const posted = (await comments()).find((c) => c.text.startsWith('What blocks search?'));
+      if (!posted) throw new Error('comment not posted');
+      if (pending.length !== 1 || pending[0].kind !== 'ask' || pending[0].comment_id !== posted.id) throw new Error(JSON.stringify(pending));
+      const r = await api('/api/agent/ask-reply', { method: 'POST', token: reader.token, body: { slug: SLUG, ask_id: pending[0].ask_id, text: 'THREAD: the new index is still in beta.', agent_login: 'claude', agent_name: 'Claude' } });
+      if (r.status !== 200 || !r.body.reply_id) throw new Error(`reply ${r.status} ${JSON.stringify(r.body)}`);
+      await page.locator('.tdoc-margin-comment.active').getByText('THREAD: the new index is still in beta.').waitFor({ timeout: 15000 });
+      await shot(page, 'thread-my-agent-reply.png');
+      const reply = ((await comments()).find((c) => c.id === posted.id).replies || []).find((x) => x.id === r.body.reply_id);
+      if (!reply || reply.author.owner?.key !== 'reader') throw new Error(JSON.stringify(reply));
       await context.close();
     });
 
-    await t('phone, helper offline: ⋯ menu and the popover read Copy for my agent; one tap copies; the sheet fits', async () => {
+    await t('phone, helper offline: tdoc AI; Only me off posts the answer in the thread; the composer fits', async () => {
       await setTier('offline');
       const { context, page } = await open(reader, PHONE);
-      await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
+      await noBarAsk(page);
       await page.getByRole('button', { name: 'More actions' }).click();
-      await page.getByRole('menuitem', { name: 'Copy for my agent' }).waitFor();
+      await page.locator('.ui-menu-popup').waitFor();
+      for (const name of ['Ask AI', 'Copy for my agent', 'Send to my agent', 'Connect my agent']) {
+        if (await page.getByRole('menuitem', { name }).count()) throw new Error(`⋯ still has ${name}`);
+      }
       await page.keyboard.press('Escape');
-      await touchSelect(page, 'Billing ships first');
+      await page.locator('.ui-menu-popup').waitFor({ state: 'detached' });
+      await touchSelect(page, 'The mobile app waits for Q4');
       const pop = page.locator('.tdoc-popup');
       await pop.waitFor();
-      const labels = await pop.locator('.tdoc-composer-foot-actions button').allTextContents();
-      if (labels.join('|') !== 'Ask AI|Copy for my agent|Comment') throw new Error(`popover: ${labels.join('|')}`);
+      const { row } = await ask(page, 'Why Q4?');
+      if (!/^tdoc AI/.test(row)) throw new Error(`first row: ${row}`);
+      // The phone composer settles as the keyboard moves it: toggle from the
+      // keyboard rather than wait for it to hold still.
+      await pop.locator('.tdoc-only-me [role=checkbox]').focus();
+      await page.keyboard.press('Space');
+      if (await pop.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'false') throw new Error('Only me did not turn off');
       const popBox = await pop.boundingBox();
       if (popBox.x < 0 || popBox.x + popBox.width > 390) throw new Error(`popover off screen ${JSON.stringify(popBox)}`);
-      await pop.locator('textarea').fill('Who owns billing?');
-      await shot(page, 'reader-offline-phone-popover.png');
-      await pop.getByRole('button', { name: 'Copy for my agent' }).click();
-      const dialog = page.getByRole('dialog', { name: 'Copy for my agent' });
-      await dialog.getByText('Copied. Paste it into your agent.').waitFor();
-      const copied = await page.evaluate(() => navigator.clipboard.readText());
-      if (!copied.endsWith('answer: Who owns billing?\n\nAbout this passage: "Billing ships first"')) throw new Error(copied);
-      if (!(await dialog.getByRole('link', { name: /Turn on the background helper/ }).isVisible())) throw new Error('no helper link');
+      await shot(page, 'phone-composer.png');
+      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      let answered = false;
+      for (let i = 0; i < 40 && !answered; i++) {
+        const posted = (await comments()).find((c) => c.text.startsWith('Why Q4?'));
+        answered = Boolean(posted && (posted.replies || []).some((r) => r.author?.name === 'tdoc AI'));
+        if (!answered) await page.waitForTimeout(250);
+      }
+      if (!answered) throw new Error('tdoc AI did not answer in the thread');
       const layout = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
       if (layout.scrollWidth > layout.width + 1) throw new Error(JSON.stringify(layout));
-      await shot(page, 'reader-offline-phone-copied.png');
       await context.close();
     });
 
-    await t('the owner keeps Send to agent / @agent and gets no reader entry', async () => {
+    await t('the owner keeps the paper plane; the composer is @agent + Comment; @agent puts the default in and lists tdoc AI with what is left', async () => {
       const { context, page } = await open(owner, DESKTOP);
       await page.locator('#tdoc-send-agent-btn').waitFor();
-      if (await page.locator('#tdoc-my-agent-btn').count()) throw new Error('owner sees the reader entry');
+      await noBarAsk(page);
+      await dragSelect(page, 'Billing ships first');
+      const pop = page.locator('.tdoc-popup');
+      await pop.waitFor();
+      const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
+      if (labels.join('|') !== '@agent|Comment') throw new Error(`owner popover buttons: ${labels.join('|')}`);
+      if (await pop.locator('.tdoc-ask-mode').count()) throw new Error('a mode before any agent is named');
+      await pop.locator('textarea').fill('Tighten this');
+      await pop.locator('.tdoc-composer-agent').click();
+      const menu = page.locator('.ui-menu-popup');
+      await menu.waitFor();
+      const items = await menu.innerText();
+      if (!/tdoc AI/.test(items) || !/free left/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
+      if (await menu.locator('a[href="/start"]').count() !== 1) throw new Error('no Connect my agent link');
+      await page.keyboard.press('Escape');
+      if (!/@\u2060tdoc AI/.test(await pop.locator('textarea').inputValue())) throw new Error(`default not put in: ${await pop.locator('textarea').inputValue()}`);
+      // The owner has no agent of their own here: tdoc AI only asks.
+      if (await mode(pop) !== 'Ask*|Ask + request change(off)') throw new Error(`mode: ${await mode(pop)}`);
+      if (!(await pop.locator('.tdoc-only-me').count())) throw new Error('no Only me for tdoc AI');
       await context.close();
     });
   } finally {

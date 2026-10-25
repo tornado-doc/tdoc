@@ -900,12 +900,14 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
   // Handoffs and readers' questions belong to this doc too: a slug published
   // again later must not inherit them.
   await env.META.delete(`handoffs:${slug}`);
-  let kvCursor;
-  do {
-    const r = await env.META.list({ prefix: `agent-asks:${slug}:`, cursor: kvCursor });
-    for (const k of r.keys) await env.META.delete(k.name);
-    kvCursor = r.list_complete ? undefined : r.cursor;
-  } while (kvCursor);
+  for (const prefix of [`agent-asks:${slug}:`, `ai-asks:${slug}:`]) {
+    let kvCursor;
+    do {
+      const r = await env.META.list({ prefix, cursor: kvCursor });
+      for (const k of r.keys) await env.META.delete(k.name);
+      kvCursor = r.list_complete ? undefined : r.cursor;
+    } while (kvCursor);
+  }
   await env.META.delete(`meta:${slug}`);
   // Free the hosted slug reservation so it can be republished. Data is already
   // gone; this goes after it. If COMMENTS is absent (Vercel) there was never a
@@ -2800,6 +2802,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     isCatalog: !!isCatalog,
     ownerManage: isOwner ? (ownerManage || null) : null,
     teamManage: (oidc && oidc.teamManage) || null,
+    folder: (oidc && oidc.folder) || null,
     // The document's actual workspace is metadata, not session-derived UI
     // manage state. A newly joined/stale cookie can legitimately have no
     // teamManage yet; the move picker still must offer My docs and hide the
@@ -3411,6 +3414,24 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
       viewerStar = { starred: (await loadStars(env, actorKey(session))).some((i) => i.slug === slug) };
     } catch {}
   }
+  // The folder the doc sits in, for the bar's breadcrumb: a team doc's team
+  // folder (for its members), or the owner's own My docs folder (for them).
+  let docFolder = null;
+  if (!isLanding && gate.meta) {
+    try {
+      if (gate.meta.workspace_id && teamManage && gate.meta.team_folder) {
+        const state = await loadTeamFolders(env, gate.meta.workspace_id);
+        const id = resolveTeamFolder(state, gate.meta.team_folder);
+        const f = id && state.folders.find((x) => x.id === id);
+        if (f) docFolder = { id: f.id, name: f.name, href: `/me?team=${encodeURIComponent(gate.meta.workspace_id)}&folder=${encodeURIComponent(f.id)}` };
+      } else if (!gate.meta.workspace_id && isOwner) {
+        const state = await loadFolderState(env, actorKey(session));
+        const id = state.docs && state.docs[slug];
+        const f = id && state.folders.find((x) => x.id === id);
+        if (f) docFolder = { id: f.id, name: f.name, href: `/me?folder=${encodeURIComponent(f.id)}` };
+      }
+    } catch {}
+  }
   const render = shellDocumentWorker;
   const reqUrl = new URL(req.url);
   // The bare /d/<slug> address is the doc's canonical page: it always
@@ -3457,7 +3478,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), ...(await devModeBoot(env, session)) }, pageUrl), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), folder: docFolder, ...(await devModeBoot(env, session)) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce), 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
     }),
   };
@@ -9619,6 +9640,9 @@ const SCOPED_TOKEN_ROUTES = new Set([
   // token's workspaces; pending lists only handoffs on docs it reaches.
   '/api/notify/local/register', '/api/notify/local/pending', '/api/notify/local/fail',
   '/api/notify/ack', '/api/notify/resolve',
+  // A question asked of a team agent (Ask only): handleAgentAsk re-checks the
+  // doc against the token, and a team agent finds only questions asked of it.
+  '/api/agent/ask-ack', '/api/agent/ask-reply', '/api/agent/ask-done',
 ]);
 // A daemon of its own is a team agent's. A person's narrowed connection that
 // registered a computer would become where that person's Send to agent goes
@@ -10793,6 +10817,11 @@ function applyCommentOp(list, op) {
       // pre-built events array to append to a specific comment (agent/reply path)
       const target = list.find(c => c.id === op.id);
       if (!target) return { status: 404, body: { error: 'not_found' } };
+      // Once only (Make public): serialized here, in the doc's store, so two
+      // concurrent requests cannot both post.
+      if (op.unique_key && list.some((c) => c && (c.events || []).some((e) => e && e.publish_key === op.unique_key))) {
+        return { status: 409, body: { error: 'already_public' } };
+      }
       for (const ev of op.events) appendEvent(target, ev);
       return { status: 200, body: op.responseBody || { ok: true } };
     }
@@ -12053,24 +12082,99 @@ async function resolveAccountNotifyTargets(env, accountId) {
 
 // A team admin may use their own connections for this workspace. Connections
 // remain account-owned; they are never shared with ordinary team members.
+// Who wrote the doc's latest version: the team agent (by id), an account's
+// own agent or CLI (the account behind the upload token; older versions name
+// no account and were the owner's), or a person in the browser editor.
+function docLastWriter(meta) {
+  const versions = Array.isArray(meta && meta.versions) ? meta.versions : [];
+  const v = versions.reduce((best, x) => (x && Number(x.n) > Number(best ? best.n : 0) ? x : best), null);
+  if (!v) return null;
+  if (v.team_agent && v.team_agent.id) return { kind: 'team_agent', id: v.team_agent.id };
+  if (v.source === 'browser') return { kind: 'person', login: v.author || '' };
+  const by = v.by || (meta.hosted && meta.hosted.account_id) || null;
+  return by ? { kind: 'agent', account_id: by } : null;
+}
+
+// Who wrote the latest version, in words for a refusal: the team agent's
+// name, the account's handle (its agent wrote it), or the person's login.
+async function docWriterName(env, meta, writer) {
+  if (!writer) return null;
+  try {
+    if (writer.kind === 'team_agent') {
+      const v = (meta.versions || []).find((x) => x && x.team_agent && x.team_agent.id === writer.id);
+      return v ? v.team_agent.name : 'the team agent';
+    }
+    if (writer.kind === 'person') return writer.login || null;
+    if (writer.kind === 'agent') {
+      const hosted = (meta && meta.hosted) || {};
+      const key = writer.account_id === hosted.account_id ? (hosted.owner_key || hosted.github_login) : '';
+      const owner = await agentOwner(env, writer.account_id, key);
+      return owner ? `${owner.display}'s agent` : null;
+    }
+  } catch {}
+  return null;
+}
+
+// Whose agents a commenter may hand edits to, on this doc (Julie, 2026-10-24:
+// respect authorship). The owner may always use their own. The team agent
+// only edits a doc the team agent wrote. Anyone else's own agent only edits
+// a doc their own agent wrote. A doc last written by somebody else's agent
+// is theirs to change: the comment is a plain comment that notifies them.
+// Answer-only questions (Ask AI) are not edits and are not limited here.
+function agentEditPolicy(meta, accountIds) {
+  const ids = (accountIds || []).filter(Boolean);
+  const ownerId = meta && meta.hosted && meta.hosted.account_id;
+  const owner = !!(ownerId && ids.includes(ownerId));
+  const writer = docLastWriter(meta);
+  const mine = !!(writer && writer.kind === 'agent' && ids.includes(writer.account_id));
+  return {
+    owner,
+    writer,
+    team: !!(writer && writer.kind === 'team_agent'),
+    own: owner || mine,
+    byOther: !!(writer && writer.kind === 'agent' && !mine),
+  };
+}
+
 async function notifyTargetsFor(env, slug, gate, localDriver = null) {
   if (!(gate.meta && gate.meta.workspace_id)) {
     const hosted = (gate.meta && gate.meta.hosted) || {};
     const owner = await agentOwner(env, hosted.account_id, hosted.owner_key || hosted.github_login);
-    return withTargetOwner(await resolveNotifyTargets(env, slug), owner, 'personal');
+    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug), owner, 'personal');
+    // The owner's agent wrote it (the only agent that can): the default says so.
+    const writer = docLastWriter(gate.meta);
+    if (resolved && resolved.default && writer && writer.kind === 'agent' && writer.account_id === hosted.account_id) {
+      resolved.default = { ...resolved.default, last_writer: true };
+    }
+    return resolved;
   }
-  // The team's own agents come first, for every member; an admin's own
-  // connections follow, for that admin only.
+  // The team's own agents, when the team agent wrote this doc; an admin's
+  // own connections, when they own it or their agent wrote it. The agent
+  // that wrote the latest version comes first.
   const caller = await teamAgentCaller(env, gate);
-  const agents = caller ? await teamAgentTargets(env, caller.team) : [];
-  if (!localDriver) {
-    if (!agents.length) return { default: null, candidates: [], fallback: null, reason: caller ? 'no_team_agent' : 'team_admin_only' };
+  const ids = [...new Set([caller && caller.accountId, localDriver, ...sessionAccountIds(gate.session || gate.actor)].filter(Boolean))];
+  const policy = agentEditPolicy(gate.meta, ids);
+  const writerAgent = policy.writer && policy.writer.kind === 'team_agent' ? policy.writer.id : null;
+  const all = caller && policy.team ? await teamAgentTargets(env, caller.team) : [];
+  const agents = [
+    ...all.filter((t) => t.team_agent.id === writerAgent).map((t) => ({ ...t, last_writer: true })),
+    ...all.filter((t) => t.team_agent.id !== writerAgent),
+  ];
+  const none = policy.byOther && !policy.own ? 'written_by_other'
+    : !caller ? 'team_admin_only'
+      : policy.team ? 'no_team_agent' : 'team_agent_not_writer';
+  if (!localDriver || !policy.own) {
+    if (!agents.length) {
+      return { default: null, candidates: [], fallback: null, reason: none, writer: policy.writer ? policy.writer.kind : null, writer_name: await docWriterName(env, gate.meta, policy.writer) };
+    }
     return { default: agents[0], candidates: agents.slice(1), fallback: null, reason: null };
   }
   // localDriverAccount only returns one of the caller's own accounts, so the
   // caller's credential names the account these connections belong to.
   const owner = await agentOwner(env, localDriver, credentialKey(gate.session || gate.actor));
   const own = withTargetOwner(await resolveAccountNotifyTargets(env, localDriver), owner, 'team');
+  const wroteIt = policy.writer && policy.writer.kind === 'agent' && policy.writer.account_id === localDriver;
+  if (wroteIt && own.default) own.default = { ...own.default, last_writer: true };
   if (!agents.length) return own;
   return { ...own, default: agents[0], candidates: [...agents.slice(1), ...[own.default, ...(own.candidates || [])].filter(Boolean)], reason: null };
 }
@@ -12934,6 +13038,112 @@ async function askAttempt(cfg, headers, payload) {
   return { ok: true, answer: answer.trim() };
 }
 
+// ─────────────────── one door: edit, or ask only ───────────────────
+// POST /api/docs/<slug>/hand-off
+//   { recipient, ask_only, only_me?, comment_id?, question?, passage?, version? }
+// ask_only false: hand the comment (comment_id) to an agent to EDIT the doc.
+//   The authorship rules decide who may (agentEditPolicy, through
+//   /api/notify/handoff): the owner to their own agent; members to the team
+//   agent on a doc it wrote; nobody on a doc somebody else's agent wrote.
+// ask_only true: an answer, never an edit, from the commenter's own agent,
+//   the doc's team agent (members), or tdoc AI (recipient.tdoc_ai) when
+//   neither can answer. Never somebody else's personal agent. only_me keeps
+//   the question and answer private (no comment_id); otherwise the answer is
+//   the reply under comment_id.
+// Each case is the existing door's request, sent through the worker again,
+// so every check those doors make still holds.
+async function handleHandOff(env, req, url, slug, ctx) {
+  if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+  if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
+  if (req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
+    return json({ error: 'cross_origin' }, { status: 403 });
+  }
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const recipient = body && typeof body.recipient === 'object' ? body.recipient : null;
+  const commentId = typeof body.comment_id === 'string' ? body.comment_id : null;
+  const forward = (path, payload) => {
+    const headers = new Headers(req.headers);
+    headers.delete('content-length');
+    headers.set('content-type', 'application/json');
+    return tdocHandlers.fetch(new Request(`${url.origin}${path}`, { method: 'POST', headers, body: JSON.stringify(payload) }), env, ctx);
+  };
+  if (!body.ask_only) {
+    if (!commentId) return json({ error: 'comment_id required' }, { status: 400 });
+    if (!recipient || recipient.tdoc_ai) return json({ error: 'edit_needs_an_agent', message: 'tdoc AI answers; it does not edit.' }, { status: 400 });
+    return forward('/api/notify/handoff', { slug, comment_ids: [commentId], recipient });
+  }
+  const onlyMe = body.only_me === true;
+  if (!onlyMe && !commentId) return json({ error: 'comment_id required' }, { status: 400 });
+  const question = body.question;
+  if (!recipient || recipient.tdoc_ai) {
+    return forward(`/api/docs/${encodeURIComponent(slug)}/ask`, {
+      question,
+      ...(body.version != null ? { version: body.version } : {}),
+      selection: body.passage && typeof body.passage.text === 'string' ? body.passage.text : '',
+      ...(onlyMe ? {} : { comment_id: commentId }),
+    });
+  }
+  return forward(`/api/docs/${encodeURIComponent(slug)}/my-agent`, {
+    question,
+    recipient,
+    ...(body.passage ? { passage: body.passage } : {}),
+    ...(onlyMe ? {} : { comment_id: commentId }),
+  });
+}
+
+// ─────────────────── an AI answer as a reply in the thread ───────────────────
+// Asking AI is commenting: the comment posts as any other, and the answer
+// arrives as an ordinary reply under it, seen by everyone who can see the
+// comment, signed by whoever answered (tdoc AI, or the commenter's own agent).
+// Only the comment's own author may ask for an answer to it, and only while
+// they may comment on the doc -- an answer is speech in their thread.
+async function askedComment(env, slug, session, meta, commentId) {
+  if (typeof commentId !== 'string' || !commentId || commentId.length > 120) {
+    return { error: json({ error: 'invalid_comment_id' }, { status: 400 }) };
+  }
+  if (!canCommentOnDoc(accessFromMeta(meta), session, env, meta)) {
+    return { error: json({ error: 'comment_not_allowed' }, { status: 403 }) };
+  }
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  const thread = findCommentThread(list, commentId);
+  const record = findRecord(list, commentId);
+  if (!thread || !record) return { error: json({ error: 'comment_not_found' }, { status: 404 }) };
+  if (!isRecordAuthor(record, session)) {
+    return { error: json({ error: 'not_your_comment', message: 'Only the person who wrote a comment can ask AI to answer it.' }, { status: 403 }) };
+  }
+  return { thread, record };
+}
+
+// One answer, posted under the comment that asked. agentReplyGate keeps it
+// to one answer per human turn, as for every agent reply.
+async function postThreadAnswer(env, slug, { thread, parentId, agent, text, version, uniqueKey = null }) {
+  const gate = agentReplyGate(thread.root, agent.login);
+  if (!gate.allowed) return { skipped: true, reason: gate.reason };
+  const V = coerceBodyVersion(version, thread.root.created_in || 1);
+  const now = new Date().toISOString();
+  const replyId = `r_${Date.now()}_${rand(4)}`;
+  const res = await mutateComments(env, slug, {
+    kind: 'raw_events', slug, id: thread.root.id,
+    events: [
+      { kind: 'reply_added', at_version: V, at: now, reply: { id: replyId, author: agent, text, agent_status: 'answered', parent_id: parentId }, ...(uniqueKey ? { publish_key: uniqueKey } : {}) },
+      { kind: 'marked_open', at_version: V, at: now, by: agent.login, agent_status: 'answered' },
+    ],
+    ...(uniqueKey ? { unique_key: uniqueKey } : {}),
+    responseBody: { id: replyId, parent_id: parentId, thread_id: thread.root.id, text, author: agent, agent_status: 'answered', created: now, reactions: {} },
+  });
+  if (res.status === 409) return { duplicate: true };
+  return res.status === 200 ? { reply: res.body } : { failed: res.status };
+}
+
+// tdoc AI, as it signs a reply: "tdoc AI · <asker>", the product's own mark
+// (the solid tile; the stroke-only logo is for chrome). No provider: it is
+// not a connection anybody made.
+function tdocAiAuthor(owner, scope) {
+  return { kind: 'agent', login: 'tdoc-ai', name: 'tdoc AI', avatar_url: '/tdoc_logo.png', ...(owner ? { owner } : {}), scope };
+}
+
 async function handleAsk(env, req, url, slug) {
   const cfg = askConfig(env);
   if (!cfg.available) return json({ error: 'ask_unavailable' }, { status: 503 });
@@ -12952,9 +13162,17 @@ async function handleAsk(env, req, url, slug) {
   }
   let body = {};
   try { body = await req.json(); } catch {}
-  const question = askCut(body && body.question, ASK_QUESTION_CHARS);
-  if (!question) return json({ error: 'question_required' }, { status: 400 });
-  const selection = askCut(body && typeof body.selection === 'string' ? body.selection : '', ASK_SELECTION_CHARS);
+  // Same-site only when it writes a reply: a missing Origin is not taken as one.
+  const commentId = body && body.comment_id != null ? body.comment_id : null;
+  // Asked in a comment, the question IS that comment (and its passage), read
+  // from the store below: a reply signed "tdoc AI" must answer what the
+  // thread shows, not words the browser sent alongside it.
+  let question = askCut(body && body.question, ASK_QUESTION_CHARS);
+  if (!question && commentId == null) return json({ error: 'question_required' }, { status: 400 });
+  let selection = askCut(body && typeof body.selection === 'string' ? body.selection : '', ASK_SELECTION_CHARS);
+  if (commentId != null && req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
+    return json({ error: 'cross_origin' }, { status: 403 });
+  }
   const meta = await loadDocMeta(env, slug);
   if (!meta) return json({ error: 'not_found' }, { status: 404 });
   const latest = latestVersionNumber(meta);
@@ -12967,8 +13185,24 @@ async function handleAsk(env, req, url, slug) {
   if (!gate.ok || gate.ownerToken || gate.bearerSession) {
     return json({ error: 'access_denied' }, { status: gate.ok ? 403 : (gate.response && gate.response.status === 401 ? 401 : 403) });
   }
+  const asking = commentId != null ? await askedComment(env, slug, session, meta, commentId) : null;
+  if (asking && asking.error) return asking.error;
+  if (asking) {
+    const stored = storedCommentQuestion(asking);
+    question = askCut(stored.text, ASK_QUESTION_CHARS);
+    selection = askCut(stored.passage, ASK_SELECTION_CHARS);
+    if (!question) return json({ error: 'question_required' }, { status: 400 });
+    // One answer per human turn, decided BEFORE anything is charged or the
+    // model runs: asking again on an answered comment costs nothing and gets
+    // nothing (a refund after the model ran was a free model call).
+    const turn = agentReplyGate(asking.thread.root, 'tdoc-ai');
+    if (!turn.allowed) {
+      const used = Number(await env.META.get(usedKey)) || 0;
+      return json({ ok: true, skipped: true, reason: turn.reason, remaining: Math.max(0, cfg.limit - used), limit: cfg.limit });
+    }
+  }
   const used = Number(await env.META.get(usedKey)) || 0;
-  if (used >= cfg.limit) return json({ error: 'ask_limit', limit: cfg.limit, remaining: 0 }, { status: 429 });
+  if (used >= cfg.limit) return json({ error: 'ask_limit', limit: cfg.limit, remaining: 0, connect_href: '/start' }, { status: 429 });
   const obj = await env.DOCS.get(`docs/${slug}/v${asked}/index.html`);
   if (!obj) return json({ error: 'not_found' }, { status: 404 });
   const doc = askDocText(await obj.text());
@@ -12989,11 +13223,175 @@ async function handleAsk(env, req, url, slug) {
   await env.META.put(usedKey, String(used + 1));
   const out = await callAskModel(cfg, messages);
   if (!out.ok) {
-    try { await env.META.put(usedKey, String(used)); } catch {}
+    // The model did not answer: give the question back, from the counter as
+    // it is now (never the value read before the call).
+    await askRefund(env, usedKey);
     console.log(JSON.stringify({ event: 'ask_failed', status: out.status || null, detail: out.detail || null }));
     return json({ error: 'ask_failed' }, { status: 502 });
   }
-  return json({ answer: out.answer, remaining: Math.max(0, cfg.limit - used - 1), limit: cfg.limit });
+  const remaining = Math.max(0, cfg.limit - used - 1);
+  if (asking) {
+    const accountId = await sessionAccountId(env, session);
+    const owner = await agentOwner(env, accountId, credentialKey(session));
+    const posted = await postThreadAnswer(env, slug, {
+      thread: asking.thread,
+      parentId: commentId,
+      agent: tdocAiAuthor(owner, meta.workspace_id ? 'team' : 'personal'),
+      text: out.answer,
+      version: asked,
+    });
+    // The model ran: the question is spent either way, even if the answer
+    // could not be posted or another one landed first.
+    if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
+    if (posted.skipped) return json({ ok: true, skipped: true, reason: posted.reason, remaining, limit: cfg.limit });
+    return json({ ok: true, reply: posted.reply, remaining, limit: cfg.limit });
+  }
+  // Asked "Only me": the answer is the asker's alone, kept (a few per doc)
+  // so "Make public" can post exactly what tdoc AI said, signed tdoc AI.
+  const askId = `a_${Date.now()}_${rand(3)}`;
+  await putAiAsk(env, slug, accountKey, { ask_id: askId, at: new Date().toISOString(), question, selection, answer: out.answer, version: asked });
+  return json({ ask_id: askId, answer: out.answer, remaining, limit: cfg.limit });
+}
+
+// Giving back a question the model never answered: decrement the counter
+// as it stands now, not write back the value read before the call.
+async function askRefund(env, usedKey) {
+  try {
+    const now = Number(await env.META.get(usedKey)) || 0;
+    if (now > 0) await env.META.put(usedKey, String(now - 1));
+  } catch {}
+}
+
+// The question a comment asks, as stored: its text, and the passage it is
+// anchored to (a reply's is its thread's).
+function storedCommentQuestion(asking) {
+  const snap = snapshotAt(asking.thread.root, Infinity) || {};
+  const isRoot = asking.record === asking.thread.root;
+  const text = isRoot ? snap.text : asking.record.text;
+  const passage = snap.anchor && typeof snap.anchor.text === 'string' ? snap.anchor.text
+    : snap.anchor && snap.anchor.fallback && typeof snap.anchor.fallback.text === 'string' ? snap.anchor.fallback.text : '';
+  return { text: String(text || '').trim(), passage };
+}
+
+const AI_ASK_MAX = 20;
+function aiAsksKey(slug, accountKey) {
+  return `ai-asks:${slug}:${accountKey}`;
+}
+async function loadAiAsks(env, slug, accountKey) {
+  try {
+    const list = JSON.parse((await env.META.get(aiAsksKey(slug, accountKey))) || '[]');
+    return Array.isArray(list) ? list.filter((a) => a && typeof a.ask_id === 'string') : [];
+  } catch { return []; }
+}
+async function putAiAsk(env, slug, accountKey, rec) {
+  const list = await loadAiAsks(env, slug, accountKey);
+  await env.META.put(aiAsksKey(slug, accountKey), JSON.stringify([rec, ...list.filter((a) => a.ask_id !== rec.ask_id)].slice(0, AI_ASK_MAX)));
+}
+
+// "Make public" for a private answer: the asker has just posted their
+// question as a comment (comment_id, theirs); the answer they were given goes
+// under it as the reply, signed by whoever gave it. Only what the server
+// kept is posted -- the browser never supplies the answer's text.
+//   POST /api/docs/<slug>/ask/publish       { ask_id, comment_id }  tdoc AI
+//   POST /api/docs/<slug>/my-agent/publish  { ask_id, comment_id }  own agent
+async function handleAskPublish(env, req, url, slug, kind) {
+  if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+  if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
+  if (req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
+    return json({ error: 'cross_origin' }, { status: 403 });
+  }
+  const session = await getSession(env, req);
+  if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+  const meta = await loadDocMeta(env, slug);
+  if (!meta) return json({ error: 'not_found' }, { status: 404 });
+  const gate = await enforceDocAccess(env, req, slug, latestVersionNumber(meta) || 1);
+  if (!gate.ok || gate.ownerToken || gate.bearerSession) return json({ error: 'access_denied' }, { status: 403 });
+  let body = {};
+  try { body = await req.json(); } catch {}
+  const askId = body && typeof body.ask_id === 'string' ? body.ask_id : '';
+  if (!askId) return json({ error: 'ask_id required' }, { status: 400 });
+  const asking = await askedComment(env, slug, session, meta, body && body.comment_id);
+  if (asking.error) return asking.error;
+  const scope = meta.workspace_id ? 'team' : 'personal';
+  const accountId = await sessionAccountId(env, session);
+  if (kind === 'ai') {
+    const accountKey = await askAccountKey(env, session);
+    const list = await loadAiAsks(env, slug, accountKey);
+    const ask = list.find((a) => a.ask_id === askId);
+    if (!ask) return json({ error: 'ask_not_found' }, { status: 404 });
+    if (ask.published) return json({ error: 'already_public', reply_id: ask.published }, { status: 409 });
+    if (!sameQuestion(asking, ask.question)) return json({ error: 'not_the_question', message: 'Make public posts the answer under the question it answered.' }, { status: 409 });
+    const owner = await agentOwner(env, accountId, credentialKey(session));
+    const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: tdocAiAuthor(owner, scope), text: ask.answer, version: ask.version, uniqueKey: `publish:${askId}` });
+    if (posted.duplicate) return json({ error: 'already_public' }, { status: 409 });
+    if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
+    if (posted.reply) await putAiAsk(env, slug, accountKey, { ...ask, published: posted.reply.id });
+    return json({ ok: true, reply: posted.reply || null, skipped: !!posted.skipped });
+  }
+  if (!accountId) return json({ error: 'ask_not_found' }, { status: 404 });
+  const group = await accountGroup(env, accountId);
+  const asker = group.canonical || accountId;
+  const ask = (await loadAgentAsks(env, slug, asker)).find((a) => a.ask_id === askId);
+  if (!ask || !ask.by || !group.ids.includes(ask.by)) return json({ error: 'ask_not_found' }, { status: 404 });
+  if (!ask.answer) return json({ error: 'not_answered' }, { status: 409 });
+  if (ask.reply_id) return json({ error: 'already_public', reply_id: ask.reply_id }, { status: 409 });
+  if (!sameQuestion(asking, ask.question)) return json({ error: 'not_the_question', message: 'Make public posts the answer under the question it answered.' }, { status: 409 });
+  const named = { agent_login: ask.answer.agent && ask.answer.agent.login, agent_name: ask.answer.agent && ask.answer.agent.name };
+  const teamOf = ask.runner && meta.workspace_id ? await loadTeam(env, meta.workspace_id) : null;
+  const author = ask.runner && ask.team_agent
+    ? teamAgentAskAuthor({ team_agent: { ...ask.team_agent, team_name: teamOf ? teamOf.name : '' } }, ask.recipient, named, env)
+    : await askAgentAuthor(env, accountId, credentialKey(session), ask.recipient, named, scope);
+  const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: author, text: ask.answer.text, uniqueKey: `publish:${askId}` });
+  if (posted.duplicate) return json({ error: 'already_public' }, { status: 409 });
+  if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
+  if (posted.reply) await putAgentAsk(env, slug, { ...ask, comment_id: body.comment_id, reply_id: posted.reply.id });
+  return json({ ok: true, reply: posted.reply || null, skipped: !!posted.skipped });
+}
+
+// Make public posts the answer only under the comment that quotes the
+// question it answered: the comment must say what was asked (the client
+// posts exactly that text), so a kept answer cannot be stuck under any
+// other comment.
+function sameQuestion(asking, question) {
+  const norm = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+  return norm(storedCommentQuestion(asking).text) === norm(question);
+}
+
+// A team agent as it signs an answer: its own name and team, from the
+// credential, never from the body (as /api/agent/reply signs it).
+function teamAgentAskAuthor(actor, recipient, body, env) {
+  const id = agentIdentity(body || {}, env);
+  const t = recipient || {};
+  return {
+    ...id,
+    login: `team-agent:${actor.team_agent.id}`,
+    name: actor.team_agent.name,
+    avatar_url: logoForAgentLogin(id.login),
+    team_agent: { id: actor.team_agent.id, name: actor.team_agent.name },
+    owner: { key: `team-agent:${actor.team_agent.id}`, display: teamAgentOwnerDisplay({ name: actor.team_agent.team_name }) },
+    ...(t.provider ? { provider: t.provider } : {}),
+    ...(t.provider === 'local' && t.cli ? { cli: t.cli } : {}),
+    ...(t.provider === 'local' && t.device ? { location: t.device } : {}),
+    scope: 'team',
+  };
+}
+
+// The reader's agent as it signs a reply in a thread: its name, the program
+// and where it runs, and the account it acts for (from the credential).
+async function askAgentAuthor(env, accountId, credKey, recipient, named, scope) {
+  const owner = await agentOwner(env, accountId, credKey);
+  const t = recipient || {};
+  const id = agentIdentity(named || {}, env);
+  const location = t.provider === 'raft' ? t.server_slug || '' : t.provider === 'local' ? t.device || '' : '';
+  return {
+    ...id,
+    ...(t.provider ? { provider: t.provider } : {}),
+    ...(t.provider === 'local' && t.cli ? { cli: t.cli } : {}),
+    ...(t.agent_name && t.provider !== 'local' ? { handle: `@${String(t.agent_name).replace(/^@/, '')}` } : {}),
+    ...(location ? { location } : {}),
+    ...(owner ? { owner, principal: { display: `@${owner.display}`, terminal: id.name } } : {}),
+    scope,
+  };
 }
 
 // ─────────────────────── a reader's own agent ───────────────────────
@@ -13001,11 +13399,13 @@ async function handleAsk(env, req, url, slug) {
 // question about it to an agent connected to THEIR OWN account -- never the
 // owner's, never anyone else's. Nothing here reads the doc's agents or the
 // owner's connections: the only targets are the reader's account list. The
-// reply comes back on the reader's own upload token and is shown to that
-// reader alone until they post it as a comment themselves.
+// reply comes back on the reader's own upload token. Asked in a comment
+// (comment_id: the comment composer's Ask AI / @AI), it is posted as a reply
+// in that thread, signed by the reader's agent, for everyone who can see the
+// comment; asked without one, it is shown to that reader alone.
 //
 // GET  /api/docs/<slug>/my-agent  -> { tier, agent, agents, asks }
-// POST /api/docs/<slug>/my-agent  { question, passage?, recipient? } -> { ask }
+// POST /api/docs/<slug>/my-agent  { question, passage?, recipient?, comment_id? } -> { ask }
 // POST /api/agent/ask-ack         { slug, ask_id }              picked up
 // POST /api/agent/ask-reply       { slug, ask_id, text }        the answer
 // POST /api/agent/ask-done        { slug, ask_id, error? }      a daemon run ended
@@ -13080,6 +13480,9 @@ function agentAskView(a) {
     at: a.at,
     question: a.question,
     passage: a.passage || null,
+    comment_id: a.comment_id || null,
+    reply_id: a.reply_id || null,
+    team_agent: a.team_agent || null,
     recipient: agentAskTargetView(a.recipient),
     delivery: a.delivery ? { status: a.delivery.status, error: a.delivery.error || null } : null,
     acked_at: a.acked_at || null,
@@ -13107,8 +13510,13 @@ function agentAskLine(url, question, passage) {
   return `Read ${url} and answer: ${question}${passage ? `\n\nAbout this passage: "${passage}"` : ''}`;
 }
 
-function agentAskEvent({ slug, docTitle, askId, question, passage, publicHost }) {
+function agentAskEvent({ slug, docTitle, askId, question, passage, publicHost, commentId = null }) {
   const url = `https://${publicHost || 'tdoc.dev'}/d/${slug}`;
+  // Asked in a comment: the answer is a reply in that thread, which everyone
+  // who can see the comment reads. Still an answer only: no edits.
+  const answerLine = commentId
+    ? `Your answer is posted as a reply under the person's comment, where everyone who can see the comment reads it: bin/tdoc-agent-reply --slug ${slug} --ask ${askId} --text "<answer>". Do not edit the document or post anything else.`
+    : `Answer only the person who asked, with the tdoc skill: bin/tdoc-agent-reply --slug ${slug} --ask ${askId} --text "<answer>". Do not edit the document or post a comment.`;
   return {
     kind: 'notification',
     summary: `tdoc: a question for you about "${docTitle || slug}"`,
@@ -13121,10 +13529,21 @@ function agentAskEvent({ slug, docTitle, askId, question, passage, publicHost })
       ask_id: askId,
       question,
       selection: passage || '',
+      ...(commentId ? { comment_id: commentId } : {}),
       url,
-      instruction: `${agentAskLine(url, question, passage)}\n\nAnswer only the person who asked, with the tdoc skill: bin/tdoc-agent-reply --slug ${slug} --ask ${askId} --text "<answer>". Do not edit the document or post a comment.`,
+      instruction: `${agentAskLine(url, question, passage)}\n\n${answerLine}`,
     },
   };
+}
+
+// The doc's team agents a commenter may ask (answers only): any member of
+// the doc's team, on that team's docs. `reachable` are those whose daemon is
+// checking in.
+async function teamAskTargets(env, gate) {
+  const caller = await teamAgentCaller(env, gate);
+  if (!caller) return { targets: [], reachable: [] };
+  const targets = await teamAgentTargets(env, caller.team);
+  return { targets, reachable: targets.filter((t) => t.provider !== 'local' || t.status === 'active') };
 }
 
 async function handleMyAgent(env, req, url, slug) {
@@ -13151,37 +13570,72 @@ async function handleMyAgent(env, req, url, slug) {
   const accountId = await sessionAccountId(env, session);
   const state = accountId ? await readerAgentState(env, accountId) : { group: { ids: [], canonical: null }, own: [], reachable: [], tier: 'none' };
   const asker = state.group.canonical || accountId;
+  // Ask only may also go to the doc's team agent, for a member of its team.
+  const team = await teamAskTargets(env, { meta, session });
   if (req.method === 'GET') {
     const asks = accountId ? (await loadAgentAsks(env, slug, asker)).slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
     return json({
       tier: state.tier,
       agent: agentAskTargetView(state.reachable[0] || null),
       agents: state.own.map(agentAskTargetView),
+      team_agents: team.targets.map(agentAskTargetView),
+      // tdoc AI is offered to everyone, within their free answers.
+      tdoc_ai: askConfig(env).available,
       asks,
       helper_href: AGENT_HELPER_HREF,
     }, { headers: { 'Cache-Control': 'no-store' } });
   }
   let body = {};
   try { body = await req.json(); } catch {}
-  const question = askCut(body && body.question, ASK_QUESTION_CHARS);
-  if (!question) return json({ error: 'question_required' }, { status: 400 });
+  const commentId = body && body.comment_id != null ? body.comment_id : null;
+  // Asked in a comment, the question is that comment as stored (see
+  // handleAsk): an answer signed by an agent must answer what the thread shows.
+  let question = askCut(body && body.question, ASK_QUESTION_CHARS);
+  if (!question && commentId == null) return json({ error: 'question_required' }, { status: 400 });
   if (!accountId) return json({ error: 'agent_not_connected', tier: 'none' }, { status: 409 });
-  // Only one of the reader's own agents, and only one that can be reached.
-  // A recipient that is not on the reader's account is somebody else's.
+  // One of the reader's own agents, or the doc's team agent for a member of
+  // its team, and only one that can be reached. Anything else is somebody
+  // else's agent.
   const asked = body && body.recipient ? normalizeNotifyTarget(body.recipient) : null;
-  if (body && body.recipient && (!asked || !state.own.some((t) => sameNotifyTarget(t, asked)))) {
-    return json({ error: 'not_your_agent', message: 'You can only send to an agent connected to your own account.' }, { status: 403 });
+  const askedTeamAgent = body && body.recipient && body.recipient.team_agent && typeof body.recipient.team_agent.id === 'string' ? body.recipient.team_agent.id : '';
+  let target = null;
+  let runner = null;
+  if (askedTeamAgent) {
+    const hit = team.targets.find((t) => t.team_agent.id === askedTeamAgent && sameNotifyTarget(t, asked));
+    if (!hit) return json({ error: 'not_your_agent', message: 'You can only ask your own agents, or your team\'s agent on your team\'s docs.' }, { status: 403 });
+    if (!team.reachable.includes(hit)) return json({ error: 'agent_offline', tier: 'offline' }, { status: 409 });
+    target = hit;
+    runner = hit.team_agent.id;
+  } else {
+    if (body && body.recipient && (!asked || !state.own.some((t) => sameNotifyTarget(t, asked)))) {
+      return json({ error: 'not_your_agent', message: 'You can only send to an agent connected to your own account.' }, { status: 403 });
+    }
+    target = asked ? state.reachable.find((t) => sameNotifyTarget(t, asked)) : state.reachable[0];
   }
-  const target = asked ? state.reachable.find((t) => sameNotifyTarget(t, asked)) : state.reachable[0];
   if (!target) return json({ error: state.tier === 'none' ? 'agent_not_connected' : 'agent_offline', tier: state.tier }, { status: 409 });
   // Each send is writes and an outbound call: a few open at once per doc,
   // and a budget per hour.
   const open = (await loadAgentAsks(env, slug, asker)).filter((a) => !agentAskDone(a)).length;
   if (open >= AGENT_ASK_OPEN_MAX) return json({ error: 'too_many_open_questions', message: 'Your agent has not answered your earlier questions on this doc yet.' }, { status: 429 });
   if (await rateLimited(env, `myagent:${asker}`, AGENT_ASK_RATE, 3600)) return json({ error: 'rate_limited', message: 'Too many questions sent to your agent; try again later.' }, { status: 429 });
-  const passage = agentAskPassage(body && body.passage);
+  // Asked in a comment (the composer's @agent, Ask): the answer goes in that
+  // thread. The reader's own comment only, and only while they may comment
+  // here (askedComment). A team agent answers for the team: never privately.
+  if (runner && commentId == null) {
+    return json({ error: 'team_agent_not_private', message: 'A team agent answers in the thread, for everyone who can see it.' }, { status: 400 });
+  }
+  let storedPassage = null;
+  if (commentId != null) {
+    const asking = await askedComment(env, slug, session, meta, commentId);
+    if (asking.error) return asking.error;
+    const stored = storedCommentQuestion(asking);
+    question = askCut(stored.text, ASK_QUESTION_CHARS);
+    if (!question) return json({ error: 'question_required' }, { status: 400 });
+    storedPassage = stored.passage ? { text: askCut(stored.passage, ASK_SELECTION_CHARS) } : null;
+  }
+  const passage = commentId != null ? storedPassage : agentAskPassage(body && body.passage);
   const askId = `q_${Date.now()}_${rand(3)}`;
-  const event = agentAskEvent({ slug, docTitle: meta.title, askId, question, passage: passage && passage.text, publicHost: env.PUBLIC_HOST });
+  const event = agentAskEvent({ slug, docTitle: meta.title, askId, question, passage: passage && passage.text, publicHost: env.PUBLIC_HOST, commentId });
   const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
   const at = new Date().toISOString();
   const rec = await putAgentAsk(env, slug, {
@@ -13190,19 +13644,36 @@ async function handleMyAgent(env, req, url, slug) {
     by: asker,
     question,
     ...(passage ? { passage } : {}),
+    ...(commentId ? { comment_id: commentId } : {}),
     recipient: target,
+    ...(runner ? { runner, team_agent: { id: target.team_agent.id, name: target.team_agent.name } } : {}),
     delivery: { ...delivery, at },
   });
   // A local agent is not pushed to: the reader's own daemon finds it in the
-  // reader's own pending index, never the doc owner's.
+  // reader's own pending index, never the doc owner's. The team agent's
+  // daemon finds it in the team agent's, and its token finds the question
+  // through team-ask:<id> (handleAgentAsk).
+  if (runner) await env.META.put(`team-ask:${askId}`, JSON.stringify({ slug, by: rec.by, runner }), { expirationTtl: 30 * 86400 });
   if (target.provider === 'local') {
-    await localPendingPut(env, rec.by, { slug, handoff_id: askId, kind: 'ask', by: rec.by, device: target.device, agent_sub: target.agent_sub, at });
+    await localPendingPut(env, runner || rec.by, { slug, handoff_id: askId, kind: 'ask', by: rec.by, ...(runner ? { runner } : {}), device: target.device, agent_sub: target.agent_sub, at });
   }
   return json({ ok: true, ask: agentAskView(rec) });
 }
 
 // The asker's agent, on the asker's own upload token. The token's account
 // must be the one that asked, and must still be able to read the doc.
+const TEAM_ASK_RUN_TTL = 3600;
+function teamAskRunKey(agentId, slug) {
+  return `team-ask-run:${agentId}:${slug}`;
+}
+// A team agent answering a question on this doc right now: an answer-only
+// run, so nothing it sends may change the doc.
+async function teamAskRunActive(env, actor, slug) {
+  if (!(actor && actor.team_agent && actor.team_agent.id)) return false;
+  try { return Boolean(await env.META.get(teamAskRunKey(actor.team_agent.id, slug))); } catch { return false; }
+}
+const ANSWER_ONLY_RUN = { error: 'answer_only_run', message: 'This team agent is answering a question on this doc: an answer only, no edits, until that run ends.' };
+
 async function handleAgentAsk(env, req, action) {
   const auth = await requireUploadAuth(req, env);
   if (!auth.ok) return auth.response;
@@ -13213,11 +13684,25 @@ async function handleAgentAsk(env, req, action) {
   if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
   if (typeof askId !== 'string' || !askId) return json({ error: 'ask_id required' }, { status: 400 });
   // Only the asking account's own questions are even looked at: somebody
-  // else's token finds nothing to answer.
-  const group = await accountGroup(env, auth.actor.account_id);
-  const prev = (await loadAgentAsks(env, slug, group.canonical)).find((a) => a.ask_id === askId);
-  if (!prev) return json({ error: 'ask_not_found' }, { status: 404 });
-  if (!prev.by || !group.ids.includes(prev.by)) return json({ error: 'not_your_question', message: 'Only the account that asked can answer this question.' }, { status: 403 });
+  // else's token finds nothing to answer. A team agent finds the questions a
+  // member asked it (team-ask:<id>), and only those.
+  const teamAgentId = auth.actor.team_agent ? auth.actor.team_agent.id : null;
+  let prev = null;
+  if (teamAgentId) {
+    let ptr = null;
+    try { ptr = JSON.parse((await env.META.get(`team-ask:${askId}`)) || 'null'); } catch {}
+    if (ptr && ptr.slug === slug && ptr.runner === teamAgentId) {
+      prev = (await loadAgentAsks(env, slug, ptr.by)).find((a) => a.ask_id === askId) || null;
+    }
+    if (!prev) return json({ error: 'ask_not_found' }, { status: 404 });
+    if (prev.runner !== teamAgentId) return json({ error: 'not_your_question' }, { status: 403 });
+  } else {
+    const group = await accountGroup(env, auth.actor.account_id);
+    prev = (await loadAgentAsks(env, slug, group.canonical)).find((a) => a.ask_id === askId);
+    if (!prev) return json({ error: 'ask_not_found' }, { status: 404 });
+    if (prev.runner || !prev.by || !group.ids.includes(prev.by)) return json({ error: 'not_your_question', message: 'Only the account that asked can answer this question.' }, { status: 403 });
+  }
+  const queueOf = prev.runner || prev.by;
   const at = new Date().toISOString();
   // Closing a run needs no read access: an asker who lost it must still be
   // able to take the question off their own queue.
@@ -13228,6 +13713,10 @@ async function handleAgentAsk(env, req, action) {
     if (!gate.ok) return json({ error: 'access_denied' }, { status: 403 });
   }
   if (action === 'ack') {
+    // A team agent's token can write its team's docs. While it answers a
+    // question on this doc it may only answer: uploads and replies on this
+    // slug are refused (teamAskRunActive) until ask-done or an hour passes.
+    if (teamAgentId) await env.META.put(teamAskRunKey(teamAgentId, slug), askId, { expirationTtl: TEAM_ASK_RUN_TTL });
     if (prev.acked_at) return json({ ok: true, ask_id: askId, acked_at: prev.acked_at, already: true });
     await putAgentAsk(env, slug, { ...prev, acked_at: at });
     return json({ ok: true, ask_id: askId, acked_at: at, already: false });
@@ -13237,9 +13726,33 @@ async function handleAgentAsk(env, req, action) {
     if (!text) return json({ error: 'text required' }, { status: 400 });
     const clean = (s) => (typeof s === 'string' ? s.trim().slice(0, 60) : '');
     const agent = { login: clean(body.agent_login), name: clean(body.agent_name) };
-    const rec = await putAgentAsk(env, slug, { ...prev, acked_at: prev.acked_at || at, answer: { text, at, agent } });
-    if (prev.recipient && prev.recipient.provider === 'local') await localPendingDrop(env, prev.by, askId);
-    return json({ ok: true, ask_id: askId, answered_at: rec.answer.at });
+    // Asked in a comment: the answer is a reply in that thread, signed by
+    // the asker's agent (naming the asker) or the team agent. A reader's own
+    // token cannot write somebody else's doc; a team agent's token can write
+    // its team's docs, so while its answer run is on (from ask-ack to
+    // ask-done) uploads and other replies on this slug are refused
+    // (teamAskRunActive).
+    let replyId = null;
+    if (prev.comment_id) {
+      const list = await readComments(env, slug);
+      ensureMigrated(list);
+      const thread = findCommentThread(list, prev.comment_id);
+      if (thread) {
+        const meta = await loadDocMeta(env, slug);
+        const author = teamAgentId
+          ? teamAgentAskAuthor(auth.actor, prev.recipient, body, env)
+          : await askAgentAuthor(env, auth.actor.account_id, credentialKey(auth.actor), prev.recipient, body, meta && meta.workspace_id ? 'team' : 'personal');
+        const posted = await postThreadAnswer(env, slug, { thread, parentId: prev.comment_id, agent: author, text });
+        if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
+        replyId = posted.reply ? posted.reply.id : null;
+      }
+    }
+    const rec = await putAgentAsk(env, slug, { ...prev, acked_at: prev.acked_at || at, answer: { text, at, agent }, ...(replyId ? { reply_id: replyId } : {}) });
+    if (prev.recipient && prev.recipient.provider === 'local') await localPendingDrop(env, queueOf, askId);
+    return json({ ok: true, ask_id: askId, answered_at: rec.answer.at, ...(replyId ? { reply_id: replyId } : {}) });
+  }
+  if (teamAgentId) {
+    try { if ((await env.META.get(teamAskRunKey(teamAgentId, slug))) === askId) await env.META.delete(teamAskRunKey(teamAgentId, slug)); } catch {}
   }
   // done: a daemon run ended. Answered already is the good ending; anything
   // else is recorded as failed so the asker is told rather than left waiting.
@@ -13247,7 +13760,7 @@ async function handleAgentAsk(env, req, action) {
     const error = String(body.error || 'finished without an answer').slice(0, 300);
     await putAgentAsk(env, slug, { ...prev, delivery: { status: 'failed', error: 'agent_run_failed', at }, run: { status: 'failed', at, error } });
   }
-  await localPendingDrop(env, prev.by, askId);
+  await localPendingDrop(env, queueOf, askId);
   return json({ ok: true, ask_id: askId, answered: !!prev.answer });
 }
 
@@ -16898,6 +17411,13 @@ const tdocHandlers = {
     // ---- comments ----
     // Ask this doc: POST asks, GET reads the reader's remaining allowance.
     {
+      // One door for "hand this to an agent" from the comment composer: the
+      // Ask only box decides edit or answer, and the rules are the existing
+      // doors' (handleHandOff), which it calls.
+      const handOffMatch = p.match(/^\/api\/docs\/([^/]+)\/hand-off\/?$/);
+      if (handOffMatch && method === 'POST') return handleHandOff(env, req, url, handOffMatch[1], ctx);
+      const publishMatch = p.match(/^\/api\/docs\/([^/]+)\/(ask|my-agent)\/publish\/?$/);
+      if (publishMatch && method === 'POST') return handleAskPublish(env, req, url, publishMatch[1], publishMatch[2] === 'ask' ? 'ai' : 'agent');
       const askMatch = p.match(/^\/api\/docs\/([^/]+)\/ask\/?$/);
       if (askMatch && (method === 'POST' || method === 'GET')) return handleAsk(env, req, url, askMatch[1]);
       // Send to my agent: the reader's own agents only (see handleMyAgent).
@@ -17655,6 +18175,17 @@ const tdocHandlers = {
       // page made up.
       const fromPage = Boolean(gate.session && gate.session.feedback) || Boolean(gate.meta && gate.meta.workspace_id);
       const offered = [resolved.default, ...(resolved.candidates || []), resolved.fallback].filter(Boolean);
+      // Authorship (agentEditPolicy): a team doc whose latest version
+      // somebody else's agent wrote is theirs to change. Nothing is queued;
+      // the comment itself already notified them.
+      if (teamDoc && !offered.length && (resolved.reason === 'written_by_other' || resolved.reason === 'team_agent_not_writer')) {
+        const who = resolved.writer_name || 'someone else';
+        return json({
+          error: resolved.reason,
+          writer: who,
+          message: `This doc was last written by ${who}; only they can request changes. Your comment notifies them.`,
+        }, { status: 403 });
+      }
       // When the asked-for recipient is one tdoc offered, send to the STORED
       // copy: the client's object may carry fields (device, cli) that only the
       // record should decide.
@@ -17898,7 +18429,9 @@ const tdocHandlers = {
             if (!cache.has(askKey)) cache.set(askKey, await loadAgentAsks(env, e.slug, e.by || id));
             const a = cache.get(askKey).find((x) => x.ask_id === e.handoff_id);
             if (agentAskDone(a)) continue;
-            if (!a.by || !accountIds.includes(a.by)) continue;
+            // Run by the asker's own daemon, or by the team agent it was asked of.
+            const runs = a.runner || a.by;
+            if (!runs || !accountIds.includes(runs)) continue;
             // A doc that is gone, or that this account can no longer read (or
             // this token may not reach): nothing to answer, and not kept, so
             // the queue never sticks on it.
@@ -17925,11 +18458,12 @@ const tdocHandlers = {
               handoff_id: a.ask_id,
               ask_id: a.ask_id,
               at: a.at,
-              by: a.by,
+              by: a.runner || a.by,
               acked_at: a.acked_at || null,
               comment_ids: [],
               question: a.question,
               selection: (a.passage && a.passage.text) || '',
+              ...(a.comment_id ? { comment_id: a.comment_id } : {}),
               recipient: { provider: 'local', device: a.recipient.device, cli: a.recipient.cli, agent_sub: a.recipient.agent_sub },
               url: `https://${env.PUBLIC_HOST || 'tdoc.dev'}/d/${e.slug}`,
             });
@@ -18020,6 +18554,7 @@ const tdocHandlers = {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
       if (!writeGate.ok) return writeGate.response;
+      if (await teamAskRunActive(env, auth.actor, slug)) return json(ANSWER_ONLY_RUN, { status: 403 });
       // Resolve parent + its current anchor up front (the optional rebind needs
       // the folded anchor for label/fallback). agent/reply is upload-token-authed
       // (owner-only), so concurrency here is negligible; the serialized write
@@ -18204,6 +18739,7 @@ const tdocHandlers = {
       }
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
+      if (await teamAskRunActive(env, auth.actor, slug)) return json(ANSWER_ONLY_RUN, { status: 403 });
       // Where a new doc from a workspace-scoped token lands, so it never
       // exists somewhere the token could not see it again: the team the
       // client names (`team`, id or name: the CLI's --team) if the token
@@ -18436,9 +18972,11 @@ const tdocHandlers = {
             // A catch-up commits up to this version only; the client's newer
             // ones land with their own uploads.
             if (catchUp && number > verNum) continue;
-            // `token` is the server's record of who published; a client
-            // cannot write it.
-            const { token: _clientToken, team_agent: _clientAgent, ...clean } = item || {};
+            // `token`, `team_agent`, `by`, `source` and `author` are the
+            // server's record of who wrote a version (docLastWriter decides
+            // who may hand edits to an agent from them); a client cannot
+            // write any of them.
+            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, source: _clientSource, author: _clientAuthor, ...clean } = item || {};
             if (!versionByNumber.has(number) || number === verNum) versionByNumber.set(number, clean);
           }
           if (!versionByNumber.has(verNum)) {
@@ -18456,6 +18994,9 @@ const tdocHandlers = {
           // A team agent's version says so by name: it is nobody's edit.
           if (auth.actor && auth.actor.team_agent) storedEntry.team_agent = { id: auth.actor.team_agent.id, name: auth.actor.team_agent.name };
           else delete storedEntry.team_agent;
+          // Whose agent wrote it (docLastWriter): the account behind the token.
+          if (auth.actor && auth.actor.kind === 'hosted' && auth.actor.account_id && !auth.actor.team_agent) storedEntry.by = auth.actor.account_id;
+          else delete storedEntry.by;
           versionByNumber.set(verNum, storedEntry);
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)

@@ -50,8 +50,11 @@ t('the dropdown and the picker read the same helper', () => {
   const field = read('shell/src/document/mention-field.jsx');
   const shell = read('shell/src/document-shell.jsx');
   assert(/const choices = orderedAgentChoices\(targets\);/.test(panel), 'panel forks the ordering');
-  assert(/orderedAgentChoices\(notifyTargets\)/.test(shell), 'picker list not from orderedAgentChoices');
-  assert(/choices: orderedAgentChoices\(notifyTargets\)[^]*: \{ choices: \[\], preselected: null \}/.test(shell), 'agents offered without canSendToAgent');
+  // The @ list is composerAgents (ai-answerer.js): the edit list is
+  // orderedAgentChoices of the same targets, and only when the viewer may send.
+  const answerer = read('shell/src/document/ai-answerer.js');
+  assert(/const edit = canSendToAgent \? orderedAgentChoices\(notifyTargets\) : \[\];/.test(answerer), 'picker list not from orderedAgentChoices');
+  assert(/composerAgents\(\{\s*canSendToAgent,\s*notifyTargets,/.test(shell), 'the shell does not build the @ list from the send targets');
   assert(/matchAgentChoices\(agentsOnOffer\.choices/.test(field), 'picker does not filter the shared list');
 });
 

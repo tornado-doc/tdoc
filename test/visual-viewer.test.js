@@ -6,6 +6,7 @@ const latestLanding = JSON.parse(fs.readFileSync(path.join(landingDir, 'meta.jso
 const landingBrand = fs.readFileSync(path.join(landingDir, `v${latestLanding}/index.html`), 'utf8').match(/<div class="brand">[\s\S]*?<\/div>/)[0];
 const { chromium, webkit } = require('playwright');
 const { resolveTarget } = require('./helpers/fixture-server');
+const { toggleTheme } = require('./helpers/theme-toggle');
 (async () => {
   const target = await resolveTarget();
   const browser = await (process.env.TDOC_TEST_BROWSER === 'webkit' ? webkit : chromium).launch();
@@ -98,7 +99,7 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await page.locator('[data-visual-open]').waitFor();
     const lightImage = await f.locator('#photo').screenshot();
     await f.getByRole('button',{name:'Close fullscreen'}).click();
-    await page.getByRole('button',{name:'Dark mode',exact:true}).click();
+    await toggleTheme(page);
     await f.locator('html[data-tdoc-theme="dark"]').waitFor();
     await f.getByRole('button',{name:'View Landscape illustration fullscreen'}).click();
     await page.locator('[data-visual-open]').waitFor();

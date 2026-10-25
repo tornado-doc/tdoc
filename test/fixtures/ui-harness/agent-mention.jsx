@@ -21,7 +21,8 @@ const targets = {
   fallback: { provider: 'raft', server_id: 'S1', server_slug: 'acme', agent_sub: 'b', agent_name: 'devin', owner },
 };
 const agents = canSend
-  ? { choices: orderedAgentChoices(targets), preselected: targets.default }
+  // The composer's @ list (ai-answerer.js composerAgents): these may edit.
+  ? { choices: orderedAgentChoices(targets).map((t) => ({ ...t, can_edit: true })), preselected: targets.default }
   : { choices: [], preselected: null };
 
 window.__posts = [];

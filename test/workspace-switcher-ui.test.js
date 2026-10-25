@@ -65,6 +65,21 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await page.getByRole('heading', { name: 'Smrti Lab' }).waitFor();
       await page.close();
     });
+    await t('desktop: Switch space is in the account menu too, and light/dark with it', async () => {
+      const page = await open(1280, '?team=tm_befreed');
+      await page.locator('.tdoc-space-trigger').waitFor();
+      assert.equal(await page.locator('#tdoc-theme-btn, .tdoc-theme-btn').count(), 0, 'standalone theme button is back');
+      await page.locator('.tdoc-bar .tdoc-account-trigger').click();
+      await page.getByRole('menuitem', { name: /Dark mode|Light mode/ }).waitFor();
+      await page.getByRole('menuitem', { name: /Switch space/ }).click();
+      const items = page.locator('.ui-menu-popup .tdoc-space-item-name');
+      await items.first().waitFor();
+      assert.deepEqual((await items.allTextContents()).map((s) => s.trim()), ['My docs', 'BeFreed', 'Smrti Lab', 'Workspace settings', 'New team']);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'switcher-account-menu-desktop.png') });
+      await page.getByRole('menuitem', { name: 'Smrti Lab' }).click();
+      await page.getByRole('heading', { name: 'Smrti Lab' }).waitFor();
+      await page.close();
+    });
     await t('My docs is the current space without ?team; New team opens the dialog', async () => {
       const page = await open(1280, '');
       await page.locator('.tdoc-space-trigger').click();

@@ -1,12 +1,12 @@
-// Send to my agent: the third of Comment / Ask AI / Send to my agent, for a
-// reader. What it does depends on what the reader's own account has, which
-// the server answers (GET /api/docs/<slug>/my-agent):
-//   none     nothing connected     → "Connect my agent": /start, then back
-//                                     here with the question waiting
-//   online   an agent can be woken → "Send to my agent": the reader's own
-//                                     agent answers, privately
-//   offline  connected, not awake  → "Copy for my agent": the line to paste
-// Never anyone else's agent: the server only knows the reader's own.
+// A reader's own agent. Ask AI / @AI in a comment hands that comment to it
+// when it can be woken (ai-answerer.js), and its answer comes back as the
+// reply in the thread. What the reader's account has, the server answers
+// (GET /api/docs/<slug>/my-agent):
+//   none     nothing connected
+//   online   an agent can be woken: it answers
+//   offline  connected, not awake: tdoc AI answers instead
+// Never anyone else's agent: the server only knows the reader's own. The
+// pending-question helpers below still serve the setup page's way back.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMyAgent } from './api.js';

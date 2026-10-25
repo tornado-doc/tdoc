@@ -90,39 +90,30 @@ t('resolved visibility governs selection without deleting stored comments', () =
     'hiding must not discard the stored comment');
 });
 
-t('resolved visibility is a switch in the bar, on by default', () => {
-  const sw = read('shell/src/ui/switch.jsx');
-  assert(sw.includes('Switch.Root') && sw.includes('Switch.Thumb'),
-    'the switch should lean on the primitive for its semantics, not fake them');
-  assert(/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar has no switch');
-  assert(/label=\{`Resolved \(\$\{resolvedCount\}\)`\}/.test(shell), 'the switch should say how many are hidden');
-  assert(/\{resolvedCount \? \(/.test(shell), 'a control that can only do nothing is worse than no control');
-  // Show all threads by default; only an explicitly saved OFF hides them.
-  assert(/try \{ return localStorage\.getItem\(RESOLVED_KEY\) !== '0'; \} catch \{ return true; \}/.test(shell),
-    'default on, including when storage is unavailable');
+t('resolved visibility is a filter in the comments area (Open / Resolved / All), All by default', () => {
+  const seg = read('shell/src/ui/segmented-control.jsx');
+  assert(seg.includes('role="radiogroup"') && seg.includes('role="radio"'),
+    'the filter should lean on the primitive for its semantics, not fake them');
+  assert(/className="tdoc-comment-filter"/.test(shell), 'there is no comments filter');
+  assert(/label: `Resolved \(\$\{resolvedCount\}\)`/.test(shell), 'the filter should say how many are resolved');
+  assert(/const commentFilterControl = resolvedCount \? \(/.test(shell), 'a control that can only do nothing is worse than no control');
+  assert(!/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar switch is back');
+  // Show all threads by default; only an explicitly saved choice narrows them.
+  assert(/return v === '0' \? 'open' : v === 'resolved' \? 'resolved' : 'all';\s*\n\s*\} catch \{ return 'all'; \}/.test(shell),
+    'default All, including when storage is unavailable');
   assert(/localStorage\.setItem\(RESOLVED_KEY/.test(shell), 'the choice should survive a reload');
 });
 
-t('the ⋯ menu carries it only where the bar cannot', () => {
-  assert(/data-action="show-resolved"/.test(toolbar), 'the narrow-width fallback is gone');
-  assert(/className="tdoc-action-menu-item tdoc-mobile-overflow-only"\s*\n\s*data-action="show-resolved"/.test(toolbar),
-    'the menu item must be overflow-only, or it duplicates the switch at desktop width');
-  // The switch folds with the controls it stands beside, not on its own rule —
-  // chrome.css has several max-width:700px blocks, so anchor on the group.
-  const css = read('server/chrome.css');
-  const at = css.indexOf('.tdoc-bar #tdoc-star-btn,');
-  assert(at >= 0, 'the bar fold group is gone');
-  const group = css.slice(at, css.indexOf('display: none;', at));
-  assert(group.includes('.tdoc-bar .tdoc-switch,'),
-    'the switch has to fold with the rest of the bar, or it crowds the title on a phone');
-  assert(css.lastIndexOf('@media (max-width: 700px)', at) > css.lastIndexOf('@media (max-width: 900px)', at),
-    'that group has to be the 700px block');
+t('on a phone the filter heads the comments drawer, and ⋯ no longer carries it', () => {
+  assert(/filter=\{commentFilterControl\}/.test(shell), 'the drawer does not get the filter');
+  assert(/tdoc-comment-filter-row/.test(read('shell/src/document/comment-layer.jsx')), 'the drawer does not show it');
+  assert(!/data-action="show-resolved"/.test(toolbar), 'the ⋯ row is back beside the filter');
 });
 
 t('resolving closes the card it was pressed on', () => {
   const start = shell.indexOf('const resolveComment = async');
   const block = shell.slice(start, shell.indexOf('\n  const ', start + 20));
-  assert(/if \(resolved && !showResolved\) setOpenCommentId\(null\)/.test(block),
+  assert(/if \(\(resolved && commentFilter === 'open'\) \|\| \(!resolved && commentFilter === 'resolved'\)\) setOpenCommentId\(null\)/.test(block),
     'the card has to go with the thread, or it is pinned to nothing');
 });
 
