@@ -49,7 +49,9 @@ function buildStamp(src, withNewHelpers) {
   vm.createContext(box);
   const parts = [
     sliceFn(src, 'cyrb53'),
+    sliceFn(src, 'stripClosedHtmlComments'),
     sliceFn(src, 'aidFor'),
+    sliceFn(src, 'headingsFromHtml'),
     sliceConst(src, 'STAMPABLE_TAGS'),
   ];
   if (withNewHelpers) {
@@ -73,7 +75,8 @@ try {
   const lbox = {};
   vm.createContext(lbox);
   vm.runInContext([
-    sliceFn(newSrc, 'cyrb53'), sliceFn(newSrc, 'aidFor'),
+    sliceFn(newSrc, 'cyrb53'), sliceFn(newSrc, 'stripClosedHtmlComments'),
+    sliceFn(newSrc, 'aidFor'), sliceFn(newSrc, 'headingsFromHtml'),
     sliceConst(newSrc, 'STAMPABLE_TAGS'), sliceFn(newSrc, 'stampAidsLegacy'),
   ].join('\n\n'), lbox);
   stampOld = lbox.stampAidsLegacy;
@@ -158,7 +161,9 @@ function driftRegion(fromFn, toFn) {
 }
 vm.runInContext([
   sliceFn(newSrc, 'cyrb53'),
+  sliceFn(newSrc, 'stripClosedHtmlComments'),
   sliceFn(newSrc, 'aidFor'),
+  sliceFn(newSrc, 'headingsFromHtml'),
   sliceConst(newSrc, 'STAMPABLE_TAGS'),
   sliceConst(newSrc, 'RAW_TEXT_TAGS'),
   sliceFn(newSrc, 'attrAwareOpenTagEnd'),
