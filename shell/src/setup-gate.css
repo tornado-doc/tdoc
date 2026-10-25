@@ -35,6 +35,12 @@
 .sg-pane-form { display: flex; flex-direction: column; padding: 26px 38px 34px; background: #fff; }
 .sg-brand { display: inline-flex; align-self: flex-start; flex: 0 0 auto; align-items: center; justify-content: center; width: 36px; height: 36px; margin-left: max(-4px, calc((100% - 440px) / 2 - 4px)); border-radius: 8px; text-decoration: none; }
 .sg-brand:hover { background: var(--td-surface, #f4f4f2); }
+/* The shared top bar, laid over the top of both panes so the form column
+   keeps the room the plain mark used to take (26px padding + 36px mark). */
+.sg-split.sg-has-bar { position: relative; }
+.sg-topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 5; }
+.sg-topbar .tdoc-bar { background: transparent; border-bottom-color: transparent; box-shadow: none; }
+.sg-has-bar .sg-pane-form { padding-top: 62px; }
 /* The column is anchored, not centred. Centring meant every change to the
    answer moved the question: picking the choice that needs a subject typed
    into it added a row, and the heading and both choices slid up the page to
@@ -363,6 +369,7 @@
   .sg-mid { padding-top: 26px; }
   .sg-col { max-width: 520px; margin: 0 auto; }
   .sg-brand { margin-left: max(-4px, calc((100% - 520px) / 2 - 4px)); }
+  .sg-has-bar .sg-pane-form { padding-top: 52px; }
   .sg-h1 { font-size: 26px; }
 }
 

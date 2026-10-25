@@ -6,6 +6,7 @@ import { AgentMarks } from './agent-marks.jsx';
 import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
 import { DebugBar } from './debug-bar.jsx';
 import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
+import { TopBar } from './top-bar.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -361,9 +362,14 @@ export function SetupGate({ boot, preview = null }) {
             : <ConnectReplay prompt={prompt} />;
 
   return (
-    <div className="sg-split">
+    <div className={`sg-split${preview ? '' : ' sg-has-bar'}`}>
+      {/* The onboarding focus page keeps its layout, with the shared top bar
+          laid over its top edge: the same mark home and the same account
+          chip as every other page. The design preview has no session, so it
+          keeps the plain mark. */}
+      {preview ? null : <div className="sg-topbar"><TopBar identity={identity} /></div>}
       <section className="sg-pane-form">
-        <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a>
+        {preview ? <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a> : null}
         <div className="sg-mid">
           <div className="sg-col">
             {signedIn && !loaded ? null : (
