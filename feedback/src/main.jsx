@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send, RefreshCw } from 'lucide-react';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { AgentButtonsContext } from '../../shell/src/document/mention-field.jsx';
-import { CommentComposer } from '../../shell/src/document/comment-composer.jsx';
-import { avatarFor } from '../../shell/src/document/model.js';
+import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
+import { avatarFor, TOP_BAR_HEIGHT } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText } from '../../shell/src/document/notify-handoff.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from '../../shell/src/document/handoff-state.js';
 import { resendNotifyHandoff, setApiTransport } from '../../shell/src/document/api.js';
@@ -19,7 +19,7 @@ if (window.top === window && !window.__TDOC_FEEDBACK__) {
 
   const style = document.createElement('style');
   style.id = 'tdoc-feedback-styles';
-  style.textContent = `${chromeCss}
+  style.textContent = `${chromeCss.replace(/:root\s*\{/, ':host { all: initial; display: block; font: 13px/1.45 system-ui, -apple-system, sans-serif; color: #1a1a1a; direction: ltr; text-transform: none; text-align: left;')}
 ${uiCss}
     /* The feedback layer is injected into arbitrary products. Put its single
        stacking context at the browser maximum and append it last, so even a
@@ -99,6 +99,10 @@ ${uiCss}
       font: 13px/1.45 system-ui, -apple-system, sans-serif;
       animation: tdoc-fb-panel-in .16s ease-out;
     }
+    @media (max-width: 700px) {
+      #tdoc-feedback-root .tdoc-feedback-dock.panel-open { display: none; }
+      #tdoc-feedback-root .tdoc-fb-panel { width: 100vw; }
+    }
     @keyframes tdoc-fb-panel-in { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
     @media (prefers-reduced-motion: reduce) { #tdoc-feedback-root .tdoc-fb-panel { animation: none; } }
     /* The header wraps instead of running past the panel: title, refresh and
@@ -118,6 +122,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-refresh:hover { background: #f0f0ee; color: #1a1a1a; }
     #tdoc-feedback-root .tdoc-fb-refresh svg { width: 15px; height: 15px; }
     #tdoc-feedback-root .tdoc-fb-refresh[aria-busy="true"] svg { animation: tdoc-fb-spin .7s linear infinite; }
+    #tdoc-feedback-root .tdoc-fb-add { appearance: none; border: 0; border-radius: 6px; background: #1652f0; color: #fff; cursor: pointer; padding: 5px 8px; font: 600 11.5px system-ui, sans-serif; }
     @keyframes tdoc-fb-spin { to { transform: rotate(360deg); } }
     #tdoc-feedback-root .tdoc-fb-scroll { flex: 1; overflow-y: auto; padding: 6px 8px 16px; overscroll-behavior: contain; }
     #tdoc-feedback-root .tdoc-fb-scroll h4 { margin: 14px 8px 6px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: #8a8985; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -144,8 +149,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-agent code { display: block; margin: 0 0 8px; padding: 8px; border-radius: 6px; background: #fff; border: 1px solid #e8e7e3; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
     #tdoc-feedback-root .tdoc-fb-agent button { appearance: none; border: 0; border-radius: 8px; padding: 6px 12px; background: #1652f0; color: #fff; font: 600 12px system-ui, sans-serif; cursor: pointer; }
     #tdoc-feedback-root .ui-dialog-backdrop, #tdoc-feedback-root .ui-dialog-viewport { z-index: 2147483647 !important; }
-    /* The host app's own button and text rules still reach our dialogs.
-       Pin the few that matter. */
+    /* Keep the dialog controls consistent with the rest of feedback UI. */
     #tdoc-feedback-root .ui-dialog-popup.tdoc-modal { color: #1a1a1a; font: 14px/1.45 system-ui, -apple-system, sans-serif; text-align: left; }
     #tdoc-feedback-root .ui-dialog-popup.tdoc-modal button { font: 600 13px/1.2 system-ui, -apple-system, sans-serif; text-transform: none; letter-spacing: normal; box-shadow: none; }
     #tdoc-feedback-root .ui-dialog-popup.tdoc-modal .actions button:not(.primary):not(.danger) { background: #fff !important; color: #1a1a1a !important; border: 1px solid #d9d8d4 !important; }
@@ -155,20 +159,76 @@ ${uiCss}
       z-index: 2147483647 !important;
     }
   `;
-  document.head.appendChild(style);
-
   const host = document.createElement('div');
   host.id = 'tdoc-feedback-root';
+  // The layer lives in an open shadow tree: host applications often style
+  // every descendant of a dialog, sometimes with !important. Moving our
+  // light-DOM root into their dialog would otherwise restyle the composer.
+  const shadow = host.attachShadow({ mode: 'open' });
+  const feedbackRoot = document.createElement('div');
+  feedbackRoot.id = 'tdoc-feedback-root';
+  shadow.append(style, feedbackRoot);
+  host.style.cssText = 'position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;margin:0!important;padding:0!important;border:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;visibility:visible!important;font:13px/1.45 system-ui,-apple-system,sans-serif!important;color:#1a1a1a!important;text-transform:none!important;direction:ltr!important;text-align:left!important;letter-spacing:normal!important;word-spacing:normal!important;white-space:normal!important;line-height:1.45!important';
   document.documentElement.appendChild(host);
 
-  // A host's modal <dialog> sits in the top layer and makes everything
-  // outside it inert, so the feedback layer ends up underneath and
-  // unclickable: nobody could comment on a modal. While a modal is open the
-  // layer moves inside it, and goes back when it closes. Inside, it opens as
-  // a popover: that puts it in the top layer above the dialog, over the whole
-  // viewport, where a dialog's transform or overflow cannot shrink or clip
-  // it. A modal library's inert/aria-hidden on the layer is removed as well.
+  // Keep the feedback layer inside the active modal, including script-driven
+  // dialogs. Outside-press and focus traps often run in document capture;
+  // stopping an event on our host in bubble is too late for those libraries.
+  // The popover puts the layer above a native dialog and avoids clipping by a
+  // transformed modal. Move it back when the modal closes or unmounts.
   (function followModals() {
+    const modalSelector = 'dialog[open], [aria-modal="true"], [role="dialog"][data-state="open"]';
+    const isHostNode = (node) => node === host || host.contains(node);
+    const hasModal = (node) => node instanceof Element && !isHostNode(node)
+      && (node.matches(modalSelector) || !!node.querySelector(modalSelector));
+    const isVisibleModal = (node) => {
+      if (node.localName === 'dialog') {
+        try { if (!node.matches(':modal')) return false; } catch (_) { return false; }
+      }
+      // Radix Dialog marks its content role=dialog/data-state=open, but does
+      // not set aria-modal. Its modal mode locks scrolling; Radix Popover has
+      // the same role/state without the lock and must not capture this layer.
+      if (node.matches('[role="dialog"][data-state="open"]') && node.getAttribute('aria-modal') !== 'true'
+        && (!document.body.hasAttribute('data-scroll-locked') || node.closest('[data-radix-popper-content-wrapper]'))) return false;
+      if (!node.getClientRects().length || getComputedStyle(node).pointerEvents === 'none') return false;
+      for (let el = node; el instanceof Element; el = el.parentElement) {
+        if (el.hidden || el.hasAttribute('inert') || el.getAttribute('aria-hidden') === 'true') return false;
+        const css = getComputedStyle(el);
+        if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || Number(css.opacity) === 0) return false;
+      }
+      return true;
+    };
+    const modalPriority = (node) => {
+      try { if (node.matches(':modal')) return 1_000_000_000; } catch (_) {}
+      let z = 0;
+      for (let el = node; el instanceof Element; el = el.parentElement) {
+        const parsed = Number.parseInt(getComputedStyle(el).zIndex, 10);
+        if (Number.isFinite(parsed)) z = Math.max(z, parsed);
+      }
+      return z + (node.contains(document.activeElement) ? 100_000_000 : 0);
+    };
+    const modalContent = (dialog) => {
+      // Headless UI's DialogPanel can have a caller-supplied id. Its state
+      // attribute, or the focused child when present, identifies the panel.
+      const panels = [...dialog.querySelectorAll('[data-headlessui-dialog-panel], [id^="headlessui-dialog-panel-"], [data-headlessui-state]')]
+        .filter((node) => isVisibleModal(node) && !node.matches('h1,h2,h3,h4,h5,h6,[id^="headlessui-dialog-title-"]'));
+      if (panels.length) {
+        return panels.find((node) => node.contains(document.activeElement)) || panels[0];
+      }
+      return dialog;
+    };
+    const activeModal = () => {
+      const dialog = [...document.querySelectorAll(modalSelector)]
+        .filter((node) => !isHostNode(node) && isVisibleModal(node))
+        .sort((a, b) => modalPriority(a) - modalPriority(b)).at(-1);
+      // Headless UI puts role=dialog on a wrapper, but outside-press tests
+      // against DialogPanel. The layer must be inside that panel too.
+      return dialog ? modalContent(dialog) : null;
+    };
+    const withinActiveModal = (node) => {
+      const modal = activeModal();
+      return !!modal && (modal === node || modal.contains(node));
+    };
     const lift = () => {
       if (!host.showPopover || host.matches(':popover-open')) return;
       host.popover = 'manual';
@@ -180,9 +240,11 @@ ${uiCss}
       host.removeAttribute('popover');
     };
     const place = () => {
-      const modal = [...document.querySelectorAll('dialog[open]')].reverse().find((d) => { try { return d.matches(':modal'); } catch (_) { return false; } });
+      const modal = activeModal();
       if (modal) {
         if (host.parentNode !== modal) { lower(); modal.appendChild(host); }
+        // A script modal may use transform/filter/overflow on its panel, which
+        // would otherwise shrink or clip our fixed-position viewport layer.
         lift();
       } else if (host.parentNode !== document.documentElement) {
         lower();
@@ -190,18 +252,23 @@ ${uiCss}
       }
     };
     new MutationObserver((records) => {
-      if (records.some((r) => r.target !== host && r.target.localName === 'dialog')) place();
+      if (records.some((r) => r.type === 'childList'
+        ? [...r.addedNodes, ...r.removedNodes].some(hasModal)
+        : r.target !== host && !isHostNode(r.target)
+          && r.target instanceof Element && (r.target.contains(host) || hasModal(r.target) || withinActiveModal(r.target)))) place();
       if (host.hasAttribute('inert')) host.removeAttribute('inert');
       if (host.getAttribute('aria-hidden') === 'true') host.removeAttribute('aria-hidden');
-    }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['open', 'inert', 'aria-hidden'] });
+    }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['open', 'hidden', 'inert', 'aria-hidden', 'aria-modal', 'class', 'style', 'data-state', 'data-closed', 'data-enter', 'data-leave'] });
     document.addEventListener('close', (e) => { if (e.target && e.target.localName === 'dialog') place(); }, true);
+    document.addEventListener('transitionend', (e) => { if (e.target instanceof Element && (hasModal(e.target) || withinActiveModal(e.target))) place(); }, true);
+    document.addEventListener('animationend', (e) => { if (e.target instanceof Element && (hasModal(e.target) || withinActiveModal(e.target))) place(); }, true);
     // A dialog removed without closing (a React unmount) takes the layer with it.
     new MutationObserver(() => { if (!host.isConnected) place(); }).observe(document.documentElement, { childList: true, subtree: true });
     // Script-driven modals (Base UI, Radix, Headless UI) close on a press
     // outside them and pull focus back inside. Presses and focus on the layer
     // stay on the layer, so commenting on a modal neither closes it nor loses
     // the typing.
-    ['pointerdown', 'mousedown', 'touchstart', 'focusin', 'focusout'].forEach((type) => {
+    ['pointerdown', 'mousedown', 'touchstart', 'focusin', 'focusout', 'click', 'dblclick', 'keydown', 'keyup', 'keypress', 'beforeinput', 'input', 'change', 'submit'].forEach((type) => {
       host.addEventListener(type, (e) => e.stopPropagation());
     });
     // Focus leaving the modal for the layer is announced on the modal's own
@@ -210,6 +277,7 @@ ${uiCss}
     window.addEventListener('focusout', (e) => {
       if (e.relatedTarget instanceof Node && host.contains(e.relatedTarget)) e.stopImmediatePropagation();
     }, true);
+    place();
   })();
 
   // Where we came from is where the comments go: the worker that served this
@@ -613,7 +681,7 @@ ${uiCss}
     // comment here is whoever it lets in.
     const shareUrl = session && session.share_url;
     return (
-      <div className="tdoc-feedback-dock" role="toolbar" aria-label="tdoc feedback" style={panelOpen ? { right: PANEL_WIDTH + 18 } : null}>
+      <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && innerWidth > 700 ? { right: PANEL_WIDTH + 18 } : null}>
         <button type="button" className={panelOpen ? 'on' : ''} onClick={onList} title="All comments on this app">
           <MessagesSquare aria-hidden="true" /> <strong>{openCount}</strong> open
         </button>
@@ -674,6 +742,7 @@ ${uiCss}
               <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>
             ))}
           </span>
+          <button type="button" className="tdoc-fb-add" onClick={onPick}>+ Comment</button>
           <button type="button" className="tdoc-fb-refresh" aria-label="Refresh feedback" title="Refresh feedback" aria-busy={refreshing ? 'true' : 'false'} onClick={onRefresh}><RefreshCw aria-hidden="true" /></button>
           <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
         </header>
@@ -967,6 +1036,7 @@ ${uiCss}
 
     const hoverRect = (picking || reanchorId) ? hovered?.getBoundingClientRect() : null;
     const rightInset = panelOpen ? Math.min(PANEL_WIDTH, innerWidth) : 0;
+    const composerRect = selected?.getBoundingClientRect();
     const placeCard = (element) => {
       const rect = element?.getBoundingClientRect();
       const width = innerWidth - rightInset;
@@ -1019,8 +1089,14 @@ ${uiCss}
         })}
 
         {selected ? (
+          /* The shared composer adds the document shell's 48px bar. Feedback
+             already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
-            selection={{ kind: 'element', label: labelOf(contextFor(selected)), rect: selected.getBoundingClientRect() }}
+            selection={{ kind: 'element', label: labelOf(contextFor(selected)), rect: {
+              top: composerRect.top - TOP_BAR_HEIGHT,
+              bottom: composerRect.bottom - TOP_BAR_HEIGHT,
+              left: Math.min(composerRect.left, Math.max(8, innerWidth - rightInset - COMPOSER_WIDTH - 8)),
+            } }}
             mentionable={mentionable}
             canSendToAgent={canSendToAgent}
             connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
@@ -1071,7 +1147,7 @@ ${uiCss}
             filter={filter}
             setFilter={setFilter}
             agent={agent}
-            onPick={() => { setOpenId(null); setPicking(true); }}
+            onPick={() => { setOpenId(null); setPanelOpen(false); setPicking(true); }}
             onOpen={openFromList}
             onClose={() => setPanelOpen(false)}
             onRefresh={refresh}
@@ -1102,7 +1178,7 @@ ${uiCss}
           panelOpen={panelOpen}
           picking={picking}
           onList={() => setPanelOpen((v) => !v)}
-          onPick={() => { setOpenId(null); setSelected(null); setPicking((v) => !v); }}
+          onPick={() => { setOpenId(null); setSelected(null); setPanelOpen(false); setPicking((v) => !v); }}
           onHide={hide}
           sendCount={ready.length}
           onSend={owner && session && session.notify ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
@@ -1127,6 +1203,6 @@ ${uiCss}
   const appBox = document.createElement('div');
   const portals = document.createElement('div');
   portals.className = 'tdoc-fb-portals';
-  host.append(appBox, portals);
+  feedbackRoot.append(appBox, portals);
   createRoot(appBox).render(<PortalContainerContext.Provider value={portals}><AgentButtonsContext.Provider value><FeedbackApp /></AgentButtonsContext.Provider></PortalContainerContext.Provider>);
 }
