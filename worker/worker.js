@@ -3378,7 +3378,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
   const raw = await obj.text();
   const session = gate.session;
   const identity = sessionPrincipal(session)
-    ? { login: actorKey(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
+    ? { login: actorKey(session), linked_actor_keys: actorKeys(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
     : null;
   // Pure-publish: version picker only for callers allowed by history_visibility.
   let versions = [{ n: version, created: null }];
@@ -8430,7 +8430,7 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
     origin: (meta && meta.feedback && meta.feedback.origin) || null,
     // This host can hand comments to an agent (the local twin cannot).
     notify: true,
-    identity: { login: actorKey(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
+    identity: { login: actorKey(session), linked_actor_keys: actorKeys(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
     is_owner: isDocOwnerSession(env, session, meta),
   };
 }
@@ -12727,6 +12727,86 @@ function withHandoffStatus(list, handoffs) {
     }
   }
   return list.map(c => ({ ...c, ...(byComment.get(c.id) || bare) }));
+}
+
+// Handoff routing and delivery are private to the commenter and the people
+// who manage this document. A public or team-readable comment can still be
+// read normally without exposing which agent was asked to handle it.
+const PRIVATE_HANDOFF_FIELDS = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to', 'handoff_resend_allowed'];
+// The member who sent a handoff: `sent_by` for one sent to a team agent,
+// `by` for one queued on the member's own agent (a team agent's `by` is the
+// agent, never a person).
+function handoffSentBySession(handoff, session) {
+  if (!handoff || !session || session.team_agent || session.feedback) return false;
+  const ids = sessionAccountIds(session);
+  return ids.includes(handoff.sent_by) || (!handoff.team_agent && ids.includes(handoff.by));
+}
+function maySeeCommentHandoff(env, gate, comment, handoffsById) {
+  if (gate.ownerToken || isDocOwnerSession(env, gate.session, gate.meta)) return true;
+  const teamAgent = gate.session?.team_agent;
+  if (teamAgent && gate.meta?.workspace_id === teamAgent.team) {
+    const handoff = handoffsById.get(comment.handoff_id);
+    if (handoff?.by === gate.session.account_id) return true;
+  }
+  // Whoever sent this handoff sees it, also on a thread somebody else began.
+  if (comment.handoff_id && handoffSentBySession(handoffsById.get(comment.handoff_id), gate.session)) return true;
+  const author = String(comment && comment.author && comment.author.login || '').trim().toLowerCase();
+  return !!(author && actorKeys(gate.session).includes(author));
+}
+function redactCommentHandoffs(env, gate, comments, handoffs, allComments) {
+  const handoffsById = new Map(handoffs.filter((handoff) => handoff?.handoff_id).map((handoff) => [handoff.handoff_id, handoff]));
+  const member = gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && !gate.session?.team_agent;
+  const keys = member ? actorKeys(gate.session) : [];
+  const own = keys.length ? handoffThreadIds(allComments, keys) : new Set();
+  return comments.map((comment) => {
+    if (!maySeeCommentHandoff(env, gate, comment, handoffsById)) {
+      const copy = { ...comment };
+      for (const field of PRIVATE_HANDOFF_FIELDS) delete copy[field];
+      return copy;
+    }
+    if (member && comment.handoff_id) {
+      const batch = handoffsById.get(comment.handoff_id)?.comment_ids || [];
+      return { ...comment, handoff_resend_allowed: batch.length > 0 && batch.every((id) => own.has(id)) };
+    }
+    return comment;
+  });
+}
+
+const authoredBy = (keys, item) => {
+  const login = String(item?.author?.login || '').trim().toLowerCase();
+  return !!login && keys.includes(login);
+};
+async function ownCommentIds(env, slug, session) {
+  const keys = actorKeys(session);
+  if (!keys.length) return new Set();
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  return new Set(list.filter((comment) => authoredBy(keys, comment)).map((comment) => comment.id));
+}
+// What a member may hand off: threads they began, threads they have a
+// (non-deleted) reply in, and those replies themselves. Seeing a handoff
+// stays with ownCommentIds and the handoff's sender.
+function handoffThreadIds(list, keys) {
+  const out = new Set();
+  for (const comment of Array.isArray(list) ? list : []) {
+    if (!comment || !comment.id) continue;
+    if (authoredBy(keys, comment)) out.add(comment.id);
+    const snap = snapshotAt(comment, Infinity);
+    if (!snap || snap.deleted) continue;
+    for (const reply of snap.replies || []) {
+      if (!reply || reply.deleted || !authoredBy(keys, reply)) continue;
+      out.add(comment.id);
+      out.add(reply.id);
+    }
+  }
+  return out;
+}
+async function handoffThreadIdsFor(env, slug, session) {
+  const keys = actorKeys(session);
+  if (!keys.length) return new Set();
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  return handoffThreadIds(list, keys);
 }
 
 async function mutateComments(env, slug, op) {
@@ -17989,9 +18069,12 @@ const tdocHandlers = {
       // Handoff state is derived from the handoff records, not stored on the
       // comment: the comment log stays a log of what people said, and "has
       // this been handed over" is a fact about the handoff, not the comment.
-      const decorated = withHandoffStatus(live, await loadHandoffs(env, slug));
+      const handoffs = await loadHandoffs(env, slug);
+      const decorated = withHandoffStatus(live, handoffs);
+      const viewerSession = gate.session || (agentAuth?.ok ? await sessionFromHostedBearer(env, req) : null);
+      const visible = redactCommentHandoffs(env, { ...gate, session: viewerSession, ownerToken: gate.ownerToken || agentAuth?.actor?.kind === 'admin' }, decorated, handoffs, list);
       const linked = V !== 'all' && hostedRegistrationEnabled(env, url.origin)
-        ? await withCommentProfileLinks(env, decorated) : decorated;
+        ? await withCommentProfileLinks(env, visible) : visible;
       return json(await redactCommentEmails(linked, await emailPrivacyFor(env, gate.session, slug, gate.meta)));
     }
 
@@ -18018,7 +18101,7 @@ const tdocHandlers = {
       });
       return json({
         users,
-        identity: { login: me, name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
+        identity: { login: me, linked_actor_keys: actorKeys(s), name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
         is_owner: isDocOwnerSession(env, s, meta),
       });
     }
@@ -18634,7 +18717,26 @@ const tdocHandlers = {
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
-      return json({ handoffs: (await loadHandoffs(env, slug)).slice(0, limit) });
+      let handoffs = await loadHandoffs(env, slug);
+      if (gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && gate.actor?.kind === 'team_member') {
+        const own = await ownCommentIds(env, slug, gate.session);
+        handoffs = handoffs.flatMap((handoff) => {
+          const sent = handoffSentBySession(handoff, gate.session);
+          const commentIds = (handoff.comment_ids || []).filter((id) => sent || own.has(id));
+          if (!commentIds.length) return [];
+          const ids = new Set(commentIds);
+          return [{
+            ...handoff,
+            comment_ids: commentIds,
+            resolved_ids: (handoff.resolved_ids || []).filter((id) => ids.has(id)),
+            // A batch instruction can describe somebody else's comments.
+            instruction: commentIds.length === (handoff.comment_ids || []).length ? handoff.instruction : '',
+            by: undefined,
+            sent_by: undefined,
+          }];
+        });
+      }
+      return json({ handoffs: handoffs.slice(0, limit) });
     }
 
     if (p === '/api/notify/handoff' && method === 'POST') {
@@ -18646,6 +18748,10 @@ const tdocHandlers = {
       if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
+      if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
+        const own = await handoffThreadIdsFor(env, slug, gate.session);
+        if (ids.some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
+      }
       // Threads whose last word is already an agent's are the person's turn:
       // handing them off again only made the agent answer itself. Drop them
       // here, whatever the client sent.
@@ -18761,6 +18867,10 @@ const tdocHandlers = {
       if (!gate.ok) return gate.response;
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
+        const own = await handoffThreadIdsFor(env, slug, gate.session);
+        if ((prev.comment_ids || []).some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
+      }
       // A resend reuses the original externalEventId, so a provider that did
       // receive the first attempt drops the duplicate instead of waking the
       // agent twice for the same batch.

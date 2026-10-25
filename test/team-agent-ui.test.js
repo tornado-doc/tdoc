@@ -236,6 +236,8 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await as(bob);
         const posted = await call('/api/comments', { method: 'POST', cookie: bob.cookie, body: { slug, version: 1, text: 'Can you add last week for comparison?', anchor: { kind: 'text', text: 'Signups grew 12% this week' } } });
         commentId = posted.body.id;
+        const other = await call('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug, version: 1, text: 'Owner-only handoff candidate', anchor: { kind: 'text', text: 'Signups grew 12% this week' } } });
+        if (other.status !== 200) throw new Error(`owner comment: ${other.status}`);
         await page.goto(`${base}/d/${slug}`);
         await caption('Bob (member) opens a BeFreed doc');
         const send = page.locator('#tdoc-send-agent-btn');
@@ -246,6 +248,8 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await activity.waitFor();
         const ready = activity.locator('.tdoc-handoff-ready');
         if (!(await ready.innerText()).includes('Can you add last week for comparison?')) throw new Error('comment missing from Ready to send');
+        if ((await ready.innerText()).includes('Owner-only handoff candidate')) throw new Error('team member can send the owner\'s comment');
+        if ((await ready.locator('input[type="checkbox"]').count()) !== 1) throw new Error('team member sees another author\'s Ready to send checkbox');
         await ready.locator('.tdoc-handoff-ready-send').click();
         const dialog = page.getByRole('dialog', { name: 'Send to agent' });
         await dialog.waitFor();
