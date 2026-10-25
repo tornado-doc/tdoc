@@ -1210,7 +1210,8 @@ a.ui-menu-item:visited {
 .ui-choice-links { display: grid; grid-auto-rows: 1fr; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-top: 18px; }
 .ui-setup-modal .ui-choice-link { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; min-height: 252px; padding: 24px; border: 1px solid var(--td-line, #ddd); border-radius: 0; background: var(--td-bg, #fff); color: var(--td-fg, #111); text-align: left; }
 .ui-choice-link:hover { background: var(--td-surface, #fafafa); border-color: var(--td-fg, #111); }
-.ui-choice-link:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 3px; }
+.ui-choice-link:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: -3px; }
+.ui-setup-modal .ui-dialog-title:focus { outline: none; }
 .ui-choice-link strong { font-size: 18px; line-height: 1.3; font-weight: 500; }
 .ui-choice-link > span:not(.ui-choice-link-icon) { font-size: 14px; line-height: 1.5; }
 .ui-choice-link small { font-size: 12px; line-height: 1.5; color: var(--td-muted, #777); }

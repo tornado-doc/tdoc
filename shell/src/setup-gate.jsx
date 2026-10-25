@@ -170,7 +170,7 @@ export function SetupGate({ boot, preview = null, onClose }) {
   return (
     <AppDialog open={open} onOpenChange={(next) => { if (!next) close(); }}
       title={intro ? 'How will you use tdoc?' : manual ? 'Use with your AI' : 'Connect a computer'}
-      className="ui-setup-modal"
+      className="ui-setup-modal" focusTitle={intro}
       eyebrow="SET UP TDOC"
       description={intro ? 'Start in your AI conversation, or connect for automatic updates.' : manual ? 'Copy one instruction into your AI conversation. No background helper needed.' : 'Connect a computer so its AI can pick up comments automatically.'}
       actions={<>

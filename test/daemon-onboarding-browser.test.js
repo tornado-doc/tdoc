@@ -43,6 +43,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    if (SHOTS) {fs.mkdirSync(SHOTS,{recursive:true});await page.screenshot({path:path.join(SHOTS,`arrival-${width}.png`)});}
    await page.getByRole('heading',{name:'How will you use tdoc?',exact:true}).waitFor();
    assert.equal(await page.locator('.ui-setup-command').count(),0,'first screen presents equal paths without installation commands');
+   assert.ok(await page.getByRole('heading',{name:'How will you use tdoc?',exact:true}).evaluate(el=>el===document.activeElement),'initial focus explains the dialog without favoring either choice');
    assert.equal(await page.getByRole('button',{name:/^Use with your AI/}).count(),1);
    assert.equal(await page.getByRole('button',{name:/^Connect for automatic updates/}).count(),1);
    await page.keyboard.press('Escape');
