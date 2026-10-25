@@ -1028,6 +1028,16 @@ export function DocumentShell({ boot, config }) {
     [visibleHandoffComments],
   );
   const unreadAgentReplies = visibleHandoffComments.filter((comment) => isThreadUnread(comment, seenMap, handoffViewer)).length;
+  const markAgentReplyRead = (comment) => {
+    if (markThreadSeen(config.slug, comment)) setSeenMap(readSeenMap(config.slug));
+  };
+  const markAllAgentRepliesRead = () => {
+    let changed = false;
+    for (const comment of visibleHandoffComments) {
+      if (isThreadUnread(comment, seenMap, handoffViewer)) changed = markThreadSeen(config.slug, comment) || changed;
+    }
+    if (changed) setSeenMap(readSeenMap(config.slug));
+  };
   const openDocNotify = (selectedIds = handoffBuckets.ready.map((c) => c.id)) => {
     setHandoffDetailsOpen(false);
     openNotifyPanel(selectedIds);
@@ -1509,6 +1519,8 @@ export function DocumentShell({ boot, config }) {
                   }}
                   onRefresh={() => comments.refresh()}
                   onToast={(text, error) => showToast(text, error)}
+                  onMarkRead={markAgentReplyRead}
+                  onMarkAllRead={markAllAgentRepliesRead}
                 />
               </DocumentSendAgentAction>
             ) : null}

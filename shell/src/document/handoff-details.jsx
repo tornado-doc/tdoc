@@ -28,7 +28,7 @@ function history(comment) {
 }
 
 export function HandoffDetailsPanel({
-  slug, open, onClose, comments, seenMap = {}, currentUser = '', onJump, onRefresh, onToast, onSendReady, onSendElsewhere,
+  slug, open, onClose, comments, seenMap = {}, currentUser = '', onJump, onRefresh, onToast, onSendReady, onSendElsewhere, onMarkRead, onMarkAllRead,
 }) {
   const buckets = useMemo(() => summarizeHandoffSurfaces(comments), [comments]);
   const sentRows = useMemo(() => {
@@ -57,6 +57,7 @@ export function HandoffDetailsPanel({
     wasOpen.current = open;
   }, [open, buckets.ready]);
   const selected = selectedIds.filter((id) => buckets.ready.some((comment) => comment.id === id));
+  const hasUnread = (comments || []).some((comment) => isThreadUnread(comment, seenMap, currentUser));
 
   const resendOne = async (comment) => {
     if (!comment?.handoff_id || busyId) return;
@@ -74,9 +75,12 @@ export function HandoffDetailsPanel({
 
   return (
     <div className="tdoc-handoff-details">
-      {sentRows.length ? <>
-        <h3 className="tdoc-handoff-details-section-title">Sent to agent</h3>
-        <ul className="tdoc-handoff-details-list">
+      {sentRows.length || hasUnread ? <>
+        <div className="tdoc-handoff-details-header">
+          <h3 className="tdoc-handoff-details-section-title">{sentRows.length ? 'Sent to agent' : 'Agent replies'}</h3>
+          {hasUnread && onMarkAllRead ? <button type="button" className="tdoc-handoff-details-mark-all" onClick={onMarkAllRead}>Mark all as read</button> : null}
+        </div>
+        {sentRows.length ? <ul className="tdoc-handoff-details-list">
           {sentRows.map(({ comment, state }) => {
             const waitState = state === 'resolved' ? 'resolved' : handoffWaitState(comment, now);
             const stuck = ['failed', 'stale', 'expired'].includes(waitState);
@@ -98,7 +102,7 @@ export function HandoffDetailsPanel({
                         <button type="button" className="tdoc-handoff-details-resend" disabled={busyId === comment.id} onClick={() => resendOne(comment)}>{busyId === comment.id ? 'Resending…' : 'Resend'}</button>
                       </> : null}
                     </span>
-                    {unread ? <span className="tdoc-handoff-details-unread-dot" role="status" aria-label="New agent reply" /> : null}
+                    {unread && onMarkRead ? <button type="button" className="tdoc-handoff-details-unread-dot" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)} /> : null}
                   </div>
                   <div className="tdoc-handoff-details-meta">
                     <span className="tdoc-handoff-details-recipient">To {readableHandle(comment.handoff_to) || 'agent'}</span>
@@ -118,7 +122,7 @@ export function HandoffDetailsPanel({
               </li>
             );
           })}
-        </ul>
+        </ul> : null}
       </> : null}
       {buckets.ready.length ? <section className="tdoc-handoff-ready">
         <h3>Ready to send</h3>
@@ -132,7 +136,7 @@ export function HandoffDetailsPanel({
           </button>
         ) : null}
       </section> : null}
-      {!sentRows.length && !buckets.ready.length ? <p className="manage-hint">No agent activity yet.</p> : null}
+      {!sentRows.length && !buckets.ready.length && !hasUnread ? <p className="manage-hint">No agent activity yet.</p> : null}
     </div>
   );
 }
