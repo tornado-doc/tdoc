@@ -204,6 +204,7 @@ const SAME = { Origin: 'https://tdoc.dev' };
 
   await t('the scheduled purge waits 30 days, then erases what Delete used to', async () => {
     assert((await call('/api/doc?slug=plan', { method: 'DELETE', token: alice.token })).status === 200, 'trash again');
+    await env.META.put('preview-status:plan:v1:deadbeefcafe', 'ready:custom');
     const at = Date.parse(JSON.parse(await env.META.get('meta:plan')).trashed_at);
     await cron(at + 29 * DAY);
     assert(await env.META.get('meta:plan'), 'purged before its 30 days');
@@ -211,6 +212,7 @@ const SAME = { Origin: 'https://tdoc.dev' };
     assert(listed && listed.days_left <= 30, 'still in Trash');
     await cron(at + 30 * DAY + 1000);
     assert(!(await env.META.get('meta:plan')), 'record not erased');
+    assert(!(await env.META.get('preview-status:plan:v1:deadbeefcafe')), 'preview status not erased');
     assert(![...env.DOCS.map.keys()].some((k) => k.startsWith('docs/plan/')), 'bytes not erased');
     assert(!(env.COMMENTS.stateFor('plan').storage.map.get('list') || []).length, 'comments not erased');
     assert(!env.COMMENTS.stateFor('plan').storage.map.has('hostedOwner'), 'slug not released');

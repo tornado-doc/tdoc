@@ -248,7 +248,10 @@ if [ -n "$PREVIEW_FILE" ]; then
 const fs = require('fs');
 const { previewNormalizeSvg } = require(process.argv[3]);
 const result = previewNormalizeSvg(fs.readFileSync(process.argv[2], 'utf8'));
-if (result.error) process.exit(1);
+if (result.error) {
+  console.error(`[tdoc] preview.svg rejected: ${result.error}`);
+  process.exit(1);
+}
 JS
 fi
 

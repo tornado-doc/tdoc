@@ -101,6 +101,7 @@ const env = {
     fs.writeFileSync(badPreview, '<svg width="1200" height="630"><text>broken</svg>');
     const rejectedPreview = await run('tdoc-write', [...args, '--preview-file', badPreview, '--force']);
     assert.notEqual(rejectedPreview.code, 0);
+    assert.match(rejectedPreview.stderr, /invalid_preview_dimensions/, 'CLI names the preview validation failure');
     assert.equal(fs.readFileSync(path.join(doc, 'v1/index.html'), 'utf8'), before[0]);
     fs.writeFileSync(input, html.replace('</body>', '<footer>Not allowed</footer></body>'));
     for (const flags of [['--force'], ['--version', 'next']]) {

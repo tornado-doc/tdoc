@@ -906,7 +906,7 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
   // Handoffs and readers' questions belong to this doc too: a slug published
   // again later must not inherit them.
   await env.META.delete(`handoffs:${slug}`);
-  for (const prefix of [`agent-asks:${slug}:`, `ai-asks:${slug}:`]) {
+  for (const prefix of [`agent-asks:${slug}:`, `ai-asks:${slug}:`, `preview-status:${slug}:`]) {
     let kvCursor;
     do {
       const r = await env.META.list({ prefix, cursor: kvCursor });
@@ -944,13 +944,7 @@ async function loadDocRecord(env, slug) {
 
 async function loadDocMeta(env, slug) {
   const meta = await loadDocRecord(env, slug);
-  if (!meta || isTrashedMeta(meta)) return null;
-  const card = meta.preview;
-  if (card && card.image_source_custom && previewCardMatches(card, slug, card.image_v) && env.META) {
-    const status = await env.META.get(previewCardStatusKey(slug, card.image_v, card.image_hash));
-    return { ...meta, preview: { ...card, image_custom: status === 'ready:custom' } };
-  }
-  return meta;
+  return meta && !isTrashedMeta(meta) ? meta : null;
 }
 
 // ─────────────────────────────── Trash ───────────────────────────────
@@ -9155,10 +9149,11 @@ async function buildDocPreview(env, html, { slug, version, title, svg = null, on
     let carryExisting = svg == null && existingPreview
       && (existingPreview.image_source_custom || existingPreview.image_custom)
       && previewCardMatches(existingPreview, slug, oldVersion);
+    let existingStatus = null;
     if (carryExisting && existingPreview.image_source_custom && env.META) {
-      const oldStatus = await env.META.get(previewCardStatusKey(slug, oldVersion, existingPreview.image_hash));
-      if (oldStatus === 'failed' || oldStatus === 'ready:auto'
-        || (!oldStatus && !await env.DOCS.head(previewCardKey(slug, oldVersion, existingPreview.image_hash)))) {
+      existingStatus = await env.META.get(previewCardStatusKey(slug, oldVersion, existingPreview.image_hash));
+      if (existingStatus === 'failed' || existingStatus === 'ready:auto'
+        || (!existingStatus && !await env.DOCS.head(previewCardKey(slug, oldVersion, existingPreview.image_hash)))) {
         carryExisting = false;
       }
     }
@@ -9171,7 +9166,7 @@ async function buildDocPreview(env, html, { slug, version, title, svg = null, on
         ...preview,
         image: existingPreview.image, image_v: Number(version), image_hash: existingPreview.image_hash,
         image_source_custom: !!(existingPreview.image_source_custom || existingPreview.image_custom),
-        image_custom: !!existingPreview.image_custom,
+        image_custom: existingStatus === 'ready:custom' || (!existingStatus && !!existingPreview.image_custom),
       };
       if (oldVersion < Number(version)) {
         const oldSource = await env.DOCS.get(previewCardSourceKey(slug, oldVersion, existingPreview.image_hash));
@@ -9231,11 +9226,14 @@ async function buildDocPreview(env, html, { slug, version, title, svg = null, on
   return preview;
 }
 
-async function processPreviewCardJob(env, job) {
+async function processPreviewCardJob(env, job, { attempts = 3 } = {}) {
   const { slug, version, hash } = job || {};
   if (!isValidSlug(slug) || !Number.isInteger(version) || version < 1 || !/^[a-f0-9]{12}$/.test(hash || '')) return;
   const statusKey = previewCardStatusKey(slug, version, hash);
   try {
+    // A permanent delete may run while this job is waiting in the Queue.
+    // Do not recreate R2 bytes or a status key after the purge.
+    if (env.META && !await env.META.get(`meta:${slug}`)) return;
     if (await env.DOCS.head(previewCardKey(slug, version, hash))) {
       if (env.META && await env.META.get(statusKey) === 'pending') {
         await env.META.put(statusKey, job.custom ? 'ready:custom' : 'ready:auto');
@@ -9257,11 +9255,19 @@ async function processPreviewCardJob(env, job) {
       bytes = await renderPreviewPng(fallback.svg);
       custom = false;
     }
+    // Rendering can take long enough for a purge to remove the source after
+    // the first existence check. Skip the write if either record is gone.
+    if ((env.META && !await env.META.get(`meta:${slug}`))
+      || !await env.DOCS.head(previewCardSourceKey(slug, version, hash))) return;
     await env.DOCS.put(previewCardKey(slug, version, hash), bytes, { httpMetadata: { contentType: 'image/png' } });
     if (env.META) await env.META.put(statusKey, custom ? 'ready:custom' : 'ready:auto');
   } catch (error) {
     console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
-    try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
+    // The Queue allows two retries. Keep the card pending while another
+    // attempt is due; only the final failure gets a negative cache entry.
+    if (attempts >= 3) {
+      try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
+    }
     throw error;
   }
 }
@@ -19688,7 +19694,7 @@ const tdocHandlers = {
       const job = message && message.body;
       try {
         if (job && job.kind === 'preview') {
-          await processPreviewCardJob(env, job);
+          await processPreviewCardJob(env, job, { attempts: Number(message.attempts) || 3 });
           if (typeof message.ack === 'function') message.ack();
           continue;
         }

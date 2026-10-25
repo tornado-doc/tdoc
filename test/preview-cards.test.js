@@ -31,6 +31,10 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   assert.match(firstCardUrl, /\/preview\/v1-[a-f0-9]{12}\.png$/);
   const card1 = await call(firstCardUrl);
   assert.equal(card1.status, 200);
+  const kvReadsBeforePage = env.META.gets.length;
+  assert.equal((await call('/d/preview-test/v/1')).status, 200);
+  assert.equal(env.META.gets.slice(kvReadsBeforePage).filter((key) => key.startsWith('preview-status:')).length, 0,
+    'ordinary document reads do not fetch preview status');
   const bytes1 = Buffer.from(await card1.arrayBuffer());
   assert.ok(png(bytes1));
   assert.ok(bytes1.length > 5_000);
@@ -102,13 +106,27 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
   assert.equal(previewNormalizeSvg(gradient).error, undefined, 'CLI and Worker accept safe local gradients and XML prelude');
   assert.equal(previewNormalizeSvg(gradient.replace('url(#ink)', 'url(https://example.com/a)')).error, 'unsafe_preview_svg');
   assert.equal(previewNormalizeSvg(gradient.replace('fill:url(#ink)', 'fill-opacity:.5;fill:url(#ink)')).error, undefined);
+  assert.equal(previewNormalizeSvg(gradient.replace('url(#ink)', "url('#ink')")).error, undefined, 'quoted local paint references are allowed');
+  assert.equal(previewNormalizeSvg(gradient.replace('url(#ink)', "url('#ink\")")).error, 'unsafe_preview_svg', 'paint reference quotes must match');
+  assert.equal(previewNormalizeSvg(gradient.replace('<defs>', '<svg width="1" height="1" viewBox="0 0 1200 630"><defs>').replace('</defs>', '</defs></svg>')).error, 'preview_viewport_limit', 'nested viewports cannot magnify paint');
+  assert.equal(previewNormalizeSvg(gradient.replace('width="1200" height="630"', 'width="1200" height="630" viewBox="0 0 1 1"')).error, 'preview_viewport_limit', 'rescaled root viewport cannot magnify paint');
+  assert.equal(previewNormalizeSvg(gradient.replace('width="1200" height="630" style=', 'width="1200px" height="630px" style=')).error, undefined, 'px shape dimensions are allowed');
+  assert.equal(previewNormalizeSvg('<!DOCTYPE svg>' + gradient.slice(gradient.indexOf('<svg'))).error, 'preview_doctype_not_allowed');
   assert.equal(previewNormalizeSvg(gradient.replace('<defs>', '<!-- inside drawing --><defs>')).error, 'unsafe_preview_svg');
   assert.equal(previewNormalizeSvg(gradient.replace('<defs>', '<!-- split --><script></script><defs>')).error, 'unsafe_preview_svg');
   const costlyGradient = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><defs><radialGradient id="g" r="0.01" spreadMethod="reflect"><stop offset="0" stop-color="#fff"/></radialGradient></defs>' + '<rect width="1200" height="630" fill="url(#g)" stroke-width="2000"/>'.repeat(90) + '</svg>';
-  assert.equal(previewNormalizeSvg(costlyGradient).error, 'unsafe_preview_svg', 'full-canvas gradient/stroke work is bounded');
-  assert.equal(previewNormalizeSvg(gradient.replace('style="fill:url(#ink)"', 'style="stroke-width:2000;fill:url(#ink)"')).error, 'unsafe_preview_svg');
-  assert.equal(previewNormalizeSvg(gradient.replace('width="1200" height="630" style=', 'width="1e9" height="630" style=')).error, 'unsafe_preview_svg');
-  assert.equal(previewNormalizeSvg(costlyGradient.replace('r="0.01" spreadMethod="reflect"', 'r=".01"')).error, 'unsafe_preview_svg');
+  assert.equal(previewNormalizeSvg(costlyGradient).error, 'preview_gradient_spread_limit', 'full-canvas gradient/stroke work is bounded');
+  assert.equal(previewNormalizeSvg(gradient.replace('style="fill:url(#ink)"', 'style="stroke-width:2000;fill:url(#ink)"')).error, 'preview_style_limit');
+  assert.equal(previewNormalizeSvg(gradient.replace('width="1200" height="630" style=', 'width="1e9" height="630" style=')).error, 'preview_painted_area_limit');
+  assert.equal(previewNormalizeSvg(costlyGradient.replace('r="0.01" spreadMethod="reflect"', 'r=".01"')).error, 'preview_gradient_radius_limit');
+  const stops = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><defs><linearGradient id="g">' + '<stop offset=".5" stop-color="#fff"/>'.repeat(17) + '</linearGradient></defs><rect width="1200" height="630" fill="url(#g)"/></svg>';
+  assert.equal(previewNormalizeSvg(stops).error, 'preview_gradient_stops_limit');
+  const inherited = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs><g fill="url(#g)">' + '<circle r="100"/>'.repeat(5) + '</g></svg>';
+  assert.equal(previewNormalizeSvg(inherited).error, 'preview_gradient_paint_limit', 'group paint counts each child');
+  const circles = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">' + '<circle r="600"/>'.repeat(4) + '</svg>';
+  assert.equal(previewNormalizeSvg(circles).error, 'preview_painted_area_limit', 'circle area is bounded');
+  const paths = '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">' + '<path d="M0 0 L1200 630 Z"/>'.repeat(4) + '</svg>';
+  assert.equal(previewNormalizeSvg(paths).error, 'preview_painted_area_limit', 'path area is bounded conservatively');
   const owner = await issue(worker.default, env, 'preview-owner');
   const stranger = await issue(worker.default, env, 'preview-stranger');
   assert.equal((await call('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'owned-card', version: 1, html: doc('Owned'), meta: meta('Owned', 'public', 1), preview_svg: authored } })).status, 200);
@@ -144,6 +162,29 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness.js
     const failedMeta = JSON.parse(await env.META.get('meta:failure-card'));
     assert.equal(failedMeta.preview.image_custom, false, 'a failed authored render is never marked custom');
   } finally { env.DOCS.put = originalPut; }
+  const retryPut = env.DOCS.put.bind(env.DOCS);
+  env.DOCS.put = async (key, value, options) => {
+    if (key.startsWith('docs/retry-card/') && key.endsWith('.png')) throw new Error('simulated retryable preview store failure');
+    return retryPut(key, value, options);
+  };
+  try {
+    const retryUpload = await worker.default.fetch(req('/api/upload', { method: 'POST', token: 'admin-test-token', body: { slug: 'retry-card', version: 1, html: doc('Retry card'), meta: meta('Retry card', 'public', 1) } }), env, { waitUntil(task) { pending.push(task); } });
+    assert.equal(retryUpload.status, 200);
+    await Promise.all(pending.splice(0));
+    const retryJob = queued.shift();
+    assert.equal(retryJob.kind, 'preview');
+    const statusKey = `preview-status:retry-card:v1:${retryJob.hash}`;
+    for (const attempts of [1, 2, 3]) {
+      let retried = false;
+      await worker.default.queue({ messages: [{ body: retryJob, attempts, retry() { retried = true; }, ack() {} }] }, env);
+      assert.equal(retried, true, 'Queue should retry a failed render');
+      assert.equal(await env.META.get(statusKey), attempts < 3 ? 'pending' : 'failed', 'only the final attempt marks the card failed');
+    }
+  } finally { env.DOCS.put = retryPut; }
+  const putsBeforeStaleJob = env.DOCS.putCalls;
+  await worker.default.queue({ messages: [{ body: { kind: 'preview', slug: 'purged-card', version: 1, hash: 'deadbeefcafe' }, attempts: 1, ack() {} }] }, env);
+  assert.equal(env.DOCS.putCalls, putsBeforeStaleJob, 'a queued render cannot recreate a permanently purged doc');
+  assert.equal(await env.META.get('preview-status:purged-card:v1:deadbeefcafe'), null);
   const uploaded = await worker.default.fetch(req('/api/upload', { method: 'POST', token: 'admin-test-token', body: { slug: 'pending-card', version: 1, html: doc('Pending card'), meta: meta('Pending card', 'public', 1) } }), env, { waitUntil(task) { pending.push(task); } });
   assert.equal(uploaded.status, 200);
   await Promise.all(pending.splice(0));
