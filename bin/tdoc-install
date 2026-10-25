@@ -32,6 +32,12 @@ for TDOC_AGENT in .claude .agents; do
     ln -s "$TDOC_RELEASE" "$HOME/$TDOC_AGENT/skills/tdoc"
   fi
 done
+# The two-command onboarding installs first, then explicitly connects.
+# Keep the default one-command installer for existing entry points.
+if [ "${1:-}" = "--install-only" ]; then
+  printf '\nInstalled. Connect this computer with %s/.local/bin/tdoc setup.\n' "$HOME"
+  exit 0
+fi
 tdoc_finish_setup() {
   # A curl|bash install must not let an interactive child consume the rest of this script.
   if ( : </dev/tty ) 2>/dev/null; then

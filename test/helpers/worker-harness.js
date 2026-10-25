@@ -77,7 +77,12 @@ class FakeR2 {
     if (!this.map.has(k)) return null;
     return { size: Buffer.byteLength(this.map.get(k)) };
   }
-  async delete(k) { this.map.delete(k); }
+  // R2 deletes one key or an array of up to 1,000.
+  async delete(k) {
+    const keys = Array.isArray(k) ? k : [k];
+    if (keys.length > 1000) throw new Error('R2 delete takes at most 1000 keys');
+    for (const key of keys) this.map.delete(key);
+  }
   async list({ prefix = '' } = {}) {
     if (this.throwList) throw new Error('forced R2 list failure');
     return {

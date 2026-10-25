@@ -4,16 +4,19 @@
 
 ## Default web onboarding — connect the computer
 
-For a new user starting at tdoc.dev, open `https://tdoc.dev/setup`. The existing
-split layout now gives a Terminal install command, browser pairing, a verified
-local AI picker, and a private practice doc. Do not send the person through the
+For a new user starting at tdoc.dev, open `https://tdoc.dev/setup`. A dialog over My docs gives separate install and setup commands, browser
+pairing, a verified local AI picker, and a private practice doc. Do not send the person through the
 old prompt/portrait flow before connecting the background service.
 
-The official bootstrap is:
+The dialog separates installation from connection:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash
+curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash -s -- --install-only
+~/.local/bin/tdoc setup
 ```
+
+The existing one-command bootstrap (`curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash`)
+still installs and connects in one run.
 
 It needs working Node.js 18+, curl and tar, and installs in `~/.tdoc/releases`.
 It preserves existing skill checkouts and AI provider/model settings. Setup

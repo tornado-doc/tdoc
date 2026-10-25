@@ -14,6 +14,8 @@ export const DOC_SUBJECT_SUFFIX = ', publish it, and give me the link';
 export const DOC_SUBJECT_PLACEHOLDER = 'what it should be about';
 export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${DOC_SUBJECT_SUFFIX}`;
 export const SETUP_PROMPT = 'curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash';
+const INSTALL_PROMPT = `${SETUP_PROMPT} -s -- --install-only`;
+const CONNECT_PROMPT = '~/.local/bin/tdoc setup';
 export const DOCTOR_PROMPT = '~/.local/bin/tdoc status';
 const POLL_MS = 3000;
 const STUCK_MS = 90000;
@@ -29,13 +31,14 @@ export function SetupGate({ boot, preview = null, onClose }) {
   const [agents, setAgents] = useState(preview?.local_agents || []);
   const [loaded, setLoaded] = useState(Boolean(preview));
   const [selected, setSelected] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState('');
   const [copyFailed, setCopyFailed] = useState(false);
   const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [platform, setPlatform] = useState('unix');
   const promptRef = useRef(null);
+  const connectRef = useRef(null);
   const active = useRef(true);
   useEffect(() => () => { active.current = false; }, []);
   const started = useRef(Date.now());
@@ -83,10 +86,10 @@ export function SetupGate({ boot, preview = null, onClose }) {
   const signIn = () => {
     if (!preview) location.href = '/api/auth/oidc/login?prompt=login&return=%2Fsetup';
   };
-  const copy = async () => {
-    const ok = await copyText(SETUP_PROMPT);
-    setCopied(ok !== false); setCopyFailed(ok === false);
-    if (ok === false) selectContents(promptRef.current);
+  const copy = async (command, name, ref) => {
+    const ok = await copyText(command);
+    setCopied(ok === false ? '' : name); setCopyFailed(ok === false);
+    if (ok === false) selectContents(ref.current);
     if (!preview) postOnboardingEvent('copy_clicked').catch(() => {});
   };
   const practice = async () => {
@@ -107,7 +110,8 @@ export function SetupGate({ boot, preview = null, onClose }) {
     <AppDialog open={open} onOpenChange={(next) => { if (!next) close(); }}
       title={choose ? 'Choose your AI' : 'Connect a computer'}
       className="ui-setup-modal"
-      description={choose ? 'Choose the AI that will work on your docs.' : 'Connect the computer where you use Claude Code or Codex.'}
+      eyebrow="SET UP TDOC"
+      description={choose ? 'Choose the AI that will work on your docs.' : 'A computer is the machine your AI runs on. Keep at least one online to work on your docs.'}
       actions={<>
         <button type="button" className="ui-setup-later" onClick={choose ? () => setStage('connect') : close}>{choose ? 'Back' : 'Later'}</button>
         {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
@@ -116,7 +120,6 @@ export function SetupGate({ boot, preview = null, onClose }) {
             : <button type="button" className="primary" disabled={!loaded || !connected} onClick={() => setStage('choose')}>Next</button>}
       </>}
     >
-      <p className="ui-setup-eyebrow">{choose ? 'Step 2 of 2' : 'Step 1 of 2'}</p>
       {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to connect this computer.' : 'Sign-in is not configured on this host.'}</p>
         : !loaded ? <p role="status">Checking your computers…</p>
           : choose ? <>
@@ -124,14 +127,17 @@ export function SetupGate({ boot, preview = null, onClose }) {
             <p className="ui-setup-connected" role="status">{error.startsWith('This computer is offline') ? 'Connection needs attention' : `Connected · ${labelOf(chosen)}`}</p>
             <p>{pendingAsk ? 'Your question will be waiting when you return.' : 'Next, select a sentence in your private practice doc and leave a comment.'}</p>
           </> : <>
-            <SegmentedControl value={platform} onChange={setPlatform} ariaLabel="Your computer" options={[{ value: 'unix', label: 'macOS / Linux' }, { value: 'windows', label: 'Windows (WSL)' }]} />
-            <p className="ui-setup-label">Install and connect</p>
-            <div className="ui-setup-command"><code ref={promptRef}>{SETUP_PROMPT}</code><button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
-            <ol className="ui-setup-steps"><li>Paste into {platform === 'windows' ? 'your WSL terminal' : 'Terminal'} and press Enter.</li><li>Approve the request in your browser.</li><li>Your computer appears here automatically.</li></ol>
+            <div className="ui-setup-toolbar"><p className="ui-setup-label"><span aria-hidden="true">›_</span> CONNECT COMMAND</p><SegmentedControl value={platform} onChange={setPlatform} ariaLabel="Your computer" options={[{ value: 'unix', label: 'macOS / Linux' }, { value: 'windows', label: 'Windows (WSL)' }]} /></div>
+            <p className="ui-setup-intro">Install the tdoc CLI on this {platform === 'windows' ? 'Windows (WSL)' : 'macOS or Linux'} machine, then connect it to your account.</p>
+            <p className="ui-setup-command-label">1. Install</p>
+            <div className="ui-setup-command"><code ref={promptRef}>{INSTALL_PROMPT}</code><button type="button" aria-label={copied === 'install' ? 'Install command copied' : 'Copy install command'} onClick={() => copy(INSTALL_PROMPT, 'install', promptRef)}>{copied === 'install' ? '✓' : '⧉'}</button></div>
+            <p className="ui-setup-command-label">2. Setup</p>
+            <div className="ui-setup-command"><code ref={connectRef}>{CONNECT_PROMPT}</code><button type="button" aria-label={copied === 'setup' ? 'Setup command copied' : 'Copy setup command'} onClick={() => copy(CONNECT_PROMPT, 'setup', connectRef)}>{copied === 'setup' ? '✓' : '⧉'}</button></div>
+            <ol className="ui-setup-steps"><li>Paste the commands above into {platform === 'windows' ? 'your WSL terminal' : 'your terminal'} and press Enter.</li><li>Approve the request when it opens in your browser.</li><li>Your computer shows up here on its own. No need to refresh.</li></ol>
             <div className="ui-setup-status" role="status" aria-live="polite">
               {connected ? <span className="ui-setup-connected">Connected · {chosen.device}</span>
                 : state === 'stuck' ? <><p>Still waiting? Check Terminal for a sign-in or installation error.</p><code>{DOCTOR_PROMPT}</code><button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy status command</button><p><a href="https://nodejs.org/">Node.js 18+ is required</a></p></>
-                  : <><span className="sg-spin" aria-hidden="true" />{copyFailed ? COPY_FALLBACK : 'Waiting for your computer…'}</>}
+                  : <><span className="sg-spin" aria-hidden="true" />{copyFailed ? COPY_FALLBACK : 'Waiting for you to run the commands and approve in your browser…'}</>}
             </div>
             {canReturn ? <p>Your agent is already linked. You can return to your question and copy it while this computer is offline.</p> : null}
             <details className="ui-setup-details"><summary>Installation details</summary><p>Installs tdoc in the background and checks your AI using its existing account. Keep this computer awake to receive tasks.</p><p>Already installed? Run <code>~/.local/bin/tdoc setup</code>. Pause with <code>~/.local/bin/tdoc stop</code>.</p><p className="sg-works"><AgentMarks size={21} /><span className="sg-sr">Claude Code and Codex</span></p></details>

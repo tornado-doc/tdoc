@@ -1801,7 +1801,10 @@ function startStubWorker(state) {
     `if(u==='/api/comments')return s.end(JSON.stringify(st.comments));` +
     `if(u==='/api/agent/reply'){st.lastReply=JSON.parse(b||'{}');` +
     `return s.end(JSON.stringify({ok:true,echo:st.lastReply}));}` +
-    `if(u==='/api/doc')return s.end(JSON.stringify({ok:true,deleted:3}));` +
+    `if(u==='/api/doc')return s.end(JSON.stringify({ok:true,trashed:true,purge_at:'2026-11-23T08:00:00.000Z'}));` +
+    `if(u==='/api/trash/restore'){const x=JSON.parse(b||'{}');if(x.slug==='gone-doc')return s.end(JSON.stringify({ok:true,restored:[x.slug]}));` +
+    `s.statusCode=404;return s.end(JSON.stringify({error:'not_in_trash'}));}` +
+    `if(u==='/api/trash')return s.end(JSON.stringify({ok:true,items:[{kind:'doc',slug:'gone-doc',title:'Gone',days_left:29}]}));` +
     `s.statusCode=404;s.end('{}');});})(${JSON.stringify(state)})`);
 }
 
@@ -1963,8 +1966,31 @@ t('tdoc-unpublish works with no jq on PATH', () => {
     });
     assert(noJq(r), `tdoc-unpublish still needs jq:\n      ${r.stdout}\n      ${r.stderr}`);
     assert(r.status === 0, `unpublish exited ${r.status}: ${r.stderr}`);
-    assert(/Unpublished gone-doc/.test(r.stdout), `no confirmation: ${r.stdout}`);
-    assert(/"deleted": 3/.test(r.stdout), `the worker response was not printed: ${r.stdout}`);
+    assert(/Moved gone-doc to Trash/.test(r.stdout) && /2026-11-23/.test(r.stdout) && /tdoc-restore gone-doc/.test(r.stdout),
+      `delete must say it went to Trash and how to get it back: ${r.stdout}`);
+    assert(/"trashed": true/.test(r.stdout), `the worker response was not printed: ${r.stdout}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-restore brings a doc back from Trash, lists Trash, and explains a miss', () => {
+  const stub = startStubWorker({ comments: [] });
+  const home = hostedHome(stub.base);
+  try {
+    const binDir = jqFreePath(home);
+    const run = (args) => spawnSync(path.join(BIN, 'tdoc-restore'), args, {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    const ok = run(['gone-doc']);
+    assert(ok.status === 0 && /Restored gone-doc from Trash/.test(ok.stdout), `restore: ${ok.status} ${ok.stdout} ${ok.stderr}`);
+    const miss = run(['never-was']);
+    assert(miss.status !== 0 && /not in Trash/.test(miss.stderr), `miss: ${miss.status} ${miss.stderr}`);
+    const list = run(['--list']);
+    assert(list.status === 0 && /gone-doc\s+Gone\s+29 days left/.test(list.stdout), `list: ${list.stdout} ${list.stderr}`);
+    assert(noJq(ok) && noJq(list), 'tdoc-restore needs jq');
   } finally {
     stub.stop();
     fs.rmSync(home, { recursive: true, force: true });

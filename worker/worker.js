@@ -864,23 +864,33 @@ function canCommentOnDoc(access, session, env, meta) {
   return false;
 }
 
-// Every copy of a doc, in the order that is safe: bytes, then the index, then
-// the comments, then the slug reservation. Authorization is the caller's job --
-// this only knows how to erase. Named because two callers need it and a second
-// thinner version is how one of them ends up leaving the DO populated, which
-// is what made delete-then-recreate resurrect old comments.
-async function deleteDocEverywhere(env, slug) {
+// Every copy of a doc, in the order that is safe: bytes, index, comments,
+// handoffs and readers' questions first, then the record, then the slug
+// reservation, and the doc's Trash markers only once all of that is done.
+// Authorization is the caller's job -- this only knows how to erase. Named
+// because two callers need it and a second thinner version is how one of them
+// ends up leaving the DO populated, which is what made delete-then-recreate
+// resurrect old comments.
+//
+// The record goes late on purpose: a purge cut short (a subrequest limit, a
+// KV error) leaves the doc still in Trash, and the next run starts over. When
+// the record went first, the next run found nothing, dropped the marker, and
+// the slug republished on top of the old thread (security review of #815).
+// `markers`: Trash marker keys the caller already knows (a purge resumed
+// after the record went, when there is no index record to derive them from).
+async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
   const idx = await priorDocMetaIndex(env, slug);
   if (idx && validTeamId(idx.w)) {
     await enqueueTeamBackup(env, { kind: 'deleted', team: idx.w, slug, deleted_at: new Date().toISOString() });
   }
+  // R2 takes up to 1,000 keys per delete: one call a page, not one a file.
   let cursor;
   do {
     const r = await env.DOCS.list({ prefix: `docs/${slug}/`, cursor });
-    for (const o of r.objects) await env.DOCS.delete(o.key);
+    const keys = r.objects.map((o) => o.key);
+    if (keys.length) await env.DOCS.delete(keys);
     cursor = r.truncated ? r.cursor : undefined;
   } while (cursor);
-  await env.META.delete(`meta:${slug}`);
   await removeDocIndex(env, slug, idx);
   // Through the DO (the canonical store), not just the KV mirror: deleting
   // only KV left DO storage populated. The wipe op clears state.storage; the
@@ -890,21 +900,30 @@ async function deleteDocEverywhere(env, slug) {
   // Handoffs and readers' questions belong to this doc too: a slug published
   // again later must not inherit them.
   await env.META.delete(`handoffs:${slug}`);
-  try {
-    let kvCursor;
-    do {
-      const r = await env.META.list({ prefix: `agent-asks:${slug}:`, cursor: kvCursor });
-      for (const k of r.keys) await env.META.delete(k.name);
-      kvCursor = r.list_complete ? undefined : r.cursor;
-    } while (kvCursor);
-  } catch {}
+  let kvCursor;
+  do {
+    const r = await env.META.list({ prefix: `agent-asks:${slug}:`, cursor: kvCursor });
+    for (const k of r.keys) await env.META.delete(k.name);
+    kvCursor = r.list_complete ? undefined : r.cursor;
+  } while (kvCursor);
+  await env.META.delete(`meta:${slug}`);
   // Free the hosted slug reservation so it can be republished. Data is already
-  // gone; this goes last. If COMMENTS is absent (Vercel) there was never a
+  // gone; this goes after it. If COMMENTS is absent (Vercel) there was never a
   // hostedOwner key -- the caller ignores the 503.
-  return hostedOwnerOp(env, slug, { kind: 'release_owner' });
+  const released = await hostedOwnerOp(env, slug, { kind: 'release_owner' });
+  if (env.COMMENTS && released && released.ok === false) return released;
+  await removeTrashMarkers(env, slug, idx);
+  for (const key of markers) await env.META.delete(key).catch(() => {});
+  return released;
 }
 
-async function loadDocMeta(env, slug) {
+// The doc's stored record, a doc in Trash included. Almost every caller wants
+// loadDocMeta instead, which answers a trashed doc exactly like a missing one:
+// that is what keeps a doc in Trash unreadable and unwritable on every path
+// without each path having to remember (Julie, 2026-10-24). Only Trash itself
+// (list, restore, purge) and the gates that must tell "in Trash" from "never
+// existed" read the record directly.
+async function loadDocRecord(env, slug) {
   try {
     const raw = await env.META.get(`meta:${slug}`);
     if (!raw) return null;
@@ -913,6 +932,505 @@ async function loadDocMeta(env, slug) {
   } catch {
     return null;
   }
+}
+
+async function loadDocMeta(env, slug) {
+  const meta = await loadDocRecord(env, slug);
+  return meta && !isTrashedMeta(meta) ? meta : null;
+}
+
+// ─────────────────────────────── Trash ───────────────────────────────
+//
+// Delete moves a doc to Trash; it is erased for good TRASH_DAYS later (the
+// scheduled handler, or "Delete forever"). A doc in Trash keeps its record
+// at meta:<slug>, stamped trashed_at / trashed_by, and its bytes, comments
+// and slug reservation stay where they are, so a restore is one meta write.
+// Everything that reads meta through loadDocMeta sees nothing; the index
+// markers go (a trashed record belongs to no facet), so no list finds it;
+// and a trash marker per owner or team (trashidx:<facet>:<slug>) is how
+// Trash lists it and the purge finds it. A deleted folder takes its docs
+// with it: they share the folder's id (trashed_with), and the folder's own
+// tree waits at trashfolder:<scope>:<id> to be put back with them.
+const TRASH_DAYS = 30;
+const TRASH_MS = TRASH_DAYS * 24 * 60 * 60 * 1000;
+// Bounded per scheduled run: a purge is ~a dozen subrequests per doc.
+const TRASH_PURGE_BATCH = 40;
+// A Trash list erases at most this many expired docs itself (the rest wait,
+// hidden, for the scheduled purge): a GET must stay a cheap request.
+const TRASH_LIST_PURGE_MAX = 10;
+// A folder goes to Trash in batches: each request reads at most
+// FOLDER_TRASH_READS doc records and trashes at most FOLDER_TRASH_WRITES
+// (~8 KV operations each), and says `remaining` until the folder is done.
+const FOLDER_TRASH_WRITES = 40;
+const FOLDER_TRASH_READS = 80;
+// Delete forever on a folder: docs erased per request (~15 operations each).
+const TRASH_FOLDER_PURGE_BATCH = 25;
+
+function isTrashedMeta(meta) {
+  return !!(meta && typeof meta === 'object' && meta.trashed_at);
+}
+
+function trashPurgeAt(trashedAt) {
+  const at = Date.parse(trashedAt || '');
+  return Number.isFinite(at) ? new Date(at + TRASH_MS).toISOString() : '';
+}
+
+function trashExpired(trashedAt, now = Date.now()) {
+  const at = Date.parse(trashedAt || '');
+  return Number.isFinite(at) && now - at >= TRASH_MS;
+}
+
+function trashMarkerKey(facet, slug) { return `trashidx:${facet}:${slug}`; }
+function trashFolderKey(scope, id) { return `trashfolder:${scope}:${id}`; }
+// Whose Trash a folder lands in: a team's, or the My docs of the person whose
+// folder tree it was (the same key the tree itself is stored under).
+function trashFolderScope(team, session) {
+  return team ? `w:${team.id}` : `u:${actorKey(session)}`;
+}
+
+// The one facet a trashed doc is listed under: its team's when it has one
+// (team admins manage it there), else its owner's.
+async function trashFacetFor(env, idx) {
+  if (!idx) return null;
+  const facets = await docIndexFacets(env, { ...idx, x: 0 });
+  return facets.find((f) => f.startsWith('w:')) || facets[0] || null;
+}
+
+async function removeTrashMarkers(env, slug, idx) {
+  if (!idx) return;
+  try {
+    const facets = await docIndexFacets(env, { ...idx, x: 0 });
+    await Promise.all(facets.map((f) => env.META.delete(trashMarkerKey(f, slug)).catch(() => {})));
+  } catch {}
+}
+
+// Who pressed Delete, as readers see a name: never an email address.
+function trashActorName(auth) {
+  const who = (auth && (auth.session || auth.actor)) || null;
+  if (!who || who.kind === 'admin') return '';
+  return actorDisplayName(who) || who.github_login || (normalizeEmail(who.email) ? normalizeEmail(who.email).split('@')[0] : '');
+}
+
+function trashActorAccount(auth) {
+  const who = (auth && (auth.session || auth.actor)) || null;
+  return (who && typeof who.account_id === 'string' && who.account_id) || '';
+}
+
+// Authorization is the caller's job, as with deleteDocEverywhere.
+async function trashDoc(env, slug, meta, auth, { folder = '' } = {}) {
+  const at = new Date().toISOString();
+  const next = {
+    ...meta,
+    trashed_at: at,
+    trashed_by: trashActorName(auth),
+    trashed_by_account: trashActorAccount(auth),
+  };
+  if (folder) next.trashed_with = folder;
+  else delete next.trashed_with;
+  const facet = await trashFacetFor(env, docMetaIndex(meta));
+  // The marker first: a record stamped trashed with no marker would be in
+  // nobody's Trash and never purged. A marker for a doc that is not trashed
+  // is swept by the next Trash read.
+  if (facet) {
+    await env.META.put(trashMarkerKey(facet, slug), '1', {
+      metadata: { t: String(meta.title || slug).slice(0, 300), at, ...(folder ? { f: folder } : {}) },
+    });
+  }
+  await putDocMetaJson(env, slug, JSON.stringify(next));
+  return { at, purge_at: trashPurgeAt(at) };
+}
+
+async function restoreTrashedDoc(env, slug, record) {
+  const next = { ...record };
+  for (const k of ['trashed_at', 'trashed_by', 'trashed_by_account', 'trashed_with']) delete next[k];
+  await putDocMetaJson(env, slug, JSON.stringify(next), { restore: true });
+  await removeTrashMarkers(env, slug, docMetaIndex(next));
+  return next;
+}
+
+// What today's hard delete did, now only from Trash: bytes, record, index,
+// comments, the team backup's tombstone, the slug reservation.
+async function purgeTrashedDoc(env, slug) {
+  return deleteDocEverywhere(env, slug);
+}
+
+// Trashed docs do not count toward the docs quota or a free team's limit,
+// so bringing them back has to fit, exactly as publishing new ones would.
+// `records` are the docs about to come back; the admin token is not held to
+// a plan.
+async function trashRestoreBlocked(env, records, actor) {
+  if (actor && actor.kind === 'admin') return null;
+  const byAccount = new Map();
+  for (const r of records) {
+    const acct = r && r.hosted && r.hosted.account_id;
+    if (acct) byAccount.set(acct, (byAccount.get(acct) || 0) + 1);
+  }
+  for (const [acct, n] of byAccount) {
+    const limit = await hostedMaxDocsFor(env, acct);
+    const used = await countHostedDocs(env, acct);
+    if (used + n > limit) {
+      return { status: 403, body: {
+        ...quotaDocsPayload(env, limit, used),
+        message: `Restoring ${n === 1 ? 'this doc' : `these ${n} docs`} would go over the ${limit}-doc limit (${used} in use). Delete another doc or raise the limit, then restore.`,
+      } };
+    }
+  }
+  const teams = new Map();
+  for (const r of records) if (r && r.workspace_id) teams.set(r.workspace_id, (teams.get(r.workspace_id) || 0) + 1);
+  for (const [id, n] of teams) {
+    const blocked = await teamPlanBlocksDocs(env, await loadTeam(env, id), n);
+    if (blocked) return { status: 402, body: blocked };
+  }
+  return null;
+}
+
+// What a session may do with a doc in Trash: 'manage' (restore and delete
+// forever) for whoever could have deleted it; 'restore' for the author of a
+// team doc who is still on the team, so a doc an admin deleted (or took to
+// Trash with a folder) is never out of its author's reach while it waits.
+function trashAccessFor(env, session, record) {
+  if (!isTrashedMeta(record)) return null;
+  if (isDocOwnerSession(env, session, record)) return 'manage';
+  if (record.workspace_id && tokenScopeAllows(session, record)
+      && sessionInTeam(session, record.workspace_id)
+      && sessionOwnsAccount(session, record.hosted && record.hosted.account_id)) return 'restore';
+  return null;
+}
+
+// Who may restore or purge a trashed doc: exactly who could delete it.
+// Same two doors as authorizeOwnerMutation -- the owner's session, or the
+// upload token / an account token that owns the doc (a team doc: a team
+// admin's) -- and a team-scoped token only inside its team.
+async function authorizeTrashedDoc(req, env, slug) {
+  const record = await loadDocRecord(env, slug);
+  if (!isTrashedMeta(record)) return { ok: false, response: json({ error: 'not_in_trash' }, { status: 404 }) };
+  const session = await getSession(env, req);
+  if (feedbackScopeDenied(session, slug)) return { ok: false, response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
+  const access = trashAccessFor(env, session, record);
+  if (access) return { ok: true, session, actor: { kind: 'owner_session' }, record, canPurge: access === 'manage' };
+  const auth = await requireUploadAuth(req, env);
+  if (!auth.ok) return { ok: false, response: auth.response };
+  if (auth.actor.kind === 'admin') return { ok: true, session: null, actor: auth.actor, record, canPurge: true };
+  if (!tokenScopeAllows(auth.actor, record)) {
+    return { ok: false, response: json({ error: 'token_scope', message: 'This token is limited to one team and cannot change docs outside it.' }, { status: 403 }) };
+  }
+  if (record.workspace_id) {
+    const team = await teamWriteAccess(env, auth.actor, record);
+    if (!team.ok) return team;
+    if (team.teamAdmin) return { ok: true, session: null, actor: auth.actor, record, canPurge: true };
+    // The author, still on the team, may bring their own doc back.
+    if (sessionOwnsAccount(auth.actor, record.hosted && record.hosted.account_id)) {
+      return { ok: true, session: null, actor: auth.actor, record, canPurge: false };
+    }
+    return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  }
+  const accountId = record.hosted && record.hosted.account_id;
+  if (!accountId || !sessionOwnsAccount(auth.actor, accountId)) {
+    return { ok: false, response: json({ error: 'not_doc_owner' }, { status: 403 }) };
+  }
+  return { ok: true, session: null, actor: auth.actor, record, canPurge: true };
+}
+
+// A doc in Trash answers every reader the way a slug that never existed
+// does: the bare doc link lands on the not-found notice, everything else is
+// a plain 404. No "in Trash" page -- that would say a doc is there.
+function docGoneResponse(req, slug, version) {
+  let path = '';
+  try { path = new URL(req.url).pathname; } catch {}
+  if (/^\/d\/[^/]+\/?$/.test(path) && (req.method === 'GET' || req.method === 'HEAD')) {
+    return new Response(null, { status: 302, headers: { Location: '/?notice=notfound' } });
+  }
+  return text(`Not found: ${slug}${version ? ` v${version}` : ''}`, { status: 404 });
+}
+
+// A folder's tree, root first, from a folder state.
+function folderSubtree(state, rootId) {
+  const root = state.folders.find((f) => f.id === rootId);
+  if (!root) return [];
+  const out = [root];
+  const seen = new Set([root.id]);
+  for (let i = 0; i < out.length; i += 1) {
+    for (const f of state.folders) {
+      if (f.parent === out[i].id && !seen.has(f.id)) { seen.add(f.id); out.push(f); }
+    }
+  }
+  return out;
+}
+
+async function loadTrashFolder(env, scope, id) {
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return null;
+  try {
+    const entry = JSON.parse(await env.META.get(trashFolderKey(scope, id)) || 'null');
+    return entry && typeof entry === 'object' && Array.isArray(entry.folders) ? entry : null;
+  } catch { return null; }
+}
+
+// The Trash facets one space lists from: a team's, or the session's own
+// (its account, or a handle with none yet, plus the operator's ownerless docs).
+function trashFacetsFor(env, session, team) {
+  if (team) return [`w:${team.id}`];
+  const out = [];
+  if (session && session.account_id) out.push(`p:${session.account_id}`);
+  else if (sessionLogin(session)) out.push(`l:${sessionLogin(session)}`);
+  if (isOwnerSession(env, session)) out.push('n');
+  return out;
+}
+
+// Every doc that went to Trash with this folder: the entry's own list, and
+// anything a Trash marker says went with it (trashed_with). A folder delete
+// that stopped half way and was run again must not strand the docs the first
+// attempt took (security review of #815): what decides is each record's
+// trashed_with, not one list written before the docs were.
+async function trashFolderDocs(env, facets, entry) {
+  const slugs = new Set((Array.isArray(entry.docs) ? entry.docs : []).filter(isValidSlug));
+  for (const facet of facets) {
+    let cursor;
+    do {
+      const page = await env.META.list({ prefix: `trashidx:${facet}:`, cursor });
+      for (const k of page.keys) {
+        if (k.metadata && k.metadata.f === entry.id) slugs.add(k.name.slice(`trashidx:${facet}:`.length));
+      }
+      cursor = page.cursor;
+      if (page.list_complete) break;
+    } while (cursor);
+  }
+  return [...slugs].filter(isValidSlug);
+}
+
+// May this session restore or purge a trashed folder? Whoever could delete
+// it: the owner of a My docs folder, a team admin or the folder's maker.
+function canManageTrashFolder(entry, session, team) {
+  if (!entry) return false;
+  if (!team) return true;
+  return teamRole(team, session && session.account_id) === 'admin'
+    || (!!entry.created_by && entry.created_by === (session && session.account_id));
+}
+
+// Put a trashed folder's tree back, then the docs that went with it. Docs
+// the session may not restore stay in Trash (they show there on their own).
+async function restoreTrashFolder(env, session, team, scope, entry) {
+  const docs = [];
+  for (const slug of await trashFolderDocs(env, trashFacetsFor(env, session, team), entry)) {
+    const record = await loadDocRecord(env, slug);
+    if (!isTrashedMeta(record) || record.trashed_with !== entry.id) continue;
+    if (!trashAccessFor(env, session, record)) continue;
+    docs.push([slug, record]);
+  }
+  const blocked = await trashRestoreBlocked(env, docs.map(([, record]) => record), session);
+  if (blocked) return { ok: false, status: blocked.status, body: blocked.body };
+  const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(session));
+  const ids = new Set(state.folders.map((f) => f.id));
+  const adding = entry.folders.filter((f) => f && typeof f.id === 'string' && !ids.has(f.id));
+  if (state.folders.length + adding.length > FOLDERS_MAX) {
+    return { ok: false, status: 400, body: { error: 'too_many_folders', limit: FOLDERS_MAX } };
+  }
+  const restoredIds = new Set([...ids, ...adding.map((f) => f.id)]);
+  for (const f of adding) {
+    const copy = { ...f };
+    // The parent it had may have been deleted since: then it lands at the top.
+    if (copy.parent && !restoredIds.has(copy.parent)) delete copy.parent;
+    state.folders.push(copy);
+    if (team && state.gone) delete state.gone[f.id];
+    if (copy.share_id) await putFolderShareIndex(env, copy.share_id, team ? { team: team.id } : actorKey(session), copy.id);
+  }
+  const restored = [];
+  for (const [slug, record] of docs) {
+    await restoreTrashedDoc(env, slug, record);
+    if (!team) {
+      const fid = entry.placements && entry.placements[slug];
+      if (typeof fid === 'string' && restoredIds.has(fid)) state.docs[slug] = fid;
+    }
+    restored.push(slug);
+  }
+  if (team) await saveTeamFolders(env, team.id, state);
+  else await saveFolderState(env, actorKey(session), state);
+  await env.META.delete(trashFolderKey(scope, entry.id));
+  return { ok: true, restored };
+}
+
+// Erase a trashed folder's docs, then the folder. `limit` bounds the docs
+// erased in one go; the entry stays (and is found again) until none are left.
+async function purgeTrashFolder(env, scope, entry, { session = null, team = null, now = null, limit = Infinity, facets = null } = {}) {
+  const purged = [];
+  const slugs = await trashFolderDocs(env, facets || entry.facets || (session ? trashFacetsFor(env, session, team) : []), entry);
+  for (const slug of slugs) {
+    const record = await loadDocRecord(env, slug);
+    if (!isTrashedMeta(record) || record.trashed_with !== entry.id) continue;
+    // From Trash by hand: only what this session could delete. By the clock:
+    // whatever has waited out its days.
+    if (session && trashAccessFor(env, session, record) !== 'manage') continue;
+    if (now != null && !trashExpired(record.trashed_at, now)) continue;
+    if (purged.length >= limit) return { purged, done: false };
+    await purgeTrashedDoc(env, slug);
+    purged.push(slug);
+  }
+  await env.META.delete(trashFolderKey(scope, entry.id));
+  return { purged, done: true };
+}
+
+// The scheduled purge: every trashed doc and folder whose days are up, a
+// bounded batch per run (the next run takes the rest). The marker's own
+// timestamp picks candidates; the record's decides.
+async function purgeExpiredTrash(env, now = Date.now(), { limit = TRASH_PURGE_BATCH } = {}) {
+  const out = { docs: [], folders: [] };
+  if (!env || !env.META) return out;
+  const listAll = async (prefix) => {
+    const keys = [];
+    let cursor;
+    do {
+      const page = await env.META.list({ prefix, cursor });
+      keys.push(...page.keys);
+      cursor = page.cursor;
+      if (page.list_complete) break;
+    } while (cursor);
+    return keys;
+  };
+  for (const k of await listAll('trashfolder:')) {
+    if (out.docs.length >= limit) return out;
+    const at = k.metadata && k.metadata.at;
+    if (at && !trashExpired(at, now)) continue;
+    const rest = k.name.slice('trashfolder:'.length);
+    const cut = rest.lastIndexOf(':');
+    const scope = rest.slice(0, cut);
+    const entry = await loadTrashFolder(env, scope, rest.slice(cut + 1));
+    if (!entry) { await env.META.delete(k.name).catch(() => {}); continue; }
+    if (!trashExpired(entry.at, now)) continue;
+    const res = await purgeTrashFolder(env, scope, entry, { now, limit: limit - out.docs.length });
+    out.docs.push(...res.purged);
+    if (res.done) out.folders.push(entry.id);
+  }
+  const bySlug = new Map();
+  for (const k of await listAll('trashidx:')) {
+    const slug = k.name.slice(k.name.lastIndexOf(':') + 1);
+    if (!isValidSlug(slug)) continue;
+    if (!bySlug.has(slug)) bySlug.set(slug, { keys: [], at: k.metadata && k.metadata.at });
+    bySlug.get(slug).keys.push(k.name);
+  }
+  for (const [slug, { keys, at }] of bySlug) {
+    if (out.docs.length >= limit) break;
+    if (at && !trashExpired(at, now)) continue;
+    const record = await loadDocRecord(env, slug);
+    if (!record) {
+      // A purge that stopped after the record went: finish it (each step is
+      // idempotent), and only then let go of the marker.
+      await deleteDocEverywhere(env, slug, { markers: keys });
+      out.docs.push(slug);
+      continue;
+    }
+    // Restored (or published again after a purge): the marker is stale.
+    if (!isTrashedMeta(record)) { for (const key of keys) await env.META.delete(key).catch(() => {}); continue; }
+    if (!trashExpired(record.trashed_at, now)) continue;
+    await purgeTrashedDoc(env, slug);
+    out.docs.push(slug);
+  }
+  return out;
+}
+
+function trashDocRow(slug, record, now = Date.now()) {
+  const purgeAt = trashPurgeAt(record.trashed_at);
+  return {
+    kind: 'doc',
+    slug,
+    title: record.title || slug,
+    trashed_at: record.trashed_at,
+    trashed_by: record.trashed_by || '',
+    purge_at: purgeAt,
+    days_left: Math.max(0, Math.ceil((Date.parse(purgeAt) - now) / 86400000)),
+    ...(record.workspace_id ? { team: record.workspace_id } : {}),
+  };
+}
+
+// One Trash: My docs' (team null) or a team's. Rows are re-checked on the
+// full record, as the catalog does; stale markers are swept, and anything
+// past its days that the viewer could purge goes now rather than wait for
+// the next scheduled run.
+// `hints` are what this browser itself just deleted ({ slugs, folders }): a
+// KV list can lag a write by up to a minute, and "I deleted it and Trash is
+// empty" is not an answer. Each hint is read directly and passes the same
+// checks as a listed row, so a hint can only add what the viewer may see.
+async function listTrash(env, session, team, now = Date.now(), hints = {}) {
+  const facets = trashFacetsFor(env, session, team);
+  const scope = trashFolderScope(team, session);
+  const folderKeys = [];
+  {
+    let cursor;
+    do {
+      const page = await env.META.list({ prefix: `trashfolder:${scope}:`, cursor });
+      folderKeys.push(...page.keys);
+      cursor = page.cursor;
+      if (page.list_complete) break;
+    } while (cursor);
+  }
+  // Expired rows this read erases itself, at most TRASH_LIST_PURGE_MAX docs;
+  // past that they are hidden and left to the scheduled purge.
+  let purgeBudget = TRASH_LIST_PURGE_MAX;
+  const items = [];
+  const folderIds = new Set();
+  const folderIdsToRead = [...new Set([
+    ...folderKeys.map((k) => k.name.slice(k.name.lastIndexOf(':') + 1)),
+    ...(hints.folders || []),
+  ])];
+  for (const folderId of folderIdsToRead) {
+    const entry = await loadTrashFolder(env, scope, folderId);
+    if (!entry || !canManageTrashFolder(entry, session, team)) continue;
+    if (trashExpired(entry.at, now)) {
+      folderIds.add(entry.id);
+      if (purgeBudget > 0) {
+        const res = await purgeTrashFolder(env, scope, entry, { session, team, now, limit: purgeBudget, facets });
+        purgeBudget -= res.purged.length;
+      }
+      continue;
+    }
+    folderIds.add(entry.id);
+    const purgeAt = trashPurgeAt(entry.at);
+    items.push({
+      kind: 'folder',
+      id: entry.id,
+      title: entry.name,
+      doc_count: Array.isArray(entry.docs) ? entry.docs.length : 0,
+      trashed_at: entry.at,
+      trashed_by: entry.by || '',
+      purge_at: purgeAt,
+      days_left: Math.max(0, Math.ceil((Date.parse(purgeAt) - now) / 86400000)),
+      can_purge: true,
+    });
+  }
+  const seen = new Set();
+  const rows = [];
+  for (const facet of facets) {
+    let cursor;
+    do {
+      const page = await env.META.list({ prefix: `trashidx:${facet}:`, cursor });
+      for (const k of page.keys) rows.push({ slug: k.name.slice(`trashidx:${facet}:`.length), key: k.name });
+      cursor = page.cursor;
+      if (page.list_complete) break;
+    } while (cursor);
+  }
+  for (const slug of hints.slugs || []) rows.push({ slug, key: null });
+  for (const { slug, key } of rows) {
+    if (seen.has(slug) || !isValidSlug(slug)) continue;
+    seen.add(slug);
+    const record = await loadDocRecord(env, slug);
+    // No record: a purge that stopped part way. Not listed, and the marker
+    // stays until the scheduled purge has finished erasing it.
+    if (!record) continue;
+    // Restored or republished: the marker is stale.
+    if (!isTrashedMeta(record)) { if (key) await env.META.delete(key).catch(() => {}); continue; }
+    if (!team && record.workspace_id) continue;
+    if (team && record.workspace_id !== team.id) continue;
+    const access = trashAccessFor(env, session, record);
+    if (!access) continue;
+    if (trashExpired(record.trashed_at, now)) {
+      if (access === 'manage' && purgeBudget > 0) { purgeBudget -= 1; await purgeTrashedDoc(env, slug); }
+      continue;
+    }
+    // A doc that went with a folder still in Trash is listed under it, for
+    // whoever can see the folder; its author alone sees it on its own.
+    if (record.trashed_with && folderIds.has(record.trashed_with)) continue;
+    items.push({ ...trashDocRow(slug, record, now), can_purge: access === 'manage' });
+  }
+  items.sort((a, b) => String(b.trashed_at).localeCompare(String(a.trashed_at)));
+  return items;
 }
 
 // One renderer for every edge page — sign-in status, access denial, email
@@ -1038,7 +1556,14 @@ async function docOwnerToken(env, req, meta) {
 // clicking Accept (/api/team/accept); a doc they can read anyway (public,
 // link, allowlist) simply opens and leaves the invite pending (#711).
 async function enforceDocAccess(env, req, slug, version) {
-  const meta = await loadDocMeta(env, slug);
+  const record = await loadDocRecord(env, slug);
+  // In Trash: gone for everyone, owner included, until it is restored. Asked
+  // before anything else so no answer differs from a slug that never existed.
+  if (isTrashedMeta(record)) {
+    if (req && typeof req === 'object') NOINDEX_REQUESTS.add(req);
+    return { ok: false, gone: true, response: docGoneResponse(req, slug, version) };
+  }
+  const meta = record;
   // No meta yet (orphan R2 object) — treat as public so legacy uploads still work.
   const access = accessFromMeta(meta || {});
   // Whatever this request answers -- the doc, a version, /raw, the frame, a
@@ -5732,15 +6257,26 @@ function docMetaIndex(meta) {
     u: String(versions[versions.length - 1]?.created || m.created || versions[0]?.created || ''),
     t: String(m.title || '').slice(0, 300),
   };
+  // In Trash: no facet lists it (docIndexFacets), no scan row counts it.
+  if (isTrashedMeta(m)) idx.x = 1;
   // KV metadata is capped at 1024 bytes; the title is the only free text.
   while (JSON.stringify(idx).length > 1000 && idx.t.length) idx.t = idx.t.slice(0, Math.floor(idx.t.length / 2));
   return idx;
 }
-async function putDocMetaJson(env, slug, json) {
+// A write built from a record read before the doc went to Trash (a publish,
+// rename, share change or move racing the delete) would bring the doc back
+// without anyone restoring it. The prior record's index says whether it is in
+// Trash, and only a restore may write a live record over a trashed one.
+class DocInTrashError extends Error {
+  constructor(slug) { super(`doc_in_trash: ${slug}`); this.code = 'doc_in_trash'; this.slug = slug; }
+}
+
+async function putDocMetaJson(env, slug, json, { restore = false } = {}) {
   let parsed = null;
   try { parsed = JSON.parse(json); } catch {}
   const idx = parsed ? docMetaIndex(parsed) : null;
   const priorIdx = idx ? await priorDocMetaIndex(env, slug) : null;
+  if (priorIdx && priorIdx.x && !idx.x && !restore) throw new DocInTrashError(slug);
   // The record is the write that matters; a marker is a shortcut to it. So a
   // marker that cannot be written (the day's KV writes spent, a transient
   // error) never fails the publish: the record is stored, and the facets
@@ -5766,7 +6302,9 @@ async function putDocMetaJson(env, slug, json) {
     if (idx.w) named.push(`w:${idx.w}`);
     await unbuildDocIndexes(env, named);
   }
-  if (parsed && validTeamId(parsed.workspace_id)) {
+  // A doc going to Trash keeps the team's backup copy as it was; the purge
+  // sends the tombstone, a restore the fresh copy.
+  if (parsed && validTeamId(parsed.workspace_id) && !isTrashedMeta(parsed)) {
     await enqueueTeamBackup(env, { kind: 'doc', team: parsed.workspace_id, slug });
   }
   if (priorIdx && validTeamId(priorIdx.w) && priorIdx.w !== String(parsed && parsed.workspace_id || '')) {
@@ -5826,7 +6364,7 @@ async function priorDocMetaIndex(env, slug) {
 // handle's account, if one exists; a doc that names nobody is the operator's.
 async function docIndexFacets(env, idx, groups = new Map()) {
   const out = [];
-  if (!idx) return out;
+  if (!idx || idx.x) return out;
   let account = idx.a || '';
   if (!account && idx.o) {
     try { const rec = await lookupHostedAccount(env, idx.o); account = (rec && rec.account_id) || ''; } catch {}
@@ -5979,7 +6517,7 @@ async function scanDocIndex(env, { backfill = 5 } = {}) {
       try { await env.META.put(`meta:${r.slug}`, raw, { metadata: r.idx }); } catch {}
     }
   }));
-  return rows.filter((r) => r.idx);
+  return rows.filter((r) => r.idx && !r.idx.x);
 }
 
 // Write the markers a facet is missing, a bounded batch per request, and
@@ -6159,6 +6697,9 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
     if (!meta) {
       try { raw = await env.META.get(`meta:${slug}`); meta = JSON.parse(raw || 'null'); } catch { meta = null; }
     }
+    // In Trash: not listed, and its marker (if one outlived the trashing)
+    // is left alone -- a restore would only have to write it again.
+    if (isTrashedMeta(meta)) return null;
     if (!meta || typeof meta !== 'object') {
       // A marker for a doc that is gone.
       if (row.marker) sweep(row.marker.facet, slug);
@@ -6321,7 +6862,7 @@ async function profileData(env, account, { includePrivate = false } = {}) {
   for (const slug of pins) {
     let meta = null;
     try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { continue; }
-    if (!meta || typeof meta !== 'object') continue;
+    if (!meta || typeof meta !== 'object' || isTrashedMeta(meta)) continue;
     const hosted = meta.hosted;
     const owns = (accountId && hosted && ownerIds.has(hosted.account_id))
       || (login && hostedGithubLogin(meta) === login);
@@ -8567,6 +9108,7 @@ async function setProfilePin(env, accountId, slug, pinned, { session, meta } = {
   if (!meta) {
     try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch { meta = null; }
   }
+  if (isTrashedMeta(meta)) meta = null;
   // Author only — collaborators / folder guests cannot curate someone else's doc.
   const blocked = !meta ? { error: 'not_found', status: 404 }
     : meta.workspace_id ? { error: 'team_doc', status: 409 }
@@ -9055,7 +9597,7 @@ async function issueHostedToken(env, body = {}, verifiedEmail = null, idp = null
 const SCOPED_TOKEN_ROUTES = new Set([
   '/api/upload', '/api/comments', '/api/agent/reply', '/api/me', '/api/teams',
   '/api/team/move', '/api/team/comments', '/api/hosted/whoami', '/api/hosted/token/scoped',
-  '/api/doc', '/api/doc/access',
+  '/api/doc', '/api/doc/access', '/api/trash', '/api/trash/restore', '/api/trash/purge',
   '/api/folders', '/api/folders/move', '/api/folders/shared', '/api/folders/move-to-team',
   // The daemon's queue (bin/tdoc-daemon). Each re-checks the doc against the
   // token's workspaces; pending lists only handoffs on docs it reaches.
@@ -9125,6 +9667,12 @@ async function scopedTokenRefusal(env, req, url) {
   // Reads and empties a My docs folder into a team: both must be reachable.
   if (p === '/api/folders/move-to-team' && !(scope.me && reaches(body && body.team))) return refuse();
   if (p === '/api/folders' || p === '/api/folders/move') {
+    const team = (body && body.team) || url.searchParams.get('team');
+    if (team ? !reaches(team) : !scope.me) return refuse();
+  }
+  // Trash: a list or a trashed folder names its workspace (a team, or My
+  // docs when it names none); a doc in Trash is checked on the doc itself.
+  if (p === '/api/trash' || ((p === '/api/trash/restore' || p === '/api/trash/purge') && !(body && typeof body.slug === 'string'))) {
     const team = (body && body.team) || url.searchParams.get('team');
     if (team ? !reaches(team) : !scope.me) return refuse();
   }
@@ -9301,7 +9849,32 @@ async function teamWriteAccess(env, actor, meta) {
 }
 
 async function requireDocWriteAccess(env, actor, slug, opts = {}) {
-  const meta = await loadDocMeta(env, slug);
+  const meta = await loadDocRecord(env, slug);
+  // In Trash the slug stays reserved and nothing writes it. Its owner, who
+  // could restore it, is told to (a publish must not silently bring it back
+  // or start over on top of it); anyone else sees what they would have seen
+  // before it was deleted: a taken slug, or nothing.
+  if (isTrashedMeta(meta)) {
+    if (!opts.create) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
+    const accountId = meta.hosted && meta.hosted.account_id;
+    const scoped = !actor || actor.kind === 'admin' || tokenScopeAllows(actor, meta);
+    const team = scoped && meta.workspace_id && actor && actor.kind !== 'admin' ? await teamWriteAccess(env, actor, meta) : null;
+    const owner = !actor || actor.kind === 'admin'
+      || (scoped && (meta.workspace_id ? !!(team && team.teamAdmin) : !!accountId && sessionOwnsAccount(actor, accountId)));
+    if (owner || (team && team.ok)) {
+      return { ok: false, response: json({
+        error: 'doc_in_trash',
+        slug,
+        trashed_at: meta.trashed_at,
+        purge_at: trashPurgeAt(meta.trashed_at),
+        message: owner
+          ? `"${meta.title || slug}" is in Trash. Restore it first (tdoc-restore ${slug}, or Trash in My docs), then publish again.`
+          : `"${meta.title || slug}" is in the team's Trash. Ask a team admin to restore it, then publish again.`,
+      }, { status: 409 }) };
+    }
+    if (!accountId) return { ok: false, response: json({ error: 'slug_taken' }, { status: 409 }) };
+    return { ok: false, response: json({ error: meta.workspace_id ? 'not_team_member' : 'not_doc_owner' }, { status: 403 }) };
+  }
   if (!actor || actor.kind === 'admin') return { ok: true, meta };
   // A workspace-scoped token writes only in its workspaces. A new slug is
   // allowed: the upload route files it into one of them. Someone else's
@@ -9522,7 +10095,10 @@ async function authorizeOwnerMutation(req, env, slug) {
   // A feedback token speaks for one doc. Owning another doc does not make the
   // token good for it.
   if (feedbackScopeDenied(session, slug)) return { ok: false, response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
-  const meta = slug ? await loadDocMeta(env, slug) : null;
+  const meta = slug ? await loadDocRecord(env, slug) : null;
+  // A doc in Trash is not there to share, rename or delete again; Trash's
+  // own routes (authorizeTrashedDoc) restore or purge it.
+  if (isTrashedMeta(meta)) return { ok: false, response: json({ error: 'not_found' }, { status: 404 }) };
   if (isDocOwnerSession(env, session, meta)) return { ok: true, session, actor: { kind: 'owner_session' }, meta };
   const auth = await requireUploadAuth(req, env);
   if (!auth.ok) return { ok: false, response: auth.response };
@@ -12110,6 +12686,7 @@ function applyPreviewKvTtl(env) {
 // A denied raw read answers in plain text for the agent that asked, saying
 // what would let it in. Status only: nothing about the doc itself.
 function rawDeniedResponse(gate) {
+  if (gate.gone) return gate.response;
   const status = (gate.response && gate.response.status) || 403;
   const body = status === 401
     ? 'This tdoc document is not public. Send the reading account\'s tdoc token as `Authorization: Bearer <token>` (the tdoc skill keeps it in ~/.tdoc/published.json), or ask the owner to share it.\n'
@@ -12650,8 +13227,15 @@ async function handleAgentAsk(env, req, action) {
 }
 
 export default {
-  fetch: (req, env, ctx) => tdocHandlers.fetch(req, env, ctx).then((res) => withDocRobots(req, res)),
+  fetch: (req, env, ctx) => tdocHandlers.fetch(req, env, ctx)
+    // Lost a race with Delete (see DocInTrashError): the doc is gone.
+    .catch((error) => {
+      if (error && error.code === 'doc_in_trash') return json({ error: 'not_found', slug: error.slug }, { status: 404 });
+      throw error;
+    })
+    .then((res) => withDocRobots(req, res)),
   queue: (batch, env) => tdocHandlers.queue(batch, env),
+  scheduled: (event, env) => tdocHandlers.scheduled(event, env),
 };
 
 const tdocHandlers = {
@@ -13481,6 +14065,7 @@ const tdocHandlers = {
         const strays = await Promise.all(pinList.filter((slug) => !listed.has(slug)).map(async (slug) => {
           let meta = null;
           try { meta = JSON.parse(await env.META.get(`meta:${slug}`) || 'null'); } catch {}
+          if (isTrashedMeta(meta)) meta = null;
           return {
             slug,
             title: (meta && meta.title) || slug,
@@ -14935,38 +15520,110 @@ const tdocHandlers = {
       const s = scope.session;
       const team = scope.team;
       const id = url.searchParams.get('id');
+      // A folder now goes to Trash with its docs, in batches. A client from
+      // before that (an old CLI) would call once and announce that the docs
+      // "moved up a level": it is told what changed instead, in words it prints.
+      if (url.searchParams.get('batch') !== '1') {
+        return json({
+          error: 'client_update_required',
+          message: 'Deleting a folder now moves the folder and its docs to Trash for 30 days. Update tdoc (bin/tdoc-update) and run it again, or delete the folder from My docs on the web.',
+        }, { status: 409 });
+      }
       const state = team ? await loadTeamFolders(env, team.id) : await loadFolderState(env, actorKey(s));
       const gone = state.folders.find((f) => f.id === id);
       if (!gone) return json({ error: 'not_found' }, { status: 404 });
       if (team && !publicTeamFolder(gone, s, team).can_manage) return json({ error: 'not_folder_owner' }, { status: 403 });
-      // Contents move UP ONE LEVEL — docs and subfolders reparent to the
-      // deleted folder's parent (root when it had none). Documents are
-      // never deleted by a folder deletion.
+      // The folder goes to Trash with everything in it: its subfolders, and
+      // every doc filed anywhere in that tree that this session could delete
+      // on its own (a team doc an admin takes this way stays restorable by its
+      // author, see trashAccessFor). Restoring the folder brings them all back
+      // together. A doc it could not delete stays out of Trash and moves up to
+      // the folder's parent, as before.
+      //
+      // A batch per request: at most FOLDER_TRASH_READS records read and
+      // FOLDER_TRASH_WRITES docs trashed, in slug order from `after`; the
+      // answer says `remaining` (and the next `after`) until the folder is
+      // done, and the last batch takes the folder out of the tree. Any call
+      // may be repeated: the Trash entry is merged, never replaced.
       const up = gone.parent || null;
-      for (const [slug, fid] of Object.entries(state.docs)) {
-        if (fid === id) {
+      const tree = folderSubtree(state, id);
+      const inTree = new Set(tree.map((f) => f.id));
+      const after = String(url.searchParams.get('after') || '');
+      const candidates = team
+        ? (await docIndexSlugs(env, `w:${team.id}`, teamDocMatcher(team.id))).filter(isValidSlug)
+        : Object.entries(state.docs).filter(([, fid]) => inTree.has(fid)).map(([slug]) => slug);
+      candidates.sort();
+      const pending = candidates.filter((slug) => slug > after);
+      const batch = [];
+      let reads = 0;
+      let last = after;
+      for (const slug of pending) {
+        if (reads >= FOLDER_TRASH_READS || batch.length >= FOLDER_TRASH_WRITES) break;
+        reads += 1;
+        last = slug;
+        const meta = await loadDocMeta(env, slug);
+        if (!meta || !isDocOwnerSession(env, s, meta)) continue;
+        if (team) {
+          if (meta.workspace_id !== team.id || meta.created_from === 'feedback') continue;
+          const at = resolveTeamFolder(state, meta.team_folder);
+          if (inTree.has(at)) batch.push([slug, meta, at]);
+        } else if (!meta.workspace_id) {
+          batch.push([slug, meta, state.docs[slug]]);
+        }
+      }
+      const remaining = pending.length > 0 && last !== pending[pending.length - 1];
+      const where = trashFolderScope(team, s);
+      const prior = await loadTrashFolder(env, where, id);
+      const at = (prior && prior.at) || new Date().toISOString();
+      const priorFolders = prior ? prior.folders.filter((f) => f && !inTree.has(f.id)) : [];
+      const entry = {
+        id,
+        name: gone.name,
+        folders: [...tree.map((f) => ({ ...f })), ...priorFolders],
+        docs: [...new Set([...((prior && prior.docs) || []), ...batch.map(([slug]) => slug)])],
+        placements: team ? {} : { ...((prior && prior.placements) || {}), ...Object.fromEntries(batch.map(([slug, , fid]) => [slug, fid])) },
+        at,
+        by: trashActorName({ session: s }),
+        facets: trashFacetsFor(env, s, team),
+        ...(team && gone.created_by ? { created_by: gone.created_by } : {}),
+      };
+      // The entry first: docs stamped as having gone with a folder that
+      // Trash cannot show would be stranded until their own days ran out.
+      await env.META.put(trashFolderKey(where, id), JSON.stringify(entry), { metadata: { at } });
+      for (const [slug, meta] of batch) await trashDoc(env, slug, meta, { session: s }, { folder: id });
+      const docs = batch.map(([slug]) => slug);
+      if (remaining) {
+        return json({
+          ok: true, trashed: true, folder: id, docs, remaining: true, after: last,
+          message: `Moving "${gone.name}" to Trash: ${entry.docs.length} doc(s) so far, more to go.`,
+        });
+      }
+      // The last batch: what did not go to Trash moves up one level, as a
+      // folder deletion always did; the folders themselves leave the tree.
+      const trashedSlugs = new Set(entry.docs);
+      if (!team) {
+        for (const [slug, fid] of Object.entries(state.docs)) {
+          if (!inTree.has(fid) || trashedSlugs.has(slug)) continue;
           if (up) state.docs[slug] = up;
           else delete state.docs[slug];
         }
       }
-      for (const f of state.folders) {
-        if (f.parent === id) {
-          if (up) f.parent = up;
-          else delete f.parent;
-        }
-      }
-      state.folders = state.folders.filter((f) => f.id !== id);
+      state.folders = state.folders.filter((f) => !inTree.has(f.id));
       if (team) {
-        // Team docs carry their folder on their own meta; they find their
-        // way up through `gone` instead of a rewrite per doc.
-        state.gone[id] = up || '';
+        // Team docs carry their folder on their own meta; the ones left
+        // behind find their way up through `gone` instead of a rewrite per doc.
+        for (const f of tree) state.gone[f.id] = up || '';
         await saveTeamFolders(env, team.id, state);
-        await deleteFolderShareIndex(env, gone.share_id);
-        return json({ ok: true });
+      } else {
+        await saveFolderState(env, actorKey(s), state);
       }
-      await saveFolderState(env, actorKey(s), state);
-      await deleteFolderShareIndex(env, gone.share_id);
-      return json({ ok: true });
+      // Its share links die now, as a deleted folder's always did; the
+      // folders keep their share_id, so a restore can bring the links back.
+      for (const f of tree) if (f.share_id) await deleteFolderShareIndex(env, f.share_id);
+      return json({
+        ok: true, trashed: true, folder: id, docs, remaining: false, purge_at: trashPurgeAt(at), retention_days: TRASH_DAYS,
+        message: `Moved "${gone.name}" and ${entry.docs.length} doc(s) to Trash. They are deleted for good after ${TRASH_DAYS} days; restore them together from Trash.`,
+      });
     }
 
     if (p === '/api/folders/shared' && method === 'GET') {
@@ -16076,6 +16733,20 @@ const tdocHandlers = {
       if (agentAskMatch && method === 'POST') return handleAgentAsk(env, req, agentAskMatch[1]);
     }
 
+    // A doc in Trash has no thread to write to, edit or react on until it is
+    // restored. (Reading comments goes through enforceDocAccess, which
+    // already answers a trashed doc as missing.)
+    if ((p === '/api/comments' || p === '/api/reactions' || p === '/api/mentions') && method !== 'OPTIONS'
+        && !(p === '/api/comments' && method === 'GET')) {
+      let trashSlug = url.searchParams.get('slug');
+      if (!trashSlug && method !== 'GET') {
+        try { trashSlug = (await req.clone().json()).slug; } catch {}
+      }
+      if (typeof trashSlug === 'string' && isValidSlug(trashSlug) && isTrashedMeta(await loadDocRecord(env, trashSlug))) {
+        return json({ error: 'not_found' }, { status: 404 });
+      }
+    }
+
     if (p === '/api/comments' && method === 'GET') {
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
@@ -17084,6 +17755,10 @@ const tdocHandlers = {
             if (!metas.get(e.slug) || !tokenScopeAllows(auth.actor, metas.get(e.slug))) { keep.push(e); continue; }
           }
           keep.push(e);
+          // Kept but not run while its doc is in Trash: a restore brings the
+          // handoff back with the doc.
+          if (!cache.has(`trash:${e.slug}`)) cache.set(`trash:${e.slug}`, isTrashedMeta(await loadDocRecord(env, e.slug)));
+          if (cache.get(`trash:${e.slug}`)) continue;
           if (device && e.device !== device) continue;
           pending.push({
             slug: e.slug,
@@ -17961,23 +18636,88 @@ const tdocHandlers = {
     }
 
     // ---- admin delete ----
+    // Delete moves the doc to Trash (see Trash, by loadDocRecord).
     // Authorized by authorizeOwnerMutation: the owner's session (browser,
     // /me or the doc-page Share panel) OR the upload token (CLI's
     // tdoc-delete) — see its doc comment for why the session path is safe.
+    // Nothing is erased here: the doc goes to Trash for TRASH_DAYS, and
+    // /api/trash/purge (or the scheduled purge) is the only hard delete.
     if (p === '/api/doc' && method === 'DELETE') {
       const slug = url.searchParams.get('slug');
       if (!slug) return json({ error: 'slug required' }, { status: 400 });
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const auth = await authorizeOwnerMutation(req, env, slug);
       if (!auth.ok) return auth.response;
-      const released = await deleteDocEverywhere(env, slug);
-      if (env.COMMENTS && released && released.ok === false) {
-        return json(
-          { error: released.error || 'owner_release_failed' },
-          { status: released.status || 503 },
-        );
+      const meta = auth.meta || await loadDocMeta(env, slug);
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      const trashed = await trashDoc(env, slug, meta, auth);
+      return json({ ok: true, trashed: true, slug, trashed_at: trashed.at, purge_at: trashed.purge_at, retention_days: TRASH_DAYS });
+    }
+
+    // ---- Trash: list, restore, delete forever ----
+    // GET /api/trash[?team=<id>] lists My docs' Trash or a team's; restore
+    // and purge take { slug } for a doc, { folder, team? } for a folder.
+    // Whoever could delete the thing may restore or purge it (see
+    // authorizeTrashedDoc / canManageTrashFolder).
+    if (p === '/api/trash' && method === 'GET') {
+      const scope = await folderScope(env, req, url, url.searchParams.get('team'));
+      if (!scope.ok) return scope.response;
+      const listed = (name) => String(url.searchParams.get(name) || '').split(',').filter(Boolean).slice(0, 20);
+      const items = await listTrash(env, scope.session, scope.team, Date.now(), {
+        slugs: listed('slugs').filter(isValidSlug),
+        folders: listed('folders'),
+      });
+      return json({ ok: true, retention_days: TRASH_DAYS, items }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    if ((p === '/api/trash/restore' || p === '/api/trash/purge') && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const purge = p === '/api/trash/purge';
+      if (body && typeof body.slug === 'string') {
+        const slug = body.slug;
+        if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+        // A cookie request must come from this origin; the Bearer cannot ride
+        // along cross-site.
+        if (await getSession(env, req) && !sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+        const auth = await authorizeTrashedDoc(req, env, slug);
+        if (!auth.ok) return auth.response;
+        if (purge) {
+          if (!auth.canPurge) {
+            return json({ error: 'not_doc_owner', message: 'Only a team admin can delete a team doc for good. You can restore it.' }, { status: 403 });
+          }
+          const released = await purgeTrashedDoc(env, slug);
+          if (env.COMMENTS && released && released.ok === false) {
+            return json({ error: released.error || 'owner_release_failed' }, { status: released.status || 503 });
+          }
+          return json({ ok: true, purged: [slug] });
+        }
+        const blocked = await trashRestoreBlocked(env, [auth.record], auth.actor);
+        if (blocked) return json(blocked.body, { status: blocked.status });
+        const restored = await restoreTrashedDoc(env, slug, auth.record);
+        return json({
+          ok: true, restored: [slug], slug, title: restored.title || slug,
+          url: `/d/${encodeURIComponent(slug)}`,
+          ...(restored.workspace_id ? { team: restored.workspace_id } : {}),
+        });
       }
-      return json({ ok: true });
+      if (body && typeof body.folder === 'string') {
+        const scope = await folderScope(env, req, url, body.team);
+        if (!scope.ok) return scope.response;
+        const where = trashFolderScope(scope.team, scope.session);
+        const entry = await loadTrashFolder(env, where, body.folder);
+        if (!entry) return json({ error: 'not_in_trash' }, { status: 404 });
+        if (!canManageTrashFolder(entry, scope.session, scope.team)) return json({ error: 'not_folder_owner' }, { status: 403 });
+        if (purge) {
+          // A batch per request, like the delete: call again while `remaining`.
+          const res = await purgeTrashFolder(env, where, entry, { session: scope.session, team: scope.team, limit: TRASH_FOLDER_PURGE_BATCH });
+          return json({ ok: true, purged: res.purged, remaining: !res.done });
+        }
+        const out = await restoreTrashFolder(env, scope.session, scope.team, where, entry);
+        if (!out.ok) return json(out.body, { status: out.status });
+        return json({ ok: true, restored: out.restored, folder: entry.id });
+      }
+      return json({ error: 'slug or folder required' }, { status: 400 });
     }
 
     // Browser navigations to unknown paths bounce to the landing page with a
@@ -17989,6 +18729,19 @@ const tdocHandlers = {
       });
     }
     return text('Not found', { status: 404 });
+  },
+
+  // Cron (wrangler.toml [triggers]): empties Trash of whatever has waited
+  // out its TRASH_DAYS. A deploy without the trigger still purges, lazily:
+  // every Trash list erases its own expired rows (listTrash).
+  async scheduled(event, env) {
+    const now = event && Number.isFinite(event.scheduledTime) ? event.scheduledTime : Date.now();
+    try {
+      const out = await purgeExpiredTrash(env, now);
+      if (out.docs.length || out.folders.length) console.log(`[trash] purged ${out.docs.length} doc(s), ${out.folders.length} folder(s)`);
+    } catch (error) {
+      console.error('[trash] purge failed:', error && error.message ? error.message : String(error));
+    }
   },
 
   async queue(batch, env) {

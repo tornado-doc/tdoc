@@ -1149,28 +1149,35 @@ a.ui-menu-item:visited {
   }
 }
 
-/* Setup stays over My docs, with a fixed footer like the other app dialogs. */
-.ui-dialog-popup.ui-setup-modal { width: min(960px, calc(100vw - 40px)); min-height: min(640px, calc(100dvh - 40px)); display: flex; flex-direction: column; padding: 30px 36px 0; }
-.ui-setup-modal .ui-dialog-body { flex: 1; padding: 18px 0 26px; }
-.ui-setup-modal .ui-dialog-title { font-size: 22px; }
-.ui-setup-modal .ui-dialog-description { padding-bottom: 18px; border-bottom: 1px solid var(--td-line, #e5e5e5); }
-.ui-setup-modal .ui-setup-eyebrow { font-size: 13px; color: var(--td-muted, #666); }
-.ui-setup-modal .ui-setup-label { margin: 20px 0 8px; font-weight: 600; font-size: 13px; }
-.ui-setup-command { display: flex; align-items: center; gap: 12px; }
-.ui-setup-command code { flex: 1; min-width: 0; background: #101010; color: #e6f5ce; padding: 14px; border-radius: 6px; overflow-wrap: anywhere; font: 13px/1.6 ui-monospace, monospace; }
-.ui-setup-command button { flex: none; }
-.ui-setup-modal .ui-setup-steps { padding-left: 20px; margin: 16px 0; font-size: 13px; line-height: 1.9; color: var(--td-muted, #666); }
-.ui-setup-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; margin: 18px 0; color: var(--td-muted, #666); }
+/* The onboarding follows the reference's centered 960 × 720 dialog and fixed footer. */
+.ui-dialog-popup.ui-setup-modal { width: min(960px, calc(100vw - 40px)); height: min(720px, calc(100dvh - 40px)); display: flex; flex-direction: column; padding: 26px 36px 0; border-radius: 0; overflow: hidden; }
+.ui-setup-modal .ui-dialog-eyebrow { margin: 0 0 10px; font: 600 10px/1.4 ui-monospace, monospace; letter-spacing: .05em; color: var(--td-muted, #777); }
+.ui-setup-modal .ui-dialog-title { margin: 0 0 8px; font-size: 20px; line-height: 1.3; }
+.ui-setup-modal .ui-dialog-description { margin: 0 -36px; padding: 0 36px 20px; border-bottom: 1px solid var(--td-line, #e5e5e5); font-size: 12px; line-height: 1.5; }
+.ui-setup-modal .ui-dialog-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 0 24px; }
+.ui-setup-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ui-setup-modal .ui-setup-label { margin: 0; font: 600 12px/1.5 ui-monospace, monospace; letter-spacing: .08em; color: var(--td-muted, #777); }
+.ui-setup-label span { margin-right: 8px; color: var(--td-fg, #111); }
+.ui-setup-modal .ui-setup-intro { margin: 10px 0 8px; font-size: 12px; color: var(--td-muted, #777); }
+.ui-setup-modal .ui-setup-command-label { margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--td-muted, #777); }
+.ui-setup-command { display: flex; align-items: center; gap: 8px; }
+.ui-setup-command code { flex: 1; min-width: 0; background: #101010; color: #c4e88b; padding: 10px 12px; border-radius: 0; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+.ui-setup-command button { flex: none; width: 34px; min-height: 32px; padding: 0; font-size: 20px; border-radius: 0; }
+.ui-setup-modal .ui-setup-steps { padding: 0; margin: 12px 0; list-style: none; counter-reset: setup-step; font-size: 12px; line-height: 1.6; color: var(--td-muted, #777); }
+.ui-setup-steps li { display: flex; align-items: baseline; gap: 8px; margin: 6px 0; counter-increment: setup-step; }
+.ui-setup-steps li::before { content: counter(setup-step); flex: none; width: 14px; text-align: center; border: 1px solid #bbb; font: 10px/14px ui-monospace, monospace; }
+.ui-setup-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 12px/1.6 ui-monospace, monospace; margin: 14px 0; color: var(--td-muted, #777); }
 .ui-setup-modal .ui-setup-connected { color: #137044; }
 .ui-setup-modal .ui-setup-error { color: #a32929; }
-.ui-setup-details { font-size: 13px; margin-top: 20px; color: var(--td-muted, #666); }
+.ui-setup-details { font-size: 12px; margin-top: 16px; color: var(--td-muted, #777); }
 .ui-setup-details summary { cursor: pointer; width: fit-content; }
 .ui-setup-details p { margin-top: 12px; }
-.ui-setup-modal .actions { position: sticky; bottom: 0; background: var(--td-bg, #fff); padding: 16px 0; border-top: 1px solid var(--td-line, #e5e5e5); margin-top: 0; }
+.ui-setup-modal .actions { flex: none; background: var(--td-bg, #fff); padding: 12px 36px; border-top: 1px solid var(--td-line, #e5e5e5); margin: 0 -36px; }
 .ui-setup-modal .ui-setup-later { margin-right: auto; }
 .ui-setup-modal button:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-width: 600px) {
-  .ui-dialog-popup.ui-setup-modal { width: calc(100vw - 32px); padding: 24px 20px 0; min-height: min(640px, calc(100dvh - 40px)); }
-  .ui-setup-command { align-items: stretch; flex-direction: column; gap: 8px; }
-  .ui-setup-command button { align-self: flex-end; }
+  .ui-dialog-popup.ui-setup-modal { width: calc(100vw - 32px); padding: 24px 20px 0; }
+  .ui-setup-modal .ui-dialog-description { margin: 0 -20px; padding: 0 20px 20px; }
+  .ui-setup-modal .actions { padding: 12px 20px; margin: 0 -20px; }
+  .ui-setup-toolbar { align-items: flex-start; flex-direction: column; }
 }

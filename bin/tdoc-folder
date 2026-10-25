@@ -12,7 +12,7 @@
 #   tdoc-folder add <slug>... --folder <folder> [--team <t>] [--create] [--parent <folder>]
 #   tdoc-folder remove <slug>... [--team <t>]                    # back to the top level
 #   tdoc-folder rename <folder> <new name> [--team <t>]
-#   tdoc-folder delete <folder> [--team <t>]                     # docs move up a level
+#   tdoc-folder delete <folder> [--team <t>]                     # folder + its docs go to Trash (30 days)
 #   tdoc-folder share <folder> [--visibility unlisted|private|public] [--team <t>]  # prints the link
 #   tdoc-folder unshare <folder> [--team <t>]                    # the link stops working
 #   tdoc-folder move-to-team <folder> --team <t>   # a My docs folder, subfolders and docs, into a team
@@ -297,9 +297,17 @@ case "$CMD" in
   delete|rm)
     [ "${#ARGS[@]}" -eq 1 ] || usage
     FID="$(require_folder "${ARGS[0]}")" || exit 1
-    api DELETE "/api/folders?id=$FID${TEAM_ID:+&team=$TEAM_ID}" >/dev/null || exit 1
+    # The folder goes to Trash with its docs a batch per request; keep asking
+    # until nothing remains, then print what the server says happened.
+    AFTER=""
+    while :; do
+      RESP="$(api DELETE "/api/folders?batch=1&id=$FID${TEAM_ID:+&team=$TEAM_ID}${AFTER:+&after=$AFTER}")" || exit 1
+      [ "$(printf '%s' "$RESP" | json_get remaining)" = "true" ] || break
+      AFTER="$(printf '%s' "$RESP" | json_get after)"
+      printf '%s\n' "[tdoc] $(printf '%s' "$RESP" | json_get message)" >&2
+    done
     recent forget "$FID"
-    echo "[tdoc] deleted folder ${ARGS[0]}; its docs moved up a level."
+    echo "[tdoc] $(printf '%s' "$RESP" | json_get message)"
     ;;
   share)
     [ "${#ARGS[@]}" -eq 1 ] || usage

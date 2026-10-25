@@ -10,6 +10,7 @@ export function AppDialog({
   open,
   onOpenChange,
   title,
+  eyebrow,
   description,
   children,
   actions,
@@ -29,6 +30,7 @@ export function AppDialog({
         {side ? null : <Dialog.Backdrop className="ui-dialog-backdrop" />}
         <Dialog.Viewport className={`ui-dialog-viewport${side ? ' ui-dialog-side' : ''}`}>
           <Dialog.Popup className={`ui-dialog-popup tdoc-modal${side ? ' ui-dialog-side-popup' : ''}${className ? ` ${className}` : ''}`}>
+            {eyebrow ? <p className="ui-dialog-eyebrow">{eyebrow}</p> : null}
             <Dialog.Title className={`ui-dialog-title${hideTitle ? ' ui-sr-only' : ''}`} render={<h3 />}>{title}</Dialog.Title>
             {description ? (
               <Dialog.Description className="muted ui-dialog-description">

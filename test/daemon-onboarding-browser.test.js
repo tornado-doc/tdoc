@@ -49,6 +49,22 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await page.getByRole('radio',{name:'Windows (WSL)'}).click();
    await page.getByText('your WSL terminal',{exact:false}).waitFor();
    assert.equal(await page.getByRole('dialog').count(),1,'setup uses the shared app dialog');
+   const modalBounds=await page.getByRole('dialog').boundingBox();
+   assert.ok(Math.abs(modalBounds.width-(width===1280?960:350))<=1,'reference modal width, constrained on phones');
+   assert.ok(Math.abs(modalBounds.height-720)<=1,'reference modal height');
+   assert.ok(Math.abs(modalBounds.x+(modalBounds.width/2)-(width/2))<=1,'modal centered horizontally');
+   assert.ok(Math.abs(modalBounds.y+(modalBounds.height/2)-425)<=1,'modal centered vertically');
+   await page.getByRole('button',{name:'Copy install command',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Copy setup command',exact:true}).waitFor();
+   assert.match(await page.locator('.ui-setup-command').nth(0).textContent(),/bash -s -- --install-only/);
+   assert.match(await page.locator('.ui-setup-command').nth(1).textContent(),/~\/.local\/bin\/tdoc setup/);
+   await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:()=>Promise.reject(new Error('denied'))}}));
+   for (const [index,name] of [[0,'Copy install command'],[1,'Copy setup command']]) {
+    await page.getByRole('button',{name,exact:true}).click();
+    await page.getByText('Copy the selected line.',{exact:true}).waitFor();
+    const selected=await page.evaluate(()=>window.getSelection().toString());
+    assert.equal(selected,await page.locator('.ui-setup-command code').nth(index).textContent(),'clipboard refusal selects the clicked command');
+   }
    assert.equal(await page.locator('.sg-pane-art').count(),0,'no split-screen animation');
    const nextBounds=await page.getByRole('button',{name:'Next',exact:true}).boundingBox();
    assert.ok(nextBounds && nextBounds.y+nextBounds.height<=850,'Next stays within the viewport');

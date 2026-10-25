@@ -127,6 +127,12 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     const retry = spawnSync(launcher, ['setup'], { encoding: 'utf8' });
     assert.equal(retry.status, 1); assert.match(retry.stderr, /AI is signed out/);
     assert.ok(fs.lstatSync(path.join(userHome, '.agents/skills/tdoc')).isSymbolicLink());
+    const installed = spawnSync('bash', [path.resolve(__dirname, '../bin/tdoc-install'), '--install-only'], { env: { ...process.env, HOME: userHome, TDOC_INSTALL_HOME: path.join(userHome, '.tdoc'), TDOC_TEST_ARCHIVE: archive, PATH: fakeBin + path.delimiter + process.env.PATH }, encoding: 'utf8' });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(installed.stdout, /Installed.*Connect this computer/s);
+    assert.doesNotMatch(installed.stderr, /AI is signed out/, 'install-only must not run setup or start a service');
+    const connect = spawnSync(launcher, ['setup'], { encoding: 'utf8' });
+    assert.equal(connect.status, 1); assert.match(connect.stderr, /AI is signed out/);
     fs.rmSync(sandbox, { recursive: true });
   });
   console.log(`${passed} passed`);

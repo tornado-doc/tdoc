@@ -52,6 +52,8 @@ const OFFLINE = [
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
   'doc-index.test.js',          // per-owner/team doc index, invite index, one-pass frame bake + per-version cache (1102)
+  'trash.test.js',              // Delete moves to Trash: gone on every path, restore, 30-day purge, folders, permissions
+  'trash-hardening.test.js',    // #815 review: resumable purge, restore quota, batched folder delete, bounded reads, write race, old CLIs, --forever
   'mention-directory.test.js',  // @ offers doc people, teammates, recent contacts first
   'publish-attribution.test.js', // author name + per-version publisher come from the credential
   'operator-fallback.test.js',  // TDOC_OWNER owns only ownerless docs, not email accounts' docs
@@ -160,6 +162,7 @@ const BROWSER = [
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments
   'profile-picks-ui.test.js', // /@handle owner removes picks: card control + Undo, every pin in the picker, errors shown
+  'trash-ui.test.js',          // Delete → Trash with Undo, link gone, Trash tab Restore / Delete forever, folders, desktop + phone
   'agent-view-ui.test.js', // doc text for agents: no visible space without JS, removed once the app starts
   'layout-preflight.test.js', // development-only Raft geometry audit
   'table-layout.test.js', // provider table protection

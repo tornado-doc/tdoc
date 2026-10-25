@@ -80,7 +80,7 @@ t('works with: Claude Code and Codex only', () => {
 });
 
 t('a refused clipboard says so instead of doing nothing', () => {
-  assert(gate.includes('selectContents(promptRef.current)') && gate.includes('COPY_FALLBACK'),
+  assert(gate.includes('selectContents(ref.current)') && gate.includes('COPY_FALLBACK'),
     'the line is left selected and the status says why');
 });
 
@@ -576,7 +576,7 @@ t('replay is new again, not just a blank record', () => {
   assert(worker.includes('meta.hosted.account_id === accountId'), 'and only one this account owns');
   // The product already knows how to delete a doc. A second, thinner version
   // is how one of them ends up leaving the DO populated.
-  assert(worker.includes('async function deleteDocEverywhere(env, slug) {')
+  assert(worker.includes('async function deleteDocEverywhere(env, slug')
     && (worker.match(/deleteDocEverywhere\(env, /g) || []).length >= 2,
     'both callers delete a doc the same way');
   // The dismissals live in the browser. Every key here is somebody saying
@@ -700,7 +700,7 @@ t('setup asks for the terminal installer and uses server-confirmed local agents'
 t('connection errors remain actionable, and clipboard refusal preserves manual copy', () => {
   assert(gate.includes('Check Terminal for a sign-in or installation error.'), 'points at the real install surface');
   assert(gate.includes('~/.local/bin/tdoc status'), 'diagnostics run outside agent chat');
-  assert(gate.includes('selectContents(promptRef.current)'), 'manual copy fallback');
+  assert(gate.includes('selectContents(ref.current)'), 'manual copy fallback');
 });
 t('the real connection remains visible when a computer stops responding', () => {
   assert(gate.includes('timer = window.setTimeout(tick, POLL_MS)'), 'does not stop polling on historical success');

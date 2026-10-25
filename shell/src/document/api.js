@@ -216,6 +216,40 @@ export function deleteDocument(slug) {
   return request(`/api/doc?${query}`, { method: 'DELETE' });
 }
 
+// Trash. Delete moves a doc (or a folder with its docs) here for 30 days;
+// `target` is { slug } for a doc, { folder, team? } for a folder.
+// `recent`: { slugs, folders } this browser just deleted, which a Trash list
+// a moment behind its write would otherwise miss.
+export function listTrash(team, recent = {}) {
+  const params = new URLSearchParams();
+  if (team) params.set('team', team);
+  if (recent.slugs?.length) params.set('slugs', recent.slugs.join(','));
+  if (recent.folders?.length) params.set('folders', recent.folders.join(','));
+  const query = params.toString();
+  return request(`/api/trash${query ? `?${query}` : ''}`);
+}
+
+export function restoreFromTrash(target) {
+  return request('/api/trash/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(target),
+  });
+}
+
+// A folder is erased a batch per request, like its delete.
+export async function deleteForever(target) {
+  for (let round = 0; round < 200; round += 1) {
+    const body = await request('/api/trash/purge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(target),
+    });
+    if (!body || !body.remaining) return body;
+  }
+  throw new Error('Still deleting. Try again.');
+}
+
 export function listNotifications(offset = 0) {
   const query = new URLSearchParams({ offset: String(offset) });
   return request(`/api/notifications?${query}`);
@@ -387,9 +421,19 @@ export function updateFolderAccess(id, { visibility, allowed_users, share } = {}
   });
 }
 
-export function deleteFolder(id, team) {
-  const query = new URLSearchParams(team ? { id, team } : { id });
-  return request(`/api/folders?${query}`, { method: 'DELETE' });
+// A folder goes to Trash with its docs a batch per request; this keeps
+// asking until the server says nothing remains, and returns every doc taken.
+export async function deleteFolder(id, team) {
+  const docs = [];
+  let after = '';
+  for (let round = 0; round < 200; round += 1) {
+    const query = new URLSearchParams({ id, batch: '1', ...(team ? { team } : {}), ...(after ? { after } : {}) });
+    const body = await request(`/api/folders?${query}`, { method: 'DELETE' });
+    docs.push(...((body && body.docs) || []));
+    if (!body || !body.remaining) return { ...body, docs };
+    after = body.after || '';
+  }
+  throw new Error('The folder is still being moved to Trash. Try again.');
 }
 
 function teamRequest(path, method, body) {

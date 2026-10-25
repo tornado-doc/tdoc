@@ -457,6 +457,18 @@
 .move-list button { display: flex; align-items: center; gap: 8px; }
 .tdoc-toast { position: fixed; top: 62px; right: 18px; z-index: 1000001; display: flex; align-items: center; gap: 8px; background: var(--td-accent); color: #fff; padding: 12px 16px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
 .tdoc-toast.error { background: var(--td-danger); }
+.tdoc-toast-action { margin-left: 6px; border: 1px solid rgba(255,255,255,.65); border-radius: 6px; background: transparent; color: #fff; font-weight: 650; padding: 3px 10px; }
+.tdoc-toast-action:hover { background: rgba(255,255,255,.16); }
+/* Trash: the catalog's own rows, with the days left and a Restore in reach;
+   Delete forever stays behind the quiet ⋯ like every other delete. */
+.trash-hint { margin: 0 0 12px; font-size: 13px; }
+.trash-row .doc-title { font-weight: 600; color: var(--td-ink); }
+.trash-days { flex-shrink: 0; color: var(--td-muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trash-days.is-soon { color: var(--td-danger); }
+.trash-actions { display: flex; align-items: center; gap: 4px; margin-left: 0; }
+.trash-restore { font-size: 13px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--td-accent); background: #fff; color: var(--td-accent); }
+.trash-restore:hover { background: var(--td-accent); color: #fff; }
+.trash-restore:disabled { opacity: .5; cursor: default; }
 .tdoc-avatar-fallback { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--td-accent); color: #fff; font-weight: 700; }
 
 @media (max-width: 700px) {
@@ -471,6 +483,7 @@
   .star-btn,
   .batch-move,
   .batch-delete,
+  .trash-restore,
   .crumb-root,
   .move-list button {
     min-height: 44px;
@@ -490,6 +503,10 @@
   .tab { padding-left: 8px; padding-right: 8px; font-size: 13px; }
 
   .doc-preview-image { width: 52px; height: 40px; flex-basis: 52px; }
+  .trash-row { flex-wrap: wrap; row-gap: 6px; }
+  .trash-row .doc-info { flex-basis: calc(100% - 40px); }
+  .trash-days { order: 3; }
+  .trash-actions { order: 4; margin-left: auto; }
   .catalog-layout button { width: 40px; height: 40px; }
   .doc-list.is-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
   .doc-list.is-grid .doc-row { padding: 8px; }
