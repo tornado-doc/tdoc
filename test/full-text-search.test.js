@@ -40,6 +40,12 @@ const SAME = { Origin: 'https://tdoc.dev' };
     while (waits.length) await Promise.all(waits.splice(0));
     await env.COMMENTS.runAlarms();
   };
+  const searchStoreIds = () => [...env.COMMENTS.states.keys()].filter((id) => String(id).startsWith('__tdoc-search__:'));
+  const dropFromIndex = async (slug) => {
+    for (const id of searchStoreIds()) {
+      await env.COMMENTS.get(id).fetch('https://do/search', { method: 'POST', body: JSON.stringify({ slug: id, op: { kind: 'remove', slug } }) });
+    }
+  };
   const publish = (who, slug, html, { version = 1, title = `Title ${slug}`, access = { visibility: 'private' } } = {}) => call('/api/upload', {
     method: 'POST', token: who.token,
     body: { slug, version, html, meta: { title, access } },
@@ -165,8 +171,10 @@ const SAME = { Origin: 'https://tdoc.dev' };
     await call('/api/doc?slug=search-notes', { method: 'DELETE', cookie: alice.cookie, headers: SAME });
     const purged = await call('/api/trash/purge', { method: 'POST', cookie: alice.cookie, headers: SAME, body: { slug: 'search-notes' } });
     assert(purged.status === 200, `purge ${purged.status} ${purged.text}`);
-    const sql = env.COMMENTS.stateFor('__tdoc-search__').storage.sql;
-    assert(!sql.exec("SELECT 1 FROM search_docs WHERE slug = 'search-notes'").toArray().length, 'purged doc still indexed');
+    for (const id of searchStoreIds()) {
+      const sql = env.COMMENTS.stateFor(id).storage.sql;
+      assert(!sql.exec("SELECT 1 FROM search_docs WHERE slug = 'search-notes'").toArray().length, `purged doc still indexed in ${id}`);
+    }
   });
 
   await t('team docs: members find them in the team space, outsiders never', async () => {
@@ -207,13 +215,13 @@ const SAME = { Origin: 'https://tdoc.dev' };
     // before this shipped looks like to the store.
     assert((await publish(alice, 'legacy-doc', '<p>An old okapi census.</p>', { title: 'Legacy doc' })).status === 200, 'publish legacy');
     await settle();
-    await env.COMMENTS.get('__tdoc-search__').fetch('https://do/search', { method: 'POST', body: JSON.stringify({ op: { kind: 'remove', slug: 'legacy-doc' } }) });
+    await dropFromIndex('legacy-doc');
     const hub = await call('/api/me', { cookie: alice.cookie });
     assert(hub.status === 200, 'hub');
     assert(!slugs(await search(alice, 'okapi')).length, 'removed from the index');
     await settle();
     assert(slugs(await search(alice, 'okapi')).join() === 'legacy-doc', 'the hub listing queued it');
-    await env.COMMENTS.get('__tdoc-search__').fetch('https://do/search', { method: 'POST', body: JSON.stringify({ op: { kind: 'remove', slug: 'legacy-doc' } }) });
+    await dropFromIndex('legacy-doc');
     const before = await search(alice, 'okapi');
     assert(!slugs(before).length, 'not indexed yet');
     assert(before.body.indexing >= 1, `search reports indexing ${before.text}`);
@@ -232,6 +240,160 @@ const SAME = { Origin: 'https://tdoc.dev' };
     const stats = await call('/api/admin/search/reindex', { method: 'POST', token: 'admin-secret-token', body: {} });
     assert(stats.body.pending === 0, `queue drained ${stats.text}`);
     assert(slugs(await search(alice, '收入增长')).join() === 'zh-report', 'still searchable after a full reindex');
+  });
+
+  // ---- security review of #835 ----
+  const searchStates = () => searchStoreIds().map((id) => [id, env.COMMENTS.stateFor(id)]);
+  const indexedIn = (slug) => searchStates().filter(([, state]) => {
+    const sql = state.storage.sql;
+    try { return sql.exec('SELECT 1 FROM search_docs WHERE slug = ?', slug).toArray().length > 0; } catch { return false; }
+  }).map(([id]) => id);
+  const pendingTotal = () => searchStates().reduce((n, [, state]) => {
+    try { return n + Number(state.storage.sql.exec('SELECT count(*) AS n FROM search_pending').toArray()[0].n); } catch { return n; }
+  }, 0);
+
+  await t('H1: a crafted doc cannot stall the store (linear stripping, capped input)', async () => {
+    const crafted = [
+      ['crafted-script', '<p>craftedscript marker</p>' + '<script'.repeat(80000)],
+      ['crafted-noscript', '<p>craftednoscript marker</p>' + '<noscript'.repeat(40000)],
+      ['crafted-comment', '<p>craftedcomment marker</p>' + '<!--'.repeat(140000)],
+      ['crafted-head', '<p>craftedhead marker</p>' + '<head <style <template '.repeat(24000)],
+    ];
+    // Published small, then the stored bytes replaced: the crafted markup
+    // goes straight to the indexer (the publish path is not what is tested).
+    for (const [slug, html] of crafted) {
+      const r = await publish(alice, slug, '<p>placeholder</p>');
+      assert(r.status === 200, `publish ${slug} ${r.status} ${r.text.slice(0, 200)}`);
+    }
+    await settle();
+    for (const [slug, html] of crafted) {
+      await env.DOCS.put(`docs/${slug}/v1/index.html`, html);
+      await dropFromIndex(slug);
+    }
+    await search(alice, 'queue them');
+    const started = Date.now();
+    await settle();
+    const ms = Date.now() - started;
+    assert(ms < 3000, `indexing crafted docs took ${ms}ms`);
+    for (const [slug] of crafted) {
+      const word = `crafted${slug.split('-')[1]}`;
+      assert(slugs(await search(alice, word)).join() === slug, `${slug} text before the crafted tail is searchable`);
+    }
+  });
+
+  await t('H1: the attempt is recorded before the doc is read', async () => {
+    const get = env.DOCS.get.bind(env.DOCS);
+    let seen = null;
+    env.DOCS.get = async (key, opts) => {
+      if (key.startsWith('docs/attempt-doc/')) {
+        for (const [, state] of searchStates()) {
+          const row = state.storage.sql.exec("SELECT tries, at FROM search_pending WHERE slug = 'attempt-doc'").toArray()[0];
+          if (row) seen = row;
+        }
+      }
+      return get(key, opts);
+    };
+    try {
+      assert((await publish(alice, 'attempt-doc', '<p>attempt words</p>')).status === 200, 'publish');
+      await settle();
+    } finally { env.DOCS.get = get; }
+    assert(seen && Number(seen.tries) === 1, `pending row while reading: ${JSON.stringify(seen)}`);
+    assert(slugs(await search(alice, 'attempt words')).join() === 'attempt-doc', 'indexed');
+  });
+
+  await t('H1: one alarm run is bounded by bytes, not only doc count', async () => {
+    const big = (i) => `<p>bulkdoc${i} ` + 'lorem ipsum dolor sit amet '.repeat(26000) + '</p>';
+    for (let i = 0; i < 5; i++) assert((await publish(alice, `bulk-${i}`, big(i))).status === 200, `publish bulk-${i}`);
+    while (waits.length) await Promise.all(waits.splice(0));
+    await env.COMMENTS.runAlarms(1);
+    const done = [0, 1, 2, 3, 4].filter((i) => indexedIn(`bulk-${i}`).length).length;
+    assert(done >= 1 && done < 5, `one run indexed ${done} of 5 ~700KB docs`);
+    await settle();
+    assert([0, 1, 2, 3, 4].every((i) => indexedIn(`bulk-${i}`).length), 'all indexed eventually');
+  });
+
+  await t('L1: giving up on a doc clears its stale text and does not loop', async () => {
+    assert((await publish(alice, 'flaky', '<p>oldflaky words</p>')).status === 200, 'v1');
+    await settle();
+    assert(slugs(await search(alice, 'oldflaky')).join() === 'flaky', 'v1 indexed');
+    const get = env.DOCS.get.bind(env.DOCS);
+    let reads = 0;
+    env.DOCS.get = async (key, opts) => {
+      if (key.startsWith('docs/flaky/v2/')) { reads++; throw new Error('R2 down'); }
+      return get(key, opts);
+    };
+    try {
+      assert((await publish(alice, 'flaky', '<p>newflaky words</p>', { version: 2, title: 'Title flaky' })).status === 200, 'v2');
+      await settle();
+      assert(!slugs(await search(alice, 'oldflaky')).length, 'stale v1 text still searchable after giving up');
+      const before = reads;
+      await call('/api/me', { cookie: alice.cookie });
+      await search(alice, 'anything here');
+      await settle();
+      assert(reads === before, `a given-up version was retried (${reads - before} reads)`);
+    } finally { env.DOCS.get = get; }
+    assert((await publish(alice, 'flaky', '<p>thirdflaky words</p>', { version: 3, title: 'Title flaky' })).status === 200, 'v3');
+    await settle();
+    assert(slugs(await search(alice, 'thirdflaky')).join() === 'flaky', 'a new version is tried again');
+  });
+
+  await t('M1: search never returns a commenter-mentioned email address', async () => {
+    assert((await publish(bob, 'bob-public', '<p>Public notes on the heron survey.</p>', { title: 'Heron survey', access: { visibility: 'public', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] } })).status === 200, 'publish');
+    const c = await call('/api/comments', { method: 'POST', cookie: carol.cookie, body: { slug: 'bob-public', version: 1, text: 'Ask @dana.secret@example.com or mail dana.secret@example.com about herons', anchor: null } });
+    assert(c.status === 200, `comment ${c.status} ${c.text}`);
+    assert((await call('/api/star', { method: 'POST', cookie: alice.cookie, body: { slug: 'bob-public', starred: true } })).status === 200, 'star');
+    await settle();
+    for (const q of ['example.com', 'dana.secret', 'herons', 'secret@']) {
+      const r = await search(alice, q, 'all');
+      assert(!JSON.stringify(r.body.results).includes('@example.com'), `${q}: an address came back ${JSON.stringify(r.body.results)}`);
+    }
+    assert(slugs(await search(alice, 'herons', 'all')).join() === 'bob-public', 'the comment is still searchable');
+  });
+
+  await t('M2: wiping all comments takes their text out of search', async () => {
+    const c = await call('/api/comments', { method: 'POST', cookie: alice.cookie, body: { slug: 'zh-report', version: 1, text: 'wipeme narwhal note', anchor: null } });
+    assert(c.status === 200, `comment ${c.status}`);
+    await settle();
+    assert(slugs(await search(alice, 'narwhal')).join() === 'zh-report', 'comment indexed');
+    const wiped = await call('/api/comments?slug=zh-report&all=1', { method: 'DELETE', token: alice.token });
+    assert(wiped.status === 200, `wipe ${wiped.status} ${wiped.text}`);
+    await settle();
+    assert(!slugs(await search(alice, 'narwhal')).length, 'wiped comment still searchable');
+  });
+
+  await t('M3: a slow search store never holds up a save or a comment', async () => {
+    const realGet = env.COMMENTS.get.bind(env.COMMENTS);
+    env.COMMENTS.get = (id) => {
+      const stub = realGet(id);
+      if (!String(id).startsWith('__tdoc-search__')) return stub;
+      return { fetch: async (...args) => { await new Promise((r) => setTimeout(r, 3000)); return stub.fetch(...args); } };
+    };
+    try {
+      let started = Date.now();
+      assert((await publish(alice, 'slow-store', '<p>slow store words</p>')).status === 200, 'publish');
+      const publishMs = Date.now() - started;
+      started = Date.now();
+      const c = await call('/api/comments', { method: 'POST', cookie: alice.cookie, body: { slug: 'slow-store', version: 1, text: 'quick', anchor: null } });
+      const commentMs = Date.now() - started;
+      assert(c.status === 200, 'comment');
+      assert(publishMs < 1500 && commentMs < 1500, `publish ${publishMs}ms, comment ${commentMs}ms`);
+    } finally { env.COMMENTS.get = realGet; }
+    await new Promise((r) => setTimeout(r, 3100));
+    await settle();
+  });
+
+  await t('M4: one store per owner scope; a move to a team moves the index entry', async () => {
+    const aliceStores = indexedIn('zh-report');
+    assert(aliceStores.length === 1 && aliceStores[0] !== '__tdoc-search__' && /^__tdoc-search__:p:/.test(aliceStores[0]), `zh-report in ${aliceStores}`);
+    const team = indexedIn('acme-plan');
+    assert(team.length === 1 && /^__tdoc-search__:w:/.test(team[0]), `acme-plan in ${team}`);
+    assert(indexedIn('bob-secret').every((id) => !aliceStores.includes(id)), 'bob shares a store with alice');
+  });
+
+  await t('L2: only a reserved search store answers search ops', async () => {
+    const r = await env.COMMENTS.get('roadmap').fetch('https://do/search', { method: 'POST', body: JSON.stringify({ slug: 'roadmap', op: { kind: 'stats' } }) });
+    const body = await r.json();
+    assert(!body.ok, `a doc's store answered: ${JSON.stringify(body)}`);
   });
 
   await t('rate limit: 60 searches a minute per person, then 429', async () => {
