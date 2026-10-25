@@ -186,11 +186,13 @@ ${uiCss}
         try { if (!node.matches(':modal')) return false; } catch (_) { return false; }
       }
       // Radix Dialog marks its content role=dialog/data-state=open, but does
-      // not set aria-modal. An Overlay normally locks scrolling, but Dialogs
-      // without one do not. Radix Popover has the same role/state and its
-      // popper wrapper distinguishes it from Dialog content.
+      // not set aria-modal. Without an Overlay it skips the scroll lock, yet
+      // its modal DismissableLayer still disables body pointer events. A
+      // nonmodal banner must not be mistaken for it; Radix Popover also has
+      // the same role/state and is identified by its popper wrapper.
       if (node.matches('[role="dialog"][data-state="open"]') && node.getAttribute('aria-modal') !== 'true'
-        && node.closest('[data-radix-popper-content-wrapper]')) return false;
+        && (node.closest('[data-radix-popper-content-wrapper]')
+          || (!document.body.hasAttribute('data-scroll-locked') && document.body.style.pointerEvents !== 'none'))) return false;
       if (!node.getClientRects().length || getComputedStyle(node).pointerEvents === 'none') return false;
       // Headless UI starts an entering DialogPanel at opacity 0. The panel is
       // still the library's outside-press boundary during its fade-in, so keep

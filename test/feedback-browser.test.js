@@ -723,6 +723,18 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await dock.waitFor({ timeout: 5000 });
         assert(await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement), 'closed MUI keepMounted dialog captured feedback');
 
+        await libs.evaluate(() => {
+          const banner = document.createElement('div');
+          banner.id = 'cookie-banner'; banner.setAttribute('role', 'dialog'); banner.setAttribute('data-state', 'open');
+          banner.setAttribute('aria-labelledby', 'cookie-title'); banner.setAttribute('aria-describedby', 'cookie-description');
+          banner.innerHTML = '<h2 id="cookie-title">Cookie choices</h2><p id="cookie-description">Choose whether to allow cookies.</p>';
+          document.body.appendChild(banner);
+        });
+        await libs.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        assert(await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement),
+          'a nonmodal cookie banner captured feedback');
+        await libs.evaluate(() => document.getElementById('cookie-banner').remove());
+
         await libs.locator('#popover-open').click();
         await libs.locator('#radix-popover').waitFor();
         assert(await libs.evaluate(() => document.getElementById('tdoc-feedback-root').parentElement === document.documentElement), 'non-modal Radix Popover captured feedback');
@@ -760,6 +772,8 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await libs.locator('#radix-no-overlay-target').waitFor();
         assert(await libs.evaluate(() => !document.body.hasAttribute('data-scroll-locked')),
           'Radix no-Overlay fixture unexpectedly locked body scrolling');
+        assert(await libs.evaluate(() => document.body.style.pointerEvents === 'none'),
+          'Radix no-Overlay fixture did not exercise modal pointer isolation');
         await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'radix-no-overlay-content');
         if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
         await libs.locator('#radix-no-overlay-target').click();
