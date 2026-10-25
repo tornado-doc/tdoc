@@ -772,9 +772,7 @@ export function DocumentShell({ boot, config }) {
         : `Sent to ${agentDisplayName(target) || readableHandle(target) || 'agent'}`, failed);
       await comments.refresh();
     } catch (err) {
-      showToast(err.body?.error === 'written_by_other'
-        ? 'Someone else\'s agent wrote this doc: your comment notifies them.'
-        : (err.message || 'Comment posted — could not send to agent'), true);
+      showToast(err.body?.message || err.message || 'Comment posted — could not send to agent', true);
     } finally {
       setSendToAgentBusy(false);
     }

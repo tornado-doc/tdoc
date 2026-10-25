@@ -168,7 +168,9 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const outsiderTargets = await call('/api/notify/targets?slug=plan', { cookie: dave });
     assert(outsiderTargets.status === 403 || outsiderTargets.status === 401, `outsider targets ${outsiderTargets.status}`);
     const memberSend = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: ['c1'], recipient: local('bob-mac') } });
-    assert(memberSend.status === 403 && memberSend.body.error === 'team_agent_admin_only', `member handoff ${memberSend.status} ${JSON.stringify(memberSend.body)}`);
+    // Refused either way: a member's own agent is not the team's, and the doc's
+    // latest version is not the team agent's (agentEditPolicy).
+    assert(memberSend.status === 403 && ['team_agent_admin_only', 'team_agent_not_writer'].includes(memberSend.body.error), `member handoff ${memberSend.status} ${JSON.stringify(memberSend.body)}`);
     const raftSend = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: ['c1'], recipient: raft } });
     assert(raftSend.status === 200 && raftSend.body.handoff_id, `raft handoff ${raftSend.status} ${JSON.stringify(raftSend.body)}`);
     const raftRecord = (JSON.parse(await env.META.get('handoffs:plan')) || []).find((h) => h.handoff_id === raftSend.body.handoff_id);

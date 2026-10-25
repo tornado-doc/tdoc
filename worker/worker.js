@@ -10817,6 +10817,11 @@ function applyCommentOp(list, op) {
       // pre-built events array to append to a specific comment (agent/reply path)
       const target = list.find(c => c.id === op.id);
       if (!target) return { status: 404, body: { error: 'not_found' } };
+      // Once only (Make public): serialized here, in the doc's store, so two
+      // concurrent requests cannot both post.
+      if (op.unique_key && list.some((c) => c && (c.events || []).some((e) => e && e.publish_key === op.unique_key))) {
+        return { status: 409, body: { error: 'already_public' } };
+      }
       for (const ev of op.events) appendEvent(target, ev);
       return { status: 200, body: op.responseBody || { ok: true } };
     }
@@ -11497,7 +11502,6 @@ function withoutLocalTargets(resolved) {
 }
 const LOCAL_OWNER_ONLY = { error: 'local_agent_owner_only', message: 'Only the owner, signed in or with their own upload token, can send comments to an agent on their computer.' };
 const TEAM_ADMIN_AGENT_ONLY = { error: 'team_agent_admin_only', message: 'Only a member of this team can send its documents to an agent.' };
-const WRITTEN_BY_OTHER = { error: 'written_by_other', message: 'Someone else\'s agent wrote this version. Your comment notifies them; they decide what their agent changes.' };
 const NO_TEAM_AGENT = { error: 'no_team_agent', message: 'This team has no agent yet. A team admin adds one in the team\'s settings, under Agents.' };
 function teamHandoffAllowed(actor, writeGate, handoff) {
   if (!(writeGate && writeGate.meta && writeGate.meta.workspace_id)) return true;
@@ -12091,6 +12095,26 @@ function docLastWriter(meta) {
   return by ? { kind: 'agent', account_id: by } : null;
 }
 
+// Who wrote the latest version, in words for a refusal: the team agent's
+// name, the account's handle (its agent wrote it), or the person's login.
+async function docWriterName(env, meta, writer) {
+  if (!writer) return null;
+  try {
+    if (writer.kind === 'team_agent') {
+      const v = (meta.versions || []).find((x) => x && x.team_agent && x.team_agent.id === writer.id);
+      return v ? v.team_agent.name : 'the team agent';
+    }
+    if (writer.kind === 'person') return writer.login || null;
+    if (writer.kind === 'agent') {
+      const hosted = (meta && meta.hosted) || {};
+      const key = writer.account_id === hosted.account_id ? (hosted.owner_key || hosted.github_login) : '';
+      const owner = await agentOwner(env, writer.account_id, key);
+      return owner ? `${owner.display}'s agent` : null;
+    }
+  } catch {}
+  return null;
+}
+
 // Whose agents a commenter may hand edits to, on this doc (Julie, 2026-10-24:
 // respect authorship). The owner may always use their own. The team agent
 // only edits a doc the team agent wrote. Anyone else's own agent only edits
@@ -12140,7 +12164,9 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
     : !caller ? 'team_admin_only'
       : policy.team ? 'no_team_agent' : 'team_agent_not_writer';
   if (!localDriver || !policy.own) {
-    if (!agents.length) return { default: null, candidates: [], fallback: null, reason: none, writer: policy.writer ? policy.writer.kind : null };
+    if (!agents.length) {
+      return { default: null, candidates: [], fallback: null, reason: none, writer: policy.writer ? policy.writer.kind : null, writer_name: await docWriterName(env, gate.meta, policy.writer) };
+    }
     return { default: agents[0], candidates: agents.slice(1), fallback: null, reason: null };
   }
   // localDriverAccount only returns one of the caller's own accounts, so the
@@ -13092,7 +13118,7 @@ async function askedComment(env, slug, session, meta, commentId) {
 
 // One answer, posted under the comment that asked. agentReplyGate keeps it
 // to one answer per human turn, as for every agent reply.
-async function postThreadAnswer(env, slug, { thread, parentId, agent, text, version }) {
+async function postThreadAnswer(env, slug, { thread, parentId, agent, text, version, uniqueKey = null }) {
   const gate = agentReplyGate(thread.root, agent.login);
   if (!gate.allowed) return { skipped: true, reason: gate.reason };
   const V = coerceBodyVersion(version, thread.root.created_in || 1);
@@ -13101,11 +13127,13 @@ async function postThreadAnswer(env, slug, { thread, parentId, agent, text, vers
   const res = await mutateComments(env, slug, {
     kind: 'raw_events', slug, id: thread.root.id,
     events: [
-      { kind: 'reply_added', at_version: V, at: now, reply: { id: replyId, author: agent, text, agent_status: 'answered', parent_id: parentId } },
+      { kind: 'reply_added', at_version: V, at: now, reply: { id: replyId, author: agent, text, agent_status: 'answered', parent_id: parentId }, ...(uniqueKey ? { publish_key: uniqueKey } : {}) },
       { kind: 'marked_open', at_version: V, at: now, by: agent.login, agent_status: 'answered' },
     ],
+    ...(uniqueKey ? { unique_key: uniqueKey } : {}),
     responseBody: { id: replyId, parent_id: parentId, thread_id: thread.root.id, text, author: agent, agent_status: 'answered', created: now, reactions: {} },
   });
+  if (res.status === 409) return { duplicate: true };
   return res.status === 200 ? { reply: res.body } : { failed: res.status };
 }
 
@@ -13134,11 +13162,14 @@ async function handleAsk(env, req, url, slug) {
   }
   let body = {};
   try { body = await req.json(); } catch {}
-  const question = askCut(body && body.question, ASK_QUESTION_CHARS);
-  if (!question) return json({ error: 'question_required' }, { status: 400 });
-  const selection = askCut(body && typeof body.selection === 'string' ? body.selection : '', ASK_SELECTION_CHARS);
   // Same-site only when it writes a reply: a missing Origin is not taken as one.
   const commentId = body && body.comment_id != null ? body.comment_id : null;
+  // Asked in a comment, the question IS that comment (and its passage), read
+  // from the store below: a reply signed "tdoc AI" must answer what the
+  // thread shows, not words the browser sent alongside it.
+  let question = askCut(body && body.question, ASK_QUESTION_CHARS);
+  if (!question && commentId == null) return json({ error: 'question_required' }, { status: 400 });
+  let selection = askCut(body && typeof body.selection === 'string' ? body.selection : '', ASK_SELECTION_CHARS);
   if (commentId != null && req.headers.get('origin') !== url.origin && req.headers.get('sec-fetch-site') !== 'same-origin') {
     return json({ error: 'cross_origin' }, { status: 403 });
   }
@@ -13156,6 +13187,20 @@ async function handleAsk(env, req, url, slug) {
   }
   const asking = commentId != null ? await askedComment(env, slug, session, meta, commentId) : null;
   if (asking && asking.error) return asking.error;
+  if (asking) {
+    const stored = storedCommentQuestion(asking);
+    question = askCut(stored.text, ASK_QUESTION_CHARS);
+    selection = askCut(stored.passage, ASK_SELECTION_CHARS);
+    if (!question) return json({ error: 'question_required' }, { status: 400 });
+    // One answer per human turn, decided BEFORE anything is charged or the
+    // model runs: asking again on an answered comment costs nothing and gets
+    // nothing (a refund after the model ran was a free model call).
+    const turn = agentReplyGate(asking.thread.root, 'tdoc-ai');
+    if (!turn.allowed) {
+      const used = Number(await env.META.get(usedKey)) || 0;
+      return json({ ok: true, skipped: true, reason: turn.reason, remaining: Math.max(0, cfg.limit - used), limit: cfg.limit });
+    }
+  }
   const used = Number(await env.META.get(usedKey)) || 0;
   if (used >= cfg.limit) return json({ error: 'ask_limit', limit: cfg.limit, remaining: 0, connect_href: '/start' }, { status: 429 });
   const obj = await env.DOCS.get(`docs/${slug}/v${asked}/index.html`);
@@ -13178,7 +13223,9 @@ async function handleAsk(env, req, url, slug) {
   await env.META.put(usedKey, String(used + 1));
   const out = await callAskModel(cfg, messages);
   if (!out.ok) {
-    try { await env.META.put(usedKey, String(used)); } catch {}
+    // The model did not answer: give the question back, from the counter as
+    // it is now (never the value read before the call).
+    await askRefund(env, usedKey);
     console.log(JSON.stringify({ event: 'ask_failed', status: out.status || null, detail: out.detail || null }));
     return json({ error: 'ask_failed' }, { status: 502 });
   }
@@ -13193,16 +13240,10 @@ async function handleAsk(env, req, url, slug) {
       text: out.answer,
       version: asked,
     });
-    if (posted.failed) {
-      try { await env.META.put(usedKey, String(used)); } catch {}
-      return json({ error: 'reply_failed' }, { status: 502 });
-    }
-    // Already answered since the person last spoke: nothing new, and the
-    // question is given back.
-    if (posted.skipped) {
-      try { await env.META.put(usedKey, String(used)); } catch {}
-      return json({ ok: true, skipped: true, reason: posted.reason, remaining: remaining + 1, limit: cfg.limit });
-    }
+    // The model ran: the question is spent either way, even if the answer
+    // could not be posted or another one landed first.
+    if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
+    if (posted.skipped) return json({ ok: true, skipped: true, reason: posted.reason, remaining, limit: cfg.limit });
     return json({ ok: true, reply: posted.reply, remaining, limit: cfg.limit });
   }
   // Asked "Only me": the answer is the asker's alone, kept (a few per doc)
@@ -13210,6 +13251,26 @@ async function handleAsk(env, req, url, slug) {
   const askId = `a_${Date.now()}_${rand(3)}`;
   await putAiAsk(env, slug, accountKey, { ask_id: askId, at: new Date().toISOString(), question, selection, answer: out.answer, version: asked });
   return json({ ask_id: askId, answer: out.answer, remaining, limit: cfg.limit });
+}
+
+// Giving back a question the model never answered: decrement the counter
+// as it stands now, not write back the value read before the call.
+async function askRefund(env, usedKey) {
+  try {
+    const now = Number(await env.META.get(usedKey)) || 0;
+    if (now > 0) await env.META.put(usedKey, String(now - 1));
+  } catch {}
+}
+
+// The question a comment asks, as stored: its text, and the passage it is
+// anchored to (a reply's is its thread's).
+function storedCommentQuestion(asking) {
+  const snap = snapshotAt(asking.thread.root, Infinity) || {};
+  const isRoot = asking.record === asking.thread.root;
+  const text = isRoot ? snap.text : asking.record.text;
+  const passage = snap.anchor && typeof snap.anchor.text === 'string' ? snap.anchor.text
+    : snap.anchor && snap.anchor.fallback && typeof snap.anchor.fallback.text === 'string' ? snap.anchor.fallback.text : '';
+  return { text: String(text || '').trim(), passage };
 }
 
 const AI_ASK_MAX = 20;
@@ -13259,8 +13320,10 @@ async function handleAskPublish(env, req, url, slug, kind) {
     const ask = list.find((a) => a.ask_id === askId);
     if (!ask) return json({ error: 'ask_not_found' }, { status: 404 });
     if (ask.published) return json({ error: 'already_public', reply_id: ask.published }, { status: 409 });
+    if (!sameQuestion(asking, ask.question)) return json({ error: 'not_the_question', message: 'Make public posts the answer under the question it answered.' }, { status: 409 });
     const owner = await agentOwner(env, accountId, credentialKey(session));
-    const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: tdocAiAuthor(owner, scope), text: ask.answer, version: ask.version });
+    const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: tdocAiAuthor(owner, scope), text: ask.answer, version: ask.version, uniqueKey: `publish:${askId}` });
+    if (posted.duplicate) return json({ error: 'already_public' }, { status: 409 });
     if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
     if (posted.reply) await putAiAsk(env, slug, accountKey, { ...ask, published: posted.reply.id });
     return json({ ok: true, reply: posted.reply || null, skipped: !!posted.skipped });
@@ -13272,15 +13335,26 @@ async function handleAskPublish(env, req, url, slug, kind) {
   if (!ask || !ask.by || !group.ids.includes(ask.by)) return json({ error: 'ask_not_found' }, { status: 404 });
   if (!ask.answer) return json({ error: 'not_answered' }, { status: 409 });
   if (ask.reply_id) return json({ error: 'already_public', reply_id: ask.reply_id }, { status: 409 });
+  if (!sameQuestion(asking, ask.question)) return json({ error: 'not_the_question', message: 'Make public posts the answer under the question it answered.' }, { status: 409 });
   const named = { agent_login: ask.answer.agent && ask.answer.agent.login, agent_name: ask.answer.agent && ask.answer.agent.name };
   const teamOf = ask.runner && meta.workspace_id ? await loadTeam(env, meta.workspace_id) : null;
   const author = ask.runner && ask.team_agent
     ? teamAgentAskAuthor({ team_agent: { ...ask.team_agent, team_name: teamOf ? teamOf.name : '' } }, ask.recipient, named, env)
     : await askAgentAuthor(env, accountId, credentialKey(session), ask.recipient, named, scope);
-  const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: author, text: ask.answer.text });
+  const posted = await postThreadAnswer(env, slug, { thread: asking.thread, parentId: body.comment_id, agent: author, text: ask.answer.text, uniqueKey: `publish:${askId}` });
+  if (posted.duplicate) return json({ error: 'already_public' }, { status: 409 });
   if (posted.failed) return json({ error: 'reply_failed' }, { status: 502 });
   if (posted.reply) await putAgentAsk(env, slug, { ...ask, comment_id: body.comment_id, reply_id: posted.reply.id });
   return json({ ok: true, reply: posted.reply || null, skipped: !!posted.skipped });
+}
+
+// Make public posts the answer only under the comment that quotes the
+// question it answered: the comment must say what was asked (the client
+// posts exactly that text), so a kept answer cannot be stuck under any
+// other comment.
+function sameQuestion(asking, question) {
+  const norm = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+  return norm(storedCommentQuestion(asking).text) === norm(question);
 }
 
 // A team agent as it signs an answer: its own name and team, from the
@@ -13513,8 +13587,11 @@ async function handleMyAgent(env, req, url, slug) {
   }
   let body = {};
   try { body = await req.json(); } catch {}
-  const question = askCut(body && body.question, ASK_QUESTION_CHARS);
-  if (!question) return json({ error: 'question_required' }, { status: 400 });
+  const commentId = body && body.comment_id != null ? body.comment_id : null;
+  // Asked in a comment, the question is that comment as stored (see
+  // handleAsk): an answer signed by an agent must answer what the thread shows.
+  let question = askCut(body && body.question, ASK_QUESTION_CHARS);
+  if (!question && commentId == null) return json({ error: 'question_required' }, { status: 400 });
   if (!accountId) return json({ error: 'agent_not_connected', tier: 'none' }, { status: 409 });
   // One of the reader's own agents, or the doc's team agent for a member of
   // its team, and only one that can be reached. Anything else is somebody
@@ -13541,15 +13618,22 @@ async function handleMyAgent(env, req, url, slug) {
   const open = (await loadAgentAsks(env, slug, asker)).filter((a) => !agentAskDone(a)).length;
   if (open >= AGENT_ASK_OPEN_MAX) return json({ error: 'too_many_open_questions', message: 'Your agent has not answered your earlier questions on this doc yet.' }, { status: 429 });
   if (await rateLimited(env, `myagent:${asker}`, AGENT_ASK_RATE, 3600)) return json({ error: 'rate_limited', message: 'Too many questions sent to your agent; try again later.' }, { status: 429 });
-  // Asked in a comment (the comment composer's Ask AI): the answer goes in
-  // that thread. The reader's own comment only, and only while they may
-  // comment here (askedComment).
-  const commentId = body && body.comment_id != null ? body.comment_id : null;
+  // Asked in a comment (the composer's @agent, Ask): the answer goes in that
+  // thread. The reader's own comment only, and only while they may comment
+  // here (askedComment). A team agent answers for the team: never privately.
+  if (runner && commentId == null) {
+    return json({ error: 'team_agent_not_private', message: 'A team agent answers in the thread, for everyone who can see it.' }, { status: 400 });
+  }
+  let storedPassage = null;
   if (commentId != null) {
     const asking = await askedComment(env, slug, session, meta, commentId);
     if (asking.error) return asking.error;
+    const stored = storedCommentQuestion(asking);
+    question = askCut(stored.text, ASK_QUESTION_CHARS);
+    if (!question) return json({ error: 'question_required' }, { status: 400 });
+    storedPassage = stored.passage ? { text: askCut(stored.passage, ASK_SELECTION_CHARS) } : null;
   }
-  const passage = agentAskPassage(body && body.passage);
+  const passage = commentId != null ? storedPassage : agentAskPassage(body && body.passage);
   const askId = `q_${Date.now()}_${rand(3)}`;
   const event = agentAskEvent({ slug, docTitle: meta.title, askId, question, passage: passage && passage.text, publicHost: env.PUBLIC_HOST, commentId });
   const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
@@ -13578,6 +13662,18 @@ async function handleMyAgent(env, req, url, slug) {
 
 // The asker's agent, on the asker's own upload token. The token's account
 // must be the one that asked, and must still be able to read the doc.
+const TEAM_ASK_RUN_TTL = 3600;
+function teamAskRunKey(agentId, slug) {
+  return `team-ask-run:${agentId}:${slug}`;
+}
+// A team agent answering a question on this doc right now: an answer-only
+// run, so nothing it sends may change the doc.
+async function teamAskRunActive(env, actor, slug) {
+  if (!(actor && actor.team_agent && actor.team_agent.id)) return false;
+  try { return Boolean(await env.META.get(teamAskRunKey(actor.team_agent.id, slug))); } catch { return false; }
+}
+const ANSWER_ONLY_RUN = { error: 'answer_only_run', message: 'This team agent is answering a question on this doc: an answer only, no edits, until that run ends.' };
+
 async function handleAgentAsk(env, req, action) {
   const auth = await requireUploadAuth(req, env);
   if (!auth.ok) return auth.response;
@@ -13617,6 +13713,10 @@ async function handleAgentAsk(env, req, action) {
     if (!gate.ok) return json({ error: 'access_denied' }, { status: 403 });
   }
   if (action === 'ack') {
+    // A team agent's token can write its team's docs. While it answers a
+    // question on this doc it may only answer: uploads and replies on this
+    // slug are refused (teamAskRunActive) until ask-done or an hour passes.
+    if (teamAgentId) await env.META.put(teamAskRunKey(teamAgentId, slug), askId, { expirationTtl: TEAM_ASK_RUN_TTL });
     if (prev.acked_at) return json({ ok: true, ask_id: askId, acked_at: prev.acked_at, already: true });
     await putAgentAsk(env, slug, { ...prev, acked_at: at });
     return json({ ok: true, ask_id: askId, acked_at: at, already: false });
@@ -13627,8 +13727,11 @@ async function handleAgentAsk(env, req, action) {
     const clean = (s) => (typeof s === 'string' ? s.trim().slice(0, 60) : '');
     const agent = { login: clean(body.agent_login), name: clean(body.agent_name) };
     // Asked in a comment: the answer is a reply in that thread, signed by
-    // the asker's agent and naming the asker. Nothing but the reply: the
-    // run that writes it cannot edit the doc (this token may not).
+    // the asker's agent (naming the asker) or the team agent. A reader's own
+    // token cannot write somebody else's doc; a team agent's token can write
+    // its team's docs, so while its answer run is on (from ask-ack to
+    // ask-done) uploads and other replies on this slug are refused
+    // (teamAskRunActive).
     let replyId = null;
     if (prev.comment_id) {
       const list = await readComments(env, slug);
@@ -13647,6 +13750,9 @@ async function handleAgentAsk(env, req, action) {
     const rec = await putAgentAsk(env, slug, { ...prev, acked_at: prev.acked_at || at, answer: { text, at, agent }, ...(replyId ? { reply_id: replyId } : {}) });
     if (prev.recipient && prev.recipient.provider === 'local') await localPendingDrop(env, queueOf, askId);
     return json({ ok: true, ask_id: askId, answered_at: rec.answer.at, ...(replyId ? { reply_id: replyId } : {}) });
+  }
+  if (teamAgentId) {
+    try { if ((await env.META.get(teamAskRunKey(teamAgentId, slug))) === askId) await env.META.delete(teamAskRunKey(teamAgentId, slug)); } catch {}
   }
   // done: a daemon run ended. Answered already is the good ending; anything
   // else is recorded as failed so the asker is told rather than left waiting.
@@ -18015,7 +18121,14 @@ const tdocHandlers = {
       // Authorship (agentEditPolicy): a team doc whose latest version
       // somebody else's agent wrote is theirs to change. Nothing is queued;
       // the comment itself already notified them.
-      if (teamDoc && !offered.length && resolved.reason === 'written_by_other') return json(WRITTEN_BY_OTHER, { status: 403 });
+      if (teamDoc && !offered.length && (resolved.reason === 'written_by_other' || resolved.reason === 'team_agent_not_writer')) {
+        const who = resolved.writer_name || 'someone else';
+        return json({
+          error: resolved.reason,
+          writer: who,
+          message: `This doc was last written by ${who}; only they can request changes. Your comment notifies them.`,
+        }, { status: 403 });
+      }
       // When the asked-for recipient is one tdoc offered, send to the STORED
       // copy: the client's object may carry fields (device, cli) that only the
       // record should decide.
@@ -18352,6 +18465,7 @@ const tdocHandlers = {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
       if (!writeGate.ok) return writeGate.response;
+      if (await teamAskRunActive(env, auth.actor, slug)) return json(ANSWER_ONLY_RUN, { status: 403 });
       // Resolve parent + its current anchor up front (the optional rebind needs
       // the folded anchor for label/fallback). agent/reply is upload-token-authed
       // (owner-only), so concurrency here is negligible; the serialized write
@@ -18536,6 +18650,7 @@ const tdocHandlers = {
       }
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
+      if (await teamAskRunActive(env, auth.actor, slug)) return json(ANSWER_ONLY_RUN, { status: 403 });
       // Where a new doc from a workspace-scoped token lands, so it never
       // exists somewhere the token could not see it again: the team the
       // client names (`team`, id or name: the CLI's --team) if the token
@@ -18768,9 +18883,11 @@ const tdocHandlers = {
             // A catch-up commits up to this version only; the client's newer
             // ones land with their own uploads.
             if (catchUp && number > verNum) continue;
-            // `token` is the server's record of who published; a client
-            // cannot write it.
-            const { token: _clientToken, team_agent: _clientAgent, ...clean } = item || {};
+            // `token`, `team_agent`, `by`, `source` and `author` are the
+            // server's record of who wrote a version (docLastWriter decides
+            // who may hand edits to an agent from them); a client cannot
+            // write any of them.
+            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, source: _clientSource, author: _clientAuthor, ...clean } = item || {};
             if (!versionByNumber.has(number) || number === verNum) versionByNumber.set(number, clean);
           }
           if (!versionByNumber.has(verNum)) {

@@ -61,8 +61,18 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
       const on = (await allShown()) === 'true';
       // Keyboard activation keeps the selected card open until the filter
       // itself handles it (pointer-down on the page dismisses cards).
-      const control = await filterRadio(on ? /^Open/ : /^All$/);
-      await control.focus();
+      // The phone drawer re-renders as it opens: find the radio again if it
+      // was replaced under us.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const control = await filterRadio(on ? /^Open/ : /^All$/);
+          await control.focus({ timeout: 3000 });
+          break;
+        } catch (error) {
+          if (attempt >= 4) throw error;
+          await page.waitForTimeout(200);
+        }
+      }
       await page.keyboard.press('Enter');
       if (await page.locator('#tdoc-comment-layer .tdoc-comment-filter').isVisible().catch(() => false)) await page.keyboard.press('Escape');
     };

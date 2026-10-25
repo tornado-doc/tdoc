@@ -304,7 +304,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(!left.length, `keys left behind: ${left}`);
     const targets = await call('/api/notify/targets?slug=befreed-report', { cookie: bob.cookie });
     // bob is an admin now, so it is his own (empty) connections that speak.
-    assert(!targets.body.default && !targets.text.includes('vid3o'), targets.text);
+    assert(!targets.body.default && !(targets.body.candidates || []).length && !JSON.stringify(targets.body.candidates || []).includes('vid3o'), targets.text);
   });
 
   // The machine's half for real: bin/tdoc-daemon against this worker over
