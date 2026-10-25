@@ -204,7 +204,7 @@ t('bridge 1 is read off the server, and a paired account is never asked for a co
     'and the gate is done when any of the three says so');
   assert(gate.includes('const POLL_MS = 3000;'), '3s while waiting');
   assert(gate.includes("postOnboardingEvent('copy_clicked')"), 'copying is telemetry, not a fake connected stamp');
-  assert(gate.includes('COPY_FALLBACK') && gate.includes('selectContents(promptRef.current)'),
+  assert(gate.includes('COPY_FALLBACK') && gate.includes('selectContents(ref.current)'),
     'a refused clipboard leaves the line selected and says so');
   // The agent's own instructions, which no page renders: it connects before it
   // reads anything, and the first doc is a fill-in template with a clock on it.
