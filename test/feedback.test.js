@@ -305,6 +305,27 @@ const APP = 'http://localhost:3000';
     assert(re.status === 413, `re-anchor: ${re.status}`);
   });
 
+  await t('product anchors reject script, relative and non-web URLs on create and re-anchor', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const julie = await putSession(env, 'julie');
+    const { body: space } = await connect(env, julie);
+    const anchor = (url) => ({ kind: 'product', url, selector: '#invite' });
+    for (const url of ['javascript:globalThis.pwned=1', 'data:text/html,hello', '//other.example/', '/dashboard', 'file:///tmp/page', 'not a URL', '']) {
+      const r = await worker.fetch(req('/api/comments', { method: 'POST', token: space.token,
+        body: { slug: space.slug, version: 1, text: `bad ${url}`, anchor: anchor(url) } }), env, {});
+      assert(r.status === 400 && (await r.json()).error === 'invalid_product_url', `create ${url}: ${r.status}`);
+    }
+    const made = await worker.fetch(req('/api/comments', { method: 'POST', token: space.token,
+      body: { slug: space.slug, version: 1, text: 'valid', anchor: anchor(`${APP}/dashboard`) } }), env, {});
+    assert(made.status === 200, `valid create: ${made.status}`);
+    const { id } = await made.json();
+    for (const url of ['javascript:globalThis.pwned=1', 'https://ok.example/#note', 'mailto:other@example.com']) {
+      const re = await worker.fetch(req('/api/comments', { method: 'PATCH', token: space.token,
+        body: { slug: space.slug, version: 1, id, anchor: anchor(url) } }), env, {});
+      assert(re.status === (url.startsWith('https:') ? 200 : 400), `re-anchor ${url}: ${re.status}`);
+    }
+  });
+
   await t('/feedback is an app page under the shared top bar: no hand-rolled bar, the real avatar', async () => {
     const env = makeEnv(mod.CommentsStore);
     const anon = await (await worker.fetch(req('/feedback'), env, {})).text();

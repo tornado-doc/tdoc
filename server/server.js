@@ -11,6 +11,15 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { commentId } = require('./comment-id');
 
+function invalidProductAnchorUrl(anchor) {
+  if (!anchor || anchor.kind !== 'product') return false;
+  if (typeof anchor.url !== 'string') return true;
+  try {
+    const url = new URL(anchor.url);
+    return url.protocol !== 'http:' && url.protocol !== 'https:';
+  } catch { return true; }
+}
+
 
 // The server knows which Node is running it; a spawned child may not. When the
 // server was started by absolute path — a launchd job, an editor, a desktop
@@ -2000,6 +2009,7 @@ const server = http.createServer(async (req, res) => {
     // not a comment, and one that gets in cannot be seen or removed (#532).
     const text = typeof body.text === 'string' ? body.text.trim() : body.text;
     if (!slug || !text) return json(res, 400, { error: 'invalid slug or missing text' });
+    if (invalidProductAnchorUrl(anchor)) return json(res, 400, { error: 'invalid_product_url' });
     const file = path.join(ROOT, slug, 'comments.json');
     const comments = readCommentFile(file);
     const created = new Date().toISOString();
@@ -2188,6 +2198,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 404, { error: 'not_found' });
     }
     if (!slug || !id || !anchor) return json(res, 400, { error: 'invalid slug or missing id/anchor' });
+    if (invalidProductAnchorUrl(anchor)) return json(res, 400, { error: 'invalid_product_url' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
     const target = all.find(c => c.id === id);

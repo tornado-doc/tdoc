@@ -5,6 +5,7 @@ import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentThreadList } from '../../shell/src/document/comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from '../../shell/src/document/comment-pin.jsx';
 import { useCommentArea } from '../../shell/src/document/comment-area.js';
+import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
@@ -133,6 +134,8 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-refresh[aria-busy="true"] svg { animation: tdoc-fb-spin .7s linear infinite; }
     #tdoc-feedback-root .tdoc-fb-add { appearance: none; border: 0; border-radius: 6px; background: #1652f0; color: #fff; cursor: pointer; padding: 5px 8px; font: 600 11.5px system-ui, sans-serif; }
     @keyframes tdoc-fb-spin { to { transform: rotate(360deg); } }
+    #tdoc-feedback-root .tdoc-fb-readbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-bottom: 1px solid #efeeea; color: #6b6a66; font: 12px system-ui, sans-serif; }
+    #tdoc-feedback-root .tdoc-fb-readbar button { appearance: none; border: 0; background: none; color: var(--td-accent); cursor: pointer; font: 600 12px system-ui, sans-serif; }
     #tdoc-feedback-root .tdoc-fb-scroll { flex: 1; overflow-y: auto; padding: 6px 8px 16px; overscroll-behavior: contain; }
     #tdoc-feedback-root .tdoc-fb-scroll h4 { margin: 14px 8px 6px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: #8a8985; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #tdoc-feedback-root .tdoc-fb-item {
@@ -703,9 +706,9 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ area, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing }) {
+  function ListPanel({ area, unreadComments, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing }) {
     const here = area.shownPageComments;
-    const unreadIds = new Set(area.unread.map((comment) => comment.id));
+    const unreadIds = new Set(unreadComments.map((comment) => comment.id));
     const elsewhere = new Map();
     for (const c of area.shown) {
       if (c.anchor.url === pageUrl) continue;
@@ -739,6 +742,7 @@ ${uiCss}
           <button type="button" className="tdoc-fb-refresh" aria-label="Refresh feedback" title="Refresh feedback" aria-busy={refreshing ? 'true' : 'false'} onClick={onRefresh}><RefreshCw aria-hidden="true" /></button>
           <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
         </header>
+        {unreadComments.length ? <div className="tdoc-fb-readbar"><span>{unreadComments.length} new agent {unreadComments.length === 1 ? 'reply' : 'replies'}</span><button type="button" onClick={() => area.markAllRead(unreadComments)}>Mark all as read</button></div> : null}
         <div className="tdoc-fb-scroll">
           <h4>This page</h4>
           {here.length ? threadList(here) : (
@@ -854,6 +858,9 @@ ${uiCss}
       filter, filterMode: 'phase', handoffViewer, isOwner: owner,
       pageUrl: canonical(),
     });
+    const unreadComments = area.unread.filter((comment) => commentPinState(comment, {
+      seenMap: area.seenMap, handoffViewer, isOwner: owner,
+    }).unread);
     const agent = useNotifyTargets(slug, Boolean(owner && slug && session?.notify));
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
       && (agent.default || agent.candidates.length || agent.fallback));
@@ -1020,6 +1027,7 @@ ${uiCss}
       handoffViewer,
       isOwner: owner,
       mentionable,
+      productLinkOrigin: location.origin,
       canSendToAgent,
       agentSetupHref: agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null,
       onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, handoffCommentId: opts.handoffCommentId }),
@@ -1028,6 +1036,7 @@ ${uiCss}
       onResolve: (id, resolved) => mutate({ type: 'tdoc-feedback-resolve', id, resolved }),
       onEdit: (id, text) => mutate({ type: 'tdoc-feedback-edit', id, text }),
       onReanchor: (id) => { setOpenId(null); setPanelOpen(false); setReanchorId(id); },
+      onMarkRead: area.markRead,
       onResendHandoff: owner && session?.notify ? async (c) => {
         try {
           const body = await resendNotifyHandoff({ slug: session.slug, handoff_id: c.handoff_id });
@@ -1068,7 +1077,9 @@ ${uiCss}
       if (!local) {
         // Another route of this same app: switch to it and open the card
         // once the comments for that page are loaded.
-        location.href = c.anchor.url;
+        const target = productPageUrl(c.anchor?.url, location.origin);
+        if (!target) { say('This comment points outside this site or has an invalid page link.', true); return; }
+        location.href = target;
         setTimeout(() => setOpenId(c.id), 600);
         return;
       }
@@ -1146,6 +1157,7 @@ ${uiCss}
         {panelOpen ? (
           <ListPanel
             area={area}
+            unreadComments={unreadComments}
             pageUrl={canonical()}
             filter={filter}
             setFilter={setFilter}
@@ -1178,7 +1190,7 @@ ${uiCss}
         <Dock
           session={session || surface?.config}
           openCount={openCount}
-          unreadCount={area.unreadCount}
+          unreadCount={unreadComments.length}
           panelOpen={panelOpen}
           picking={picking}
           onList={() => setPanelOpen((v) => !v)}

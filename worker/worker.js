@@ -328,6 +328,15 @@ function anchorTooLarge(anchor) {
   try { return JSON.stringify(anchor).length > ANCHOR_MAX_BYTES; } catch { return true; }
 }
 
+function invalidProductAnchorUrl(anchor) {
+  if (!anchor || anchor.kind !== 'product') return false;
+  if (typeof anchor.url !== 'string') return true;
+  try {
+    const url = new URL(anchor.url);
+    return url.protocol !== 'http:' && url.protocol !== 'https:';
+  } catch { return true; }
+}
+
 // A token-bound session may only touch the doc it was minted for.
 function feedbackScopeDenied(session, slug) {
   return Boolean(session && session.feedback && session.feedback.slug !== slug);
@@ -18899,6 +18908,7 @@ const tdocHandlers = {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       if (anchorTooLarge(anchor)) return json({ error: 'anchor_too_large', limit: ANCHOR_MAX_BYTES }, { status: 413 });
+      if (invalidProductAnchorUrl(anchor)) return json({ error: 'invalid_product_url' }, { status: 400 });
       const meta = await loadDocMeta(env, slug);
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
@@ -19044,6 +19054,7 @@ const tdocHandlers = {
       const { slug, id, anchor, version } = body;
       if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       if (anchorTooLarge(anchor)) return json({ error: 'anchor_too_large', limit: ANCHOR_MAX_BYTES }, { status: 413 });
+      if (invalidProductAnchorUrl(anchor)) return json({ error: 'invalid_product_url' }, { status: 400 });
       if (typeof body.resolved === 'boolean') {
         // Marking a thread handled, and taking it back. Same gate as delete and
         // move-anchor: the doc's owner, or whoever wrote the comment — the
