@@ -294,7 +294,7 @@ async function t(name, fn) {
       await page.close();
     });
 
-    await t('mobile FAB shows open count and unread dot, then a direct comment CTA when all are resolved', async () => {
+    await t('mobile FAB stays an icon with no open comments and offers compose in the empty drawer', async () => {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
       const errors = [];
       page.on('pageerror', (e) => errors.push(e.message));
@@ -308,17 +308,24 @@ async function t(name, fn) {
       await page.locator('#tdoc-comment-layer').waitFor();
       await page.goto(`${base}/?view=mobile-fab&state=resolved`);
       await fab.waitFor();
-      assert.equal((await fab.textContent()).trim(), 'Leave a comment or ask AI');
+      assert.equal((await fab.textContent()).trim(), '');
       assert.equal(await fab.locator('#tdoc-fab-count').count(), 0);
       assert.equal(await fab.locator('.tdoc-fab-unread-dot').count(), 0);
-      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-fab-cta.png') });
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-fab-zero.png') });
       await fab.click();
+      await page.locator('#tdoc-comment-layer [data-comment-id="resolved"]').waitFor();
+      await page.goto(`${base}/?view=mobile-fab&state=empty`);
+      await fab.waitFor();
+      assert.equal((await fab.textContent()).trim(), '');
+      await fab.click();
+      const empty = page.locator('.tdoc-drawer-empty');
+      await empty.getByRole('button', { name: 'Leave a comment or ask AI' }).waitFor();
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-drawer-empty.png') });
+      await empty.getByRole('button', { name: 'Leave a comment or ask AI' }).click();
       await page.locator('.tdoc-popup').getByText('On this document').waitFor();
       await page.locator('.tdoc-popup textarea').fill('Please clarify the pricing');
       await page.locator('.tdoc-popup').getByRole('button', { name: 'Comment', exact: true }).click();
       assert.deepEqual(JSON.parse(await page.locator('#mobile-comment-log').textContent()), { text: 'Please clarify the pricing', anchor: null });
-      await page.goto(`${base}/?view=mobile-fab&state=empty`);
-      assert.equal((await fab.textContent()).trim(), 'Leave a comment or ask AI');
       assert.deepEqual(errors, []);
       await page.close();
     });

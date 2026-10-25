@@ -231,25 +231,13 @@ export function MobileCommentDrawer({
     return () => cancelAnimationFrame(raf);
   }, [open, openCommentId]);
 
-  if (!comments.length && !filter && !onStartComment) return null;
-
-  const fab = openCount > 0 ? (
-    <Drawer.Trigger className="tdoc-fab" aria-label={`${openCount} open comments${unread ? ', new agent reply' : ''}`}>
-      <CommentIcon size={16} />
-      <span id="tdoc-fab-count">{openCount}</span>
-      {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
-    </Drawer.Trigger>
-  ) : onStartComment ? (
-    <button type="button" className="tdoc-fab tdoc-fab-cta" onClick={onStartComment}>
-      <CommentIcon size={16} />
-      <span>Leave a comment or ask AI</span>
-      {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
-    </button>
-  ) : null;
-
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
-      {fab}
+      <Drawer.Trigger className="tdoc-fab" aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
+        <CommentIcon size={16} />
+        {openCount > 0 ? <span id="tdoc-fab-count">{openCount}</span> : null}
+        {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
+      </Drawer.Trigger>
       <Drawer.Portal>
         <Drawer.Backdrop className="tdoc-drawer-backdrop" />
         <Drawer.Viewport className="tdoc-drawer-viewport">
@@ -258,6 +246,10 @@ export function MobileCommentDrawer({
             <Drawer.Close className="tdoc-drawer-handle" aria-label="Close comments" />
             <Drawer.Content className="tdoc-drawer-list">
               {filter ? <div className="tdoc-comment-filter-row">{filter}</div> : null}
+              {!comments.length ? <div className="tdoc-drawer-empty">
+                <p>No comments here yet.</p>
+                {onStartComment ? <button type="button" onClick={() => { onOpenChange(false); onStartComment(); }}>Leave a comment or ask AI</button> : null}
+              </div> : null}
               {comments.map((comment) => (
                 <CommentCard
                   key={comment.id}
