@@ -54,10 +54,6 @@ export function TopBar({
   currentTeam = null,
   onSpace = null,
   onNewTeam = null,
-  // The space chip. A list page (My docs, a team) shows it; a document does
-  // not -- it already belongs to its space, and Switch space is in the
-  // account menu on every page.
-  spaceSwitcher = true,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -265,7 +261,7 @@ export function TopBar({
             </AppMenuItem>
           ) : null}
         </AppMenu>
-        {identity && spaceSwitcher ? <WorkspaceSwitcher space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
+        {identity ? <WorkspaceSwitcher space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
         {identity ? (
           <AppMenu trigger={(
             <button className="tdoc-chip tdoc-account-trigger" type="button" aria-label={`Account: ${identity.name || identity.login}`} title={identity.name || identity.login}>
@@ -278,18 +274,6 @@ export function TopBar({
               Notifications{notifications.unread ? ` (${notifications.unread})` : ''}
             </AppMenuItem>
             <AppMenuLinkItem href="/me">My docs</AppMenuLinkItem>
-            <AppSubmenu
-              className="tdoc-space-submenu-trigger tdoc-account-space-trigger"
-              trigger={(
-                <>
-                  <span>Switch space</span>
-                  {space !== null ? <span className="tdoc-space-submenu-current">{spaceLabel(space, spaceTeams, currentTeam)}</span> : null}
-                  <ChevronRight className="tdoc-submenu-chevron" size={14} />
-                </>
-              )}
-            >
-              <SpaceMenuItems space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} />
-            </AppSubmenu>
             {publicProfileHref ? (
               <AppMenuLinkItem href={publicProfileHref}>{publicProfileLabel}</AppMenuLinkItem>
             ) : activeProfile || onClaimProfile ? (

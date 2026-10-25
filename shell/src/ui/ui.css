@@ -1134,8 +1134,6 @@ a.ui-menu-item:visited {
 /* On a phone the chip gives its room to ⋯ (#tdoc-more-btn), which carries
    Show resolved, Share and Versions: the same rows are a "Switch space"
    submenu there. ⋯ never shrinks out of the bar. */
-/* The account menu's Switch space row: label, current space, chevron. */
-.ui-menu-item.tdoc-account-space-trigger { display: flex; align-items: center; gap: 10px; }
 .tdoc-space-submenu-current { margin-left: auto; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a8a8a; font-size: 12px; }
 @media (max-width: 700px) {
   .tdoc-bar .tdoc-space-trigger { display: none; }

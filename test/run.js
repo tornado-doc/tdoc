@@ -26,7 +26,7 @@ const OFFLINE = [
   'comment-notification-failure.test.js', // inbox KV trouble never turns a saved comment into HTTP 500
   'event-convergence.test.js',// eid dedup convergence + fold ordering
   'reconcile.test.js',        // anchor reconcile branches + compaction
-  'agent-status-emoji.test.js',// agent verdict emoji constant must exist (v>=2 folds)
+  'agent-status-emoji.test.js',// agent verdict folds without synthetic reactions
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'link-sharing.test.js',     // anyone with the link: noindex everywhere, unlisted by default, require sign-in, public->link migration
@@ -47,6 +47,7 @@ const OFFLINE = [
   'reader-agent-ask.test.js',  // Send to my agent: a reader's own agents only, never anyone else's; the answer is the asker's alone
   'ask-in-thread.test.js',     // Ask AI in a comment: tdoc AI or the commenter's own agent answers as a reply in the thread, seen by all
   'hand-off.test.js',          // one door: Ask only decides edit (authorship) or answer (own / team agent / tdoc AI), never another's agent
+  'handoff-privacy.test.js',   // handoff details: commenter, sender and owner only; a member hands off threads they began or replied in
   'agent-authorship.test.js',  // authorship at write time (upload, agent replies that mark applied) and answer-only locks from send to answer, per question, failing closed
   'comment-wipe-authorship.test.js', // the comment wipe and team move follow agent authorship; a successful wipe answers 200
   'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
@@ -148,6 +149,7 @@ const OFFLINE = [
   'p3-hardening.test.js',     // #33 safeParseList + escapeHtml
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)
   'preview-cards.test.js',    // versioned OG cards, PNG rendering and access gate
+  'preview-screenshot.test.js', // page screenshot as the card: PNG checks, write access, precedence
   'preview-workflow.test.js', // #148 PR preview GitHub Action contract
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'widget-island.test.js',    // #138 sandboxed widget route + host iframe rewrite
@@ -190,7 +192,8 @@ const BROWSER = [
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
-  'doc-bar-composer-ui.test.js', // the doc bar (crumbs, Edited, quiet Share, modes in ⋯, comments filter) and the composer's @agent / Ask / Ask + request change / Only me, desktop + phone, team docs
+  'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, modes in ⋯, comments filter) and the composer's @agent pill / Answers only / Only me, desktop + phone, team docs
+  'reply-agent-ui.test.js',    // the reply box's @agent = the composer's: pill at the caret, pill dropdown (Mine / Team / tdoc AI), Answers only where it may not edit, Only me in a reply; the @ list shows every agent
   'phone-top-bar-ui.test.js', // signed in on a phone: ⋯ stays on screen, spaces under ⋯ → Switch space
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
   'share-access-ui.test.js', // Share panel: specific people / anyone with the link / public, sign-in switch, desktop + phone

@@ -1,88 +1,62 @@
-// Per-comment handoff details: status + short preview + jump to the card.
-// Replaces the old "Manage" entry that was an alias for Send to agent.
+// One place to inspect sent comments and send selected unsent comments.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { deliveryErrorText, readableHandle, resendResultText } from './notify-handoff.jsx';
+import { compactHandoffText } from './handoff-status-line.jsx';
+import { resendNotifyHandoff } from './api.js';
+import { isThreadUnread } from './thread-seen.js';
+import { handoffActivityAt, handoffWaitState, shortCommentPreview, summarizeHandoffSurfaces } from './handoff-state.js';
 
-import React, { useMemo, useState } from 'react';
-import { deliveryErrorText, resendResultText } from './notify-handoff.jsx';
-import { handoffStatusText } from './handoff-status-line.jsx';
-import { AppDialog } from '../ui/dialog.jsx';
-import { postNotifyHandoff, resendNotifyHandoff } from './api.js';
-import { formatHandoffAgo } from './handoff-ago.js';
-import {
-  handoffActivityAt,
-  handoffWaitState,
-  shortCommentPreview,
-  summarizeHandoffSurfaces,
-} from './handoff-state.js';
-
-const STATE_LABEL = {
-  ready: 'Ready to send',
-  failed: 'Not delivered',
-  waiting: 'Waiting on agent',
-  received: 'Agent received',
-  replied: 'Agent replied',
-};
-
-// In-flight rows say what the card says: queued, picked up, or no response.
-function rowLabel(comment, state) {
-  if (state === 'waiting' || state === 'received') {
-    return handoffStatusText(comment, handoffWaitState(comment)) || STATE_LABEL[state];
-  }
-  const meta = rowMeta(comment, state);
-  return `${STATE_LABEL[state] || state}${meta ? ` · ${meta}` : ''}`;
+function latestAgentReply(comment) {
+  return [...(comment.replies || [])].reverse().find((reply) =>
+    !reply.deleted && (reply.author?.kind === 'agent' || reply.agent_status));
 }
 
-function rowMeta(comment, state) {
-  if (state === 'received' && comment.handoff_acked_at) {
-    return formatHandoffAgo(comment.handoff_acked_at) || null;
-  }
-  if (state === 'waiting' || state === 'failed') {
-    const ago = comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '';
-    return ago || null;
-  }
-  return null;
+function eventTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+}
+
+function history(comment) {
+  const events = [];
+  if (comment.handoff_at) events.push(['Sent', comment.handoff_at]);
+  if (comment.handoff_delivery?.status === 'delivered') events.push(['Delivered', comment.handoff_delivery.at || comment.handoff_at]);
+  if (comment.handoff_acked_at) events.push(['On it', comment.handoff_acked_at]);
+  const reply = latestAgentReply(comment);
+  if (reply) events.push([compactHandoffText(comment, 'replied') || 'Agent replied', reply.created]);
+  return events;
 }
 
 export function HandoffDetailsPanel({
-  slug,
-  open,
-  onClose,
-  comments,
-  onJump,
-  onRefresh,
-  onToast,
+  slug, open, onClose, comments, seenMap = {}, currentUser = '', onJump, onRefresh, onToast, onSendReady, onSendElsewhere,
 }) {
   const buckets = useMemo(() => summarizeHandoffSurfaces(comments), [comments]);
-  const rows = useMemo(() => {
-    // Newest activity first so "just replied / just sent" sits on top.
-    const out = [];
-    for (const state of ['failed', 'waiting', 'received', 'ready', 'replied']) {
-      for (const c of buckets[state] || []) out.push({ comment: c, state });
+  const sentRows = useMemo(() => {
+    const rows = [];
+    for (const state of ['failed', 'waiting', 'received', 'replied']) {
+      for (const comment of buckets[state]) rows.push({ comment, state });
     }
-    out.sort((a, b) => handoffActivityAt(b.comment) - handoffActivityAt(a.comment));
-    return out;
-  }, [buckets]);
+    for (const comment of comments || []) {
+      if (!comment.deleted && comment.status === 'applied' && comment.handoff_at) rows.push({ comment, state: 'resolved' });
+    }
+    return rows.sort((a, b) => handoffActivityAt(b.comment) - handoffActivityAt(a.comment));
+  }, [buckets, comments]);
   const [busyId, setBusyId] = useState(null);
-
-  const sendOne = async (comment) => {
-    if (!comment?.id || busyId) return;
-    setBusyId(comment.id);
-    try {
-      const body = await postNotifyHandoff({
-        slug,
-        comment_ids: [comment.id],
-        instruction: 'address this comment',
-      });
-      const failed = body?.delivery?.status === 'failed';
-      onToast?.(failed
-        ? `Sent — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
-        : 'Sent to agent', failed);
-      await onRefresh?.();
-    } catch (err) {
-      onToast?.(err.message || 'Could not send', true);
-    } finally {
-      setBusyId(null);
-    }
-  };
+  const [expandedId, setExpandedId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [now, setNow] = useState(() => Date.now());
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, [open]);
+  useEffect(() => {
+    if (open && !wasOpen.current) setSelectedIds(buckets.ready.map((comment) => comment.id));
+    wasOpen.current = open;
+  }, [open, buckets.ready]);
+  const selected = selectedIds.filter((id) => buckets.ready.some((comment) => comment.id === id));
 
   const resendOne = async (comment) => {
     if (!comment?.handoff_id || busyId) return;
@@ -99,76 +73,66 @@ export function HandoffDetailsPanel({
   };
 
   return (
-    <AppDialog
-      open={open}
-      onOpenChange={(next) => { if (!next) onClose(); }}
-      title="Handoff details"
-      description={rows.length
-        ? `${rows.length} comment${rows.length === 1 ? '' : 's'} · newest first`
-        : 'Nothing in flight or waiting to send.'}
-      actions={<button type="button" onClick={onClose}>Close</button>}
-    >
-      {rows.length ? (
+    <div className="tdoc-handoff-details">
+      {sentRows.length ? <>
+        <h3 className="tdoc-handoff-details-section-title">Sent to agent</h3>
         <ul className="tdoc-handoff-details-list">
-          {rows.map(({ comment, state }) => {
-            const busy = busyId === comment.id;
+          {sentRows.map(({ comment, state }) => {
+            const waitState = state === 'resolved' ? 'resolved' : handoffWaitState(comment, now);
+            const stuck = ['failed', 'stale', 'expired'].includes(waitState);
+            const label = state === 'resolved' ? '✅ Done' : compactHandoffText(comment, waitState);
+            const pillState = label.startsWith('❓') ? 'question' : label.startsWith('🟡') ? 'partial' : waitState;
+            const unread = isThreadUnread(comment, seenMap, currentUser);
+            const expanded = expandedId === comment.id;
             return (
               <li key={comment.id} className="tdoc-handoff-details-row">
-                <button
-                  type="button"
-                  className="tdoc-handoff-details-jump"
-                  onClick={() => {
-                    onJump?.(comment.id);
-                    onClose();
-                  }}
-                >
-                  <span className={`tdoc-handoff-details-state is-${state}`}>
-                    {rowLabel(comment, state)}
-                  </span>
-                  <span className="tdoc-handoff-details-preview">
-                    {shortCommentPreview(comment.text)}
-                  </span>
-                </button>
-                <span className="tdoc-handoff-details-actions">
-                  {state === 'failed' ? (
-                    <button
-                      type="button"
-                      className="text-btn"
-                      disabled={busy}
-                      onClick={() => resendOne(comment)}
-                    >
-                      {busy ? 'Resending…' : 'Resend'}
+                <div className="tdoc-handoff-details-main">
+                  <div className="tdoc-handoff-details-heading">
+                    <button type="button" className="tdoc-handoff-details-jump" onClick={() => { onJump?.(comment.id); onClose(); }}>
+                      <span className="tdoc-handoff-details-preview">{shortCommentPreview(comment.text)}</span>
                     </button>
-                  ) : null}
-                  {state === 'ready' ? (
-                    <button
-                      type="button"
-                      className="text-btn"
-                      disabled={busy}
-                      onClick={() => sendOne(comment)}
-                    >
-                      {busy ? 'Sending…' : 'Send'}
+                    <span className={`tdoc-handoff-details-state is-${pillState}`}>
+                      {label}
+                      {stuck && comment.handoff_resend_allowed !== false ? <>
+                        <span aria-hidden="true"> · </span>
+                        <button type="button" className="tdoc-handoff-details-resend" disabled={busyId === comment.id} onClick={() => resendOne(comment)}>{busyId === comment.id ? 'Resending…' : 'Resend'}</button>
+                      </> : null}
+                    </span>
+                    {unread ? <span className="tdoc-handoff-details-unread-dot" role="status" aria-label="New agent reply" /> : null}
+                  </div>
+                  <div className="tdoc-handoff-details-meta">
+                    <span className="tdoc-handoff-details-recipient">To {readableHandle(comment.handoff_to) || 'agent'}</span>
+                    <button type="button" className="tdoc-handoff-details-expand" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? null : comment.id)}>
+                      {expanded ? 'Hide details' : 'Details'}
                     </button>
+                  </div>
+                  {expanded ? (
+                    <div className="tdoc-handoff-details-history">
+                      {history(comment).map(([event, at], index) => <div key={`${event}-${index}`}>{event}{eventTime(at) ? ` · ${eventTime(at)}` : ''}</div>)}
+                      {latestAgentReply(comment)?.text ? <div>{shortCommentPreview(latestAgentReply(comment).text)}</div> : null}
+                      {comment.handoff_delivery?.status === 'failed' ? <div>Delivery failed: {deliveryErrorText(comment.handoff_delivery.error) || 'Unknown reason'}</div> : null}
+                      {stuck && onSendElsewhere ? <button type="button" className="tdoc-handoff-details-elsewhere" onClick={() => onSendElsewhere(comment)}>Send to another agent</button> : null}
+                    </div>
                   ) : null}
-                  {state === 'waiting' ? (
-                    <button
-                      type="button"
-                      className="text-btn"
-                      disabled={busy}
-                      title="Create a new handoff and notify the agent again"
-                      onClick={() => sendOne(comment)}
-                    >
-                      {busy ? 'Sending…' : 'Send again'}
-                    </button>
-                  ) : null}
-                </span>
+                </div>
               </li>
             );
           })}
         </ul>
-      ) : (
-        <p className="manage-hint">No handoff activity on open comments.</p>
-      )}
-    </AppDialog>
+      </> : null}
+      {buckets.ready.length ? <section className="tdoc-handoff-ready">
+        <h3>Ready to send</h3>
+        {buckets.ready.map((comment) => <label key={comment.id} className="tdoc-handoff-ready-row">
+          <input type="checkbox" checked={selected.includes(comment.id)} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...ids, comment.id] : ids.filter((id) => id !== comment.id))} />
+          <span>{shortCommentPreview(comment.text)}</span>
+        </label>)}
+        {selected.length && onSendReady ? (
+          <button type="button" className="tdoc-handoff-ready-send" onClick={() => onSendReady(selected)}>
+            Send {selected.length} {selected.length === 1 ? 'comment' : 'comments'}
+          </button>
+        ) : null}
+      </section> : null}
+      {!sentRows.length && !buckets.ready.length ? <p className="manage-hint">No agent activity yet.</p> : null}
+    </div>
   );
 }

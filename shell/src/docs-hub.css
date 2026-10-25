@@ -213,6 +213,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: top center;
     display: block;
   }
   .profile-pick-copy {
@@ -383,7 +384,9 @@
   .doc-list.is-grid .doc-row:hover { border-color: #c9cbd2; box-shadow: 0 3px 10px rgba(16,18,26,.08); }
   .doc-list.is-grid .row-check { position: absolute; z-index: 1; top: 16px; left: 16px; padding: 4px; border-radius: 5px; background: rgba(255,255,255,.92); }
   .doc-card-preview { position: relative; grid-column: 1 / -1; aspect-ratio: 40 / 21; min-width: 0; overflow: hidden; display: flex; align-items: flex-start; border: 1px solid var(--td-line); border-radius: 7px; background: var(--td-surface); color: var(--td-ink); text-decoration: none; }
-  .doc-card-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--td-surface); }
+  /* Cards and screenshots are 1200 wide, 600-700 tall: cover from the top so a
+     screenshot reads as a miniature of the page's first screen. */
+  .doc-card-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; background: #fff; }
   .doc-card-preview span { display: -webkit-box; margin: 16px; overflow: hidden; -webkit-line-clamp: 6; -webkit-box-orient: vertical; font: 13px/1.55 Georgia, serif; color: var(--td-muted); }
   .doc-list.is-grid .doc-info { align-self: stretch; }
   .doc-list.is-grid .doc-preview-excerpt { display: none; }

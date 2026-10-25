@@ -78,6 +78,19 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     };
     assert.equal(await allShown(), 'true', 'fresh document defaults to showing all comments');
     await settled(true);
+    // The painted underline has no DOM hover target. Moving across its range
+    // still highlights the corresponding margin avatar, without a text label.
+    const hoverPoint = await frame.evaluate(text => {
+      const node = [...document.querySelectorAll('h1,h2,h3,p')].find(element => element.textContent.includes(text));
+      const range = document.createRange(); range.selectNodeContents(node);
+      const rect = range.getClientRects()[0];
+      return { x: rect.x + Math.min(12, rect.width / 2), y: rect.y + rect.height / 2 };
+    }, openText);
+    const frameBox = await page.locator('iframe[aria-label="Document content"]').boundingBox();
+    await page.mouse.move(frameBox.x + hoverPoint.x, frameBox.y + hoverPoint.y);
+    await page.locator('.tdoc-pin[data-id="open"].tdoc-pin-anchor-hover').waitFor();
+    await page.mouse.move(10, 10);
+    await page.waitForFunction(() => !document.querySelector('.tdoc-pin[data-id="open"]')?.classList.contains('tdoc-pin-anchor-hover'));
     await toggle();
     await settled(false);
     await toggle();

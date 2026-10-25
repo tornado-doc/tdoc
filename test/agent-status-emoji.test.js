@@ -1,15 +1,5 @@
-// Regression test for "comments vanish and posting 500s from v2 onward".
-//
-// Root cause: #296 deleted `const AGENT_STATUS_EMOJI` from worker.js but left
-// the two references in snapshotAt(). The line only runs when a fold produces
-// an agent verdict (a marked_applied / marked_open event at or below the
-// requested version), so v1 folded fine and every v>=2 read threw
-// `ReferenceError: AGENT_STATUS_EMOJI is not defined` → 500 on GET and POST
-// /api/comments. Live docs looked like they had lost their comments.
-//
-// The existing fold tests missed it because they INJECT AGENT_STATUS_EMOJI into
-// the VM sandbox. This one takes the definition from worker.js itself, so a
-// deleted constant fails here instead of in production.
+// Regression test for v2 agent verdict folds. The verdict belongs in reply
+// status and resolution, without synthesizing a reaction on the parent.
 //
 // Run with: node test/agent-status-emoji.test.js
 
@@ -37,11 +27,8 @@ function sliceFn(name) {
   return workerSrc.slice(start, i);
 }
 
-// The constant comes from the SOURCE, not from the sandbox — that is the point.
-const emojiDecl = /^const AGENT_STATUS_EMOJI = \{.*\};$/m.exec(workerSrc);
-
-t('worker.js defines AGENT_STATUS_EMOJI (snapshotAt references it)', () => {
-  assert(emojiDecl, 'AGENT_STATUS_EMOJI is referenced by snapshotAt but never declared in worker.js');
+t('snapshotAt does not depend on an emoji lookup', () => {
+  assert(!sliceFn('snapshotAt').includes('AGENT_STATUS_EMOJI'), 'snapshotAt still synthesizes verdict reactions');
 });
 
 const deps = [
@@ -51,7 +38,7 @@ const deps = [
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(`${emojiDecl ? emojiDecl[0] : ''}\n\n${deps}`, sandbox);
+vm.runInContext(deps, sandbox);
 
 // A comment created on v1 and marked applied by the agent on v2 — the exact
 // shape that took every v>=2 read down.
@@ -74,26 +61,25 @@ t('folding at v1 keeps the comment open (verdict event is out of scope)', () => 
   assert(snap.status === 'open', `expected open at v1, got ${snap.status}`);
 });
 
-t('folding at v2 renders the ✅ verdict instead of throwing', () => {
+t('folding at v2 preserves resolution without adding a reaction', () => {
   const snap = sandbox.snapshotAt(appliedOnV2(), 2);
   assert(snap, 'v2 snapshot missing');
   assert(snap.status === 'applied', `expected applied at v2, got ${snap.status}`);
-  assert(Array.isArray(snap.reactions['✅']), 'agent verdict emoji not synthesized at v2');
-  assert(snap.reactions['✅'].includes('tdoc-agent'), 'verdict emoji not attributed to the agent');
+  assert(Object.keys(snap.reactions).length === 0, 'agent verdict added an automatic reaction');
 });
 
 t('the whole list still folds at the latest version (GET /api/comments path)', () => {
   const list = sandbox.snapshotList([appliedOnV2()], Infinity);
   assert(list.length === 1, `expected 1 comment, got ${list.length}`);
-  assert(list[0].reactions['✅'], 'latest fold lost the verdict emoji');
+  assert(Object.keys(list[0].reactions).length === 0, 'latest fold added an automatic reaction');
 });
 
 t('partial, question and answered verdicts fold too', () => {
-  for (const [status, emoji] of [['partial', '🟡'], ['question', '❓'], ['answered', '💬']]) {
+  for (const status of ['partial', 'question', 'answered']) {
     const c = appliedOnV2();
     c.events[1].agent_status = status;
     const snap = sandbox.snapshotAt(c, 2);
-    assert(snap.reactions[emoji], `${status} verdict did not render ${emoji}`);
+    assert(Object.keys(snap.reactions).length === 0, `${status} added an automatic reaction`);
   }
 });
 
@@ -246,7 +232,7 @@ async function seedDocWithAppliedComment(env) {
     const list = await r.json();
     assert(list.length === 1, `v2 lost the comment (got ${list.length})`);
     assert(list[0].status === 'applied', `expected applied at v2, got ${list[0].status}`);
-    assert(list[0].reactions['✅'], 'agent verdict emoji missing at v2');
+    assert(Object.keys(list[0].reactions).length === 0, 'agent verdict added a reaction at v2');
   });
 
   await ta('GET /api/comments?version=all serves the full history', async () => {

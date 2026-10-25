@@ -338,7 +338,8 @@ t('comment card renders the re-anchor button only for the author or the doc owne
   assert(gatedByCanMutate(cardSrc, 'tdoc-reanchor-btn'), 're-anchor action is not gated by canMutate');
 });
 t('both comment layers forward isOwner to the card', () => {
-  assert(layerSrc.split('isOwner={isOwner}').length === 3,
+  const cards = [...layerSrc.matchAll(/<CommentCard\b([\s\S]*?)\/>/g)];
+  assert(cards.length === 2 && cards.every((match) => match[1].includes('isOwner={isOwner}')),
     'desktop layer and mobile drawer must both pass isOwner to CommentCard');
 });
 t('the document shell sources isOwner from the boot config', () => {

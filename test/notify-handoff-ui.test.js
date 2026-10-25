@@ -158,21 +158,44 @@ async function t(name, fn) {
       const errors = [];
       page.on('pageerror', (e) => errors.push(e.message));
       await page.goto(`${base}/?view=status`);
-      const line = (id) => page.locator(`[data-comment-id="${id}"] .tdoc-handoff-line`);
+      const line = (id) => page.locator(`[data-comment-id="${id}"] .tdoc-handoff-status-text`);
       await line('queued').waitFor();
-      assert.equal((await line('queued').textContent()).trim(), 'Sent to smarter-tdoc-claw · queued in Raft · 2 min ago');
-      assert.equal((await line('picked').textContent()).trim(), 'smarter-tdoc-claw picked it up · 3 min ago');
-      assert.equal((await line('stale').textContent()).trim(), 'No response for 7 min');
-      assert.equal((await line('expired').textContent()).trim(), 'Expired — the agent never picked it up');
+      assert.equal((await line('queued').textContent()).trim(), 'Delivered');
+      assert.equal(await line('queued').getAttribute('title'), 'Delivered to smarter-tdoc-claw · 2 min ago');
+      assert.equal((await line('local-queued').textContent()).trim(), 'Sent');
+      assert.equal((await line('picked').textContent()).trim(), 'On it');
+      assert.equal((await line('stale').textContent()).trim(), 'No response · Resend');
+      assert.equal((await line('expired').textContent()).trim(), 'No response · Resend');
       assert.equal((await line('replied').textContent()).trim(), 'Agent replied');
+      assert.equal((await line('question').textContent()).trim(), '❓ Asked you');
+      assert.equal((await line('partial').textContent()).trim(), '🟡 Partial');
+      assert.equal(await page.locator('[data-comment-id="resolved"] .tdoc-handoff-chip').count(), 0, 'resolved comment repeats the agent verdict');
+      assert.equal((await page.locator('[data-comment-id="resolved"] .tdoc-resolved-chip').textContent()).trim(), '✅ Done');
+      assert.equal(await page.locator('[data-comment-id="human-followup"] .tdoc-handoff-chip').count(), 0, 'human follow-up still shows the old agent question');
+      assert.equal((await line('resent-followup').textContent()).trim(), 'Delivered', 'new delivery still shows the old agent question');
+      for (const id of ['queued', 'picked', 'replied', 'question']) {
+        assert.equal(await page.locator(`[data-comment-id="${id}"] .tdoc-handoff-chip`).count(), 1, `${id} shows more than one status`);
+        const style = await line(id).evaluate((el) => ({
+          background: getComputedStyle(el).backgroundColor,
+          cardBackground: getComputedStyle(el.closest('.tdoc-margin-comment')).backgroundColor,
+          height: el.getBoundingClientRect().height,
+          padding: getComputedStyle(el).padding,
+          lineHeight: getComputedStyle(el).lineHeight,
+          display: getComputedStyle(el).display,
+          radius: getComputedStyle(el).borderRadius,
+        }));
+        assert.notEqual(style.background, style.cardBackground, `${id} lost its pill background`);
+        assert.equal(style.radius, '999px', `${id} lost its pill shape`);
+        assert.ok(style.height <= 22, `${id} status is still tall: ${JSON.stringify(style)}`);
+      }
       // Buttons only where there is something to do.
       for (const id of ['queued', 'picked', 'replied']) {
         assert.equal(await page.locator(`[data-comment-id="${id}"] .tdoc-handoff-nudge`).count(), 0, `${id} has actions`);
       }
-      const stale = page.locator('[data-comment-id="stale"] .tdoc-handoff-nudge button');
-      assert.deepEqual((await stale.allTextContents()).map((x) => x.trim()), ['Resend', 'Send to another agent']);
-      const expired = page.locator('[data-comment-id="expired"] .tdoc-handoff-nudge button');
-      assert.deepEqual((await expired.allTextContents()).map((x) => x.trim()), ['Resend']);
+      const stale = page.locator('[data-comment-id="stale"] .tdoc-handoff-chip-action');
+      assert.equal(await stale.textContent(), 'Resend');
+      const expired = page.locator('[data-comment-id="expired"] .tdoc-handoff-chip-action');
+      assert.equal(await expired.textContent(), 'Resend');
       // Nothing spills out of a narrow card.
       for (const id of ['queued', 'picked', 'stale', 'expired']) {
         const [card, chip] = await Promise.all([
@@ -181,12 +204,163 @@ async function t(name, fn) {
         ]);
         assert.ok(chip.x + chip.width <= card.x + card.width + 0.5, `${id} line overflows its card`);
       }
-      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'handoff-status-ladder.png'), clip: { x: 0, y: 0, width: 340, height: 720 } }); }
+      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'handoff-status-ladder.png'), clip: { x: 0, y: 0, width: 340, height: 900 } }); }
+      if (SHOTS) { await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: path.join(SHOTS, 'handoff-status-phone.png'), fullPage: true }); }
       await stale.first().click();
       await page.getByText('Resending…').waitFor();
       await page.waitForFunction(() => document.getElementById('log').textContent === 'resend:stale');
-      await stale.nth(1).click();
-      await page.waitForFunction(() => document.getElementById('log').textContent === 'resend:stale,elsewhere:stale');
+      assert.equal(await stale.count(), 1);
+      assert.deepEqual(errors, []);
+      await page.close();
+    });
+
+    await t('the top plane replaces the banner and opens activity with both comment and agent reply', async () => {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(`${base}/?view=activity`);
+      const plane = page.locator('#tdoc-send-agent-btn');
+      await plane.waitFor();
+      assert.match(await plane.getAttribute('title'), /to send.*waiting for agent.*new agent replies/);
+      assert.equal(await page.locator('.tdoc-handoff-banner').count(), 0);
+      assert.equal(await plane.locator('.tdoc-send-agent-badge').count(), 1);
+      assert.equal(await plane.locator('.tdoc-send-agent-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(229, 72, 77)');
+      assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '4');
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-desktop.png') });
+      await plane.click();
+      const details = page.getByRole('dialog', { name: 'Agent activity' });
+      await details.waitFor();
+      await details.getByText('❓ Asked you').waitFor();
+      assert.equal(await details.locator('.tdoc-handoff-details-preview').filter({ hasText: 'please fix this' }).count() > 0, true);
+      await details.getByRole('button', { name: 'Details' }).first().click();
+      assert.equal(await details.locator('.tdoc-handoff-details-history').count(), 1);
+      assert.equal(await details.locator('.tdoc-handoff-details-unread-dot').count(), 4);
+      assert.equal(await details.getByRole('status', { name: 'New agent reply' }).count(), 4);
+      assert.equal(await details.getByText('✅ Done', { exact: true }).count(), 1);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-details-desktop.png') });
+      const readyChecks = details.getByRole('checkbox');
+      assert.equal(await readyChecks.count(), 2);
+      assert.equal(await readyChecks.first().isChecked(), true);
+      await readyChecks.nth(1).uncheck();
+      assert.equal(await details.getByRole('button', { name: /Send 1 comment/ }).count(), 1);
+      await details.locator('#activity-refresh').click();
+      assert.equal(await readyChecks.nth(1).isChecked(), false, 'comment refresh selected a comment the user unchecked');
+      assert.equal(await details.getByRole('button', { name: /Send 1 comment/ }).count(), 1);
+      await readyChecks.nth(1).check();
+      await details.getByRole('button', { name: /Send 2 comments/ }).click();
+      assert.equal(await page.locator('#activity-log').textContent(), 'send-ready:human-followup,new-comment');
+      await details.waitFor({ state: 'hidden' });
+      assert.deepEqual(errors, []);
+      await page.close();
+    });
+
+    await t('the plane shows a red dot for failed delivery and fits a phone', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(`${base}/?view=activity&failed=1&unread=0`);
+      const plane = page.locator('#tdoc-send-agent-btn');
+      await plane.waitFor();
+      assert.match(await plane.getAttribute('title'), /1 not delivered/);
+      assert.equal(await plane.locator('.tdoc-send-agent-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(22, 82, 240)');
+      await plane.click();
+      const details = page.getByRole('dialog', { name: 'Agent activity' });
+      await details.locator('.tdoc-handoff-details-state.is-failed').waitFor();
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-details-phone.png') });
+      const failedRow = details.locator('.tdoc-handoff-details-row').filter({ hasText: 'Add a conclusion to the report' });
+      await failedRow.getByRole('button', { name: 'Details' }).click();
+      assert.match(await failedRow.locator('.tdoc-handoff-details-history').textContent(), /Delivery failed: Raft refused/);
+      await failedRow.getByRole('button', { name: 'Send to another agent' }).click();
+      assert.equal(await page.locator('#activity-log').textContent(), 'elsewhere:failed');
+      assert.deepEqual(errors, []);
+      await page.close();
+    });
+
+    await t('a mixed team batch does not offer a resend that the server will reject', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      await page.goto(`${base}/?view=activity&failed=1&mixed=1`);
+      await page.locator('#tdoc-send-agent-btn').click();
+      const row = page.locator('.tdoc-handoff-details-row').filter({ hasText: 'Add a conclusion to the report' });
+      await row.waitFor();
+      assert.equal(await row.getByRole('button', { name: 'Resend' }).count(), 0);
+      await row.getByRole('button', { name: 'Details' }).click();
+      assert.equal(await row.getByRole('button', { name: 'Send to another agent' }).count(), 1);
+      await page.close();
+    });
+
+    await t('collapsed pins show private corner markers, unread dots and hover focus without breaking clusters', async () => {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+      await page.goto(`${base}/?view=pins&viewer=julie&hover=question`);
+      const pin = (id) => page.locator(`.tdoc-pin[data-id="${id}"]`);
+      assert.equal(await pin('question').locator('.tdoc-pin-handoff-badge').textContent(), '❓');
+      assert.equal(await pin('partial').locator('.tdoc-pin-handoff-badge').textContent(), '🟡');
+      assert.equal(await pin('resolved').locator('.tdoc-pin-handoff-badge').textContent(), '✅');
+      assert.equal(await pin('failed').locator('.tdoc-pin-handoff-badge').textContent(), '⚠');
+      assert.match(await pin('picked').getAttribute('class'), /is-waiting-handoff/);
+      assert.equal(await pin('question').locator('.tdoc-pin-unread-dot').count(), 1);
+      assert.match(await pin('question').getAttribute('class'), /tdoc-pin-anchor-hover/);
+      assert.equal((await page.locator('.tdoc-pin-cluster').textContent()).trim(), '2');
+      assert.equal(await page.locator('.tdoc-pin-cluster .tdoc-pin-handoff-badge').count(), 0);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-pins-desktop.png') });
+      await page.goto(`${base}/?view=pins&viewer=other`);
+      assert.equal(await page.locator('.tdoc-pin-handoff-badge, .tdoc-pin-unread-dot, .is-waiting-handoff').count(), 0);
+      assert.doesNotMatch(await pin('resolved').getAttribute('class'), /tdoc-pin-resolved/);
+      await page.goto(`${base}/?view=pins&viewer=owner`);
+      assert.equal(await pin('question').locator('.tdoc-pin-handoff-badge').textContent(), '❓');
+      await page.close();
+    });
+
+    await t('a quiet handoff pin becomes a warning when its response window passes', async () => {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+      await page.clock.install({ time: new Date('2026-10-25T09:00:00Z') });
+      await page.goto(`${base}/?view=pins&near-stale=1`);
+      const pin = page.locator('.tdoc-pin[data-id="near-stale"]');
+      await pin.waitFor();
+      assert.match(await pin.getAttribute('class'), /is-waiting-handoff/);
+      assert.equal(await pin.locator('.tdoc-pin-handoff-badge').count(), 0);
+      await page.clock.runFor(30000);
+      await pin.locator('.tdoc-pin-handoff-badge.is-warning').waitFor();
+      assert.equal(await pin.locator('.tdoc-pin-handoff-badge').textContent(), '⚠');
+      await page.close();
+    });
+
+    await t('mobile FAB stays an icon with no open comments and offers compose in the empty drawer', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(`${base}/?view=mobile-fab&state=active`);
+      const fab = page.locator('.tdoc-fab');
+      await fab.waitFor();
+      assert.equal((await fab.textContent()).trim(), '2');
+      assert.equal(await fab.locator('.tdoc-fab-unread-dot').count(), 1);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-fab-active.png') });
+      await fab.click();
+      await page.locator('#tdoc-comment-layer').waitFor();
+      await page.goto(`${base}/?view=mobile-fab&state=resolved`);
+      await fab.waitFor();
+      assert.equal((await fab.textContent()).trim(), '');
+      assert.equal(await fab.locator('#tdoc-fab-count').count(), 0);
+      assert.equal(await fab.locator('.tdoc-fab-unread-dot').count(), 0);
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-fab-zero.png') });
+      await fab.click();
+      await page.locator('#tdoc-comment-layer [data-comment-id="resolved"]').waitFor();
+      await page.goto(`${base}/?view=mobile-fab&state=empty`);
+      await fab.waitFor();
+      assert.equal((await fab.textContent()).trim(), '');
+      await fab.click();
+      const empty = page.locator('.tdoc-drawer-empty');
+      await empty.getByRole('button', { name: 'Leave a comment', exact: true }).waitFor();
+      await empty.getByRole('button', { name: 'Ask AI', exact: true }).waitFor();
+      if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-drawer-empty.png') });
+      await empty.getByRole('button', { name: 'Leave a comment', exact: true }).click();
+      await page.locator('.tdoc-popup').getByText('On this document').waitFor();
+      await page.locator('.tdoc-popup textarea').fill('Please clarify the pricing');
+      await page.locator('.tdoc-popup').getByRole('button', { name: 'Comment', exact: true }).click();
+      assert.deepEqual(JSON.parse(await page.locator('#mobile-comment-log').textContent()), { text: 'Please clarify the pricing', anchor: null });
+      await fab.click();
+      await page.locator('.tdoc-drawer-empty').getByRole('button', { name: 'Ask AI', exact: true }).click();
+      await page.locator('.tdoc-popup').getByText('On this document').waitFor();
+      assert.match(await page.locator('.tdoc-popup textarea').inputValue(), /tdoc AI/);
       assert.deepEqual(errors, []);
       await page.close();
     });

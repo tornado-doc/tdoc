@@ -167,15 +167,18 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(adminTargets.body.default.owner?.display === 'alice', `team owner ${JSON.stringify(adminTargets.body.default.owner)}`);
     const outsiderTargets = await call('/api/notify/targets?slug=plan', { cookie: dave });
     assert(outsiderTargets.status === 403 || outsiderTargets.status === 401, `outsider targets ${outsiderTargets.status}`);
-    const memberSend = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: ['c1'], recipient: local('bob-mac') } });
+    const adminComment = await call('/api/comments', { method: 'POST', cookie: alice, body: { slug: 'plan', version: 2, text: 'Admin request', anchor: null } });
+    const memberComment = await call('/api/comments', { method: 'POST', cookie: bob, body: { slug: 'plan', version: 2, text: 'Member request', anchor: null } });
+    assert(adminComment.status === 200 && memberComment.status === 200, 'team comments created');
+    const memberSend = await call('/api/notify/handoff', { method: 'POST', cookie: bob, body: { slug: 'plan', comment_ids: [memberComment.body.id], recipient: local('bob-mac') } });
     // Refused either way: a member's own agent is not the team's, and the doc's
     // latest version is not the team agent's (agentEditPolicy).
     assert(memberSend.status === 403 && ['team_agent_admin_only', 'team_agent_not_writer'].includes(memberSend.body.error), `member handoff ${memberSend.status} ${JSON.stringify(memberSend.body)}`);
-    const raftSend = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: ['c1'], recipient: raft } });
+    const raftSend = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: [adminComment.body.id], recipient: raft } });
     assert(raftSend.status === 200 && raftSend.body.handoff_id, `raft handoff ${raftSend.status} ${JSON.stringify(raftSend.body)}`);
     const raftRecord = (JSON.parse(await env.META.get('handoffs:plan')) || []).find((h) => h.handoff_id === raftSend.body.handoff_id);
     assert(raftRecord?.by === 'acct-alice' && raftRecord?.recipient?.provider === 'raft', `team Raft handoff stays bound to its admin ${JSON.stringify(raftRecord)}`);
-    const sent = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: ['c1'], recipient: local('alice-mac') } });
+    const sent = await call('/api/notify/handoff', { method: 'POST', cookie: alice, body: { slug: 'plan', comment_ids: [adminComment.body.id], recipient: local('alice-mac') } });
     assert(sent.status === 200 && sent.body.delivery.status === 'queued', `admin handoff ${sent.status} ${JSON.stringify(sent.body)}`);
     assert(!JSON.parse(await env.META.get('meta:plan')).notify_agents, 'an admin daemon is not stored as a shared team-doc agent');
     const pending = JSON.parse(await env.META.get('local-pending:acct-alice') || '[]');

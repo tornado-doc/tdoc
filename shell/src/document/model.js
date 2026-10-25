@@ -41,6 +41,7 @@ export function avatarFor(author) {
 }
 
 export function anchorFromSelection(selection) {
+  if (selection.kind === 'document') return null;
   if (selection.kind === 'element') {
     return {
       kind: 'element',
