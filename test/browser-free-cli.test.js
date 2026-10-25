@@ -85,9 +85,10 @@ const env = {
     console.log('  ✓ clean skill doctor requires no browser installation');
 
     const input = path.join(temp, 'input.html');
+    const previewPath = path.join(root, 'authoring/preview-card.svg');
     const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:white}</style></head><body><div class="wrap"><h1>Browser-free document</h1><p>Keep my content.</p></div></body></html>';
     fs.writeFileSync(input, html);
-    const args = ['--slug', 'sample', '--title', 'Sample', '--no-server', '--quiet', '--html-file', input];
+    const args = ['--slug', 'sample', '--title', 'Sample', '--no-server', '--quiet', '--html-file', input, '--preview-file', previewPath];
     result = await run('tdoc-write', args);
     assert.equal(result.code, 0, result.stderr);
     const doc = path.join(docs, 'sample');
@@ -95,6 +96,13 @@ const env = {
     fs.writeFileSync(path.join(doc, 'comments.json'), comments);
     const before = ['v1/index.html', 'meta.json', 'comments.json'].map(f => fs.readFileSync(path.join(doc, f), 'utf8'));
     assert(before[0].includes('id="tdoc-reader"'));
+    assert.equal(fs.readFileSync(path.join(doc, 'v1/preview.svg'), 'utf8'), fs.readFileSync(previewPath, 'utf8'));
+    const badPreview = path.join(temp, 'bad-preview.svg');
+    fs.writeFileSync(badPreview, '<svg width="1200" height="630"><text>broken</svg>');
+    const rejectedPreview = await run('tdoc-write', [...args, '--preview-file', badPreview, '--force']);
+    assert.notEqual(rejectedPreview.code, 0);
+    assert.match(rejectedPreview.stderr, /invalid_preview_dimensions/, 'CLI names the preview validation failure');
+    assert.equal(fs.readFileSync(path.join(doc, 'v1/index.html'), 'utf8'), before[0]);
     fs.writeFileSync(input, html.replace('</body>', '<footer>Not allowed</footer></body>'));
     for (const flags of [['--force'], ['--version', 'next']]) {
       result = await run('tdoc-write', [...args, ...flags]);
@@ -133,6 +141,7 @@ const env = {
     const latest = uploads.find(u => Number(u.version) === 2);
     assert(latest, 'latest version must reach the upload endpoint');
     assert.equal(latest.html, baked);
+    assert.equal(latest.preview_svg, fs.readFileSync(previewPath, 'utf8'));
     assert.equal(latest.meta.access.visibility, 'private');
     assert.equal(latest.meta.access.history_visibility, 'owner');
     assert(!/layout check|playwright|chromium/i.test(result.stderr));

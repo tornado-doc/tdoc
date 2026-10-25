@@ -356,7 +356,7 @@ async function seedPins(env, accountId, pins, extra = {}) {
     const metaAfter = JSON.parse(await env.META.get('meta:sam-open'));
     assert(metaAfter.preview && /^Opening paragraph/.test(metaAfter.preview.excerpt),
       `preview lead without h1: ${JSON.stringify(metaAfter.preview)}`);
-    assert(metaAfter.preview.image === 'https://example.com/sam-open.png', 'first graphic cached');
+    assert(metaAfter.preview.image === '/tdoc_logo-v2.png', 'neutral fallback when test harness omits renderer');
 
     const page = await worker.fetch(req('/@sam'), env, {});
     assert(page.status === 200, `/@sam ${page.status}`);
@@ -364,10 +364,10 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(boot.page === 'profile' && boot.handle === 'sam', 'claimed profile boot');
     assert(boot.docs.map((d) => d.slug).join(',') === 'sam-open', `docs ${JSON.stringify(boot.docs)}`);
     assert(/Opening paragraph/.test(boot.docs[0].excerpt || ''), 'boot carries excerpt from meta');
-    assert(boot.docs[0].image === 'https://example.com/sam-open.png', 'boot carries first graphic');
+    assert(boot.docs[0].image === '', 'no card yet: text-only, no placeholder');
   });
 
-  await t('/@ backfills preview onto old pins missing meta.preview', async () => {
+  await t('/@ shows a placeholder for old pins without generating a preview', async () => {
     const env = makeEnv(mod.CommentsStore);
     const accountId = await seedAccount(env, 'backfill', 'acct-backfill');
     await seedDoc(env, 'old-pin', {
@@ -393,11 +393,10 @@ async function seedPins(env, accountId, pins, extra = {}) {
     assert(page.status === 200, `/@backfill ${page.status}`);
     const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
     assert(boot.docs.length === 1 && boot.docs[0].slug === 'old-pin', JSON.stringify(boot.docs));
-    assert(/Opening paragraph/.test(boot.docs[0].excerpt || ''),
-      `backfilled excerpt: ${JSON.stringify(boot.docs[0])}`);
-    assert(boot.docs[0].image === 'https://example.com/old-pin.png', 'backfilled image');
+    assert(boot.docs[0].excerpt === '', 'no document read on profile page');
+    assert(boot.docs[0].image === '', 'old pin: text-only, no placeholder');
     const metaAfter = JSON.parse(await env.META.get('meta:old-pin'));
-    assert(metaAfter.preview && metaAfter.preview.excerpt, 'preview persisted on meta');
+    assert(!metaAfter.preview, 'profile read does not mutate meta');
   });
 
   await t('curate forces public; take-down restores prior visibility', async () => {

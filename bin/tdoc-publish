@@ -84,13 +84,13 @@ json_get() {
 }
 json_str() { node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$1"; }
 
-# build_payload <slug> <version> <html-file> <meta-file> <widgets-json> [comments-file]
+# build_payload <slug> <version> <html-file> <meta-file> <widgets-json> [comments-file] [preview-file]
 # Node reads the files itself: an entire HTML document, images and all, never
 # has to survive a shell round trip.
 build_payload() {
   node -e '
     const fs = require("fs");
-    const [slug, version, htmlPath, metaPath, widgetsJson, commentsPath] = process.argv.slice(1);
+    const [slug, version, htmlPath, metaPath, widgetsJson, commentsPath, previewPath] = process.argv.slice(1);
     const out = {
       slug,
       version: Number(version),
@@ -98,6 +98,11 @@ build_payload() {
       meta: JSON.parse(fs.readFileSync(metaPath, "utf8")),
     };
     if (commentsPath) out.comments = JSON.parse(fs.readFileSync(commentsPath, "utf8"));
+    if (previewPath) {
+      const svg = fs.readFileSync(previewPath, "utf8");
+      if (Buffer.byteLength(svg) > 128 * 1024) throw new Error("preview.svg exceeds 128 KB");
+      out.preview_svg = svg;
+    }
     // Where a NEW doc should land. Only an agent connection limited to some
     // workspaces reads these (it files the doc there at once); any other
     // credential publishes to My docs and the move below places it. --team
@@ -107,7 +112,7 @@ build_payload() {
     const widgets = JSON.parse(widgetsJson || "{}");
     if (Object.keys(widgets).length) out.widgets = widgets;
     process.stdout.write(JSON.stringify(out));
-  ' "$1" "$2" "$3" "$4" "$5" "${6:-}"
+  ' "$1" "$2" "$3" "$4" "$5" "${6:-}" "${7:-}"
 }
 
 PLATFORM_FLAG="${TDOC_PLATFORM:-}"
@@ -333,6 +338,37 @@ require_wrangler() {
   if ! command -v wrangler >/dev/null 2>&1; then
     fail_with_agent_prompt "wrangler is not installed" \
       "Install Cloudflare wrangler globally so tdoc can publish: run 'npm i -g wrangler' (or 'pnpm add -g wrangler'). After it's installed, run '/tdoc publish --platform cloudflare $SLUG' again."
+  fi
+}
+ensure_preview_queue_config() {
+  local cfg="$WORKER_DIR/wrangler.toml"
+  [ -f "$cfg" ] || return 0
+  if (cd "$WORKER_DIR" &&
+      { wrangler queues create tdoc-previews >/dev/null 2>&1 || wrangler queues info tdoc-previews >/dev/null 2>&1; } &&
+      { wrangler queues create tdoc-previews-dlq >/dev/null 2>&1 || wrangler queues info tdoc-previews-dlq >/dev/null 2>&1; }); then
+    if ! grep -q '^binding = "PREVIEW_QUEUE"' "$cfg"; then
+      cat >> "$cfg" <<'TDOC_PREVIEW_QUEUE'
+
+# BEGIN PREVIEW_QUEUE
+[[queues.producers]]
+binding = "PREVIEW_QUEUE"
+queue = "tdoc-previews"
+
+[[queues.consumers]]
+queue = "tdoc-previews"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 2
+dead_letter_queue = "tdoc-previews-dlq"
+# END PREVIEW_QUEUE
+TDOC_PREVIEW_QUEUE
+    fi
+  elif grep -q '^# BEGIN PREVIEW_QUEUE$' "$cfg"; then
+    # A free or restricted Cloudflare account may not have Queues. Keep
+    # publishing available; the Worker serves its static logo as the card.
+    awk '/^# BEGIN PREVIEW_QUEUE$/ {skip=1; next} /^# END PREVIEW_QUEUE$/ {skip=0; next} !skip {print}' "$cfg" > "$cfg.tmp" \
+      && mv "$cfg.tmp" "$cfg"
+    echo '[tdoc] preview queue unavailable; publish continues with the logo card' >&2
   fi
 }
 require_vercel() {
@@ -1044,25 +1080,21 @@ bundle_worker() {
 }
 
 worker_bundle_sha() {
-  node -e '
-    const fs = require("fs");
-    const path = require("path");
-    const crypto = require("crypto");
-    const skill = process.env.SKILL_DIR;
-    const worker = fs.readFileSync(path.join(skill, "worker/worker.js"), "utf8");
-    const overlay = fs.readFileSync(path.join(skill, "server/overlay.js"), "utf8");
-    process.stdout.write(crypto.createHash("sha256").update(worker + "\0" + overlay).digest("hex"));
-  '
+  bundle_worker >/dev/null
+  cat "$WORKER_DIR/_worker.bundled.sha256"
 }
 
 vercel_bundle_sha() {
+  TDOC_BUNDLE_PLATFORM=vercel bundle_worker "$VERCEL_APP_DIR" >/dev/null
   node -e '
     const fs = require("fs");
     const path = require("path");
     const crypto = require("crypto");
     const skill = process.env.SKILL_DIR;
+    const app = process.argv[1];
     const h = crypto.createHash("sha256");
-    for (const rel of ["worker/worker.js", "server/overlay.js", "shared/github-oauth.js"]) {
+    h.update(fs.readFileSync(path.join(app, "_worker.bundled.sha256")));
+    for (const rel of ["shared/github-oauth.js"]) {
       h.update(rel); h.update("\0"); h.update(fs.readFileSync(path.join(skill, rel))); h.update("\0");
     }
     const dir = path.join(skill, "vercel");
@@ -1079,7 +1111,7 @@ vercel_bundle_sha() {
     };
     walk(dir);
     process.stdout.write(h.digest("hex"));
-  '
+  ' "$VERCEL_APP_DIR"
 }
 
 first_time_setup() {
@@ -1194,6 +1226,7 @@ first_time_setup() {
     -e "s/PLACEHOLDER_KV_ID/${kv_id}/g" \
     -e "s/PLACEHOLDER_OWNER/${owner_login}/g" \
     "$WORKER_DIR/wrangler.toml.template" > "$WORKER_DIR/wrangler.toml"
+  ensure_preview_queue_config
 
   # 7. bundle + deploy
   SKILL_DIR="$SKILL_DIR" bundle_worker
@@ -1255,7 +1288,7 @@ sync_vercel_app() {
   # a ../../shared hop (vercel-app is outside the skill checkout).
   cp "$SKILL_DIR/shared/github-oauth.js" "$VERCEL_APP_DIR/lib/github-oauth.js"
   cp "$SKILL_DIR/vercel/vercel.json" "$SKILL_DIR/vercel/package.json" "$VERCEL_APP_DIR/"
-  SKILL_DIR="$SKILL_DIR" bundle_worker "$VERCEL_APP_DIR"
+  TDOC_BUNDLE_PLATFORM=vercel SKILL_DIR="$SKILL_DIR" bundle_worker "$VERCEL_APP_DIR"
 }
 
 # Deploy $VERCEL_APP_DIR to production. Prints the deployment URL on stdout
@@ -1525,6 +1558,27 @@ else
           echo "[tdoc] updated GITHUB_CLIENT_ID to org OAuth SoT ($_gh)"
         fi
       fi
+      # Existing self-hosted installs keep their wrangler.toml. Teach those
+      # installs the binary module types before the new bundle is deployed.
+      if [ -f "$WORKER_DIR/wrangler.toml" ] && ! grep -q 'type = "CompiledWasm"' "$WORKER_DIR/wrangler.toml"; then
+        cat >> "$WORKER_DIR/wrangler.toml" <<'TDOCRULES'
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+TDOCRULES
+      fi
+      if [ -f "$WORKER_DIR/wrangler.toml" ] && ! grep -q 'type = "Data"' "$WORKER_DIR/wrangler.toml"; then
+        cat >> "$WORKER_DIR/wrangler.toml" <<'TDOCRULES'
+
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true
+TDOCRULES
+      fi
+      ensure_preview_queue_config
       SKILL_DIR="$SKILL_DIR" bundle_worker
       (cd "$WORKER_DIR" && wrangler deploy)
       jq --arg sha "$DESIRED_BUNDLE_SHA" '.worker_bundle_sha256 = $sha' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" \
@@ -1623,6 +1677,8 @@ upload_version() {
   # comments) and the merge is idempotent, so sending them on each version
   # upload is safe. Default to [] when there's no local comments.json.
   local comments_file="$DOC_DIR/comments.json"
+  local preview_file="$DOC_DIR/v${v}/preview.svg"
+  [ -f "$preview_file" ] || preview_file=""
   local payload
   local widgets_json="{}"
   local wdir="$DOC_DIR/v${v}/widgets"
@@ -1640,9 +1696,9 @@ upload_version() {
     done
   fi
   if [ -f "$comments_file" ] && node -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(Array.isArray(a)&&a.length?0:1)' "$comments_file" >/dev/null 2>&1; then
-    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json" "$comments_file")" || return 1
+    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json" "$comments_file" "$preview_file")" || return 1
   else
-    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json")" || return 1
+    payload="$(build_payload "$SLUG" "$v" "$html_path" "$META_FILE" "$widgets_json" "" "$preview_file")" || return 1
   fi
   # Pass the payload via a temp file, not an argument — docs with embedded
   # images exceed ARG_MAX as a curl argument (curl: Argument list too long).
@@ -1693,6 +1749,11 @@ upload_version() {
     [ "$(printf '%s' "$resp" | json_get scoped)" = "true" ] && UP_SCOPED=1
     UP_TEAM="$(printf '%s' "$resp" | json_get team)"
     merged="$(printf '%s' "$resp" | json_get mergedComments)"; merged="${merged:-0}"
+    local preview_warning
+    preview_warning="$(printf '%s' "$resp" | json_get preview_warning)"
+    if [ -n "$preview_warning" ] && [ "$preview_warning" != "null" ]; then
+      echo "[tdoc] preview.svg was rejected ($preview_warning); an automatic preview card was used" >&2
+    fi
     if [ "$merged" != "0" ] && [ "$merged" != "null" ]; then
       echo "[tdoc] v$v uploaded (${_sz:-?} bytes, +$merged local comment(s) merged)"
     else
