@@ -34,6 +34,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     }), env, {});
     assert(up.status === 200, `upload ${up.status}`);
     const reader = await putSession(env, 'reader');
+    env.__commentReaderCookie = reader;
     const posted = await worker.fetch(req('/api/comments', {
       method: 'POST', cookie: reader,
       body: { slug, version: 1, text: 'this is confusing', anchor: { kind: 'text', text: 'a sentence' } },
@@ -48,7 +49,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     method: 'POST', token, body: { slug, ...body },
   }), env, {});
   const listComments = async (env, slug) => {
-    const r = await worker.fetch(req(`/api/comments?slug=${slug}&version=1`), env, {});
+    const r = await worker.fetch(req(`/api/comments?slug=${slug}&version=1`, { cookie: env.__commentReaderCookie }), env, {});
     return r.json();
   };
 
@@ -357,11 +358,12 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       body: { slug: 'wire-doc', version: 1, html: '<h1>d</h1><p>a sentence to comment on</p>' },
     }), env, {});
     const reader = await putSession(env, 'reader');
+    env.__commentReaderCookie = reader;
     const c = await (await worker.fetch(req('/api/comments', {
       method: 'POST', cookie: reader,
       body: { slug: 'wire-doc', version: 1, text: 'x', anchor: { kind: 'text', text: 'a sentence' } },
     }), env, {})).json();
-    return { token: tok.token, commentId: c.id };
+    return { token: tok.token, commentId: c.id, reader };
   }
 
   await t('the access request is addressed by server SLUG, not id', async () => {
@@ -433,7 +435,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       assert(d.expires_at === '2026-10-14T10:00:00.000Z', `expires_at: ${d.expires_at}`);
       assert(d.deduped === false, `deduped: ${d.deduped}`);
       // The comment carries what the card needs: who, when, and the deadline.
-      const [c] = await (await worker.fetch(req('/api/comments?slug=wire-doc&version=1'), env, {})).json();
+      const [c] = await (await worker.fetch(req('/api/comments?slug=wire-doc&version=1', { cookie: env.__commentReaderCookie }), env, {})).json();
       assert(c.handoff_delivery.expires_at === '2026-10-14T10:00:00.000Z', `comment expires_at: ${JSON.stringify(c.handoff_delivery)}`);
       assert(c.handoff_delivery.at, 'comment carries the delivery time');
       assert(c.handoff_to && c.handoff_to.agent_name === 'xiaocc' && c.handoff_to.provider === 'raft', `handoff_to: ${JSON.stringify(c.handoff_to)}`);

@@ -37,6 +37,7 @@ function comment(partial) {
     shortCommentPreview,
     lastHumanAt,
     handoffWaitState,
+    handoffPinBadge,
     handoffWaitMinutes,
     HANDOFF_STALE_MS,
   } = await load();
@@ -203,6 +204,14 @@ function comment(partial) {
   assert.strictEqual(handoffWaitState(sent({ handoff_delivery: { status: 'failed', error: 'x' } }), SENT + 60 * 60 * 1000), 'failed');
   assert.strictEqual(handoffWaitState(comment(), SENT), 'ready');
   ok('other states pass through unchanged');
+
+  const twoAgentReplies = sent({ replies: [
+    { author: { kind: 'agent' }, created: '2026-01-01T01:02:00Z', agent_status: 'question' },
+    { author: { kind: 'agent' }, created: '2026-01-01T01:03:00Z', agent_status: 'applied' },
+  ] });
+  assert.strictEqual(handoffPinBadge(twoAgentReplies, SENT + 4 * 60 * 1000), 'done');
+  assert.strictEqual(handoffPinBadge({ ...twoAgentReplies, replies: [...twoAgentReplies.replies, { author: { kind: 'agent' }, created: '2026-01-01T01:04:00Z' }] }, SENT + 5 * 60 * 1000), null);
+  ok('pin marker uses only the latest agent reply verdict');
 
   console.log(`\n${pass} passed`);
 })().catch((e) => {

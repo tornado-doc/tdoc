@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { CommentIcon } from '../ui/comment-icon.jsx';
 import { Drawer } from '@base-ui/react/drawer';
@@ -8,17 +8,17 @@ import { canSeeHandoff, handoffPinBadge, handoffWaitState, isHandoffInFlight } f
 import { isThreadUnread } from './thread-seen.js';
 
 function Pin({
-  cluster, top, left, frameTop, commentsById, seenMap, currentUser, isOwner, hoveredAnchorId, onOpenComment, onOpenCluster,
+  cluster, top, left, frameTop, commentsById, seenMap, currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
 }) {
   const single = cluster.items.length === 1 ? cluster.items[0].comment : null;
   const resolved = single?.resolved
     || (!single && cluster.items.every((item) => item.comment.resolved));
   const live = single && commentsById ? commentsById.get(single.id) : null;
   const maySee = single && live && canSeeHandoff(live, currentUser, isOwner);
-  const handoff = maySee ? handoffWaitState(live) : null;
-  const badge = maySee ? handoffPinBadge(live) : null;
+  const handoff = maySee ? handoffWaitState(live, now) : null;
+  const badge = maySee ? handoffPinBadge(live, now) : null;
   const waiting = isHandoffInFlight(handoff);
-  const unread = maySee && !waiting && isThreadUnread(live, seenMap);
+  const unread = maySee && !waiting && isThreadUnread(live, seenMap, currentUser);
   const badgeText = { question: '❓', done: '✅', partial: '🟡', warning: '⚠' }[badge];
   const badgeLabel = { question: 'Agent asked you', done: 'Agent done', partial: 'Partially done', warning: 'Agent handoff needs attention' }[badge];
 
@@ -115,6 +115,11 @@ export function DesktopCommentLayer({
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
 
   return (
@@ -134,6 +139,7 @@ export function DesktopCommentLayer({
             currentUser={currentUser}
             isOwner={isOwner}
             hoveredAnchorId={hoveredAnchorId}
+            now={now}
             onOpenComment={onOpenComment}
             onOpenCluster={onOpenCluster}
           />

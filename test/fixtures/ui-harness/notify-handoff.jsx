@@ -82,14 +82,14 @@ function ActivityDemo() {
   const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)));
   const buckets = summarizeHandoffSurfaces(activityCards);
   const counts = Object.fromEntries(Object.entries(buckets).map(([state, items]) => [state, items.length]));
-  const unread = params.get('unread') === '0' ? 0 : activityCards.filter((card) => isThreadUnread(card, {})).length;
+  const unread = params.get('unread') === '0' ? 0 : activityCards.filter((card) => isThreadUnread(card, {}, 'julie')).length;
   return <>
     <div className="tdoc-bar" style={{ display: 'flex', alignItems: 'center', gap: phone ? 10 : 18, height: 48, padding: '0 16px', background: '#fff', borderBottom: '1px solid #e8e7e3' }}>
       <span>🌪</span><strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>RaftBench pricing plan</strong>
       <span style={{ flex: 1 }} />
       {!phone ? <span style={{ color: '#888' }}>Edited 2m ago</span> : null}
       <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen}>
-        <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={{}} onClose={() => setOpen(false)}
+        <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={{}} currentUser="julie" onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
           onSendElsewhere={(comment) => { setLog(`elsewhere:${comment.id}`); setOpen(false); }} />
         <button id="activity-refresh" type="button" onClick={() => setLog('refreshed')}>Refresh comments</button>
@@ -109,11 +109,16 @@ function ActivityDemo() {
 function PinDemo() {
   const viewer = params.get('viewer') || 'julie';
   const pins = ['question', 'partial', 'resolved', 'failed', 'picked', 'queued', 'local-queued'];
-  const byId = new Map(CARDS.map((card) => [card.id, card]));
+  const nearStale = params.has('near-stale') ? base('near-stale', {
+    handoff_at: iso(4 * MIN + 45000),
+    handoff_delivery: { status: 'delivered', at: iso(4 * MIN + 45000), expires_at: later(24 * 60 * MIN) },
+  }) : null;
+  const byId = new Map([...CARDS, ...(nearStale ? [nearStale] : [])].map((card) => [card.id, card]));
   const item = (id) => ({ comment: { id, resolved: byId.get(id).status === 'applied' } });
   const clusters = [
     ...pins.slice(0, 5).map((id, index) => ({ key: id, y: 50 + index * 58, items: [item(id)] })),
     { key: 'group', y: 360, items: [item('queued'), item('local-queued')] },
+    ...(nearStale ? [{ key: 'near-stale', y: 410, items: [item('near-stale')] }] : []),
   ];
   return <div id="tdoc-pin-layer" style={{ position: 'relative', height: 450, width: 180 }}>
     <DesktopCommentLayer clusters={clusters} commentsById={byId} seenMap={{}} frameScrollY={0} frameTop={0}

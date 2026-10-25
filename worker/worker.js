@@ -12625,6 +12625,32 @@ function withHandoffStatus(list, handoffs) {
   return list.map(c => ({ ...c, ...(byComment.get(c.id) || bare) }));
 }
 
+// Handoff routing and delivery are private to the commenter and the people
+// who manage this document. A public or team-readable comment can still be
+// read normally without exposing which agent was asked to handle it.
+const PRIVATE_HANDOFF_FIELDS = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to'];
+function maySeeCommentHandoff(env, gate, comment) {
+  if (gate.ownerToken || isDocOwnerSession(env, gate.session, gate.meta)) return true;
+  const author = String(comment && comment.author && comment.author.login || '').trim().toLowerCase();
+  return !!(author && actorKeys(gate.session).includes(author));
+}
+function redactCommentHandoffs(env, gate, comments) {
+  return comments.map((comment) => {
+    if (maySeeCommentHandoff(env, gate, comment)) return comment;
+    const copy = { ...comment };
+    for (const field of PRIVATE_HANDOFF_FIELDS) delete copy[field];
+    return copy;
+  });
+}
+
+async function ownCommentIds(env, slug, session) {
+  const keys = actorKeys(session);
+  if (!keys.length) return new Set();
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  return new Set(list.filter((comment) => keys.includes(String(comment?.author?.login || '').trim().toLowerCase())).map((comment) => comment.id));
+}
+
 async function mutateComments(env, slug, op) {
   let result;
   if (env.COMMENTS) {
@@ -17886,8 +17912,9 @@ const tdocHandlers = {
       // comment: the comment log stays a log of what people said, and "has
       // this been handed over" is a fact about the handoff, not the comment.
       const decorated = withHandoffStatus(live, await loadHandoffs(env, slug));
+      const visible = redactCommentHandoffs(env, gate, decorated);
       const linked = V !== 'all' && hostedRegistrationEnabled(env, url.origin)
-        ? await withCommentProfileLinks(env, decorated) : decorated;
+        ? await withCommentProfileLinks(env, visible) : visible;
       return json(await redactCommentEmails(linked, await emailPrivacyFor(env, gate.session, slug, gate.meta)));
     }
 
@@ -18530,7 +18557,25 @@ const tdocHandlers = {
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
-      return json({ handoffs: (await loadHandoffs(env, slug)).slice(0, limit) });
+      let handoffs = await loadHandoffs(env, slug);
+      if (gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && gate.actor?.kind === 'team_member') {
+        const own = await ownCommentIds(env, slug, gate.session);
+        handoffs = handoffs.flatMap((handoff) => {
+          const commentIds = (handoff.comment_ids || []).filter((id) => own.has(id));
+          if (!commentIds.length) return [];
+          const ids = new Set(commentIds);
+          return [{
+            ...handoff,
+            comment_ids: commentIds,
+            resolved_ids: (handoff.resolved_ids || []).filter((id) => ids.has(id)),
+            // A batch instruction can describe somebody else's comments.
+            instruction: '',
+            by: undefined,
+            sent_by: undefined,
+          }];
+        });
+      }
+      return json({ handoffs: handoffs.slice(0, limit) });
     }
 
     if (p === '/api/notify/handoff' && method === 'POST') {
@@ -18542,6 +18587,10 @@ const tdocHandlers = {
       if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
+      if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
+        const own = await ownCommentIds(env, slug, gate.session);
+        if (ids.some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
+      }
       // Threads whose last word is already an agent's are the person's turn:
       // handing them off again only made the agent answer itself. Drop them
       // here, whatever the client sent.

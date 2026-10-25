@@ -987,11 +987,15 @@ export function DocumentShell({ boot, config }) {
   };
   // Badge + send panel = comments ready to hand off (never sent, or human
   // wrote again after the last handoff). Not "open" and not "sent".
-  const handoffBuckets = useMemo(
-    () => summarizeHandoffSurfaces(comments.comments),
-    [comments.comments],
+  const visibleHandoffComments = useMemo(
+    () => comments.comments.filter((comment) => canSeeHandoff(comment, config.identity?.login || 'anon', Boolean(config.isOwner))),
+    [comments.comments, config.identity?.login, config.isOwner],
   );
-  const unreadAgentReplies = comments.comments.filter((comment) => isThreadUnread(comment, seenMap)).length;
+  const handoffBuckets = useMemo(
+    () => summarizeHandoffSurfaces(visibleHandoffComments),
+    [visibleHandoffComments],
+  );
+  const unreadAgentReplies = visibleHandoffComments.filter((comment) => isThreadUnread(comment, seenMap, config.identity?.login)).length;
   const openDocNotify = (selectedIds = handoffBuckets.ready.map((c) => c.id)) => {
     setHandoffDetailsOpen(false);
     openNotifyPanel(selectedIds);
@@ -1371,7 +1375,7 @@ export function DocumentShell({ boot, config }) {
   const openCount = comments.comments.length - resolvedCount;
   const mobileUnread = comments.comments.some((comment) => (
     canSeeHandoff(comment, config.identity?.login || 'anon', Boolean(config.isOwner))
-    && isThreadUnread(comment, seenMap)
+    && isThreadUnread(comment, seenMap, config.identity?.login)
   ));
   const startDocumentComment = (askAi = false) => {
     if (!config.canComment) { if (config.signInToComment) signIn(); return; }
@@ -1458,7 +1462,8 @@ export function DocumentShell({ boot, config }) {
                 <HandoffDetailsPanel
                   slug={config.slug}
                   open={handoffDetailsOpen}
-                  comments={comments.comments}
+                  comments={visibleHandoffComments}
+                  currentUser={config.identity?.login || 'anon'}
                   seenMap={seenMap}
                   onClose={() => setHandoffDetailsOpen(false)}
                   onSendReady={openDocNotify}
