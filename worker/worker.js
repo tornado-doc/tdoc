@@ -17526,7 +17526,7 @@ const tdocHandlers = {
         if (body.action === 'default') {
           const target = local.find(t => t.device === body.device && t.cli === body.cli);
           let ready = []; try { ready = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${body.device}`)) || []; } catch {}
-          if (!target || !ready.includes(body.cli) || withLocalSeen(target, seen, paused).status !== 'active') return json({ error: 'computer_not_ready' }, { status: 409 });
+          if (!target || !Array.isArray(ready) || !ready.includes(body.cli) || withLocalSeen(target, seen, paused).status !== 'active') return json({ error: 'computer_not_ready' }, { status: 409 });
           await env.META.put(`account-notify:${accountId}`, JSON.stringify([target, ...targets.filter(t => !sameNotifyTarget(t, target))]));
           return json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
         }
@@ -17535,6 +17535,7 @@ const tdocHandlers = {
       const computers = [];
       for (const device of devices) {
         let ready = []; try { ready = JSON.parse(await env.META.get(`local-agent-ready:${accountId}:${device}`)) || []; } catch {}
+        if (!Array.isArray(ready)) ready = [];
         const record = inventory[device] || {};
         const runtimes = (record.runtimes || local.filter(t => t.device === device).map(t => ({ cli: t.cli, state: ready.includes(t.cli) ? 'ready' : 'needs_check' })))
           .map(r => ({ ...r, state: r.state === 'ready' && (!ready.includes(r.cli) || !local.some(t => t.device === device && t.cli === r.cli)) ? 'needs_check' : r.state }));
