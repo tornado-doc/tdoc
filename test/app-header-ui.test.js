@@ -188,6 +188,9 @@ async function startServer(worker, env) {
         assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '<script src="https://tdoc.dev/feedback.js"></script>');
         await pill.click();
         await page.locator('#coach .coach-copy').waitFor();
+        // The curve is positioned by an effect after the coach mounts.
+        // Wait for the drawn path, then keep the geometry assertion below.
+        await page.locator('#coach path').last().waitFor();
         assert.match(await page.locator('#coach path').last().getAttribute('d'), /^M [\d.]+ [\d.]+ C /);
         await page.keyboard.press('Escape');
         assert.equal(await page.locator('#coach').count(), 0, 'Escape closes the coach');
