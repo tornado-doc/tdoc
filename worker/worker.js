@@ -3874,6 +3874,74 @@ function oidcConfig(env) {
   return oidcProvider(env, 'oidc');
 }
 
+// PR aliases are separate cookie hosts. Clerk knows only this stable callback;
+// a short-lived ticket moves the resulting preview session to the exact PR
+// alias that started the sign-in. Production never enters this path.
+const PREVIEW_AUTH_ORIGIN = 'https://tdoc-preview.jyshi1107.workers.dev';
+const PREVIEW_ALIAS_HOST = /^pr-[1-9]\d*-tdoc-preview\.jyshi1107\.workers\.dev$/;
+const PREVIEW_AUTH_TICKET_TTL = 60;
+const PREVIEW_SESSION_TTL = 14 * 24 * 60 * 60;
+const PREVIEW_LOGIN_COOKIE = 'tdoc_preview_login';
+function safePreviewPath(target) {
+  const path = target.pathname + target.search;
+  return sanitizeReturn(path) === path && !/^\/(?:\/|\\|%2f|%5c)/i.test(path) ? path : null;
+}
+function previewAliasTarget(raw) {
+  if (typeof raw !== 'string' || !/^https:\/\/pr-[1-9]\d*-tdoc-preview\.jyshi1107\.workers\.dev\//.test(raw)) return null;
+  let target;
+  try { target = new URL(raw); } catch { return null; }
+  if (target.protocol !== 'https:' || !PREVIEW_ALIAS_HOST.test(target.hostname)
+      || target.port || target.username || target.password || target.hash || !safePreviewPath(target)) return null;
+  return target.toString();
+}
+function previewAuthEnabled(env, url) {
+  return env.TDOC_PREVIEW === '1' && url.origin === PREVIEW_AUTH_ORIGIN;
+}
+async function claimPreviewAuthTicket(env, req, url) {
+  if (env.TDOC_PREVIEW !== '1' || !PREVIEW_ALIAS_HOST.test(url.hostname) || url.protocol !== 'https:') {
+    return text('Not found', { status: 404 });
+  }
+  const ticket = url.searchParams.get('ticket') || '';
+  if (!/^[a-f0-9]{48}$/.test(ticket)) return authStatusResponse('Invalid sign-in ticket. Try again.', { error: true, status: 400 });
+  const key = `preview-auth-ticket:${ticket}`;
+  let raw = null;
+  for (let attempt = 0; attempt < 3 && !raw; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    raw = await env.META.get(key);
+  }
+  if (!raw) return authStatusResponse('Sign-in ticket expired. Try again.', { error: true, status: 410 });
+  let record;
+  try { record = JSON.parse(raw); } catch { return authStatusResponse('Invalid sign-in ticket. Try again.', { error: true, status: 400 }); }
+  const target = previewAliasTarget(record && record.target);
+  if (!target || new URL(target).origin !== url.origin) {
+    return authStatusResponse('This sign-in ticket belongs to another preview.', { error: true, status: 403 });
+  }
+  const browserNonce = ((req.headers.get('cookie') || '').match(new RegExp(`(?:^|;\\s*)${PREVIEW_LOGIN_COOKIE}=([a-f0-9]{48})(?:;|$)`)) || [])[1];
+  if (!browserNonce || !/^[a-f0-9]{64}$/.test(record.bindHash || '')
+      || !await timingSafeEqual(await sha256Hex(browserNonce), record.bindHash)) {
+    return authStatusResponse('This sign-in was started in another browser. Try again here.', { error: true, status: 403 });
+  }
+  if (!record || !Number.isFinite(record.expiresAt) || Date.now() >= record.expiresAt
+      || !/^[a-f0-9]{48}$/.test(record.sid || '')
+      || !await env.META.get(`session:${record.sid}`)) {
+    await env.META.delete(key);
+    return authStatusResponse('Sign-in ticket expired. Try again.', { error: true, status: 410 });
+  }
+  const destination = new URL(target);
+  const path = safePreviewPath(destination);
+  if (!path) return authStatusResponse('Invalid preview sign-in target.', { error: true, status: 400 });
+  // Workers KV has no atomic consume. The browser-bound nonce means a leaked
+  // ticket alone cannot be replayed, and sequential claims are single-use.
+  await env.META.delete(key);
+  const response = redirectTo(path, [
+    `tdoc_sid=${record.sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${PREVIEW_SESSION_TTL}`,
+    `${PREVIEW_LOGIN_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+  ]);
+  response.headers.set('Cache-Control', 'no-store');
+  response.headers.set('Referrer-Policy', 'no-referrer');
+  return response;
+}
+
 // Per-isolate discovery cache, per issuer. Discovery is static config on the
 // issuer's side; refetching it per sign-in would add a round trip for nothing.
 const OIDC_DISCOVERY = new Map();
@@ -3894,7 +3962,10 @@ async function oidcDiscovery(cfg) {
 
 // The generic seat's sign-in: a verified email resolves (never mints) an
 // account and becomes a session.
-async function completeEmailSignIn(env, { user, ret, clearState }) {
+async function completeEmailSignIn(env, { user, ret, clearState, previewTarget = null, previewBindHash = null }) {
+  if (previewTarget && !/^[a-f0-9]{64}$/.test(previewBindHash || '')) {
+    return authStatusResponse('Invalid preview sign-in binding. Try again.', { error: true, status: 400 });
+  }
   const email = normalizeEmail(user && user.email);
   // Verified only — the account-takeover rule, same as everywhere else.
   if (!email || user.email_verified !== true) {
@@ -4124,7 +4195,20 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
     ...(ghHandle ? { login: ghHandle } : {}),
     ...(githubId ? { github_id: githubId } : {}),
   };
-  await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+  await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: previewTarget ? PREVIEW_SESSION_TTL : 60 * 60 * 24 * 30 });
+  if (previewTarget) {
+    const ticket = rand(24);
+    await env.META.put(`preview-auth-ticket:${ticket}`, JSON.stringify({
+      sid, target: previewTarget, bindHash: previewBindHash,
+      expiresAt: Date.now() + PREVIEW_AUTH_TICKET_TTL * 1000,
+    }), { expirationTtl: PREVIEW_AUTH_TICKET_TTL });
+    const claim = new URL('/auth/preview/claim', previewTarget);
+    claim.searchParams.set('ticket', ticket);
+    const response = redirectTo(claim.toString(), [clearState]);
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('Referrer-Policy', 'no-referrer');
+    return response;
+  }
   return redirectTo(ret, [
     `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
     clearState,
@@ -17166,14 +17250,37 @@ const tdocHandlers = {
 
     // OIDC sign-in, one pair of routes for every registered provider
     // (OIDC_PROVIDERS). GitHub keeps its own first-party flow above.
+    if (method === 'GET' && p === '/auth/preview/claim') {
+      return claimPreviewAuthTicket(env, req, url);
+    }
     const oidcLoginMatch = method === 'GET' && p.match(OIDC_LOGIN_ROUTE);
     if (oidcLoginMatch) {
       const cfg = oidcProvider(env, oidcLoginMatch[1]);
       if (!cfg) return redirectTo('/?notice=signin');
-      const notice = cfg.id === 'oidc' ? switchAccountNotice(env, req, url) : null;
+      if (env.TDOC_PREVIEW === '1' && cfg.id === 'oidc' && PREVIEW_ALIAS_HOST.test(url.hostname)) {
+        const target = previewAliasTarget(`${url.origin}${sanitizeReturn(url.searchParams.get('return'))}`);
+        if (!target) return authStatusResponse('Invalid preview sign-in target.', { error: true, status: 400 });
+        const browserNonce = rand(24);
+        const login = new URL('/api/auth/oidc/login', PREVIEW_AUTH_ORIGIN);
+        login.searchParams.set('preview_return', target);
+        login.searchParams.set('preview_bind', await sha256Hex(browserNonce));
+        return redirectTo(login.toString(), [
+          `${PREVIEW_LOGIN_COOKIE}=${browserNonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+        ]);
+      }
+      const previewReturnRaw = url.searchParams.get('preview_return');
+      const previewBindHash = url.searchParams.get('preview_bind');
+      const previewTarget = previewAuthEnabled(env, url) && cfg.id === 'oidc' && previewReturnRaw != null
+        ? previewAliasTarget(previewReturnRaw) : null;
+      if ((previewReturnRaw != null && !previewTarget) || (previewTarget && !/^[a-f0-9]{64}$/.test(previewBindHash || ''))
+          || (!previewTarget && previewBindHash != null)) {
+        return authStatusResponse('Invalid preview sign-in target.', { error: true, status: 400 });
+      }
+      const notice = cfg.id === 'oidc' && !previewTarget ? switchAccountNotice(env, req, url) : null;
       if (notice) return notice;
       const nonce = rand(16);
-      const ret = sanitizeReturn(url.searchParams.get('return'));
+      const ret = previewTarget ? JSON.stringify({ previewTarget, previewBindHash })
+        : sanitizeReturn(url.searchParams.get('return'));
       await env.META.put(`oauthstate:${cfg.id}:${nonce}`, ret, { expirationTtl: 600 });
       let auth;
       try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
@@ -17220,8 +17327,20 @@ const tdocHandlers = {
         return authStatusResponse('Sign-in could not be verified (state mismatch). Please try again.', { error: true, status: 400 });
       }
       let ret = '/';
+      let previewTarget = null;
+      let previewBindHash = null;
       if (!stateless) {
-        ret = sanitizeReturn(await env.META.get(`oauthstate:${cfg.id}:${state}`));
+        const storedReturn = await env.META.get(`oauthstate:${cfg.id}:${state}`);
+        if (previewAuthEnabled(env, url) && cfg.id === 'oidc' && storedReturn && storedReturn.startsWith('{')) {
+          let previewState;
+          try { previewState = JSON.parse(storedReturn); } catch { previewState = null; }
+          previewTarget = previewAliasTarget(previewState && previewState.previewTarget);
+          previewBindHash = previewState && previewState.previewBindHash;
+          if (!previewTarget || !/^[a-f0-9]{64}$/.test(previewBindHash || '')) {
+            return authStatusResponse('Invalid preview sign-in target.', { error: true, status: 400 });
+          }
+        }
+        ret = previewTarget ? '/' : sanitizeReturn(storedReturn);
         await env.META.delete(`oauthstate:${cfg.id}:${state}`);
       }
       try {
@@ -17262,7 +17381,8 @@ const tdocHandlers = {
             return await completeRaftConnect(env, req, { pending, tok, ret, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
           }
         }
-        return await cfg.complete(env, { user, tok, disc, ret, stateless, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
+        return await cfg.complete(env, { user, tok, disc, ret, stateless, previewTarget, previewBindHash,
+          clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
       } catch (e) {
         await raftConnectFailed('Could not reach Raft. Try again.');
         return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
