@@ -14,7 +14,10 @@ TDOC_STAGE="$(mktemp -d "$TDOC_INSTALL_HOME/releases/runtime.XXXXXX")"
 trap 'rm -rf "$TDOC_STAGE"' EXIT
 # The archive is the official source plus prebuilt reader assets. The user's existing
 # skill checkouts are never updated or overwritten by this installer.
-curl -fsSL --connect-timeout 15 --max-time 180 https://github.com/tornado-doc/tdoc/archive/refs/heads/main.tar.gz -o "$TDOC_STAGE/source.tar.gz"
+TDOC_INSTALL_REF="${TDOC_INSTALL_REF:-main}"
+# Only official repository revisions; no user-supplied download host.
+case "$TDOC_INSTALL_REF" in *[!a-zA-Z0-9._/-]*|'') echo 'Invalid tdoc release revision.' >&2; exit 1 ;; esac
+curl -fsSL --connect-timeout 15 --max-time 180 "https://github.com/tornado-doc/tdoc/archive/$TDOC_INSTALL_REF.tar.gz" -o "$TDOC_STAGE/source.tar.gz"
 tar -xzf "$TDOC_STAGE/source.tar.gz" --strip-components=1 -C "$TDOC_STAGE"
 rm "$TDOC_STAGE/source.tar.gz"
 [ -f "$TDOC_STAGE/bin/lib/daemon-setup.js" ] || { echo 'The installer release is incomplete. Please try again later.' >&2; exit 1; }

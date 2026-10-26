@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Link an existing platform task receiver; never starts a local daemon.
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "$TDOC_BIN_DIR/lib/connect-webhook.js" "$@"

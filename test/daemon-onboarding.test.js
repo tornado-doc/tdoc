@@ -70,6 +70,21 @@ async function test(name, fn) { await fn(); passed++; console.log(`  ✓ ${name}
     assert.notEqual(next.connected_at, '2026-01-01T00:00:00.000Z', 'explicit setup starts a new connection');
     assert.equal(next.setup_checked_at, '2026-10-25T02:00:00.000Z');
   });
+  await test('platform practice uses only the signed-in account’s registered receiver', async () => {
+    const linked = await call('/api/me/connectors/webhook', { method: 'POST', cookie: owner.cookie, headers: origin, body: { url: 'https://receiver.example/task', label: 'Grok Bot' } });
+    assert.equal(linked.status, 200);
+    const recipient = linked.body.target;
+    const made = await call('/api/onboarding/practice', { method: 'POST', cookie: owner.cookie, headers: origin, body: { mode: 'platform', recipient, product: 'grok' } });
+    assert.equal(made.status, 200, JSON.stringify(made.body));
+    const record = (await call('/api/onboarding', { cookie: owner.cookie })).body.record;
+    assert.equal(record.tutorial_mode, 'platform'); assert.equal(record.tutorial_product, 'grok');
+    const targets = (await call(`/api/notify/targets?slug=${made.body.slug}`, { cookie: owner.cookie })).body;
+    assert.equal(targets.default.provider, 'webhook');
+    assert.equal((await call('/api/onboarding/practice', { method: 'POST', cookie: other.cookie, headers: origin, body: { mode: 'platform', recipient } })).status, 409);
+    assert.equal((await call('/api/onboarding/practice', { method: 'POST', cookie: owner.cookie, headers: origin, body: { mode: 'platform', recipient: { ...recipient, agent_sub: 'unregistered' } } })).status, 409);
+    // Do not let the platform fixture change the following local-delivery default.
+    await call('/api/me/connectors/remove', { method: 'POST', cookie: owner.cookie, headers: origin, body: recipient });
+  });
   let slug;
   await test('practice creates one private, owned doc and resumes it on retry', async () => {
     const made = await practice();

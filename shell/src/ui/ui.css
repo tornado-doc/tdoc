@@ -1261,3 +1261,39 @@ a.ui-menu-item:visited {
 .ui-checkbox-indicator { display: inline-flex; }
 .ui-checkbox-label { white-space: nowrap; }
 .ui-checkbox-hint { color: #8a8a8a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* A single product choice, followed by one instruction and one next action. */
+.ui-setup-simple .ui-dialog-title { font-size: 30px; letter-spacing: -.035em; line-height: 1.2; margin: 8px 0 16px; }
+.ui-setup-simple .ui-dialog-description { font-size: 16px; line-height: 1.5; border-bottom: 0; padding-bottom: 12px; color: var(--td-ink, #222); }
+.ui-setup-simple .ui-dialog-body { padding-top: 8px; }
+.ui-setup-simple .actions button { min-height: 44px; font-size: 16px; }
+.ui-ai-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 8px 0; }
+.ui-ai-option { display: flex; align-items: center; gap: 16px; min-height: 100px; padding: 20px; text-align: left; border: 1px solid var(--td-line, #ddd); border-radius: 12px; background: var(--td-bg, #fff); color: inherit; cursor: pointer; }
+.ui-ai-option:hover { background: var(--td-surface, #f8f8f8); border-color: var(--td-muted, #777); }
+.ui-ai-option:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
+.ui-ai-mark { display: grid; place-items: center; width: 44px; height: 44px; flex: none; }
+.ui-ai-label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; font: 16px/1.4 -apple-system, system-ui, sans-serif; }
+.ui-ai-label strong { font-weight: 600; }
+.ui-ai-option > svg { flex: none; }
+.ui-setup-connection { max-width: 620px; margin: 30px auto; font-size: 16px; line-height: 1.6; }
+.ui-setup-simple .ui-setup-details, .ui-setup-simple .ui-setup-instruction, .ui-setup-simple .ui-setup-ai-select, .ui-setup-simple .ui-setup-runtime-help, .ui-setup-simple .ui-setup-runtime-help h3 { font-size: 16px; }
+.ui-setup-progress { margin: 0 0 40px; padding: 0; list-style: none; counter-reset: connect; display: grid; gap: 22px; }
+.ui-setup-progress li { display: flex; align-items: center; gap: 16px; counter-increment: connect; }
+.ui-setup-progress li::before { content: counter(connect); display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--td-line, #ddd); border-radius: 50%; font-variant-numeric: tabular-nums; }
+.ui-setup-progress .is-complete::before { content: '\2713'; background: var(--td-ink, #222); color: var(--td-bg, #fff); border-color: transparent; }
+.ui-setup-ready { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; min-height: 330px; text-align: center; font-size: 20px; }
+.ui-setup-simple .ui-setup-error { font-size: 16px; }
+@media(max-width: 600px) {
+  .ui-setup-simple .ui-dialog-title { font-size: 26px; }
+  .ui-ai-picker { grid-template-columns: 1fr; gap: 8px; }
+  .ui-ai-option { min-height: 82px; padding: 14px 16px; gap: 12px; }
+  .ui-setup-connection { margin: 20px 0; }
+}
+
+.ui-tutorial-coach .ui-dialog-title { font-size: 24px; letter-spacing: -.025em; }
+.ui-tutorial-coach .ui-dialog-description { font-size: 16px; line-height: 1.6; color: var(--td-ink, #222); }
+.ui-tutorial-coach button { font-size: 16px; min-height: 44px; }
+.ui-tutorial-coach .actions { gap: 12px; }
+.ui-tutorial-single { padding: 12px 16px; border: 1px solid var(--td-line, #ddd); background: var(--td-bg, #fff); color: inherit; border-radius: 8px; cursor: pointer; }
+
+.ui-dialog-popup.ui-setup-simple { border-radius: 16px; }

@@ -7,13 +7,14 @@ import { DocsHub } from './docs-hub.jsx';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { StatusPage } from './status-page.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
+import { TutorialCoach } from './document/tutorial-coach.jsx';
 import { DocStepHint } from './document/step-hint.jsx';
 import { CommentCard } from './document/comment-card.jsx';
 import './docs-hub.css';
 import './onboarding-preview.css';
 
 const identity = { name: 'Alex Morgan', email: 'alex.morgan@example.com' };
-const states = ['Start', 'Connect your AI', 'AI ready', 'Computer ready', 'Computers & AI', 'Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
+const states = ['Start', 'Connect your AI', 'AI ready', 'Computer ready', 'Computers & AI', 'Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial manual', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
 
 function TutorialPreview({ state }) {
   const [agentState, setAgentState] = useState(state.replace('Tutorial ', ''));
@@ -27,6 +28,7 @@ function TutorialPreview({ state }) {
       <span>{shared ? 'Link copied.' : 'Answered 1 comment in v2. Share it.'}</span>
       {shared ? <a href="/me">My docs</a> : <button onClick={() => setShared(true)}>Copy link</button>}
     </div> : <DocStepHint step={state === 'Tutorial comment' ? 'comment' : 'handoff'} agentState={['waiting', 'reading', 'stuck'].includes(agentState) ? agentState : 'idle'} onGo={noop} />}
+    <TutorialCoach slug={`preview-${state.replaceAll(' ', '-').toLowerCase()}`} step={done ? null : state === 'Tutorial comment' ? 'comment' : 'handoff'} product="chatgpt" automatic={state !== 'Tutorial manual'} agentState={['waiting','reading','stuck'].includes(agentState) ? agentState : 'idle'} onComment={noop} onSendAll={noop} onCopy={() => true} />
     <div className="op-tutorial-card"><CommentCard comment={comment} currentUser="alex" onReply={noop} onReact={noop} onDelete={noop} onResolve={noop} onEdit={noop}
       handoff={state === 'Tutorial comment' || done ? null : {threadId:comment.id, open, line:'Read https://tdoc.dev/d/my-first-tdoc and fix the comments.', state:['waiting','reading','stuck'].includes(agentState) ? agentState : 'idle', onCopy:()=>setAgentState('waiting'), onToggle:()=>setOpen(value=>!value)}} />
     </div>

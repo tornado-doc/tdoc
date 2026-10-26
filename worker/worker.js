@@ -15580,6 +15580,7 @@ const tdocHandlers = {
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
         bootJson: safeJsonForScript({
           page: 'setup',
+          setupRef: runtimeInfo().generated_by === 'tdoc-preview' ? TDOC_BUILD_INFO.source_ref || null : null,
           step,
           identity: sessionPrincipal(session)
             ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '' }
@@ -16177,6 +16178,7 @@ const tdocHandlers = {
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
         bootJson: safeJsonForScript({
           page: 'docs-hub',
+          setupRef: runtimeInfo().generated_by === 'tdoc-preview' ? TDOC_BUILD_INFO.source_ref || null : null,
           identity,
           runtime: runtimeInfo(),
           // Mirrors the /api/doc/create gate: offering "start from scratch" on a
@@ -18956,6 +18958,32 @@ const tdocHandlers = {
       });
     }
 
+    // A platform agent can register its own task receiver using the same
+    // account credential as publishing. Secrets never enter browser prompts.
+    if (p === '/api/notify/webhook/register' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) return json({ error: 'account_token_required' }, { status: 403 });
+      let body = {}; try { body = await req.json(); } catch {}
+      const hookUrl = webhookUrl(body.url);
+      if (!hookUrl) return json({ error: 'invalid_url' }, { status: 400 });
+      const accountId = auth.actor.account_id;
+      const current = await accountNotifyTargets(env, accountId);
+      const existing = current.find(t => t.provider === 'webhook' && t.url === hookUrl);
+      const id = existing?.agent_sub || `wh_${rand(10)}`;
+      const secret = existing ? await env.META.get(`notify-webhook-secret:${id}`) : `whsec_${rand(24)}`;
+      if (!secret) return json({ error: 'webhook_secret_missing' }, { status: 409 });
+      if (!existing) {
+        if (current.length >= NOTIFY_AGENTS_MAX) return json({ error: 'connector_limit' }, { status: 409 });
+        await env.META.put(`notify-webhook-secret:${id}`, secret);
+        const label = typeof body.label === 'string' ? body.label.trim().slice(0, 60) : '';
+        const target = normalizeNotifyTarget({ provider: 'webhook', server_id: 'webhook', agent_sub: id, url: hookUrl, agent_name: label || new URL(hookUrl).host });
+        await env.META.put(`account-notify:${accountId}`, JSON.stringify([...current, { ...target, last_touched: new Date().toISOString() }]));
+        return json({ ok: true, target, secret });
+      }
+      return json({ ok: true, target: existing, secret });
+    }
+
     // A browser-owned setup attempt, confirmed by the tools using this same
     // account's upload credential. Old tokens/heartbeats cannot finish it.
     if (p === '/api/onboarding/connect/complete' && method === 'POST') {
@@ -19088,7 +19116,12 @@ const tdocHandlers = {
       // Manual practice is an explicit copy/paste workflow, not evidence of a
       // connected computer. Never attach or mark an agent ready on this path.
       let target = null;
-      if (body.mode !== 'manual') {
+      if (body.mode === 'platform') {
+        const current = await accountNotifyTargets(env, accountId);
+        const recipient = body.recipient;
+        target = recipient && current.find(t => ['raft', 'webhook'].includes(t.provider) && sameNotifyTarget(t, recipient));
+        if (!target) return json({ error: 'platform_agent_required' }, { status: 409 });
+      } else if (body.mode !== 'manual') {
         const current = await accountNotifyTargets(env, accountId);
         target = current.find((t) => t.provider === 'local' && t.device === body.device && t.cli === body.cli);
         if (!target) return json({ error: 'local_agent_required' }, { status: 409 });
@@ -19105,8 +19138,8 @@ const tdocHandlers = {
       }
       if (!slug) {
         const made = await createDocForSession(env, req, session, {
-          html: '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Your first tdoc</title><style>body{background:#fff}</style></head><body><div class="wrap"><h1>Your first tdoc</h1><p>A good project update tells readers what changed, what is next, and where help is needed.</p><h2>Try a change</h2><p>Highlight the sentence above and leave a comment, such as “Make this shorter.” Then copy the instruction on your comment into your AI conversation, or use Send to agent if you connected a background helper.</p><h2>Keep working here</h2><p>Your AI publishes a new version at this same link and replies to your comment. You can review earlier versions whenever you need them.</p></div></body></html>',
-          meta: { title: 'Your first tdoc', created_from: 'daemon-practice', access: { visibility: 'private', commenting: 'owner', history_visibility: 'owner' } },
+          html: '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Your Tdoc tutorial</title><style>body{background:#fff}</style></head><body><div class="wrap"><h1>Your Tdoc tutorial</h1><p>A good project update tells readers what changed, what is next, and where help is needed.</p><h2>Try a change</h2><p>Select the sentence above and comment “Make this shorter.” Your AI will publish a new version here.</p><h2>Keep working here</h2><p>Your AI publishes a new version at this same link and replies to your comment. You can review earlier versions whenever you need them.</p></div></body></html>',
+          meta: { title: 'Your Tdoc tutorial', created_from: 'daemon-practice', access: { visibility: 'private', commenting: 'owner', history_visibility: 'owner' } },
           version: { prompt: 'Practice commenting and revising with your AI' },
         });
         if (!made.ok) return made.response;
@@ -19117,6 +19150,9 @@ const tdocHandlers = {
       if (record.first_doc !== slug) await adoptFirstDocFor(env, accountId, slug);
       // An explicit choice, scoped to this practice doc. Other docs keep their agent.
       if (target) await touchDocAgent(env, slug, target);
+      const tutorialRecord = await loadOnboarding(env, accountId);
+      const product = ['chatgpt', 'cowork', 'claude', 'codex', 'grok', 'raft', 'cursor', 'other'].includes(body.product) ? body.product : null;
+      await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({ ...tutorialRecord, tutorial_mode: body.mode === 'platform' ? 'platform' : body.mode === 'manual' ? 'manual' : 'computer', tutorial_product: product }));
       return json({ ok: true, slug, url: `/d/${slug}?step=comment` });
     }
     // Puts the caller's own onboarding record into a named state, so the

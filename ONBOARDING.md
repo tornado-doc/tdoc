@@ -2,55 +2,61 @@
 
 > **For agents (Claude Code, Codex, etc.):** read this file end-to-end before running any command. It's written for you, not the human. For new tdoc.dev users, follow Default web onboarding below. Background automation is optional; its portrait recipe is optional. Ask for confirmation on browser-side actions and re-probe state with `bin/tdoc-doctor --json` when using that manual path.
 
-## Default web onboarding — background helper is optional
+## Default web onboarding
 
-Open `https://tdoc.dev/setup`. A centered dialog over My docs starts with two
-equal choices: **Use with your AI** and **Connect for automatic updates**.
-Neither is preselected. Local Claude Code / Codex users may choose either path.
-Do not require a daemon or always-on computer for interactive use.
+Open `https://tdoc.dev/setup`. The dialog asks **Which AI do you use?**
+Choose ChatGPT Work, Claude Cowork, Claude Code, Codex, Grok Bot, Raft, Cursor,
+or Other AI / Agent. Each product opens its own instruction; no environment
+inference and no upfront choice between technical connection types.
 
-### Use with your AI
+Copy the instruction into that AI. Reuse an existing install and account when
+possible. Prepare missing official tools, ask the person to approve account
+access if needed, then run `~/.local/bin/tdoc connect CODE` with the fresh code.
+The browser requires the tools to confirm that exact account-owned attempt;
+copying or an old login cannot complete it. Codes expire after 15 minutes.
+The instruction does not create a document. My docs is selected by default;
+team workspaces require an explicit choice in the approval page.
 
-Copy the setup instruction into an existing ChatGPT Work, Cowork, Grok Bot,
-Claude Code or Codex conversation with command and network access. The AI reads
-`https://tdoc.dev/SKILL.md`, installs/prepares the official tools without a
-background service, signs in through browser approval when needed, then runs
-`~/.local/bin/tdoc connect CODE` using the exact fresh code from the instruction.
+A CLI download does not register an account Skill. ChatGPT Work and Claude
+Cowork may need the person to add the Tdoc Skill in the host's Skills interface
+once. Reuse it afterward. Check credentials on new chats; restore missing tools
+automatically and request fresh account approval only when credentials are
+missing or invalid. Never promise permanent credential retention across hosts.
 
-The browser waits for that account's tools to confirm this setup attempt.
-Copying, an old token, a historical doc or an unrelated computer heartbeat does
-not complete it. Codes expire after 15 minutes and another account cannot use
-them. The confirmation creates no document and starts no daemon. Cloud session
-files may be temporary; do not promise skills persist beyond that environment.
+### Computer AI
 
-### Connect for automatic updates (optional)
+Claude Code and Codex connect a user background service, using the existing AI
+account for a bounded check. Show missing installation/sign-in inline. Only a
+live computer with a verified runtime can continue. If both are ready, let the
+person choose. Keep the selected product preferred. An offline or paused helper
+cannot be reported as processing work. Setup requires Node.js 18+, curl and tar.
 
-The default action copies one setup instruction into Claude Code or Codex on
-the computer being connected. The AI installs the official tdoc skill and tools,
-connects the account through browser approval, checks the existing AI account,
-and starts a user service. **Use Terminal instead** exposes the alternate flow:
+### Platforms with a task receiver
+
+Raft and webhook bots use their platform receiver, never a local daemon.
+Raft agents run `bin/tdoc-connect-agent`. Webhook agents run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash -s -- --install-only
-~/.local/bin/tdoc setup
+bash bin/tdoc-connect-webhook --url HTTPS_RECEIVER --label PLATFORM_NAME
 ```
 
-The first command installs the tools and skill, preserving an existing skill.
-The second checks AI execution and starts launchd on macOS or systemd on Linux
-(Windows uses WSL). Node.js 18+, curl and tar are required. Installation alone
-never starts a service. The computer must stay awake to pick up work.
+Only use the platform's documented task endpoint. This registers an account-owned
+receiver and stores its signing secret in a private file (mode 0600), never in
+chat. Configure the receiver to verify `X-Tdoc-Signature`: `sha256=` followed by
+the hexadecimal HMAC-SHA256 of the exact POST body, keyed by that secret.
+Deduplicate `X-Tdoc-Delivery`. After linking, **Check connection** sends an inert
+test; a failed delivery stays in setup. Transport receipt does not prove the AI
+has executed a change. If a platform has no supported receiver, explain that
+limitation; do not invent an endpoint or claim automation is ready.
 
-Runtime detection stays in the connection step. There is no computer dropdown
-or separate Choose AI page. Missing/sign-in guidance stays inline. Only a live,
-verified AI enables **Finish setup**, which saves the chosen AI as the fallback
-for docs with no selected agent. It does not create a practice doc.
+### Continue into the tutorial
 
-### Setup ends here; the tutorial is optional
-
-Both paths finish at **You’re ready**. **Go to my docs** exits setup without
-creating anything. **Try the tutorial** separately starts the existing first-doc
-recipe for interactive use, or a private practice doc for automatic updates.
-Document creation, comments and AI revision belong to that tutorial.
+**Continue** opens a private example document, explicitly labeled as a tutorial.
+**Skip** leaves setup without creating one. All paths use this same tutorial.
+First select a sentence and leave a comment. Then the guide teaches either
+sending all comments with Ask AI, or mentioning AI on one comment. Interactive
+chat users get a copyable instruction and the exact product/chat to return to.
+The tutorial completes only after the AI publishes the change and replies.
 
 ### Manage later in tdoc
 

@@ -52,6 +52,12 @@ export function updateComputer(body) {
   return request('/api/me/computers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
 
+export function getSetupConnectors() {
+  return request('/api/me/connectors');
+}
+export function testSetupConnector(target) {
+  return request('/api/me/connectors/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target) });
+}
 export function startConversationSetup() {
   return request('/api/onboarding/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 }

@@ -684,6 +684,22 @@ the tdoc app must be installed on your Raft server. `--check` says whether it
 would work without changing anything. Never print or paste the credentials it
 reads.
 
+### `tdoc-connect-webhook` — connect a platform bot without a daemon
+
+For a platform with a documented HTTPS task receiver, use:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-connect-webhook" --url HTTPS_RECEIVER --label PLATFORM_NAME
+```
+
+This uses the existing Tdoc account and keeps the receiver signing secret in a
+private 0600 file. Configure your receiver to verify the exact request body's
+HMAC-SHA256 against `X-Tdoc-Signature` (`sha256=<hex>`), and deduplicate delivery
+IDs in `X-Tdoc-Delivery`. Never print that private file or secret in chat.
+The Tdoc connection page sends an inert delivery test; receiving it is not proof
+that an edit executed. Do not invent a receiver URL. If the host cannot expose a
+supported receiver, explain the limit instead of installing a local daemon.
+
 ### `tdoc-daemon` — let tdoc hand comments to Claude Code / Codex on this computer
 
 Raft agents are pushed to; a laptop cannot be. `bin/tdoc-daemon` is the
