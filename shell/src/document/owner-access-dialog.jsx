@@ -192,7 +192,7 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
     const added = allowedUsers.find((user) => !normalized.allowed_users.includes(user));
     const domain = added?.includes('@') ? added.split('@')[1] : '';
     const memberDomains = new Set((fullTeam?.members || []).map((member) => String(member.email || member.key || '').split('@')[1]).filter(Boolean));
-    if (teamGuestsEnabled && fullTeam && domain && memberDomains.has(domain)) {
+    if (teamGuestsEnabled && fullTeam?.role === 'admin' && domain && memberDomains.has(domain)) {
       setPendingInvite({ invitee: added, allowedUsers });
     } else {
       save({ allowed_users: allowedUsers });

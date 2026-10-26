@@ -68,13 +68,13 @@ const OPTIONS = [
     if (doc.includes('guests=1')) {
       await page.addInitScript(() => { window.__TDOC_APP_BOOT__ = { devMode: { on: true } }; });
       await page.route('**/api/team?*', (route) => route.fulfill({ json: { ok: true, team: {
-        id: 'tm_1', name: 'BeFreed', invites: [], members: [{ email: 'alice@befreed.ai', key: 'alice', role: 'admin' }],
+        id: 'tm_1', name: 'BeFreed', role: 'admin', invites: [], members: [{ email: 'alice@befreed.ai', key: 'alice', role: 'admin' }],
       } } }));
       await page.route('**/api/team/guests?*', (route) => route.fulfill({ json: { ok: true, guests: [], limit: 5, invites: [] } }));
       await page.route('**/api/team', (route) => {
         teamInvites.push(route.request().postDataJSON());
         return route.fulfill({ json: { ok: true, team: {
-        id: 'tm_1', name: 'BeFreed', invites: ['bob@befreed.ai'], members: [{ email: 'alice@befreed.ai', key: 'alice', role: 'admin' }],
+        id: 'tm_1', name: 'BeFreed', role: 'admin', invites: ['bob@befreed.ai'], members: [{ email: 'alice@befreed.ai', key: 'alice', role: 'admin' }],
       } } });
       });
     }
