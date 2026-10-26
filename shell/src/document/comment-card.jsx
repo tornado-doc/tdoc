@@ -13,6 +13,7 @@ import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-ans
 import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
+import { productPageUrl } from './product-url.js';
 
 function authorLine(author) {
   if (!author) return 'anonymous';
@@ -97,6 +98,15 @@ export function Author({ author, timestamp }) {
       </span>
     </div>
   );
+}
+
+// The same safe body is used by comments, replies, and private Ask AI turns.
+export function CommentMessageText({ text, mentions = [] }) {
+  return <div className="text"><MentionText text={text} mentions={mentions} /></div>;
+}
+
+export function ReplyMessage({ author, text, mentions = [] }) {
+  return <><Author author={author} /><CommentMessageText text={text} mentions={mentions} /></>;
 }
 
 function ReactionPicker({ onPick }) {
@@ -568,11 +578,10 @@ function ReplyCard({
       {flattened ? (
         <div className="tdoc-reply-to">Replying to @{answers(replies, reply, rootComment)}</div>
       ) : null}
-      <Author author={reply.author} />
       {editTarget === reply.id ? (
-        <EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} />
+        <><Author author={reply.author} /><EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} /></>
       ) : (
-        <div className="text"><MentionText text={reply.text} mentions={reply.mentions} /></div>
+        <ReplyMessage author={reply.author} text={reply.text} mentions={reply.mentions} />
       )}
       <TdocAiQuota reply={reply} currentUser={currentUser} />
       {reacted ? <Reactions item={reply} me={currentUser} onReact={onReact} /> : null}
@@ -628,10 +637,12 @@ function ReplyCard({
 // A comment left on an app (feedback overlay) points at a page and an element
 // of that app, not at anything in this document. Without this line the card,
 // seen on the doc page, says what is wrong but not where.
-function ProductWhere({ anchor }) {
+function ProductWhere({ anchor, origin }) {
   if (!anchor || anchor.kind !== 'product' || !anchor.url) return null;
-  let path = anchor.url;
-  try { const u = new URL(anchor.url); path = `${u.host}${u.pathname}${u.search}`; } catch (_) {}
+  const webUrl = productPageUrl(anchor.url);
+  const safeUrl = productPageUrl(anchor.url, origin);
+  let path = webUrl ? 'Page outside this site' : 'Invalid page link';
+  if (safeUrl) { const u = new URL(safeUrl); path = `${u.host}${u.pathname}${u.search}`; }
   const text = String(anchor.text || '').trim();
   const what = anchor.accessible_name || (text ? `${anchor.tag || 'element'} “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”` : anchor.tag || '');
   const st = anchor.state || {};
@@ -639,16 +650,16 @@ function ProductWhere({ anchor }) {
     st.dialog ? `in dialog “${st.dialog}”` : (st.layer ? `in “${st.layer}”` : ''),
     st.tabs && st.tabs.length ? `tab ${st.tabs.join(' › ')}` : '',
   ].filter(Boolean).join(' · ');
-  return (
-    <a className="tdoc-product-where" href={anchor.url} target="_blank" rel="noopener noreferrer" title={anchor.url}>
-      {path}{inState ? ` · ${inState}` : ''}{what ? ` · ${what}` : ''}
-    </a>
-  );
+  const label = <>{path}{inState ? ` · ${inState}` : ''}{what ? ` · ${what}` : ''}</>;
+  return safeUrl
+    ? <a className="tdoc-product-where" href={safeUrl} target="_blank" rel="noopener noreferrer" title={safeUrl}>{label}</a>
+    : <span className="tdoc-product-where">{label}</span>;
 }
 
 export function CommentCard({
   comment,
   currentUser,
+  handoffViewer = currentUser,
   isOwner = false,
   mentionable = [],
   demo = false,
@@ -657,6 +668,9 @@ export function CommentCard({
   position,
   expandReplies = false,
   selected = false,
+  unread = false,
+  onMarkRead = null,
+  productLinkOrigin = null,
   canSendToAgent = false,
   // Owner with no agent connected: @agent stays visible and leads to setup.
   agentSetupHref = null,
@@ -819,14 +833,17 @@ export function CommentCard({
       <div className="tdoc-status-row">
         {comment.status === 'applied' ? (
           <span className="tdoc-resolved-chip">
-            {comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, currentUser, isOwner)) ? '✅ Done' : comment.resolved_by
+            {comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, handoffViewer, isOwner)) ? '✅ Done' : comment.resolved_by
               ? `✓ resolved by @${comment.resolved_by}`
               : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
           </span>
         ) : null}
-        {demo || canSeeHandoff(comment, currentUser, isOwner) ? (
-          <HandoffStatusChips comment={comment} onResend={onResendHandoff} />
+        {demo || canSeeHandoff(comment, handoffViewer, isOwner) ? (
+          <HandoffStatusChips comment={comment} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
         ) : null}
+        {unread ? (onMarkRead
+          ? <button type="button" className="tdoc-thread-mark-read" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)}><span className="tdoc-thread-unread-dot" aria-hidden="true" /></button>
+          : <span className="tdoc-thread-unread-dot" role="status" aria-label="New agent reply" title="New agent reply" />) : null}
       </div>
       <header className="tdoc-cc-head">
         <Author
@@ -884,11 +901,11 @@ export function CommentCard({
           ) : null}
         </div>
       </header>
-      <ProductWhere anchor={comment.anchor} />
+      <ProductWhere anchor={comment.anchor} origin={productLinkOrigin} />
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
       ) : (
-        <div className="text"><MentionText text={comment.text} mentions={comment.mentions} /></div>
+        <CommentMessageText text={comment.text} mentions={comment.mentions} />
       )}
       {reactionCount ? (
         <Reactions item={comment} me={currentUser} onReact={onReact} />

@@ -100,16 +100,16 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
     await t('grid/list preview switch is shared, complete, and remembered', async () => {
       const page = await open(1280, '');
       await page.getByRole('button', { name: 'Grid view' }).click();
-      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
-      assert.match(await page.locator('.doc-card-preview').textContent(), /Only in My docs/);
+      await page.locator('.doc-list.is-grid .doc-row.is-card').waitFor();
+      assert.match(await page.locator('.doc-list.is-grid .doc-row.is-card').first().textContent(), /Only in My docs/);
       assert.equal(await page.getByRole('button', { name: 'Grid view' }).getAttribute('aria-pressed'), 'true');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-grid-desktop.png'), fullPage: true });
       await page.reload();
       await page.locator('.doc-list.is-grid').waitFor();
       await page.locator('.tdoc-space-trigger').click();
       await page.getByRole('menuitem', { name: 'BeFreed' }).click();
-      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
-      assert.match(await page.locator('.doc-card-preview').textContent(), /Only in BeFreed/);
+      await page.locator('.doc-list.is-grid .doc-row.is-card').waitFor();
+      assert.match(await page.locator('.doc-list.is-grid .doc-row.is-card').first().textContent(), /Only in BeFreed/);
       await page.getByRole('button', { name: 'List view' }).click();
       assert.equal(await page.locator('.doc-list.is-list').count(), 1);
       await page.close();
@@ -145,7 +145,9 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await admin.getByRole('heading', { name: 'Workspace settings' }).waitFor();
       assert.deepEqual(await admin.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Trash', 'Settings']);
       await admin.getByRole('heading', { name: 'Members' }).waitFor();
+      await admin.getByRole('radio', { name: 'Agents' }).click();
       await admin.getByRole('heading', { name: 'Agents' }).waitFor();
+      await admin.getByText('Daemon running').waitFor();
       const agents = await admin.locator('#agents').textContent();
       assert.match(agents, /Raft · acme.*This computer · juliesmac.*Daemon running/s);
       await admin.getByRole('heading', { name: 'Data backup' }).waitFor();
@@ -157,6 +159,7 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await member.getByRole('tab', { name: 'Settings' }).click();
       assert.equal(await member.getByRole('heading', { name: 'Data backup' }).count(), 0);
       // A member sees the team's agents, and not the admin's own connectors.
+      await member.getByRole('radio', { name: 'Agents' }).click();
       const memberAgents = await member.locator('#agents').textContent();
       assert.match(memberAgents, /Team agents/);
       assert.doesNotMatch(memberAgents, /Your own agents|Add a connector/);
@@ -182,7 +185,7 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       assert.equal(await page.locator('.tm-spaces').count(), 0, 'the pill row is back');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'switcher-phone.png') });
       await page.getByRole('button', { name: 'Grid view' }).click();
-      await page.locator('.doc-list.is-grid .doc-card-preview').waitFor();
+      await page.locator('.doc-list.is-grid .doc-row.is-card').waitFor();
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'grid overflows sideways');
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'catalog-grid-phone.png'), fullPage: true });
       await more.click();

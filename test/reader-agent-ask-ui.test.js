@@ -251,6 +251,38 @@ async function touchSelect(page, phrase) {
       await context.close();
     });
 
+    await t('top bar Ask AI asks my agent privately and shows its reply before I choose to post it', async () => {
+      await setTier('online');
+      const { context, page } = await open(reader, DESKTOP);
+      await page.locator('#tdoc-send-agent-btn').click();
+      const panel = page.getByRole('dialog', { name: 'Ask AI' });
+      await panel.getByRole('button', { name: 'Who should answer?' }).click();
+      await page.locator('.tdoc-agent-menu').getByRole('menuitem', { name: /Mine/ }).click();
+      await panel.getByRole('textbox', { name: 'Ask about this document' }).fill('Can my agent check the Q4 plan?');
+      await panel.getByRole('button', { name: 'Send question' }).click();
+      let ask = null;
+      for (let i = 0; i < 40 && !ask; i++) {
+        const pending = (await api('/api/notify/local/pending?device=readerbox', { token: reader.token })).body.pending;
+        ask = pending.find((item) => item.kind === 'ask' && item.question === 'Can my agent check the Q4 plan?');
+        if (!ask) await page.waitForTimeout(250);
+      }
+      if (!ask || ask.comment_id) throw new Error(`private Ask AI request not queued: ${JSON.stringify(ask)}`);
+      if ((await comments()).some((c) => c.text.includes('Can my agent check the Q4 plan?'))) throw new Error('private agent question was posted');
+      const reply = await api('/api/agent/ask-reply', { method: 'POST', token: reader.token, body: {
+        slug: SLUG, ask_id: ask.ask_id, text: 'The mobile app remains planned for Q4.', agent_login: 'claude', agent_name: 'Claude',
+      } });
+      if (reply.status !== 200) throw new Error(`agent reply ${reply.status}: ${JSON.stringify(reply.body)}`);
+      await panel.getByText('The mobile app remains planned for Q4.').waitFor({ timeout: 15000 });
+      if ((await comments()).some((c) => c.text.includes('Can my agent check the Q4 plan?'))) throw new Error('agent reply made the question public');
+      await panel.getByRole('button', { name: 'Post as comment' }).click();
+      await panel.getByText('Posted as a comment').waitFor();
+      const posted = (await comments()).find((c) => c.text === 'Can my agent check the Q4 plan?');
+      if (!posted || !(posted.replies || []).some((r) => r.text === 'The mobile app remains planned for Q4.')) {
+        throw new Error(`agent answer not posted: ${JSON.stringify(posted)}`);
+      }
+      await context.close();
+    });
+
     await t('phone, helper offline: tdoc AI; Only me off posts the answer in the thread; the composer fits', async () => {
       await setTier('offline');
       const { context, page } = await open(reader, PHONE);

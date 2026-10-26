@@ -98,6 +98,15 @@ content-hashed and deterministic, so after any edit under `shell/src` run
 `shell runtime` job rebuilds and fails on a byte diff. See `IMPLEMENTATION.md`
 for the runtime boundary and component layers.
 
+## Feature flags
+
+New or uncertain features ship behind a flag in `shell/src/feature-flags.js`,
+visible only in dev mode. Add an entry to `FLAGS` (`label`, `owner`, `added`,
+`default: false`) and check it with `isFeatureOn(name)`; the account menu lists
+what dev mode is showing. Flip `default` to `true` when approved, and remove the
+flag and its checks once the feature is stable. Server-rendered link previews
+are not flagged.
+
 ## Hard rule: run tests before every push
 
 The skill ships JS that runs in users' browsers and a worker that runs on Cloudflare, both deployed on every `/tdoc publish`. Run `npm test` before pushing; for shell (`shell/src`, `server/frame-probe.js`) or worker changes also run the matching gated suite via `npm run test:all`. Doc-only changes still need a `grep` for stale references (counts, command names, version numbers).

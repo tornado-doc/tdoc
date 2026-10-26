@@ -297,7 +297,10 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes('Number(config.version) === latestVersion'), 'only on the latest version');
   assert(shell.includes("if (value?.id) setOpenCommentId(value.id);"), 'a posted comment opens its card — the next instruction lives there');
   assert(shell.includes("v/${latest}?revised=1"), 'a new version is arrived at as one');
-  assert((layer.match(/handoff=\{handoff\}/g) || []).length === 2, 'threaded through both the desktop layer and the phone drawer');
+  const sharedList = read('shell/src/document/comment-thread-list.jsx');
+  assert(layer.includes('handoff={handoff}') && layer.includes('onReanchor, handoff, onResendHandoff,')
+    && sharedList.includes('{...cardProps}'),
+  'threaded through both the desktop layer and the phone drawer');
 });
 
 t('the exit is a line on a revised doc, owed until the link is copied', () => {

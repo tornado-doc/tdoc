@@ -97,6 +97,7 @@ build_payload() {
       html: fs.readFileSync(htmlPath, "utf8"),
       meta: JSON.parse(fs.readFileSync(metaPath, "utf8")),
     };
+    if (process.env.TDOC_UPLOAD_ACCESS_PATCH) out.access_patch = JSON.parse(process.env.TDOC_UPLOAD_ACCESS_PATCH);
     if (commentsPath) out.comments = JSON.parse(fs.readFileSync(commentsPath, "utf8"));
     if (previewPath) {
       const svg = fs.readFileSync(previewPath, "utf8");
@@ -1633,6 +1634,17 @@ if [ -n "$VISIBILITY_FLAG" ] || [ -n "$HISTORY_FLAG" ] || [ -n "$COMMENTING_FLAG
       process.stdout.write(JSON.stringify(list));
     });
   ')"
+  TDOC_UPLOAD_ACCESS_PATCH="$(node -e '
+    const [visibility, history, commenting, allowed] = process.argv.slice(1);
+    const patch = {};
+    if (visibility) patch.visibility = visibility;
+    if (history) patch.history_visibility = history;
+    if (commenting) patch.commenting = commenting;
+    const added = JSON.parse(allowed || "[]");
+    if (added.length) patch.allowed_users_add = added;
+    process.stdout.write(JSON.stringify(patch));
+  ' "$VISIBILITY_FLAG" "$HISTORY_FLAG" "$COMMENTING_FLAG" "$ALLOW_JSON")"
+  export TDOC_UPLOAD_ACCESS_PATCH
   tmp_meta="$(mktemp -t tdoc-meta.XXXXXX)"
   node -e '
     const fs = require("fs");

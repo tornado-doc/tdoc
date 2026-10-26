@@ -699,7 +699,7 @@ export function NotifyHandoffPanel({
           {lastFailed ? (
             <p className="tdoc-send-notice tdoc-notify-error">
               The last send to {agentLabel(last.recipient)} was not delivered.
-              {last.handoff_id ? (
+              {last.handoff_id && last.handoff_resend_allowed !== false ? (
                 <button type="button" className="text-btn" disabled={busy} onClick={() => resend(last.handoff_id)}>Resend</button>
               ) : null}
             </p>

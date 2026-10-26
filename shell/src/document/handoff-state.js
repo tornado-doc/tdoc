@@ -139,9 +139,11 @@ export function handoffWaitState(comment, now = Date.now()) {
 
 /** Viewer-specific handoff cues are private to the commenter and doc owner. */
 export function canSeeHandoff(comment, viewerLogin, isOwner) {
-  const login = String(viewerLogin || '').trim().toLowerCase();
   const author = String(comment?.author?.login || '').trim().toLowerCase();
-  return Boolean(isOwner || (login && login !== 'anon' && author && author === login));
+  const logins = (Array.isArray(viewerLogin) ? viewerLogin : [viewerLogin])
+    .map((login) => String(login || '').trim().toLowerCase())
+    .filter((login) => login && login !== 'anon');
+  return Boolean(isOwner || (author && logins.includes(author)));
 }
 
 /** Compact corner marker for a collapsed comment avatar. */
@@ -151,13 +153,17 @@ export function handoffPinBadge(comment, now = Date.now()) {
   const state = handoffWaitState(comment, now);
   if (state === 'failed' || state === 'stale' || state === 'expired') return 'warning';
   if (state !== 'replied') return null;
-  const replies = comment.replies || [];
-  for (let i = replies.length - 1; i >= 0; i -= 1) {
-    const verdict = replies[i]?.agent_status;
-    if (verdict === 'question') return 'question';
-    if (verdict === 'partial') return 'partial';
-    if (verdict === 'applied' || verdict === 'answered') return 'done';
+  let latest = null;
+  let latestAt = 0;
+  for (const reply of comment.replies || []) {
+    if (!reply || reply.deleted || !(reply.author?.kind === 'agent' || reply.agent_status)) continue;
+    const at = ts(reply.created);
+    if (!latest || at >= latestAt) { latest = reply; latestAt = at; }
   }
+  const verdict = latest?.agent_status;
+  if (verdict === 'question') return 'question';
+  if (verdict === 'partial') return 'partial';
+  if (verdict === 'applied' || verdict === 'answered') return 'done';
   return null;
 }
 

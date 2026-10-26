@@ -60,7 +60,7 @@ t('resolution records its author without synthesizing reactions', () => {
 });
 
 t('the chip says who decided, because they are different claims', () => {
-  assert(card.includes("comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, currentUser, isOwner)) ? '✅ Done'"),
+  assert(card.includes("comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, handoffViewer, isOwner)) ? '✅ Done'"),
     'an agent handoff resolved by the agent should show Done');
   assert(/comment\.resolved_by\s*\n?\s*\? `✓ resolved by @\$\{comment\.resolved_by\}`/.test(card),
     'a person resolving should not read as "fixed"');
@@ -79,15 +79,17 @@ t('resolve sits with the thread actions, behind canMutate', () => {
 });
 
 t('resolved visibility governs selection without deleting stored comments', () => {
-  const start = shell.indexOf('const shownComments = useMemo');
-  const block = shell.slice(start, shell.indexOf('), [', start) + 120);
-  assert(/comment\.status !== 'applied'/.test(block), 'resolved threads should not be sent as anchors');
-  assert(!/comment\.id === (openCommentId|deepTarget)/.test(block),
+  const model = read('shell/src/document/comment-area.js');
+  assert(model.includes("filterMode === 'resolution' && filter === 'open' && phase(comment) !== 'resolved'"),
+    'resolved threads should not be sent as anchors');
+  assert(!/comment\.id === (openCommentId|deepTarget)/.test(model),
     'selection or a notification link must not bypass the visibility switch');
-  assert(shell.includes('const openComment = visibleCommentsById.get(openCommentId);'),
+  assert(shell.includes('const openComment = commentArea.selected;')
+    && model.includes('selected: shown.find((comment) => comment.id === selectedId)'),
     'the card must obey the same visible set as the frame');
   // Hidden records remain available for status changes and explicit reveals.
-  assert(/const commentsById = useMemo\(\s*\n\s*\(\) => new Map\(comments\.comments/.test(shell),
+  assert(shell.includes('const commentsById = commentArea.byId;')
+    && model.includes('const byId = new Map(all.map((comment) => [comment.id, comment]));'),
     'hiding must not discard the stored comment');
 });
 

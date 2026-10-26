@@ -48,6 +48,7 @@ const OFFLINE = [
   'reader-agent-ask.test.js',  // Send to my agent: a reader's own agents only, never anyone else's; the answer is the asker's alone
   'ask-in-thread.test.js',     // Ask AI in a comment: tdoc AI or the commenter's own agent answers as a reply in the thread, seen by all
   'hand-off.test.js',          // one door: Ask only decides edit (authorship) or answer (own / team agent / tdoc AI), never another's agent
+  'handoff-privacy.test.js',   // handoff details: commenter, sender and owner only; a member hands off threads they began or replied in
   'agent-authorship.test.js',  // authorship at write time (upload, agent replies that mark applied) and answer-only locks from send to answer, per question, failing closed
   'comment-wipe-authorship.test.js', // the comment wipe and team move follow agent authorship; a successful wipe answers 200
   'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
@@ -75,6 +76,7 @@ const OFFLINE = [
   'folders-agent.test.js',      // agents file docs into folders (My docs + team) with the hosted Bearer
   'docs-hub-unified.test.js',   // My docs + team use one toolbar/list and cached previews
   'catalog-search.test.js',      // all-folder document search + field prefixes + nested paths
+  'full-text-search.test.js',    // body + comment search: CJK, ranking, snippets as text, only docs the viewer's hub lists
   'folder-move-to-team.test.js', // a whole My docs folder into a team: batches, re-runs, stale reads
   'team-backup.test.js',         // customer-owned S3/R2 mirror: encryption, queue, retries, tombstones
   'backup-cli.test.js',          // open-format portability copy download + checksum verification
@@ -88,6 +90,7 @@ const OFFLINE = [
   'provider-observability.test.js', // privacy-minimized hosted onboarding funnel in Worker logs (#397)
   'pair-signin-cli.test.js',  // phase-2 CLI: pairing-first, 404 fallback, probe-first resume
   'oidc-provider-seat.test.js', // phase-3: OIDC seat — verified-email sessions, email-born accounts, sub never a key
+  'preview-oidc-login.test.js', // fixed Clerk callback returns a one-time session ticket to the originating PR alias
   'oidc-provider-registry.test.js', // provider registry: raft seat, agent-only stateless callback
   'email-identity-surface.test.js', // phase-4: actor keys — email identities comment, are invited, own their words
   'identity-recycling.test.js', // renamed handles and recycled addresses must not inherit an account
@@ -107,6 +110,7 @@ const OFFLINE = [
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'resolve-a-thread.test.js',
   'onboarding-journey.test.js',
+  'feature-flags.test.js', // flag registry: dev-mode-only until default flips; unknown names off
   'dev-mode.test.js', // Dev mode switch (allow-list only, per account) + onboarding never returns on re-login
   'setup-gate.test.js', // the journey: two doors, three server-driven bridges, no daemon // #357 a person can resolve; resolved threads leave the margin
   'tornado-doc-landing.test.js',
@@ -126,6 +130,7 @@ const OFFLINE = [
   'agent-runtime.test.js',    // host-runtime detect + agent logos
   'pins-layout.test.js',      // v0.8.0 pins clustering/spread/overflow-fold core
   'worker-shell.test.js',     // step7 worker shell parity: /frame route, CSP, bundled builders
+  'upload-linear-time.test.js', // malformed 1.5 MB HTML must stay fast through the real upload route
   'bake-reader.test.js',      // tdoc-new bakes the reader template → self-contained docs (shell)
   'dark-invert-parity.test.js', // the shell's dark invert and the frame's copy must not drift
   'write-invariants.test.js',  // every server write path bakes, stamps aids, records sha
@@ -173,6 +178,7 @@ const BROWSER = [
   'account-profile-menu-ui.test.js', // viewer profile in every desktop/mobile account menu
   'comment-profile-ui.test.js', // comment/reply avatars navigate; pins keep opening comments
   'profile-picks-ui.test.js', // /@handle owner removes picks: card control + Undo, every pin in the picker, errors shown
+  'full-text-search-ui.test.js', // My docs search: text results from /api/search, English + Chinese, marked passages, doc markup shown as text
   'trash-ui.test.js',          // Delete → Trash with Undo, link gone, Trash tab Restore / Delete forever, folders, desktop + phone
   'agent-view-ui.test.js', // doc text for agents: no visible space without JS, removed once the app starts
   'layout-preflight.test.js', // development-only Raft geometry audit
@@ -203,7 +209,7 @@ const BROWSER = [
   'agent-mention-ui.test.js', // @ lists real agents above people; picking one hands the comment to it
   'daemon-onboarding-browser.test.js',
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
-  'dev-mode-ui.test.js', // account menu Dev mode on/off, Internal bar Exit needs two presses, refused off the list, re-login skips the gate; desktop + phone
+  'dev-mode-ui.test.js', // account menu Dev mode on/off and nested onboarding controls; two-press exit/replay, refused off the list, re-login skips the gate; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
 ];
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
+import { Drawer } from '@base-ui/react/drawer';
 import {
   Check,
   ChevronRight,
@@ -10,7 +11,7 @@ import {
   FolderInput,
   History,
   Share2,
-  Send,
+  Sparkles,
   Star,
   Trash2,
   Upload,
@@ -154,8 +155,33 @@ export function DocumentPrimaryAction({
 
 // One document-level entry for handoff activity and unsent comments. The
 // comment card itself carries the state of that one comment.
-export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, children }) {
+export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, narrow = false, children }) {
   const portalContainer = usePortalContainer();
+  const [visibleViewport, setVisibleViewport] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const dragStart = useRef(null);
+  const dragged = useRef(false);
+  useEffect(() => {
+    if (!narrow || !open) return undefined;
+    const visual = window.visualViewport;
+    const update = () => {
+      const height = Math.round(visual?.height || window.innerHeight);
+      if (window.innerHeight - height > 100) setExpanded(true);
+      setVisibleViewport({
+        bottom: Math.max(0, window.innerHeight - ((visual?.offsetTop || 0) + height)),
+        height,
+      });
+    };
+    update();
+    visual?.addEventListener('resize', update);
+    visual?.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    return () => {
+      visual?.removeEventListener('resize', update);
+      visual?.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [narrow, open]);
   const ready = counts.ready || 0;
   const waiting = (counts.waiting || 0) + (counts.received || 0);
   const failed = counts.failed || 0;
@@ -165,22 +191,42 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
     unread ? `${unread} new agent ${unread === 1 ? 'reply' : 'replies'}` : null,
     failed ? `${failed} not delivered` : null,
   ].filter(Boolean).join(' · ');
-  const label = `Agent activity${details ? ` · ${details}` : ''}`;
+  const label = `Ask AI${details ? ` · ${details}` : ''}`;
+  const triggerContents = <>
+    <Sparkles className="tdoc-ask-ai-mark" size={18} strokeWidth={2} color="var(--td-accent, #1652f0)" aria-hidden="true" />
+    <span className="tdoc-ask-ai-label">Ask AI</span>
+    {unread ? <span className="tdoc-send-agent-badge is-unread" aria-hidden="true" />
+      : ready ? <span className="tdoc-send-agent-badge is-ready" aria-hidden="true" /> : null}
+  </>;
+  const triggerProps = { id: 'tdoc-send-agent-btn', type: 'button', className: 'tdoc-send-agent-action', 'aria-label': label, title: label };
+  if (narrow) return <Drawer.Root open={open} onOpenChange={(next) => { if (!next) setExpanded(false); onOpenChange(next); }} swipeDirection="down">
+    <Drawer.Trigger {...triggerProps}>{triggerContents}</Drawer.Trigger>
+    <Drawer.Portal container={portalContainer}>
+      <Drawer.Backdrop className="tdoc-ask-drawer-backdrop" />
+      <Drawer.Viewport className="tdoc-ask-drawer-viewport">
+        <Drawer.Popup className="tdoc-ask-mobile-drawer" style={{ bottom: visibleViewport?.bottom ?? 0, height: Math.max(120, expanded ? (visibleViewport?.height || 600) - 48 : (visibleViewport?.height || 600) * 0.7 - 8) }}>
+          <Drawer.Title className="tdoc-visually-hidden">Ask AI</Drawer.Title>
+          <button type="button" className="tdoc-ask-drawer-grip" aria-label={expanded ? 'Collapse Ask AI' : 'Expand Ask AI'}
+            onClick={() => { if (!dragged.current) setExpanded(!expanded); dragged.current = false; }}
+            onPointerDown={(event) => { dragStart.current = event.clientY; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId); }}
+            onPointerUp={(event) => {
+              if (dragStart.current != null && Math.abs(dragStart.current - event.clientY) > 48) {
+                dragged.current = true;
+                setExpanded(event.clientY < dragStart.current);
+              }
+              dragStart.current = null;
+            }}><span /></button>
+          <Drawer.Close className="tdoc-ask-drawer-close" aria-label="Close Ask AI">×</Drawer.Close>
+          <Drawer.Content className="tdoc-ask-drawer-content">{children}</Drawer.Content>
+        </Drawer.Popup>
+      </Drawer.Viewport>
+    </Drawer.Portal>
+  </Drawer.Root>;
   return <Popover.Root open={open} onOpenChange={onOpenChange}>
-    <Popover.Trigger
-      id="tdoc-send-agent-btn"
-      type="button"
-      className="tdoc-send-agent-action"
-      aria-label={label}
-      title={label}
-    >
-      <Send size={16} aria-hidden="true" />
-      {unread ? <span className="tdoc-send-agent-badge is-unread" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>
-        : ready ? <span className="tdoc-send-agent-badge is-ready" aria-hidden="true" /> : null}
-    </Popover.Trigger>
+    <Popover.Trigger {...triggerProps}>{triggerContents}</Popover.Trigger>
     <Popover.Portal container={portalContainer}>
-      <Popover.Positioner side="bottom" align="end" sideOffset={8} collisionPadding={8} positionMethod="fixed" className="tdoc-picker-positioner">
-        <Popover.Popup className="tdoc-handoff-popover" aria-label="Agent activity">
+      <Popover.Positioner side="bottom" align="end" sideOffset={narrow ? 8 : 48} collisionPadding={8} positionMethod="fixed" className="tdoc-picker-positioner">
+        <Popover.Popup className="tdoc-handoff-popover" aria-label="Ask AI">
           {children}
         </Popover.Popup>
       </Popover.Positioner>

@@ -328,6 +328,15 @@ function anchorTooLarge(anchor) {
   try { return JSON.stringify(anchor).length > ANCHOR_MAX_BYTES; } catch { return true; }
 }
 
+function invalidProductAnchorUrl(anchor) {
+  if (!anchor || anchor.kind !== 'product') return false;
+  if (typeof anchor.url !== 'string') return true;
+  try {
+    const url = new URL(anchor.url);
+    return url.protocol !== 'http:' && url.protocol !== 'https:';
+  } catch { return true; }
+}
+
 // A token-bound session may only touch the doc it was minted for.
 function feedbackScopeDenied(session, slug) {
   return Boolean(session && session.feedback && session.feedback.slug !== slug);
@@ -915,6 +924,7 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
     } while (kvCursor);
   }
   await env.META.delete(`meta:${slug}`);
+  await searchStoreOp(env, searchScopeFromIdx(idx), { kind: 'remove', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
   // Free the hosted slug reservation so it can be republished. Data is already
   // gone; this goes after it. If COMMENTS is absent (Vercel) there was never a
   // hostedOwner key -- the caller ignores the 503.
@@ -2019,6 +2029,23 @@ function cyrb53(str, seed = 0) {
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
+// A failed `<!--...-->` regex attempt at each repeated opener scans the rest
+// of the document again. Keep malformed/unclosed comments verbatim, matching
+// the old replacement, while each character is visited at most once.
+function stripClosedHtmlComments(html) {
+  const chunks = [];
+  let pos = 0;
+  while (pos < html.length) {
+    const open = html.indexOf('<!--', pos);
+    if (open === -1) break;
+    const close = html.indexOf('-->', open + 4);
+    if (close === -1) break;
+    chunks.push(html.slice(pos, open));
+    pos = close + 3;
+  }
+  chunks.push(html.slice(pos));
+  return chunks.join('');
+}
 // Compute an aid from a raw HTML substring representing one artifact element.
 // Strips data-tdoc-* attrs from the open tag (so an aid doesn't include
 // itself), strips comments, collapses whitespace inside.
@@ -2031,8 +2058,7 @@ function aidFor(tag, innerHtml, openAttrs) {
       return m ? a + '=' + m[1] : '';
     })
     .filter(Boolean).join('|');
-  const norm = (innerHtml || '')
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const norm = stripClosedHtmlComments(innerHtml || '')
     .replace(/\sdata-tdoc-[\w-]+\s*=\s*"[^"]*"/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -2072,6 +2098,59 @@ function skipRawTextBodyAt(html, openTag, attrs, openEnd) {
   return m ? openEnd + m.index + m[0].length : html.length;
 }
 
+// A heading label is plain text. Skip complete nested tags once and discard
+// any stray brackets left by malformed markup.
+function headingPlainText(html) {
+  const chunks = [];
+  let pos = 0;
+  while (pos < html.length) {
+    const open = html.indexOf('<', pos);
+    if (open === -1) { chunks.push(html.slice(pos)); break; }
+    chunks.push(html.slice(pos, open));
+    const close = html.indexOf('>', open + 1);
+    if (close === -1) break;
+    pos = close + 1;
+  }
+  const text = chunks.join('');
+  let clean = '';
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '<' && text[i] !== '>') clean += text[i];
+  }
+  return clean.replace(/\s+/g, ' ').trim();
+}
+
+// The former non-greedy heading regex retried the entire remaining document
+// for every unclosed <h1>/<h2>/<h3>. Preserve its first-close semantics while
+// scanning each candidate once. Once a level has no later close, no subsequent
+// opener of that level can produce a heading either.
+function headingsFromHtml(html) {
+  const headings = [];
+  const openRe = /<h([1-3])\b/gi;
+  const closeRe = [null, /<\/h1>/gi, /<\/h2>/gi, /<\/h3>/gi];
+  const noClose = new Set();
+  let match;
+  while ((match = openRe.exec(html))) {
+    const level = Number(match[1]);
+    if (noClose.has(level)) continue;
+    const openEnd = html.indexOf('>', openRe.lastIndex);
+    if (openEnd === -1) break;
+    const close = closeRe[level];
+    close.lastIndex = openEnd + 1;
+    const endMatch = close.exec(html);
+    if (!endMatch) {
+      noClose.add(level);
+      openRe.lastIndex = openEnd + 1;
+      continue;
+    }
+    headings.push({
+      end: close.lastIndex,
+      text: headingPlainText(html.slice(openEnd + 1, endMatch.index)),
+    });
+    openRe.lastIndex = close.lastIndex;
+  }
+  return headings;
+}
+
 // --- #24 dry-run instrumentation -------------------------------------------
 // The hardened stampAids() above fixes real regex bugs (`>` in an attribute,
 // `</tag>` inside <script>/<style>). For ORDINARY HTML it produces aids
@@ -2085,13 +2164,7 @@ function skipRawTextBodyAt(html, openTag, attrs, openEnd) {
 // (it folds deep copies). (Design: docs/DESIGN-aid-migration.md. Empirically 0
 // across current docs.)
 function stampAidsLegacy(rawHtml) {
-  const headRe = /<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
-  const headings = [];
-  let hmatch;
-  while ((hmatch = headRe.exec(rawHtml))) {
-    headings.push({ end: hmatch.index + hmatch[0].length,
-      text: hmatch[2].replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim() });
-  }
+  const headings = headingsFromHtml(rawHtml);
   function nearestHeadingAt(idx) {
     let best = null;
     // Use <= so a heading whose close tag ends exactly at the next
@@ -2130,11 +2203,19 @@ function stampAidsLegacy(rawHtml) {
   // Pass 2: opt-in markers (any tag with data-tdoc-artifact or class
   // containing `tdoc-artifact`). Authors mark composed cards/widgets this
   // way so they're commentable as a unit.
-  const optInRe = /<([a-z][\w-]*)\b([^>]*\b(?:data-tdoc-artifact\b|class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*")[^>]*)>/gi;
+  const optInRe = /<([a-z][\w-]*)\b/gi;
   let om;
   while ((om = optInRe.exec(rawHtml))) {
     const tagLower = om[1].toLowerCase();
-    harvest(om.index, om.index + om[0].length, tagLower, om[2] || '');
+    // Keep the legacy `>` boundary for the dry-run comparison, but do not
+    // retry the rest of an unclosed tag at every nested `<script` opener.
+    const end = rawHtml.indexOf('>', om.index + om[0].length);
+    if (end === -1) break;
+    const attrs = rawHtml.slice(om.index + om[0].length, end);
+    optInRe.lastIndex = end + 1;
+    if (/\bdata-tdoc-artifact\b/i.test(attrs) || /class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*"/i.test(attrs)) {
+      harvest(om.index, end + 1, tagLower, attrs);
+    }
   }
   // Compute aid per element (uses cleaned attrs + inner content with any
   // existing data-tdoc-aid stripped, so re-stamping is idempotent).
@@ -2233,13 +2314,7 @@ function measureAidDrift(rawHtml, comments) {
 // SEPARATE passes per tag, so an svg inside a figure gets stamped just
 // like a free-standing svg. Both are valid anchor targets.
 function stampAids(rawHtml) {
-  const headRe = /<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
-  const headings = [];
-  let hmatch;
-  while ((hmatch = headRe.exec(rawHtml))) {
-    headings.push({ end: hmatch.index + hmatch[0].length,
-      text: hmatch[2].replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim() });
-  }
+  const headings = headingsFromHtml(rawHtml);
   function nearestHeadingAt(idx) {
     let best = null;
     // Use <= so a heading whose close tag ends exactly at the next
@@ -2308,7 +2383,8 @@ function stampAids(rawHtml) {
     let m;
     while ((m = openRe.exec(rawHtml))) {
       const end = attrAwareOpenTagEnd(rawHtml, m.index);
-      if (end < 0) continue;
+      if (end < 0) break;
+      openRe.lastIndex = end;
       const attrs = rawHtml.slice(m.index + 1 + tag.length, end - 1);
       harvest(m.index, end, tag, attrs);
     }
@@ -2322,7 +2398,8 @@ function stampAids(rawHtml) {
   while ((om = optInProbe.exec(rawHtml))) {
     const tagLower = om[1].toLowerCase();
     const end = attrAwareOpenTagEnd(rawHtml, om.index);
-    if (end < 0) continue;
+    if (end < 0) break;
+    optInProbe.lastIndex = end;
     const attrs = rawHtml.slice(om.index + 1 + om[1].length, end - 1);
     if (/\bdata-tdoc-artifact\b/i.test(attrs) || /class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*"/i.test(attrs)) {
       harvest(om.index, end, tagLower, attrs);
@@ -3378,7 +3455,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
   const raw = await obj.text();
   const session = gate.session;
   const identity = sessionPrincipal(session)
-    ? { login: actorKey(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
+    ? { login: actorKey(session), linked_actor_keys: actorKeys(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
     : null;
   // Pure-publish: version picker only for callers allowed by history_visibility.
   let versions = [{ n: version, created: null }];
@@ -3797,6 +3874,74 @@ function oidcConfig(env) {
   return oidcProvider(env, 'oidc');
 }
 
+// PR aliases are separate cookie hosts. Clerk knows only this stable callback;
+// a short-lived ticket moves the resulting preview session to the exact PR
+// alias that started the sign-in. Production never enters this path.
+const PREVIEW_AUTH_ORIGIN = 'https://tdoc-preview.jyshi1107.workers.dev';
+const PREVIEW_ALIAS_HOST = /^pr-[1-9]\d*-tdoc-preview\.jyshi1107\.workers\.dev$/;
+const PREVIEW_AUTH_TICKET_TTL = 60;
+const PREVIEW_SESSION_TTL = 14 * 24 * 60 * 60;
+const PREVIEW_LOGIN_COOKIE = 'tdoc_preview_login';
+function safePreviewPath(target) {
+  const path = target.pathname + target.search;
+  return sanitizeReturn(path) === path && !/^\/(?:\/|\\|%2f|%5c)/i.test(path) ? path : null;
+}
+function previewAliasTarget(raw) {
+  if (typeof raw !== 'string' || !/^https:\/\/pr-[1-9]\d*-tdoc-preview\.jyshi1107\.workers\.dev\//.test(raw)) return null;
+  let target;
+  try { target = new URL(raw); } catch { return null; }
+  if (target.protocol !== 'https:' || !PREVIEW_ALIAS_HOST.test(target.hostname)
+      || target.port || target.username || target.password || target.hash || !safePreviewPath(target)) return null;
+  return target.toString();
+}
+function previewAuthEnabled(env, url) {
+  return env.TDOC_PREVIEW === '1' && url.origin === PREVIEW_AUTH_ORIGIN;
+}
+async function claimPreviewAuthTicket(env, req, url) {
+  if (env.TDOC_PREVIEW !== '1' || !PREVIEW_ALIAS_HOST.test(url.hostname) || url.protocol !== 'https:') {
+    return text('Not found', { status: 404 });
+  }
+  const ticket = url.searchParams.get('ticket') || '';
+  if (!/^[a-f0-9]{48}$/.test(ticket)) return authStatusResponse('Invalid sign-in ticket. Try again.', { error: true, status: 400 });
+  const key = `preview-auth-ticket:${ticket}`;
+  let raw = null;
+  for (let attempt = 0; attempt < 3 && !raw; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    raw = await env.META.get(key);
+  }
+  if (!raw) return authStatusResponse('Sign-in ticket expired. Try again.', { error: true, status: 410 });
+  let record;
+  try { record = JSON.parse(raw); } catch { return authStatusResponse('Invalid sign-in ticket. Try again.', { error: true, status: 400 }); }
+  const target = previewAliasTarget(record && record.target);
+  if (!target || new URL(target).origin !== url.origin) {
+    return authStatusResponse('This sign-in ticket belongs to another preview.', { error: true, status: 403 });
+  }
+  const browserNonce = ((req.headers.get('cookie') || '').match(new RegExp(`(?:^|;\\s*)${PREVIEW_LOGIN_COOKIE}=([a-f0-9]{48})(?:;|$)`)) || [])[1];
+  if (!browserNonce || !/^[a-f0-9]{64}$/.test(record.bindHash || '')
+      || !await timingSafeEqual(await sha256Hex(browserNonce), record.bindHash)) {
+    return authStatusResponse('This sign-in was started in another browser. Try again here.', { error: true, status: 403 });
+  }
+  if (!record || !Number.isFinite(record.expiresAt) || Date.now() >= record.expiresAt
+      || !/^[a-f0-9]{48}$/.test(record.sid || '')
+      || !await env.META.get(`session:${record.sid}`)) {
+    await env.META.delete(key);
+    return authStatusResponse('Sign-in ticket expired. Try again.', { error: true, status: 410 });
+  }
+  const destination = new URL(target);
+  const path = safePreviewPath(destination);
+  if (!path) return authStatusResponse('Invalid preview sign-in target.', { error: true, status: 400 });
+  // Workers KV has no atomic consume. The browser-bound nonce means a leaked
+  // ticket alone cannot be replayed, and sequential claims are single-use.
+  await env.META.delete(key);
+  const response = redirectTo(path, [
+    `tdoc_sid=${record.sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${PREVIEW_SESSION_TTL}`,
+    `${PREVIEW_LOGIN_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+  ]);
+  response.headers.set('Cache-Control', 'no-store');
+  response.headers.set('Referrer-Policy', 'no-referrer');
+  return response;
+}
+
 // Per-isolate discovery cache, per issuer. Discovery is static config on the
 // issuer's side; refetching it per sign-in would add a round trip for nothing.
 const OIDC_DISCOVERY = new Map();
@@ -3817,7 +3962,10 @@ async function oidcDiscovery(cfg) {
 
 // The generic seat's sign-in: a verified email resolves (never mints) an
 // account and becomes a session.
-async function completeEmailSignIn(env, { user, ret, clearState }) {
+async function completeEmailSignIn(env, { user, ret, clearState, previewTarget = null, previewBindHash = null }) {
+  if (previewTarget && !/^[a-f0-9]{64}$/.test(previewBindHash || '')) {
+    return authStatusResponse('Invalid preview sign-in binding. Try again.', { error: true, status: 400 });
+  }
   const email = normalizeEmail(user && user.email);
   // Verified only — the account-takeover rule, same as everywhere else.
   if (!email || user.email_verified !== true) {
@@ -4047,7 +4195,20 @@ async function completeEmailSignIn(env, { user, ret, clearState }) {
     ...(ghHandle ? { login: ghHandle } : {}),
     ...(githubId ? { github_id: githubId } : {}),
   };
-  await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: 60 * 60 * 24 * 30 });
+  await env.META.put(`session:${sid}`, JSON.stringify(session), { expirationTtl: previewTarget ? PREVIEW_SESSION_TTL : 60 * 60 * 24 * 30 });
+  if (previewTarget) {
+    const ticket = rand(24);
+    await env.META.put(`preview-auth-ticket:${ticket}`, JSON.stringify({
+      sid, target: previewTarget, bindHash: previewBindHash,
+      expiresAt: Date.now() + PREVIEW_AUTH_TICKET_TTL * 1000,
+    }), { expirationTtl: PREVIEW_AUTH_TICKET_TTL });
+    const claim = new URL('/auth/preview/claim', previewTarget);
+    claim.searchParams.set('ticket', ticket);
+    const response = redirectTo(claim.toString(), [clearState]);
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('Referrer-Policy', 'no-referrer');
+    return response;
+  }
   return redirectTo(ret, [
     `tdoc_sid=${sid}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`,
     clearState,
@@ -5039,6 +5200,17 @@ async function moveFolderToTeam(env, session, team, body) {
   // call's docs where they were; batches already moved stay in the team.
   const blocked = await teamPlanBlocksDocs(env, team, entering);
   if (blocked) return { ok: false, status: 402, body: blocked };
+  if (entering) {
+    const guests = new Set((await teamGuestRoster(env, team)).map((guest) => guest.invitee));
+    const existingGuests = new Set(guests);
+    for (const [, meta] of writes) {
+      for (const invitee of accessFromMeta(meta).allowed_users) {
+        if (!await teamGuestIsMember(env, team, invitee)) guests.add(invitee);
+      }
+    }
+    const limit = await teamGuestLimit(env, team);
+    if (guests.size > limit && [...guests].some((invitee) => !existingGuests.has(invitee))) return fail(409, 'team_guest_limit', { count: guests.size, limit });
+  }
 
   // Folders before the docs that point at them; My docs last, so a failure
   // midway leaves every doc either still in My docs or filed in the team.
@@ -5445,6 +5617,64 @@ async function teamDocCount(env, teamId) {
   const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
   const metas = await Promise.all(slugs.map((slug) => loadDocMeta(env, slug)));
   return metas.filter((meta) => meta && meta.workspace_id === teamId && meta.created_from !== 'feedback').length;
+}
+const TEAM_GUEST_FREE_LIMIT = 5;
+const TEAM_GUEST_PAID_LIMIT = 50;
+
+async function teamGuestIsMember(env, team, invitee) {
+  if ((team.members || []).some((member) => {
+    const key = String(member.key || '').toLowerCase();
+    return key === invitee || key === `email:${invitee}` || member.email === invitee;
+  })) return true;
+  if (!invitee.includes('@')) return false;
+  const accountId = await accountIdByEmail(env, invitee);
+  return !!accountId && !!teamMember(team, accountId);
+}
+
+async function teamGuestRoster(env, team) {
+  const slugs = await docIndexSlugs(env, `w:${team.id}`, teamDocMatcher(team.id));
+  const metas = await Promise.all(slugs.map((slug) => loadDocMeta(env, slug)));
+  const guests = new Map();
+  const membership = new Map();
+  for (let i = 0; i < metas.length; i++) {
+    const meta = metas[i];
+    if (!meta || meta.workspace_id !== team.id || meta.created_from === 'feedback') continue;
+    const inviters = meta.guest_invited_by && typeof meta.guest_invited_by === 'object' ? meta.guest_invited_by : {};
+    for (const invitee of accessFromMeta(meta).allowed_users) {
+      if (!membership.has(invitee)) membership.set(invitee, await teamGuestIsMember(env, team, invitee));
+      if (membership.get(invitee)) continue;
+      if (!guests.has(invitee)) guests.set(invitee, { invitee, documents: [], added_by: inviters[invitee] || null });
+      const guest = guests.get(invitee);
+      guest.documents.push({ slug: slugs[i], title: meta.title || slugs[i] });
+      if (!guest.added_by && inviters[invitee]) guest.added_by = inviters[invitee];
+    }
+  }
+  return [...guests.values()].sort((a, b) => a.invitee.localeCompare(b.invitee));
+}
+
+async function teamGuestLimit(env, team) {
+  return (await teamPlanPaid(env, team.id)) ? TEAM_GUEST_PAID_LIMIT : TEAM_GUEST_FREE_LIMIT;
+}
+
+async function teamGuestLimitError(env, team, currentSlug, nextAccess, previousAccess = null) {
+  // Removing guests, or sharing with the same people, cannot exceed the cap.
+  // Avoid scanning every team document on ordinary publishes and policy edits.
+  const before = new Set(previousAccess?.allowed_users || []);
+  const added = (nextAccess.allowed_users || []).filter((invitee) => !before.has(invitee));
+  if (previousAccess && !added.length) return null;
+  if (added.length && (await Promise.all(added.map((invitee) => teamGuestIsMember(env, team, invitee)))).every(Boolean)) return null;
+  // The roster is derived from document ACLs, not an atomic counter. A
+  // concurrent pair of invites may briefly exceed the plan cap; each later
+  // change is checked against the current roster.
+  const roster = await teamGuestRoster(env, team);
+  const existing = new Set(roster.map((guest) => guest.invitee));
+  const current = new Set(roster.filter((guest) => guest.documents.some((doc) => doc.slug !== currentSlug)).map((guest) => guest.invitee));
+  for (const invitee of nextAccess.allowed_users || []) {
+    if (!await teamGuestIsMember(env, team, invitee)) current.add(invitee);
+  }
+  const limit = await teamGuestLimit(env, team);
+  return current.size > limit && [...current].some((invitee) => !existing.has(invitee))
+    ? { error: 'team_guest_limit', count: current.size, limit } : null;
 }
 // Can `adding` more docs go into this team? Returns null when yes, else the
 // 402 body to answer with.
@@ -5859,6 +6089,7 @@ function teamDetail(team, accountId, origin) {
       account_id: m.account_id,
       name: m.name,
       key: m.key,
+      ...(admin && m.email ? { email: m.email } : {}),
       role: m.role,
       me: m.account_id === accountId,
     })),
@@ -5873,6 +6104,7 @@ function teamMemberFromSession(session, role) {
   return {
     account_id: session.account_id,
     key: actorKey(session),
+    ...(normalizeEmail(session.email) ? { email: normalizeEmail(session.email) } : {}),
     name: actorDisplayName(session),
     role,
     joined: new Date().toISOString(),
@@ -5985,10 +6217,15 @@ async function ensureSessionAccount(env, session, origin) {
 }
 
 async function teamManageFor(env, session, meta, access, isOwner) {
-  if (!meta || !sessionInTeam(session, meta.workspace_id)) return null;
+  if (!meta || !meta.workspace_id || !sessionPrincipal(session)) return null;
   const team = await loadTeam(env, meta.workspace_id);
+  if (!team) return null;
   const role = teamRole(team, session.account_id);
-  if (!role) return null;
+  if (!role) {
+    if (isOwner || !isAllowlisted(access, session, env, meta)) return null;
+    return { team: { id: team.id, name: team.name }, guest: true,
+      invitePending: pendingTeamInvite(team, session) };
+  }
   const canManage = !!isOwner;
   return {
     team: { id: team.id, name: team.name },
@@ -5997,7 +6234,7 @@ async function teamManageFor(env, session, meta, access, isOwner) {
   };
 }
 
-async function sendTeamInviteEmails(env, { added, inviterName, inviterId, team, origin }) {
+async function sendTeamInviteEmails(env, { added, inviterName, inviterId, team, origin, force = false }) {
   const emailed = [];
   if (!emailSenderAvailable(env) || !Array.isArray(added) || !added.length || !team.invite_token) return emailed;
   let host = 'tdoc.dev';
@@ -6014,7 +6251,7 @@ async function sendTeamInviteEmails(env, { added, inviterName, inviterId, team, 
     try { addr = await resolveInviteeAddress(env, invitee); } catch {}
     if (!addr || await env.META.get(`email-optout:${addr}`)) continue;
     const coolKey = `team-invite-sent:${team.id}:${addr}`;
-    if (await env.META.get(coolKey)) continue;
+    if (!force && await env.META.get(coolKey)) continue;
     const tok = rand(16);
     const optoutUrl = `${origin}/email/optout?t=${tok}`;
     try {
@@ -6572,6 +6809,9 @@ async function putDocMetaJson(env, slug, json, { restore = false } = {}) {
     }
   }
   await env.META.put(`meta:${slug}`, json, idx ? { metadata: idx } : undefined);
+  // Full-text search follows every record write: a new version is queued
+  // for reindexing, a rename retitles, Trash takes the doc out. Best-effort.
+  if (parsed) await searchIndexTouch(env, slug, parsed, priorIdx);
   if (sync) {
     try { await sync.after(); } catch {}
     if (sync.failed.length) await unbuildDocIndexes(env, sync.failed);
@@ -6884,7 +7124,7 @@ async function joinedFeedbackSpaceSlugs(env, session) {
   return slugs.filter((s) => typeof s === 'string' && isValidSlug(s));
 }
 
-async function indexData(env, session, origin, { ctx = null } = {}) {
+async function indexData(env, session, origin, { ctx = null, searchScopes: searchScopesWanted = false } = {}) {
   const defer = deferIndexWork(ctx);
   // Which rows this viewer could possibly see, decided from the index alone:
   // their own (by account, handle or owner key), their teams', and the ones
@@ -7113,6 +7353,16 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
     };
   };
 
+  // Docs indexed before full-text search, or whose index fell behind, are
+  // queued the first time their hub lists them: one call per owner store,
+  // after the response; each store's alarm reads them a few at a time.
+  const searchScopes = new Map(catalog.map((row) => [row.slug, searchScopeOf(row.meta)]));
+  if (ctx && typeof ctx.waitUntil === 'function' && env.COMMENTS) {
+    for (const [scope, docs] of searchGroupByScope([...mine, ...teamDocs], searchScopes)) {
+      ctx.waitUntil(searchStoreOp(env, scope, { kind: 'ensure', docs }));
+    }
+  }
+
   // Feedback spaces stay out of My docs, but they need a home: the Feedback
   // tab. Listed here without counts — the catalog must not read comments per
   // row — and counted by /api/me/feedback when the tab is opened.
@@ -7130,6 +7380,9 @@ async function indexData(env, session, origin, { ctx = null } = {}) {
       team.id, teamFolderStates.get(team.id).folders.map((folder) => publicTeamFolder(folder, session, team)),
     ])),
     team_invites: await invitesP,
+    // Which store each row's search index lives in: for /api/search only,
+    // never serialized (it names owners' account ids).
+    ...(searchScopesWanted ? { search_scopes: searchScopes } : {}),
   };
 }
 
@@ -8430,7 +8683,7 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
     origin: (meta && meta.feedback && meta.feedback.origin) || null,
     // This host can hand comments to an agent (the local twin cannot).
     notify: true,
-    identity: { login: actorKey(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
+    identity: { login: actorKey(session), linked_actor_keys: actorKeys(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
     is_owner: isDocOwnerSession(env, session, meta),
   };
 }
@@ -9417,6 +9670,688 @@ async function refreshDocPreview(env, slug, meta) {
   } catch {
     return meta;
   }
+}
+
+// ─────────────── full-text search ───────────────
+//
+// Title, body text and comments of every doc, in SQLite FTS5 indexes held by
+// CommentsStore instances under reserved names (like the index bookkeeping
+// store above): a SQLite-backed Durable Object the deploy already has, so
+// search needs no new Cloudflare resource, no new binding and no migration,
+// and a BYOK worker gets it with the same bundle.
+//
+// One store per owner scope -- a person's account (p:), a team (w:), a
+// handle with no account (l:), docs with no owner at all (n) -- so one
+// person's docs never share a database, a queue or a CPU budget with
+// anyone else's, and no store grows with the platform. A search asks only
+// the stores of the docs the viewer's hub lists.
+//
+// The trigram tokenizer indexes every three-character window, which is what
+// makes Chinese searchable at all (no word breaks to split on) and gives
+// substring matches in every language. A term shorter than three characters
+// (most two-character Chinese words) cannot use the trigram index and is
+// matched with LIKE instead, over the rows the viewer may read.
+//
+// The index never decides who may read what. Every query names the slugs the
+// viewer's hub lists (searchHubRows) and the SQL cannot return a row outside
+// them; the route re-checks each result against the doc's current record.
+//
+// Writes never wait on search: a record write or comment change marks the
+// doc pending in its store with a short timeout, and the store's alarm reads
+// docs a few at a time, bounded by bytes. Docs that were never indexed (or
+// whose mark was lost to that timeout) are queued when a viewer's hub or
+// search lists them (ensure).
+const SEARCH_STORE_PREFIX = '__tdoc-search__';
+const SEARCH_INDEX_BATCH = 8;
+const SEARCH_ALARM_BYTES = 1500000;
+const SEARCH_HTML_CAP = 1500000;
+const SEARCH_ENSURE_PER_CALL = 40;
+const SEARCH_BODY_CAP = 400000;
+const SEARCH_COMMENTS_CAP = 100000;
+const SEARCH_RATE_LIMIT = 60;
+const SEARCH_RATE_WINDOW = 60;
+const SEARCH_RESULT_LIMIT = 20;
+const SEARCH_MAX_TRIES = 4;
+const SEARCH_MAX_SCOPES = 16;
+const SEARCH_WRITE_TIMEOUT_MS = 500;
+const SEARCH_QUERY_TIMEOUT_MS = 5000;
+
+// Which store a doc's index lives in, from its record (or its index entry).
+function searchScopeFromIdx(idx) {
+  if (!idx) return '';
+  if (idx.w) return `w:${idx.w}`;
+  if (idx.a) return `p:${idx.a}`;
+  if (idx.o) return `l:${idx.o}`;
+  return 'n';
+}
+// Which life of a slug an index row belongs to: a slug purged and published
+// again starts over at v1, and must not inherit the old v1's row.
+function searchEpoch(meta) {
+  const versions = meta && Array.isArray(meta.versions) ? meta.versions : [];
+  return String((meta && meta.created) || versions[0]?.created || '');
+}
+function searchScopeOf(meta) {
+  return meta && typeof meta === 'object' ? searchScopeFromIdx(docMetaIndex(meta)) : '';
+}
+
+function searchWithin(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function searchStoreOp(env, scope, op, { timeoutMs = 0 } = {}) {
+  if (!env || !env.COMMENTS || !scope) return null;
+  const name = `${SEARCH_STORE_PREFIX}:${scope}`;
+  const run = (async () => {
+    try {
+      const stub = env.COMMENTS.get(env.COMMENTS.idFromName(name));
+      const r = await stub.fetch('https://do/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: name, op }),
+      });
+      const out = await r.json();
+      return out && out.ok ? out : null;
+    } catch { return null; }
+  })();
+  return timeoutMs > 0 ? searchWithin(run, timeoutMs) : run;
+}
+
+// Every write of a doc's record lands here (putDocMetaJson): a new version
+// queues a reindex, a rename only retitles, Trash takes it out, and a move
+// between owners (to a team, back) takes it out of the old scope's store.
+// Bounded by a short timeout and never fails the write that called it.
+async function searchIndexTouch(env, slug, meta, priorIdx) {
+  if (!env || !env.COMMENTS || !meta || typeof meta !== 'object') return;
+  const scope = searchScopeOf(meta);
+  const prior = searchScopeFromIdx(priorIdx);
+  const ops = [searchStoreOp(env, scope, {
+    kind: 'touch',
+    slug,
+    version: latestVersionNumber(meta) || 1,
+    epoch: searchEpoch(meta),
+    // Arriving from another owner's store: whatever this store held for the
+    // slug may be a copy left behind by an earlier move (its removal can
+    // time out), so it is read again rather than trusted by version.
+    moved: Boolean(prior && prior !== scope),
+    title: String(meta.title || slug),
+    gone: isTrashedMeta(meta) || meta.created_from === 'feedback',
+  })];
+  if (prior && prior !== scope) ops.push(searchStoreOp(env, prior, { kind: 'remove', slug }));
+  await searchWithin(Promise.all(ops), SEARCH_WRITE_TIMEOUT_MS);
+}
+
+const SEARCH_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', middot: '·', copy: '©' };
+const SEARCH_SKIP_TAGS = ['head', 'script', 'style', 'noscript', 'template'];
+const SEARCH_INLINE_TAGS = new Set(['a', 'abbr', 'b', 'bdi', 'bdo', 'cite', 'code', 'data', 'dfn', 'em', 'i', 'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'time', 'u', 'var']);
+
+// The words a reader sees, one space between them. One forward scan with
+// indexOf -- every search starts where the last one ended, so the cost is
+// linear in the input whatever it holds (an unclosed <script, ten thousand
+// `<!--`): a doc cannot make indexing slow for anyone. Input is capped before
+// the scan. Entities are decoded in a single pass (never twice), and the
+// text only ever leaves as data: snippets are segments the client renders as
+// text, not HTML.
+function searchPlainText(html, cap = SEARCH_BODY_CAP) {
+  if (typeof html !== 'string' || !html) return '';
+  const src = html.length > SEARCH_HTML_CAP ? html.slice(0, SEARCH_HTML_CAP) : html;
+  // ASCII-only lower case keeps every index equal to the original's.
+  const lower = src.replace(/[A-Z]+/g, (s) => s.toLowerCase());
+  const out = [];
+  let pos = 0;
+  const n = src.length;
+  while (pos < n) {
+    const lt = src.indexOf('<', pos);
+    if (lt === -1) { out.push(src.slice(pos)); break; }
+    if (lt > pos) out.push(src.slice(pos, lt));
+    if (lower.startsWith('<!--', lt)) {
+      const end = lower.indexOf('-->', lt + 4);
+      if (end === -1) break;
+      out.push(' ');
+      pos = end + 3;
+      continue;
+    }
+    // <!doctype ...>, <![CDATA[ ...>, <?xml ...?>: declarations, not text.
+    if (src[lt + 1] === '!' || src[lt + 1] === '?') {
+      const end = src.indexOf('>', lt + 2);
+      if (end === -1) break;
+      out.push(' ');
+      pos = end + 1;
+      continue;
+    }
+    let m = lt + 1;
+    if (src[m] === '/') m += 1;
+    let nameEnd = m;
+    while (nameEnd < n && nameEnd - m < 16 && /[a-z0-9]/.test(lower[nameEnd])) nameEnd += 1;
+    const name = lower.slice(m, nameEnd);
+    if (!name) { out.push('<'); pos = lt + 1; continue; }
+    const gt = src.indexOf('>', nameEnd);
+    if (gt === -1) break;
+    if (src[lt + 1] !== '/' && SEARCH_SKIP_TAGS.includes(name)) {
+      const close = lower.indexOf(`</${name}`, gt + 1);
+      if (close === -1) break;
+      const closeEnd = src.indexOf('>', close + name.length + 2);
+      if (closeEnd === -1) break;
+      out.push(' ');
+      pos = closeEnd + 1;
+      continue;
+    }
+    // Inline tags sit inside words (`<b>re</b>port`); block tags separate them.
+    out.push(SEARCH_INLINE_TAGS.has(name) ? '' : ' ');
+    pos = gt + 1;
+  }
+  const text = out.join('')
+    .replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]{1,10});/gi, (all, ent) => {
+      if (ent[0] === '#') {
+        const code = ent[1] === 'x' || ent[1] === 'X' ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+        return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : ' ';
+      }
+      const key = ent.toLowerCase();
+      return Object.prototype.hasOwnProperty.call(SEARCH_ENTITIES, key) ? SEARCH_ENTITIES[key] : ' ';
+    })
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > cap ? text.slice(0, cap) : text;
+}
+
+// Live comments and replies, every version's: what a reader of the doc can
+// read in its comment list -- minus email addresses. Comment reads redact
+// addresses per viewer (redactCommentEmails); a search result cannot know
+// who may see which, so the index never holds one: `@name@host` becomes
+// `@name`, a bare address its local part.
+// Linear: the text is capped first (each comment, then all of them), split
+// on whitespace, and only a token holding an @ is looked at -- with bounded
+// quantifiers on a bounded token. A token too long to be an address keeps
+// only what comes before its @.
+const SEARCH_COMMENT_CAP = 5000;
+const SEARCH_EMAIL_TOKEN_RE = /([^@\s]{1,64})@[^@\s]{1,255}\.[^@\s]{1,63}/g;
+function searchScrubEmails(text) {
+  return text.split(/(\s+)/).map((token) => {
+    const at = token.indexOf('@');
+    if (at === -1) return token;
+    if (token.length > 400) return token.slice(0, Math.min(at, 64));
+    return token.replace(SEARCH_EMAIL_TOKEN_RE, '$1');
+  }).join('');
+}
+function searchCommentsText(list) {
+  const parts = [];
+  let total = 0;
+  const add = (text) => {
+    if (!text || total >= SEARCH_COMMENTS_CAP) return;
+    const part = String(text).slice(0, SEARCH_COMMENT_CAP);
+    parts.push(part);
+    total += part.length + 3;
+  };
+  try {
+    for (const c of historyList(Array.isArray(list) ? list : [])) {
+      add(c.text);
+      for (const r of Array.isArray(c.replies) ? c.replies : []) {
+        if (r && !r.deleted) add(r.text);
+      }
+    }
+  } catch { return ''; }
+  const joined = parts.join(' · ').slice(0, SEARCH_COMMENTS_CAP);
+  return searchScrubEmails(joined).replace(/\s+/g, ' ').trim();
+}
+
+// Terms: whitespace separated, "quoted phrases" kept whole; at most eight,
+// each at most 100 characters, case-folded duplicates dropped.
+function searchTerms(q) {
+  const out = [];
+  const seen = new Set();
+  const re = /"([^"]+)"|(\S+)/g;
+  let m;
+  while ((m = re.exec(String(q || ''))) && out.length < 8) {
+    const term = String(m[1] || m[2] || '').replace(/["\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+    const key = term.toLowerCase();
+    if (!term || seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+  }
+  return out;
+}
+
+function searchTermRegex(terms) {
+  const parts = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length);
+  return parts.length ? new RegExp(parts.join('|'), 'giu') : null;
+}
+
+// Text split into [{ text, hit }] segments with every term marked. Data, not
+// markup: the client renders each segment as text, so nothing a doc says can
+// become HTML on the results page.
+function searchSegments(text, terms) {
+  const re = searchTermRegex(terms);
+  const out = [];
+  if (!re) return [{ text, hit: false }];
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    if (!m[0]) { re.lastIndex += 1; continue; }
+    if (m.index > last) out.push({ text: text.slice(last, m.index), hit: false });
+    out.push({ text: m[0], hit: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), hit: false });
+  return out;
+}
+
+// The passage around the first match, ~200 characters, as segments.
+function searchSnippet(text, terms, { before = 60, after = 140 } = {}) {
+  if (!text) return null;
+  const re = searchTermRegex(terms);
+  const m = re && re.exec(text);
+  if (!m) return null;
+  let start = Math.max(0, m.index - before);
+  let end = Math.min(text.length, m.index + m[0].length + after);
+  if (start > 0) {
+    const space = text.indexOf(' ', start);
+    if (space !== -1 && space < m.index && space - start < 20) start = space + 1;
+  }
+  if (end < text.length) {
+    const space = text.lastIndexOf(' ', end);
+    if (space > m.index + m[0].length && end - space < 20) end = space;
+  }
+  const segments = searchSegments(text.slice(start, end), terms);
+  if (start > 0) segments.unshift({ text: '…', hit: false });
+  if (end < text.length) segments.push({ text: '…', hit: false });
+  return segments;
+}
+
+function searchSql(store) {
+  const storage = store && store.state && store.state.storage;
+  const sql = storage && storage.sql;
+  if (!sql || typeof sql.exec !== 'function') throw new Error('search_sql_unavailable');
+  if (!store._searchReady) {
+    sql.exec('CREATE TABLE IF NOT EXISTS search_docs (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 0, epoch TEXT NOT NULL DEFAULT \'\', title TEXT NOT NULL DEFAULT \'\', updated TEXT NOT NULL DEFAULT \'\')');
+    sql.exec('CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(title, body, comments, tokenize = \'trigram case_sensitive 0 remove_diacritics 1\')');
+    sql.exec('CREATE TABLE IF NOT EXISTS search_pending (slug TEXT PRIMARY KEY, at INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 0)');
+    // Versions given up on after SEARCH_MAX_TRIES: not queued again until
+    // the doc changes.
+    sql.exec('CREATE TABLE IF NOT EXISTS search_failed (slug TEXT PRIMARY KEY, version INTEGER NOT NULL)');
+    sql.exec('CREATE TABLE IF NOT EXISTS search_rate (bucket TEXT PRIMARY KEY, win INTEGER NOT NULL, n INTEGER NOT NULL)');
+    sql.exec('CREATE TABLE IF NOT EXISTS search_store (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+    store._searchReady = true;
+  }
+  return sql;
+}
+
+function searchRows(sql, query, ...params) {
+  return [...sql.exec(query, ...params)];
+}
+
+// A pending mark is a ticket: the alarm deletes only the ticket it took, so a
+// touch that lands while a doc is being read queues it again rather than
+// being swallowed by the older run.
+let searchTicketSeq = 0;
+function searchTicket() {
+  searchTicketSeq = (searchTicketSeq + 1) % 1000;
+  return Date.now() * 1000 + searchTicketSeq;
+}
+
+async function searchArm(store, delay = 500) {
+  const storage = store.state.storage;
+  if (typeof storage.setAlarm !== 'function') return;
+  try {
+    const current = await storage.getAlarm();
+    if (current == null || current > Date.now() + delay) await storage.setAlarm(Date.now() + delay);
+  } catch {}
+}
+
+function searchQueue(sql, slug, version = 0) {
+  sql.exec('INSERT INTO search_pending (slug, at, tries, version) VALUES (?, ?, 0, ?) ON CONFLICT(slug) DO UPDATE SET at = excluded.at, tries = 0, version = excluded.version', slug, searchTicket(), Number(version) || 0);
+}
+
+function searchRemove(sql, slug) {
+  for (const row of searchRows(sql, 'SELECT id FROM search_docs WHERE slug = ?', slug)) {
+    sql.exec('DELETE FROM search_fts WHERE rowid = ?', row.id);
+  }
+  sql.exec('DELETE FROM search_docs WHERE slug = ?', slug);
+  sql.exec('DELETE FROM search_pending WHERE slug = ?', slug);
+}
+
+function searchPendingCount(sql) {
+  const row = searchRows(sql, 'SELECT count(*) AS n FROM search_pending')[0];
+  return Number(row && row.n) || 0;
+}
+
+// The scope this store serves, from the reserved name it is reached by.
+// Only names under SEARCH_STORE_PREFIX are search stores: a doc's own
+// CommentsStore never answers a search op.
+function searchStoreScope(store, name) {
+  const prefix = `${SEARCH_STORE_PREFIX}:`;
+  if (typeof name !== 'string' || !name.startsWith(prefix) || name.length <= prefix.length || name.length > 300) return '';
+  const id = store && store.state && store.state.id;
+  if (id && typeof id.name === 'string' && id.name !== name) return '';
+  return name.slice(prefix.length);
+}
+
+async function searchStoreHandle(store, name, op) {
+  const scope = searchStoreScope(store, name);
+  if (!scope) return { ok: false, error: 'not_a_search_store' };
+  const sql = searchSql(store);
+  if (!store._searchScopeSaved) {
+    sql.exec('INSERT INTO search_store (k, v) VALUES (\'scope\', ?) ON CONFLICT(k) DO NOTHING', scope);
+    store._searchScopeSaved = true;
+  }
+  const kind = op && op.kind;
+  const slugOk = (s) => isValidSlug(s);
+  if (kind === 'touch') {
+    if (!slugOk(op.slug)) return { ok: false };
+    if (op.gone) { searchRemove(sql, op.slug); return { ok: true, removed: true }; }
+    const row = searchRows(sql, 'SELECT id, version, epoch, title FROM search_docs WHERE slug = ?', op.slug)[0];
+    const pending = searchRows(sql, 'SELECT 1 AS p FROM search_pending WHERE slug = ?', op.slug).length > 0;
+    if (row && !pending && !op.moved && Number(row.version) === Number(op.version) && String(row.epoch) === String(op.epoch || '')) {
+      const title = String(op.title || '').slice(0, 500);
+      if (title && title !== row.title) {
+        // FTS5 has no partial-column update of a contentful table that
+        // keeps the other columns; rewrite the row with the stored text.
+        const prev = searchRows(sql, 'SELECT body, comments FROM search_fts WHERE rowid = ?', row.id)[0] || { body: '', comments: '' };
+        sql.exec('DELETE FROM search_fts WHERE rowid = ?', row.id);
+        sql.exec('INSERT INTO search_fts (rowid, title, body, comments) VALUES (?, ?, ?, ?)', row.id, title, prev.body || '', prev.comments || '');
+        sql.exec('UPDATE search_docs SET title = ? WHERE id = ?', title, row.id);
+      }
+      return { ok: true, queued: false };
+    }
+    searchQueue(sql, op.slug, op.version);
+    await searchArm(store);
+    return { ok: true, queued: true };
+  }
+  if (kind === 'comments') {
+    if (!slugOk(op.slug)) return { ok: false };
+    searchQueue(sql, op.slug, 0);
+    await searchArm(store);
+    return { ok: true, queued: true };
+  }
+  if (kind === 'remove') {
+    if (slugOk(op.slug)) {
+      searchRemove(sql, op.slug);
+      sql.exec('DELETE FROM search_failed WHERE slug = ?', op.slug);
+    }
+    return { ok: true };
+  }
+  if (kind === 'ensure' || kind === 'enqueue') {
+    const docs = (Array.isArray(op.docs) ? op.docs : []).filter((d) => d && slugOk(d.slug));
+    const queued = searchEnsure(sql, docs, kind === 'enqueue' ? docs.length : SEARCH_ENSURE_PER_CALL, kind === 'enqueue');
+    if (queued) await searchArm(store);
+    return { ok: true, queued, pending: searchPendingCount(sql) };
+  }
+  if (kind === 'rate') {
+    const bucket = String(op.bucket || '').slice(0, 200);
+    if (!bucket) return { ok: true, limited: false };
+    const windowSeconds = Math.max(1, Number(op.window) || SEARCH_RATE_WINDOW);
+    const limit = Math.max(1, Number(op.limit) || SEARCH_RATE_LIMIT);
+    const win = Math.floor(Date.now() / (windowSeconds * 1000));
+    const row = searchRows(sql, 'SELECT win, n FROM search_rate WHERE bucket = ?', bucket)[0];
+    const n = row && Number(row.win) === win ? Number(row.n) : 0;
+    if (n >= limit) return { ok: true, limited: true };
+    sql.exec('INSERT INTO search_rate (bucket, win, n) VALUES (?, ?, ?) ON CONFLICT(bucket) DO UPDATE SET win = excluded.win, n = excluded.n', bucket, win, n + 1);
+    return { ok: true, limited: false };
+  }
+  if (kind === 'query') {
+    const docs = (Array.isArray(op.docs) ? op.docs : []).filter((d) => d && slugOk(d.slug));
+    const queued = searchEnsure(sql, docs, SEARCH_ENSURE_PER_CALL, false);
+    if (queued) await searchArm(store);
+    const results = searchQuery(sql, String(op.q || ''), docs.map((d) => d.slug), Math.max(1, Math.min(50, Number(op.limit) || SEARCH_RESULT_LIMIT)));
+    return { ok: true, results, pending: searchPendingCount(sql) };
+  }
+  if (kind === 'stats') {
+    const docs = searchRows(sql, 'SELECT count(*) AS n FROM search_docs')[0];
+    return { ok: true, docs: Number(docs && docs.n) || 0, pending: searchPendingCount(sql) };
+  }
+  return { ok: false };
+}
+
+// Queue the docs whose indexed version is behind (or that were never
+// indexed), at most `cap`. A version given up on is not queued again.
+// `force` queues them all (the admin bulk path).
+function searchEnsure(sql, docs, cap, force) {
+  if (!docs.length || cap <= 0) return 0;
+  const have = new Map();
+  const failed = new Map();
+  const pending = new Set();
+  const slugs = JSON.stringify(docs.map((d) => d.slug));
+  for (const row of searchRows(sql, 'SELECT slug, version FROM search_docs WHERE slug IN (SELECT value FROM json_each(?))', slugs)) have.set(row.slug, Number(row.version));
+  for (const row of searchRows(sql, 'SELECT slug, version FROM search_failed WHERE slug IN (SELECT value FROM json_each(?))', slugs)) failed.set(row.slug, Number(row.version));
+  for (const row of searchRows(sql, 'SELECT slug FROM search_pending WHERE slug IN (SELECT value FROM json_each(?))', slugs)) pending.add(row.slug);
+  let queued = 0;
+  for (const d of docs) {
+    if (queued >= cap) break;
+    if (pending.has(d.slug)) continue;
+    const version = Number(d.version || 0);
+    if (!force && have.has(d.slug) && have.get(d.slug) === version) continue;
+    if (!force && failed.has(d.slug) && failed.get(d.slug) === version) continue;
+    searchQueue(sql, d.slug, version);
+    pending.add(d.slug);
+    queued += 1;
+  }
+  return queued;
+}
+
+// Matching rows among `slugs` only: the slug list is a bound parameter of
+// every statement, so no query can reach a doc the caller did not name. With
+// no full-text term the viewer's rows drive the join (CROSS JOIN fixes the
+// order), so LIKE only ever reads the rows the viewer may read.
+function searchQuery(sql, q, slugs, limit) {
+  const terms = searchTerms(q);
+  if (!terms.length || !slugs.length) return [];
+  const long = terms.filter((t) => [...t].length >= 3);
+  const short = terms.filter((t) => [...t].length < 3);
+  const where = ['d.slug IN (SELECT value FROM json_each(?))'];
+  const params = [JSON.stringify(slugs)];
+  if (long.length) {
+    where.push('search_fts MATCH ?');
+    params.push(long.map((t) => `"${t.replace(/"/g, '""')}"`).join(' AND '));
+  }
+  for (const t of short) {
+    const like = `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where.push("(f.title LIKE ? ESCAPE '\\' OR f.body LIKE ? ESCAPE '\\' OR f.comments LIKE ? ESCAPE '\\')");
+    params.push(like, like, like);
+  }
+  const score = long.length ? 'bm25(search_fts, 8.0, 1.0, 0.5)' : '0';
+  const from = long.length
+    ? 'search_fts f JOIN search_docs d ON d.id = f.rowid'
+    : 'search_docs d CROSS JOIN search_fts f ON f.rowid = d.id';
+  let candidates;
+  try {
+    candidates = searchRows(sql, `SELECT d.id AS id, d.slug AS slug, d.title AS title, d.updated AS updated, ${score} AS score
+      FROM ${from}
+      WHERE ${where.join(' AND ')}
+      ORDER BY score ASC, d.updated DESC LIMIT 200`, ...params);
+  } catch (error) {
+    console.error('[search] query failed:', error && error.message || String(error));
+    return [];
+  }
+  // Relevance first: every term in the title beats a body match; then the
+  // FTS rank; then the most recently updated.
+  const lowerTerms = terms.map((t) => t.toLowerCase());
+  const titleHits = (title) => lowerTerms.filter((t) => String(title || '').toLowerCase().includes(t)).length;
+  for (const row of candidates) row.title_hits = titleHits(row.title);
+  candidates.sort(searchRank);
+  return candidates.slice(0, limit).map((row) => {
+    const text = searchRows(sql, 'SELECT body, comments FROM search_fts WHERE rowid = ?', row.id)[0] || {};
+    let snippet = searchSnippet(String(text.body || ''), terms);
+    let where = 'body';
+    if (!snippet) {
+      snippet = searchSnippet(String(text.comments || ''), terms);
+      where = snippet ? 'comments' : 'title';
+    }
+    if (!snippet) {
+      const lead = String(text.body || '').slice(0, 180);
+      snippet = lead ? [{ text: lead + (String(text.body || '').length > 180 ? '…' : ''), hit: false }] : [];
+    }
+    return { slug: row.slug, title: row.title, updated: row.updated, where, snippet, score: Number(row.score) || 0, title_hits: row.title_hits };
+  });
+}
+
+function searchRank(a, b) {
+  return (Number(b.title_hits) - Number(a.title_hits))
+    || (Number(a.score) - Number(b.score))
+    || String(b.updated).localeCompare(String(a.updated));
+}
+
+// Index one doc. Returns how many bytes of HTML it read (the alarm's budget).
+async function searchIndexDoc(store, sql, scope, slug, ticket) {
+  const env = store.env;
+  const meta = await loadDocMeta(env, slug);
+  const stillMine = () => searchRows(sql, 'SELECT at FROM search_pending WHERE slug = ?', slug).some((r) => Number(r.at) === ticket);
+  // Gone, a feedback space, or moved to another owner's store since it was
+  // queued (that store was told by the write that moved it).
+  if (!meta || meta.created_from === 'feedback' || searchScopeOf(meta) !== scope) {
+    if (stillMine()) searchRemove(sql, slug);
+    return 0;
+  }
+  const version = latestVersionNumber(meta) || 1;
+  sql.exec('UPDATE search_pending SET version = ? WHERE slug = ? AND at = ?', version, slug, ticket);
+  const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+  let html = obj ? await obj.text() : '';
+  const bytes = html.length;
+  if (html.length > SEARCH_HTML_CAP) html = html.slice(0, SEARCH_HTML_CAP);
+  let body = searchPlainText(html);
+  html = '';
+  // Most docs open with their title as the heading; the title is indexed on
+  // its own, and a passage should start with what follows it.
+  const docTitle = String(meta.title || '').trim();
+  if (docTitle && body.slice(0, docTitle.length).toLowerCase() === docTitle.toLowerCase()) body = body.slice(docTitle.length).trimStart();
+  let comments = '';
+  try { comments = searchCommentsText(await readComments(env, slug)); } catch {}
+  // A newer touch, or a delete, landed while this one read: leave it to the
+  // run that owns the newer ticket.
+  if (!stillMine()) return bytes;
+  const versions = Array.isArray(meta.versions) ? meta.versions : [];
+  const updated = String(versions[versions.length - 1]?.created || meta.created || '');
+  const title = String(meta.title || slug).slice(0, 500);
+  const row = searchRows(sql, 'SELECT id FROM search_docs WHERE slug = ?', slug)[0];
+  let id;
+  if (row) {
+    id = row.id;
+    sql.exec('DELETE FROM search_fts WHERE rowid = ?', id);
+    sql.exec('UPDATE search_docs SET version = ?, epoch = ?, title = ?, updated = ? WHERE id = ?', version, searchEpoch(meta), title, updated, id);
+  } else {
+    sql.exec('INSERT INTO search_docs (slug, version, epoch, title, updated) VALUES (?, ?, ?, ?, ?)', slug, version, searchEpoch(meta), title, updated);
+    id = searchRows(sql, 'SELECT id FROM search_docs WHERE slug = ?', slug)[0].id;
+  }
+  sql.exec('INSERT INTO search_fts (rowid, title, body, comments) VALUES (?, ?, ?, ?)', id, title, body, comments);
+  sql.exec('DELETE FROM search_pending WHERE slug = ? AND at = ?', slug, ticket);
+  sql.exec('DELETE FROM search_failed WHERE slug = ?', slug);
+  return bytes;
+}
+
+// The alarm: a few docs a run, bounded by bytes read, then again shortly
+// while any are left. Each attempt is written down (tries + 1, to the back
+// of the queue) and flushed BEFORE the doc is read, so a run the runtime
+// kills mid-doc still counts against that doc -- one bad doc cannot hold the
+// queue. After SEARCH_MAX_TRIES the doc leaves the index (its stale text
+// with it) and that version is not queued again until the doc changes.
+async function searchStoreAlarm(store) {
+  let sql;
+  try { sql = searchSql(store); } catch { return; }
+  const scopeRow = searchRows(sql, "SELECT v FROM search_store WHERE k = 'scope'")[0];
+  const scope = scopeRow ? String(scopeRow.v) : '';
+  if (!scope) return;
+  const batch = searchRows(sql, 'SELECT slug, at, tries, version FROM search_pending ORDER BY at ASC LIMIT ?', SEARCH_INDEX_BATCH);
+  let bytes = 0;
+  for (const item of batch) {
+    if (Number(item.tries) >= SEARCH_MAX_TRIES) {
+      console.error('[search] giving up on', item.slug, 'v' + item.version);
+      searchRemove(sql, item.slug);
+      sql.exec('INSERT INTO search_failed (slug, version) VALUES (?, ?) ON CONFLICT(slug) DO UPDATE SET version = excluded.version', item.slug, Number(item.version) || 0);
+      continue;
+    }
+    const ticket = searchTicket();
+    sql.exec('UPDATE search_pending SET tries = tries + 1, at = ? WHERE slug = ? AND at = ?', ticket, item.slug, item.at);
+    if (!searchRows(sql, 'SELECT 1 AS p FROM search_pending WHERE slug = ? AND at = ?', item.slug, ticket).length) continue;
+    try { if (typeof store.state.storage.sync === 'function') await store.state.storage.sync(); } catch {}
+    try {
+      bytes += await searchIndexDoc(store, sql, scope, item.slug, ticket);
+    } catch (error) {
+      console.error('[search] index failed:', item.slug, error && error.message || String(error));
+    }
+    if (bytes >= SEARCH_ALARM_BYTES) break;
+  }
+  // Rate windows from earlier minutes are dead weight.
+  sql.exec('DELETE FROM search_rate WHERE win < ?', Math.floor(Date.now() / (SEARCH_RATE_WINDOW * 1000)) - 1);
+  if (searchPendingCount(sql)) await searchArm(store, 250);
+}
+
+// The docs a search may return: exactly the rows the viewer's hub lists
+// (their own, their teams', and the ones they opened or starred), scoped the
+// way /api/me scopes a workspace token, then narrowed to one space.
+//   space ''      My docs (personal rows)
+//   space <team>  that team's rows
+//   space 'all'   both
+function searchHubRows(data, session, space) {
+  const scope = session && session.scope;
+  const reach = scope
+    ? (row) => (row.workspace_id ? scope.teams.includes(row.workspace_id) : scope.me && row.mine === true)
+    : () => true;
+  const rows = [
+    ...(scope && !scope.me ? [] : (data.docs || [])),
+    ...(data.team_docs || []).map((row) => ({ ...row, workspace_id: row.workspace_id || row.team })),
+    ...(data.recent || []),
+    ...(data.starred || []),
+  ];
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    if (!row || !row.slug || seen.has(row.slug) || !reach(row)) continue;
+    const ws = row.workspace_id || '';
+    if (space !== 'all' && ws !== space) continue;
+    seen.add(row.slug);
+    out.push(row);
+  }
+  return out;
+}
+
+// The stores that are the viewer's own: their accounts, their handle, their
+// teams, and (for the deploy operator) the ownerless pool.
+function searchOwnScopes(env, session) {
+  const own = new Set();
+  for (const id of sessionAccountIds(session)) own.add(`p:${id}`);
+  const login = sessionLogin(session);
+  if (login) own.add(`l:${login}`);
+  for (const id of (session && session.team_ids) || []) own.add(`w:${id}`);
+  if (isOwnerSession(env, session)) own.add('n');
+  return own;
+}
+
+// Rows grouped by the store their index lives in. The viewer's own and team
+// stores are always asked; other people's (docs shared with the viewer)
+// fill the rest, biggest first, up to SEARCH_MAX_SCOPES stores in all. What
+// is left out is counted, so the caller can say the search was partial.
+function searchGroupByScope(rows, scopes, own = new Set()) {
+  const groups = new Map();
+  for (const row of rows) {
+    const scope = scopes && scopes.get(row.slug);
+    if (!scope) continue;
+    if (!groups.has(scope)) groups.set(scope, []);
+    groups.get(scope).push({ slug: row.slug, version: row.latest });
+  }
+  const entries = [...groups.entries()];
+  const mine = entries.filter(([scope]) => own.has(scope)).sort((a, b) => b[1].length - a[1].length);
+  const others = entries.filter(([scope]) => !own.has(scope)).sort((a, b) => b[1].length - a[1].length);
+  const room = Math.max(0, SEARCH_MAX_SCOPES - mine.length);
+  const out = [...mine, ...others.slice(0, room)];
+  out.skipped = Math.max(0, others.length - room);
+  return out;
+}
+
+// A burst of keystrokes would rebuild the whole hub catalog each time; a
+// viewer's rows are kept for a few seconds per isolate. Only which docs to
+// search comes from here -- every result is checked again against its
+// current record before it is returned.
+const SEARCH_ROWS_TTL_MS = 5000;
+const searchRowsCache = new Map();
+async function searchViewerData(env, session, origin, ctx) {
+  const ttl = env && env.TDOC_SEARCH_CACHE_MS != null && Number.isFinite(Number(env.TDOC_SEARCH_CACHE_MS)) ? Number(env.TDOC_SEARCH_CACHE_MS) : SEARCH_ROWS_TTL_MS;
+  const key = `${origin}|${(session && session.id) || actorKey(session) || ''}|${JSON.stringify([(session && session.scope) || null, (session && session.team_ids) || []])}`;
+  const hit = searchRowsCache.get(key);
+  if (hit && Date.now() - hit.at < ttl) return hit.data;
+  const data = await indexData(env, session, origin, { ctx, searchScopes: true });
+  if (searchRowsCache.size > 200) searchRowsCache.clear();
+  searchRowsCache.set(key, { at: Date.now(), data });
+  return data;
 }
 
 // Pins live on the account group's canonical profile record: that is the one
@@ -10636,6 +11571,7 @@ function inboxGroupKey(kind, slug, targetId) {
   if (kind === 'reaction') return `reaction:${targetId}`;
   // One row per person asking: each is approved or ignored on its own.
   if (kind === 'access_request') return targetId ? `access_request:${slug}:${targetId}` : `access_request:${slug}`;
+  if (kind === 'team_join_request') return `team_join_request:${slug}:${targetId || ''}`;
   return `other:${slug || 'x'}`;
 }
 
@@ -10673,6 +11609,7 @@ function applyInboxEvent(inbox, ev) {
     actor: ev.actor || null,
     preview: ev.preview || '',
     title: ev.title || ev.slug,
+    ...(ev.team_id ? { team_id: ev.team_id } : {}),
     at: ev.at,
     read: false,
     count: 1,
@@ -11296,7 +12233,7 @@ async function deliverInbox(env, recipientLogin, ev, delivery = {}) {
 const PUSH_SUBS_MAX = 10;
 const PUSH_TTL_S = 24 * 60 * 60;
 const PUSH_PREVIEW_MAX = 280;
-const PUSH_KINDS = new Set(['comment', 'mention', 'reply', 'access_request', 'access_granted']);
+const PUSH_KINDS = new Set(['comment', 'mention', 'reply', 'access_request', 'access_granted', 'team_join_request']);
 // The worker POSTs to whatever endpoint a subscription names, so only the
 // browsers' own push services are accepted -- never an arbitrary URL.
 const PUSH_HOSTS = [
@@ -11463,7 +12400,7 @@ async function dropPushSubscription(env, keys, endpoint) {
 function pushRow(row) {
   const clip = (s, n) => { const t = String(s || ''); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
   return {
-    id: row.id, kind: row.kind, slug: row.slug, version: row.version,
+    id: row.id, kind: row.kind, slug: row.slug, team_id: row.team_id, version: row.version,
     comment_id: row.comment_id, thread_id: row.thread_id,
     actor: row.actor ? { login: row.actor.login, name: clip(row.actor.name, 80) } : null,
     preview: clip(row.preview, PUSH_PREVIEW_MAX), title: clip(row.title, 120),
@@ -11498,7 +12435,7 @@ async function pushInboxRow(env, who, row) {
 //   - the permanent opt-out (email-optout:<addr>) and the per-person switch
 //     in Notifications (notify-email-off:<actor key>) are checked first
 //   - no sender configured: nothing, and not an error
-const EMAIL_NOTIFY_KINDS = new Set(['mention', 'reply', 'comment', 'access_request']);
+const EMAIL_NOTIFY_KINDS = new Set(['mention', 'reply', 'comment', 'access_request', 'team_join_request']);
 const EMAIL_NOTIFY_COOLDOWN_S = 30 * 60;
 const EMAIL_NOTIFY_DAILY_CAP = 30;
 
@@ -12738,6 +13675,86 @@ function withHandoffStatus(list, handoffs) {
   return list.map(c => ({ ...c, ...(byComment.get(c.id) || bare) }));
 }
 
+// Handoff routing and delivery are private to the commenter and the people
+// who manage this document. A public or team-readable comment can still be
+// read normally without exposing which agent was asked to handle it.
+const PRIVATE_HANDOFF_FIELDS = ['handoff_status', 'handoff_id', 'handoff_at', 'handoff_acked_at', 'handoff_delivery', 'handoff_to', 'handoff_resend_allowed'];
+// The member who sent a handoff: `sent_by` for one sent to a team agent,
+// `by` for one queued on the member's own agent (a team agent's `by` is the
+// agent, never a person).
+function handoffSentBySession(handoff, session) {
+  if (!handoff || !session || session.team_agent || session.feedback) return false;
+  const ids = sessionAccountIds(session);
+  return ids.includes(handoff.sent_by) || (!handoff.team_agent && ids.includes(handoff.by));
+}
+function maySeeCommentHandoff(env, gate, comment, handoffsById) {
+  if (gate.ownerToken || isDocOwnerSession(env, gate.session, gate.meta)) return true;
+  const teamAgent = gate.session?.team_agent;
+  if (teamAgent && gate.meta?.workspace_id === teamAgent.team) {
+    const handoff = handoffsById.get(comment.handoff_id);
+    if (handoff?.by === gate.session.account_id) return true;
+  }
+  // Whoever sent this handoff sees it, also on a thread somebody else began.
+  if (comment.handoff_id && handoffSentBySession(handoffsById.get(comment.handoff_id), gate.session)) return true;
+  const author = String(comment && comment.author && comment.author.login || '').trim().toLowerCase();
+  return !!(author && actorKeys(gate.session).includes(author));
+}
+function redactCommentHandoffs(env, gate, comments, handoffs, allComments) {
+  const handoffsById = new Map(handoffs.filter((handoff) => handoff?.handoff_id).map((handoff) => [handoff.handoff_id, handoff]));
+  const member = gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && !gate.session?.team_agent;
+  const keys = member ? actorKeys(gate.session) : [];
+  const own = keys.length ? handoffThreadIds(allComments, keys) : new Set();
+  return comments.map((comment) => {
+    if (!maySeeCommentHandoff(env, gate, comment, handoffsById)) {
+      const copy = { ...comment };
+      for (const field of PRIVATE_HANDOFF_FIELDS) delete copy[field];
+      return copy;
+    }
+    if (member && comment.handoff_id) {
+      const batch = handoffsById.get(comment.handoff_id)?.comment_ids || [];
+      return { ...comment, handoff_resend_allowed: batch.length > 0 && batch.every((id) => own.has(id)) };
+    }
+    return comment;
+  });
+}
+
+const authoredBy = (keys, item) => {
+  const login = String(item?.author?.login || '').trim().toLowerCase();
+  return !!login && keys.includes(login);
+};
+async function ownCommentIds(env, slug, session) {
+  const keys = actorKeys(session);
+  if (!keys.length) return new Set();
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  return new Set(list.filter((comment) => authoredBy(keys, comment)).map((comment) => comment.id));
+}
+// What a member may hand off: threads they began, threads they have a
+// (non-deleted) reply in, and those replies themselves. Seeing a handoff
+// stays with ownCommentIds and the handoff's sender.
+function handoffThreadIds(list, keys) {
+  const out = new Set();
+  for (const comment of Array.isArray(list) ? list : []) {
+    if (!comment || !comment.id) continue;
+    if (authoredBy(keys, comment)) out.add(comment.id);
+    const snap = snapshotAt(comment, Infinity);
+    if (!snap || snap.deleted) continue;
+    for (const reply of snap.replies || []) {
+      if (!reply || reply.deleted || !authoredBy(keys, reply)) continue;
+      out.add(comment.id);
+      out.add(reply.id);
+    }
+  }
+  return out;
+}
+async function handoffThreadIdsFor(env, slug, session) {
+  const keys = actorKeys(session);
+  if (!keys.length) return new Set();
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  return handoffThreadIds(list, keys);
+}
+
 async function mutateComments(env, slug, op) {
   let result;
   if (env.COMMENTS) {
@@ -12763,6 +13780,9 @@ async function mutateComments(env, slug, op) {
   }
   if (result && result.status === 200) {
     const meta = await loadDocMeta(env, slug);
+    // Comment text is searchable, a wipe included: queue the doc for
+    // reindexing in its owner's store. Bounded; never fails the comment.
+    if (meta) await searchStoreOp(env, searchScopeOf(meta), { kind: 'comments', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
     if (meta && validTeamId(meta.workspace_id)) {
       await enqueueTeamBackup(env, { kind: 'comments', team: meta.workspace_id, slug });
     }
@@ -12849,6 +13869,9 @@ async function versionReservationOp(env, slug, op) {
 // backstop. All same-slug reads/writes funnel through this one instance.
 export class CommentsStore {
   constructor(state, env) { this.state = state; this.env = env; }
+
+  // Only search stores (SEARCH_STORE_PREFIX) ever set an alarm.
+  async alarm() { await searchStoreAlarm(this); }
 
   // Resolve the list for `slug` from DO storage INSIDE transaction txn, doing
   // the one-time legacy-KV migration on first touch. DO storage is the SOLE
@@ -13044,6 +14067,17 @@ export class CommentsStore {
     let payload;
     try { payload = await req.json(); } catch { return Response.json({ list: [] }); }
     const { slug, op } = payload;
+
+    // FULL-TEXT SEARCH: one store per owner scope (searchStoreHandle),
+    // reached under reserved names no slug can take; any other instance
+    // refuses the op.
+    if (u.pathname === '/search') {
+      try { return Response.json(await searchStoreHandle(this, slug, op)); }
+      catch (error) {
+        console.error('[search] store op failed:', error && error.message || String(error));
+        return Response.json({ ok: false });
+      }
+    }
 
     // INDEX BOOKKEEPING: the one place on the platform that counts how many
     // index markers the lazy backfill may still write today, and which
@@ -13954,7 +14988,11 @@ function agentAskEvent({ slug, docTitle, askId, question, passage, publicHost, c
 async function teamAskTargets(env, gate) {
   const caller = await teamAgentCaller(env, gate);
   if (!caller) return { targets: [], reachable: [] };
-  const targets = await teamAgentTargets(env, caller.team);
+  const writer = docLastWriter(gate.meta);
+  const targets = (await teamAgentTargets(env, caller.team))
+    .map((target) => ({ ...target, last_writer: writer?.kind === 'team_agent' && target.team_agent?.id === writer.id }))
+    .sort((a, b) => Number(b.last_writer) - Number(a.last_writer)
+      || String(b.last_touched || '').localeCompare(String(a.last_touched || '')));
   return { targets, reachable: targets.filter((t) => t.provider !== 'local' || t.status === 'active') };
 }
 
@@ -14027,11 +15065,18 @@ async function handleMyAgent(env, req, url, slug) {
   const team = await teamAskTargets(env, { meta, session });
   if (req.method === 'GET') {
     const asks = accountId ? (await loadAgentAsks(env, slug, asker)).slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
+    const guestTeam = meta.workspace_id && !await isTeamMemberSession(env, session, meta.workspace_id)
+      && isAllowlisted(accessFromMeta(meta), session, env, meta)
+      ? await loadTeam(env, meta.workspace_id) : null;
     return json({
       tier: state.tier,
       agent: agentAskTargetView(state.reachable[0] || null),
       agents: state.own.map(agentAskTargetView),
       team_agents: team.targets.map(agentAskTargetView),
+      disabled_team_agents: guestTeam ? teamAgents(guestTeam).map((agent) => ({
+        provider: 'local', agent_sub: agent.id, agent_name: agent.name,
+        team_agent: { id: agent.id, name: agent.name }, disabled: true,
+      })) : [],
       // tdoc AI is offered to everyone, within their free answers.
       tdoc_ai: askConfig(env).available,
       asks,
@@ -14652,6 +15697,68 @@ const tdocHandlers = {
     // Agents (hosted Bearer) use GET /api/me — same catalog as the HTML /me
     // hub, without needing a cookie. Cookie sessions also work so browser
     // tools can fetch JSON.
+    // Full-text search over the docs this viewer's hub lists (searchHubRows):
+    // title, body and comments, ranked, with a marked passage per result.
+    //   GET /api/search?q=<text>&space=<''|team id|all>
+    if (p === '/api/search' && method === 'GET') {
+      const s = await getViewerSession(env, req);
+      if (!canSeeMyDocs(env, s, url.origin) || s.feedback) {
+        return json({ error: sessionPrincipal(s) ? 'forbidden' : 'sign_in_required' }, { status: sessionPrincipal(s) ? 403 : 401 });
+      }
+      const q = String(url.searchParams.get('q') || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      const rawSpace = String(url.searchParams.get('space') || '');
+      const space = rawSpace === 'all' || validTeamId(rawSpace) ? rawSpace : '';
+      const headers = { 'Cache-Control': 'private, no-store' };
+      if ([...q].length < 2) return json({ ok: true, q, results: [], indexing: 0 }, { headers });
+      if (!env.COMMENTS) return json({ error: 'search_unavailable' }, { status: 503, headers });
+      // Counted in a store of the searcher's own: no KV write, and nobody
+      // else's searches share the counter.
+      const bucket = actorKey(s) || s.id || clientIp(req);
+      const rate = await searchStoreOp(env, `r:${bucket}`, { kind: 'rate', bucket, limit: SEARCH_RATE_LIMIT, window: SEARCH_RATE_WINDOW }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS });
+      if (!rate) return json({ error: 'search_unavailable' }, { status: 503, headers });
+      if (rate.limited) return json({ error: 'rate_limited', message: 'Too many searches; wait a moment.' }, { status: 429, headers: { ...headers, 'Retry-After': String(SEARCH_RATE_WINDOW) } });
+      const data = await searchViewerData(env, s, url.origin, ctx);
+      const rows = searchHubRows(data, s, space);
+      const bySlug = new Map(rows.map((row) => [row.slug, row]));
+      // Each owner store is asked only about this viewer's docs in it.
+      const groups = searchGroupByScope(rows, data.search_scopes, searchOwnScopes(env, s));
+      const answers = await Promise.all(groups.map(([scope, docs]) => (
+        searchStoreOp(env, scope, { kind: 'query', q, limit: SEARCH_RESULT_LIMIT, docs }, { timeoutMs: SEARCH_QUERY_TIMEOUT_MS })
+      )));
+      if (rows.length && !answers.some(Boolean)) return json({ error: 'search_unavailable' }, { status: 503, headers });
+      const out = {
+        results: answers.filter(Boolean).flatMap((a) => a.results || []).sort(searchRank).slice(0, SEARCH_RESULT_LIMIT),
+        pending: answers.reduce((n, a) => n + (a ? Number(a.pending) || 0 : 0), 0),
+      };
+      const terms = searchTerms(q);
+      // The index is a cache: each result is checked against the doc's
+      // current record before a word of it is returned.
+      const results = (await Promise.all((out.results || []).map(async (hit) => {
+        const row = bySlug.get(hit.slug);
+        if (!row) return null;
+        const meta = await loadDocMeta(env, hit.slug);
+        if (!meta || meta.created_from === 'feedback' || !docReadableBy(env, s, meta)) return null;
+        if (String(meta.workspace_id || '') !== String(row.workspace_id || '')) return null;
+        const title = String(meta.title || hit.slug);
+        return {
+          slug: hit.slug,
+          title,
+          title_marks: searchSegments(title, terms),
+          workspace_id: row.workspace_id || '',
+          folder: row.folder || '',
+          owner: row.owner || '',
+          mine: !!row.mine,
+          updated: row.updated || hit.updated || '',
+          where: hit.where,
+          snippet: hit.snippet,
+        };
+      }))).filter(Boolean);
+      // Stores left out past SEARCH_MAX_SCOPES, or that did not answer in
+      // time: say the search was partial rather than look complete.
+      const skipped = groups.skipped + answers.filter((a) => !a).length;
+      return json({ ok: true, q, results, indexing: Number(out.pending) || 0, ...(skipped ? { partial: true, skipped } : {}) }, { headers });
+    }
+
     if (p === '/api/me/feedback' && method === 'GET') {
       const s = await getSession(env, req);
       if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
@@ -15195,6 +16302,8 @@ const tdocHandlers = {
           docs,
           mine,
           ...(mine ? { catalog, identity } : { identity }),
+          // Dev-mode-only features (shell/src/feature-flags.js) read this.
+          devMode: (await devModeBoot(env, session)).devMode,
         }),
       }), {
         headers: { 'Content-Security-Policy': cspHeader(nonce) },
@@ -16236,14 +17345,37 @@ const tdocHandlers = {
 
     // OIDC sign-in, one pair of routes for every registered provider
     // (OIDC_PROVIDERS). GitHub keeps its own first-party flow above.
+    if (method === 'GET' && p === '/auth/preview/claim') {
+      return claimPreviewAuthTicket(env, req, url);
+    }
     const oidcLoginMatch = method === 'GET' && p.match(OIDC_LOGIN_ROUTE);
     if (oidcLoginMatch) {
       const cfg = oidcProvider(env, oidcLoginMatch[1]);
       if (!cfg) return redirectTo('/?notice=signin');
-      const notice = cfg.id === 'oidc' ? switchAccountNotice(env, req, url) : null;
+      if (env.TDOC_PREVIEW === '1' && cfg.id === 'oidc' && PREVIEW_ALIAS_HOST.test(url.hostname)) {
+        const target = previewAliasTarget(`${url.origin}${sanitizeReturn(url.searchParams.get('return'))}`);
+        if (!target) return authStatusResponse('Invalid preview sign-in target.', { error: true, status: 400 });
+        const browserNonce = rand(24);
+        const login = new URL('/api/auth/oidc/login', PREVIEW_AUTH_ORIGIN);
+        login.searchParams.set('preview_return', target);
+        login.searchParams.set('preview_bind', await sha256Hex(browserNonce));
+        return redirectTo(login.toString(), [
+          `${PREVIEW_LOGIN_COOKIE}=${browserNonce}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
+        ]);
+      }
+      const previewReturnRaw = url.searchParams.get('preview_return');
+      const previewBindHash = url.searchParams.get('preview_bind');
+      const previewTarget = previewAuthEnabled(env, url) && cfg.id === 'oidc' && previewReturnRaw != null
+        ? previewAliasTarget(previewReturnRaw) : null;
+      if ((previewReturnRaw != null && !previewTarget) || (previewTarget && !/^[a-f0-9]{64}$/.test(previewBindHash || ''))
+          || (!previewTarget && previewBindHash != null)) {
+        return authStatusResponse('Invalid preview sign-in target.', { error: true, status: 400 });
+      }
+      const notice = cfg.id === 'oidc' && !previewTarget ? switchAccountNotice(env, req, url) : null;
       if (notice) return notice;
       const nonce = rand(16);
-      const ret = sanitizeReturn(url.searchParams.get('return'));
+      const ret = previewTarget ? JSON.stringify({ previewTarget, previewBindHash })
+        : sanitizeReturn(url.searchParams.get('return'));
       await env.META.put(`oauthstate:${cfg.id}:${nonce}`, ret, { expirationTtl: 600 });
       let auth;
       try { auth = new URL((await oidcDiscovery(cfg)).authorization_endpoint); }
@@ -16290,8 +17422,20 @@ const tdocHandlers = {
         return authStatusResponse('Sign-in could not be verified (state mismatch). Please try again.', { error: true, status: 400 });
       }
       let ret = '/';
+      let previewTarget = null;
+      let previewBindHash = null;
       if (!stateless) {
-        ret = sanitizeReturn(await env.META.get(`oauthstate:${cfg.id}:${state}`));
+        const storedReturn = await env.META.get(`oauthstate:${cfg.id}:${state}`);
+        if (previewAuthEnabled(env, url) && cfg.id === 'oidc' && storedReturn && storedReturn.startsWith('{')) {
+          let previewState;
+          try { previewState = JSON.parse(storedReturn); } catch { previewState = null; }
+          previewTarget = previewAliasTarget(previewState && previewState.previewTarget);
+          previewBindHash = previewState && previewState.previewBindHash;
+          if (!previewTarget || !/^[a-f0-9]{64}$/.test(previewBindHash || '')) {
+            return authStatusResponse('Invalid preview sign-in target.', { error: true, status: 400 });
+          }
+        }
+        ret = previewTarget ? '/' : sanitizeReturn(storedReturn);
         await env.META.delete(`oauthstate:${cfg.id}:${state}`);
       }
       try {
@@ -16332,7 +17476,8 @@ const tdocHandlers = {
             return await completeRaftConnect(env, req, { pending, tok, ret, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
           }
         }
-        return await cfg.complete(env, { user, tok, disc, ret, stateless, clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
+        return await cfg.complete(env, { user, tok, disc, ret, stateless, previewTarget, previewBindHash,
+          clearState: `${cfg.stateCookie}=; Path=/; Max-Age=0` });
       } catch (e) {
         await raftConnectFailed('Could not reach Raft. Try again.');
         return authStatusResponse('Sign-in error: ' + e.message, { error: true, status: 500 });
@@ -17025,6 +18170,86 @@ const tdocHandlers = {
       return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
     }
 
+    if (p === '/api/team/guests' && (method === 'GET' || method === 'POST')) {
+      if (method === 'POST' && !sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      let body = {};
+      if (method === 'POST') { try { body = await req.json(); } catch {} }
+      const id = method === 'GET' ? url.searchParams.get('id') : body.id;
+      const team = await loadTeam(env, id);
+      if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      let emailed = [];
+      if (method === 'POST') {
+        const invitee = normalizeInvitee(body.invitee);
+        if (!invitee || !['invite_member', 'resend', 'remove'].includes(body.action)) return json({ error: 'invalid_guest_action' }, { status: 400 });
+        const roster = await teamGuestRoster(env, team);
+        const guest = roster.find((item) => item.invitee === invitee);
+        if (body.action === 'remove') {
+          if (!guest) return json({ error: 'guest_not_found' }, { status: 404 });
+          if (Array.isArray(team.invites) && team.invites.includes(invitee)) {
+            team.invites = team.invites.filter((item) => item !== invitee);
+            await saveTeam(env, team);
+          }
+          for (const doc of guest.documents) {
+            const meta = await loadDocMeta(env, doc.slug);
+            if (!meta || meta.workspace_id !== team.id) continue;
+            const access = accessFromMeta(meta);
+            access.allowed_users = access.allowed_users.filter((item) => item !== invitee);
+            const invitedBy = { ...(meta.guest_invited_by || {}) };
+            delete invitedBy[invitee];
+            await putDocMetaJson(env, doc.slug, JSON.stringify({ ...meta, access, guest_invited_by: invitedBy }));
+          }
+        } else {
+          const invites = Array.isArray(team.invites) ? team.invites : [];
+          if (body.action === 'resend' && !invites.includes(invitee)) return json({ error: 'invite_not_found' }, { status: 404 });
+          if (body.action === 'invite_member' && !guest) return json({ error: 'guest_not_found' }, { status: 404 });
+          if (!invites.includes(invitee)) {
+            if (invites.length >= TEAM_INVITES_MAX) return json({ error: 'team_invites_full', limit: TEAM_INVITES_MAX }, { status: 409 });
+            team.invites = [...invites, invitee];
+            await saveTeam(env, team);
+          }
+          try {
+            emailed = await sendTeamInviteEmails(env, {
+              added: [invitee], inviterName: actorDisplayName(gate.session),
+              inviterId: actorKey(gate.session), team, origin: url.origin,
+              force: body.action === 'resend',
+            });
+          } catch {}
+        }
+      }
+      return json({ ok: true, guests: await teamGuestRoster(env, team), limit: await teamGuestLimit(env, team), invites: team.invites || [], emailed });
+    }
+
+    if (p === '/api/team/request-join' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body.slug;
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const meta = await loadDocMeta(env, slug);
+      const team = meta && meta.workspace_id ? await loadTeam(env, meta.workspace_id) : null;
+      if (!team || teamMember(team, gate.session.account_id) || !isAllowlisted(accessFromMeta(meta), gate.session, env, meta)) {
+        return json({ error: 'guest_required' }, { status: 403 });
+      }
+      const requester = actorKey(gate.session);
+      const key = `team-join-request:${team.id}:${requester}`;
+      if (!await env.META.get(key)) {
+        for (const admin of team.members.filter((member) => member.role === 'admin')) {
+          await writeInboxEvent(env, admin.key, {
+            kind: 'team_join_request', slug, team_id: team.id, title: team.name,
+            target_id: requester, requester, at: new Date().toISOString(),
+            actor: { login: requester, name: actorDisplayName(gate.session), avatar_url: gate.session.avatar_url || '' },
+          }, { ctx, origin: url.origin });
+        }
+        await env.META.put(key, '1', { expirationTtl: 24 * 60 * 60 });
+      }
+      return json({ ok: true, requested: true });
+    }
+
     // Customer-owned backup mirror. Browser admins only: these credentials
     // can copy every team document, so a terminal token and a team member are
     // intentionally insufficient. The destination is tested before its
@@ -17577,6 +18802,15 @@ const tdocHandlers = {
       if (team) {
         const blocked = await teamPlanBlocksDocs(env, team, metas.length);
         if (blocked) return json(blocked, { status: 402 });
+        const guests = new Set((await teamGuestRoster(env, team)).map((guest) => guest.invitee));
+        const existingGuests = new Set(guests);
+        for (const [, meta] of metas) {
+          for (const invitee of accessFromMeta(meta).allowed_users) {
+            if (!await teamGuestIsMember(env, team, invitee)) guests.add(invitee);
+          }
+        }
+        const limit = await teamGuestLimit(env, team);
+        if (guests.size > limit && [...guests].some((invitee) => !existingGuests.has(invitee))) return json({ error: 'team_guest_limit', count: guests.size, limit }, { status: 409 });
       }
       for (const [slug, meta] of metas) {
         const next = { ...meta };
@@ -18146,9 +19380,12 @@ const tdocHandlers = {
       // Handoff state is derived from the handoff records, not stored on the
       // comment: the comment log stays a log of what people said, and "has
       // this been handed over" is a fact about the handoff, not the comment.
-      const decorated = withHandoffStatus(live, await loadHandoffs(env, slug));
+      const handoffs = await loadHandoffs(env, slug);
+      const decorated = withHandoffStatus(live, handoffs);
+      const viewerSession = gate.session || (agentAuth?.ok ? await sessionFromHostedBearer(env, req) : null);
+      const visible = redactCommentHandoffs(env, { ...gate, session: viewerSession, ownerToken: gate.ownerToken || agentAuth?.actor?.kind === 'admin' }, decorated, handoffs, list);
       const linked = V !== 'all' && hostedRegistrationEnabled(env, url.origin)
-        ? await withCommentProfileLinks(env, decorated) : decorated;
+        ? await withCommentProfileLinks(env, visible) : visible;
       return json(await redactCommentEmails(linked, await emailPrivacyFor(env, gate.session, slug, gate.meta)));
     }
 
@@ -18175,7 +19412,7 @@ const tdocHandlers = {
       });
       return json({
         users,
-        identity: { login: me, name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
+        identity: { login: me, linked_actor_keys: actorKeys(s), name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
         is_owner: isDocOwnerSession(env, s, meta),
       });
     }
@@ -18193,6 +19430,7 @@ const tdocHandlers = {
       if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       if (anchorTooLarge(anchor)) return json({ error: 'anchor_too_large', limit: ANCHOR_MAX_BYTES }, { status: 413 });
+      if (invalidProductAnchorUrl(anchor)) return json({ error: 'invalid_product_url' }, { status: 400 });
       const meta = await loadDocMeta(env, slug);
       const access = accessFromMeta(meta || {});
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
@@ -18338,6 +19576,7 @@ const tdocHandlers = {
       const { slug, id, anchor, version } = body;
       if (feedbackScopeDenied(s, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
       if (anchorTooLarge(anchor)) return json({ error: 'anchor_too_large', limit: ANCHOR_MAX_BYTES }, { status: 413 });
+      if (invalidProductAnchorUrl(anchor)) return json({ error: 'invalid_product_url' }, { status: 400 });
       if (typeof body.resolved === 'boolean') {
         // Marking a thread handled, and taking it back. Same gate as delete and
         // move-anchor: the doc's owner, or whoever wrote the comment — the
@@ -18791,7 +20030,33 @@ const tdocHandlers = {
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
-      return json({ handoffs: (await loadHandoffs(env, slug)).slice(0, limit) });
+      let handoffs = await loadHandoffs(env, slug);
+      if (gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && gate.actor?.kind === 'team_member') {
+        const list = await readComments(env, slug);
+        ensureMigrated(list);
+        const keys = actorKeys(gate.session);
+        const own = new Set(list.filter((comment) => authoredBy(keys, comment)).map((comment) => comment.id));
+        const resendable = handoffThreadIds(list, keys);
+        handoffs = handoffs.flatMap((handoff) => {
+          const sent = handoffSentBySession(handoff, gate.session);
+          const commentIds = (handoff.comment_ids || []).filter((id) => sent || own.has(id));
+          if (!commentIds.length) return [];
+          const ids = new Set(commentIds);
+          return [{
+            ...handoff,
+            comment_ids: commentIds,
+            resolved_ids: (handoff.resolved_ids || []).filter((id) => ids.has(id)),
+            // The list can show only this member's slice of a mixed batch,
+            // but Resend submits the original batch and would be rejected.
+            handoff_resend_allowed: (handoff.comment_ids || []).length > 0 && handoff.comment_ids.every((id) => resendable.has(id)),
+            // A batch instruction can describe somebody else's comments.
+            instruction: commentIds.length === (handoff.comment_ids || []).length ? handoff.instruction : '',
+            by: undefined,
+            sent_by: undefined,
+          }];
+        });
+      }
+      return json({ handoffs: handoffs.slice(0, limit) });
     }
 
     if (p === '/api/notify/handoff' && method === 'POST') {
@@ -18803,6 +20068,10 @@ const tdocHandlers = {
       if (!ids.length) return json({ error: 'comment_ids required' }, { status: 400 });
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
+      if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
+        const own = await handoffThreadIdsFor(env, slug, gate.session);
+        if (ids.some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
+      }
       // Threads whose last word is already an agent's are the person's turn:
       // handing them off again only made the agent answer itself. Drop them
       // here, whatever the client sent.
@@ -18918,6 +20187,10 @@ const tdocHandlers = {
       if (!gate.ok) return gate.response;
       const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
+      if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
+        const own = await handoffThreadIdsFor(env, slug, gate.session);
+        if ((prev.comment_ids || []).some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
+      }
       // A resend reuses the original externalEventId, so a provider that did
       // receive the first attempt drops the duplicate instead of waking the
       // agent twice for the same batch.
@@ -19403,6 +20676,41 @@ const tdocHandlers = {
       return json(result.body, { status: result.status });
     }
 
+    // Admin-only, cursor-paged: queue every doc on a page of records for the
+    // search index. Dry-run by default; the store's alarm does the reading.
+    if (p === '/api/admin/search/reindex' && method === 'POST') {
+      const auth = await requireUploadAuth(req, env);
+      if (!auth.ok) return auth.response;
+      if (!auth.actor || auth.actor.kind !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      if (!env.COMMENTS) return json({ error: 'search_unavailable' }, { status: 503 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const dryRun = body.apply !== true;
+      const limit = Math.max(1, Math.min(1000, Number(body.limit) || 200));
+      const page = await env.META.list({ prefix: 'meta:', limit, ...(body.cursor ? { cursor: String(body.cursor) } : {}) });
+      const slugs = (page.keys || []).map((item) => String(item.name || '').slice(5)).filter(isValidSlug);
+      // Each doc goes to its owner's store.
+      const byScope = new Map();
+      for (const slug of slugs) {
+        const meta = await loadDocMeta(env, slug);
+        const scope = meta && meta.created_from !== 'feedback' ? searchScopeOf(meta) : '';
+        if (!scope) continue;
+        if (!byScope.has(scope)) byScope.set(scope, []);
+        byScope.get(scope).push({ slug, version: latestVersionNumber(meta) || 1 });
+      }
+      let queued = 0, indexed = 0, pending = 0;
+      for (const [scope, docs] of byScope) {
+        if (!dryRun) {
+          const out = await searchStoreOp(env, scope, { kind: 'enqueue', docs });
+          if (!out) return json({ error: 'search_unavailable' }, { status: 503 });
+          queued += out.queued;
+        }
+        const stats = await searchStoreOp(env, scope, { kind: 'stats' });
+        if (stats) { indexed += stats.docs; pending += stats.pending; }
+      }
+      return json({ ok: true, dry_run: dryRun, scanned: slugs.length, stores: byScope.size, queued, indexed, pending, cursor: page.list_complete ? null : page.cursor });
+    }
+
     // Admin-only, cursor-paged backfill. Dry-run is the default and never
     // mutates R2 or KV; the CLI loops pages and reports aggregate counts.
     if (p === '/api/admin/preview-cards/backfill' && method === 'POST') {
@@ -19596,9 +20904,44 @@ const tdocHandlers = {
         delete incoming.created_from;
         delete incoming.feedback;
         delete incoming.trashed_at;
+        delete incoming.guest_invited_by;
         const prev = writeGate.meta;
-        if (!incoming.access && prev && prev.access) {
-          incoming.access = prev.access;
+        if (prev && prev.guest_invited_by) incoming.guest_invited_by = prev.guest_invited_by;
+        // A checkout can carry a stale access snapshot. Keep the browser's
+        // invitees; accept legacy publishers' tighter visibility, history,
+        // commenting and sign-in policy. A stale checkout cannot reopen a
+        // browser-restricted document. Modern clients send access_patch for
+        // intentional widening and invitee removal.
+        if (prev && (prev.access || meta?.access || body.access_patch)) {
+          const stored = accessFromMeta(prev);
+          const proposed = meta && meta.access && typeof meta.access === 'object'
+            ? validateAccessWrite(meta.access) : null;
+          if (proposed?.error) return json({ error: proposed.error, ...(proposed.field ? { field: proposed.field } : {}) }, { status: 400 });
+          const legacy = proposed?.access || {};
+          const rank = {
+            visibility: { private: 0, unlisted: 1, public: 2 },
+            history_visibility: { owner: 0, invited: 1, public: 2 },
+            commenting: { off: 0, owner: 1, invited: 2, signed_in: 3 },
+          };
+          const access = { ...stored };
+          for (const field of Object.keys(rank)) {
+            if (legacy[field] && rank[field][legacy[field]] < rank[field][stored[field]]) access[field] = legacy[field];
+          }
+          if (legacy.signin_required === true) access.signin_required = true;
+          incoming.access = access;
+        }
+        if (body.access_patch != null) {
+          const patch = body.access_patch;
+          if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return json({ error: 'invalid_access_patch' }, { status: 400 });
+          const { allowed_users_add: add, ...fields } = patch;
+          const validated = validateAccessWrite(fields);
+          if (validated.error) return json({ error: validated.error, ...(validated.field ? { field: validated.field } : {}), ...(validated.fields ? { fields: validated.fields } : {}) }, { status: 400 });
+          if (add != null && (!Array.isArray(add) || add.some((item) => !normalizeInvitee(item)))) {
+            return json({ error: 'invalid_access_value', field: 'allowed_users_add' }, { status: 400 });
+          }
+          const baseAccess = incoming.access || newDocAccess();
+          incoming.access = { ...baseAccess, ...validated.access };
+          if (add) incoming.access.allowed_users = [...new Set([...(incoming.access.allowed_users || []), ...add.map(normalizeInvitee)])];
         }
         // A brand-new doc that names no access is shared by link, not
         // published to the web. An existing doc keeps what it has.
@@ -19633,6 +20976,21 @@ const tdocHandlers = {
         if (writeGate.teamDoc) {
           incoming.hosted = prev.hosted;
           incoming.access = prev.access;
+        }
+        const guestChange = !prev || (body.access_patch && ('allowed_users' in body.access_patch || 'allowed_users_add' in body.access_patch));
+        if (prevTeam && guestChange && !writeGate.teamDoc) {
+          const team = await loadTeam(env, prevTeam);
+          if (team) {
+            const blocked = await teamGuestLimitError(env, team, slug, incoming.access, prev && accessFromMeta(prev));
+            if (blocked) return json(blocked, { status: 409 });
+          }
+          const before = new Set(prev ? accessFromMeta(prev).allowed_users : []);
+          const added = incoming.access.allowed_users.filter((invitee) => !before.has(invitee));
+          if (added.length) {
+            const inviter = auth.actor?.github_login || auth.actor?.email?.split('@')[0] || 'Agent';
+            incoming.guest_invited_by = { ...(incoming.guest_invited_by || {}) };
+            for (const invitee of added) incoming.guest_invited_by[invitee] = inviter;
+          }
         }
       }
       if (auth.actor && auth.actor.kind === 'hosted' && !writeGate.teamDoc) {
@@ -20120,11 +21478,28 @@ const tdocHandlers = {
       if (next.error) {
         return json({ error: next.error, ...(next.field ? { field: next.field } : {}), ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
       }
+      if (meta.workspace_id) {
+        const team = await loadTeam(env, meta.workspace_id);
+        if (team) {
+          const blocked = await teamGuestLimitError(env, team, slug, next.access, accessFromMeta(meta));
+          if (blocked) return json(blocked, { status: 409 });
+        }
+      }
+      const added = (next.access.allowed_users || []).filter((x) => !prevAllowed.includes(x));
+      if (meta.workspace_id) {
+        const inviter = auth.session ? actorDisplayName(auth.session)
+          : ((auth.actor && (auth.actor.github_login || (auth.actor.email || '').split('@')[0])) || 'Someone');
+        const invitedBy = { ...(meta.guest_invited_by || {}) };
+        for (const item of added) invitedBy[item] = inviter;
+        for (const item of Object.keys(invitedBy)) {
+          if (!next.access.allowed_users.includes(item)) delete invitedBy[item];
+        }
+        next.meta.guest_invited_by = invitedBy;
+      }
       await putDocMetaJson(env, slug, JSON.stringify(next.meta));
       // The one moment an invitation exists as an event rather than a list
       // entry: mail the people the owner just added, never the ones who were
       // already there.
-      const added = (next.access.allowed_users || []).filter((x) => !prevAllowed.includes(x));
       let emailed = [];
       if (added.length) {
         const inviterName = auth.session ? actorDisplayName(auth.session)

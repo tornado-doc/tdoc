@@ -832,6 +832,220 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       }
     });
 
+    await test('the same agent thread renders alike in the document and the real host app at 390/1440', async () => {
+      const session = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), `tdoc-feedback:${tdocBase}`);
+      const file = path.join(root, session.slug, 'comments.json');
+      const original = fs.readFileSync(file, 'utf8');
+      const source = JSON.parse(original).find((c) => c.anchor?.kind === 'product' && c.anchor.url === `${appBase}/dashboard`);
+      assert(source, 'no product comment to seed parity fixture');
+      const at = new Date(Date.now() - 60000).toISOString();
+      const replyAt = new Date(Date.now() - 30000).toISOString();
+      const fixture = {
+        ...source, id: 'c_feedback_parity', text: 'Clarify the invite button', created: at,
+        anchor: { kind: 'product', url: `${appBase}/dashboard`, selector: '#invite', tag: 'button', text: 'Send invite' },
+        status: 'open', handoff_at: at, handoff_to: { handle: 'agent' },
+        handoff_status: 'sent', handoff_delivery: { status: 'delivered', at },
+        replies: [{ id: 'r_feedback_parity', parent_id: 'c_feedback_parity',
+          text: 'Which team should receive the invite?', created: replyAt,
+          author: { kind: 'agent', login: 'agent', name: 'Helper' },
+          agent_status: 'question', reactions: {} }], reactions: {},
+      };
+      fs.writeFileSync(file, JSON.stringify([...JSON.parse(original), fixture]));
+      const host = await context.newPage();
+      const doc = await context.newPage();
+      let handoffPayload = null;
+      try {
+        await host.setViewportSize({ width: 1440, height: 800 });
+        await host.goto(`${appBase}/dashboard`);
+        await host.evaluate((key) => {
+          const session = JSON.parse(localStorage.getItem(key));
+          session.notify = true;
+          localStorage.setItem(key, JSON.stringify(session));
+        }, `tdoc-feedback:${tdocBase}`);
+        await host.route('**/api/feedback/session', async (route) => {
+          const response = await route.fetch();
+          const session = await response.json();
+          await route.fulfill({ response, contentType: 'application/json', body: JSON.stringify({ ...session, notify: true }) });
+        });
+        await host.route('**/api/notify/targets?**', (route) => route.fulfill({
+          status: 200,
+          headers: { 'access-control-allow-origin': appBase, 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, OPTIONS' },
+          contentType: 'application/json',
+          body: JSON.stringify({ default: { provider: 'raft', agent_name: 'Helper', agent_sub: 'helper', server_slug: 'team' }, candidates: [], fallback: null, reason: null }),
+        }));
+        await host.route('**/api/notify/handoff', (route) => {
+          if (route.request().method() === 'POST') handoffPayload = JSON.parse(route.request().postData());
+          return route.fulfill({ status: 200,
+            headers: { 'access-control-allow-origin': appBase, 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'POST, OPTIONS' },
+            contentType: 'application/json', body: JSON.stringify({ ok: true, delivery: { status: 'delivered' } }),
+          });
+        });
+        await host.addScriptTag({ url: `${tdocBase}/feedback.js` });
+        await host.waitForFunction(() => Boolean(window.tdocFeedback));
+        await host.evaluate(() => window.tdocFeedback.open());
+        await host.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor();
+        const panel = host.locator('#tdoc-feedback-root .tdoc-fb-panel');
+        await host.waitForTimeout(300);
+        if (!(await panel.isVisible())) await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+        await panel.waitFor({ state: 'visible' });
+        await panel.getByRole('button', { name: 'All', exact: true }).click();
+        const fbCard = host.locator('#tdoc-feedback-root .tdoc-fb-item article[data-comment-id="c_feedback_parity"]');
+        await fbCard.waitFor();
+        const pin = host.locator('#tdoc-feedback-root .tdoc-pin[data-id="c_feedback_parity"]');
+        assert((await pin.count()) === 1, `fixture pin missing: ${JSON.stringify(await host.evaluate(() => ({
+          pins: [...window.__fbAll('.tdoc-pin')].map((p) => p.dataset.id),
+          invite: document.getElementById('invite')?.getBoundingClientRect().toJSON(),
+          title: document.title,
+        })))}`);
+        assert((await pin.locator('.tdoc-pin-handoff-badge.is-question').count()) === 1,
+          `feedback pin lost the agent question badge: ${await pin.evaluate((el) => el.outerHTML)} / ${await fbCard.innerText()}`);
+        assert((await pin.locator('.tdoc-pin-unread-dot').count()) === 1, 'feedback pin lost the unread agent reply');
+        await fbCard.locator('.tdoc-replies-toggle').click();
+        assert(await fbCard.locator('.tdoc-reply[data-comment-id="r_feedback_parity"]').isVisible(), 'feedback list cannot show the agent reply');
+        const shots = process.env.TDOC_UI_SHOTS;
+        await fbCard.scrollIntoViewIfNeeded();
+        await host.waitForTimeout(250); // let the panel's entrance clip animation finish
+        const withinPanel = async () => host.evaluate(() => {
+          const panel = window.__fb('.tdoc-fb-panel').getBoundingClientRect();
+          const card = window.__fb('.tdoc-fb-item article[data-comment-id="c_feedback_parity"]').getBoundingClientRect();
+          return panel.left >= 0 && panel.right <= innerWidth && card.left >= panel.left && card.right <= panel.right;
+        });
+        assert(await withinPanel(), 'feedback comment card overflows the panel at 1440');
+        if (shots) { fs.mkdirSync(shots, { recursive: true }); await host.screenshot({ path: path.join(shots, 'shared-comment-host-1440.png') }); }
+        await host.setViewportSize({ width: 390, height: 800 });
+        await fbCard.scrollIntoViewIfNeeded();
+        await host.waitForTimeout(100);
+        assert(await withinPanel(), 'feedback comment card overflows the panel at 390');
+        assert(await host.evaluate(() => {
+          const pinRect = window.__fb('.tdoc-pin[data-id="c_feedback_parity"]').getBoundingClientRect();
+          const hit = document.getElementById('tdoc-feedback-root').shadowRoot.elementFromPoint(pinRect.x + pinRect.width / 2, pinRect.y + pinRect.height / 2);
+          return Boolean(hit?.closest('.tdoc-fb-panel'));
+        }), 'a page pin is covering the mobile comment panel');
+        if (shots) await host.screenshot({ path: path.join(shots, 'shared-comment-host-390.png') });
+
+        await doc.setViewportSize({ width: 390, height: 800 });
+        await doc.goto(`${tdocBase}/d/${session.slug}/v/${session.version}`);
+        await doc.waitForFunction(() => document.body.dataset.tdocReady === '1');
+        await doc.locator('.tdoc-fab').click();
+        const docCard = doc.locator('.tdoc-drawer-list article[data-comment-id="c_feedback_parity"]');
+        await docCard.waitFor();
+        assert((await fbCard.locator('.tdoc-thread-unread-dot').count()) === 1
+          && (await docCard.locator('.tdoc-thread-unread-dot').count()) === 1,
+        'the same unread thread must be marked in both comment lists');
+        await docCard.locator('.tdoc-replies-toggle').click();
+        const read = (card) => card.evaluate((element) => {
+          const text = (selector) => element.querySelector(selector)?.innerText.replace(/\s+/g, ' ').trim();
+          return { status: text('.tdoc-status-row'), author: text('.tdoc-cc-head .author'),
+            text: text('.text'), replies: [...element.querySelectorAll('.tdoc-replies .tdoc-reply[data-comment-id]')]
+              .map((reply) => ({ author: reply.querySelector('.author')?.textContent.trim(),
+                text: reply.querySelector('.text')?.textContent.trim() })) };
+        });
+        const feedback = await read(fbCard);
+        const document = await read(docCard);
+        assert(JSON.stringify(feedback) === JSON.stringify(document), `document/feedback thread differs: ${JSON.stringify({ feedback, document })}`);
+        assert(feedback.status.includes('Asked you') && feedback.replies[0]?.text.includes('Which team'), 'agent status or reply was omitted');
+        await fbCard.locator('.tdoc-reply-toggle').first().click();
+        await docCard.locator('.tdoc-reply-toggle').first().click();
+        assert(await fbCard.locator('.tdoc-reply-form').isVisible() && await docCard.locator('.tdoc-reply-form').isVisible(),
+          'one surface cannot open the shared reply box');
+        assert(await fbCard.locator('.tdoc-reply-form .tdoc-reply-agent').isVisible(),
+          'feedback reply box is missing the shared agent tag control');
+        await panel.locator('button.x').click();
+        await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
+        await host.locator('#invite').click();
+        const composer = host.locator('#tdoc-feedback-root .tdoc-popup');
+        await composer.locator('button.tdoc-composer-agent').click();
+        assert((await composer.locator('textarea').inputValue()).includes('Helper'), 'the feedback composer did not insert the shared agent tag');
+        assert(await composer.locator('.tdoc-agent-pill').isVisible(), 'the agent tag did not render as a pill');
+        await composer.getByRole('button', { name: 'Comment', exact: true }).click();
+        for (let i = 0; i < 20 && !handoffPayload; i++) await host.waitForTimeout(100);
+        assert(handoffPayload?.recipient?.agent_name === 'Helper' && handoffPayload.comment_ids.length === 1,
+          `selected agent was not sent with the comment: ${JSON.stringify(handoffPayload)}`);
+      } finally {
+        await host.close();
+        await doc.close();
+        fs.writeFileSync(file, original);
+      }
+    });
+
+    await test('stored unsafe product links cannot navigate the host; feedback read controls match pin state', async () => {
+      const session = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), `tdoc-feedback:${tdocBase}`);
+      const file = path.join(root, session.slug, 'comments.json');
+      const original = fs.readFileSync(file, 'utf8');
+      const source = JSON.parse(original).find((c) => c.anchor?.kind === 'product');
+      assert(source, 'no product comment for link-safety fixture');
+      const at = (offset) => new Date(Date.now() + offset).toISOString();
+      const clone = (id, url, replies = []) => ({ ...source, id, text: `Fixture ${id}`, created: at(-120000),
+        anchor: { kind: 'product', url, selector: '#invite', text: 'Send invite' },
+        status: 'open', handoff_at: at(-90000), handoff_status: 'sent',
+        handoff_delivery: { status: 'delivered', at: at(-90000) }, replies, reactions: {} });
+      const agentReply = (id) => ({ id, text: 'I have a question', created: at(-60000),
+        author: { kind: 'agent', login: 'helper', name: 'Helper' }, agent_status: 'question', reactions: {} });
+      const unsafe = clone('c_fb_unsafe', 'javascript:window.__feedbackInjected=1');
+      const external = clone('c_fb_external', 'https://elsewhere.example/steal');
+      const unreadA = clone('c_fb_unread_a', `${appBase}/dashboard`, [agentReply('r_fb_unread_a')]);
+      const unreadB = clone('c_fb_unread_b', `${appBase}/pricing`, [agentReply('r_fb_unread_b')]);
+      const waiting = clone('c_fb_waiting', `${appBase}/dashboard`, [agentReply('r_fb_waiting'), {
+        id: 'r_fb_waiting_human', text: 'Please also check this', created: at(-30000),
+        author: { kind: 'human', login: 'teammate', name: 'Teammate' }, reactions: {},
+      }]);
+      waiting.handoff_at = at(-10000);
+      waiting.handoff_delivery = { status: 'delivered', at: waiting.handoff_at };
+      fs.writeFileSync(file, JSON.stringify([...JSON.parse(original), unsafe, external, unreadA, unreadB, waiting]));
+      const host = await context.newPage();
+      try {
+        await host.setViewportSize({ width: 390, height: 800 });
+        await host.goto(`${appBase}/dashboard`);
+        await host.evaluate(() => { window.__feedbackInjected = 0; });
+        await host.addScriptTag({ url: `${tdocBase}/feedback.js` });
+        await host.waitForFunction(() => Boolean(window.tdocFeedback));
+        await host.evaluate(() => window.tdocFeedback.open());
+        const panel = host.locator('#tdoc-feedback-root .tdoc-fb-panel');
+        if (!(await panel.isVisible())) await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+        await panel.waitFor({ state: 'visible' });
+        await panel.getByRole('button', { name: 'All', exact: true }).click();
+        const card = (id) => panel.locator(`article[data-comment-id="${id}"]`);
+        await card('c_fb_unread_a').waitFor();
+        assert((await card('c_fb_waiting').locator('.tdoc-thread-unread-dot').count()) === 0,
+          'waiting thread has an unread list dot while its pin has none');
+        assert((await card('c_fb_unread_a').locator('.tdoc-thread-unread-dot').count()) === 1,
+          'unread thread lost its read control');
+        const readbar = panel.locator('.tdoc-fb-readbar');
+        assert(await readbar.getByRole('button', { name: 'Mark all as read' }).isVisible(), 'bulk read control is missing');
+        const shots = process.env.TDOC_UI_SHOTS;
+        await card('c_fb_unread_a').scrollIntoViewIfNeeded();
+        await host.waitForTimeout(250); // finish the panel's clip entrance before screenshots
+        if (shots) { fs.mkdirSync(shots, { recursive: true }); await host.screenshot({ path: path.join(shots, 'feedback-link-read-controls-390.png') }); }
+        await host.setViewportSize({ width: 1440, height: 800 });
+        await card('c_fb_unread_a').scrollIntoViewIfNeeded();
+        if (shots) await host.screenshot({ path: path.join(shots, 'feedback-link-read-controls-1440.png') });
+        await card('c_fb_unread_a').getByRole('button', { name: 'Mark as read' }).click();
+        assert((await card('c_fb_unread_a').locator('.tdoc-thread-unread-dot').count()) === 0,
+          'single read control did not clear its thread');
+        assert((await card('c_fb_unread_b').locator('.tdoc-thread-unread-dot').count()) === 1,
+          'single read control cleared another thread');
+        await readbar.getByRole('button', { name: 'Mark all as read' }).click();
+        assert((await card('c_fb_unread_b').locator('.tdoc-thread-unread-dot').count()) === 0,
+          'bulk read control did not clear remaining threads');
+        assert((await card('c_fb_unsafe').locator('a.tdoc-product-where').count()) === 0,
+          'legacy script URL was rendered as a clickable link');
+        assert((await card('c_fb_external').locator('a.tdoc-product-where').count()) === 0,
+          'an off-site product link was rendered as a clickable link in feedback');
+        for (const id of ['c_fb_unsafe', 'c_fb_external']) {
+          const target = card(id);
+          await target.scrollIntoViewIfNeeded();
+          await panel.locator(`.tdoc-fb-item:has(article[data-comment-id="${id}"]) .tdoc-fb-context`).click();
+          assert(host.url() === `${appBase}/dashboard`, `${id} navigated off the current page`);
+        }
+        assert(await host.evaluate(() => window.__feedbackInjected === 0), 'script URL executed in the host page');
+        await panel.locator('.tdoc-fb-item:has(article[data-comment-id="c_fb_unread_b"]) .tdoc-fb-context').click();
+        await host.waitForURL(`${appBase}/pricing`);
+      } finally {
+        await host.close();
+        fs.writeFileSync(file, original);
+      }
+    });
+
     await test('no console errors on the app page', async () => {
       assert(consoleErrors.length === 0, consoleErrors.join('\n'));
     });

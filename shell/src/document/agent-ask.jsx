@@ -28,7 +28,11 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   const key = target ? targetKey(target) : '';
   useEffect(() => { setOnlyMe(null); }, [key]);
   const canChange = Boolean(target && target.can_edit);
-  const ownOrCloud = Boolean(target) && Boolean(target.tdoc_ai || !target.team_agent);
+  // Embedded feedback can hand a comment to an editor, but has no private
+  // answer flow. Hide Only me there so a tagged comment is never silently
+  // posted without reaching the agent.
+  const ownOrCloud = Boolean(target) && Boolean(target.tdoc_ai || !target.team_agent)
+    && agents.privateAskSupported !== false;
   const private_ = ownOrCloud && (onlyMe === null ? onlyMeDefault(target) : onlyMe);
   const tagOf = (t) => `@${AGENT_TAG_JOINER}${agentMentionName(t, choices)}`;
   // The text with the default agent in it, at `at` (the caret) or the end.

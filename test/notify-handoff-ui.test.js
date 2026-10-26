@@ -55,11 +55,11 @@ async function t(name, fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true });
 
-  async function open({ ids, deliver = 'delivered', targets = null, query = '' }) {
-    const page = await browser.newPage({ viewport: { width: 900, height: 720 } });
+  async function open({ ids, deliver = 'delivered', targets = null, query = '', history = null, width = 900 }) {
+    const page = await browser.newPage({ viewport: { width, height: 720 } });
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
-    let handoffs = [{ handoff_id: 'h1', at: new Date(Date.now() - 20 * 60000).toISOString(), recipient: SMARTER, comment_ids: ['c0'], delivery: { status: 'delivered' } }];
+    let handoffs = history || [{ handoff_id: 'h1', at: new Date(Date.now() - 20 * 60000).toISOString(), recipient: SMARTER, comment_ids: ['c0'], delivery: { status: 'delivered' } }];
     const posts = [];
     await page.route('**/api/notify/targets*', (r) => r.fulfill({ json: targets || { default: SMARTER, candidates: [DEVIN], fallback: DEVIN, reason: null } }));
     await page.route('**/api/notify/handoffs*', (r) => r.fulfill({ json: { handoffs } }));
@@ -127,6 +127,28 @@ async function t(name, fn) {
       await primary.click();
       await page.getByText(/Not delivered to tdoc-claw-devin/).waitFor();
       assert.equal(posts.length, 2, 'Retry did not send again');
+      await page.close();
+    });
+
+    await t('a mixed team handoff explains failure without offering a rejected Resend', async () => {
+      for (const width of [390, 1440]) {
+        const { page, dialog, errors } = await open({ ids: [], width, history: [{
+          handoff_id: 'mixed', at: new Date().toISOString(), recipient: SMARTER,
+          comment_ids: ['own-comment'], handoff_resend_allowed: false,
+          delivery: { status: 'failed', error: 'request_403' },
+        }] });
+        assert.match(await dialog.locator('.tdoc-send-notice').textContent(), /was not delivered/);
+        assert.equal(await dialog.getByRole('button', { name: 'Resend' }).count(), 0);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `mixed-resend-hidden-${width}.png`) });
+        assert.deepEqual(errors, []);
+        await page.close();
+      }
+      const { page, dialog } = await open({ ids: [], history: [{
+        handoff_id: 'own', at: new Date().toISOString(), recipient: SMARTER,
+        comment_ids: ['own-comment'], handoff_resend_allowed: true,
+        delivery: { status: 'failed', error: 'request_403' },
+      }] });
+      assert.equal(await dialog.getByRole('button', { name: 'Resend' }).count(), 1);
       await page.close();
     });
     await t('a stopped agent is flagged in the picker and before sending, and sending still works', async () => {
@@ -224,17 +246,20 @@ async function t(name, fn) {
       assert.match(await plane.getAttribute('title'), /to send.*waiting for agent.*new agent replies/);
       assert.equal(await page.locator('.tdoc-handoff-banner').count(), 0);
       assert.equal(await plane.locator('.tdoc-send-agent-badge').count(), 1);
-      assert.equal(await plane.locator('.tdoc-send-agent-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(229, 72, 77)');
-      assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '4');
+      assert.equal(await plane.locator('.tdoc-send-agent-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(22, 82, 240)');
+      assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '');
+      assert.match(await plane.getAttribute('aria-label'), /4 new agent replies/);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-desktop.png') });
       await plane.click();
-      const details = page.getByRole('dialog', { name: 'Agent activity' });
+      const details = page.getByRole('dialog', { name: 'Ask AI' });
       await details.waitFor();
+      await details.getByRole('button', { name: /Agent activity/ }).click();
       await details.getByText('❓ Asked you').waitFor();
       assert.equal(await details.locator('.tdoc-handoff-details-preview').filter({ hasText: 'please fix this' }).count() > 0, true);
       await details.getByRole('button', { name: 'Details' }).first().click();
       assert.equal(await details.locator('.tdoc-handoff-details-history').count(), 1);
       assert.equal(await details.locator('.tdoc-handoff-details-unread-dot').count(), 4);
+      assert.equal(await details.getByRole('button', { name: 'Mark as read' }).count(), 4);
       assert.equal(await details.getByText('✅ Done', { exact: true }).count(), 1);
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-details-desktop.png') });
       const readyChecks = details.getByRole('checkbox');
@@ -253,6 +278,74 @@ async function t(name, fn) {
       await page.close();
     });
 
+    await t('one reply or all replies can be marked read from the plane', async () => {
+      for (const width of [1440, 390]) {
+        const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 900 } });
+        const errors = [];
+        page.on('pageerror', (e) => errors.push(e.message));
+        await page.goto(`${base}/?view=activity`);
+        const plane = page.locator('#tdoc-send-agent-btn');
+        assert.equal(await plane.locator('.tdoc-send-agent-badge').textContent(), '');
+        assert.match(await plane.getAttribute('aria-label'), /4 new agent replies/);
+        if (width === 390) assert.equal(await page.locator('.tdoc-fab-unread-dot').count(), 1);
+        else assert.equal(await page.locator('.tdoc-pin-unread-dot').count(), 3);
+        await plane.click();
+        const details = page.getByRole('dialog', { name: 'Ask AI' });
+        await details.getByRole('button', { name: /Agent activity/ }).click();
+        await details.getByRole('button', { name: 'Mark all as read' }).waitFor();
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `handoff-read-${width}.png`) });
+        const question = details.locator('.tdoc-handoff-details-row').filter({ hasText: 'Should pricing be per seat?' });
+        const dot = question.getByRole('button', { name: 'Mark as read' });
+        assert.equal(await dot.getAttribute('title'), 'Mark as read');
+        await dot.click();
+        assert.equal(await question.getByRole('button', { name: 'Mark as read' }).count(), 0);
+        assert.match(await plane.getAttribute('aria-label'), /3 new agent replies/);
+        if (width === 1440) assert.equal(await page.locator('.tdoc-pin[data-id="question"] .tdoc-pin-unread-dot').count(), 0);
+        await details.getByRole('button', { name: 'Mark all as read' }).click();
+        assert.equal(await details.getByRole('button', { name: 'Mark all as read' }).count(), 0);
+        assert.equal(await details.getByRole('button', { name: 'Mark as read' }).count(), 0);
+        assert.equal(await plane.locator('.tdoc-send-agent-badge.is-unread').count(), 0);
+        if (width === 390) assert.equal(await page.locator('.tdoc-fab-unread-dot').count(), 0);
+        else assert.equal(await page.locator('.tdoc-pin-unread-dot').count(), 0);
+        assert.deepEqual(errors, []);
+        await page.close();
+      }
+    });
+
+    await t('Ask AI activity uses one round blue dot without a numeral on phone and desktop', async () => {
+      for (const width of [390, 1440]) {
+        for (const [query, count] of [['unread=0', 0], ['badge=1', 1], ['badge=9', 9], ['badge=10', 10]]) {
+          const page = await browser.newPage({ viewport: { width, height: 844 } });
+          await page.goto(`${base}/?view=activity&${query}`);
+          const geometry = await page.locator('#tdoc-send-agent-btn').evaluate((button) => {
+            const outer = button.getBoundingClientRect();
+            const badge = button.querySelector('.tdoc-send-agent-badge');
+            const inner = badge.getBoundingClientRect();
+            const label = button.querySelector('.tdoc-ask-ai-label').getBoundingClientRect();
+            return { label: badge.textContent, width: inner.width, height: inner.height,
+              x: inner.x + inner.width / 2, y: inner.y + inner.height / 2,
+              labelShown: label.width > 0, clearOfLabel: inner.left >= label.right,
+              expectedX: outer.right - 6 - inner.width / 2, expectedY: outer.top + 8 + inner.height / 2 };
+          });
+          assert.equal(geometry.label, '');
+          assert.equal(geometry.width, geometry.height, `badge not round: ${JSON.stringify(geometry)}`);
+          assert.match(await page.locator('#tdoc-send-agent-btn').getAttribute('aria-label'),
+            count ? new RegExp(`${count} new agent repl`) : /^Ask AI/);
+          if (geometry.labelShown) {
+            // Desktop: the dot follows the "Ask AI" label and never covers it.
+            assert.ok(geometry.clearOfLabel, `${width}px ${query} badge overlaps the label: ${JSON.stringify(geometry)}`);
+          } else {
+            assert.ok(Math.abs(geometry.x - geometry.expectedX) < 1, `${width}px ${query} badge x: ${JSON.stringify(geometry)}`);
+            assert.ok(Math.abs(geometry.y - geometry.expectedY) < 1, `${width}px ${query} badge y: ${JSON.stringify(geometry)}`);
+          }
+          if (SHOTS && (query === 'unread=0' || query === 'badge=10')) {
+            await page.locator('.tdoc-bar').screenshot({ path: path.join(SHOTS, `ask-ai-bar-${query === 'unread=0' ? 'ready' : 'unread'}-${width}.png`) });
+          }
+          await page.close();
+        }
+      }
+    });
+
     await t('the plane shows a red dot for failed delivery and fits a phone', async () => {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
       const errors = [];
@@ -263,7 +356,8 @@ async function t(name, fn) {
       assert.match(await plane.getAttribute('title'), /1 not delivered/);
       assert.equal(await plane.locator('.tdoc-send-agent-badge').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(22, 82, 240)');
       await plane.click();
-      const details = page.getByRole('dialog', { name: 'Agent activity' });
+      const details = page.getByRole('dialog', { name: 'Ask AI' });
+      await details.getByRole('button', { name: /Agent activity/ }).click();
       await details.locator('.tdoc-handoff-details-state.is-failed').waitFor();
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-plane-details-phone.png') });
       const failedRow = details.locator('.tdoc-handoff-details-row').filter({ hasText: 'Add a conclusion to the report' });
@@ -272,6 +366,19 @@ async function t(name, fn) {
       await failedRow.getByRole('button', { name: 'Send to another agent' }).click();
       assert.equal(await page.locator('#activity-log').textContent(), 'elsewhere:failed');
       assert.deepEqual(errors, []);
+      await page.close();
+    });
+
+    await t('a mixed team batch does not offer a resend that the server will reject', async () => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      await page.goto(`${base}/?view=activity&failed=1&mixed=1`);
+      await page.locator('#tdoc-send-agent-btn').click();
+      await page.getByRole('dialog', { name: 'Ask AI' }).getByRole('button', { name: /Agent activity/ }).click();
+      const row = page.locator('.tdoc-handoff-details-row').filter({ hasText: 'Add a conclusion to the report' });
+      await row.waitFor();
+      assert.equal(await row.getByRole('button', { name: 'Resend' }).count(), 0);
+      await row.getByRole('button', { name: 'Details' }).click();
+      assert.equal(await row.getByRole('button', { name: 'Send to another agent' }).count(), 1);
       await page.close();
     });
 
@@ -294,6 +401,20 @@ async function t(name, fn) {
       assert.doesNotMatch(await pin('resolved').getAttribute('class'), /tdoc-pin-resolved/);
       await page.goto(`${base}/?view=pins&viewer=owner`);
       assert.equal(await pin('question').locator('.tdoc-pin-handoff-badge').textContent(), '❓');
+      await page.close();
+    });
+
+    await t('a quiet handoff pin becomes a warning when its response window passes', async () => {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+      await page.clock.install({ time: new Date('2026-10-25T09:00:00Z') });
+      await page.goto(`${base}/?view=pins&near-stale=1`);
+      const pin = page.locator('.tdoc-pin[data-id="near-stale"]');
+      await pin.waitFor();
+      assert.match(await pin.getAttribute('class'), /is-waiting-handoff/);
+      assert.equal(await pin.locator('.tdoc-pin-handoff-badge').count(), 0);
+      await page.clock.runFor(30000);
+      await pin.locator('.tdoc-pin-handoff-badge.is-warning').waitFor();
+      assert.equal(await pin.locator('.tdoc-pin-handoff-badge').textContent(), '⚠');
       await page.close();
     });
 

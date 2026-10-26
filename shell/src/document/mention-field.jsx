@@ -28,7 +28,7 @@ const MENU_MAX_HEIGHT = 184;
 // that may edit and agents that may only answer, each row saying which, the
 // default first. `ai` carries tdoc AI's free answers left and who is
 // answering where.
-export const AgentMentionContext = createContext({ choices: [], preselected: null, ai: null });
+export const AgentMentionContext = createContext({ choices: [], disabledChoices: [], guestAction: null, preselected: null, ai: null });
 
 // The composers' @agent buttons. The document page has none -- @ in the text
 // is the one way to hand a comment to an agent -- the feedback overlay keeps
@@ -75,6 +75,8 @@ export function MentionField({
       };
     })
     : [];
+  const disabledAgentMatches = query ? matchAgentChoices(agentsOnOffer.disabledChoices || [], query.query, { limit: Infinity })
+    .map((agent) => ({ agent, key: `disabled:${targetKey(agent)}`, name: agentMentionName(agent, agentsOnOffer.disabledChoices), tag: 'Team · members only', disabled: true })) : [];
   const localMatches = query ? matchMentionable(people, query.query) : [];
   // Typing an address is already a complete tag — asking GitHub's user search
   // about "dana@corp.com" offers strangers and leaks the address upstream.
@@ -91,7 +93,7 @@ export function MentionField({
     // concat, and recomputing keeps the highlighted row in step with the query.
   }, [JSON.stringify(localMatches), remote]);
   const rows = agentMatches.concat(matches);
-  const open = Boolean(query) && rows.length > 0;
+  const open = Boolean(query) && (rows.length > 0 || disabledAgentMatches.length > 0);
 
   // Restore the caret after an insertion: React re-renders with the new value
   // and would otherwise leave it at the end of the textarea.
@@ -147,6 +149,7 @@ export function MentionField({
   };
 
   const pick = (person) => {
+    if (!person) return;
     if (person.agent) {
       // "@\u2060claude": reads as the agent's name, never parsed as a login.
       const next = insertMention(value, query, `${AGENT_TAG_JOINER}${agentMentionName(person.agent, agentsOnOffer.choices)}`);
@@ -167,12 +170,12 @@ export function MentionField({
   const onKeyDown = (event) => {
     if (!open && removeWholeTag(event)) return;
     if (open) {
-      if (event.key === 'ArrowDown') {
+      if (event.key === 'ArrowDown' && rows.length) {
         event.preventDefault();
         setActive((i) => (i + 1) % rows.length);
         return;
       }
-      if (event.key === 'ArrowUp') {
+      if (event.key === 'ArrowUp' && rows.length) {
         event.preventDefault();
         setActive((i) => (i - 1 + rows.length) % rows.length);
         return;
@@ -247,6 +250,8 @@ export function MentionField({
           value={value}
           pill={pill}
           choices={agentsOnOffer.choices}
+          disabledChoices={agentsOnOffer.disabledChoices}
+          guestAction={agentsOnOffer.guestAction}
           ai={agentsOnOffer.ai}
           onPick={swapAgent}
         />
@@ -270,6 +275,13 @@ export function MentionField({
               {row.tag ? <span className="tdoc-agent-menu-tag">{row.tag}</span> : null}
             </button>
           ))}
+          {disabledAgentMatches.map((row) => <button key={row.key} type="button" role="option" disabled aria-selected="false"
+            className="tdoc-mention-option tdoc-mention-agent" title="You are a guest. Team agents are for members.">
+            <span className="tdoc-mention-agent-mark"><ProviderMark target={row.agent} size={14} /></span>
+            <span className="tdoc-mention-login">{row.name}</span><span className="tdoc-agent-menu-tag">{row.tag}</span>
+          </button>)}
+          {disabledAgentMatches.length && agentsOnOffer.guestAction ? <button type="button" className="tdoc-mention-connect"
+            onMouseDown={(event) => event.preventDefault()} onClick={agentsOnOffer.guestAction.onClick}>{agentsOnOffer.guestAction.label}</button> : null}
           {agentMatches.some((row) => row.agent.tdoc_ai) ? (
             <a className="tdoc-mention-connect" href="/start" onMouseDown={(event) => event.preventDefault()}>Connect my agent</a>
           ) : null}
@@ -314,7 +326,7 @@ export function MentionField({
 const MIRRORED = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'wordSpacing',
   'textTransform', 'textIndent', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
   'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'tabSize'];
-function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, ai, onPick }) {
+function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, disabledChoices, guestAction, ai, onPick }) {
   const [box, setBox] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   useLayoutEffect(() => {
@@ -362,7 +374,7 @@ function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, ai, onPick }
           </span>
         )}
       >
-        <AgentMenuItems choices={choices} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
+        <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
       </AppMenu>
       <span aria-hidden="true">{`${value.slice(pill.end)}\u200b`}</span>
     </div>
@@ -393,7 +405,7 @@ function renderInline(nodes, mentions, keyPrefix) {
     if (node.type === 'link') {
       return (
         <a key={key} className="tdoc-md-link" href={node.value} target="_blank" rel="noopener noreferrer">
-          {node.value}
+          {node.label || node.value}
         </a>
       );
     }
@@ -407,13 +419,18 @@ function renderRichBlocks(blocks, mentions, keyPrefix) {
     if (block.type === 'fence') {
       return <pre key={key} className="tdoc-md-pre"><code>{block.value}</code></pre>;
     }
+    if (block.type === 'heading') {
+      const Tag = `h${Math.min(6, Math.max(1, block.level || 1))}`;
+      return <Tag key={key} className="tdoc-md-heading">{renderInline(block.children, mentions, key)}</Tag>;
+    }
     if (block.type === 'list') {
+      const Tag = block.ordered ? 'ol' : 'ul';
       return (
-        <ul key={key} className="tdoc-md-list">
+        <Tag key={key} className="tdoc-md-list">
           {(block.items || []).map((item, i) => (
             <li key={`${key}-li-${i}`}>{renderInline(item, mentions, `${key}-li-${i}`)}</li>
           ))}
-        </ul>
+        </Tag>
       );
     }
     if (block.type === 'break') return <React.Fragment key={key}>{'\n\n'}</React.Fragment>;

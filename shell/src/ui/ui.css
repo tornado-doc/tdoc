@@ -210,6 +210,12 @@ button.tdoc-pin {
   z-index: 1000000;
 }
 
+/* Ask AI's answerer menu opens from inside the desktop popover. It must sit
+   above that popover, whose positioner uses z-index 1000001. */
+.ui-menu-positioner.tdoc-ask-target-menu-positioner {
+  z-index: 1000002;
+}
+
 .ui-menu-popup {
   padding: 4px;
   border: 1px solid var(--td-line);
@@ -261,6 +267,13 @@ button.tdoc-pin {
 }
 
 .tdoc-submenu-chevron { color: #98989f; }
+
+.tdoc-dev-mode-flags {
+  padding: 0 10px 6px;
+  color: #8a8a8a;
+  font: 12px system-ui, sans-serif;
+}
+.tdoc-action-menu-item + .tdoc-dev-mode-flags { padding-left: 34px; }
 
 .ui-menu-popup.tdoc-version-submenu {
   min-width: 164px;

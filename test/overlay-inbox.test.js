@@ -33,7 +33,7 @@ t('opening Notifications loads rows and selecting one marks it read', () => {
 });
 
 t('same-document notifications re-arm the deep link without navigation', () => {
-  assert(shell.includes('const sameDocument = item.slug === config.slug'), 'same-document comparison missing');
+  assert(shell.includes("const sameDocument = item.kind !== 'team_join_request' && item.slug === config.slug"), 'same-document comparison missing or team requests treated as comment links');
   assert(shell.includes("history.replaceState(null, '', target)"), 'URL is not updated in place');
   assert(shell.includes('setDeepTarget(commentId)'), 'deep-link state is not re-armed');
 });

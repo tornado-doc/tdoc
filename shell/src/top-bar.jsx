@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { readStored, writeStored } from './safe-storage.js';
 import {
   Bell,
@@ -20,6 +20,8 @@ import { useNotifications } from './hooks/use-notifications.js';
 import { BrowserAlertsPrompt, NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 import { SpaceMenuItems, WorkspaceSwitcher, spaceLabel, useSpaceTeams } from './workspace-switcher.jsx';
 import { readDevMode, setDevMode } from './dev-mode.js';
+import { devOnlyFlags } from './feature-flags.js';
+import { DebugBar } from './debug-bar.jsx';
 
 // Sign in always asks which account: after Sign out, the provider (and
 // GitHub behind it) still remember the last one, and going straight back in
@@ -53,6 +55,7 @@ export function TopBar({
   currentTeam = null,
   onSpace = null,
   onNewTeam = null,
+  onboardingTest = null,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -67,8 +70,24 @@ export function TopBar({
   const spaceTeams = useSpaceTeams(teams, Boolean(identity));
   // Only an allow-listed account has the switch; the boot says so.
   const [devMode] = useState(readDevMode);
-  const toggleDevMode = () => { setDevMode(!devMode.on).catch(() => {}); };
-  const devModeLabel = devMode ? `Dev mode: ${devMode.on ? 'on' : 'off'}` : '';
+  const [exitArmed, setExitArmed] = useState(false);
+  const exitTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(exitTimer.current), []);
+  const toggleDevMode = () => {
+    if (!devMode?.on) { setDevMode(true).catch(() => {}); return; }
+    if (!exitArmed) {
+      setExitArmed(true);
+      window.clearTimeout(exitTimer.current);
+      exitTimer.current = window.setTimeout(() => setExitArmed(false), 4000);
+      return;
+    }
+    window.clearTimeout(exitTimer.current);
+    setExitArmed(false);
+    setDevMode(false).catch(() => {});
+  };
+  const devModeLabel = devMode ? `Dev mode: ${devMode.on ? (exitArmed ? 'exit?' : 'on') : 'off'}` : '';
+  const devFlags = devMode ? devOnlyFlags().map((flag) => flag.label) : [];
+  const devFlagsNote = devFlags.length ? <div className="tdoc-dev-mode-flags" role="note">Dev mode shows: {devFlags.join(', ')}</div> : null;
 
   useEffect(() => {
     if (!viewerKey || profile) return undefined;
@@ -242,10 +261,12 @@ export function TopBar({
                   <TerminalSquare size={15} /> Agents
                 </AppMenuLinkItem>
                 {devMode ? (
-                  <AppMenuItem className="tdoc-action-menu-item tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} onClick={toggleDevMode}>
+                  <AppMenuItem className="tdoc-action-menu-item tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} closeOnClick={!devMode.on || exitArmed} onClick={toggleDevMode}>
                     <FlaskConical size={15} /> {devModeLabel}
                   </AppMenuItem>
                 ) : null}
+                {devFlagsNote}
+                {devMode?.on && onboardingTest ? <DebugBar {...onboardingTest} /> : null}
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
                 </AppMenuItem>
@@ -277,10 +298,12 @@ export function TopBar({
             ) : null}
             <AppMenuLinkItem href="/me?view=settings#agents">Agents</AppMenuLinkItem>
             {devMode ? (
-              <AppMenuItem className="tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} onClick={toggleDevMode}>
+              <AppMenuItem className="tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} closeOnClick={!devMode.on || exitArmed} onClick={toggleDevMode}>
                 {devModeLabel}
               </AppMenuItem>
             ) : null}
+            {devFlagsNote}
+            {devMode?.on && onboardingTest ? <DebugBar {...onboardingTest} /> : null}
             {supportsTheme ? (
               <>
                 <AppMenuSeparator />
