@@ -18964,6 +18964,7 @@ const tdocHandlers = {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
       if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) return json({ error: 'account_token_required' }, { status: 403 });
+      if (auth.actor.scope && !auth.actor.scope.me) return json({ error: 'my_docs_access_required', message: 'Reconnect and include My docs to use this setup.' }, { status: 403 });
       let body = {}; try { body = await req.json(); } catch {}
       const hookUrl = webhookUrl(body.url);
       if (!hookUrl) return json({ error: 'invalid_url' }, { status: 400 });
@@ -18990,6 +18991,7 @@ const tdocHandlers = {
       const auth = await requireUploadAuth(req, env);
       if (!auth.ok) return auth.response;
       if (auth.actor.kind !== 'hosted' || !auth.actor.account_id) return json({ error: 'account_token_required' }, { status: 403 });
+      if (auth.actor.scope && !auth.actor.scope.me) return json({ error: 'my_docs_access_required', message: 'Reconnect and include My docs to use this setup.' }, { status: 403 });
       let body = {}; try { body = await req.json(); } catch {}
       if (!/^[a-f0-9]{32}$/.test(body.code || '')) return json({ error: 'invalid_code' }, { status: 400 });
       const key = `onboarding-connect:${body.code}`;

@@ -51,9 +51,6 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [platform, setPlatform] = useState('unix');
-  const promptRef = useRef(null);
-  const connectRef = useRef(null);
   const active = useRef(true);
   useEffect(() => () => { active.current = false; }, []);
   const started = useRef(Date.now());

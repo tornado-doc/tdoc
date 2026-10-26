@@ -17,7 +17,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
  const server=http.createServer((q,r)=>{
   const p=new URL(q.url,'http://fixture').pathname;
   let file;
-  if(p==='/h.js'||p==='/h.css') file=path.join(out,p.slice(1));
+  if(/^\/h(?:\d+)?\.(?:js|css|png|svg)$/.test(p)) file=path.join(out,p.slice(1));
   else if(p==='/tdoc_logo.svg') file=path.join(ROOT,'assets/tdoc_logo.svg');
   else if(p==='/mac/wallpaper.jpg') file=path.join(ROOT,'assets/mac-wallpaper.jpg');
   else if(/^\/mac\/[a-z]+\.png$/.test(p)) file=path.join(ROOT,'assets','mac-'+path.basename(p));
@@ -52,6 +52,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    assert.equal(await page.getByText('Gemini CLI',{exact:true}).count(),0);
    assert.ok(await page.getByRole('heading',{name:'Which AI do you use?',exact:true}).evaluate(el=>el===document.activeElement));
    assert.ok(await page.locator('.ui-ai-label span').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=16),'no small-print product labels');
+   await page.waitForFunction(() => [...document.querySelectorAll('.ui-ai-option img')].every(img => img.complete && img.naturalWidth > 0));
    await shot('products');
    for(const [product,title] of [['ChatGPT Work','Connect ChatGPT Work'],['Claude Cowork','Connect Claude Cowork'],['Claude Code','Connect Claude Code'],['Codex','Connect Codex'],['Grok Bot','Connect Grok Bot'],['Raft','Connect Raft'],['Cursor','Connect Cursor'],['Other AI / Agent','Connect Other AI / Agent']]){
      await page.getByRole('button',{name:new RegExp('^'+product.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))}).click();
