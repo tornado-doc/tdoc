@@ -1,5 +1,5 @@
 const assert = require('assert/strict');
-const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
+const { loadWorker, makeEnv, req, issue, putSession } = require('./helpers/worker-harness');
 (async () => {
   const mod = await loadWorker(); const worker = mod.default;
   const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev', TDOC_HOSTED_ACCOUNTS: '1' });
@@ -24,6 +24,11 @@ const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
   await env.META.put(`onboarding-connect:${expired.body.code}`, JSON.stringify({ account_id: owner.account_id, expires: '2000-01-01T00:00:00Z' }));
   assert.equal((await complete(expired.body.code)).status, 410);
   console.log('✓ interactive setup requires a fresh, account-matched tool confirmation; no document or helper');
+  const newcomer = await putSession(env, 'first-time-reader');
+  const fresh = await browser('/api/onboarding/connect', {}, newcomer);
+  assert.equal(fresh.status, 200, 'a first sign-in can start setup before it has published anything');
+  assert.match(fresh.body.code, /^[a-f0-9]{32}$/);
+  console.log('✓ a first-time sign-in gets an account when it starts setup');
 
   const registration = { device: 'my-mac', clis: ['claude', 'codex'], ready_clis: ['codex'], runtimes: [{ cli: 'claude', state: 'needs_check' }, { cli: 'codex', state: 'ready', version: '1.2.3' }], setup_checked_at: new Date().toISOString() };
   const register = () => call('/api/notify/local/register', { method: 'POST', token: owner.token, body: registration });

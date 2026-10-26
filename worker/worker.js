@@ -19008,7 +19008,9 @@ const tdocHandlers = {
     if (p === '/api/onboarding/connect' && ['GET', 'POST'].includes(method)) {
       const session = await getSession(env, req);
       if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
-      const accountId = await sessionAccountId(env, session);
+      // A first-time sign-in has no account until something creates one; setup is that first thing.
+      await ensureSessionAccount(env, session, url.origin);
+      const accountId = session.account_id || await sessionAccountId(env, session);
       if (!accountId) return json({ error: 'account_required' }, { status: 403 });
       if (method === 'POST') {
         if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
@@ -19030,7 +19032,8 @@ const tdocHandlers = {
     if (p === '/api/me/computers' && ['GET', 'POST'].includes(method)) {
       const session = await getSession(env, req);
       if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
-      const accountId = await sessionAccountId(env, session);
+      await ensureSessionAccount(env, session, url.origin);
+      const accountId = session.account_id || await sessionAccountId(env, session);
       if (!accountId) return json({ error: 'account_required' }, { status: 403 });
       const group = await accountGroup(env, accountId);
       const targets = await accountNotifyTargets(env, accountId);
@@ -19112,7 +19115,8 @@ const tdocHandlers = {
       if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
       const session = await getSession(env, req);
       if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
-      const accountId = await sessionAccountId(env, session);
+      await ensureSessionAccount(env, session, url.origin);
+      const accountId = session.account_id || await sessionAccountId(env, session);
       if (!accountId) return json({ error: 'account_required' }, { status: 403 });
       let body = {}; try { body = await req.json(); } catch {}
       // Manual practice is an explicit copy/paste workflow, not evidence of a

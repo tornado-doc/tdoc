@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowRight, Bot } from 'lucide-react';
-import codexIcon from '../../../assets/mac-codex.png';
-import cursorIcon from '../../../assets/cursor-icon.png';
+import codexIcon from '../../../assets/mac-codex.png?inline';
+import cursorIcon from '../../../assets/cursor-icon.png?inline';
 import { ClaudeMark, OpenAIMark, GrokMark, RaftMark } from '../agent-marks.jsx';
 
 const CodexMark = ({ size }) => <img src={codexIcon} width={size} height={size} alt="" />;
