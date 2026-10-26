@@ -85,6 +85,7 @@ jobs:
   browser:
     name: browser regressions (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -104,7 +105,15 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium-webkit
-      - run: npx playwright install --with-deps chromium webkit
+      # The apt step of --with-deps sometimes hangs on a runner (seen for 15+
+      # min). Bound each attempt and retry instead of waiting out the job.
+      - name: Install Playwright browsers
+        run: |
+          for attempt in 1 2 3; do
+            timeout 240 npx playwright install --with-deps chromium webkit && exit 0
+            echo "playwright install attempt $attempt failed or timed out; retrying"
+          done
+          exit 1
       - run: node test/run.js --browser --shard=${{ matrix.shard }}/4
       - if: matrix.shard == 4
         run: |
