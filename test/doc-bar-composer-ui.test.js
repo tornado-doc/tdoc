@@ -206,8 +206,29 @@ async function dragSelect(page, phrase) {
       }));
       if (modeStyle.background !== 'rgba(0, 0, 0, 0)' || modeStyle.border !== '0px' || !['none', 'normal'].includes(modeStyle.marker)) throw new Error(`phone mode has a filled pill: ${JSON.stringify(modeStyle)}`);
       await shot(page, 'selection-composer-phone.png');
+      await frame.evaluate(() => {
+        const rect = getSelection().getRangeAt(0).getClientRects()[0];
+        const touch = new Touch({ identifier: 1, target: document.body, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 });
+        document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
+        document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
+      });
+      if (!(await pop.isVisible()) || (await frame.evaluate(() => getSelection().toString())) !== selected) throw new Error('tapping the selected passage closed its copy/composer controls');
       await pop.getByRole('button', { name: 'Copy selected text' }).click();
       if ((await page.evaluate(() => navigator.clipboard.readText())) !== selected) throw new Error('phone copy icon missed the quote');
+      // iOS does not emit mouse events for a tap on plain document text. A tap
+      // away from the selected passage must dismiss the composer and its
+      // pending yellow highlight without requiring a switch to Read mode.
+      await frame.evaluate(() => {
+        const touch = new Touch({ identifier: 1, target: document.body, clientX: innerWidth - 12, clientY: innerHeight - 12 });
+        document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
+        document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
+      });
+      await pop.waitFor({ state: 'detached' });
+      const cleared = await frame.evaluate(() => ({
+        selection: getSelection().toString(),
+        pending: Boolean(window.CSS?.highlights?.has('tdoc-pending')),
+      }));
+      if (cleared.selection || cleared.pending) throw new Error(`phone tap left a selected passage behind: ${JSON.stringify(cleared)}`);
       await context.close();
     });
 

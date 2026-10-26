@@ -506,15 +506,36 @@
   var _tap = null;
   document.addEventListener('touchstart', function (e) {
     var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
-    _tap = t ? { x: t.clientX, y: t.clientY, at: Date.now() } : null;
+    var selected = t ? window.getSelection() : null;
+    _tap = t ? {
+      x: t.clientX, y: t.clientY, at: Date.now(),
+      // A tap on the selected passage is for the native copy menu. A tap
+      // elsewhere dismisses the composer, even on iOS where plain text taps
+      // never produce the mouse events used by the desktop clear path.
+      inSelection: !!(selected && !selected.isCollapsed && selected.rangeCount
+        && pointOverRange(selected.getRangeAt(0), t.clientX, t.clientY))
+    } : null;
   }, { capture: true, passive: true });
   document.addEventListener('touchend', function (e) {
     var start = _tap;
     _tap = null;
+    var t = e.changedTouches && e.changedTouches[0];
+    var still = start && t && Math.abs(t.clientX - start.x) < 10
+      && Math.abs(t.clientY - start.y) < 10 && Date.now() - start.at < 600;
+    if (still && shellUiOpen && interactionMode === 'comment' && !start.inSelection
+      && !visualViewerOpen() && !(e.target && e.target.closest
+        && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
+      // The pending CSS highlight outlives the browser selection. Clear both
+      // before closing the composer so no yellow passage remains on the page.
+      if (e.cancelable) e.preventDefault();
+      if (HL) CSS.highlights.delete('tdoc-pending');
+      try { var pendingSelection = window.getSelection(); if (pendingSelection) pendingSelection.removeAllRanges(); } catch (x) {}
+      setActiveAnchor(null, false);
+      post({ type: 'tdoc:cleared' });
+      return;
+    }
     if (start && !shellUiOpen && interactionMode !== 'edit' && !visualViewerOpen()) {
-      var t = e.changedTouches && e.changedTouches[0];
       var sel = window.getSelection();
-      var still = t && Math.abs(t.clientX - start.x) < 10 && Math.abs(t.clientY - start.y) < 10 && Date.now() - start.at < 600;
       if (still && (!sel || sel.isCollapsed)) {
         var hit = anchorIdAtPoint(t.clientX, t.clientY);
         if (hit) {
