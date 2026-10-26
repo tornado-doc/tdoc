@@ -41,17 +41,25 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         }
         assert(view.w <= view.room + 1, `card fits the column: ${view.w} > ${view.room}`);
         assert(view.overflow <= 1, `no sideways overflow in slide view: ${view.overflow}`);
+        await page.locator('.tdoc-document-comments').getByText('A note about the whole deck.').waitFor();
+        const commentPlacement = await frame.locator('html').evaluate(() => {
+          const slot = document.querySelector('[data-tdoc-document-comments-slot]');
+          const last = document.querySelector('#s3');
+          const first = document.querySelector('#s1');
+          const present = document.querySelector('.tdoc-present-open');
+          return { afterDeck: slot.previousElementSibling === last && slot.parentElement === last.parentElement,
+            height: slot.getBoundingClientRect().height,
+            firstTop: first.getBoundingClientRect().top,
+            presentBottom: present.getBoundingClientRect().bottom };
+        });
+        assert(commentPlacement.afterDeck && commentPlacement.height > 50,
+          `whole-document comments must follow the deck: ${JSON.stringify(commentPlacement)}`);
+        assert(commentPlacement.presentBottom <= commentPlacement.firstTop + 1,
+          `Present must remain above the first card: ${JSON.stringify(commentPlacement)}`);
         if (process.env.TDOC_TEST_SCREENSHOTS) {
           fs.mkdirSync(process.env.TDOC_TEST_SCREENSHOTS, { recursive: true });
           await page.screenshot({ path: path.join(process.env.TDOC_TEST_SCREENSHOTS, `slide-view-${width}.png`), fullPage: true });
         }
-        const presentPlacement = await frame.locator('.tdoc-present-open').evaluate((button) => {
-          const slot = document.querySelector('[data-tdoc-document-comments-slot]');
-          return slot && slot.offsetHeight ? { buttonBottom: button.getBoundingClientRect().bottom,
-            commentsTop: slot.getBoundingClientRect().top } : null;
-        });
-        if (presentPlacement) assert(presentPlacement.buttonBottom <= presentPlacement.commentsTop + 1,
-          `Present must not sit behind document comments: ${JSON.stringify(presentPlacement)}`);
         await frame.getByRole('button', { name: 'Present slides' }).click();
         await page.locator('[data-visual-open]').waitFor();
         await frame.locator('html[data-tdoc-presenting]').waitFor();

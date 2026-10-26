@@ -74,6 +74,26 @@ async function check(name, run) {
                 const scrolled = await frame.evaluate(() => window.scrollY);
                 if (!scrolled) throw new Error('wheel did not scroll the frame');
               });
+              await check('explicit custom template keeps comments outside a nested title hero', async () => {
+                const frame = page.frames().find((item) => item !== page.mainFrame() && item.url().includes('hostile-body-css'));
+                await frame.evaluate(() => {
+                  const hero = document.createElement('div');
+                  hero.setAttribute('data-custom-hero', '');
+                  document.querySelector('h1').before(hero);
+                  hero.append(document.querySelector('h1'));
+                  document.documentElement.setAttribute('data-tdoc-design', 'custom');
+                });
+                await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({
+                  source: 'tdoc-shell', type: 'tdoc:anchors', comments: [],
+                }, '*'));
+                await frame.waitForFunction(() => {
+                  const slot = document.querySelector('[data-tdoc-document-comments-slot]');
+                  return slot === document.body.lastElementChild;
+                });
+                const outsideHero = await frame.evaluate(() => !document.querySelector('[data-custom-hero]').contains(
+                  document.querySelector('[data-tdoc-document-comments-slot]')));
+                if (!outsideHero) throw new Error('custom hero contains document comments');
+              });
             }
             if (width === 390 && engineName === 'chromium') {
               await check('phone: inline Add a comment creates a null-anchor thread', async () => {

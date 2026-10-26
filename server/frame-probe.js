@@ -1003,13 +1003,15 @@
   var _view = null, _rangeCache = {}, _anchorTargets = {}, _activeAnchorId = null;
   var _lastComments = [];   // re-report pins when layout settles (images/fonts)
   // The comment UI belongs to the shell, but document-level threads belong in
-  // the article flow just below its title. This provider-owned spacer reserves
+  // the article flow near its title. This provider-owned spacer reserves
   // the shell's measured height without ever becoming published author HTML.
   var documentCommentsSlot = null;
   function placeDocumentCommentsSlot() {
     var root = findEditRoot();
     if (!root) return null;
     var heading = root.querySelector('h1');
+    var slides = root.querySelectorAll('[data-tdoc-slide]');
+    var customDesign = document.documentElement.getAttribute('data-tdoc-design') === 'custom';
     if (!documentCommentsSlot) {
       documentCommentsSlot = document.createElement('div');
       documentCommentsSlot.setAttribute('data-tdoc-provider', '');
@@ -1028,7 +1030,19 @@
       documentCommentsSlot.style.setProperty('grid-column', '1 / -1', 'important');
       documentCommentsSlot.style.setProperty('pointer-events', 'none', 'important');
     }
-    if (heading) {
+    if (slides.length) {
+      // A title may live inside a 16:9 card. Reserve comment space after the
+      // whole deck, outside its slide wrapper, so neither cards nor Present
+      // controls move when comments arrive.
+      var lastSlide = slides[slides.length - 1];
+      var deckEnd = lastSlide;
+      while (deckEnd.parentElement && deckEnd.parentElement !== root) deckEnd = deckEnd.parentElement;
+      if (documentCommentsSlot.previousElementSibling !== deckEnd || documentCommentsSlot.parentNode !== root) deckEnd.after(documentCommentsSlot);
+    } else if (customDesign) {
+      // Custom templates own the title layout; a nested hero is not a safe
+      // place for an injected section. Keep the section in the root's flow.
+      if (documentCommentsSlot.parentNode !== root || documentCommentsSlot !== root.lastElementChild) root.append(documentCommentsSlot);
+    } else if (heading) {
       if (documentCommentsSlot.previousSibling !== heading || documentCommentsSlot.parentNode !== heading.parentNode) heading.after(documentCommentsSlot);
     } else if (documentCommentsSlot.parentNode !== root || documentCommentsSlot !== root.firstChild) {
       root.insertBefore(documentCommentsSlot, root.firstChild);

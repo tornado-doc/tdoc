@@ -36,5 +36,19 @@
       "context_after": ""
     },
     "replies": []
+  },
+  {
+    "id": "on-document",
+    "version": 1,
+    "created_in": 1,
+    "text": "A note about the whole deck.",
+    "author": {
+      "login": "preview-reviewer",
+      "name": "Reviewer"
+    },
+    "created": "2026-10-23T10:10:00Z",
+    "status": "open",
+    "anchor": null,
+    "replies": []
   }
 ]

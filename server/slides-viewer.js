@@ -186,16 +186,7 @@
     }
     var r = list[0].getBoundingClientRect();
     openButton.hidden = !canPresent();
-    var top = Math.max(0, r.top + window.scrollY - 46);
-    // Document-level comments reserve space between the heading and the first
-    // slide. The old button position lands inside that shell-owned section,
-    // where it cannot receive clicks, so keep Present just above the section.
-    var commentsSlot = document.querySelector('[data-tdoc-document-comments-slot]');
-    if (commentsSlot && commentsSlot.offsetHeight) {
-      var slotTop = commentsSlot.getBoundingClientRect().top + window.scrollY;
-      top = Math.min(top, Math.max(0, slotTop - openButton.offsetHeight - 8));
-    }
-    openButton.style.top = top + 'px';
+    openButton.style.top = Math.max(0, r.top + window.scrollY - 46) + 'px';
     openButton.style.left = 'clamp(0px,' + Math.max(0, r.right + window.scrollX - 110) + 'px,calc(100% - 110px))';
   }
 
