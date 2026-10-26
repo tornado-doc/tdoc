@@ -16,10 +16,10 @@ export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${D
 export const SETUP_PROMPT = 'curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash';
 const INSTALL_PROMPT = `${SETUP_PROMPT} -s -- --install-only`;
 const CONNECT_PROMPT = '~/.local/bin/tdoc setup';
-export const conversationPrompt = (code, product = 'your AI') => `Set up tdoc for ${product}: follow "Connect a conversation" in https://tdoc.dev/SKILL.md. If the tools are missing, run ${INSTALL_PROMPT}. Then run ~/.local/bin/tdoc connect ${code}`;
-export const AUTOMATIC_PROMPT = `Set up tdoc on this computer for automatic comment updates. Run ${SETUP_PROMPT} and tell me when it is ready. Guide: https://tdoc.dev/SKILL.md`;
+export const conversationPrompt = (code, product = 'your AI') => `Set up tdoc for ${product}: follow "Connect a conversation" in https://tdoc.dev/SKILL.md\n~/.local/bin/tdoc connect ${code}`;
+export const AUTOMATIC_PROMPT = `Set up tdoc on this computer for automatic comment updates:\n${SETUP_PROMPT}`;
 export const DOCTOR_PROMPT = '~/.local/bin/tdoc status';
-export const platformPrompt = (code, product) => `${conversationPrompt(code, product)}. Then connect this agent's task receiver with bin/tdoc-connect-agent (Raft) or bin/tdoc-connect-webhook. Do not install a daemon.`;
+export const platformPrompt = (code, product) => `${conversationPrompt(code, product)}\nThen connect its task receiver with bin/tdoc-connect-agent (Raft) or bin/tdoc-connect-webhook. Do not install a daemon.`;
 const POLL_MS = 3000;
 const STUCK_MS = 90000;
 export const readyLocalAgents = (agents) => (agents || []).filter((a) => a.ready && a.status === 'active');
@@ -158,9 +158,13 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const instructionBase = platformRoute ? platformPrompt(attempt?.code || '', product.label) : manual ? conversationPrompt(attempt?.code || '', product.label) : AUTOMATIC_PROMPT;
   const releaseRef = /^[a-f0-9]{40}$/.test(boot?.setupRef || '') ? boot.setupRef : 'main';
   const host = typeof location === 'undefined' ? 'https://tdoc.dev' : location.origin;
-  const instruction = instructionBase.replaceAll('https://tdoc.dev/SKILL.md', `${host}/SKILL.md`)
-    .replace('https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash', `https://raw.githubusercontent.com/tornado-doc/tdoc/${releaseRef}/bin/tdoc-install | TDOC_INSTALL_REF=${releaseRef} TDOC_HOSTED_BASE=${host} bash`)
-    .replace('Then run ~/.local/bin/tdoc connect', `Then run TDOC_HOSTED_BASE=${host} ~/.local/bin/tdoc connect`);
+  // tdoc.dev needs no overrides. Any other host (a preview) pins the installer to
+  // its own revision and points the CLI at itself, on a line of its own.
+  const custom = host !== 'https://tdoc.dev';
+  const installLine = `curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/${releaseRef}/bin/tdoc-install | TDOC_INSTALL_REF=${releaseRef} TDOC_HOSTED_BASE=${host} bash`;
+  const instruction = !custom ? instructionBase : instructionBase.replaceAll('https://tdoc.dev/SKILL.md', `${host}/SKILL.md`)
+    .replace(`${SETUP_PROMPT}`, installLine)
+    .replace('\n~/.local/bin/tdoc connect', `\n${installLine} -s -- --install-only\nTDOC_HOSTED_BASE=${host} ~/.local/bin/tdoc connect`);
   const copyInstruction = () => copy(instruction, 'instruction', instructionRef);
   const chooseProduct = (id) => {
     setProductId(id); setSelected(id === 'claude' || id === 'codex' ? id : '');
@@ -202,6 +206,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   return (
     <AppDialog open={open} onOpenChange={next => { if (!next) close(); }}
       title={done ? 'You’re connected' : intro ? 'Which AI do you use?' : `Connect ${product.label}`}
+      eyebrow={done ? null : intro ? 'Set up Tdoc' : 'Connect your AI'}
       className="ui-setup-modal ui-setup-simple" focusTitle
       description={intro || done ? null : manual ? `Paste this into a new ${product.label} chat.` : 'Paste this into Claude Code or Codex on this computer.'}
       actions={<>

@@ -83,7 +83,7 @@ The plain-HTTP routes above only read. tdoc itself is writable through the tdoc 
 
 A person on a tdoc setup page copies an instruction with a connection code into you. Finish connecting before offering to write a document.
 
-- Reuse tools and a saved sign-in that already work; prepare only what is missing. The instruction names the install command.
+- Reuse tools and a saved sign-in that already work; prepare only what is missing. If \`~/.local/bin/tdoc\` is missing, install it with \`curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash -s -- --install-only\`.
 - Run \`~/.local/bin/tdoc connect <code>\` with the exact code, and ask the person to approve tdoc in their browser when asked. The setup page updates on its own.
 - If tdoc is not yet an account skill in this app (ChatGPT Skills; Claude Customize → Skills), guide the person to add it once so later chats find it. A CLI download is not an account skill.
 - Do not create a document, and do not install or start a background helper.
