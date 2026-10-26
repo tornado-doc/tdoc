@@ -27,7 +27,7 @@ import { formatDraftAge } from './draft-store.js';
 
 export const MODES = [
   { value: 'read', label: 'Read', Icon: Eye },
-  { value: 'comment', label: 'Comment', Icon: CommentIcon },
+  { value: 'comment', label: 'Comment', Icon: (props) => <CommentIcon outline {...props} /> },
   { value: 'edit', label: 'Edit', Icon: Pencil },
 ];
 
