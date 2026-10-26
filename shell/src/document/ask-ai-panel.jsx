@@ -8,6 +8,7 @@ import { Author, CommentMessageText, ReplyMessage } from './comment-card.jsx';
 // A document-level question starts private. Sending a saved comment to an
 // editor stays a separate action, visible only when comments are ready.
 export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets, viewer,
+  disabledChoices = [], guestAction = null,
   turns, busy, remaining, onAsk, onKeep, onPost, readyCount, onSendReady,
   activityOpen, onActivityOpen, unreadCount, children }) {
   const input = useRef(null);
@@ -38,7 +39,7 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
             {agentMentionName(selected.target, choices)} <ChevronDown size={12} aria-hidden="true" />
           </button>
         )}>
-          <AgentMenuItems choices={choices} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={false} showRelevance pinTdocAi
+          <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={false} showRelevance pinTdocAi
             onPick={(target) => onTarget(targets.find((item) => sameTarget(item.target, target))?.key || selected.key)} />
         </AppMenu> : null}
         <button type="submit" aria-label="Send question" disabled={!draft.trim() || busy || !selected || noFreeAnswers}>↑</button>
