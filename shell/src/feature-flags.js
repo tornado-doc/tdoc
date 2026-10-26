@@ -12,6 +12,7 @@ export const FLAGS = Object.freeze({
   // "Results in document text" under the hub search: body and comment
   // matches from /api/search. Indexing runs regardless; this gates the UI.
   fullTextSearch: Object.freeze({ label: 'Full-text search', owner: 'julie', added: '2026-10-25', default: false }),
+  teamGuests: Object.freeze({ label: 'Team guests and seats', owner: 'julie', added: '2026-10-26', default: true }),
 });
 
 export function isFeatureOn(name, devMode = readDevMode()) {

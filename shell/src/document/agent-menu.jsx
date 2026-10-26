@@ -24,7 +24,8 @@ export function agentTag(t, ai = null) {
 // typed-@ list's light style (Julie, 2026-10-25): the same agents typing @
 // offers.
 export function AgentMenuItems({ choices, ai = null, current = null, onPick,
-  preserveOrder = false, maxVisible = Infinity, showConnect = true, showRelevance = false, pinTdocAi = false }) {
+  preserveOrder = false, maxVisible = Infinity, showConnect = true, showRelevance = false, pinTdocAi = false,
+  disabledChoices = [], guestAction = null }) {
   const list = choices || [];
   const rows = preserveOrder ? list : AGENT_GROUPS.flatMap((group) => list.filter((t) => whose(t) === group));
   const aiRow = pinTdocAi ? rows.find((t) => t.tdoc_ai) : null;
@@ -55,6 +56,12 @@ export function AgentMenuItems({ choices, ai = null, current = null, onPick,
       {more.length ? <AppSubmenu trigger="More agents" className="tdoc-agent-menu-more">
         {more.map(renderRow)}
       </AppSubmenu> : null}
+      {disabledChoices.map((agent) => <AppMenuItem key={`disabled:${targetKey(agent)}`} disabled title="You are a guest. Team agents are for members." className="tdoc-agent-menu-item">
+        <span className="tdoc-mention-agent-mark"><ProviderMark target={agent} size={14} /></span>
+        <span className="tdoc-agent-menu-name">{agentMentionName(agent, disabledChoices)}</span>
+        <span className="tdoc-agent-menu-tag">Team · members only</span>
+      </AppMenuItem>)}
+      {disabledChoices.length && guestAction ? <AppMenuItem className="tdoc-agent-menu-connect" onClick={guestAction.onClick}>{guestAction.label}</AppMenuItem> : null}
       {showConnect && rows.some((t) => t.tdoc_ai) ? (
         <AppMenuLinkItem className="tdoc-agent-menu-connect" href="/start">Connect my agent</AppMenuLinkItem>
       ) : null}
