@@ -226,7 +226,13 @@ const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
 const RUNTIME = ['preview-workerd.test.js']; // needs npm ci; real workerd WASM and font modules
 const runAll = process.argv.includes('--all');
 const runBrowser = process.argv.includes('--browser');
-const files = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
+const allFiles = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
+// --shard i/n runs every n-th suite starting at i, so CI can split the
+// browser regressions across parallel jobs (each suite starts its own server).
+const shardArg = process.argv.find((a) => a.startsWith('--shard='));
+const [shardIndex, shardCount] = shardArg ? shardArg.slice(8).split('/').map(Number) : [1, 1];
+if (!(shardCount >= 1 && shardIndex >= 1 && shardIndex <= shardCount)) throw new Error(`bad --shard ${shardArg}`);
+const files = allFiles.filter((_, i) => i % shardCount === shardIndex - 1);
 if (runAll || runBrowser) {
   // A requested browser suite must never report success by skipping every test.
   const probe = spawnSync(process.execPath, ['-e',

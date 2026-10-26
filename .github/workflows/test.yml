@@ -83,8 +83,12 @@ jobs:
       - run: npm run test:svg
 
   browser:
-    name: browser regressions
+    name: browser regressions (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -93,13 +97,22 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      # Browsers are cached by Playwright version; system deps still install.
+      - id: pw
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium-webkit
       - run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:browser
-      - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
-      - run: TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
-      - run: TDOC_TEST_BROWSER=webkit node test/custom-design-theme.test.js
-      - run: TDOC_TEST_BROWSER=webkit node test/visual-viewer.test.js
-      - run: TDOC_TEST_BROWSER=webkit node test/reply-activity-ui.test.js
+      - run: node test/run.js --browser --shard=${{ matrix.shard }}/4
+      - if: matrix.shard == 4
+        run: |
+          TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
+          TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
+          TDOC_TEST_BROWSER=webkit node test/custom-design-theme.test.js
+          TDOC_TEST_BROWSER=webkit node test/visual-viewer.test.js
+          TDOC_TEST_BROWSER=webkit node test/reply-activity-ui.test.js
 
   shell-runtime:
     name: shell runtime
