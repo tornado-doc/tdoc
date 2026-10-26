@@ -856,6 +856,8 @@ export function DocumentShell({ boot, config }) {
   };
 
   const replyTo = async (parentId, text, opts = {}) => {
+    // Signed out, replying is the prompt to sign in (the reply box still shows).
+    if (!config.identity && config.signInToComment) { signIn(); return false; }
     // Only me from a reply box: nothing is posted; the question goes with the
     // passage the thread hangs on, and the answer shows in that box.
     if (opts.target && opts.askOnly && opts.onlyMe) {
@@ -886,7 +888,8 @@ export function DocumentShell({ boot, config }) {
   // rewrite of words they were already told about.
   const editComment = async (id, text) => (await attempt(() => comments.edit(id, text))).ok;
 
-  const reactTo = (commentId, emoji) => attempt(() => comments.react(commentId, emoji));
+  const reactTo = (commentId, emoji) => (!config.identity && config.signInToComment
+    ? signIn() : attempt(() => comments.react(commentId, emoji)));
   // Resolving takes the thread out of the margin, so the card that owns the
   // button goes with it — close it rather than leaving a card pinned to
   // nothing.
