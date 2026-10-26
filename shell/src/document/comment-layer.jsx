@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { CommentIcon } from '../ui/comment-icon.jsx';
+import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { CommentThreadList } from './comment-thread-list.jsx';
@@ -208,8 +209,13 @@ export function MobileCommentDrawer({
   handoff = null,
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
+  // Unified entry: the same drawer also holds the Ask AI panel, one tab away.
+  askAi = null,
+  tab = 'comments',
+  onTab = null,
 }) {
   const drawerRef = useRef(null);
+  const showAsk = Boolean(askAi) && tab === 'ask';
 
   // Tapping a highlight opens the drawer at THAT comment. The drawer mounts
   // and animates in after this effect first runs, so look for the card for a
@@ -243,13 +249,26 @@ export function MobileCommentDrawer({
           <Drawer.Popup ref={drawerRef} id="tdoc-comment-layer" className="open">
             <Drawer.Title className="tdoc-visually-hidden">Comments</Drawer.Title>
             <Drawer.Close className="tdoc-drawer-handle" aria-label="Close comments" />
+            {askAi ? <div className="tdoc-drawer-tabs">
+              <SegmentedControl
+                ariaLabel="Comments or Ask AI"
+                value={tab}
+                onChange={onTab}
+                options={[
+                  { value: 'comments', label: openCount ? `Comments · ${openCount}` : 'Comments' },
+                  { value: 'ask', label: <>Ask AI{unread ? <span className="tdoc-tab-dot" aria-label="new agent reply" /> : null}</> },
+                ]}
+              />
+            </div> : null}
+            {showAsk ? <div className="tdoc-drawer-ask">{askAi}</div> : (
             <Drawer.Content className="tdoc-drawer-list">
               {filter ? <div className="tdoc-comment-filter-row">{filter}</div> : null}
               {!comments.length ? <div className="tdoc-drawer-empty">
                 <p>No comments here yet.</p>
                 <div className="tdoc-drawer-empty-actions">
                   {onStartComment ? <button type="button" onClick={() => { onOpenChange(false); onStartComment(); }}>Leave a comment</button> : null}
-                  {onAskAi ? <button type="button" onClick={() => { onOpenChange(false); onAskAi(); }}>Ask AI</button> : null}
+                  {askAi && onTab ? <button type="button" onClick={() => onTab('ask')}>Ask AI</button>
+                    : onAskAi ? <button type="button" onClick={() => { onOpenChange(false); onAskAi(); }}>Ask AI</button> : null}
                 </div>
               </div> : null}
               <CommentThreadList
@@ -266,7 +285,7 @@ export function MobileCommentDrawer({
                   onSendHandoffElsewhere,
                 }}
               />
-            </Drawer.Content>
+            </Drawer.Content>)}
           </Drawer.Popup>
         </Drawer.Viewport>
       </Drawer.Portal>

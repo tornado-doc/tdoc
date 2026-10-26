@@ -12,12 +12,22 @@ export const FLAGS = Object.freeze({
   // "Results in document text" under the hub search: body and comment
   // matches from /api/search. Indexing runs regardless; this gates the UI.
   fullTextSearch: Object.freeze({ label: 'Full-text search', owner: 'julie', added: '2026-10-25', default: false }),
+  // One entry on phones: the comment button opens a drawer with Comments and
+  // Ask AI tabs instead of a separate Ask AI button in the top bar. On in PR
+  // previews so it can be tried before it ships.
+  unifiedEntry: Object.freeze({ label: 'One comment + Ask AI entry on phones', owner: 'julie', added: '2026-10-26', default: false, preview: true }),
 });
+
+const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
+
+function isPreviewHost() {
+  return typeof location !== 'undefined' && PREVIEW_HOST.test(location.hostname || '');
+}
 
 export function isFeatureOn(name, devMode = readDevMode()) {
   const flag = Object.prototype.hasOwnProperty.call(FLAGS, name) ? FLAGS[name] : null;
   if (!flag) return false;
-  return flag.default === true || Boolean(devMode && devMode.on);
+  return flag.default === true || Boolean(devMode && devMode.on) || (flag.preview === true && isPreviewHost());
 }
 
 // The flags dev mode adds over what everybody else sees.

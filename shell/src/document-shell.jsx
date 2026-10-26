@@ -65,6 +65,7 @@ import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAskAiChoic
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel } from './document/ask-ai-panel.jsx';
+import { isFeatureOn } from './feature-flags.js';
 import { useCommentArea } from './document/comment-area.js';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
@@ -926,6 +927,11 @@ export function DocumentShell({ boot, config }) {
   // demo has no account to send from.
   const myAgentEnabled = Boolean(config.mode === 'published' && !config.isLanding && !config.demoComments);
   const askAiPanelEnabled = notifyEnabled || (myAgentEnabled && Boolean(config.identity));
+  // Phones get one entry: the comment button's drawer carries an Ask AI tab,
+  // and the top bar keeps only Share and ⋯ (flag: unifiedEntry).
+  const [unifiedEntryFlag] = useState(() => isFeatureOn('unifiedEntry'));
+  const unifiedEntry = narrow && askAiPanelEnabled && unifiedEntryFlag;
+  const [drawerTab, setDrawerTab] = useState('comments');
   const myAgent = useMyAgent(config.slug, myAgentEnabled && Boolean(config.identity));
   // The composer's @ list: agents that may edit this doc, then those that
   // may only answer (own, the team's), else tdoc AI (ai-answerer.js).
@@ -1491,6 +1497,56 @@ export function DocumentShell({ boot, config }) {
     const y = window.innerHeight - 80;
     setComposer({ kind: 'document', intent: askAi ? 'ask-ai' : 'comment', rect: { top: y, bottom: y, left: 16 } });
   };
+  const closeAskAi = () => { setHandoffDetailsOpen(false); if (unifiedEntry) setDrawerOpen(false); };
+  const askAiPanel = (panelOpen) => (
+    <AskAiPanel
+      open={panelOpen}
+      draft={askAiDraft}
+      onDraft={setAskAiDraft}
+      targetKey={selectedAskAiTargetKey}
+      onTarget={setAskAiTargetKey}
+      targets={askAiTargets}
+      viewer={config.identity}
+      turns={askAiTurns}
+      busy={askAiBusy}
+      remaining={aiRemaining}
+      onAsk={askAiSend}
+      onKeep={keepAskAiAnswer}
+      onPost={postAskAiAnswer}
+      readyCount={canSendToAgent ? handoffBuckets.ready.length : 0}
+      onSendReady={canSendToAgent ? () => openDocNotify() : null}
+      activityOpen={agentActivityOpen}
+      onActivityOpen={setAgentActivityOpen}
+      unreadCount={unreadAgentReplies}
+    ><HandoffDetailsPanel
+      slug={config.slug}
+      open={panelOpen}
+      comments={visibleHandoffComments}
+      handoffViewer={handoffViewer}
+      seenMap={seenMap}
+      showReady={canSendToAgent}
+      onClose={closeAskAi}
+      onSendReady={canSendToAgent ? openDocNotify : null}
+      onSendElsewhere={canSendToAgent ? (comment) => {
+        closeAskAi();
+        sendHandoffElsewhere(comment);
+      } : null}
+      onJump={(id) => {
+        setCommentFilterState('all');
+        setDrawerTab('comments');
+        if (narrow) setDrawerOpen(true);
+        focusComment(id, { scroll: true });
+      }}
+      onRefresh={() => comments.refresh()}
+      onToast={(text, error) => showToast(text, error)}
+      onMarkRead={markAgentReplyRead}
+      onMarkAllRead={markAllAgentRepliesRead}
+      onViewChanges={() => { closeAskAi(); changeComparison(true); }}
+      onReply={config.canComment ? async (comment, text) => replyTo(comment.id, text,
+        canSendToAgent ? { sendToAgent: true, handoffCommentId: comment.id, recipient: comment.handoff_to }
+          : { target: comment.handoff_to, askOnly: true }) : null}
+    /></AskAiPanel>
+  );
   const commentFilterControl = resolvedCount ? (
     <SegmentedControl
       className="tdoc-comment-filter"
@@ -1558,7 +1614,7 @@ export function DocumentShell({ boot, config }) {
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
           !comparing && <>
             <DocumentEdited config={config} onCompare={() => changeComparison(true)} />
-            {askAiPanelEnabled ? (
+            {askAiPanelEnabled && !unifiedEntry ? (
               <DocumentSendAgentAction
                 counts={Object.fromEntries(Object.entries(handoffBuckets).map(([state, list]) => [state, list.length]))}
                 unread={unreadAgentReplies}
@@ -1566,52 +1622,7 @@ export function DocumentShell({ boot, config }) {
                 onOpenChange={(open) => { setHandoffDetailsOpen(open); if (open) { setAgentActivityOpen(false); setDrawerOpen(false); } }}
                 narrow={narrow}
               >
-                <AskAiPanel
-                  open={handoffDetailsOpen}
-                  draft={askAiDraft}
-                  onDraft={setAskAiDraft}
-                  targetKey={selectedAskAiTargetKey}
-                  onTarget={setAskAiTargetKey}
-                  targets={askAiTargets}
-                  viewer={config.identity}
-                  turns={askAiTurns}
-                  busy={askAiBusy}
-                  remaining={aiRemaining}
-                  onAsk={askAiSend}
-                  onKeep={keepAskAiAnswer}
-                  onPost={postAskAiAnswer}
-                  readyCount={canSendToAgent ? handoffBuckets.ready.length : 0}
-                  onSendReady={canSendToAgent ? () => openDocNotify() : null}
-                  activityOpen={agentActivityOpen}
-                  onActivityOpen={setAgentActivityOpen}
-                  unreadCount={unreadAgentReplies}
-                ><HandoffDetailsPanel
-                  slug={config.slug}
-                  open={handoffDetailsOpen}
-                  comments={visibleHandoffComments}
-                  handoffViewer={handoffViewer}
-                  seenMap={seenMap}
-                  showReady={canSendToAgent}
-                  onClose={() => setHandoffDetailsOpen(false)}
-                  onSendReady={canSendToAgent ? openDocNotify : null}
-                  onSendElsewhere={canSendToAgent ? (comment) => {
-                    setHandoffDetailsOpen(false);
-                    sendHandoffElsewhere(comment);
-                  } : null}
-                  onJump={(id) => {
-                    setCommentFilterState('all');
-                    if (narrow) setDrawerOpen(true);
-                    focusComment(id, { scroll: true });
-                  }}
-                  onRefresh={() => comments.refresh()}
-                  onToast={(text, error) => showToast(text, error)}
-                  onMarkRead={markAgentReplyRead}
-                  onMarkAllRead={markAllAgentRepliesRead}
-                  onViewChanges={() => { setHandoffDetailsOpen(false); changeComparison(true); }}
-                  onReply={config.canComment ? async (comment, text) => replyTo(comment.id, text,
-                    canSendToAgent ? { sendToAgent: true, handoffCommentId: comment.id, recipient: comment.handoff_to }
-                      : { target: comment.handoff_to, askOnly: true }) : null}
-                /></AskAiPanel>
+                {askAiPanel(handoffDetailsOpen)}
               </DocumentSendAgentAction>
             ) : null}
             <DocumentPrimaryAction
@@ -1791,6 +1802,9 @@ export function DocumentShell({ boot, config }) {
           agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
           onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
           hideFab={handoffDetailsOpen}
+          askAi={unifiedEntry ? askAiPanel(drawerOpen && drawerTab === 'ask') : null}
+          tab={drawerTab}
+          onTab={setDrawerTab}
           onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
           onAskAi={config.canComment || config.signInToComment ? () => startDocumentComment(true) : null}
           onReply={replyTo}
