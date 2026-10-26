@@ -51,7 +51,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    assert.equal(await page.locator('.ui-ai-option').count(),8);
    assert.equal(await page.getByText('Gemini CLI',{exact:true}).count(),0);
    assert.ok(await page.getByRole('heading',{name:'Which AI do you use?',exact:true}).evaluate(el=>el===document.activeElement));
-   assert.ok(await page.locator('.ui-ai-label span').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=16),'no small-print product labels');
+   assert.ok(await page.locator('.ui-ai-label span').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=14),'no small-print product labels (Raft body size)');
    await page.waitForFunction(() => [...document.querySelectorAll('.ui-ai-option img')].every(img => img.complete && img.naturalWidth > 0));
    await shot('products');
    for(const [product,title] of [['ChatGPT Work','Connect ChatGPT Work'],['Claude Cowork','Connect Claude Cowork'],['Claude Code','Connect Claude Code'],['Codex','Connect Codex'],['Grok Bot','Connect Grok Bot'],['Raft','Connect Raft'],['Cursor','Connect Cursor'],['Other AI / Agent','Connect Other AI / Agent']]){
@@ -68,6 +68,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await page.getByRole('button',{name:/^ChatGPT Work/}).click();
    await page.getByRole('button',{name:'Copy instruction',exact:true}).waitFor();
    await shot('cloud-connect');
+   assert.ok(await page.locator('.ui-setup-instruction').evaluate(el=>getComputedStyle(el).color.match(/\d+/g).slice(0,3).every(v=>Number(v)>200)),'the instruction is light text on the dark block');
    await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:()=>Promise.reject(new Error('denied'))}}));
    await page.getByRole('button',{name:'Copy instruction',exact:true}).click();
    await page.getByText('Copy the selected line.',{exact:true}).waitFor();

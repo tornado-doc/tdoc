@@ -15360,6 +15360,22 @@ const tdocHandlers = {
     if ((p === '/SKILL.md' || p === '/SKILLS.md') && (method === 'GET' || method === 'HEAD')) {
       return remoteSkillResponse(method);
     }
+
+    // Some cloud AI sandboxes (Claude Cowork) may reach tdoc but not GitHub.
+    // Relay the official source archive so bin/tdoc-install works there too.
+    // Only revisions of tornado-doc/tdoc; never an arbitrary upstream.
+    {
+      const m = /^\/install\/source\/([A-Za-z0-9._-]{1,100})\.tar\.gz$/.exec(p);
+      if (m && (method === 'GET' || method === 'HEAD')) {
+        const ref = m[1];
+        if (ref.startsWith('.') || ref.includes('..')) return json({ error: 'invalid_ref' }, { status: 400 });
+        let upstream;
+        try { upstream = await fetch(`https://github.com/tornado-doc/tdoc/archive/${ref}.tar.gz`, { redirect: 'follow' }); } catch { upstream = null; }
+        if (!upstream || !upstream.ok) return json({ error: 'source_unavailable' }, { status: upstream && upstream.status === 404 ? 404 : 502 });
+        const pinned = /^[a-f0-9]{40}$/.test(ref);
+        return new Response(method === 'HEAD' ? null : upstream.body, { headers: { 'Content-Type': 'application/gzip', 'Cache-Control': pinned ? 'public, max-age=31536000, immutable' : 'public, max-age=300' } });
+      }
+    }
     if ((p === '/llms.txt' || p === '/.well-known/llms.txt') && (method === 'GET' || method === 'HEAD')) {
       return remoteSkillResponse(method, LLMS_TXT, 'text/plain');
     }

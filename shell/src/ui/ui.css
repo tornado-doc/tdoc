@@ -1231,7 +1231,7 @@ a.ui-menu-item:visited {
 .ui-setup-subject { display: grid; gap: 10px; margin: 6px 0 20px; font-size: 14px; }
 .ui-setup-subject input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--td-line, #ddd); border-radius: 0; background: var(--td-bg, #fff); color: var(--td-fg, #111); font: inherit; }
 .ui-setup-prompt { position: relative; border-radius: 12px; background: #1d1d1f; color: #f5f5f7; }
-.ui-setup-instruction { margin: 0; max-height: 9.6em; overflow: auto; padding: 16px 92px 16px 18px; overflow-wrap: anywhere; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: #f5f5f7; }
+.ui-setup-prompt .ui-setup-instruction, .tdoc-modal .ui-setup-prompt p.ui-setup-instruction { margin: 0; max-height: 9.6em; overflow: auto; padding: 16px 92px 16px 18px; overflow-wrap: anywhere; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: #f5f5f7; }
 .ui-setup-modal .ui-setup-copy { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: rgba(255,255,255,.16); color: #f5f5f7; box-shadow: none; font: 500 14px/1 -apple-system, system-ui, sans-serif; cursor: pointer; }
 .ui-setup-modal .ui-setup-copy:hover { background: rgba(255,255,255,.22); }
 .ui-setup-steps { margin: 24px 0 0; padding-left: 1.4em; display: grid; gap: 10px; font-size: 16px; line-height: 1.5; }
@@ -1307,3 +1307,35 @@ a.ui-menu-item:visited {
 .ui-tutorial-single { padding: 12px 16px; border: 1px solid var(--td-line, #ddd); background: var(--td-bg, #fff); color: inherit; border-radius: 8px; cursor: pointer; }
 
 .ui-dialog-popup.ui-setup-simple { border-radius: 16px; }
+
+/* Setup dialog measured 1:1 against Raft's Connect Computer window: 512px wide,
+   20px padding, 16/24 title, 14/22 text, one 60px command row with Copy beside
+   it, a status band, and compact buttons together on the right. Colors and
+   corner radius stay Tdoc's. */
+.ui-dialog-popup.ui-setup-modal.ui-setup-raft { width: min(512px, calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 40px); padding: 20px; border-radius: 16px; }
+.ui-setup-modal.ui-setup-raft .ui-dialog-title { margin: 0 0 4px; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: 0; }
+.ui-setup-modal.ui-setup-raft .ui-dialog-description { margin: 0; padding: 0 0 16px; border: 0; font-size: 14px; line-height: 22px; color: var(--td-muted, #666); }
+.ui-setup-modal.ui-setup-raft .ui-dialog-body { padding: 0; }
+.ui-setup-raft .ui-setup-connection { max-width: none; margin: 0; font-size: 14px; line-height: 22px; }
+.ui-setup-raft .ui-setup-prompt { display: flex; align-items: stretch; gap: 8px; background: none; border-radius: 0; }
+.ui-setup-raft .ui-setup-prompt .ui-setup-instruction, .tdoc-modal .ui-setup-raft .ui-setup-prompt p.ui-setup-instruction { flex: 1; min-width: 0; height: 60px; max-height: 60px; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; background: #1d1d1f; color: #f5f5f7; font-size: 12px; line-height: 21px; }
+.ui-setup-modal.ui-setup-raft .ui-setup-copy { position: static; flex: none; align-self: flex-start; min-height: 32px; height: 32px; padding: 0 12px; border: 1px solid var(--td-line, #ddd); border-radius: 8px; background: var(--td-bg, #fff); color: var(--td-ink, #222); font-size: 14px; }
+.ui-setup-modal.ui-setup-raft .ui-setup-copy:hover { background: var(--td-surface, #f5f5f7); }
+.ui-setup-raft .ui-setup-wait { margin: 16px 0 0; padding: 8px 12px; border-radius: 10px; background: var(--td-surface, #f5f5f7); font-size: 14px; line-height: 22px; color: var(--td-ink, #222); }
+.ui-setup-raft .ui-setup-error { font-size: 14px; line-height: 22px; margin: 12px 0 0; }
+.ui-setup-modal.ui-setup-raft .actions { justify-content: flex-end; gap: 8px; margin: 0; padding: 16px 0 0; border-top: 0; background: none; }
+.ui-setup-modal.ui-setup-raft .actions button { min-height: 32px; height: 32px; padding: 0 14px; font-size: 14px; }
+.ui-setup-modal.ui-setup-raft .ui-setup-later { margin-right: 0; }
+.ui-setup-raft .ui-ai-groups { gap: 12px; }
+.ui-setup-raft .ui-ai-group h3 { margin: 0 0 6px; font-size: 14px; line-height: 22px; }
+.ui-setup-raft .ui-ai-picker { gap: 8px; padding: 0; }
+.ui-setup-raft .ui-ai-option { min-height: 56px; padding: 10px 12px; gap: 10px; border-radius: 10px; }
+.ui-setup-raft .ui-ai-mark { width: 28px; height: 28px; }
+.ui-setup-raft .ui-ai-mark > * { width: 24px; height: 24px; }
+.ui-setup-raft .ui-ai-label { font-size: 14px; line-height: 20px; gap: 0; }
+.ui-setup-raft .ui-setup-ready { padding: 8px 0; }
+.ui-setup-raft .ui-setup-ready p { font-size: 14px; line-height: 22px; }
+@media (max-width: 600px) {
+  .ui-setup-raft .ui-ai-picker { grid-template-columns: 1fr; }
+}
+

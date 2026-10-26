@@ -202,8 +202,8 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   return (
     <AppDialog open={open} onOpenChange={next => { if (!next) close(); }}
       title={done ? 'You’re connected' : intro ? 'Which AI do you use?' : `Connect ${product.label}`}
-      className="ui-setup-modal ui-setup-simple" focusTitle
-      description={intro || done ? null : manual ? `Paste this into a new ${product.label} chat.` : 'Paste this into Claude Code or Codex on this computer.'}
+      className="ui-setup-modal ui-setup-simple ui-setup-raft" focusTitle
+      description={intro || done ? null : `${manual ? `Paste this into a new ${product.label} chat` : 'Paste this into Claude Code or Codex on this computer'}, then approve Tdoc in your browser. This window updates on its own.`}
       actions={<>
         <button type="button" className="ui-setup-later" disabled={busy} onClick={done ? close : intro ? close : () => choosePath('intro')}>{done || intro ? 'Skip' : 'Back'}</button>
         {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
@@ -225,11 +225,6 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
                   {copied === 'instruction' ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}<span>{copied === 'instruction' ? 'Copied' : 'Copy'}</span>
                 </button>
               </div>
-              <ol className="ui-setup-steps">
-                <li>Paste it into {manual && !platformRoute ? product.label : platformRoute ? `your ${product.label} agent` : 'your AI'}.</li>
-                <li>Approve Tdoc in your browser.</li>
-                <li>This page updates on its own.</li>
-              </ol>
               {platformRoute && platformTargets.length > 1 ? <label className="ui-setup-ai-select">Agent <AppSelect ariaLabel="Platform agent" value={platformTarget ? `${platformTarget.server_id}:${platformTarget.agent_sub}` : ''} options={platformTargets.map(t => ({ value: `${t.server_id}:${t.agent_sub}`, label: [t.agent_name || t.agent_sub, t.server_slug].filter(Boolean).join(' · ') }))} onChange={id => setPlatformTarget(platformTargets.find(t => `${t.server_id}:${t.agent_sub}` === id))} /></label> : null}
               <p role="status" className="ui-setup-wait">{copyFailed ? COPY_FALLBACK : platformTarget ? 'Linked. Check that it can receive a task.' : !manual && runtimeReady ? `${labelOf(chosen)} is ready.`
                 : <><Loader2 size={16} aria-hidden="true" className="ui-setup-spin" />Waiting for {product.label}…</>}</p>

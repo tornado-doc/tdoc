@@ -17,7 +17,13 @@ trap 'rm -rf "$TDOC_STAGE"' EXIT
 TDOC_INSTALL_REF="${TDOC_INSTALL_REF:-main}"
 # Only official repository revisions; no user-supplied download host.
 case "$TDOC_INSTALL_REF" in *[!a-zA-Z0-9._/-]*|'') echo 'Invalid tdoc release revision.' >&2; exit 1 ;; esac
-curl -fsSL --connect-timeout 15 --max-time 180 "https://github.com/tornado-doc/tdoc/archive/$TDOC_INSTALL_REF.tar.gz" -o "$TDOC_STAGE/source.tar.gz"
+# Try the tdoc host's relay of the same archive first: some cloud sandboxes
+# can reach tdoc but not GitHub. The relay only serves tornado-doc/tdoc.
+TDOC_MIRROR="${TDOC_HOSTED_BASE:-https://tdoc.dev}"
+case "$TDOC_MIRROR" in https://*) ;; *) TDOC_MIRROR=https://tdoc.dev ;; esac
+case "$TDOC_INSTALL_REF" in */*) TDOC_MIRROR= ;; esac
+{ [ -n "$TDOC_MIRROR" ] && curl -fsSL --connect-timeout 15 --max-time 180 "${TDOC_MIRROR%/}/install/source/$TDOC_INSTALL_REF.tar.gz" -o "$TDOC_STAGE/source.tar.gz"; } \
+  || curl -fsSL --connect-timeout 15 --max-time 180 "https://github.com/tornado-doc/tdoc/archive/$TDOC_INSTALL_REF.tar.gz" -o "$TDOC_STAGE/source.tar.gz"
 tar -xzf "$TDOC_STAGE/source.tar.gz" --strip-components=1 -C "$TDOC_STAGE"
 rm "$TDOC_STAGE/source.tar.gz"
 [ -f "$TDOC_STAGE/bin/lib/daemon-setup.js" ] || { echo 'The installer release is incomplete. Please try again later.' >&2; exit 1; }
