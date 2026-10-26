@@ -1230,8 +1230,15 @@ a.ui-menu-item:visited {
 .ui-setup-manual { max-width: 660px; font-size: 14px; line-height: 1.6; }
 .ui-setup-subject { display: grid; gap: 10px; margin: 6px 0 20px; font-size: 14px; }
 .ui-setup-subject input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--td-line, #ddd); border-radius: 0; background: var(--td-bg, #fff); color: var(--td-fg, #111); font: inherit; }
-.ui-setup-instruction { padding: 16px; border: 1px solid var(--td-line, #ddd); background: var(--td-surface, #fafafa); overflow-wrap: anywhere; font: 13px/1.7 ui-monospace, monospace; }
-.ui-setup-instruction p { margin: 0; }
+.ui-setup-prompt { position: relative; border-radius: 12px; background: #1d1d1f; color: #f5f5f7; }
+.ui-setup-instruction { margin: 0; max-height: 9.6em; overflow: auto; padding: 16px 92px 16px 18px; overflow-wrap: anywhere; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: #f5f5f7; }
+.ui-setup-modal .ui-setup-copy { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: rgba(255,255,255,.16); color: #f5f5f7; box-shadow: none; font: 500 14px/1 -apple-system, system-ui, sans-serif; cursor: pointer; }
+.ui-setup-modal .ui-setup-copy:hover { background: rgba(255,255,255,.22); }
+.ui-setup-steps { margin: 24px 0 0; padding-left: 1.4em; display: grid; gap: 10px; font-size: 16px; line-height: 1.5; }
+.ui-setup-wait { display: flex; align-items: center; gap: 10px; margin: 24px 0 0; color: var(--td-muted, #666); }
+.ui-setup-spin { animation: ui-setup-spin 1s linear infinite; flex: none; }
+@keyframes ui-setup-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ui-setup-spin { animation: none; } }
 @media (max-width: 600px) {
   .ui-choice-links { grid-template-columns: 1fr; gap: 12px; padding-top: 4px; }
   .ui-setup-modal .ui-choice-link { min-height: 192px; padding: 18px; gap: 10px; }
@@ -1279,7 +1286,7 @@ a.ui-menu-item:visited {
 .ui-ai-label strong { font-weight: 600; }
 .ui-ai-option > svg { flex: none; }
 .ui-setup-connection { max-width: 620px; margin: 30px auto; font-size: 16px; line-height: 1.6; }
-.ui-setup-simple .ui-setup-details, .ui-setup-simple .ui-setup-instruction, .ui-setup-simple .ui-setup-ai-select, .ui-setup-simple .ui-setup-runtime-help, .ui-setup-simple .ui-setup-runtime-help h3 { font-size: 16px; }
+.ui-setup-simple .ui-setup-details, .ui-setup-simple .ui-setup-ai-select, .ui-setup-simple .ui-setup-runtime-help, .ui-setup-simple .ui-setup-runtime-help h3 { font-size: 16px; }
 .ui-setup-progress { margin: 0 0 40px; padding: 0; list-style: none; counter-reset: connect; display: grid; gap: 22px; }
 .ui-setup-progress li { display: flex; align-items: center; gap: 16px; counter-increment: connect; }
 .ui-setup-progress li::before { content: counter(connect); display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--td-line, #ddd); border-radius: 50%; font-variant-numeric: tabular-nums; }

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, Copy, Loader2 } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent, createOnboardingPractice, startConversationSetup, conversationSetupStatus, updateComputer, getSetupConnectors, testSetupConnector } from './document/api.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
@@ -16,10 +16,10 @@ export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${D
 export const SETUP_PROMPT = 'curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash';
 const INSTALL_PROMPT = `${SETUP_PROMPT} -s -- --install-only`;
 const CONNECT_PROMPT = '~/.local/bin/tdoc setup';
-export const conversationPrompt = (code, product = 'your AI') => `Set up tdoc for ${product} using https://tdoc.dev/SKILL.md. Reuse installed tools and saved sign-in. Only if the tools or connect command are missing, prepare them with: ${INSTALL_PROMPT}. Then run ~/.local/bin/tdoc connect ${code} and ask me to approve tdoc sign-in in my browser if needed. Do not create a document or install or start a background helper. If Tdoc is not yet installed as an account Skill in this host, guide me through adding it once so future chats can find it; do not claim a CLI download installed an account Skill. Tell me when this conversation is ready to use tdoc.`;
-export const AUTOMATIC_PROMPT = `Set up tdoc on this computer for automatic comment updates. Read https://tdoc.dev/SKILL.md and run the official installer: ${SETUP_PROMPT}. It installs the tdoc skill, checks Claude Code or Codex using the existing account, and starts the background helper. Ask me to approve tdoc sign-in in my browser if needed. Do not create a document. Return me to tdoc when setup is ready.`;
+export const conversationPrompt = (code, product = 'your AI') => `Set up tdoc for ${product}: follow "Connect a conversation" in https://tdoc.dev/SKILL.md. If the tools are missing, run ${INSTALL_PROMPT}. Then run ~/.local/bin/tdoc connect ${code}`;
+export const AUTOMATIC_PROMPT = `Set up tdoc on this computer for automatic comment updates. Run ${SETUP_PROMPT} and tell me when it is ready. Guide: https://tdoc.dev/SKILL.md`;
 export const DOCTOR_PROMPT = '~/.local/bin/tdoc status';
-export const platformPrompt = (code, product) => `${conversationPrompt(code, product)} Also connect this agent's existing platform task receiver to tdoc. For Raft, use bin/tdoc-connect-agent. For a webhook platform, register its documented HTTPS task receiver with bin/tdoc-connect-webhook --url RECEIVER_URL --label PLATFORM_NAME, then configure the receiver to verify the signing secret stored in the private output file. Never print or send the secret in chat. Do not install a daemon or choose a local runtime. If the platform has no supported receiver, say so rather than claim automatic delivery is ready.`;
+export const platformPrompt = (code, product) => `${conversationPrompt(code, product)}. Then connect this agent's task receiver with bin/tdoc-connect-agent (Raft) or bin/tdoc-connect-webhook. Do not install a daemon.`;
 const POLL_MS = 3000;
 const STUCK_MS = 90000;
 export const readyLocalAgents = (agents) => (agents || []).filter((a) => a.ready && a.status === 'active');
@@ -144,7 +144,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const copy = async (command, name, ref) => {
     const ok = await copyText(command);
     setCopied(ok === false ? '' : name); setCopyFailed(ok === false);
-    if (ok === false) { const details = ref.current?.closest('details'); if (details) details.open = true; selectContents(ref.current); }
+    if (ok === false) selectContents(ref.current);
     if (!preview) postOnboardingEvent('copy_clicked').catch(() => {});
   };
   const choosePath = (path) => {
@@ -203,15 +203,15 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     <AppDialog open={open} onOpenChange={next => { if (!next) close(); }}
       title={done ? 'You’re connected' : intro ? 'Which AI do you use?' : `Connect ${product.label}`}
       className="ui-setup-modal ui-setup-simple" focusTitle
-      description={intro || done ? null : `Paste the instruction into ${product.label}, then approve Tdoc access.`}
+      description={intro || done ? null : manual ? `Paste this into a new ${product.label} chat.` : 'Paste this into Claude Code or Codex on this computer.'}
       actions={<>
         <button type="button" className="ui-setup-later" disabled={busy} onClick={done ? close : intro ? close : () => choosePath('intro')}>{done || intro ? 'Skip' : 'Back'}</button>
         {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
           : done ? <button type="button" className="primary" disabled={busy} onClick={tutorial}>{busy ? 'Opening…' : 'Continue'}</button>
             : canReturn ? <button type="button" className="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</button>
-              : !intro ? <button type="button" className="primary" disabled={busy || (manual ? !attempt : !loaded)}
-                onClick={platformRoute && platformTarget ? verifyPlatform : !manual && runtimeReady ? finishConnection : copyInstruction}>
-                {busy ? 'Checking…' : platformRoute && platformTarget ? 'Check connection' : !manual && runtimeReady ? 'Continue' : copied === 'instruction' ? 'Copy again' : 'Copy instruction'}
+              : !intro ? <button type="button" className="primary" disabled={busy || !(platformRoute ? platformTarget : !manual && runtimeReady)}
+                onClick={platformRoute ? verifyPlatform : finishConnection}>
+                {busy ? 'Checking…' : platformRoute && platformTarget ? 'Check connection' : 'Continue'}
               </button> : null}
       </>}
     >
@@ -219,14 +219,20 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
         : intro ? <AIPicker onChoose={chooseProduct} />
           : done ? <div className="ui-setup-ready"><Check size={44} aria-hidden="true" /><p>Try a comment. Watch your AI make the change.</p></div>
             : <div className="ui-setup-connection">
-              <ol className="ui-setup-progress" aria-label="Connection progress">
-                <li className={copied ? 'is-complete' : ''}>Send instruction</li>
-                <li className={manual ? platformTarget ? 'is-complete' : '' : connected ? 'is-complete' : ''}>Approve access</li>
-                <li className={!manual && runtimeReady ? 'is-complete' : ''}>{platformRoute ? 'Check delivery' : 'Connect Tdoc'}</li>
+              <div className="ui-setup-prompt">
+                <p className="ui-setup-instruction" ref={instructionRef}>{manual && !attempt ? 'Preparing…' : instruction}</p>
+                <button type="button" className="ui-setup-copy" aria-label="Copy instruction" disabled={manual && !attempt} onClick={copyInstruction}>
+                  {copied === 'instruction' ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}<span>{copied === 'instruction' ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+              <ol className="ui-setup-steps">
+                <li>Paste it into {manual && !platformRoute ? product.label : platformRoute ? `your ${product.label} agent` : 'your AI'}.</li>
+                <li>Approve Tdoc in your browser.</li>
+                <li>This page updates on its own.</li>
               </ol>
               {platformRoute && platformTargets.length > 1 ? <label className="ui-setup-ai-select">Agent <AppSelect ariaLabel="Platform agent" value={platformTarget ? `${platformTarget.server_id}:${platformTarget.agent_sub}` : ''} options={platformTargets.map(t => ({ value: `${t.server_id}:${t.agent_sub}`, label: [t.agent_name || t.agent_sub, t.server_slug].filter(Boolean).join(' · ') }))} onChange={id => setPlatformTarget(platformTargets.find(t => `${t.server_id}:${t.agent_sub}` === id))} /></label> : null}
-              <p role="status">{copyFailed ? COPY_FALLBACK : platformTarget ? 'Your platform is linked. Check that it can receive a task.' : !manual && runtimeReady ? `${labelOf(chosen)} is ready.` : copied ? `Waiting for ${product.label}…` : manual && !attempt ? 'Preparing your instruction…' : 'Your AI will guide you through setup.'}</p>
-              <details className="ui-setup-details"><summary>View instruction</summary><div className="ui-setup-instruction"><p ref={instructionRef}>{instruction}</p></div></details>
+              <p role="status" className="ui-setup-wait">{copyFailed ? COPY_FALLBACK : platformTarget ? 'Linked. Check that it can receive a task.' : !manual && runtimeReady ? `${labelOf(chosen)} is ready.`
+                : <><Loader2 size={16} aria-hidden="true" className="ui-setup-spin" />Waiting for {product.label}…</>}</p>
               {!attempt && error && manual ? <button type="button" onClick={() => setRetry(value => value + 1)}>Try again</button> : null}
               {!manual && connected && !runtimeReady ? <section className="ui-setup-runtime-help" aria-label="Local AI installation">
                 <h3>Finish your AI’s sign-in</h3>
