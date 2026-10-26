@@ -35,17 +35,20 @@ function stubIssuer({ verified = true, expectedRedirect = `https://${BASE}/auth/
 
 async function start(worker, env, path = '/d/conway-life/v/2?tab=comments') {
   const first = await worker.fetch(req(`/api/auth/oidc/login?return=${encodeURIComponent(path)}`, { host: PR }), env, {});
-  assert(first.status === 302 && !(first.headers.get('set-cookie') || '').includes('tdoc_oidcst'), 'alias must hand login to base');
+  const browserNonce = ((first.headers.get('set-cookie') || '').match(/tdoc_preview_login=([a-f0-9]{48})/) || [])[1];
+  assert(first.status === 302 && browserNonce && !(first.headers.get('set-cookie') || '').includes('tdoc_oidcst'),
+    'alias must bind this browser and hand login to base');
   const baseLogin = new URL(first.headers.get('location'));
   assert(baseLogin.origin === `https://${BASE}` && baseLogin.searchParams.get('preview_return') === `https://${PR}${path}`,
     `alias target not preserved: ${baseLogin}`);
+  assert(/^[a-f0-9]{64}$/.test(baseLogin.searchParams.get('preview_bind') || ''), 'browser binding hash missing');
   const login = await worker.fetch(new Request(baseLogin), env, {});
   const state = ((login.headers.get('set-cookie') || '').match(/tdoc_oidcst=([a-f0-9]+)/) || [])[1];
   assert(state, 'base login must set the state cookie');
   const auth = new URL(login.headers.get('location'));
   assert(auth.searchParams.get('redirect_uri') === `https://${BASE}/auth/oidc/callback`, 'Clerk must know only one callback');
   assert(auth.searchParams.get('client_id') === CONFIG.OIDC_CLIENT_ID, 'wrong OAuth client');
-  return state;
+  return { state, browserNonce };
 }
 
 (async () => {
@@ -56,7 +59,7 @@ async function start(worker, env, path = '/d/conway-life/v/2?tab=comments') {
   await t('fixed callback hands a verified session to the originating PR exactly once', async () => {
     const env = makeEnv(mod.CommentsStore, CONFIG);
     stubIssuer();
-    const state = await start(worker, env);
+    const { state, browserNonce } = await start(worker, env);
     const callback = await worker.fetch(req(`/auth/oidc/callback?code=clerk-code&state=${state}`, {
       host: BASE, cookie: `tdoc_oidcst=${state}`,
     }), env, {});
@@ -66,11 +69,12 @@ async function start(worker, env, path = '/d/conway-life/v/2?tab=comments') {
     assert(!(callback.headers.get('set-cookie') || '').includes('tdoc_sid='), 'base must not set the alias session cookie');
     const ticket = claimUrl.searchParams.get('ticket');
     assert(ticket && /^[a-f0-9]{48}$/.test(ticket), 'one-time ticket missing');
-    const claim = await worker.fetch(new Request(claimUrl), env, {});
+    const claim = await worker.fetch(new Request(claimUrl, { headers: { Cookie: `tdoc_preview_login=${browserNonce}` } }), env, {});
     const sid = ((claim.headers.get('set-cookie') || '').match(/tdoc_sid=([a-f0-9]{48})/) || [])[1];
     assert(claim.status === 302 && sid && env.META.map.has(`session:${sid}`), 'alias session not established');
     assert(claim.headers.get('location') === '/d/conway-life/v/2?tab=comments', 'original PR path lost');
-    const replay = await worker.fetch(new Request(claimUrl), env, {});
+    assert((claim.headers.get('set-cookie') || '').includes('tdoc_preview_login=;'), 'browser binding cookie was not cleared');
+    const replay = await worker.fetch(new Request(claimUrl, { headers: { Cookie: `tdoc_preview_login=${browserNonce}` } }), env, {});
     assert(replay.status === 410 && !(replay.headers.get('set-cookie') || '').includes('tdoc_sid='), 'ticket replayed');
   });
 
@@ -80,6 +84,7 @@ async function start(worker, env, path = '/d/conway-life/v/2?tab=comments') {
       'https://evil.example/', 'http://' + PR + '/', `https://${PR}.evil.example/`,
       `https://evil.example@${PR}/`, `https://${PR}:444/`, `https://${PR}:443/`, `https://${PR}/#frag`,
       'https://pr-foo-tdoc-preview.jyshi1107.workers.dev/',
+      `https://${PR}/.//evil.com`, `https://${PR}/%2e//evil.com`, `https://${PR}/a/..//evil.com`,
     ]) {
       const r = await worker.fetch(req(`/api/auth/oidc/login?preview_return=${encodeURIComponent(target)}`, { host: BASE }), env, {});
       assert(r.status === 400, `accepted ${target}: ${r.status}`);
@@ -87,30 +92,58 @@ async function start(worker, env, path = '/d/conway-life/v/2?tab=comments') {
     const alias = await worker.fetch(req('/api/auth/oidc/login?return=https%3A%2F%2Fevil.example%2F', { host: PR }), env, {});
     assert(new URL(alias.headers.get('location')).searchParams.get('preview_return') === `https://${PR}/`,
       'alias return parameter escaped the PR host');
+    for (const path of ['/.//evil.com', '/%2e//evil.com', '/a/..//evil.com']) {
+      const r = await worker.fetch(req(`/api/auth/oidc/login?return=${encodeURIComponent(path)}`, { host: PR }), env, {});
+      assert(r.status === 400, `alias accepted protocol-relative return ${path}`);
+    }
   });
 
-  await t('a ticket cannot be claimed on another PR and expires after 60 seconds', async () => {
+  await t('a ticket belongs to one browser and one PR, then expires after 60 seconds', async () => {
     const env = makeEnv(mod.CommentsStore, CONFIG);
     stubIssuer();
-    const state = await start(worker, env, '/me');
+    const { state, browserNonce } = await start(worker, env, '/me');
     const callback = await worker.fetch(req(`/auth/oidc/callback?code=clerk-code&state=${state}`, {
       host: BASE, cookie: `tdoc_oidcst=${state}`,
     }), env, {});
     const claimUrl = new URL(callback.headers.get('location'));
     const ticket = claimUrl.searchParams.get('ticket');
-    const wrong = await worker.fetch(req(claimUrl.pathname + claimUrl.search, { host: OTHER_PR }), env, {});
+    const noCookie = await worker.fetch(new Request(claimUrl), env, {});
+    assert(noCookie.status === 403 && env.META.map.has(`preview-auth-ticket:${ticket}`), 'missing browser cookie consumed ticket');
+    const wrongCookie = await worker.fetch(new Request(claimUrl, { headers: { Cookie: `tdoc_preview_login=${'a'.repeat(48)}` } }), env, {});
+    assert(wrongCookie.status === 403 && env.META.map.has(`preview-auth-ticket:${ticket}`), 'other browser claimed ticket');
+    const wrong = await worker.fetch(req(claimUrl.pathname + claimUrl.search, {
+      host: OTHER_PR, cookie: `tdoc_preview_login=${browserNonce}`,
+    }), env, {});
     assert(wrong.status === 403 && env.META.map.has(`preview-auth-ticket:${ticket}`), 'other PR consumed the ticket');
     const record = JSON.parse(env.META.map.get(`preview-auth-ticket:${ticket}`));
     record.expiresAt = Date.now() - 1;
     env.META.map.set(`preview-auth-ticket:${ticket}`, JSON.stringify(record));
-    const expired = await worker.fetch(new Request(claimUrl), env, {});
+    const expired = await worker.fetch(new Request(claimUrl, { headers: { Cookie: `tdoc_preview_login=${browserNonce}` } }), env, {});
     assert(expired.status === 410 && !(expired.headers.get('set-cookie') || '').includes('tdoc_sid='), 'expired ticket opened a session');
+  });
+
+  await t('a poisoned stored ticket cannot redirect outside the preview', async () => {
+    const env = makeEnv(mod.CommentsStore, CONFIG);
+    stubIssuer();
+    const { state, browserNonce } = await start(worker, env, '/me');
+    const callback = await worker.fetch(req(`/auth/oidc/callback?code=clerk-code&state=${state}`, {
+      host: BASE, cookie: `tdoc_oidcst=${state}`,
+    }), env, {});
+    const claimUrl = new URL(callback.headers.get('location'));
+    const ticketKey = `preview-auth-ticket:${claimUrl.searchParams.get('ticket')}`;
+    const record = JSON.parse(env.META.map.get(ticketKey));
+    record.target = `https://${PR}/.//evil.com`;
+    env.META.map.set(ticketKey, JSON.stringify(record));
+    const claim = await worker.fetch(new Request(claimUrl, {
+      headers: { Cookie: `tdoc_preview_login=${browserNonce}` },
+    }), env, {});
+    assert(claim.status === 403 && !claim.headers.get('location'), 'poisoned ticket caused external navigation');
   });
 
   await t('unverified email creates no ticket or session', async () => {
     const env = makeEnv(mod.CommentsStore, CONFIG);
     stubIssuer({ verified: false });
-    const state = await start(worker, env);
+    const { state } = await start(worker, env);
     const callback = await worker.fetch(req(`/auth/oidc/callback?code=clerk-code&state=${state}`, {
       host: BASE, cookie: `tdoc_oidcst=${state}`,
     }), env, {});
@@ -128,6 +161,10 @@ async function start(worker, env, path = '/d/conway-life/v/2?tab=comments') {
       cookie: `tdoc_oidcst=${state}`,
     }), env, {});
     assert(callback.status === 302 && (callback.headers.get('set-cookie') || '').includes('tdoc_sid='), 'production session changed');
+    const previewParam = await worker.fetch(req(`/api/auth/oidc/login?preview_return=${encodeURIComponent(`https://${PR}/`)}`), env, {});
+    assert(previewParam.status === 400, 'production accepted preview return');
+    const claim = await worker.fetch(req('/auth/preview/claim?ticket=' + 'a'.repeat(48), { host: PR }), env, {});
+    assert(claim.status === 404, 'non-preview Worker exposed ticket claim');
   });
 
   globalThis.fetch = actualFetch;
