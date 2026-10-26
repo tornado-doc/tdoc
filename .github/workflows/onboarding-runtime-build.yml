@@ -1,0 +1,44 @@
+name: Onboarding full verification
+on:
+  push:
+    branches: [serena/onboarding-test-draft]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:shell
+      - run: npm run build:feedback
+      - run: npm run build:sw
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: onboarding-runtime-64fc37e
+          path: server/runtime/
+          retention-days: 1
+      - run: npm test
+      - run: node test/preview-workerd.test.js
+      - run: npx playwright install --with-deps chromium webkit
+      - run: node test/workspace-switcher-ui.test.js
+      - run: node test/workspace-access-ui.test.js
+      - run: npm run test:browser
+        env:
+          TDOC_UI_SHOTS: /tmp/onboarding-test-draft-shots
+      - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/custom-design-theme.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/visual-viewer.test.js
+      - run: TDOC_TEST_BROWSER=webkit node test/reply-activity-ui.test.js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: onboarding-test-draft-shots
+          path: /tmp/onboarding-test-draft-shots/
+          retention-days: 1
