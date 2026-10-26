@@ -1,6 +1,8 @@
 // PR preview workflow (#148) — shareable published-chrome URL, not tdoc.dev.
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { spawnSync } = require('child_process');
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -99,6 +101,67 @@ t('never uses a personal Worker or the production upload token', () => {
   assert(!wf.includes('published.json'), 'must not read a laptop ~/.tdoc/published.json');
   assert(wf.includes('Do not deploy previews to a personal Worker'),
     'missing-secrets error must say not to use a personal Worker');
+});
+
+t('preview Clerk client is optional, isolated, and rejects TOML injection', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-preview-oidc-'));
+  const file = path.join(dir, 'wrangler.toml');
+  const script = path.join(root, 'bin', 'tdoc-preview-oidc-config.js');
+  try {
+    fs.writeFileSync(file, tpl);
+    let run = spawnSync(process.execPath, [script, file], {
+      env: { ...process.env, TDOC_PREVIEW_OIDC_CLIENT_ID: '' }, encoding: 'utf8',
+    });
+    assert(run.status === 0 && fs.readFileSync(file, 'utf8') === tpl,
+      'an unconfigured preview must stay anonymously readable');
+
+    run = spawnSync(process.execPath, [script, file], {
+      env: { ...process.env, TDOC_PREVIEW_OIDC_CLIENT_ID: 'previewClient_123' }, encoding: 'utf8',
+    });
+    const configured = fs.readFileSync(file, 'utf8');
+    assert(run.status === 0 && configured.includes('OIDC_ISSUER = "https://clerk.tdoc.dev"') &&
+      configured.includes('OIDC_CLIENT_ID = "previewClient_123"'),
+    'configured preview must use its own Clerk OAuth client');
+    assert(!configured.includes('OIDC_CLIENT_SECRET ='), 'client secret must not enter Wrangler vars');
+
+    fs.writeFileSync(file, tpl);
+    run = spawnSync(process.execPath, [script, file], {
+      env: { ...process.env, TDOC_PREVIEW_OIDC_CLIENT_ID: 'bad"\nTDOC_PREVIEW = "0' }, encoding: 'utf8',
+    });
+    assert(run.status !== 0 && fs.readFileSync(file, 'utf8') === tpl,
+      'invalid client IDs must not rewrite the preview config');
+    assert(wf.includes('secrets.TDOC_PREVIEW_OIDC_CLIENT_SECRET') &&
+      wf.includes('wrangler versions secret put OIDC_CLIENT_SECRET --name tdoc-preview'),
+    'the separate preview client secret must be installed only on tdoc-preview');
+    assert(!wf.includes('secrets.OIDC_CLIENT_SECRET') && !tpl.includes('OIDC_CLIENT_ID = "qKJaxWEoECYonmld"'),
+      'preview must not reuse the production Clerk OAuth client');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+t('preview deploy rejects either half of the Clerk OAuth pair', () => {
+  const step = wf.split('      - name: Require preview secrets\n')[1]
+    ?.split('      - name: Offline test suite\n')[0];
+  assert(step && step.includes('        run: |\n'), 'preview secret check step is missing');
+  const script = step.split('        run: |\n')[1].replace(/^          /gm, '');
+  for (const [id, secret, expected] of [
+    ['', '', 0],
+    ['previewClient_123', '', 1],
+    ['', 'test-secret', 1],
+    ['previewClient_123', 'test-secret', 0],
+  ]) {
+    const run = spawnSync('bash', ['-e', '-c', script], {
+      env: {
+        ...process.env,
+        CLOUDFLARE_API_TOKEN: 'test-token', CLOUDFLARE_ACCOUNT_ID: 'test-account',
+        TDOC_PREVIEW_UPLOAD_TOKEN: 'test-upload',
+        TDOC_PREVIEW_OIDC_CLIENT_ID: id, TDOC_PREVIEW_OIDC_CLIENT_SECRET: secret,
+      },
+      encoding: 'utf8',
+    });
+    assert(run.status === expected, `Clerk pair ID=${Boolean(id)}, secret=${Boolean(secret)} returned ${run.status}`);
+  }
 });
 
 t('Node and wrangler match production CD pins', () => {
