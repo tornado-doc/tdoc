@@ -321,16 +321,23 @@ async function t(name, fn) {
             const outer = button.getBoundingClientRect();
             const badge = button.querySelector('.tdoc-send-agent-badge');
             const inner = badge.getBoundingClientRect();
+            const label = button.querySelector('.tdoc-ask-ai-label').getBoundingClientRect();
             return { label: badge.textContent, width: inner.width, height: inner.height,
               x: inner.x + inner.width / 2, y: inner.y + inner.height / 2,
+              labelShown: label.width > 0, clearOfLabel: inner.left >= label.right,
               expectedX: outer.right - 6 - inner.width / 2, expectedY: outer.top + 8 + inner.height / 2 };
           });
           assert.equal(geometry.label, '');
           assert.equal(geometry.width, geometry.height, `badge not round: ${JSON.stringify(geometry)}`);
           assert.match(await page.locator('#tdoc-send-agent-btn').getAttribute('aria-label'),
             count ? new RegExp(`${count} new agent repl`) : /^Ask AI/);
-          assert.ok(Math.abs(geometry.x - geometry.expectedX) < 1, `${width}px ${query} badge x: ${JSON.stringify(geometry)}`);
-          assert.ok(Math.abs(geometry.y - geometry.expectedY) < 1, `${width}px ${query} badge y: ${JSON.stringify(geometry)}`);
+          if (geometry.labelShown) {
+            // Desktop: the dot follows the "Ask AI" label and never covers it.
+            assert.ok(geometry.clearOfLabel, `${width}px ${query} badge overlaps the label: ${JSON.stringify(geometry)}`);
+          } else {
+            assert.ok(Math.abs(geometry.x - geometry.expectedX) < 1, `${width}px ${query} badge x: ${JSON.stringify(geometry)}`);
+            assert.ok(Math.abs(geometry.y - geometry.expectedY) < 1, `${width}px ${query} badge y: ${JSON.stringify(geometry)}`);
+          }
           if (SHOTS && (query === 'unread=0' || query === 'badge=10')) {
             await page.locator('.tdoc-bar').screenshot({ path: path.join(SHOTS, `ask-ai-bar-${query === 'unread=0' ? 'ready' : 'unread'}-${width}.png`) });
           }
