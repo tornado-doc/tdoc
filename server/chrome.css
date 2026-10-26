@@ -1219,13 +1219,14 @@
     height: 18px;
     flex: none;
   }
-  /* After the "Ask AI" label on desktop, never over it; in the corner of the
-     icon-only phone button. */
+  /* Top-right of the "Ask AI" label on desktop (like the avatar's dot), never
+     over it; in the corner of the icon-only phone button. */
   .tdoc-bar .tdoc-send-agent-badge {
     flex: none;
+    align-self: flex-start;
     width: 8px;
     height: 8px;
-    margin-left: -2px;
+    margin: 4px 0 0 -4px;
     border: 1.5px solid #fff;
     border-radius: 50%;
     background: var(--td-accent, #1652f0);
