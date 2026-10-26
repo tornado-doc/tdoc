@@ -154,6 +154,7 @@ const OFFLINE = [
   'preview-cards.test.js',    // versioned OG cards, PNG rendering and access gate
   'preview-screenshot.test.js', // page screenshot as the card: PNG checks, write access, precedence
   'preview-workflow.test.js', // #148 PR preview GitHub Action contract
+  'ci-workflow.test.js',      // browser CI image matches locked playwright; suites sharded
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'widget-island.test.js',    // #138 sandboxed widget route + host iframe rewrite
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)
