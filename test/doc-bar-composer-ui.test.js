@@ -4,7 +4,8 @@
 //             ⋯ · space chip (as on My docs) · avatar only. No space / folder
 //             crumbs, no mode dropdown, no Resolved switch: the modes head ⋯,
 //             the filter (Open / Resolved / All) heads the comments
-//   composer  Comment + @agent. @agent puts the default agent in as a pill;
+//   composer  Comment + @agent. @agent puts an evidenced default in as a pill,
+//             otherwise opens the picker;
 //             the pill's menu is Mine / Team / tdoc AI (with "Connect my
 //             agent"). No mode to pick: the agent answers or edits from the
 //             text, where authorship lets it edit; elsewhere it answers only
@@ -81,20 +82,18 @@ async function dragSelect(page, phrase) {
   const reader = await issue(worker, env, 'reader');
   for (const who of [bob, reader]) await env.META.delete(`account-terminal:${who.account_id}`);
   const api = async (p, o = {}) => {
-    const r = await worker.fetch(new Request(`https://tdoc.dev${p}`, { method: o.method || 'GET', headers: { ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}), ...(o.cookie ? { cookie: o.cookie, origin: 'https://tdoc.dev' } : {}), 'Content-Type': 'application/json' }, body: o.body ? JSON.stringify(o.body) : undefined }), env, {});
+    const r = await worker.fetch(new Request(`https://tdoc.dev${p}`, { method: o.method || 'GET', headers: { ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}), ...(o.cookie ? { cookie: o.cookie, origin: 'https://tdoc.dev' } : {}), 'Content-Type': 'application/json', ...o.headers }, body: o.body ? JSON.stringify(o.body) : undefined }), env, {});
     let body = null; try { body = await r.json(); } catch {} return { status: r.status, body };
   };
-  const up = (token, slug, v, title) => api('/api/upload', { method: 'POST', token, body: { slug, version: v, html: DOC(title), meta: { title } } });
-  await up(julie.token, 'launch-plan', 1, 'Launch plan');
+  const julieAgent = { 'X-Tdoc-Agent': 'local/juliesmac/juliesmac_claude' };
+  const up = (token, slug, v, title, headers = {}) => api('/api/upload', { method: 'POST', token, headers, body: { slug, version: v, html: DOC(title), meta: { title } } });
   await api('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device: 'juliesmac', clis: ['claude'] } });
-  await up(julie.token, 'own-agent-draft', 1, 'Agent draft');
-  const ownAgentMeta = JSON.parse(env.META.map.get('meta:own-agent-draft'));
-  ownAgentMeta.versions[0].by = julie.account_id;
-  env.META.map.set('meta:own-agent-draft', JSON.stringify(ownAgentMeta));
+  await up(julie.token, 'launch-plan', 1, 'Launch plan', julieAgent);
+  await up(julie.token, 'own-agent-draft', 1, 'Agent draft', julieAgent);
   const team = (await api('/api/teams', { method: 'POST', cookie: julie.cookie, body: { name: 'Tdoc' } })).body.team;
   await api('/api/team/join', { method: 'POST', cookie: bob.cookie, body: { token: team.invite_url.split('/').pop() } });
   await up(julie.token, 'team-plan', 1, 'Team plan');
-  await up(julie.token, 'julies-draft', 1, "Julie's draft");
+  await up(julie.token, 'julies-draft', 1, "Julie's draft", julieAgent);
   await api('/api/team/move', { method: 'POST', cookie: julie.cookie, body: { slugs: ['team-plan', 'julies-draft'], team: team.id } });
   const added = (await api('/api/team/agents', { method: 'POST', cookie: julie.cookie, body: { id: team.id, name: 'tdoc-bot' } })).body;
   const agentToken = (await api('/api/team/agents/connect', { method: 'POST', body: { code: added.setup_code, device: 'team-box' } })).body.token;
@@ -302,9 +301,18 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t("member on a doc Julie's agent wrote: Answers only, no control; Comment asks the team agent", async () => {
+    await t("member on a doc Julie's agent wrote: no automatic recipient; explicit team agent answers only", async () => {
       const { context, page } = await open(bob, 'julies-draft');
-      const { pop } = await compose(page, 'Can we move billing?');
+      await dragSelect(page, 'Billing ships first');
+      const pop = page.locator('.tdoc-popup');
+      await pop.waitFor();
+      await pop.locator('textarea').fill('Can we move billing?');
+      await pop.locator('.tdoc-composer-agent').click();
+      if (await pop.locator('.tdoc-agent-pill').count()) throw new Error('somebody else’s agent became the default');
+      const picker = page.locator('.tdoc-mention-menu');
+      await picker.waitFor();
+      await picker.getByRole('option', { name: /tdoc-bot/ }).click();
+      await pop.locator('.tdoc-agent-pill').waitFor();
       if (!(await answersOnly(pop))) throw new Error('no "Answers only"');
       await shot(page, 'composer-ask-only-locked.png');
       await pop.getByRole('button', { name: 'Comment', exact: true }).click();
@@ -315,9 +323,22 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('reader with no agent: tdoc AI with Connect my agent; Answers only; Only me on', async () => {
+    await t('reader with no agent: explicitly chooses tdoc AI; Answers only; Only me on', async () => {
       const { context, page } = await open(reader, 'launch-plan');
-      const { pop, items } = await compose(page, 'Why billing first?');
+      await dragSelect(page, 'Billing ships first');
+      const pop = page.locator('.tdoc-popup');
+      await pop.waitFor();
+      await pop.locator('textarea').fill('Why billing first?');
+      await pop.locator('.tdoc-composer-agent').click();
+      if (await pop.locator('.tdoc-agent-pill').count()) throw new Error('reader inherited the owner’s agent as default');
+      const picker = page.locator('.tdoc-mention-menu');
+      await picker.waitFor();
+      await picker.getByRole('option', { name: /tdoc AI/ }).click();
+      await pop.locator('.tdoc-agent-pill').click();
+      const menu = page.locator('.ui-menu-popup');
+      await menu.waitFor();
+      const items = await menu.innerText();
+      await page.keyboard.press('Escape');
       if (!/tdoc AI/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
       if (!(await answersOnly(pop))) throw new Error('no "Answers only"');
       if (await pop.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
