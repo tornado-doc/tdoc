@@ -186,7 +186,7 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
 });
 
 t('a visitor with no session still sees a way to comment, and it is the sign-in', () => {
-  assert(/cfg\.signInToComment = !identity && !isLanding && !!versionWritesEnabled\s*&& accessFromMeta\(docMeta \|\| \{\}\)\.commenting !== 'off'/.test(worker),
+  assert(/cfg\.signInToComment = !identity && !isLanding\s*&& accessFromMeta\(docMeta \|\| \{\}\)\.commenting !== 'off'/.test(worker),
     'the flag is on when the doc takes comments and this visitor has no session');
   assert(server.includes('signInToComment: false'), 'local preview is anonymous by design and may always comment');
   assert(toolbar.includes("(option.value === 'comment' && (canComment || signInToComment))"), 'the Comment option shows for the visitor');

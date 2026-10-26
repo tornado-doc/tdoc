@@ -2928,7 +2928,10 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // The doc takes comments and this visitor has none of the sessions that may
   // leave one. The Comment option still shows and opens the sign-in: the door
   // is where the person looks for it, not a button in the corner.
-  cfg.signInToComment = !identity && !isLanding && !!versionWritesEnabled
+  // PR previews use the KV comment fallback rather than a Durable Object.
+  // The sign-in affordance depends on the doc's commenting policy, not that
+  // storage binding; otherwise anonymous visitors see no way to comment.
+  cfg.signInToComment = !identity && !isLanding
     && accessFromMeta(docMeta || {}).commenting !== 'off';
 
   let oldVersion = null;

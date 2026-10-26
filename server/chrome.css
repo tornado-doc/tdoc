@@ -220,6 +220,10 @@
     position: relative; top: auto; left: auto; width: 100%; box-sizing: border-box;
     max-height: none; margin: 0;
   }
+  .tdoc-document-comments .tdoc-margin-comment.active:not(.tdoc-current-comment) {
+    border-color: #e8eaed;
+    box-shadow: 0 1px 3px rgba(60,64,67,.15), 0 4px 8px rgba(60,64,67,.08);
+  }
   .tdoc-document-comment-add {
     appearance: none; width: 100%; min-height: 36px; padding: 8px 12px;
     box-sizing: border-box; text-align: left; border: 1px solid var(--td-line, #e8e7e3);

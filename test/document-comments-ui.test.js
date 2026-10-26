@@ -53,6 +53,8 @@ async function check(name, run) {
               });
               if (!slot.follows || slot.height < 80) throw new Error(`slot does not reserve space after h1: ${JSON.stringify(slot)}`);
               const card = section.locator('[data-comment-id="c_document_existing"]');
+              const border = await card.evaluate((node) => getComputedStyle(node).borderTopColor);
+              if (border !== 'rgb(232, 234, 237)') throw new Error(`idle card has an emphasized border: ${border}`);
               await card.getByRole('button', { name: 'More actions' }).click();
               if (await page.getByRole('menuitem', { name: /Re-anchor|Move anchor/ }).count()) throw new Error('whole-document comment offers re-anchor');
               await page.keyboard.press('Escape');
