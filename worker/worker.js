@@ -13435,7 +13435,8 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
   const publisher = policy.writer?.kind === 'agent' && policy.writer.account_id === localDriver ? policy.writer.agent : null;
   const handoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
   const offered = [...agents, ...(own.candidates || [])];
-  const preferred = offered.find((t) => publisher && sameNotifyTarget(t, publisher))
+  const preferred = offered.find((t) => t.last_writer)
+    || offered.find((t) => publisher && sameNotifyTarget(t, publisher))
     || offered.find((t) => sameNotifyTarget(t, handoff)) || null;
   return { ...own, default: preferred ? { ...preferred, ...(publisher && sameNotifyTarget(preferred, publisher) ? { last_writer: true } : {}) } : null,
     candidates: offered.filter((t) => t !== preferred), reason: offered.length ? null : own.reason };
