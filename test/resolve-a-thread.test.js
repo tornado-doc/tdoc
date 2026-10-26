@@ -99,7 +99,7 @@ t('resolved visibility is a filter in the comments area (Open / Resolved / All),
     'the filter should lean on the primitive for its semantics, not fake them');
   assert(/className="tdoc-comment-filter"/.test(shell), 'there is no comments filter');
   assert(/label: `Resolved \(\$\{resolvedCount\}\)`/.test(shell), 'the filter should say how many are resolved');
-  assert(/const commentFilterControl = resolvedCount \? \(/.test(shell), 'a control that can only do nothing is worse than no control');
+  assert(/const commentFilterControl = comments\.comments\.length \? \(/.test(shell), 'the filter should appear when there are comments to filter');
   assert(!/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar switch is back');
   // Show all threads by default; only an explicitly saved choice narrows them.
   assert(/return v === '0' \? 'open' : v === 'resolved' \? 'resolved' : 'all';\s*\n\s*\} catch \{ return 'all'; \}/.test(shell),

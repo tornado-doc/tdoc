@@ -504,7 +504,16 @@
       }
       return;
     }
+    // The floating Comment action can sit over an existing text anchor. Its
+    // own click must reach its handler instead of opening that older thread.
+    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill,.tdoc-selection-action')) return;
     if (reanchorMode) { reportPointSelection(e); return; }
+    // A drag across existing highlighted text can still finish with a click
+    // event. Keep that gesture as a selection; opening the old thread would
+    // make the next tap on Comment dismiss the card instead of composing.
+    var dragSelection = window.getSelection();
+    if (dragSelection && !dragSelection.isCollapsed
+      && (Math.abs(e.clientX - pointerStartX) > 4 || Math.abs(e.clientY - pointerStartY) > 4)) return;
     var commentId = interactionMode === 'comment' ? anchorIdAtPoint(e.clientX, e.clientY) : null;
     if (commentId) {
       e.preventDefault(); e.stopPropagation();
