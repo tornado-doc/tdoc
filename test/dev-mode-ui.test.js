@@ -339,7 +339,7 @@ async function startServer(worker, env) {
         await context.close();
       });
 
-      await t(`${label}: document and setup pages expose only their relevant onboarding states`, async () => {
+      await t(`${label}: document states stay scoped; dismissing setup returns to hub states`, async () => {
         await seed(env);
         await env.META.delete('dev-mode:julie@example.com');
         const context = await newContext(JULIE);
@@ -354,10 +354,13 @@ async function startServer(worker, env) {
         await page.getByRole('heading', { name: 'Which AI do you use?', exact: true }).waitFor();
         await page.keyboard.press('Escape');
         await page.getByRole('dialog').waitFor({ state: 'hidden' });
+        await page.waitForURL(`${base}/me`);
         await openAccountMenu(page);
         await onboarding(page).click();
         await page.getByRole('menuitem', { name: 'connected' }).waitFor();
-        assert.equal(await page.getByRole('menuitem', { name: 'commented' }).count(), 0, 'setup has only connect states');
+        for (const state of ['new', 'started', 'connected', 'published', 'commented', 'revised']) {
+          assert.equal(await page.getByRole('menuitem', { name: state, exact: true }).count(), 1, `My docs exposes ${state}`);
+        }
         await shot(page, 'setup-onboarding-test');
         await context.close();
       });
