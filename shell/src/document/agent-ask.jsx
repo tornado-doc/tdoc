@@ -80,7 +80,9 @@ export function useAgentAsk(text, setText, fieldRef = null) {
 // The @agent button: puts the default agent's pill in. Nothing when there is
 // no agent to offer.
 export function AgentButton({ ask, busy = false, className = 'tdoc-composer-agent' }) {
-  if (!ask.choices.length) return null;
+  // Once the text names an agent the button has nothing left to do; the tag
+  // itself changes or removes it, and Comment sends to it.
+  if (!ask.choices.length || ask.target) return null;
   return (
     <button
       className={className}
