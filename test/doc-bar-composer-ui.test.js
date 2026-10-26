@@ -109,8 +109,11 @@ async function dragSelect(page, phrase) {
 
   const { server, base } = await startServer(worker, env);
   const browser = await chromium.launch({ headless: true });
-  const open = async (who, slug, phone = false) => {
+  // flags: pin feature flags for this page, e.g. { unifiedEntry: false } for
+  // the phone top-bar Ask AI drawer that the unified entry replaces.
+  const open = async (who, slug, phone = false, flags = null) => {
     const context = await browser.newContext(phone ? { ...devices['iPhone 13'], defaultBrowserType: undefined } : { viewport: { width: 1440, height: 800 } });
+    if (flags) await context.addInitScript((pinned) => { window.__TDOC_FLAGS__ = pinned; }, flags);
     if (who) await context.addCookies([{ name: 'tdoc_sid', value: who.cookie.split('=')[1], domain: '127.0.0.1', path: '/' }]);
     const page = await context.newPage();
     page.on('pageerror', (e) => { throw e; });
@@ -178,7 +181,7 @@ async function dragSelect(page, phrase) {
 
     await t('phone bar and Ask AI drawer fit 375px, 390px and 430px, including a reduced keyboard viewport', async () => {
       for (const width of [375, 390, 430]) {
-      const { context, page } = await open(julie, 'launch-plan', true);
+      const { context, page } = await open(julie, 'launch-plan', true, { unifiedEntry: false });
       await page.setViewportSize({ width, height: 800 });
       await page.locator('#tdoc-send-agent-btn').waitFor();
       const phoneAskIcon = await page.locator('#tdoc-send-agent-btn .tdoc-ask-ai-mark').evaluate((el) => el.outerHTML);
@@ -276,7 +279,7 @@ async function dragSelect(page, phrase) {
     });
 
     await t('Ask AI puts the team editor first in the menu but defaults private questions to tdoc AI', async () => {
-      const { context, page } = await open(bob, 'team-plan', true);
+      const { context, page } = await open(bob, 'team-plan', true, { unifiedEntry: false });
       await page.locator('#tdoc-send-agent-btn').click();
       const panel = page.getByRole('dialog', { name: 'Ask AI' });
       if (!(await panel.getByRole('button', { name: 'Who should answer?' }).innerText()).includes('tdoc AI')) throw new Error('a team editor was selected for a private question');
@@ -322,7 +325,7 @@ async function dragSelect(page, phrase) {
     });
 
     await t('long Markdown answer stays readable in the 390px drawer and can expand to full height', async () => {
-      const { context, page } = await open(reader, 'launch-plan', true);
+      const { context, page } = await open(reader, 'launch-plan', true, { unifiedEntry: false });
       await page.setViewportSize({ width: 390, height: 800 });
       if (!(await page.locator('.tdoc-bar-mark').isVisible())) throw new Error('reader logo is missing');
       await page.locator('#tdoc-send-agent-btn').click();
@@ -399,12 +402,32 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
+    await t('phone: one entry; the comment button opens Comments and Ask AI tabs, no Ask AI in the bar', async () => {
+      for (const width of [375, 390, 430]) {
+        const { context, page } = await open(reader, 'launch-plan', true);
+        await page.setViewportSize({ width, height: 800 });
+        if (await page.locator('#tdoc-send-agent-btn').count()) throw new Error(`${width}px: Ask AI is still in the top bar`);
+        await page.locator('.tdoc-fab').click();
+        const tabs = page.getByRole('radiogroup', { name: 'Comments or Ask AI' });
+        await tabs.waitFor();
+        await tabs.getByRole('radio', { name: /Ask AI/ }).click();
+        const box = page.locator('#tdoc-comment-layer').getByRole('textbox', { name: 'Ask about this document' });
+        await box.waitFor();
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        if (overflow > 0) throw new Error(`${width}px: page overflows by ${overflow}px`);
+        await tabs.getByRole('radio', { name: /Comments/ }).click();
+        if (await box.count()) throw new Error(`${width}px: Ask AI panel stays after switching back to Comments`);
+        await shot(page, `unified-entry-${width}.png`);
+        await context.close();
+      }
+    });
+
     await t('Ask AI keeps a long agent list behind More agents on a phone', async () => {
       for (const device of ['studio-a', 'studio-b', 'studio-c', 'studio-d']) {
         const registered = await api('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device, clis: ['codex'] } });
         if (registered.status >= 400) throw new Error(`could not register ${device}: ${registered.status}`);
       }
-      const { context, page } = await open(julie, 'launch-plan', true);
+      const { context, page } = await open(julie, 'launch-plan', true, { unifiedEntry: false });
       await page.setViewportSize({ width: 390, height: 800 });
       await page.locator('#tdoc-send-agent-btn').click();
       const drawer = page.getByRole('dialog', { name: 'Ask AI' });

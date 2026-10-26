@@ -28,6 +28,9 @@ function isPreviewHost() {
 export function isFeatureOn(name, devMode = readDevMode()) {
   const flag = Object.prototype.hasOwnProperty.call(FLAGS, name) ? FLAGS[name] : null;
   if (!flag) return false;
+  // A page (tests, a support link) may pin a flag either way before boot.
+  const pinned = typeof window !== 'undefined' && window.__TDOC_FLAGS__ ? window.__TDOC_FLAGS__[name] : undefined;
+  if (typeof pinned === 'boolean') return pinned;
   return flag.default === true || Boolean(devMode && devMode.on) || (flag.preview === true && isPreviewHost());
 }
 
