@@ -1107,7 +1107,7 @@
   .tdoc-ask-turn-collapse { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--td-accent); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-margin-comment .text .tdoc-md-heading, .tdoc-reply .text .tdoc-md-heading { margin: 6px 0 3px; font-size: 1em; }
   .tdoc-ask-answer-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
-  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { min-height: 40px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 7px; padding: 5px 9px; background: var(--td-ground); color: var(--td-ink, #1a1a1a); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { border: 1px solid var(--td-line, #e8e7e3); border-radius: 6px; padding: 6px 14px; background: var(--td-ground); color: var(--td-ink, #1a1a1a); font: inherit; font-weight: 500; cursor: pointer; }
   .tdoc-ask-answer-actions button.primary, .tdoc-ask-answer.is-error button { border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff; }
   .tdoc-ask-answer-actions button:disabled { opacity: .55; cursor: default; }
   .tdoc-ask-private-note { display: block; margin-top: 8px; color: var(--td-muted, #6b6a66); font-size: 11px; }
