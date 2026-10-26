@@ -51,7 +51,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    assert.equal(await page.locator('.ui-ai-option').count(),8);
    assert.equal(await page.getByText('Gemini CLI',{exact:true}).count(),0);
    assert.ok(await page.getByRole('heading',{name:'Which AI do you use?',exact:true}).evaluate(el=>el===document.activeElement));
-   assert.ok(await page.locator('.ui-ai-label span').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=14),'no small-print product labels (Raft body size)');
+   assert.ok(await page.locator('.ui-ai-label span').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=16),'no small-print product labels');
    await page.waitForFunction(() => [...document.querySelectorAll('.ui-ai-option img')].every(img => img.complete && img.naturalWidth > 0));
    await shot('products');
    for(const [product,title] of [['ChatGPT Work','Connect ChatGPT Work'],['Claude Cowork','Connect Claude Cowork'],['Claude Code','Connect Claude Code'],['Codex','Connect Codex'],['Grok Bot','Connect Grok Bot'],['Raft','Connect Raft'],['Cursor','Connect Cursor'],['Other AI / Agent','Connect Other AI / Agent']]){
