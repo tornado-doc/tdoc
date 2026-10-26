@@ -1203,7 +1203,5 @@ a.ui-menu-item:visited {
     font-size: max(16px, 1rem) !important;
   }
   :where(input.tdoc-activate-code) { font-size: max(22px, 1rem) !important; }
-  :where(button, a, summary, [role="button"], [role="menuitem"], [role="option"],
-    .tdoc-popup, .tdoc-modal, .ui-dialog-popup, .tdoc-handoff-popover,
-    .tdoc-ask-mobile-drawer, #tdoc-comment-layer) { touch-action: manipulation; }
+  :where(#tdoc-send-agent-btn, .tdoc-fab) { touch-action: manipulation; }
 }
