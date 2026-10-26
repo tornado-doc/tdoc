@@ -142,9 +142,9 @@ t('preview Clerk client is optional, isolated, and rejects TOML injection', () =
 });
 
 t('fixed Clerk callback deploy is main-only and does not touch production', () => {
-  assert(wf.includes('https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback'),
+  assert(wf.split('\n').some((line) => line === '#   Clerk redirect URI https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback'),
     'PR preview must document the one fixed Clerk callback');
-  assert(tpl.includes('https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback'),
+  assert(tpl.split('\n').some((line) => line === '# https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback in Clerk.'),
     'preview Worker config must document the fixed callback');
   assert(baseWf.includes('workflow_dispatch:') && baseWf.includes("github.ref == 'refs/heads/main'"),
     'stable callback deployment must run from main only');
