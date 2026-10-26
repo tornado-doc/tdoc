@@ -119,49 +119,49 @@
       "shell/src/main.jsx"
     ],
     "dynamicImports": [
-      "node_modules/node_modules/katex/dist/katex.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
+      "node_modules/katex/dist/katex.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
       "_flowDiagram-HODETNUW-DsHFai7K.js",
       "_flowDiagram-HODETNUW-DsHFai7K.js",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
       "_flowDiagram-HODETNUW-DsHFai7K.js",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
-      "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs"
+      "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
+      "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs"
     ]
   },
   "_init-Gi6I4Gst.js": {
@@ -199,16 +199,16 @@
       "shell/src/main.jsx"
     ],
     "dynamicImports": [
-      "node_modules/node_modules/browser-fs-access/dist/file-open-002ab408.js",
-      "node_modules/node_modules/browser-fs-access/dist/file-open-7c801643.js",
-      "node_modules/node_modules/browser-fs-access/dist/directory-open-4ed118d0.js",
-      "node_modules/node_modules/browser-fs-access/dist/directory-open-01563666.js",
-      "node_modules/node_modules/browser-fs-access/dist/file-save-745eba88.js",
-      "node_modules/node_modules/browser-fs-access/dist/file-save-3189631c.js",
+      "node_modules/browser-fs-access/dist/file-open-002ab408.js",
+      "node_modules/browser-fs-access/dist/file-open-7c801643.js",
+      "node_modules/browser-fs-access/dist/directory-open-4ed118d0.js",
+      "node_modules/browser-fs-access/dist/directory-open-01563666.js",
+      "node_modules/browser-fs-access/dist/file-save-745eba88.js",
+      "node_modules/browser-fs-access/dist/file-save-3189631c.js",
       "node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js",
       "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
       "_pica-WDK-AyCM.js",
-      "node_modules/node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
+      "node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
       "node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js",
       "node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js",
       "node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js",
@@ -264,7 +264,7 @@
       "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js",
       "_index-Cg8BR1oe.js",
       "_index-Cg8BR1oe.js",
-      "node_modules/node_modules/canvas-roundrect-polyfill/roundRect.js"
+      "node_modules/canvas-roundrect-polyfill/roundRect.js"
     ],
     "css": [
       "shell.CfLx8Klp.css"
@@ -855,64 +855,64 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/browser-fs-access/dist/directory-open-01563666.js": {
+  "node_modules/browser-fs-access/dist/directory-open-01563666.js": {
     "file": "assets/directory-open-01563666-DWU9wJ6I.js",
     "name": "directory-open-01563666",
-    "src": "node_modules/node_modules/browser-fs-access/dist/directory-open-01563666.js",
+    "src": "node_modules/browser-fs-access/dist/directory-open-01563666.js",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/browser-fs-access/dist/directory-open-4ed118d0.js": {
+  "node_modules/browser-fs-access/dist/directory-open-4ed118d0.js": {
     "file": "assets/directory-open-4ed118d0-CunoC1EB.js",
     "name": "directory-open-4ed118d0",
-    "src": "node_modules/node_modules/browser-fs-access/dist/directory-open-4ed118d0.js",
+    "src": "node_modules/browser-fs-access/dist/directory-open-4ed118d0.js",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/browser-fs-access/dist/file-open-002ab408.js": {
+  "node_modules/browser-fs-access/dist/file-open-002ab408.js": {
     "file": "assets/file-open-002ab408-DIuFHtCF.js",
     "name": "file-open-002ab408",
-    "src": "node_modules/node_modules/browser-fs-access/dist/file-open-002ab408.js",
+    "src": "node_modules/browser-fs-access/dist/file-open-002ab408.js",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/browser-fs-access/dist/file-open-7c801643.js": {
+  "node_modules/browser-fs-access/dist/file-open-7c801643.js": {
     "file": "assets/file-open-7c801643-684qeFg4.js",
     "name": "file-open-7c801643",
-    "src": "node_modules/node_modules/browser-fs-access/dist/file-open-7c801643.js",
+    "src": "node_modules/browser-fs-access/dist/file-open-7c801643.js",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/browser-fs-access/dist/file-save-3189631c.js": {
+  "node_modules/browser-fs-access/dist/file-save-3189631c.js": {
     "file": "assets/file-save-3189631c-C1wFhQhH.js",
     "name": "file-save-3189631c",
-    "src": "node_modules/node_modules/browser-fs-access/dist/file-save-3189631c.js",
+    "src": "node_modules/browser-fs-access/dist/file-save-3189631c.js",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/browser-fs-access/dist/file-save-745eba88.js": {
+  "node_modules/browser-fs-access/dist/file-save-745eba88.js": {
     "file": "assets/file-save-745eba88-Bb9F9Kg7.js",
     "name": "file-save-745eba88",
-    "src": "node_modules/node_modules/browser-fs-access/dist/file-save-745eba88.js",
+    "src": "node_modules/browser-fs-access/dist/file-save-745eba88.js",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/canvas-roundrect-polyfill/roundRect.js": {
+  "node_modules/canvas-roundrect-polyfill/roundRect.js": {
     "file": "assets/roundRect-0PYZxl1G.js",
     "name": "roundRect",
-    "src": "node_modules/node_modules/canvas-roundrect-polyfill/roundRect.js",
+    "src": "node_modules/canvas-roundrect-polyfill/roundRect.js",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs": {
+  "node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs": {
     "file": "assets/image-blob-reduce.esm-HwCm7IZ0.js",
     "name": "image-blob-reduce.esm",
-    "src": "node_modules/node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
+    "src": "node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/katex/dist/katex.mjs": {
+  "node_modules/katex/dist/katex.mjs": {
     "file": "assets/katex-C5jXJg4s.js",
     "name": "katex",
-    "src": "node_modules/node_modules/katex/dist/katex.mjs",
+    "src": "node_modules/katex/dist/katex.mjs",
     "isDynamicEntry": true
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs": {
     "file": "assets/abnfDiagram-VCTEODGH-B46rONYD.js",
     "name": "abnfDiagram-VCTEODGH",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-SVP7TREG-ClPXR8lx.js",
@@ -922,10 +922,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs": {
     "file": "assets/architectureDiagram-5GKGNRK7-Daz4cN5O.js",
     "name": "architectureDiagram-5GKGNRK7",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-JWPE2WC7-Dxotb0AM.js",
@@ -935,10 +935,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs": {
     "file": "assets/blockDiagram-I7D4REHJ-CCM3RN4M.js",
     "name": "blockDiagram-I7D4REHJ",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-5VM5RSS4-BBtzKB0s.js",
@@ -947,10 +947,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs": {
     "file": "assets/c4Diagram-7LVT6UL2-0IhyVcue.js",
     "name": "c4Diagram-7LVT6UL2",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-F27PBJKO-jpwlnvRK.js",
@@ -958,10 +958,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs": {
     "file": "assets/classDiagram-ZZMXUADV-e_zbapr2.js",
     "name": "classDiagram-ZZMXUADV",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-TICWLB2K-Dnigcxgw.js",
@@ -973,10 +973,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs": {
     "file": "assets/classDiagram-v2-VYDZK3BY-e_zbapr2.js",
     "name": "classDiagram-v2-VYDZK3BY",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-TICWLB2K-Dnigcxgw.js",
@@ -988,10 +988,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs": {
     "file": "assets/cose-bilkent-JH36ORCC-BP8rX1US.js",
     "name": "cose-bilkent-JH36ORCC",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
@@ -999,10 +999,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs": {
     "file": "assets/cynefinDiagram-5FMLGOSQ-DT36DEkE.js",
     "name": "cynefinDiagram-5FMLGOSQ",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-JWPE2WC7-Dxotb0AM.js",
@@ -1011,10 +1011,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs": {
     "file": "assets/dagre-GXQ25YYZ-D02IxFeh.js",
     "name": "dagre-GXQ25YYZ",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
@@ -1022,10 +1022,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs": {
     "file": "assets/diagram-S7CK7UJ4-CyCswSiq.js",
     "name": "diagram-S7CK7UJ4",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-2Q5K7J3B-BK1n_CVD.js",
@@ -1035,10 +1035,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs": {
     "file": "assets/diagram-UQ7AKVKN-BAr132yd.js",
     "name": "diagram-UQ7AKVKN",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-JWPE2WC7-Dxotb0AM.js",
@@ -1047,10 +1047,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs": {
     "file": "assets/diagram-VSXAHHWV-uUc_78SP.js",
     "name": "diagram-VSXAHHWV",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-JWPE2WC7-Dxotb0AM.js",
@@ -1059,10 +1059,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs": {
     "file": "assets/diagram-VX7I27RA-DNcjOmln.js",
     "name": "diagram-VX7I27RA",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-JWPE2WC7-Dxotb0AM.js",
@@ -1075,10 +1075,10 @@
       "_init-Gi6I4Gst.js"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs": {
     "file": "assets/diagram-Z3DM3KII-7N4z1dyV.js",
     "name": "diagram-Z3DM3KII",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-JWPE2WC7-Dxotb0AM.js",
@@ -1087,10 +1087,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs": {
     "file": "assets/ebnfDiagram-PWID7BFC-DT33wW_0.js",
     "name": "ebnfDiagram-PWID7BFC",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-SVP7TREG-ClPXR8lx.js",
@@ -1100,10 +1100,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs": {
     "file": "assets/erDiagram-RLTQ6QDP-CyIq4Cs_.js",
     "name": "erDiagram-RLTQ6QDP",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-XXDRQBXY-BI3jEAxz.js",
@@ -1113,10 +1113,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs": {
     "file": "assets/ganttDiagram-EL5Y4UJY-qyIkCpe-.js",
     "name": "ganttDiagram-EL5Y4UJY",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
@@ -1126,10 +1126,10 @@
       "_defaultLocale-DX6XiGOO.js"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs": {
     "file": "assets/gitGraphDiagram-WWUBYQGX-CEz1Jbpf.js",
     "name": "gitGraphDiagram-WWUBYQGX",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-2Q5K7J3B-BK1n_CVD.js",
@@ -1139,10 +1139,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs": {
     "file": "assets/infoDiagram-27XIBGKW-Bh8Qa_eg.js",
     "name": "infoDiagram-27XIBGKW",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
@@ -1150,20 +1150,20 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs": {
     "file": "assets/ishikawaDiagram-5VMMS53U-CDRDKju7.js",
     "name": "ishikawaDiagram-5VMMS53U",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs": {
     "file": "assets/journeyDiagram-3NMN7TZE-CZ2HL39c.js",
     "name": "journeyDiagram-3NMN7TZE",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-5VM5RSS4-BBtzKB0s.js",
@@ -1173,10 +1173,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs": {
     "file": "assets/kanban-definition-UXKFOSKX-BKXF59cW.js",
     "name": "kanban-definition-UXKFOSKX",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
@@ -1184,10 +1184,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs": {
     "file": "assets/mindmap-definition-YA3MSWOX-C5we-9Xx.js",
     "name": "mindmap-definition-YA3MSWOX",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-XXDRQBXY-BI3jEAxz.js",
@@ -1196,10 +1196,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs": {
     "file": "assets/pegDiagram-XKGWAZYB-DCUNKx-Y.js",
     "name": "pegDiagram-XKGWAZYB",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-SVP7TREG-ClPXR8lx.js",
@@ -1209,10 +1209,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs": {
     "file": "assets/pieDiagram-E7YTZNPT-bwVBqZRg.js",
     "name": "pieDiagram-E7YTZNPT",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-JWPE2WC7-Dxotb0AM.js",
@@ -1224,10 +1224,10 @@
       "_init-Gi6I4Gst.js"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs": {
     "file": "assets/quadrantDiagram-AXDQQJYC-BnP8CvVP.js",
     "name": "quadrantDiagram-AXDQQJYC",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
@@ -1237,10 +1237,10 @@
       "_defaultLocale-DX6XiGOO.js"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs": {
     "file": "assets/railroadDiagram-O6MQD6OU-BnlUmLcF.js",
     "name": "railroadDiagram-O6MQD6OU",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-SVP7TREG-ClPXR8lx.js",
@@ -1250,10 +1250,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs": {
     "file": "assets/requirementDiagram-BXWQKSXE-BM9zkUEI.js",
     "name": "requirementDiagram-BXWQKSXE",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-XXDRQBXY-BI3jEAxz.js",
@@ -1262,10 +1262,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs": {
     "file": "assets/sankeyDiagram-P5KCCOFB-D1080drS.js",
     "name": "sankeyDiagram-P5KCCOFB",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
@@ -1274,10 +1274,10 @@
       "_init-Gi6I4Gst.js"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs": {
     "file": "assets/sequenceDiagram-WJ2MYXX4-uiYDMYcB.js",
     "name": "sequenceDiagram-WJ2MYXX4",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-2Q5K7J3B-BK1n_CVD.js",
@@ -1286,20 +1286,20 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs": {
     "file": "assets/sizeCapture-INFHLROL-DW-J1ycc.js",
     "name": "sizeCapture-INFHLROL",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs": {
     "file": "assets/stateDiagram-D77RDMKH-Cz4q85sc.js",
     "name": "stateDiagram-D77RDMKH",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-IMKFNOWR-DZW4U1XM.js",
@@ -1311,10 +1311,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs": {
     "file": "assets/stateDiagram-v2-MP3YSRHH-Bf6KVo2a.js",
     "name": "stateDiagram-v2-MP3YSRHH",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-IMKFNOWR-DZW4U1XM.js",
@@ -1325,20 +1325,20 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs": {
     "file": "assets/swimlanes-42K2YHIH-DYq_CU3J.js",
     "name": "swimlanes-42K2YHIH",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs": {
     "file": "assets/swimlanesDiagram-VR7AAH4N-XfHtRWWr.js",
     "name": "swimlanesDiagram-VR7AAH4N",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_flowDiagram-HODETNUW-DsHFai7K.js",
@@ -1351,10 +1351,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs": {
     "file": "assets/timeline-definition-24CTP7MA-QCUN4beV.js",
     "name": "timeline-definition-24CTP7MA",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
@@ -1362,20 +1362,20 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs": {
     "file": "assets/vennDiagram-4TSXK5OY-xMYgCXkI.js",
     "name": "vennDiagram-4TSXK5OY",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs": {
     "file": "assets/wardleyDiagram-VM6X3IG4-C0vqmktZ.js",
     "name": "wardleyDiagram-VM6X3IG4",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_chunk-JWPE2WC7-Dxotb0AM.js",
@@ -1384,10 +1384,10 @@
       "shell/src/main.jsx"
     ]
   },
-  "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs": {
+  "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs": {
     "file": "assets/xychartDiagram-S5SC5T6Z-CsuxAbbB.js",
     "name": "xychartDiagram-S5SC5T6Z",
-    "src": "node_modules/node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
+    "src": "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
     "isDynamicEntry": true,
     "imports": [
       "_index-Cg8BR1oe.js",
