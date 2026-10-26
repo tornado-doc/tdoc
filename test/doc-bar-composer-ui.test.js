@@ -57,6 +57,7 @@ async function startServer(worker, env) {
 async function dragSelect(page, phrase) {
   const frameEl = await page.locator('iframe').first().elementHandle();
   const frame = await frameEl.contentFrame();
+  await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
   const box = await frameEl.boundingBox();
   const r = await frame.evaluate((needle) => {
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);

@@ -160,7 +160,7 @@ const SLUG = 'hostile-body-css';
     });
 
     // --- #2 COMMENTS ACROSS THE BOUNDARY -------------------------------------
-    await t('selecting text inside the iframe opens the composer in the shell', async () => {
+    await t('selecting text inside the iframe offers a comment action', async () => {
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
       if (!frame) throw new Error('author-content frame not found');
       // Select the first paragraph's text inside the iframe.
@@ -174,6 +174,8 @@ const SLUG = 'hostile-body-css';
           clientX: rect.left + 20, clientY: rect.top + 8, bubbles: true, cancelable: true, view: window, button: 0,
         }));
       });
+      await frame.waitForSelector('.tdoc-selection-action', { state: 'visible', timeout: 2000 });
+      await frame.click('.tdoc-selection-action');
       await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
     });
 
@@ -948,6 +950,7 @@ const SLUG = 'hostile-body-css';
             if (!remode) throw new Error('re-anchor banner/mode did not engage');
             // select para-2 in the frame → shell PATCHes the anchor instead of opening a composer
             const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+            await frame.waitForFunction(() => document.documentElement.hasAttribute('data-tdoc-reanchoring'));
             await frame.evaluate(() => {
               const p = document.getElementById('para-2');
               const r = document.createRange(); r.selectNodeContents(p);

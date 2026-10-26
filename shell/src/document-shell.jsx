@@ -622,7 +622,7 @@ export function DocumentShell({ boot, config }) {
   useEffect(() => {
     reanchorRef.current = reanchorId;
     document.body.classList.toggle('tdoc-reanchoring', Boolean(reanchorId));
-    bridge.send({ type: 'tdoc:reanchorMode', active: Boolean(reanchorId) });
+    if (!reanchorId) bridge.send({ type: 'tdoc:reanchorMode', active: false });
   }, [reanchorId, bridge.send]);
 
   useEffect(() => {
@@ -1921,7 +1921,7 @@ export function DocumentShell({ boot, config }) {
           onReact={reactTo}
           onDelete={removeComment}
           onResolve={resolveComment}
-          onReanchor={setReanchorId}
+          onReanchor={(id) => { bridge.send({ type: 'tdoc:reanchorMode', active: true }); setReanchorId(id); }}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onResendHandoff={canSendToAgent ? resendHandoff : null}
           onSendHandoffElsewhere={canSendToAgent ? sendHandoffElsewhere : null}
@@ -1962,7 +1962,7 @@ export function DocumentShell({ boot, config }) {
           onReact={reactTo}
           onDelete={removeComment}
           onResolve={resolveComment}
-          onReanchor={setReanchorId}
+          onReanchor={(id) => { bridge.send({ type: 'tdoc:reanchorMode', active: true }); setReanchorId(id); }}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onResendHandoff={canSendToAgent ? resendHandoff : null}
           onSendHandoffElsewhere={canSendToAgent ? sendHandoffElsewhere : null}

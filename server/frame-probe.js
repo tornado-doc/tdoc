@@ -122,6 +122,7 @@
     var selecting = dark ? 'rgba(76,137,255,.72)' : 'rgba(22,82,240,.32)';
     return '::highlight(tdoc-anchor){background:' + anchor + ';text-decoration:underline solid rgba(184,134,11,.7);text-decoration-thickness:2px;}' +
       '::highlight(tdoc-anchor-active){background:rgba(255,216,77,.94);text-decoration:underline solid #b8860b;text-decoration-thickness:3px;}' +
+      '::highlight(tdoc-anchor-flash){background:rgba(255,185,0,.98);text-decoration:underline solid #9a6200;text-decoration-thickness:3px;}' +
       '::highlight(tdoc-anchor-moved){background:' + moved + ';text-decoration:underline dashed rgba(184,134,11,.55);text-decoration-thickness:1.5px;}' +
       '::highlight(tdoc-selecting){background:' + selecting + ';}' +
       '::highlight(tdoc-pending){background:' + pending + ';}';
@@ -526,6 +527,14 @@
     if (visualViewerOpen()) return;
     clearSelectingCursor();
     pointerSelecting = false;
+    if (reanchorMode) {
+      var reanchorSelection = window.getSelection();
+      if (reanchorSelection && !reanchorSelection.isCollapsed && reanchorSelection.rangeCount) {
+        var reanchorText = reanchorSelection.toString().trim();
+        if (reanchorText) postTextSelection(reanchorSelection.getRangeAt(0), reanchorText);
+      }
+      return;
+    }
     var wasOutsideSelection = pointerHadSelection && !pointerDownInSelection;
     pointerHadSelection = false;
     pointerDownInSelection = false;
@@ -1162,6 +1171,11 @@
   window.addEventListener('scroll', function () { reportAnchorHover(null); }, { passive: true });
   function setActiveAnchor(id, scroll) {
     var target = id && _anchorTargets[id];
+    if (_activeAnchorId !== (target ? id : null)) {
+      for (var i = 0; i < _flashTimers.length; i++) clearTimeout(_flashTimers[i]);
+      _flashTimers = [];
+      if (HL) CSS.highlights.delete('tdoc-anchor-flash');
+    }
     _activeAnchorId = target ? id : null;
     if (HL) CSS.highlights.delete('tdoc-anchor-active');
     if (!target) return;
@@ -1190,13 +1204,14 @@
     for (var i = 0; i < _flashTimers.length; i++) clearTimeout(_flashTimers[i]);
     _flashTimers = [];
     if (!HL) return;
+    CSS.highlights.delete('tdoc-anchor-flash');
     var target = _anchorTargets[id];
     if (!target || !target.range) return;
     [160, 320, 480, 640].forEach(function (ms, n) {
       _flashTimers.push(setTimeout(function () {
         if (_activeAnchorId !== id) return;
-        if (n % 2 === 0) CSS.highlights.delete('tdoc-anchor-active');
-        else CSS.highlights.set('tdoc-anchor-active', new Highlight(target.range));
+        if (n % 2 === 0) CSS.highlights.set('tdoc-anchor-flash', new Highlight(target.range));
+        else CSS.highlights.delete('tdoc-anchor-flash');
       }, ms));
     });
   }
@@ -1648,10 +1663,16 @@
       if (next === 'comment') {
         CSS.highlights.set('tdoc-anchor', _anchorHighlight);
         CSS.highlights.set('tdoc-anchor-moved', _movedHighlight);
+        // A mode message may arrive while the mobile drawer is closing after
+        // a comment was chosen. Keep its focused anchor visible in Comment.
+        if (_activeAnchorId) setActiveAnchor(_activeAnchorId, false);
       } else {
         CSS.highlights.delete('tdoc-anchor');
         CSS.highlights.delete('tdoc-anchor-moved');
         CSS.highlights.delete('tdoc-anchor-active');
+        CSS.highlights.delete('tdoc-anchor-flash');
+        for (var i = 0; i < _flashTimers.length; i++) clearTimeout(_flashTimers[i]);
+        _flashTimers = [];
       }
     }
     if (HL && next !== 'comment') CSS.highlights.delete('tdoc-selecting');
@@ -1723,6 +1744,7 @@
     else if (d.type === 'tdoc:mode') setInteractionMode(d.mode, d);
     else if (d.type === 'tdoc:reanchorMode') {
       reanchorMode = !!d.active;
+      document.documentElement.toggleAttribute('data-tdoc-reanchoring', reanchorMode);
       if (reanchorMode) {
         hideSelectionAction();
         try { window.getSelection().removeAllRanges(); } catch (x) {}
