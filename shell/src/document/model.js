@@ -64,6 +64,10 @@ export function anchorFromSelection(selection) {
   };
 }
 
+export function isDocumentComment(comment) {
+  return !comment?.anchor || comment.anchor.kind === 'document';
+}
+
 export function layoutPins(pins, docHeight) {
   const rows = pins
     .map((pin) => ({ y: pin.docY, comment: pin }))

@@ -7,7 +7,7 @@ import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { CommentThreadList } from './comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from './comment-pin.jsx';
-import { avatarFor, TOP_BAR_HEIGHT } from './model.js';
+import { avatarFor, isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
 
 function Pin({
   cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
@@ -304,7 +304,7 @@ export function MobileCommentDrawer({
                 comments={comments}
                 selectedId={openCommentId}
                 expandReplies={expandReplies}
-                isAnchored={(comment) => pinIds.has(comment.id)}
+                isAnchored={(comment) => isDocumentComment(comment) || pinIds.has(comment.id)}
                 isUnread={(comment) => commentPinState(comment, { seenMap, handoffViewer, isOwner }).unread}
                 onNavigate={onNavigate}
                 cardProps={{

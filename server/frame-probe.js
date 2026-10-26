@@ -1002,6 +1002,47 @@
   // the whole doc + re-scanning every anchor (O(N + C·D)) every time.
   var _view = null, _rangeCache = {}, _anchorTargets = {}, _activeAnchorId = null;
   var _lastComments = [];   // re-report pins when layout settles (images/fonts)
+  // The comment UI belongs to the shell, but document-level threads belong in
+  // the article flow just below its title. This provider-owned spacer reserves
+  // the shell's measured height without ever becoming published author HTML.
+  var documentCommentsSlot = null;
+  function placeDocumentCommentsSlot() {
+    var root = findEditRoot();
+    if (!root) return null;
+    var heading = root.querySelector('h1');
+    if (!documentCommentsSlot) {
+      documentCommentsSlot = document.createElement('div');
+      documentCommentsSlot.setAttribute('data-tdoc-provider', '');
+      documentCommentsSlot.setAttribute('data-tdoc-document-comments-slot', '');
+      documentCommentsSlot.setAttribute('contenteditable', 'false');
+      documentCommentsSlot.style.setProperty('display', 'block', 'important');
+      documentCommentsSlot.style.setProperty('position', 'relative', 'important');
+      documentCommentsSlot.style.setProperty('width', '100%', 'important');
+      documentCommentsSlot.style.setProperty('min-height', '0', 'important');
+      documentCommentsSlot.style.setProperty('max-height', 'none', 'important');
+      documentCommentsSlot.style.setProperty('margin', '0', 'important');
+      documentCommentsSlot.style.setProperty('padding', '0', 'important');
+      documentCommentsSlot.style.setProperty('border', '0', 'important');
+      documentCommentsSlot.style.setProperty('box-sizing', 'border-box', 'important');
+      documentCommentsSlot.style.setProperty('clear', 'both', 'important');
+      documentCommentsSlot.style.setProperty('grid-column', '1 / -1', 'important');
+      documentCommentsSlot.style.setProperty('pointer-events', 'none', 'important');
+    }
+    if (heading) {
+      if (documentCommentsSlot.previousSibling !== heading || documentCommentsSlot.parentNode !== heading.parentNode) heading.after(documentCommentsSlot);
+    } else if (documentCommentsSlot.parentNode !== root || documentCommentsSlot !== root.firstChild) {
+      root.insertBefore(documentCommentsSlot, root.firstChild);
+    }
+    return documentCommentsSlot;
+  }
+  function documentCommentsGeometry() {
+    var slot = placeDocumentCommentsSlot();
+    if (!slot) return null;
+    var rect = slot.getBoundingClientRect();
+    var scale = slot.offsetWidth ? rect.width / slot.offsetWidth : 1;
+    return { docY: rect.top + (window.scrollY || 0), left: rect.left,
+      width: rect.width, scale: scale > 0 ? scale : 1 };
+  }
   // The renderer owns these collections for the frame's lifetime. Mutate the
   // registered ranges so removal invalidates their old painted area. Replacing
   // a Highlight with a new empty object can leave stale pixels in Safari.
@@ -1132,7 +1173,9 @@
       // Skip before registering targets or painting exact/moved ranges: the
       // visibility switch governs every affordance, including element anchors.
       if (!c || c.hidden) return;
-      if (!c.anchor) return seat(c);
+      // Null anchors are intentional whole-document comments. The shell
+      // renders them in the title section, so they must never get a lost seat.
+      if (!c.anchor || c.anchor.kind === 'document') return;
       if (c.anchor.kind === 'element' && c.anchor.selector) {
         var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
         if (eel) {
@@ -1171,7 +1214,8 @@
     setActiveAnchor(_activeAnchorId, false);
     // Frame-local: the slides presenter counts the threads on the slide shown.
     try { document.dispatchEvent(new CustomEvent('tdoc:anchors-resolved', { detail: { targets: _anchorTargets, comments: (comments || []).filter(function (c) { return c && !c.hidden && !c.deleted; }).map(function (c) { return c.id; }) } })); } catch (x) {}
-    post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
+    post({ type: 'tdoc:pins', pins: pins, documentComments: documentCommentsGeometry(),
+      scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
 
   // Geometry can settle AFTER the first pin report (images/fonts load, layout
@@ -1579,6 +1623,14 @@
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || d.source !== 'tdoc-shell') return;
     if (d.type === 'tdoc:anchors') reportPins(d.comments);
+    else if (d.type === 'tdoc:documentCommentsHeight') {
+      var slot = placeDocumentCommentsSlot();
+      var next = Math.max(0, Math.min(20000, Number(d.height) || 0));
+      if (slot && Math.abs(slot.offsetHeight - next) > 1) {
+        slot.style.setProperty('height', next + 'px', 'important');
+        rereportPins();
+      }
+    }
     else if (d.type === 'tdoc:clearPending') {
       if (HL) CSS.highlights.delete('tdoc-pending');
       // Drop the reader's own selection too. The browser paints it OVER our
@@ -1612,6 +1664,7 @@
     }
     else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
+    else if (d.type === 'tdoc:scrollBy') { try { window.scrollBy(0, Number(d.deltaY) || 0); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {
       var clone = document.body.cloneNode(true);
       Array.prototype.forEach.call(clone.querySelectorAll('script, style, noscript, .tdoc-hover-outline, .tdoc-comment-pill'), function (n) { n.remove(); });

@@ -887,7 +887,7 @@ export function CommentCard({
                   descendant rules, and a menu renders through a portal OUTSIDE
                   the card, so both spans stayed display:none and the row came
                   out empty — an invisible item reads as a gap in the menu. */}
-              {canMutate ? (
+              {canMutate && comment.anchor && comment.anchor.kind !== 'document' ? (
                 <AppMenuItem
                   className="tdoc-reanchor-btn"
                   onClick={() => onReanchor(comment.id)}

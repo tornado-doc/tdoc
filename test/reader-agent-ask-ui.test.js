@@ -282,6 +282,11 @@ async function touchSelect(page, phrase) {
       if (!posted || !(posted.replies || []).some((r) => r.text === 'The mobile app remains planned for Q4.')) {
         throw new Error(`agent answer not posted: ${JSON.stringify(posted)}`);
       }
+      const documentSection = page.locator('.tdoc-document-comments');
+      await documentSection.getByText('Can my agent check the Q4 plan?').waitFor();
+      if (await page.locator(`.tdoc-pin[data-id="${posted.id}"]`).count()) {
+        throw new Error('public Ask AI answer appeared as a margin pin instead of under the title');
+      }
       await context.close();
     });
 
@@ -289,7 +294,7 @@ async function touchSelect(page, phrase) {
       await setTier('offline');
       const { context, page } = await open(reader, PHONE);
       await noBarAsk(page);
-      await page.getByRole('button', { name: 'More actions' }).click();
+      await page.locator('#tdoc-more-btn').click();
       await page.locator('.ui-menu-popup').waitFor();
       for (const name of ['Ask AI', 'Copy for my agent', 'Send to my agent', 'Connect my agent']) {
         if (await page.getByRole('menuitem', { name }).count()) throw new Error(`⋯ still has ${name}`);
