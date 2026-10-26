@@ -183,11 +183,15 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t("reply, member on a doc Julie's agent wrote: Answers only (no control); Reply asks the team agent, answer under the reply", async () => {
+    await t("reply, member on a doc Julie's agent wrote: choose the team agent for Answers only; answer under the reply", async () => {
       const { context, page } = await open(bob, 'julies-draft');
       const { form } = await replyBox(page, t2.body.id);
       await form.locator('textarea').fill('Why not April?');
       await form.locator('.tdoc-reply-agent').click();
+      if (await form.locator('.tdoc-agent-pill').count()) throw new Error('another member inherited the owner’s agent as default');
+      const picker = page.locator('.tdoc-mention-menu');
+      await picker.waitFor();
+      await picker.getByRole('option', { name: /tdoc-bot/ }).click();
       await form.locator('.tdoc-agent-pill').waitFor();
       await noMode(form);
       if (!(await answersOnly(form))) throw new Error('no "Answers only"');
@@ -234,6 +238,10 @@ async function dragSelect(page, phrase) {
       const { card, form } = await replyBox(page, c1.body.id);
       await form.locator('textarea').fill('Why billing first?');
       await form.locator('.tdoc-reply-agent').click();
+      if (await form.locator('.tdoc-agent-pill').count()) throw new Error('reader inherited the owner’s agent as default');
+      const picker = page.locator('.tdoc-mention-menu');
+      await picker.waitFor();
+      await picker.getByRole('option', { name: /tdoc AI/ }).click();
       await form.locator('.tdoc-agent-pill').waitFor();
       if (await form.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
       await form.getByRole('button', { name: 'Reply', exact: true }).click();
