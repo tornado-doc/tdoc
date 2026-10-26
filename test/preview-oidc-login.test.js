@@ -84,6 +84,9 @@ async function start(worker, env, path = '/d/conway-life/v/2?tab=comments') {
       const r = await worker.fetch(req(`/api/auth/oidc/login?preview_return=${encodeURIComponent(target)}`, { host: BASE }), env, {});
       assert(r.status === 400, `accepted ${target}: ${r.status}`);
     }
+    const alias = await worker.fetch(req('/api/auth/oidc/login?return=https%3A%2F%2Fevil.example%2F', { host: PR }), env, {});
+    assert(new URL(alias.headers.get('location')).searchParams.get('preview_return') === `https://${PR}/`,
+      'alias return parameter escaped the PR host');
   });
 
   await t('a ticket cannot be claimed on another PR and expires after 60 seconds', async () => {
