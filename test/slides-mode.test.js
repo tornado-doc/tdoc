@@ -45,6 +45,13 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
           fs.mkdirSync(process.env.TDOC_TEST_SCREENSHOTS, { recursive: true });
           await page.screenshot({ path: path.join(process.env.TDOC_TEST_SCREENSHOTS, `slide-view-${width}.png`), fullPage: true });
         }
+        const presentPlacement = await frame.locator('.tdoc-present-open').evaluate((button) => {
+          const slot = document.querySelector('[data-tdoc-document-comments-slot]');
+          return slot && slot.offsetHeight ? { buttonBottom: button.getBoundingClientRect().bottom,
+            commentsTop: slot.getBoundingClientRect().top } : null;
+        });
+        if (presentPlacement) assert(presentPlacement.buttonBottom <= presentPlacement.commentsTop + 1,
+          `Present must not sit behind document comments: ${JSON.stringify(presentPlacement)}`);
         await frame.getByRole('button', { name: 'Present slides' }).click();
         await page.locator('[data-visual-open]').waitFor();
         await frame.locator('html[data-tdoc-presenting]').waitFor();
