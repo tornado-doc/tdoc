@@ -15369,7 +15369,13 @@ const tdocHandlers = {
     }
 
     if ((p === '/SKILL.md' || p === '/SKILLS.md') && (method === 'GET' || method === 'HEAD')) {
-      return remoteSkillResponse(method);
+      // A preview pins setup to its own revision and host, so the copied prompt
+      // stays two short lines everywhere.
+      const ref = runtimeInfo().generated_by === 'tdoc-preview' && /^[a-f0-9]{40}$/.test(TDOC_BUILD_INFO.source_ref || '') ? TDOC_BUILD_INFO.source_ref : null;
+      if (!ref) return remoteSkillResponse(method);
+      return remoteSkillResponse(method, REMOTE_SKILL_MD
+        .replace('https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash -s -- --install-only', `https://raw.githubusercontent.com/tornado-doc/tdoc/${ref}/bin/tdoc-install | TDOC_INSTALL_REF=${ref} TDOC_HOSTED_BASE=${url.origin} bash -s -- --install-only`)
+        .replace('- Run \`~/.local/bin/tdoc connect <code>\`', `- Run \`TDOC_HOSTED_BASE=${url.origin} ~/.local/bin/tdoc connect <code>\``));
     }
 
     if ((p === '/llms.txt' || p === '/.well-known/llms.txt') && (method === 'GET' || method === 'HEAD')) {

@@ -1309,3 +1309,9 @@ a.ui-menu-item:visited {
 .ui-tutorial-single { padding: 12px 16px; border: 1px solid var(--td-line, #ddd); background: var(--td-bg, #fff); color: inherit; border-radius: 8px; cursor: pointer; }
 
 .ui-dialog-popup.ui-setup-simple { border-radius: 16px; }
+@media (max-width: 600px) {
+  .ui-setup-prompt { flex-direction: column-reverse; align-items: stretch; }
+  .ui-setup-modal .ui-setup-copy { align-self: flex-end; min-height: 36px; }
+  .ui-setup-prompt .ui-setup-instruction, .tdoc-modal .ui-setup-prompt p.ui-setup-instruction { font-size: 13px; }
+}
+

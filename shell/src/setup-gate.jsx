@@ -158,13 +158,12 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const instructionBase = platformRoute ? platformPrompt(attempt?.code || '', product.label) : manual ? conversationPrompt(attempt?.code || '', product.label) : AUTOMATIC_PROMPT;
   const releaseRef = /^[a-f0-9]{40}$/.test(boot?.setupRef || '') ? boot.setupRef : 'main';
   const host = typeof location === 'undefined' ? 'https://tdoc.dev' : location.origin;
-  // tdoc.dev needs no overrides. Any other host (a preview) pins the installer to
-  // its own revision and points the CLI at itself, on a line of its own.
-  const custom = host !== 'https://tdoc.dev';
-  const installLine = `curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/${releaseRef}/bin/tdoc-install | TDOC_INSTALL_REF=${releaseRef} TDOC_HOSTED_BASE=${host} bash`;
-  const instruction = !custom ? instructionBase : instructionBase.replaceAll('https://tdoc.dev/SKILL.md', `${host}/SKILL.md`)
-    .replace(`${SETUP_PROMPT}`, installLine)
-    .replace('\n~/.local/bin/tdoc connect', `\n${installLine} -s -- --install-only\nTDOC_HOSTED_BASE=${host} ~/.local/bin/tdoc connect`);
+  // Off tdoc.dev (a preview) the conversation prompt only swaps the SKILL.md host:
+  // that host's skill carries the pinned install and connect details. The
+  // computer route runs the installer directly, so it pins the revision here.
+  const pinnedSetup = `curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/${releaseRef}/bin/tdoc-install | TDOC_INSTALL_REF=${releaseRef} TDOC_HOSTED_BASE=${host} bash`;
+  const instruction = instructionBase.replaceAll('https://tdoc.dev/SKILL.md', `${host}/SKILL.md`)
+    .replace(SETUP_PROMPT, releaseRef === 'main' ? SETUP_PROMPT : pinnedSetup);
   const copyInstruction = () => copy(instruction, 'instruction', instructionRef);
   const chooseProduct = (id) => {
     setProductId(id); setSelected(id === 'claude' || id === 'codex' ? id : '');
