@@ -968,7 +968,13 @@ export function DocumentShell({ boot, config }) {
     ? askAiTargetKey : defaultAskAiTargetKey;
   const askAiSend = async (retryText = null, retryTarget = null) => {
     const question = String(retryText || askAiDraft).trim();
-    if (signedOutAsk) { if (question) signIn(); return; }
+    if (signedOutAsk) {
+      if (!question) return;
+      // Keep the question across the sign-in round trip; it opens again here.
+      try { sessionStorage.setItem(`tdoc-ask-draft:${config.slug}`, question); } catch {}
+      signIn();
+      return;
+    }
     const choice = retryTarget
       ? askAiTargets.find((item) => sameTarget(item.target, retryTarget))
       : askAiTargets.find((item) => item.key === selectedAskAiTargetKey);
@@ -1502,6 +1508,16 @@ export function DocumentShell({ boot, config }) {
     setComposer({ kind: 'document', intent: askAi ? 'ask-ai' : 'comment', rect: { top: y, bottom: y, left: 16 } });
   };
   const closeAskAi = () => { setHandoffDetailsOpen(false); if (unifiedEntry) setDrawerOpen(false); };
+  // A question typed before signing in comes back after it, in the open panel.
+  useEffect(() => {
+    if (!config.identity) return;
+    let saved = null;
+    try { saved = sessionStorage.getItem(`tdoc-ask-draft:${config.slug}`); sessionStorage.removeItem(`tdoc-ask-draft:${config.slug}`); } catch {}
+    if (!saved) return;
+    setAskAiDraft(saved);
+    if (unifiedEntry) { setDrawerTab('ask'); setDrawerOpen(true); } else setHandoffDetailsOpen(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.identity, config.slug]);
   const askAiPanel = (panelOpen) => (
     <AskAiPanel
       open={panelOpen}
