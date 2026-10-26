@@ -15,7 +15,7 @@ export const FLAGS = Object.freeze({
   // One entry on phones: the comment button opens a drawer with Comments and
   // Ask AI tabs instead of a separate Ask AI button in the top bar. On in PR
   // previews so it can be tried before it ships.
-  unifiedEntry: Object.freeze({ label: 'One comment + Ask AI entry on phones', owner: 'julie', added: '2026-10-26', default: false, preview: true }),
+  unifiedEntry: Object.freeze({ label: 'One comment + Ask AI entry on phones', owner: 'julie', added: '2026-10-26', default: true }),
   teamGuests: Object.freeze({ label: 'Team guests and seats', owner: 'julie', added: '2026-10-26', default: true }),
 });
 
