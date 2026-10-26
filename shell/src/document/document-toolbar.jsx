@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
 import { usePortalContainer } from '../ui/portal.js';
+import { useVisibleViewport } from './visible-viewport.js';
 
 // The label after a version number. "current" read as "latest" from an old
 // version (round-4 tester), so the two facts get their own words: where you
@@ -157,31 +158,14 @@ export function DocumentPrimaryAction({
 // comment card itself carries the state of that one comment.
 export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, narrow = false, children }) {
   const portalContainer = usePortalContainer();
-  const [visibleViewport, setVisibleViewport] = useState(null);
+  const visibleViewport = useVisibleViewport(narrow && open);
   const [expanded, setExpanded] = useState(false);
   const dragStart = useRef(null);
   const dragged = useRef(false);
-  useEffect(() => {
-    if (!narrow || !open) return undefined;
-    const visual = window.visualViewport;
-    const update = () => {
-      const height = Math.round(visual?.height || window.innerHeight);
-      if (window.innerHeight - height > 100) setExpanded(true);
-      setVisibleViewport({
-        bottom: Math.max(0, window.innerHeight - ((visual?.offsetTop || 0) + height)),
-        height,
-      });
-    };
-    update();
-    visual?.addEventListener('resize', update);
-    visual?.addEventListener('scroll', update);
-    window.addEventListener('resize', update);
-    return () => {
-      visual?.removeEventListener('resize', update);
-      visual?.removeEventListener('scroll', update);
-      window.removeEventListener('resize', update);
-    };
-  }, [narrow, open]);
+  // Keyboard expansion follows the current viewport. A transient resize while
+  // typing must not leave the drawer stuck in its manually expanded state.
+  const keyboardRaised = narrow && open && window.innerHeight - visibleViewport.height > 100;
+  const drawerExpanded = expanded || keyboardRaised;
   const ready = counts.ready || 0;
   const waiting = (counts.waiting || 0) + (counts.received || 0);
   const failed = counts.failed || 0;
@@ -204,10 +188,16 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
     <Drawer.Portal container={portalContainer}>
       <Drawer.Backdrop className="tdoc-ask-drawer-backdrop" />
       <Drawer.Viewport className="tdoc-ask-drawer-viewport">
-        <Drawer.Popup className="tdoc-ask-mobile-drawer" style={{ bottom: visibleViewport?.bottom ?? 0, height: Math.max(120, expanded ? (visibleViewport?.height || 600) - 48 : (visibleViewport?.height || 600) * 0.7 - 8) }}>
+        <Drawer.Popup className="tdoc-ask-mobile-drawer" style={{ bottom: visibleViewport.bottom, height: Math.max(120, drawerExpanded ? visibleViewport.height - 48 : visibleViewport.height * 0.7 - 8) }}>
           <Drawer.Title className="tdoc-visually-hidden">Ask AI</Drawer.Title>
-          <button type="button" className="tdoc-ask-drawer-grip" aria-label={expanded ? 'Collapse Ask AI' : 'Expand Ask AI'}
-            onClick={() => { if (!dragged.current) setExpanded(!expanded); dragged.current = false; }}
+          <button type="button" className="tdoc-ask-drawer-grip" aria-label={drawerExpanded ? 'Collapse Ask AI' : 'Expand Ask AI'}
+            onClick={() => {
+              if (!dragged.current) {
+                if (keyboardRaised) { document.activeElement?.blur(); setExpanded(false); }
+                else setExpanded(!expanded);
+              }
+              dragged.current = false;
+            }}
             onPointerDown={(event) => { dragStart.current = event.clientY; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId); }}
             onPointerUp={(event) => {
               if (dragStart.current != null && Math.abs(dragStart.current - event.clientY) > 48) {

@@ -1,8 +1,9 @@
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useRef, useState } from 'react';
 import { AgentButtonsContext, MentionField } from './mention-field.jsx';
 import { joinAiTags, mentionsAi } from './ai-answerer.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { TOP_BAR_HEIGHT } from './model.js';
+import { useVisibleViewport } from './visible-viewport.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
 // The shell's chrome does not scroll — the frame does — so the composer's
@@ -17,19 +18,6 @@ import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 // The card is position:fixed for the same reason: absolute positioning ties it
 // to the document, and iOS scrolls the document to reveal the focused textarea.
 // Fixed plus offsetTop keeps it against the band that is actually on screen.
-function readViewport() {
-  const visual = typeof window !== 'undefined' ? window.visualViewport : null;
-  if (!visual) {
-    return { width: window.innerWidth, height: window.innerHeight, offsetTop: 0, offsetLeft: 0 };
-  }
-  return {
-    width: Math.round(visual.width),
-    height: Math.round(visual.height),
-    offsetTop: Math.round(visual.offsetTop || 0),
-    offsetLeft: Math.round(visual.offsetLeft || 0),
-  };
-}
-
 export const COMPOSER_WIDTH = 320;
 export const COMPOSER_HEIGHT = 190;
 
@@ -81,22 +69,8 @@ export function CommentComposer({
 }) {
   const [text, setText] = useState(initialText);
   const [connectOpen, setConnectOpen] = useState(false);
-  const [viewport, setViewport] = useState(readViewport);
+  const viewport = useVisibleViewport();
   const agentButtons = useContext(AgentButtonsContext);
-
-  useEffect(() => {
-    const onChange = () => setViewport(readViewport());
-    const visual = window.visualViewport;
-    // `scroll` too: iOS shifts the visual viewport as well as resizing it.
-    visual?.addEventListener('resize', onChange);
-    visual?.addEventListener('scroll', onChange);
-    window.addEventListener('resize', onChange);
-    return () => {
-      visual?.removeEventListener('resize', onChange);
-      visual?.removeEventListener('scroll', onChange);
-      window.removeEventListener('resize', onChange);
-    };
-  }, []);
 
   const { top, left } = composerPosition(selection.rect || {}, viewport);
 

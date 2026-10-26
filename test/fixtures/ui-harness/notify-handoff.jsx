@@ -98,7 +98,7 @@ function ActivityDemo() {
       <span>🌪</span><strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>RaftBench pricing plan</strong>
       <span style={{ flex: 1 }} />
       {!phone ? <span style={{ color: '#888' }}>Edited 2m ago</span> : null}
-      <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen}>
+      <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen} narrow={phone}>
         <AskAiPanel open={open} draft={askDraft} onDraft={setAskDraft} targetKey="tdoc-ai" onTarget={() => {}}
           targets={[{ key: 'tdoc-ai', label: 'tdoc AI', tdocAi: true }]} turns={[]} busy={false} remaining={5}
           onAsk={() => {}} onKeep={() => {}} onPost={() => {}} readyCount={counts.ready}

@@ -11,7 +11,7 @@ const path = require('path');
 const http = require('http');
 const { execFileSync } = require('child_process');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
-const { chromium } = requirePlaywrightOrSkip('notify-handoff-ui.test.js');
+const { chromium, webkit } = requirePlaywrightOrSkip('notify-handoff-ui.test.js');
 
 const ROOT = path.join(__dirname, '..');
 const SHOTS = process.env.TDOC_UI_SHOTS || '';
@@ -41,7 +41,7 @@ async function t(name, fn) {
 (async () => {
   console.log('Send to agent dialog UI');
   const out = build();
-  const page404 = '<!doctype html><html><head><link rel="stylesheet" href="/h.css"></head><body><div id="root"></div><script type="module" src="/h.js"></script></body></html>';
+  const page404 = '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/h.css"></head><body><div id="root"></div><script type="module" src="/h.js"></script></body></html>';
   const server = http.createServer((req, res) => {
     const u = req.url.split('?')[0];
     if (u === '/h.js' || u === '/h.css') {
@@ -53,7 +53,7 @@ async function t(name, fn) {
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await (process.env.TDOC_TEST_BROWSER === 'webkit' ? webkit : chromium).launch({ headless: true });
 
   async function open({ ids, deliver = 'delivered', targets = null, query = '', history = null, width = 900 }) {
     const page = await browser.newPage({ viewport: { width, height: 720 } });
@@ -450,6 +450,75 @@ async function t(name, fn) {
       assert.match(await page.locator('.tdoc-popup textarea').inputValue(), /tdoc AI/);
       assert.deepEqual(errors, []);
       await page.close();
+    });
+
+    await t('mobile text controls stay readable and the comment drawer follows the visible viewport', async () => {
+      for (const width of [375, 390, 430]) {
+        const page = await browser.newPage({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
+        await page.goto(`${base}/?view=activity`);
+        await page.locator('#tdoc-send-agent-btn').click();
+        const ask = page.getByRole('dialog', { name: 'Ask AI' });
+        await ask.waitFor();
+        const askInput = ask.locator('textarea').first();
+        assert.ok(await askInput.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)) >= 16);
+        assert.equal(await askInput.evaluate((el) => document.activeElement === el), false,
+          'the keyboard opened while the Ask AI drawer was still animating');
+        assert.equal(await page.locator('#tdoc-send-agent-btn').evaluate((el) => getComputedStyle(el).touchAction), 'manipulation');
+        await askInput.click();
+        await page.evaluate(() => {
+          Object.defineProperties(window.visualViewport, {
+            height: { configurable: true, value: 420 },
+            offsetTop: { configurable: true, value: 20 },
+          });
+          window.visualViewport.dispatchEvent(new Event('resize'));
+        });
+        await page.waitForFunction(() => {
+          const panel = document.querySelector('.tdoc-ask-mobile-drawer');
+          if (!panel) return false;
+          const rect = panel.getBoundingClientRect();
+          return rect.top >= 19 && rect.bottom <= 441;
+        });
+        const askBox = await ask.boundingBox();
+        assert.ok(askBox.y >= 19 && askBox.y + askBox.height <= 441, JSON.stringify(askBox));
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `mobile-ask-visible-${width}.png`) });
+        await page.evaluate(() => {
+          Object.defineProperties(window.visualViewport, {
+            height: { configurable: true, value: 844 },
+            offsetTop: { configurable: true, value: 0 },
+          });
+          window.visualViewport.dispatchEvent(new Event('resize'));
+        });
+        await ask.getByRole('button', { name: 'Expand Ask AI' }).waitFor();
+        await page.goto(`${base}/?view=mobile-fab&state=active`);
+        await page.locator('.tdoc-fab').click();
+        const drawer = page.locator('#tdoc-comment-layer');
+        await drawer.waitFor();
+        await page.evaluate(() => {
+          Object.defineProperties(window.visualViewport, {
+            height: { configurable: true, value: 420 },
+            offsetTop: { configurable: true, value: 20 },
+          });
+          window.visualViewport.dispatchEvent(new Event('resize'));
+        });
+        await page.waitForFunction(() => {
+          const drawer = document.querySelector('#tdoc-comment-layer');
+          return drawer && parseFloat(getComputedStyle(drawer).bottom) >= 400;
+        });
+        const geometry = await drawer.evaluate((el) => {
+          const rect = el.getBoundingClientRect();
+          return { top: rect.top, bottom: rect.bottom };
+        });
+        assert.ok(geometry.top >= 19 && geometry.bottom <= 441, JSON.stringify(geometry));
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `mobile-visible-drawer-${width}.png`) });
+        await page.goto(`${base}/?view=mobile-fab&state=empty`);
+        await page.locator('.tdoc-fab').click();
+        await page.locator('.tdoc-drawer-empty').getByRole('button', { name: 'Leave a comment', exact: true }).click();
+        const commentInput = page.locator('.tdoc-popup textarea');
+        await commentInput.waitFor();
+        assert.ok(await commentInput.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)) >= 16);
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `mobile-compose-${width}.png`) });
+        await page.close();
+      }
     });
   } finally {
     await browser.close();

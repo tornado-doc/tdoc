@@ -13,7 +13,10 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   const input = useRef(null);
   const [expandedTurnId, setExpandedTurnId] = useState(null);
   useEffect(() => {
-    if (open && !activityOpen) input.current?.focus();
+    // Focusing during a phone panel's opening animation raises the software
+    // keyboard and changes the visual viewport before the panel settles.
+    // Let the reader choose when to type; desktop keeps direct focus.
+    if (open && !activityOpen && !window.matchMedia('(max-width: 700px)').matches) input.current?.focus();
   }, [open, activityOpen]);
   useEffect(() => {
     if (!input.current) return;

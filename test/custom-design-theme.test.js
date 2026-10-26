@@ -35,7 +35,28 @@ const { resolveTarget } = require('./helpers/fixture-server');
     await page.setViewportSize({width:1280,height:800});
     await page.goto(target.url);
     const frame = page.frameLocator('iframe[aria-label="Document content"]');
-    await frame.locator('html[data-tdoc-theme="dark"]').waitFor();
+    // Keep the visibility assertion while diagnosing the Linux WebKit failure.
+    try {
+      await frame.locator('html[data-tdoc-theme="dark"]').waitFor();
+    } catch (error) {
+      console.error('default document iframe state:', await page.locator('iframe[aria-label="Document content"]').evaluate(el => {
+        const css = getComputedStyle(el);
+        const box = el.getBoundingClientRect();
+        return { box: { x: box.x, y: box.y, width: box.width, height: box.height },
+          display: css.display, visibility: css.visibility, opacity: css.opacity,
+          parentDisplay: getComputedStyle(el.parentElement).display };
+      }).catch(() => 'iframe unavailable'));
+      console.error('default document root state:', await frame.locator('html').evaluate(el => {
+        const css = getComputedStyle(el);
+        const box = el.getBoundingClientRect();
+        return { theme: el.getAttribute('data-tdoc-theme'),
+          mode: el.getAttribute('data-tdoc-interaction-mode'),
+          box: { x: box.x, y: box.y, width: box.width, height: box.height },
+          display: css.display, visibility: css.visibility, opacity: css.opacity,
+          saved: localStorage.getItem('tdoc-theme') };
+      }).catch(() => 'frame root unavailable'));
+      throw error;
+    }
     const row = await themeRow(page);
     assert.equal((await row.textContent()).trim(), 'Light mode', 'dark is on: the row offers light');
     await row.click();

@@ -6,6 +6,7 @@ import { CommentCard } from './comment-card.jsx';
 import { CommentThreadList } from './comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from './comment-pin.jsx';
 import { avatarFor, TOP_BAR_HEIGHT } from './model.js';
+import { useVisibleViewport } from './visible-viewport.js';
 
 function Pin({
   cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
@@ -210,6 +211,7 @@ export function MobileCommentDrawer({
   onSendHandoffElsewhere = null,
 }) {
   const drawerRef = useRef(null);
+  const viewport = useVisibleViewport(open);
 
   // Tapping a highlight opens the drawer at THAT comment. The drawer mounts
   // and animates in after this effect first runs, so look for the card for a
@@ -240,7 +242,8 @@ export function MobileCommentDrawer({
       <Drawer.Portal>
         <Drawer.Backdrop className="tdoc-drawer-backdrop" />
         <Drawer.Viewport className="tdoc-drawer-viewport">
-          <Drawer.Popup ref={drawerRef} id="tdoc-comment-layer" className="open">
+          <Drawer.Popup ref={drawerRef} id="tdoc-comment-layer" className="open"
+            style={{ '--td-visible-bottom': `${viewport.bottom}px`, '--td-visible-height': `${viewport.height}px` }}>
             <Drawer.Title className="tdoc-visually-hidden">Comments</Drawer.Title>
             <Drawer.Close className="tdoc-drawer-handle" aria-label="Close comments" />
             <Drawer.Content className="tdoc-drawer-list">
