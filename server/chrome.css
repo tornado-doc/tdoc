@@ -198,6 +198,45 @@
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
+  /* Whole-document threads sit in the article flow, directly under its title.
+     The sandboxed frame reserves their measured height; the shell paints the
+     same shared CommentCard and composer controls over that empty slot. */
+  .tdoc-document-comments-layer {
+    position: fixed; left: 0; right: 0; bottom: 0; overflow: hidden;
+    pointer-events: none; z-index: 999995;
+  }
+  .tdoc-document-comments {
+    position: absolute; box-sizing: border-box; padding: 8px 0 12px;
+    display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+    pointer-events: auto; overscroll-behavior: contain;
+    color: var(--td-ink, #1a1a1a); font: 13px/1.4 Inter, system-ui, sans-serif;
+  }
+  .tdoc-document-comments h2 {
+    margin: 0 0 2px; color: var(--td-muted, #73777f);
+    font: 600 12px/1.4 Inter, system-ui, sans-serif;
+  }
+  .tdoc-document-comment-row { width: 100%; }
+  .tdoc-document-comments .tdoc-document-comment-row .tdoc-margin-comment {
+    position: relative; top: auto; left: auto; width: 100%; box-sizing: border-box;
+    max-height: none; margin: 0;
+  }
+  .tdoc-document-comment-add {
+    appearance: none; width: 100%; min-height: 36px; padding: 8px 12px;
+    box-sizing: border-box; text-align: left; border: 1px solid var(--td-line, #e8e7e3);
+    border-radius: 8px; background: var(--td-ground, #fff);
+    color: var(--td-muted, #73777f); font: 13px/1.4 Inter, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .tdoc-document-comment-add:hover, .tdoc-document-comment-add:focus-visible {
+    border-color: var(--td-accent, #1652f0); color: var(--td-accent, #1652f0);
+  }
+  .tdoc-document-comments .tdoc-popup.tdoc-inline-composer {
+    position: relative; top: auto; left: auto; width: 100%; max-width: none;
+    box-sizing: border-box; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  }
+  body.tdoc-narrow .tdoc-document-comments .tdoc-popup.tdoc-inline-composer {
+    left: auto !important; width: 100%; max-width: none;
+  }
   /* Parent-level resolved chip (distinct from the per-reply status chip). */
   .tdoc-resolved-chip {
     display: inline-flex;

@@ -264,14 +264,17 @@ const cardSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'docu
 const layerSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'comment-layer.jsx'), 'utf8');
 const shellSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document-shell.jsx'), 'utf8');
 
-// True when `needle` sits inside a `{canMutate ? ... : null}` block.
+// True when `needle` sits inside a conditional whose first gate is canMutate.
+// The condition can impose further restrictions, such as requiring an anchor.
 function gatedByCanMutate(src, needle) {
   const at = src.indexOf(needle);
   if (at === -1) throw new Error(`${needle} not found in comment-card.jsx`);
-  const open = src.lastIndexOf('{canMutate ? (', at);
+  const open = src.lastIndexOf('{canMutate', at);
   if (open === -1) return false;
+  const conditionEnd = src.indexOf('? (', open);
   const close = src.indexOf(') : null}', open);
-  return close !== -1 && close > at;
+  return conditionEnd !== -1 && conditionEnd < at && !src.slice(open, conditionEnd).includes('}')
+    && close !== -1 && close > at;
 }
 
 // The condition guarding EVERY occurrence of `needle`, in source order. A
@@ -336,6 +339,8 @@ t('the re-anchor gate is the only thing left that the doc owner unlocks', () => 
 });
 t('comment card renders the re-anchor button only for the author or the doc owner', () => {
   assert(gatedByCanMutate(cardSrc, 'tdoc-reanchor-btn'), 're-anchor action is not gated by canMutate');
+  assert(cardSrc.includes("canMutate && comment.anchor && comment.anchor.kind !== 'document'"),
+    'whole-document comments must not offer re-anchor');
 });
 t('both comment layers forward isOwner to the card', () => {
   const cards = [...layerSrc.matchAll(/<CommentCard\b([\s\S]*?)\/>/g)];
@@ -346,8 +351,8 @@ t('both comment layers forward isOwner to the card', () => {
   'desktop layer and mobile drawer must both pass isOwner to CommentCard');
 });
 t('the document shell sources isOwner from the boot config', () => {
-  assert(shellSrc.split('isOwner={Boolean(config.isOwner)}').length === 3,
-    'both comment layers must receive config.isOwner');
+  assert(shellSrc.split('isOwner={Boolean(config.isOwner)}').length === 4,
+    'desktop pins, mobile drawer and document section must receive config.isOwner');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

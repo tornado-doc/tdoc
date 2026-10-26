@@ -61,6 +61,7 @@ export function composerPosition(rect, viewport) {
 
 export function CommentComposer({
   selection,
+  inline = false,
   initialText = '',
   onSubmit,
   onClose,
@@ -160,8 +161,8 @@ export function CommentComposer({
   if (privateAsk) {
     return (
       <div
-        className="tdoc-popup tdoc-private-ask"
-        style={{ top, left }}
+        className={`tdoc-popup tdoc-private-ask${inline ? ' tdoc-inline-composer' : ''}`}
+        style={inline ? undefined : { top, left }}
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className="head">
@@ -175,8 +176,8 @@ export function CommentComposer({
 
   return (
     <div
-      className="tdoc-popup"
-      style={{ top, left }}
+      className={`tdoc-popup${inline ? ' tdoc-inline-composer' : ''}`}
+      style={inline ? undefined : { top, left }}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDownCapture={copyEmptyDraftQuote}
     >
