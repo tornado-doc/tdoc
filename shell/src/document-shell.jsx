@@ -1931,6 +1931,7 @@ export function DocumentShell({ boot, config }) {
           onMakePublic={makePublic}
           onSubmit={postComment}
           onClose={closeComposer}
+          onCopyToast={showToast}
         />
       ) : null}
 

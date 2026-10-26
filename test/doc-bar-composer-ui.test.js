@@ -64,6 +64,7 @@ async function dragSelect(page, phrase) {
   }, phrase);
   await page.mouse.move(box.x + r.x1, box.y + r.y1); await page.mouse.down();
   await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 }); await page.mouse.up();
+  await page.locator('.tdoc-popup textarea').waitFor();
 }
 
 (async () => {
@@ -144,6 +145,72 @@ async function dragSelect(page, phrase) {
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
 
   try {
+    await t('selection opens a composer; an empty draft copies the quote while a typed draft keeps native copy', async () => {
+      const { context, page } = await open(julie, 'launch-plan');
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      await dragSelect(page, 'Billing ships first');
+      const pop = page.locator('.tdoc-popup');
+      await shot(page, 'selection-composer-desktop.png');
+      const selected = await page.frameLocator('iframe').locator('body').evaluate(() => window.getSelection().toString());
+      if (!selected.includes('Billing ships')) throw new Error(`frame selection lost: ${JSON.stringify(selected)}`);
+      const textarea = pop.locator('textarea');
+      if (!(await textarea.evaluate((el) => document.activeElement === el))) throw new Error('desktop composer did not focus its textarea');
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
+      const keyboardCopy = await page.evaluate(() => navigator.clipboard.readText());
+      if (keyboardCopy !== selected) throw new Error(`empty draft copied ${JSON.stringify(keyboardCopy)} instead of ${JSON.stringify(selected)}`);
+      await textarea.fill('draft text');
+      await page.evaluate(() => navigator.clipboard.writeText('sentinel'));
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'sentinel') throw new Error('typed draft shortcut copied the quote');
+      await textarea.evaluate((el) => el.select());
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'draft text') throw new Error('native textarea copy was intercepted');
+      await pop.getByRole('button', { name: 'Copy selected text' }).click();
+      const buttonCopy = await page.evaluate(() => navigator.clipboard.readText());
+      if (buttonCopy !== selected) throw new Error(`quote icon copied ${JSON.stringify(buttonCopy)}`);
+      await pop.locator('.x').click();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
+      await page.getByRole('menuitemradio', { name: /Read/ }).click();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem('tdoc-draft:launch-plan:julie') || '{}').mode === 'read');
+      await page.reload();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await context.close();
+    });
+
+    await t('phone selection opens the composer without focusing or clearing the native selection', async () => {
+      const { context, page } = await open(julie, 'launch-plan', true);
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+      await frame.evaluate(() => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const index = node.nodeValue.indexOf('Billing ships first');
+          if (index < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, index); range.setEnd(node, index + 'Billing ships first'.length);
+          const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+          document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }));
+          return;
+        }
+      });
+      const pop = page.locator('.tdoc-popup');
+      await pop.waitFor();
+      const selected = await frame.evaluate(() => getSelection().toString());
+      if (selected !== 'Billing ships first') throw new Error(`phone selection was cleared: ${JSON.stringify(selected)}`);
+      if (await pop.locator('textarea').evaluate((el) => document.activeElement === el)) throw new Error('phone composer opened the keyboard');
+      const modeStyle = await page.locator('.tdoc-mode-trigger').evaluate((el) => ({
+        background: getComputedStyle(el).backgroundColor,
+        border: getComputedStyle(el).borderWidth,
+        marker: getComputedStyle(el, '::before').content,
+      }));
+      if (modeStyle.background !== 'rgba(0, 0, 0, 0)' || modeStyle.border !== '0px' || !['none', 'normal'].includes(modeStyle.marker)) throw new Error(`phone mode has a filled pill: ${JSON.stringify(modeStyle)}`);
+      await shot(page, 'selection-composer-phone.png');
+      await pop.getByRole('button', { name: 'Copy selected text' }).click();
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== selected) throw new Error('phone copy icon missed the quote');
+      await context.close();
+    });
+
     await t('desktop bar: logo · title; Edited · ✈ · Share · ⋯ · space chip · avatar; mode switch in the bar; the filter heads the comments', async () => {
       const { context, page } = await open(julie, 'launch-plan');
       await page.locator('.tdoc-bar .tdoc-space-trigger', { hasText: 'My docs' }).waitFor();
@@ -164,9 +231,10 @@ async function dragSelect(page, phrase) {
       if (await page.locator('.tdoc-account-trigger .name').isVisible()) throw new Error('the avatar shows a name');
       await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
       await page.getByRole('menuitemradio', { name: /Comment/ }).waitFor();
-      await page.getByRole('menuitemradio', { name: /Read/ }).click();
+      await page.getByRole('menuitemradio', { name: /Read/ }).waitFor();
+      await page.getByRole('menuitemradio', { name: /Edit/ }).click();
       await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
-      if (await page.getByRole('menuitemradio', { name: /Read/ }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from the bar');
+      if (await page.getByRole('menuitemradio', { name: /Edit/ }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from the bar');
       await page.keyboard.press('Escape');
       const filter = page.locator('.tdoc-comment-filter');
       await filter.waitFor();

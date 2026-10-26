@@ -34,9 +34,9 @@ function waitForServer(port, timeout = 5_000) {
   });
 }
 
-function selectParagraph(frame) {
-  return frame.evaluate(() => {
-    const paragraph = document.getElementById('editable-paragraph');
+function selectParagraph(frame, id = 'editable-paragraph') {
+  return frame.evaluate((paragraphId) => {
+    const paragraph = document.getElementById(paragraphId);
     const range = document.createRange();
     range.selectNodeContents(paragraph);
     const selection = window.getSelection();
@@ -46,7 +46,7 @@ function selectParagraph(frame) {
       bubbles: true, cancelable: true, view: window,
       clientX: rect.left + 10, clientY: rect.top + 10,
     }));
-  });
+  }, id);
 }
 
 async function chooseMode(page, label) {
@@ -341,14 +341,14 @@ async function chooseMode(page, label) {
       await frame.evaluate(() => window.getSelection().removeAllRanges());
     });
 
-    await test('Read mode opens existing anchors but does not create a comment selection', async () => {
-      await chooseMode(page, 'Read');
+    await test('Comment mode opens the composer after a selection', async () => {
+      await chooseMode(page, 'Comment');
       await selectParagraph(frame);
       await page.waitForTimeout(150);
-      assert(await page.locator('.tdoc-popup').count() === 0, 'Read selection opened the comment composer');
+      assert(await page.locator('.tdoc-popup').count() === 1, 'selection did not open the comment composer');
     });
 
-    await test('Read mode copies the selected document text', async () => {
+    await test('Comment mode copies the selected document text', async () => {
       const paragraph = frame.locator('#editable-paragraph');
       await paragraph.click();
       await paragraph.selectText();
@@ -368,7 +368,7 @@ async function chooseMode(page, label) {
       await page.keyboard.press(`${PRIMARY_MODIFIER}+c`);
       const copied = await page.evaluate(() => navigator.clipboard.readText());
       assert(copied === 'Edit this sentence and save one snapshot.',
-        `Read copy returned the wrong text: ${JSON.stringify(copied)}`);
+        `Comment copy returned the wrong text: ${JSON.stringify(copied)}`);
     });
 
     await test('Comment mode turns a selection into a composer', async () => {
@@ -599,9 +599,9 @@ async function chooseMode(page, label) {
         toolbarWidth: Math.round(document.querySelector('.tdoc-editor-toolbar').getBoundingClientRect().width),
         modeWidth: Math.round(document.querySelector('.tdoc-mode-trigger').getBoundingClientRect().width),
         modeLabelDisplay: getComputedStyle(document.querySelector('.tdoc-mode-label')).display,
-        versionDisplay: getComputedStyle(document.querySelector('#tdoc-version-toggle')).display,
-        publishDisplay: getComputedStyle(document.querySelector('#tdoc-publish-btn')).display,
-        accountDisplay: getComputedStyle(document.querySelector('.tdoc-account-trigger')).display,
+        versionDisplay: document.querySelector('#tdoc-version-toggle') ? getComputedStyle(document.querySelector('#tdoc-version-toggle')).display : 'none',
+        publishDisplay: document.querySelector('#tdoc-publish-btn') ? getComputedStyle(document.querySelector('#tdoc-publish-btn')).display : 'none',
+        accountDisplay: document.querySelector('.tdoc-account-trigger') ? getComputedStyle(document.querySelector('.tdoc-account-trigger')).display : 'none',
       }));
       assert(dimensions.scrollWidth <= dimensions.innerWidth + 1,
         `mobile shell overflows: ${JSON.stringify(dimensions)}`);
@@ -643,11 +643,11 @@ async function chooseMode(page, label) {
       // drawer: the bug is the keyboard eating HEIGHT, not the width. Reload to
       // shed whatever the mobile test above left open in the top bar.
       await page.setViewportSize({ width: 900, height: 664 });
-      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.goto(`http://127.0.0.1:${port}/d/${resolvedSlug}/v/1`, { waitUntil: 'networkidle' });
       const composerFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
       assert(composerFrame, 'author frame missing');
       await chooseMode(page, 'Comment');
-      await selectParagraph(composerFrame);
+      await selectParagraph(composerFrame, 'resolved-paragraph');
       const popup = page.locator('.tdoc-popup');
       await popup.waitFor();
       const before = await popup.boundingBox();
@@ -685,16 +685,11 @@ async function chooseMode(page, label) {
       const hidden = await entries.count();
       assert(hidden === 2, `the drawer showed ${hidden} threads by default, expected 2`);
 
-      // The control is a ⋯ menu item on a phone, not the bar switch — that one
-      // is display:none below 700px.
-      await page.keyboard.press('Escape');
-      await page.locator('#tdoc-more-btn').click();
-      await page.locator('[data-action="show-resolved"]').click();
-      await page.waitForTimeout(400);
-      await page.locator('.tdoc-fab').first().click();
+      // The filter lives at the top of the phone drawer.
+      await page.locator('#tdoc-comment-layer .tdoc-comment-filter').getByRole('radio', { name: 'Open' }).click();
       await page.waitForTimeout(400);
       const shown = await entries.count();
-      assert(shown === 1, `hiding resolved left ${shown} threads in the drawer, expected 1`);
+      assert(shown === 1, `Open filter left ${shown} threads in the drawer, expected 1`);
     });
 
     // Last on purpose: it navigates away from the doc every test above shares.
@@ -806,7 +801,7 @@ async function chooseMode(page, label) {
         await savedFrame.locator(`#${id} [data-tdoc-diagram-open]`).waitFor();
         assert(await savedFrame.locator(`#${id}`).getByRole('button', { name: 'Edit diagram' }).isVisible(), 'the saved diagram lost its edit action');
         await diagramPage.goto(`${base}/d/${created.slug}/v/1`, { waitUntil: 'networkidle' });
-        await chooseMode(diagramPage, 'Read');
+        await chooseMode(diagramPage, 'Comment');
         const readFrame = diagramPage.frames().find((candidate) => candidate.url().includes('/frame'));
         const editAction = readFrame.locator(`#${id}`).getByRole('button', { name: 'Edit diagram' });
         const expandAction = readFrame.getByRole('button', { name: 'View Diagram fullscreen' }).last();

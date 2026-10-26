@@ -103,7 +103,7 @@ const SLUG = 'hostile-body-css';
     await t('the shell renders the REAL top bar + footer (1:1 chrome)', async () => {
       const chrome = await page.evaluate(() => ({
         mark: !!document.querySelector('.tdoc-bar .tdoc-bar-mark img'),
-        version: !!document.querySelector('.tdoc-bar #tdoc-version-toggle'),
+        mode: !!document.querySelector('.tdoc-bar .tdoc-mode-trigger'),
         more: !!document.querySelector('.tdoc-bar #tdoc-more-btn'),   // ⋯ menu (Copy as Markdown lives here now)
         // This fixture supplies its own background and text palette. Reader
         // theme is intentionally hidden; custom-design-theme tests both cases.
@@ -122,7 +122,7 @@ const SLUG = 'hostile-body-css';
         slot.innerHTML = '<div class="tdoc-oldver-strip tdoc-oldver-visible">Old version</div>';
         document.querySelector('.tdoc-bar').after(slot);
       });
-      await page.click('#tdoc-version-toggle');
+      await page.click('#tdoc-more-btn');
       await page.waitForSelector('.ui-menu-positioner');
       const layers = await page.evaluate(() => {
         const menu = document.querySelector('.ui-menu-positioner');

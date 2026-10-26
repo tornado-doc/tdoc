@@ -54,9 +54,9 @@ t('stored comment mode requires canComment permission', () => {
     'stored comment mode must be gated on canComment');
 });
 
-t('stored read mode does not require special permissions', () => {
+t('stored read mode remains Read for a reader who can comment', () => {
   assert(/if \(stored === 'read'\) return 'read'/.test(editorHook),
-    'stored read mode should restore without permission checks');
+    'Read preference should remain available when Comment also allows copy');
 });
 
 t('mode is persisted on change via storeMode', () => {

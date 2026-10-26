@@ -84,6 +84,7 @@ async function dragSelect(page, phrase) {
   await page.mouse.down();
   await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 });
   await page.mouse.up();
+  await page.locator('.tdoc-popup textarea').waitFor();
 }
 
 // A phone selects by long-press; the probe reports it on touchend.
@@ -101,6 +102,7 @@ async function touchSelect(page, phrase) {
       return;
     }
   }, phrase);
+  await page.locator('.tdoc-popup textarea').waitFor();
 }
 
 (async () => {

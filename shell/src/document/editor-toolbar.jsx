@@ -35,7 +35,6 @@ export const MODES = [
 // Comment option still shows — the door has to be where the person looks for
 // it, not hidden behind a Sign in button in the corner — and choosing it opens
 // the sign-in instead of the mode.
-// The modes this visitor has: Read, Comment (or Sign in to comment), Edit.
 export function availableModes({ canComment, canEdit, signInToComment = false }) {
   return MODES.filter((option) => (
     option.value === 'read'
@@ -45,11 +44,7 @@ export function availableModes({ canComment, canEdit, signInToComment = false })
 }
 
 export function DocumentModeControl({ mode, canComment, canEdit, onChange, signInToComment = false, onSignIn }) {
-  const options = MODES.filter((option) => (
-    option.value === 'read'
-    || (option.value === 'comment' && (canComment || signInToComment))
-    || (option.value === 'edit' && canEdit)
-  ));
+  const options = availableModes({ canComment, canEdit, signInToComment });
   if (options.length < 2) return null;
   const current = options.find((option) => option.value === mode) || options[0];
   const CurrentIcon = current.Icon;
