@@ -452,6 +452,18 @@ export function getTeam(id) {
   return request(`/api/team?${new URLSearchParams({ id })}`);
 }
 
+export function getTeamGuests(id) {
+  return request(`/api/team/guests?${new URLSearchParams({ id })}`);
+}
+
+export function changeTeamGuest(id, invitee, action) {
+  return teamRequest('/api/team/guests', 'POST', { id, invitee, action });
+}
+
+export function requestTeamJoin(slug) {
+  return teamRequest('/api/team/request-join', 'POST', { slug });
+}
+
 export function updateTeam(id, patch) {
   return teamRequest('/api/team', 'PATCH', { id, ...patch });
 }

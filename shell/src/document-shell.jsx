@@ -15,6 +15,8 @@ import {
   handOff,
   publishAsk,
   setDocumentStar,
+  acceptTeamInvite,
+  requestTeamJoin,
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
@@ -51,6 +53,7 @@ import {
 } from './document/owner-access-dialog.jsx';
 import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { readStored } from './safe-storage.js';
+import { isFeatureOn } from './feature-flags.js';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -65,7 +68,6 @@ import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAskAiChoic
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel } from './document/ask-ai-panel.jsx';
-import { isFeatureOn } from './feature-flags.js';
 import { useCommentArea } from './document/comment-area.js';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
@@ -326,6 +328,8 @@ export function DocumentShell({ boot, config }) {
   });
 
   const [invited, setInvited] = useState(null);
+  const [teamGuestsEnabled] = useState(() => isFeatureOn('teamGuests'));
+  const [guestInviteStatus, setGuestInviteStatus] = useState('');
 
   // The journey record, for a signed-in reader on a doc of their own: it says
   // whether the exit line is still owed. Nothing is read for a visitor.
@@ -1079,17 +1083,31 @@ export function DocumentShell({ boot, config }) {
 
   const makePublicRef = useRef(null);
   makePublicRef.current = makePublic;
+  const guestAction = teamGuestsEnabled && config.teamManage?.guest ? {
+    label: config.teamManage.invitePending ? 'Accept team invitation' : `Request to join ${config.teamManage.team.name}`,
+    onClick: async () => {
+      setGuestInviteStatus('Sending…');
+      try {
+        if (config.teamManage.invitePending) await acceptTeamInvite(config.teamManage.team.id);
+        else await requestTeamJoin(config.slug);
+        if (config.teamManage.invitePending) location.reload();
+        else setGuestInviteStatus('Request sent to team admins.');
+      } catch (error) { setGuestInviteStatus(error.message || 'Could not send request.'); }
+    },
+  } : null;
   // What @ offers (agentChoices) and what tdoc AI has left / who is
   // answering where, for the composers and the cards.
   const agentMentions = useMemo(() => ({
     choices: agentChoices,
+    disabledChoices: teamGuestsEnabled && config.teamManage?.guest ? (myAgent.state?.disabled_team_agents || []) : [],
+    guestAction,
     preselected: agentChoices.find((agent) => notifyTargets.default && sameTarget(agent, notifyTargets.default)) || null,
     ai: { remaining: aiRemaining, thinking: aiThinking, offered: offersTdocAi },
     // An Only me question asked from a reply box, which shows its answer.
     privateReply: privateAskView && privateAskView.parentId ? privateAskView : null,
     onMakePublic: () => makePublicRef.current(),
     onClosePrivate: () => setPrivateAsk(null),
-  }), [agentChoices, notifyTargets.default, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk]);
+  }), [agentChoices, notifyTargets.default, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);
@@ -1541,6 +1559,8 @@ export function DocumentShell({ boot, config }) {
       activityOpen={agentActivityOpen}
       onActivityOpen={setAgentActivityOpen}
       unreadCount={unreadAgentReplies}
+      disabledChoices={teamGuestsEnabled && config.teamManage?.guest ? (myAgent.state?.disabled_team_agents || []) : []}
+      guestAction={guestAction}
       signInToAsk={signedOutAsk}
     >{signedOutAsk ? null : <HandoffDetailsPanel
       slug={config.slug}
@@ -1682,7 +1702,7 @@ export function DocumentShell({ boot, config }) {
           bridge.send({ type: 'tdoc:theme', theme: nextTheme });
         }}
         onNotificationNavigate={(item, target) => {
-          const sameDocument = item.slug === config.slug
+          const sameDocument = item.kind !== 'team_join_request' && item.slug === config.slug
             && Number(item.version || 1) === Number(config.version);
           if (!sameDocument) {
             location.href = target;
@@ -1709,6 +1729,13 @@ export function DocumentShell({ boot, config }) {
           onRename={renameDoc}
         />
       </TopBar>
+      {teamGuestsEnabled && config.teamManage?.guest ? <div className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
+        <span>{config.teamManage.invitePending
+          ? `You have been invited to join ${config.teamManage.team.name}.`
+          : `You are a guest in ${config.teamManage.team.name}. Team agents are for members.`}</span>
+        <button type="button" onClick={guestAction.onClick}>{guestAction.label}</button>
+        {guestInviteStatus ? <span>{guestInviteStatus}</span> : null}
+      </div> : null}
       {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} onClose={() => changeComparison(false)} /> : null}
 
       <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}

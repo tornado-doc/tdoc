@@ -145,7 +145,9 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await admin.getByRole('heading', { name: 'Workspace settings' }).waitFor();
       assert.deepEqual(await admin.getByRole('tab').allTextContents(), ['Docs', 'Recent', 'Starred', 'Comments', 'Trash', 'Settings']);
       await admin.getByRole('heading', { name: 'Members' }).waitFor();
+      await admin.getByRole('radio', { name: 'Agents' }).click();
       await admin.getByRole('heading', { name: 'Agents' }).waitFor();
+      await admin.getByText('Daemon running').waitFor();
       const agents = await admin.locator('#agents').textContent();
       assert.match(agents, /Raft · acme.*This computer · juliesmac.*Daemon running/s);
       await admin.getByRole('heading', { name: 'Data backup' }).waitFor();
@@ -157,6 +159,7 @@ const NESTED_TEAM = { slug: 'launch-brief', title: 'Launch brief', excerpt: 'Con
       await member.getByRole('tab', { name: 'Settings' }).click();
       assert.equal(await member.getByRole('heading', { name: 'Data backup' }).count(), 0);
       // A member sees the team's agents, and not the admin's own connectors.
+      await member.getByRole('radio', { name: 'Agents' }).click();
       const memberAgents = await member.locator('#agents').textContent();
       assert.match(memberAgents, /Team agents/);
       assert.doesNotMatch(memberAgents, /Your own agents|Add a connector/);

@@ -1157,7 +1157,8 @@ t('tdoc-agent-reply posts to .base on a hosted config', () => {
   }));
   try {
     const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
-      env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+      env: { ...process.env, HOME: home, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
+      encoding: 'utf8', timeout: 30000,
     });
     assert(r.status === 0, `hosted reply exited ${r.status}; stderr=${r.stderr}`);
     assert(/"id":"c_hosted"/.test(r.stdout),
