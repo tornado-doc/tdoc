@@ -74,7 +74,7 @@ t('mobile onboarding actions keep names and 44px touch targets', () => {
 t('the installer line matches setup and carries no credentials', () => {
   assert(dialog.includes('bin/tdoc-install | bash') && html.includes('bin/tdoc-install | bash'), 'one official installer');
   assert(!/token\s*(is|=)|Authorization|Bearer/.test(dialog), 'no embedded credential');
-  assert(dialog.includes('copyText(command)') && dialog.includes("copy(INSTALL_PROMPT, 'install', promptRef)") && dialog.includes("copy(CONNECT_PROMPT, 'setup', connectRef)"), 'each copy action uses its corresponding command');
+  assert(dialog.includes('copyText(command)') && dialog.includes("copy(instruction, 'instruction', instructionRef)"), 'each copy action uses its corresponding command');
 });
 
 t('a newcomer is told what to have before pasting', () => {

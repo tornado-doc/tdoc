@@ -206,7 +206,7 @@ t('connection readiness comes from the server; history alone cannot finish setup
     && server.includes('const paired = Boolean(process.env.TDOC_E2E_PAIRED);'), 'both hosts say whether a terminal has connected');
   assert(gate.includes("const connected = Boolean(computer?.status === 'active')")
     && gate.includes("const runtimeReady = Boolean(chosen && computer?.status === 'active')")
-    && gate.includes('if (!runtimeReady || busy) return;') && gate.includes('Finish setup'),
+    && gate.includes('if (!runtimeReady || busy) return;') && gate.includes('!manual && runtimeReady ? finishConnection : copyInstruction'),
     'only a live, verified runtime can finish automatic setup');
   assert(gate.includes('const POLL_MS = 3000;'), '3s while waiting');
   assert(gate.includes("postOnboardingEvent('copy_clicked')"), 'copying is telemetry, not a fake connected stamp');

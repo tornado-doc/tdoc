@@ -736,7 +736,7 @@ t('the real connection remains visible when a computer stops responding', () => 
   assert(gate.includes('window.clearTimeout(timer)'), 'unmount clears the timer');
 });
 t('the chosen AI opens a private practice doc through the account API', () => {
-  assert(gate.includes('createOnboardingPractice({ ...target, product: completedPath === 'connect' ? chosen.cli : productId })') && gate.includes('device: chosen?.device, cli: chosen?.cli'), 'explicit target');
+  assert(gate.includes("createOnboardingPractice({ ...target, product: completedPath === 'connect' ? chosen.cli : productId })") && gate.includes('device: chosen?.device, cli: chosen?.cli'), 'explicit target');
   assert(gate.includes('location.assign(result.url)'), 'opens server-created doc');
   assert(!gate.includes('PORTRAIT_PROMPT'), 'history scanning is not required');
 });
