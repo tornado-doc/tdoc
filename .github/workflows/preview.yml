@@ -11,7 +11,7 @@ name: PR preview
 # Optional preview Clerk OAuth application (separate from production):
 #   GitHub Actions variable TDOC_PREVIEW_OIDC_CLIENT_ID
 #   GitHub Actions secret TDOC_PREVIEW_OIDC_CLIENT_SECRET
-#   Clerk redirect URI https://<preview-host>/auth/oidc/callback
+#   Clerk redirect URI https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback
 #
 # KV id is discovered at runtime (namespace title tdoc-preview-META).
 # R2 bucket tdoc-preview-docs is created if missing.
@@ -406,7 +406,7 @@ jobs:
           **Custom design (no theme switch):** https://${PREVIEW_HOST}/d/custom-design-pr-${PR}/v/1
           **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1
           **Or a document:** https://${PREVIEW_HOST}/d/conway-life/v/2
-          **Clerk callback (when enabled):** https://${PREVIEW_HOST}/auth/oidc/callback
+          **Clerk sign-in (when enabled):** the fixed tdoc-preview callback returns to this PR URL.
 
           This link is unique to this PR. New commits update the same URL. It is not [tdoc.dev](https://tdoc.dev).
 

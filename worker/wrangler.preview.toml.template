@@ -56,7 +56,9 @@ TDOC_PREVIEW = "1"
 # public Client ID as GitHub Actions variable TDOC_PREVIEW_OIDC_CLIENT_ID and
 # its secret as GitHub Actions secret TDOC_PREVIEW_OIDC_CLIENT_SECRET. The
 # preview workflow injects these vars and installs OIDC_CLIENT_SECRET only on
-# tdoc-preview. Register each PR's exact /auth/oidc/callback URL in Clerk.
+# tdoc-preview. Register only the stable callback
+# https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback in Clerk.
+# A 60-second one-use ticket returns the session to the originating PR alias.
 
 # Secret: TDOC_UPLOAD_TOKEN — preview-only; never the production token.
 # Secret: GITHUB_CLIENT_SECRET — set via `wrangler secret put GITHUB_CLIENT_SECRET`

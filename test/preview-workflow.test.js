@@ -12,6 +12,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const root = path.join(__dirname, '..');
 const wf = fs.readFileSync(path.join(root, '.github/workflows/preview.yml'), 'utf8');
+const baseWf = fs.readFileSync(path.join(root, '.github/workflows/preview-auth-base.yml'), 'utf8');
 const prod = fs.readFileSync(path.join(root, '.github/workflows/deploy-tdoc-dev.yml'), 'utf8');
 const tpl = fs.readFileSync(path.join(root, 'worker/wrangler.preview.toml.template'), 'utf8');
 
@@ -138,6 +139,19 @@ t('preview Clerk client is optional, isolated, and rejects TOML injection', () =
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+t('fixed Clerk callback deploy is main-only and does not touch production', () => {
+  assert(wf.includes('https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback'),
+    'PR preview must document the one fixed Clerk callback');
+  assert(tpl.includes('https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback'),
+    'preview Worker config must document the fixed callback');
+  assert(baseWf.includes('workflow_dispatch:') && baseWf.includes("github.ref == 'refs/heads/main'"),
+    'stable callback deployment must run from main only');
+  assert(baseWf.includes('wrangler deploy --name tdoc-preview') &&
+    baseWf.includes('wrangler secret put OIDC_CLIENT_SECRET --name tdoc-preview'),
+  'stable callback host needs its own deployed code and secret');
+  assert(!/wrangler deploy --name tdoc(?:\s|$)/m.test(baseWf), 'callback deploy must never target production');
 });
 
 t('preview deploy rejects either half of the Clerk OAuth pair', () => {
