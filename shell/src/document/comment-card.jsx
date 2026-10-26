@@ -201,6 +201,7 @@ function ReplyForm({
 
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
+    if (sendToAgent && v4 && !target && !agents.preselected) { ask.putDefault(); return; }
     setBusy(true);
     try {
       let opts;
@@ -256,7 +257,9 @@ function ReplyForm({
           {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
         </span>
         <div className="tdoc-reply-form-actions">
-          {v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent" /> : null}
+          {v4 && agentSetupHref && !canSendToAgent ? (
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
+          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent" /> : null}
           {agentButtons && !canSendToAgent && agentSetupHref ? (
             <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
           ) : null}

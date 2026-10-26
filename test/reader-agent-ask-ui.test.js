@@ -320,7 +320,7 @@ async function touchSelect(page, phrase) {
       await context.close();
     });
 
-    await t('the owner keeps the paper plane; the composer is @agent + Comment; @agent puts the default in and lists tdoc AI with what is left', async () => {
+    await t('without a connected agent the comment @agent button opens the connection guide', async () => {
       const { context, page } = await open(owner, DESKTOP);
       await page.locator('#tdoc-send-agent-btn').waitFor();
       await noBarAsk(page);
@@ -329,24 +329,12 @@ async function touchSelect(page, phrase) {
       await pop.waitFor();
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
       if (labels.join('|') !== '@agent|Comment') throw new Error(`owner popover buttons: ${labels.join('|')}`);
-      if (await pop.locator('.tdoc-ask-row, .tdoc-agent-pill').count()) throw new Error('agent options before any agent is named');
       await pop.locator('textarea').fill('Tighten this');
-      // @agent puts the default agent in as a pill, no menu to go through.
       await pop.locator('.tdoc-composer-agent').click();
-      await pop.locator('.tdoc-agent-pill').waitFor();
-      if (await page.locator('.ui-menu-popup').count()) throw new Error('@agent opened a menu');
-      if (!/@\u2060tdoc AI/.test(await pop.locator('textarea').inputValue())) throw new Error(`default not put in: ${await pop.locator('textarea').inputValue()}`);
-      // The pill's dropdown lists the agents, tdoc AI with what is left.
-      await pop.locator('.tdoc-agent-pill').click();
-      const menu = page.locator('.ui-menu-popup');
-      await menu.waitFor();
-      const items = await menu.innerText();
-      if (!/tdoc AI/.test(items) || !/\d+ free/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
-      if (await menu.locator('a[href="/start"]').count() !== 1) throw new Error('no Connect my agent link');
-      await page.keyboard.press('Escape');
-      // The owner has no agent of their own here: tdoc AI only asks.
-      await answersOnly(pop);
-      if (!(await pop.locator('.tdoc-only-me').count())) throw new Error('no Only me for tdoc AI');
+      await pop.getByText('No agent is connected yet.').waitFor();
+      if (await pop.locator('.tdoc-agent-pill').count()) throw new Error('an unrelated agent was preselected');
+      if (await pop.getByRole('link', { name: 'Set up an agent' }).count() !== 1) throw new Error('missing setup action');
+      if (await pop.getByText('Or paste this into your agent').count() !== 1) throw new Error('missing existing connection prompt');
       await context.close();
     });
   } finally {

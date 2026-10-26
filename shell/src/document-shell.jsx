@@ -1064,13 +1064,13 @@ export function DocumentShell({ boot, config }) {
   // answering where, for the composers and the cards.
   const agentMentions = useMemo(() => ({
     choices: agentChoices,
-    preselected: agentChoices[0] || null,
+    preselected: agentChoices.find((agent) => notifyTargets.default && sameTarget(agent, notifyTargets.default)) || null,
     ai: { remaining: aiRemaining, thinking: aiThinking, offered: offersTdocAi },
     // An Only me question asked from a reply box, which shows its answer.
     privateReply: privateAskView && privateAskView.parentId ? privateAskView : null,
     onMakePublic: () => makePublicRef.current(),
     onClosePrivate: () => setPrivateAsk(null),
-  }), [agentChoices, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk]);
+  }), [agentChoices, notifyTargets.default, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);

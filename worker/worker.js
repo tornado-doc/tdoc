@@ -12472,6 +12472,15 @@ function sameNotifyTarget(a, b) {
     && a.server_id === b.server_id && a.agent_sub === b.agent_sub;
 }
 
+// Version metadata and handoff preferences need only an identity. In
+// particular, do not copy a webhook URL into either record.
+function notifyTargetIdentity(target) {
+  if (!target || !NOTIFY_PROVIDERS[target.provider]) return null;
+  const { provider, server_id, agent_sub } = target;
+  return typeof server_id === 'string' && server_id && typeof agent_sub === 'string' && agent_sub
+    ? { provider, server_id, agent_sub } : null;
+}
+
 const NOTIFY_PROVIDERS = {
   raft: {
     validateTarget(t) {
@@ -13159,6 +13168,10 @@ async function accountNotifyTargets(env, accountId) {
   return [...byKey.values()];
 }
 
+function lastDeliveredHandoffAgent(handoffs) {
+  return (handoffs || []).find((h) => h && h.recipient && h.delivery?.status && h.delivery.status !== 'failed')?.recipient || null;
+}
+
 // Raft servers this account has connected. The trust boundary for Raft is the
 // server, not the agent: once a server is connected, any agent on it that
 // says who it is (and the CLI says so on every publish and reply) can take a
@@ -13194,7 +13207,8 @@ async function resolveNotifyTargets(env, slug) {
     .map(normalizeNotifyTarget)
     .filter((t) => t && !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)))
     .sort(byRecency);
-  const fallbackList = await accountNotifyTargets(env, ownerAccount);
+  const fallbackList = (await accountNotifyTargets(env, ownerAccount))
+    .filter((t) => !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)));
   const servers = await accountRaftServers(env, ownerAccount);
   // Then every other agent on the account's connected servers, from Raft's
   // directory, so the dropdown is the whole server and not only the agents
@@ -13210,21 +13224,25 @@ async function resolveNotifyTargets(env, slug) {
   fallbackList.splice(0, fallbackList.length, ...fallbackList.map(withStatus));
   // And the daemon's word on whether a local agent's computer is around.
   await decorateLocalSeen(env, ownerAccount, [docTargets, fallbackList]);
-  const fallback = fallbackList[0] || null;
-  if (docTargets.length) {
-    // The doc's last-touched agent is preselected, but the person may send
-    // to any of their agents: the doc's others first, then the account's.
-    const accountOnly = fallbackList.filter((t) => !docTargets.some((d) => sameNotifyTarget(d, t)));
-    return {
-      default: { ...docTargets[0], source: 'doc' },
-      candidates: [
-        ...docTargets.slice(1).map(t => ({ ...t, source: 'doc' })),
-        ...accountOnly.map(t => ({ ...t, source: 'account' })),
-        ...directory,
-      ],
-      fallback,
-      reason: null,
-    };
+  const offered = [];
+  for (const t of [...docTargets.map((x) => ({ ...x, source: 'doc' })),
+    ...fallbackList.map((x) => ({ ...x, source: 'account' })), ...directory]) {
+    if (!offered.some((x) => sameNotifyTarget(x, t))) offered.push(t);
+  }
+  // Connection order is not a recommendation. A version names its exact
+  // publisher; older versions that know only an account cannot distinguish
+  // that account's agents. A successful handoff on THIS document is the only
+  // fallback. Activity elsewhere only affects ordering, never selection.
+  const writer = docLastWriter(meta);
+  const publisher = writer?.kind === 'agent' ? writer.agent : null;
+  const docHandoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+  const preferred = [publisher, docHandoff]
+    .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
+  offered.sort(byRecency);
+  const ranked = offered.map((t) => ({ ...t, ...(publisher && sameNotifyTarget(t, publisher) ? { last_writer: true } : {}) }));
+  if (ranked.length) {
+    const chosen = preferred && ranked.find((t) => sameNotifyTarget(t, preferred));
+    return { default: chosen || null, candidates: ranked.filter((t) => t !== chosen), fallback: null, reason: null };
   }
   // With no recipient the caller has to tell a person WHY, and the honest
   // answer differs by case. Saying "this agent has notifications off" when we
@@ -13241,14 +13259,13 @@ async function resolveNotifyTargets(env, slug) {
   // someone who already did.
   //
   // With no default yet, directory agents are still offered: nothing is
-  // preselected for @agent, but Send to agent can pick one, and that pick
-  // becomes the account default (see /api/notify/handoff).
-  const raftServers = fallback ? [] : servers.map((sv) => ({ server_id: sv.server_id, server_slug: sv.server_slug }));
+  // preselected for @agent, but Send to agent can explicitly pick one.
+  const raftServers = servers.map((sv) => ({ server_id: sv.server_id, server_slug: sv.server_slug }));
   return {
-    default: fallback ? { ...fallback, source: 'account' } : null,
-    candidates: [...fallbackList.slice(1).map(t => ({ ...t, source: 'account' })), ...directory],
-    fallback,
-    reason: fallback ? null : 'no_agent_bound',
+    default: null,
+    candidates: [],
+    fallback: null,
+    reason: 'no_agent_bound',
     ...(raftServers.length ? { raft_servers: raftServers } : {}),
   };
 }
@@ -13263,13 +13280,14 @@ async function resolveAccountNotifyTargets(env, accountId) {
     return d ? { ...t, status: d.status } : t;
   });
   await decorateLocalSeen(env, accountId, [targets]);
-  const fallback = targets[0] || null;
+  const offered = [...targets.map((t) => ({ ...t, source: 'account' })), ...directory];
+  offered.sort((a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || '')));
   return {
-    default: fallback ? { ...fallback, source: 'account' } : null,
-    candidates: [...targets.slice(1).map((t) => ({ ...t, source: 'account' })), ...directory],
-    fallback,
-    reason: fallback ? null : 'no_agent_bound',
-    ...(!fallback && servers.length ? { raft_servers: servers.map((sv) => ({ server_id: sv.server_id, server_slug: sv.server_slug })) } : {}),
+    default: null,
+    candidates: offered,
+    fallback: null,
+    reason: offered.length ? null : 'no_agent_bound',
+    ...(!offered.length && servers.length ? { raft_servers: servers.map((sv) => ({ server_id: sv.server_id, server_slug: sv.server_slug })) } : {}),
   };
 }
 
@@ -13287,7 +13305,7 @@ function docLastWriter(meta) {
   // Made by a person in the browser without an edit: a blank doc's scaffold,
   // a duplicate. Nobody's agent wrote it.
   if (v.blank || v.human) return { kind: 'person', login: v.author || '' };
-  if (v.by) return { kind: 'agent', account_id: v.by };
+  if (v.by) return { kind: 'agent', account_id: v.by, agent: notifyTargetIdentity(v.publisher_agent) };
   // Older versions do not say who wrote them; the owner is a guess (legacy).
   const owner = meta.hosted && meta.hosted.account_id;
   return owner ? { kind: 'agent', account_id: owner, legacy: true } : null;
@@ -13385,11 +13403,6 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
     const hosted = (gate.meta && gate.meta.hosted) || {};
     const owner = await agentOwner(env, hosted.account_id, hosted.owner_key || hosted.github_login);
     const resolved = withTargetOwner(await resolveNotifyTargets(env, slug), owner, 'personal');
-    // The owner's agent wrote it (the only agent that can): the default says so.
-    const writer = docLastWriter(gate.meta);
-    if (resolved && resolved.default && writer && writer.kind === 'agent' && writer.account_id === hosted.account_id) {
-      resolved.default = { ...resolved.default, last_writer: true };
-    }
     return resolved;
   }
   // The team's own agents, when the team agent wrote this doc; an admin's
@@ -13411,16 +13424,21 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
     if (!agents.length) {
       return { default: null, candidates: [], fallback: null, reason: none, writer: policy.writer ? policy.writer.kind : null, writer_name: await docWriterName(env, gate.meta, policy.writer) };
     }
-    return { default: agents[0], candidates: agents.slice(1), fallback: null, reason: null };
+    const handoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+    const preferred = agents.find((t) => t.last_writer) || agents.find((t) => sameNotifyTarget(t, handoff)) || null;
+    return { default: preferred, candidates: agents.filter((t) => t !== preferred), fallback: null, reason: null };
   }
   // localDriverAccount only returns one of the caller's own accounts, so the
   // caller's credential names the account these connections belong to.
   const owner = await agentOwner(env, localDriver, credentialKey(gate.session || gate.actor));
   const own = withTargetOwner(await resolveAccountNotifyTargets(env, localDriver), owner, 'team');
-  const wroteIt = policy.writer && policy.writer.kind === 'agent' && policy.writer.account_id === localDriver;
-  if (wroteIt && own.default) own.default = { ...own.default, last_writer: true };
-  if (!agents.length) return own;
-  return { ...own, default: agents[0], candidates: [...agents.slice(1), ...[own.default, ...(own.candidates || [])].filter(Boolean)], reason: null };
+  const publisher = policy.writer?.kind === 'agent' && policy.writer.account_id === localDriver ? policy.writer.agent : null;
+  const handoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+  const offered = [...agents, ...(own.candidates || [])];
+  const preferred = offered.find((t) => publisher && sameNotifyTarget(t, publisher))
+    || offered.find((t) => sameNotifyTarget(t, handoff)) || null;
+  return { ...own, default: preferred ? { ...preferred, ...(publisher && sameNotifyTarget(preferred, publisher) ? { last_writer: true } : {}) } : null,
+    candidates: offered.filter((t) => t !== preferred), reason: offered.length ? null : own.reason };
 }
 
 // The account an agent acts for, as its rows and replies name it: the
@@ -14259,14 +14277,30 @@ const ASK_SYSTEM_PROMPT = [
 
 function askConfig(env) {
   const key = String((env && env.ASK_API_KEY) || '').trim();
+  const previewMock = env?.TDOC_PREVIEW === '1' && !key;
   const base = String((env && env.ASK_API_BASE) || '').trim().replace(/\/+$/, '') || ASK_DEFAULT_API_BASE;
   const model = String((env && env.ASK_MODEL) || '').trim() || ASK_DEFAULT_MODEL;
   const raw = Number(env && env.ASK_FREE_LIMIT);
   const limit = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : ASK_DEFAULT_FREE_LIMIT;
   const rawMax = Number(env && env.ASK_MAX_TOKENS);
   const maxTokens = Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : ASK_DEFAULT_MAX_TOKENS;
-  return { available: Boolean(key), key, base, model, limit, maxTokens };
+  return { available: Boolean(key) || previewMock, previewMock, key, base, model, limit, maxTokens };
 }
+
+const ASK_PREVIEW_ANSWER = [
+  '# 预览示例回答',
+  '',
+  '这是预览站的固定示例，用来查看回答的排版。',
+  '',
+  '- 标题和列表会按 Markdown 显示。',
+  '- 正式站会根据文档内容生成回答。',
+  '',
+  '```js',
+  'const answer = "preview";',
+  '```',
+  '',
+  '[了解 tdoc](https://tdoc.dev)',
+].join('\n');
 
 function askUsedKey(accountKey) {
   return `ask-used:${accountKey}`;
@@ -14561,7 +14595,7 @@ async function handleAsk(env, req, url, slug) {
     }
   }
   const used = Number(await env.META.get(usedKey)) || 0;
-  if (used >= cfg.limit) return json({ error: 'ask_limit', limit: cfg.limit, remaining: 0, connect_href: '/start' }, { status: 429 });
+  if (!cfg.previewMock && used >= cfg.limit) return json({ error: 'ask_limit', limit: cfg.limit, remaining: 0, connect_href: '/start' }, { status: 429 });
   const obj = await env.DOCS.get(`docs/${slug}/v${asked}/index.html`);
   if (!obj) return json({ error: 'not_found' }, { status: 404 });
   const doc = askDocText(await obj.text());
@@ -14579,8 +14613,8 @@ async function handleAsk(env, req, url, slug) {
   });
   // Reserve before the call so a burst cannot spend more than the allowance;
   // a failed call gives the question back.
-  await env.META.put(usedKey, String(used + 1));
-  const out = await callAskModel(cfg, messages);
+  if (!cfg.previewMock) await env.META.put(usedKey, String(used + 1));
+  const out = cfg.previewMock ? { ok: true, answer: ASK_PREVIEW_ANSWER } : await callAskModel(cfg, messages);
   if (!out.ok) {
     // The model did not answer: give the question back, from the counter as
     // it is now (never the value read before the call).
@@ -14588,7 +14622,7 @@ async function handleAsk(env, req, url, slug) {
     console.log(JSON.stringify({ event: 'ask_failed', status: out.status || null, detail: out.detail || null }));
     return json({ error: 'ask_failed' }, { status: 502 });
   }
-  const remaining = Math.max(0, cfg.limit - used - 1);
+  const remaining = Math.max(0, cfg.limit - used - (cfg.previewMock ? 0 : 1));
   if (asking) {
     const accountId = await sessionAccountId(env, session);
     const owner = await agentOwner(env, accountId, credentialKey(session));
@@ -20698,6 +20732,11 @@ const tdocHandlers = {
       if (incoming && writesLatestMeta) {
         let pendingPreviewTask = null;
         try {
+          // Resolve the exact publisher from a verified session or an agent
+          // already linked to this account. The upload's version JSON cannot
+          // name its own publisher.
+          const publishingAgent = auth.actor?.kind === 'hosted' && !auth.actor.team_agent
+            ? await actingAgent(env, req, auth.actor) : null;
           // Remote storage is authoritative. Preserve versions that a browser
           // editor may have created since this local checkout was last pulled.
           const currentMeta = await loadDocMeta(env, slug);
@@ -20710,12 +20749,12 @@ const tdocHandlers = {
             // A catch-up commits up to this version only; the client's newer
             // ones land with their own uploads.
             if (catchUp && number > verNum) continue;
-            // `token`, `team_agent`, `by`, `source`, `author`, `blank` and
+            // `token`, `team_agent`, `by`, `publisher_agent`, `source`, `author`, `blank` and
             // `human` are the
             // server's record of who wrote a version (docLastWriter decides
             // who may hand edits to an agent from them); a client cannot
             // write any of them.
-            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, source: _clientSource, author: _clientAuthor, blank: _clientBlank, human: _clientHuman, ...clean } = item || {};
+            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, publisher_agent: _clientPublisher, source: _clientSource, author: _clientAuthor, blank: _clientBlank, human: _clientHuman, ...clean } = item || {};
             if (!versionByNumber.has(number) || number === verNum) versionByNumber.set(number, clean);
           }
           if (!versionByNumber.has(verNum)) {
@@ -20736,6 +20775,8 @@ const tdocHandlers = {
           // Whose agent wrote it (docLastWriter): the account behind the token.
           if (auth.actor && auth.actor.kind === 'hosted' && auth.actor.account_id && !auth.actor.team_agent) storedEntry.by = auth.actor.account_id;
           else delete storedEntry.by;
+          if (publishingAgent) storedEntry.publisher_agent = notifyTargetIdentity(publishingAgent);
+          else delete storedEntry.publisher_agent;
           versionByNumber.set(verNum, storedEntry);
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)

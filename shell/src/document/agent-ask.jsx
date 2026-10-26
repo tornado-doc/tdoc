@@ -23,8 +23,8 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   const agents = useContext(AgentMentionContext);
   const choices = agents.choices || [];
   const [onlyMe, setOnlyMe] = useState(null);
-  // The agent the text names after @ (a bare @AI means the list's first).
-  const target = taggedAgent(text, choices) || (mentionsAi(text) ? choices[0] || null : null);
+  // A bare @AI follows this document's evidenced default, if there is one.
+  const target = taggedAgent(text, choices) || (mentionsAi(text) ? agents.preselected || null : null);
   const key = target ? targetKey(target) : '';
   useEffect(() => { setOnlyMe(null); }, [key]);
   const canChange = Boolean(target && target.can_edit);
@@ -36,7 +36,7 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   const private_ = ownOrCloud && (onlyMe === null ? onlyMeDefault(target) : onlyMe);
   const tagOf = (t) => `@${AGENT_TAG_JOINER}${agentMentionName(t, choices)}`;
   // The text with the default agent in it, at `at` (the caret) or the end.
-  const withAgent = (cur, t = choices[0], at = null) => {
+  const withAgent = (cur, t = agents.preselected, at = null) => {
     if (!t || taggedAgent(cur, choices)) return { text: cur, caret: null };
     const pos = at == null ? cur.length : Math.max(0, Math.min(at, cur.length));
     const before = cur.slice(0, pos);
@@ -49,7 +49,9 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   // already, the caret goes back to the text.
   const putDefault = () => {
     const box = fieldRef && fieldRef.current;
-    const next = withAgent(text, choices[0], box ? box.selectionStart : null);
+    const next = agents.preselected
+      ? withAgent(text, agents.preselected, box ? box.selectionStart : null)
+      : { text: `${text}${text && !/\s$/.test(text) ? ' ' : ''}@`, caret: null };
     if (next.text !== text) setText(next.text);
     requestAnimationFrame(() => {
       const el = fieldRef && fieldRef.current;
@@ -63,7 +65,7 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   const outgoing = (withDefault = false) => {
     const named = target;
     const filled = withDefault && !named ? withAgent(text) : { text };
-    const t = named || (withDefault ? choices[0] || null : null);
+    const t = named || (withDefault ? agents.preselected || null : null);
     const ownCloud = Boolean(t) && Boolean(t.tdoc_ai || !t.team_agent);
     const only = Boolean(t) && ownCloud && (t === named ? private_ : onlyMeDefault(t));
     const mayEdit = Boolean(t && t.can_edit) && !only;
@@ -87,7 +89,7 @@ export function AgentButton({ ask, busy = false, className = 'tdoc-composer-agen
       // Keep the caret where it is in the text: that is where the pill goes.
       onMouseDown={(event) => event.preventDefault()}
       onClick={ask.putDefault}
-      title={`Add ${agentDisplayName(ask.choices[0], ask.choices)} to this comment`}
+      title={ask.agents.preselected ? `Add ${agentDisplayName(ask.agents.preselected, ask.choices)} to this comment` : 'Choose an agent for this comment'}
     >
       @agent
     </button>

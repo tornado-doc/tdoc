@@ -117,6 +117,7 @@ export function CommentComposer({
   const { agents, target } = ask;
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
+    if (sendToAgent && !agentButtons && !target && !agents.preselected) { ask.putDefault(); return; }
     setBusy(true);
     try {
       if (agentButtons) {
@@ -205,7 +206,10 @@ export function CommentComposer({
           </span>
         )}
         <div className="tdoc-composer-foot-actions">
-          {!agentButtons ? <AgentButton ask={ask} busy={busy} /> : null}
+          {!agentButtons && connectAgentPrompt ? (
+            <button className="tdoc-composer-agent" type="button" disabled={busy} aria-expanded={connectOpen}
+              onClick={() => setConnectOpen((value) => !value)} title="Connect an agent to use @agent">@agent</button>
+          ) : !agentButtons ? <AgentButton ask={ask} busy={busy} /> : null}
           {agentButtons && !canSendToAgent && connectAgentPrompt ? (
             <button
               className="submit agent tdoc-agent-unlinked"
