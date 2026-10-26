@@ -55,7 +55,7 @@ export function useDocumentEditor({
   const legacyKey = useMemo(() => legacyDraftKey(config), [config]);
   const publishedHtml = useRef(null);
   const consideringDraft = useRef(false);
-  const [sessionReady, setSessionReady] = useState(false);
+  const manualMode = useRef(false);
   // A doc created from scratch arrives at ?edit=1: it is blank, so dropping the
   // author in read mode would show an empty page and hide the one control they
   // need. `tdoc:ready` re-sends whatever mode is current, so the frame picks
@@ -67,7 +67,9 @@ export function useDocumentEditor({
     if (stored === 'edit' && config.canEdit) return 'edit';
     if (stored === 'comment' && config.canComment) return 'comment';
     if (stored === 'read') return 'read';
-    return config.canComment ? 'comment' : 'read';
+    // On a phone, reading and copying should not open comment controls for
+    // every passage. A mode the person chose still wins on either screen.
+    return window.innerWidth <= 700 ? 'read' : (config.canComment ? 'comment' : 'read');
   });
   const [dirty, setDirty] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -79,14 +81,11 @@ export function useDocumentEditor({
     let cancelled = false;
     loadDraft(storeKey, legacyKey).then((record) => {
       if (cancelled) return;
-      if (!urlWantsEdit()) {
+      if (!manualMode.current && !urlWantsEdit() && record?.modeExplicit) {
         const next = allowedMode(record?.mode, config);
         if (next) setMode(next);
       }
-      setSessionReady(true);
-    }).catch(() => {
-      if (!cancelled) setSessionReady(true);
-    });
+    }).catch(() => {});
     return () => { cancelled = true; };
     // Load once per document. Mode is omitted so this cannot fight the author
     // switching Read/Comment/Edit after the restore.
@@ -95,12 +94,6 @@ export function useDocumentEditor({
   useEffect(() => {
     send({ type: 'tdoc:mode', mode, elementComment: !config.isLanding });
   }, [mode, send, config.isLanding]);
-
-  useEffect(() => {
-    if (!sessionReady) return undefined;
-    saveDraftMode(storeKey, mode).catch(() => {});
-    return undefined;
-  }, [mode, sessionReady, storeKey]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -124,9 +117,11 @@ export function useDocumentEditor({
       return;
     }
     if (nextMode !== 'comment') onDisableCommentSelection();
+    manualMode.current = true;
     setMode(nextMode);
     storeMode(nextMode);
-  }, [config.canComment, config.canEdit, dirty, onDisableCommentSelection, showToast]);
+    saveDraftMode(storeKey, nextMode).catch(() => {});
+  }, [config.canComment, config.canEdit, dirty, onDisableCommentSelection, showToast, storeKey]);
 
   const requestDocument = useCallback(() => new Promise((resolve, reject) => {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;

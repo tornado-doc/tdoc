@@ -178,9 +178,16 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('phone selection opens the composer without focusing or clearing the native selection', async () => {
+    await t('phone starts in Read, keeps a chosen Comment mode, and clears a dismissed selection', async () => {
       const { context, page } = await open(julie, 'launch-plan', true);
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      await page.locator('.tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await page.locator('.tdoc-mode-trigger').click();
+      await page.getByRole('menuitemradio', { name: 'Comment' }).click();
+      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+      await page.waitForFunction(() => JSON.parse(localStorage.getItem('tdoc-draft:launch-plan:julie') || '{}').modeExplicit === true);
+      await page.reload();
+      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
       const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
       await frame.evaluate(() => {
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -215,6 +222,21 @@ async function dragSelect(page, phrase) {
       if (!(await pop.isVisible()) || (await frame.evaluate(() => getSelection().toString())) !== selected) throw new Error('tapping the selected passage closed its copy/composer controls');
       await pop.getByRole('button', { name: 'Copy selected text' }).click();
       if ((await page.evaluate(() => navigator.clipboard.readText())) !== selected) throw new Error('phone copy icon missed the quote');
+      await frame.evaluate(() => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const index = node.nodeValue.indexOf('Search follows in April');
+          if (index < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, index); range.setEnd(node, index + 'Search follows in April'.length);
+          const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+          document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }));
+          return;
+        }
+      });
+      await page.waitForFunction(() => document.querySelector('.tdoc-popup .h')?.textContent?.includes('Search follows in April'));
+      const pendingText = await frame.evaluate(() => Array.from(CSS.highlights.get('tdoc-pending') || []).map((range) => range.toString()));
+      if (pendingText.length !== 1 || pendingText[0] !== 'Search follows in April') throw new Error(`old phone highlight survived a new selection: ${JSON.stringify(pendingText)}`);
       // iOS does not emit mouse events for a tap on plain document text. A tap
       // away from the selected passage must dismiss the composer and its
       // pending yellow highlight without requiring a switch to Read mode.
