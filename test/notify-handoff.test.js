@@ -192,14 +192,15 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   }
   const link = (env, token, body) => worker.fetch(req('/api/notify/link', { method: 'POST', token, body }), env, {});
 
-  await t('a link code offers an agent without picking it for an unrelated doc', async () => {
+  await t('linking a second agent leaves an unrelated doc without a default', async () => {
     const { env, token, slug } = await seed();
     const code = await pendingLink(env);
     const r = await link(env, token, { link_code: code });
     const body = await r.json();
     assert(r.status === 200 && body.ok, `link ${r.status}: ${JSON.stringify(body)}`);
     assert(body.target.agent_sub === 'uuid-a', 'the bound target is the agent that signed in');
-    // Connection alone does not prove who should receive this doc's comments.
+    await link(env, token, { link_code: await pendingLink(env, 'lk_other', { agent_sub: 'uuid-b', agent_name: 'other' }) });
+    // Connection order alone does not choose between two agents.
     const targets = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
     assert(targets.default === null && targets.candidates.some((t) => t.agent_sub === 'uuid-a'), `expected an offered agent, not a default: ${JSON.stringify(targets)}`);
   });
@@ -308,7 +309,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 200 && body.ok, `link with both credentials failed: ${r.status} ${JSON.stringify(body)}`);
     assert(body.target.agent_sub === 'uuid-a', 'bound the agent that signed in');
     const targets = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
-    assert(targets.default === null && targets.candidates.some((t) => t.agent_sub === 'uuid-a'), 'connection should be selectable without becoming the default');
+    assert(targets.default?.agent_sub === 'uuid-a', 'the author’s sole connected agent should be selected');
   });
 
   // ---- why the button is disabled ----
@@ -325,7 +326,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const { env, token, slug } = await seed();
     await link(env, token, { link_code: await pendingLink(env, 'lk_reason') });
     const r = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
-    assert(r.default === null && r.candidates.length > 0 && r.reason === null, `expected selectable recipients and no reason, got ${JSON.stringify(r)}`);
+    assert(r.default?.agent_sub === 'uuid-a' && r.reason === null, `expected the sole recipient and no reason, got ${JSON.stringify(r)}`);
   });
 
   // ---- the Raft wire format ----
@@ -503,7 +504,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       body: { slug, parent_id: commentId, text: 'done', status: 'applied', applied_in: 1, agent_login: 'claude' },
     }), env, {});
     const t2 = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
-    assert(t2.default === null && t2.candidates.some((agent) => agent.source === 'doc'), `a reply alone is not the publisher or a handoff choice: ${JSON.stringify(t2)}`);
+    assert(t2.default?.source === 'doc' && !t2.default.last_writer, `a reply is doc activity, not an exact publisher claim: ${JSON.stringify(t2)}`);
   });
 
   await t('publishing without a Raft identity binds nobody and still succeeds', async () => {
@@ -607,10 +608,12 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   // account -- linking needs the token AND a Raft-verified identity -- and the
   // seat it earns only chooses who is pinged; it never grants access.
   const LINKED = { provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', server_slug: 'julie', agent_name: 'xiaocc' };
-  async function seedLinked(slug = 'self-report-doc') {
+  async function seedLinked(slug = 'self-report-doc', second = false) {
     const env = makeEnv(mod.CommentsStore);
     const tok = await issue(worker, env, 'owner');
-    await env.META.put(`account-notify:${tok.account_id}`, JSON.stringify([LINKED]));
+    await env.META.put(`account-notify:${tok.account_id}`, JSON.stringify(second
+      ? [LINKED, { ...LINKED, agent_sub: 'uuid-b', agent_name: 'other' }]
+      : [LINKED]));
     return { env, tok, slug };
   }
   const publishAs = (env, tok, slug, claim, version = 1) => worker.fetch(req('/api/upload', {
@@ -659,7 +662,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   });
 
   await t('an agent that is not linked to the account is ignored without inventing a default', async () => {
-    const { env, tok, slug } = await seedLinked();
+    const { env, tok, slug } = await seedLinked('unlinked-agent', true);
     await publishAs(env, tok, slug, 'S1/uuid-stranger');
     const r = await targetsOf(env, tok, slug);
     assert(r.default === null && r.candidates.some((agent) => agent.agent_sub === 'uuid-a'),
@@ -667,28 +670,35 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   });
 
   await t('the same agent on another Raft server does not match', async () => {
-    const { env, tok, slug } = await seedLinked();
+    const { env, tok, slug } = await seedLinked('wrong-server-agent', true);
     await publishAs(env, tok, slug, 'S2/uuid-a');
     const r = await targetsOf(env, tok, slug);
     assert(r.default === null, `matched on agent id alone: ${JSON.stringify(r.default)}`);
   });
 
   await t('a malformed claim is ignored rather than trusted', async () => {
-    const { env, tok, slug } = await seedLinked();
+    const { env, tok, slug } = await seedLinked('malformed-agent', true);
     await publishAs(env, tok, slug, 'S1/uuid-a/extra; drop');
     const r = await targetsOf(env, tok, slug);
     assert(r.default === null, `a malformed header was honoured: ${JSON.stringify(r.default)}`);
   });
 
-  await t('no claim at all changes nothing -- the old behaviour holds', async () => {
+  await t('an account-stamped older version with one linked agent defaults to that agent', async () => {
     const { env, tok, slug } = await seedLinked();
     await publishAs(env, tok, slug, null);
     const r = await targetsOf(env, tok, slug);
-    assert(r.default === null, `expected no default, got ${JSON.stringify(r.default)}`);
+    assert(r.default?.agent_sub === LINKED.agent_sub, `sole agent was not selected: ${JSON.stringify(r.default)}`);
+  });
+
+  await t('an account-stamped older version with multiple agents has no default', async () => {
+    const { env, tok, slug } = await seedLinked('ambiguous-older-doc', true);
+    await publishAs(env, tok, slug, null);
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default === null && r.candidates.length === 2, `ambiguous author was selected: ${JSON.stringify(r)}`);
   });
 
   await t('answering a comment claims the seat the same way publishing does', async () => {
-    const { env, tok, slug } = await seedLinked('self-report-reply');
+    const { env, tok, slug } = await seedLinked('self-report-reply', true);
     await publishAs(env, tok, slug, null);
     const reader = await putSession(env, 'reader');
     const posted = await worker.fetch(req('/api/comments', {

@@ -13276,7 +13276,7 @@ async function accountRaftServers(env, accountId) {
 
 // doc first, account second. Returns what the handoff panel renders: one
 // preselected recipient, the other recent ones as switchable candidates.
-async function resolveNotifyTargets(env, slug) {
+async function resolveNotifyTargets(env, slug, viewerAccountId = null) {
   const meta = await loadDocMeta(env, slug);
   const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
   const ownerAccount = meta && meta.hosted && meta.hosted.account_id;
@@ -13309,13 +13309,16 @@ async function resolveNotifyTargets(env, slug) {
   }
   // Connection order is not a recommendation. A version names its exact
   // publisher; older versions that know only an account cannot distinguish
-  // that account's agents. A successful handoff on THIS document is the only
-  // fallback. Activity elsewhere only affects ordering, never selection.
+  // between multiple agents. With exactly one available agent, the author
+  // viewing their own document can still use that agent by default.
   const writer = docLastWriter(meta);
   const publisher = writer?.kind === 'agent' ? writer.agent : null;
   const docHandoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
-  const preferred = [publisher, docHandoff]
+  const evidenced = [publisher, docHandoff]
     .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
+  const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
+    && !writer.agent && writer.account_id === viewerAccountId && offered.length === 1 ? offered[0] : null;
+  const preferred = evidenced || soleAuthorAgent;
   offered.sort(byRecency);
   const ranked = offered.map((t) => ({ ...t, ...(publisher && sameNotifyTarget(t, publisher) ? { last_writer: true } : {}) }));
   if (ranked.length) {
@@ -13480,7 +13483,7 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
   if (!(gate.meta && gate.meta.workspace_id)) {
     const hosted = (gate.meta && gate.meta.hosted) || {};
     const owner = await agentOwner(env, hosted.account_id, hosted.owner_key || hosted.github_login);
-    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug), owner, 'personal');
+    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug, localDriver), owner, 'personal');
     return resolved;
   }
   // The team's own agents, when the team agent wrote this doc; an admin's
@@ -13515,7 +13518,9 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
   const offered = [...agents, ...(own.candidates || [])];
   const preferred = offered.find((t) => t.last_writer)
     || offered.find((t) => publisher && sameNotifyTarget(t, publisher))
-    || offered.find((t) => sameNotifyTarget(t, handoff)) || null;
+    || offered.find((t) => sameNotifyTarget(t, handoff))
+    || (policy.writer?.kind === 'agent' && !policy.writer.legacy && !policy.writer.agent
+      && policy.writer.account_id === localDriver && offered.length === 1 ? offered[0] : null);
   return { ...own, default: preferred ? { ...preferred, ...(publisher && sameNotifyTarget(preferred, publisher) ? { last_writer: true } : {}) } : null,
     candidates: offered.filter((t) => t !== preferred), reason: offered.length ? null : own.reason };
 }
