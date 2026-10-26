@@ -3,7 +3,8 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Terminal, Webhook } from 'lucide-react';
+import { Terminal, Webhook } from 'lucide-react';
+import { AskIcon } from '../ui/ask-icon.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
@@ -84,7 +85,7 @@ function sinceText(iso) {
 }
 
 export function ProviderMark({ target, size = 18 }) {
-  if (target && target.tdoc_ai) return <Sparkles size={size} aria-hidden="true" />;
+  if (target && target.tdoc_ai) return <AskIcon size={size} />;
   const meta = providerMeta(target);
   if (meta.mark === 'raft') return <RaftMark size={size} />;
   if (meta.mark === 'webhook') return <Webhook size={size} aria-hidden="true" />;
