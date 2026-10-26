@@ -55,6 +55,12 @@ finally { fs.rmSync(config, { force: true }); }
         await page.close();
       } catch (error) { failed++; console.log(`  ✗ ${width}px: ${error.message}`); }
     }
+    const member = await browser.newPage();
+    await member.goto(`${base}/?role=member`);
+    await member.getByRole('radio', { name: 'Members' }).waitFor();
+    assert.equal(await member.getByRole('radio', { name: 'Guests' }).count(), 0, 'member should not see guest settings');
+    await member.close();
+    console.log('  ✓ member settings omit private guest roster');
   } finally { await browser.close(); server.close(); fs.rmSync(out, { recursive: true, force: true }); }
   console.log(failed ? `${failed} failed` : 'all passed');
   process.exit(failed ? 1 : 0);

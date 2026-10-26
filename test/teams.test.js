@@ -87,6 +87,13 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(detail.status === 200 && detail.body.team.members.length === 3, 'three members');
     assert(!detail.body.team.invites.includes('bob'), 'bob invite cleared');
     assert(!detail.body.team.invite_url, 'members do not get the invite link');
+    const savedTeam = JSON.parse(await env.META.get(`team:${team.id}`));
+    savedTeam.members.find((member) => member.account_id === 'acct-alice').email = 'alice@example.com';
+    await env.META.put(`team:${team.id}`, JSON.stringify(savedTeam));
+    const memberDetail = await call(`/api/team?id=${team.id}`, { cookie: bob });
+    const adminDetail = await call(`/api/team?id=${team.id}`, { cookie: alice });
+    assert(!memberDetail.body.team.members.some((member) => member.email), 'member cannot read teammate emails');
+    assert(adminDetail.body.team.members.some((member) => member.email === 'alice@example.com'), 'admin can read member email');
     const page = await call(`/team/join/${token}`, { cookie: bob });
     assert(page.status === 302 && page.r.headers.get('Location') === `/me?team=${team.id}`, 'member is sent to the team');
   });
@@ -118,10 +125,16 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(cannotCreate.status === 403, 'guest cannot create team document');
     const agentList = await call('/api/docs/plan/my-agent', { cookie: guests[0] });
     assert(agentList.status === 200 && agentList.body.team_agents.length === 0, 'team agent unavailable to guest');
+    const createAgent = await call('/api/team/agents', { method: 'POST', cookie: guests[0],
+      body: { id: team.id, name: 'Guest agent' } });
+    assert(createAgent.status === 404, 'guest cannot create a team agent via direct POST');
     const roster = await call(`/api/team/guests?id=${team.id}`, { cookie: alice });
     assert(roster.status === 200 && roster.body.guests.length === 5 && roster.body.limit === 5, `roster ${JSON.stringify(roster.body)}`);
     const teammateRoster = await call(`/api/team/guests?id=${team.id}`, { cookie: bob });
-    assert(teammateRoster.status === 200 && teammateRoster.body.guests.length === 5, 'members see guest list');
+    assert(teammateRoster.status === 403 && teammateRoster.body.error === 'admin_required', 'members cannot read guest details');
+    const teammateEdit = await call('/api/team/guests', { method: 'POST', cookie: bob,
+      body: { id: team.id, invitee: 'guest1', action: 'remove' } });
+    assert(teammateEdit.status === 403, 'members cannot change guests');
     assert(roster.body.guests[0].documents.some((doc) => doc.slug === 'plan'), 'guest document listed');
     assert(roster.body.guests[0].added_by === 'alice', 'inviter recorded');
     const outsider = await call(`/api/team/guests?id=${team.id}`, { cookie: guests[0] });
@@ -129,6 +142,17 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const sixth = await call('/api/doc/access', { method: 'PATCH', cookie: alice,
       body: { slug: 'plan', access: { allowed_users: [...firstFive, 'guest6'] } } });
     assert(sixth.status === 409 && sixth.body.error === 'team_guest_limit', `sixth ${sixth.status} ${JSON.stringify(sixth.body)}`);
+    await seedDoc(env, 'guest-move-cap', 'alice', { visibility: 'private', allowed_users: ['guest6'] });
+    const moveSixth = await call('/api/team/move', { method: 'POST', cookie: alice,
+      body: { slugs: ['guest-move-cap'], team: team.id } });
+    assert(moveSixth.status === 409 && !JSON.parse(await env.META.get('meta:guest-move-cap')).workspace_id, 'moving a shared doc cannot bypass cap');
+    const publishToken = 'guest-cap-publish';
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(publishToken)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    await env.META.put(`hosted-token:${hash}`, JSON.stringify({ account_id: 'acct-bob', github_login: 'bob', scope: { me: false, teams: [team.id] } }));
+    const publishSixth = await call('/api/upload', { method: 'POST', token: publishToken,
+      body: { slug: 'guest-publish-cap', version: 1, html: '<p>blocked</p>',
+        access_patch: { allowed_users_add: ['guest6'] } } });
+    assert(publishSixth.status === 409 && !await env.DOCS.head('docs/guest-publish-cap/v1/index.html'), 'publish patch cannot bypass cap');
     const invite = await call('/api/team/guests', { method: 'POST', cookie: alice,
       body: { id: team.id, invitee: 'guest1', action: 'invite_member' } });
     assert(invite.status === 200 && invite.body.invites.includes('guest1'), 'member invite created');
@@ -136,12 +160,21 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(request.status === 200 && request.body.requested, `join request ${request.status}`);
     const adminInbox = JSON.parse(await env.META.get('inbox:alice'));
     assert(adminInbox.items.some((item) => item.kind === 'team_join_request' && item.team_id === team.id), 'admin notified');
+    const repeat = await call('/api/team/request-join', { method: 'POST', cookie: guests[1], body: { slug: 'plan' } });
+    const afterRepeat = JSON.parse(await env.META.get('inbox:alice'));
+    assert(repeat.status === 200 && afterRepeat.items.filter((item) => item.kind === 'team_join_request' && item.team_id === team.id).length === 1, 'join request is rate limited');
     const removed = await call('/api/team/guests', { method: 'POST', cookie: alice,
       body: { id: team.id, invitee: 'guest5', action: 'remove' } });
     assert(removed.status === 200 && removed.body.guests.length === 4, `removed ${JSON.stringify(removed.body)}`);
     const shareSixth = await call('/api/doc/access', { method: 'PATCH', cookie: alice,
       body: { slug: 'plan', access: { allowed_users: [...firstFive.slice(0, 4), 'guest6'] } } });
     assert(shareSixth.status === 200, `after removal ${shareSixth.status}`);
+    const publishExisting = await call('/api/upload', { method: 'POST', token: publishToken,
+      body: { slug: 'guest-publish-cap', version: 1, html: '<p>shared</p>',
+        access_patch: { allowed_users_add: ['guest6'] } } });
+    assert(publishExisting.status === 200, `existing guest publish ${publishExisting.status} ${JSON.stringify(publishExisting.body)}`);
+    const publishedMeta = JSON.parse(await env.META.get('meta:guest-publish-cap'));
+    assert(publishedMeta.guest_invited_by?.guest6 === 'bob', 'publish records the guest inviter');
     await env.META.put(`team-billing:${team.id}`, JSON.stringify({ status: 'active' }));
     const paid = await call(`/api/team/guests?id=${team.id}`, { cookie: alice });
     assert(paid.body.limit === 50, 'paid guest limit');

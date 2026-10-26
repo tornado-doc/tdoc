@@ -879,11 +879,11 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
       {team.role === 'admin' ? <TeamBillingCard team={team} /> : null}
       {guestsEnabled ? <SegmentedControl ariaLabel="Team settings" value={tab} onChange={setTab} options={[
         { value: 'members', label: 'Members' },
-        { value: 'guests', label: 'Guests' },
+        ...(team.role === 'admin' ? [{ value: 'guests', label: 'Guests' }] : []),
         { value: 'agents', label: 'Agents' },
       ]} /> : null}
       {(!guestsEnabled || tab === 'members') ? <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} /> : null}
-      {guestsEnabled && tab === 'guests' ? <TeamGuestsSection team={team} /> : null}
+      {guestsEnabled && team.role === 'admin' && tab === 'guests' ? <TeamGuestsSection team={team} /> : null}
       {(!guestsEnabled || tab === 'agents') ? <section className="tm-settings-card" id="agents">
         <div className="tm-settings-head"><div><h2>Agents</h2><p>Team agents work for everyone in this workspace. Admins can also use their own connected agents here.</p></div></div>
         <TeamAgentsSection team={team} />

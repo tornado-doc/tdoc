@@ -5656,7 +5656,16 @@ async function teamGuestLimit(env, team) {
   return (await teamPlanPaid(env, team.id)) ? TEAM_GUEST_PAID_LIMIT : TEAM_GUEST_FREE_LIMIT;
 }
 
-async function teamGuestLimitError(env, team, currentSlug, nextAccess) {
+async function teamGuestLimitError(env, team, currentSlug, nextAccess, previousAccess = null) {
+  // Removing guests, or sharing with the same people, cannot exceed the cap.
+  // Avoid scanning every team document on ordinary publishes and policy edits.
+  const before = new Set(previousAccess?.allowed_users || []);
+  const added = (nextAccess.allowed_users || []).filter((invitee) => !before.has(invitee));
+  if (previousAccess && !added.length) return null;
+  if (added.length && (await Promise.all(added.map((invitee) => teamGuestIsMember(env, team, invitee)))).every(Boolean)) return null;
+  // The roster is derived from document ACLs, not an atomic counter. A
+  // concurrent pair of invites may briefly exceed the plan cap; each later
+  // change is checked against the current roster.
   const roster = await teamGuestRoster(env, team);
   const existing = new Set(roster.map((guest) => guest.invitee));
   const current = new Set(roster.filter((guest) => guest.documents.some((doc) => doc.slug !== currentSlug)).map((guest) => guest.invitee));
@@ -6080,7 +6089,7 @@ function teamDetail(team, accountId, origin) {
       account_id: m.account_id,
       name: m.name,
       key: m.key,
-      ...(m.email ? { email: m.email } : {}),
+      ...(admin && m.email ? { email: m.email } : {}),
       role: m.role,
       me: m.account_id === accountId,
     })),
@@ -18195,7 +18204,7 @@ const tdocHandlers = {
       const id = method === 'GET' ? url.searchParams.get('id') : body.id;
       const team = await loadTeam(env, id);
       if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
-      if (method === 'POST' && teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      if (teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
       let emailed = [];
       if (method === 'POST') {
         const invitee = normalizeInvitee(body.invitee);
@@ -20742,10 +20751,29 @@ const tdocHandlers = {
         delete incoming.guest_invited_by;
         const prev = writeGate.meta;
         if (prev && prev.guest_invited_by) incoming.guest_invited_by = prev.guest_invited_by;
-        // A checkout can carry a stale access snapshot. The browser's Share
-        // edits are authoritative until this request explicitly names the
-        // fields to change; a routine republish must not evict invitees.
-        if (prev) incoming.access = prev.access;
+        // A checkout can carry a stale access snapshot. Keep the browser's
+        // invitees; accept legacy publishers' tighter visibility, history,
+        // commenting and sign-in policy. A stale checkout cannot reopen a
+        // browser-restricted document. Modern clients send access_patch for
+        // intentional widening and invitee removal.
+        if (prev && (prev.access || meta?.access || body.access_patch)) {
+          const stored = accessFromMeta(prev);
+          const proposed = meta && meta.access && typeof meta.access === 'object'
+            ? validateAccessWrite(meta.access) : null;
+          if (proposed?.error) return json({ error: proposed.error, ...(proposed.field ? { field: proposed.field } : {}) }, { status: 400 });
+          const legacy = proposed?.access || {};
+          const rank = {
+            visibility: { private: 0, unlisted: 1, public: 2 },
+            history_visibility: { owner: 0, invited: 1, public: 2 },
+            commenting: { off: 0, owner: 1, invited: 2, signed_in: 3 },
+          };
+          const access = { ...stored };
+          for (const field of Object.keys(rank)) {
+            if (legacy[field] && rank[field][legacy[field]] < rank[field][stored[field]]) access[field] = legacy[field];
+          }
+          if (legacy.signin_required === true) access.signin_required = true;
+          incoming.access = access;
+        }
         if (body.access_patch != null) {
           const patch = body.access_patch;
           if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return json({ error: 'invalid_access_patch' }, { status: 400 });
@@ -20797,8 +20825,15 @@ const tdocHandlers = {
         if (prevTeam && guestChange && !writeGate.teamDoc) {
           const team = await loadTeam(env, prevTeam);
           if (team) {
-            const blocked = await teamGuestLimitError(env, team, slug, incoming.access);
+            const blocked = await teamGuestLimitError(env, team, slug, incoming.access, prev && accessFromMeta(prev));
             if (blocked) return json(blocked, { status: 409 });
+          }
+          const before = new Set(prev ? accessFromMeta(prev).allowed_users : []);
+          const added = incoming.access.allowed_users.filter((invitee) => !before.has(invitee));
+          if (added.length) {
+            const inviter = auth.actor?.github_login || auth.actor?.email?.split('@')[0] || 'Agent';
+            incoming.guest_invited_by = { ...(incoming.guest_invited_by || {}) };
+            for (const invitee of added) incoming.guest_invited_by[invitee] = inviter;
           }
         }
       }
@@ -21297,7 +21332,7 @@ const tdocHandlers = {
       if (meta.workspace_id) {
         const team = await loadTeam(env, meta.workspace_id);
         if (team) {
-          const blocked = await teamGuestLimitError(env, team, slug, next.access);
+          const blocked = await teamGuestLimitError(env, team, slug, next.access, accessFromMeta(meta));
           if (blocked) return json(blocked, { status: 409 });
         }
       }
