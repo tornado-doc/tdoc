@@ -923,10 +923,12 @@ function TeamGuestsSection({ team }) {
     <p className="manage-hint">{data ? `${data.guests.length} ${data.guests.length === 1 ? 'guest' : 'guests'} · limit ${data.limit}` : 'Loading guests…'}</p>
     {(data?.guests || []).map((guest) => {
       const invited = data.invites?.includes(guest.invitee);
+      const documentNames = guest.documents.slice(0, 3).map((doc) => doc.title).join(', ');
+      const moreDocuments = guest.documents.length > 3 ? ` +${guest.documents.length - 3} more` : '';
       return <PersonRow key={guest.invitee} className="tm-guest-row"
         member={{ name: guest.invitee, key: guest.invitee }}
         name={maskedInvitee(guest.invitee)}
-        sub={`${guest.documents.length} ${guest.documents.length === 1 ? 'document' : 'documents'}: ${guest.documents.map((doc) => doc.title).join(', ')} · Added by ${guest.added_by || 'unknown'}`}
+        sub={`${guest.documents.length} ${guest.documents.length === 1 ? 'document' : 'documents'}: ${documentNames}${moreDocuments} · Added by ${guest.added_by || 'unknown'}${guest.documents.length >= 40 ? ' · Frequent collaborator — consider a member seat' : ''}`}
         right={team.role === 'admin' ? <>
           <button type="button" className="tm-text-btn" onClick={() => act(guest.invitee, invited ? 'resend' : 'invite_member')}>{invited ? 'Resend invite' : 'Invite to team'}</button>
           <button type="button" className="tm-text-btn" onClick={() => act(guest.invitee, 'remove')}>Remove</button>
