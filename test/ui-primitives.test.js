@@ -29,6 +29,46 @@ function sources(dir) {
 // Internal tooling that is not product UI.
 const NATIVE_SELECT_ALLOWED = new Set(['shell/src/onboarding-preview.jsx']);
 
+
+// Buttons (Julie, 2026-10-26): ~45 hand-sized button styles drifted apart; the
+// Ask AI actions were taller than Comment. AppButton (ui/button.jsx) owns the
+// sizes; other stylesheets may recolour .ui-btn on a surface, never size it.
+// Older hand-sized button rules are grandfathered in an allowlist that may
+// only shrink: migrate one to AppButton, then delete its line.
+const CSS_FILES = (() => {
+  const out = [];
+  for (const dir of ['server', 'shell/src', 'feedback/src']) {
+    const walk = (rel) => {
+      if (!fs.existsSync(path.join(ROOT, rel))) return;
+      for (const entry of fs.readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
+        const child = path.join(rel, entry.name);
+        if (entry.isDirectory() && entry.name !== 'runtime' && entry.name !== 'node_modules') walk(child);
+        else if (entry.name.endsWith('.css')) out.push(child);
+      }
+    };
+    walk(dir);
+  }
+  return out;
+})();
+const SIZING = /(^|;|\{)\s*(height|min-height|padding|border-radius|font-size|font)\s*:/;
+function buttonSizingRules() {
+  const found = [];
+  for (const file of CSS_FILES) {
+    const css = fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const re = /([^{};]+)\{([^{}]*)\}/g;
+    let m;
+    while ((m = re.exec(css))) {
+      const selector = m[1].trim().replace(/\s+/g, ' ');
+      if (selector.startsWith('@') || !SIZING.test(`{${m[2]}`)) continue;
+      for (const one of selector.split(',')) {
+        const s = one.trim();
+        if (/\bbutton\b|btn|\.submit\b/i.test(s)) found.push(`${file} :: ${s}`);
+      }
+    }
+  }
+  return found;
+}
+
 console.log('UI primitives');
 
 t('no native <select> in product UI (use AppSelect from shell/src/ui/select.jsx)', () => {
@@ -118,6 +158,36 @@ t('document owners can move the open doc between workspaces', () => {
   assert(/workspaceId: \(docMeta && docMeta\.workspace_id\) \|\| null/.test(worker), 'document boot config omits its metadata-owned workspace');
   const teams = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub/teams.jsx'), 'utf8');
   assert(/team\.id !== currentTeam/.test(teams), 'move dialog does not hide the current workspace');
+});
+
+
+t('AppButton owns button sizes: only ui.css sizes .ui-btn', () => {
+  const offenders = buttonSizingRules()
+    .filter((rule) => /ui-btn/.test(rule) && !rule.startsWith('shell/src/ui/ui.css :: '));
+  assert(!offenders.length, `resize AppButton only in ui.css (recolour elsewhere): ${offenders.join('; ')}`);
+});
+
+t('no new hand-sized button styles (allowlist only shrinks; use AppButton)', () => {
+  const allowed = new Set(JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/button-sizing-allowlist.json'), 'utf8')));
+  const current = buttonSizingRules().filter((rule) => !rule.startsWith('shell/src/ui/ui.css :: .ui-btn'));
+  const added = current.filter((rule) => !allowed.has(rule));
+  assert(!added.length, `new button sizing outside AppButton: ${added.join('; ')}`);
+  const gone = [...allowed].filter((rule) => !current.includes(rule));
+  assert(!gone.length, `remove migrated rules from test/fixtures/button-sizing-allowlist.json: ${gone.join('; ')}`);
+});
+
+t('comment surfaces use AppButton sizes (composer, reply, private answer, Ask AI, handoff reply)', () => {
+  const files = {
+    'shell/src/document/comment-composer.jsx': 3,
+    'shell/src/document/comment-card.jsx': 4,
+    'shell/src/document/agent-ask.jsx': 3,
+    'shell/src/document/ask-ai-panel.jsx': 3,
+    'shell/src/document/handoff-details.jsx': 1,
+  };
+  for (const [file, min] of Object.entries(files)) {
+    const n = (fs.readFileSync(path.join(ROOT, file), 'utf8').match(/ui-btn ui-btn-(primary|secondary|quiet) ui-btn-[ms]/g) || []).length;
+    assert(n >= min, `${file}: ${n} AppButton-sized buttons, expected at least ${min}`);
+  }
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

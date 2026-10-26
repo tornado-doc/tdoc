@@ -224,12 +224,12 @@ export function CommentComposer({
         )}
         <div className="tdoc-composer-foot-actions">
           {!agentButtons && connectAgentPrompt ? (
-            <button className="tdoc-composer-agent" type="button" disabled={busy} aria-expanded={connectOpen}
+            <button className="tdoc-composer-agent ui-btn ui-btn-secondary ui-btn-m" type="button" disabled={busy} aria-expanded={connectOpen}
               onClick={() => setConnectOpen((value) => !value)} title="Connect an agent to use @agent">@agent</button>
           ) : !agentButtons ? <AgentButton ask={ask} busy={busy} /> : null}
           {agentButtons && !canSendToAgent && connectAgentPrompt ? (
             <button
-              className="submit agent tdoc-agent-unlinked"
+              className="submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m"
               type="button"
               aria-expanded={connectOpen}
               onClick={() => setConnectOpen((v) => !v)}
@@ -240,7 +240,7 @@ export function CommentComposer({
           ) : null}
           {agentButtons && canSendToAgent ? (
             <button
-              className="submit agent"
+              className="submit agent ui-btn ui-btn-secondary ui-btn-m"
               type="button"
               onClick={() => submit(true)}
               disabled={busy}
@@ -249,7 +249,7 @@ export function CommentComposer({
               {busy ? 'Posting…' : '@agent'}
             </button>
           ) : null}
-          <button className="submit" type="button" onClick={() => submit(false)} disabled={busy}>
+          <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Comment'}
           </button>
         </div>

@@ -603,10 +603,6 @@
   .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
   .tdoc-reply-form-foot .hint { color: #888; font-size: 11px; min-width: 0; }
   .tdoc-reply-form-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-  .tdoc-reply-form-foot .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
-  .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: var(--td-accent-hover); }
-  .tdoc-reply-form-foot .tdoc-reply-submit.agent { background: #f4f4f5; color: #202124; border: 1px solid #d0d0d6; }
-  .tdoc-reply-form-foot .tdoc-reply-submit.agent:hover { background: #eaeaec; }
 
   /* Editing a comment in place: the reply form's textarea, with Cancel/Save
      where the composer has its hint and submit. */
@@ -699,11 +695,9 @@
     .tdoc-popup .tdoc-keyboard-shortcut-hint,
     .tdoc-reply-form-foot .tdoc-keyboard-shortcut-hint { display: none; }
   }
-  .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
-  .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
-  /* Secondary action on the dark composer — same shape as Comment, quieter fill. */
-  .tdoc-popup .submit.agent { background: #2c2c2c; color: #f0f0f0; border: 1px solid #4a4a4a; }
-  .tdoc-popup .submit.agent:hover { background: #3a3a3a; }
+  /* The composer popover is dark: secondary AppButtons take its colours, not a new size. */
+  .tdoc-popup .ui-btn-secondary { background: #2c2c2c; color: #f0f0f0; border-color: #4a4a4a; }
+  .tdoc-popup .ui-btn-secondary:hover:not(:disabled) { background: #3a3a3a; }
   .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
 
   /* @mention picker + chips. The field wrapper is the positioning context for
@@ -1124,9 +1118,6 @@
   .tdoc-ask-turn-collapse { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--td-accent); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-margin-comment .text .tdoc-md-heading, .tdoc-reply .text .tdoc-md-heading { margin: 6px 0 3px; font-size: 1em; }
   .tdoc-ask-answer-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
-  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { border: 1px solid var(--td-line, #e8e7e3); border-radius: 6px; padding: 6px 14px; background: var(--td-ground); color: var(--td-ink, #1a1a1a); font: inherit; font-weight: 500; cursor: pointer; }
-  .tdoc-ask-answer-actions button.primary, .tdoc-ask-answer.is-error button { border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff; }
-  .tdoc-ask-answer-actions button:disabled { opacity: .55; cursor: default; }
   .tdoc-ask-private-note { display: block; margin-top: 8px; color: var(--td-muted, #6b6a66); font-size: 11px; }
   .tdoc-ask-activity-toggle { display: flex; width: 100%; justify-content: space-between; margin-top: 14px; padding: 10px 0 0; border: 0; border-top: 1px solid var(--td-line, #e8e7e3); background: transparent; color: var(--td-muted, #6b6a66); font: 650 12px Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
   .tdoc-ask-activity-toggle span:last-child { color: var(--td-accent, #1652f0); }
@@ -1250,8 +1241,6 @@
   .tdoc-handoff-details-history { color: #5f6368; font-size: 11px; line-height: 1.5; padding: 5px 0 0 8px; border-left: 2px solid #e8eeff; }
   .tdoc-handoff-details-reply-form { display: flex; gap: 6px; margin-top: 8px; }
   .tdoc-handoff-details-reply-form input { min-width: 0; flex: 1; border: 1px solid #c9d7f5; border-radius: 7px; padding: 7px; font: 12px Inter, system-ui, sans-serif; }
-  .tdoc-handoff-details-reply-form button { border: 0; border-radius: 7px; padding: 0 10px; background: var(--td-accent, #1652f0); color: #fff; font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
-  .tdoc-handoff-details-reply-form button:disabled { opacity: .5; cursor: default; }
   .tdoc-handoff-ready { border-top: 1px solid var(--td-line, #e6e4dc); padding-top: 10px; }
   .tdoc-handoff-ready h3 { margin: 0 0 6px; color: #888; font-size: 11px; font-weight: 500; }
   .tdoc-handoff-ready-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; font-size: 12px; }
@@ -1390,8 +1379,6 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
 
 /* The comment composer's @agent button, the agent pill's menu
    and the Answers only / Only me row under the text. */
-.tdoc-popup .tdoc-composer-agent { padding: 6px 10px; border: 1px solid #4a4a4a; border-radius: 6px; background: #2c2c2c; color: #f0f0f0; font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; }
-.tdoc-popup .tdoc-composer-agent:hover { background: #3a3a3a; }
 .tdoc-popup .tdoc-ask-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; color: #e8e8e8; }
 .tdoc-popup .tdoc-ask-mode { border-color: #4a4a4a; flex-wrap: nowrap; }
 .tdoc-popup .tdoc-ask-mode button { padding: 4px 10px; background: #1d1d1f; color: #d8d8d8; font-size: 12px; white-space: nowrap; }
@@ -1482,9 +1469,5 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-reply-form.tdoc-private-ask .tdoc-private-status { color: #888; }
 .tdoc-reply-form.tdoc-private-ask .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
 .tdoc-reply-form.tdoc-private-ask .hint { display: inline-flex; align-items: center; gap: 4px; color: #888; font-size: 11px; }
-.tdoc-reply-form.tdoc-private-ask .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
-.tdoc-reply-form.tdoc-private-ask .tdoc-reply-submit:disabled { opacity: .5; cursor: default; }
 .tdoc-reply-form.tdoc-private-ask .tdoc-composer-foot-actions { display: inline-flex; gap: 6px; }
-.tdoc-private-dismiss { background: none; border: 1px solid #d0d0d6; border-radius: 6px; padding: 4px 10px; font: 12px system-ui; color: #444; cursor: pointer; }
-.tdoc-popup .tdoc-private-dismiss { border-color: #4a4a4a; color: #d8d8d8; }
 .tdoc-reply-form .tdoc-ask-hint { color: #888; font-size: 11px; }
