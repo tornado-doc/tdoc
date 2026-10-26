@@ -1219,15 +1219,20 @@
     height: 18px;
     flex: none;
   }
+  /* Top-right of the "Ask AI" label on desktop (like the avatar's dot), never
+     over it; in the corner of the icon-only phone button. */
   .tdoc-bar .tdoc-send-agent-badge {
-    position: absolute;
-    top: 8px;
-    right: 6px;
+    flex: none;
+    align-self: flex-start;
     width: 8px;
     height: 8px;
+    margin: 4px 0 0 -4px;
     border: 1.5px solid #fff;
     border-radius: 50%;
     background: var(--td-accent, #1652f0);
+  }
+  @media (max-width: 700px) {
+    .tdoc-bar .tdoc-send-agent-badge { position: absolute; top: 8px; right: 6px; margin: 0; }
   }
 
 /* A navigation is under way (shell/src/nav-progress.js): a thin bar along the
