@@ -1,8 +1,9 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
+import { Copy } from 'lucide-react';
 import { AgentButtonsContext, MentionField } from './mention-field.jsx';
 import { joinAiTags, mentionsAi } from './ai-answerer.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
-import { TOP_BAR_HEIGHT } from './model.js';
+import { TOP_BAR_HEIGHT, copyText } from './model.js';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
 // The shell's chrome does not scroll — the frame does — so the composer's
@@ -60,6 +61,7 @@ export function composerPosition(rect, viewport) {
 
 export function CommentComposer({
   selection,
+  inline = false,
   initialText = '',
   onSubmit,
   onClose,
@@ -78,6 +80,7 @@ export function CommentComposer({
   // answer, error }. The composer turns into its answer, with Make public.
   privateAsk = null,
   onMakePublic = null,
+  onCopyToast = null,
 }) {
   const [text, setText] = useState(initialText);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -101,6 +104,18 @@ export function CommentComposer({
   const { top, left } = composerPosition(selection.rect || {}, viewport);
 
   const quoted = String(selection.text || '');
+  const copyQuote = async () => {
+    let copied = false;
+    try { copied = await copyText(quoted); } catch {}
+    onCopyToast?.(copied ? 'Copied' : 'Copy failed', !copied);
+  };
+  const copyEmptyDraftQuote = (event) => {
+    if (!quoted || text.length || event.altKey || event.shiftKey || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'c') return;
+    const textarea = field.current;
+    if (!textarea || document.activeElement !== textarea || textarea.selectionStart !== textarea.selectionEnd) return;
+    event.preventDefault();
+    void copyQuote();
+  };
   const preview = selection.kind === 'document'
     ? 'On this document'
     : selection.kind === 'element'
@@ -117,6 +132,7 @@ export function CommentComposer({
   const { agents, target } = ask;
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
+    if (sendToAgent && !agentButtons && !target && !agents.preselected) { ask.putDefault(); return; }
     setBusy(true);
     try {
       if (agentButtons) {
@@ -145,8 +161,8 @@ export function CommentComposer({
   if (privateAsk) {
     return (
       <div
-        className="tdoc-popup tdoc-private-ask"
-        style={{ top, left }}
+        className={`tdoc-popup tdoc-private-ask${inline ? ' tdoc-inline-composer' : ''}`}
+        style={inline ? undefined : { top, left }}
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className="head">
@@ -160,17 +176,19 @@ export function CommentComposer({
 
   return (
     <div
-      className="tdoc-popup"
-      style={{ top, left }}
+      className={`tdoc-popup${inline ? ' tdoc-inline-composer' : ''}`}
+      style={inline ? undefined : { top, left }}
       onPointerDown={(event) => event.stopPropagation()}
+      onKeyDownCapture={copyEmptyDraftQuote}
     >
       <div className="head">
         {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
         <span className="h">{preview}</span>
+        {quoted ? <button type="button" className="tdoc-copy-quote" aria-label="Copy selected text" title="Copy selected text" onMouseDown={(event) => event.preventDefault()} onClick={copyQuote}><Copy size={15} aria-hidden="true" /></button> : null}
         <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
       </div>
       <div><MentionField
-        autoFocus
+        autoFocus={viewport.width > 700}
         fieldRef={field}
         placeholder={demo
           ? 'What should change? Type a GitHub @ — or @email'
@@ -205,7 +223,10 @@ export function CommentComposer({
           </span>
         )}
         <div className="tdoc-composer-foot-actions">
-          {!agentButtons ? <AgentButton ask={ask} busy={busy} /> : null}
+          {!agentButtons && connectAgentPrompt ? (
+            <button className="tdoc-composer-agent" type="button" disabled={busy} aria-expanded={connectOpen}
+              onClick={() => setConnectOpen((value) => !value)} title="Connect an agent to use @agent">@agent</button>
+          ) : !agentButtons ? <AgentButton ask={ask} busy={busy} /> : null}
           {agentButtons && !canSendToAgent && connectAgentPrompt ? (
             <button
               className="submit agent tdoc-agent-unlinked"

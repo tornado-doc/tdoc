@@ -3,7 +3,8 @@
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Sparkles, Terminal, Webhook } from 'lucide-react';
+import { Terminal, Webhook } from 'lucide-react';
+import { AskIcon } from '../ui/ask-icon.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
@@ -33,7 +34,7 @@ function recipientPrimary(t) {
 }
 
 // One line per agent in the recipient dropdown: who, where, and why it is the
-// preselected one (this doc's agent, or the account default).
+// preselected one, when this doc has evidence for it.
 // One row of an agent picker: the name to search by, and on the right why it
 // is near the top -- it is this doc's agent, the default, or it was used
 // recently. Directory agents that never worked with tdoc carry no note.
@@ -46,7 +47,7 @@ export function recipientOption(t, preselected, list = null) {
     ? (t.provider === 'local' ? localSeenText(t) : `${t.status} in Raft`)
     : t.last_writer ? 'edited last'
       : sameTarget(t, preselected)
-        ? (t.source === 'doc' ? "this doc's agent" : 'default')
+        ? 'last handoff on this doc'
         : (t.last_touched ? `used ${sinceText(t.last_touched)}` : '');
   const whose = t.tdoc_ai ? '' : t.team_agent ? 'Team' : 'Mine';
   return { value: targetKey(t), label: agentDisplayName(t, list), hint: [whose, why].filter(Boolean).join(' · '), whose };
@@ -84,7 +85,7 @@ function sinceText(iso) {
 }
 
 export function ProviderMark({ target, size = 18 }) {
-  if (target && target.tdoc_ai) return <Sparkles size={size} aria-hidden="true" />;
+  if (target && target.tdoc_ai) return <AskIcon size={size} />;
   const meta = providerMeta(target);
   if (meta.mark === 'raft') return <RaftMark size={size} />;
   if (meta.mark === 'webhook') return <Webhook size={size} aria-hidden="true" />;
@@ -551,14 +552,14 @@ export function NotifyHandoffPanel({
   const [result, setResult] = useState(null);
   const [recent, setRecent] = useState([]);
 
-  // With no default yet (a server just connected), the first agent on offer
-  // is preselected; sending to it makes it the default.
+  // An unrelated account connection is not this document's default. Let the
+  // person choose unless this document's publisher or handoff names one.
   useEffect(() => {
     if (!open) return;
     const all = [targets.default, ...targets.candidates].filter(Boolean);
     const skip = (t) => avoid && avoid.agent_name && t.provider === (avoid.provider || t.provider)
       && String(t.agent_name || '').toLowerCase() === String(avoid.agent_name).toLowerCase();
-    setSelected((avoid && all.find((t) => !skip(t))) || all[0] || null);
+    setSelected(avoid ? all.find((t) => !skip(t)) || null : targets.default || null);
   }, [open, targets.default, targets.candidates, avoid]);
 
   useEffect(() => {
@@ -705,12 +706,7 @@ export function NotifyHandoffPanel({
             </p>
           ) : null}
 
-          {choices.length === 1 ? (
-            <div className="tdoc-send-field">
-              <span className="tdoc-send-label">Agent</span>
-              <RecipientLine target={choices[0]} />
-            </div>
-          ) : choices.length > 1 ? (
+          {choices.length > 0 ? (
             <div className="tdoc-send-field">
               <label className="tdoc-send-label" htmlFor="tdoc-notify-recipient">
                 {!ids.length && lastIds.length > 0 ? 'Hand it to another agent' : 'Agent'}
@@ -727,9 +723,7 @@ export function NotifyHandoffPanel({
                 }}
                 options={choices.map((t) => recipientOption(t, targets.default, choices))}
               />
-              {!targets.default ? (
-                <p className="tdoc-send-hint">The agent you pick becomes your default for docs no agent has worked on.</p>
-              ) : null}
+              {!targets.default ? <p className="tdoc-send-hint">Choose who should receive this document&apos;s comments.</p> : null}
             </div>
           ) : (
             <p className="tdoc-send-hint" title={boundHint || undefined}>

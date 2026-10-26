@@ -9,33 +9,27 @@ import {
   legacyDraftKey,
   loadDraft,
   saveDraft,
-  saveDraftMode,
 } from '../document/draft-store.js';
 
 function urlWantsEdit() {
   return new URLSearchParams(location.search).get('edit') === '1';
 }
 
-function allowedMode(mode, config) {
-  if (mode === 'edit') return config.canEdit ? 'edit' : null;
-  if (mode === 'comment') return config.canComment ? 'comment' : null;
-  if (mode === 'read') return 'read';
-  return null;
+function modeStorageKey(config) {
+  return `tdoc-mode:${config.slug}:${config.identity?.login || 'anon'}`;
 }
 
-const MODE_STORAGE_KEY = 'tdoc-mode';
-
-function getStoredMode() {
+function getStoredMode(config) {
   try {
-    return localStorage.getItem(MODE_STORAGE_KEY);
+    return localStorage.getItem(modeStorageKey(config));
   } catch {
     return null;
   }
 }
 
-function storeMode(mode) {
+function storeMode(config, mode) {
   try {
-    localStorage.setItem(MODE_STORAGE_KEY, mode);
+    localStorage.setItem(modeStorageKey(config), mode);
   } catch {}
 }
 
@@ -55,7 +49,6 @@ export function useDocumentEditor({
   const legacyKey = useMemo(() => legacyDraftKey(config), [config]);
   const publishedHtml = useRef(null);
   const consideringDraft = useRef(false);
-  const [sessionReady, setSessionReady] = useState(false);
   // A doc created from scratch arrives at ?edit=1: it is blank, so dropping the
   // author in read mode would show an empty page and hide the one control they
   // need. `tdoc:ready` re-sends whatever mode is current, so the frame picks
@@ -63,11 +56,11 @@ export function useDocumentEditor({
   const [mode, setMode] = useState(() => {
     const wantsEdit = new URLSearchParams(location.search).get('edit') === '1';
     if (wantsEdit && config.canEdit) return 'edit';
-    const stored = getStoredMode();
+    const stored = getStoredMode(config);
     if (stored === 'edit' && config.canEdit) return 'edit';
-    if (stored === 'comment' && config.canComment) return 'comment';
+    if (stored === 'comment' && (config.canComment || config.signInToComment)) return 'comment';
     if (stored === 'read') return 'read';
-    return config.canComment ? 'comment' : 'read';
+    return (config.canComment || config.signInToComment) ? 'comment' : 'read';
   });
   const [dirty, setDirty] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -76,31 +69,8 @@ export function useDocumentEditor({
   const [staleDraft, setStaleDraft] = useState(null);
 
   useEffect(() => {
-    let cancelled = false;
-    loadDraft(storeKey, legacyKey).then((record) => {
-      if (cancelled) return;
-      if (!urlWantsEdit()) {
-        const next = allowedMode(record?.mode, config);
-        if (next) setMode(next);
-      }
-      setSessionReady(true);
-    }).catch(() => {
-      if (!cancelled) setSessionReady(true);
-    });
-    return () => { cancelled = true; };
-    // Load once per document. Mode is omitted so this cannot fight the author
-    // switching Read/Comment/Edit after the restore.
-  }, [storeKey, legacyKey]);
-
-  useEffect(() => {
     send({ type: 'tdoc:mode', mode, elementComment: !config.isLanding });
   }, [mode, send, config.isLanding]);
-
-  useEffect(() => {
-    if (!sessionReady) return undefined;
-    saveDraftMode(storeKey, mode).catch(() => {});
-    return undefined;
-  }, [mode, sessionReady, storeKey]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -118,15 +88,15 @@ export function useDocumentEditor({
 
   const changeMode = useCallback((nextMode) => {
     if (nextMode === 'edit' && !config.canEdit) return;
-    if (nextMode === 'comment' && !config.canComment) return;
+    if (nextMode === 'comment' && !config.canComment && !config.signInToComment) return;
     if (nextMode === 'comment' && dirty) {
       showToast('Save or discard the draft before commenting', true);
       return;
     }
     if (nextMode !== 'comment') onDisableCommentSelection();
     setMode(nextMode);
-    storeMode(nextMode);
-  }, [config.canComment, config.canEdit, dirty, onDisableCommentSelection, showToast]);
+    storeMode(config, nextMode);
+  }, [config, dirty, onDisableCommentSelection, showToast, storeKey]);
 
   const requestDocument = useCallback(() => new Promise((resolve, reject) => {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;

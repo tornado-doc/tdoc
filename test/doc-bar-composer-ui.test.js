@@ -4,7 +4,8 @@
 //             ⋯ · space chip (as on My docs) · avatar only. No space / folder
 //             crumbs, no mode dropdown, no Resolved switch: the modes head ⋯,
 //             the filter (Open / Resolved / All) heads the comments
-//   composer  Comment + @agent. @agent puts the default agent in as a pill;
+//   composer  Comment + @agent. @agent puts an evidenced default in as a pill,
+//             otherwise opens the picker;
 //             the pill's menu is Mine / Team / tdoc AI (with "Connect my
 //             agent"). No mode to pick: the agent answers or edits from the
 //             text, where authorship lets it edit; elsewhere it answers only
@@ -56,13 +57,21 @@ async function startServer(worker, env) {
 async function dragSelect(page, phrase) {
   const frameEl = await page.locator('iframe').first().elementHandle();
   const frame = await frameEl.contentFrame();
+  await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
   const box = await frameEl.boundingBox();
   const r = await frame.evaluate((needle) => {
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = w.nextNode(); n; n = w.nextNode()) { const i = n.nodeValue.indexOf(needle); if (i < 0) continue; const range = document.createRange(); range.setStart(n, i); range.setEnd(n, i + needle.length); const rects = range.getClientRects(); const a = rects[0]; const b = rects[rects.length - 1]; return { x1: a.left + 1, y1: a.top + a.height / 2, x2: b.right - 1, y2: b.top + b.height / 2 }; }
   }, phrase);
   await page.mouse.move(box.x + r.x1, box.y + r.y1); await page.mouse.down();
-  await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 }); await page.mouse.up();
+  await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 });
+  if (await frame.locator('.tdoc-selection-action').isVisible()) throw new Error('Comment action flashed during selection drag');
+  await page.mouse.up();
+  const action = frame.getByRole('button', { name: 'Comment', exact: true });
+  await action.waitFor();
+  if (await page.locator('.tdoc-popup').isVisible()) throw new Error('selection opened a composer before Comment was clicked');
+  await action.click();
+  await page.locator('.tdoc-popup textarea').waitFor();
 }
 
 (async () => {
@@ -81,20 +90,18 @@ async function dragSelect(page, phrase) {
   const reader = await issue(worker, env, 'reader');
   for (const who of [bob, reader]) await env.META.delete(`account-terminal:${who.account_id}`);
   const api = async (p, o = {}) => {
-    const r = await worker.fetch(new Request(`https://tdoc.dev${p}`, { method: o.method || 'GET', headers: { ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}), ...(o.cookie ? { cookie: o.cookie, origin: 'https://tdoc.dev' } : {}), 'Content-Type': 'application/json' }, body: o.body ? JSON.stringify(o.body) : undefined }), env, {});
+    const r = await worker.fetch(new Request(`https://tdoc.dev${p}`, { method: o.method || 'GET', headers: { ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}), ...(o.cookie ? { cookie: o.cookie, origin: 'https://tdoc.dev' } : {}), 'Content-Type': 'application/json', ...o.headers }, body: o.body ? JSON.stringify(o.body) : undefined }), env, {});
     let body = null; try { body = await r.json(); } catch {} return { status: r.status, body };
   };
-  const up = (token, slug, v, title) => api('/api/upload', { method: 'POST', token, body: { slug, version: v, html: DOC(title), meta: { title } } });
-  await up(julie.token, 'launch-plan', 1, 'Launch plan');
+  const julieAgent = { 'X-Tdoc-Agent': 'local/juliesmac/juliesmac_claude' };
+  const up = (token, slug, v, title, headers = {}) => api('/api/upload', { method: 'POST', token, headers, body: { slug, version: v, html: DOC(title), meta: { title } } });
   await api('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device: 'juliesmac', clis: ['claude'] } });
-  await up(julie.token, 'own-agent-draft', 1, 'Agent draft');
-  const ownAgentMeta = JSON.parse(env.META.map.get('meta:own-agent-draft'));
-  ownAgentMeta.versions[0].by = julie.account_id;
-  env.META.map.set('meta:own-agent-draft', JSON.stringify(ownAgentMeta));
+  await up(julie.token, 'launch-plan', 1, 'Launch plan', julieAgent);
+  await up(julie.token, 'own-agent-draft', 1, 'Agent draft', julieAgent);
   const team = (await api('/api/teams', { method: 'POST', cookie: julie.cookie, body: { name: 'Tdoc' } })).body.team;
   await api('/api/team/join', { method: 'POST', cookie: bob.cookie, body: { token: team.invite_url.split('/').pop() } });
   await up(julie.token, 'team-plan', 1, 'Team plan');
-  await up(julie.token, 'julies-draft', 1, "Julie's draft");
+  await up(julie.token, 'julies-draft', 1, "Julie's draft", julieAgent);
   await api('/api/team/move', { method: 'POST', cookie: julie.cookie, body: { slugs: ['team-plan', 'julies-draft'], team: team.id } });
   const added = (await api('/api/team/agents', { method: 'POST', cookie: julie.cookie, body: { id: team.id, name: 'tdoc-bot' } })).body;
   const agentToken = (await api('/api/team/agents/connect', { method: 'POST', body: { code: added.setup_code, device: 'team-box' } })).body.token;
@@ -109,13 +116,17 @@ async function dragSelect(page, phrase) {
 
   const { server, base } = await startServer(worker, env);
   const browser = await chromium.launch({ headless: true });
-  const open = async (who, slug, phone = false) => {
+  // flags: pin feature flags for this page, e.g. { unifiedEntry: false } for
+  // the phone top-bar Ask AI drawer that the unified entry replaces.
+  const open = async (who, slug, phone = false, flags = null) => {
     const context = await browser.newContext(phone ? { ...devices['iPhone 13'], defaultBrowserType: undefined } : { viewport: { width: 1440, height: 800 } });
+    if (flags) await context.addInitScript((pinned) => { window.__TDOC_FLAGS__ = pinned; }, flags);
     if (who) await context.addCookies([{ name: 'tdoc_sid', value: who.cookie.split('=')[1], domain: '127.0.0.1', path: '/' }]);
     const page = await context.newPage();
     page.on('pageerror', (e) => { throw e; });
     await page.goto(`${base}/d/${slug}`);
     await page.frameLocator('iframe').locator('h1').waitFor({ timeout: 15000 });
+    await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
     return { context, page };
   };
   const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${name}` }); } };
@@ -142,12 +153,104 @@ async function dragSelect(page, phrase) {
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
 
   try {
-    await t('desktop bar: logo · title; Edited · ✈ · Share · ⋯ · space chip · avatar; modes in ⋯; the filter heads the comments', async () => {
+    await t('selection opens a composer; an empty draft copies the quote while a typed draft keeps native copy', async () => {
+      const { context, page } = await open(julie, 'launch-plan');
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      await dragSelect(page, 'Billing ships first');
+      const pop = page.locator('.tdoc-popup');
+      await shot(page, 'selection-composer-desktop.png');
+      const selected = (await pop.locator('.head .h').textContent()).replace(/^"|"$/g, '');
+      if (!selected.includes('Billing ships')) throw new Error(`composer lost selected text: ${JSON.stringify(selected)}`);
+      const textarea = pop.locator('textarea');
+      if (!(await textarea.evaluate((el) => document.activeElement === el))) throw new Error('desktop composer did not focus its textarea');
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
+      const keyboardCopy = await page.evaluate(() => navigator.clipboard.readText());
+      if (keyboardCopy !== selected) throw new Error(`empty draft copied ${JSON.stringify(keyboardCopy)} instead of ${JSON.stringify(selected)}`);
+      await textarea.fill('draft text');
+      await page.evaluate(() => navigator.clipboard.writeText('sentinel'));
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'sentinel') throw new Error('typed draft shortcut copied the quote');
+      await textarea.evaluate((el) => el.select());
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'draft text') throw new Error('native textarea copy was intercepted');
+      await pop.getByRole('button', { name: 'Copy selected text' }).click();
+      const buttonCopy = await page.evaluate(() => navigator.clipboard.readText());
+      if (buttonCopy !== selected) throw new Error(`quote icon copied ${JSON.stringify(buttonCopy)}`);
+      await pop.locator('.x').click();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
+      await page.getByRole('menuitemradio', { name: /Read/ }).click();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await page.waitForFunction(() => localStorage.getItem('tdoc-mode:launch-plan:julie') === 'read');
+      await page.reload();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await context.close();
+    });
+
+    await t('phone keeps native copy, shows Comment after release, and remembers a chosen Read per document', async () => {
+      const { context, page } = await open(julie, 'launch-plan', true);
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+      const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+      const select = async () => frame.evaluate(() => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const index = node.nodeValue.indexOf('Billing ships first');
+          if (index < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, index); range.setEnd(node, index + 'Billing ships first'.length);
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+          const rect = range.getBoundingClientRect();
+          const touch = new Touch({ identifier: 1, target: document.body, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 });
+          document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
+          document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
+          return;
+        }
+      });
+      await select();
+      const action = frame.getByRole('button', { name: 'Comment', exact: true });
+      await action.waitFor();
+      if (await page.locator('.tdoc-popup').count()) throw new Error('selection opened the composer before Comment was clicked');
+      const selected = await frame.evaluate(() => getSelection().toString());
+      if (selected !== 'Billing ships first') throw new Error(`native selection was lost: ${JSON.stringify(selected)}`);
+      const geometry = await frame.evaluate(() => ({
+        selectedBottom: getSelection().getRangeAt(0).getBoundingClientRect().bottom,
+        actionTop: document.querySelector('.tdoc-selection-action').getBoundingClientRect().top,
+      }));
+      if (geometry.actionTop < geometry.selectedBottom) throw new Error(`phone action covered the system Copy menu: ${JSON.stringify(geometry)}`);
+      const nativeCopy = await frame.evaluate(() => {
+        const data = new DataTransfer();
+        document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+        return data.getData('text/plain');
+      });
+      if (nativeCopy !== selected) throw new Error(`native copy did not preserve selected text: ${JSON.stringify(nativeCopy)}`);
+      await action.click();
+      const pop = page.locator('.tdoc-popup');
+      await pop.waitFor();
+      if (await pop.locator('textarea').evaluate((el) => document.activeElement === el)) throw new Error('phone composer opened the keyboard');
+      await shot(page, 'selection-composer-phone.png');
+      await frame.evaluate(() => {
+        const touch = new Touch({ identifier: 2, target: document.body, clientX: innerWidth - 12, clientY: innerHeight - 12 });
+        document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
+        document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
+      });
+      await pop.waitFor({ state: 'detached' });
+      if (await frame.evaluate(() => getSelection().toString() || window.CSS?.highlights?.has('tdoc-pending'))) throw new Error('tap away left selection or pending highlight');
+      await page.locator('.tdoc-mode-trigger').click();
+      await page.getByRole('menuitemradio', { name: /Read/ }).click();
+      await page.reload();
+      await page.locator('.tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await page.goto(`${base}/d/own-agent-draft`);
+      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+      await context.close();
+    });
+
+    await t('desktop bar: logo · title; Edited · ✈ · Share · ⋯ · space chip · avatar; mode switch in the bar; the filter heads the comments', async () => {
       const { context, page } = await open(julie, 'launch-plan');
       await page.locator('.tdoc-bar .tdoc-space-trigger', { hasText: 'My docs' }).waitFor();
       if (await page.locator('.tdoc-crumbs, .tdoc-crumb').count()) throw new Error('space / folder crumbs are back');
       if (!(await page.locator('.tdoc-bar-left .doc-title').isVisible())) throw new Error('no title on the left');
-      if (await page.locator('.tdoc-mode-trigger, #tdoc-show-resolved, #tdoc-theme-btn, #tdoc-star-btn').count()) throw new Error('an old bar control is back');
+      if (await page.locator('#tdoc-show-resolved, #tdoc-theme-btn, #tdoc-star-btn').count()) throw new Error('an old bar control is back');
+      if (!(await page.locator('.tdoc-bar .tdoc-mode-trigger').isVisible())) throw new Error('the mode switch is not in the bar');
       if (!/^Edited /.test((await page.locator('#tdoc-version-toggle').textContent()).trim())) throw new Error('no Edited …');
       await page.locator('#tdoc-send-agent-btn').waitFor();
       desktopAskIcon = await page.locator('#tdoc-send-agent-btn .tdoc-ask-ai-mark').evaluate((el) => el.outerHTML);
@@ -159,11 +262,12 @@ async function dragSelect(page, phrase) {
       });
       if (askStyle.background !== 'rgba(0, 0, 0, 0)' || askStyle.border !== '0px') throw new Error(`Ask AI has a pill: ${JSON.stringify(askStyle)}`);
       if (await page.locator('.tdoc-account-trigger .name').isVisible()) throw new Error('the avatar shows a name');
-      await page.locator('#tdoc-more-btn').click();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
       await page.getByRole('menuitemradio', { name: /Comment/ }).waitFor();
-      await page.getByRole('menuitemradio', { name: /Read/ }).click();
-      await page.locator('#tdoc-more-btn').click();
-      if (await page.getByRole('menuitemradio', { name: /Read/ }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from ⋯');
+      await page.getByRole('menuitemradio', { name: /Read/ }).waitFor();
+      await page.getByRole('menuitemradio', { name: /Edit/ }).click();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
+      if (await page.getByRole('menuitemradio', { name: /Edit/ }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from the bar');
       await page.keyboard.press('Escape');
       const filter = page.locator('.tdoc-comment-filter');
       await filter.waitFor();
@@ -178,7 +282,7 @@ async function dragSelect(page, phrase) {
 
     await t('phone bar and Ask AI drawer fit 375px, 390px and 430px, including a reduced keyboard viewport', async () => {
       for (const width of [375, 390, 430]) {
-      const { context, page } = await open(julie, 'launch-plan', true);
+      const { context, page } = await open(julie, 'launch-plan', true, { unifiedEntry: false });
       await page.setViewportSize({ width, height: 800 });
       await page.locator('#tdoc-send-agent-btn').waitFor();
       const phoneAskIcon = await page.locator('#tdoc-send-agent-btn .tdoc-ask-ai-mark').evaluate((el) => el.outerHTML);
@@ -276,7 +380,7 @@ async function dragSelect(page, phrase) {
     });
 
     await t('Ask AI puts the team editor first in the menu but defaults private questions to tdoc AI', async () => {
-      const { context, page } = await open(bob, 'team-plan', true);
+      const { context, page } = await open(bob, 'team-plan', true, { unifiedEntry: false });
       await page.locator('#tdoc-send-agent-btn').click();
       const panel = page.getByRole('dialog', { name: 'Ask AI' });
       if (!(await panel.getByRole('button', { name: 'Who should answer?' }).innerText()).includes('tdoc AI')) throw new Error('a team editor was selected for a private question');
@@ -299,9 +403,18 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t("member on a doc Julie's agent wrote: Answers only, no control; Comment asks the team agent", async () => {
+    await t("member on a doc Julie's agent wrote: no automatic recipient; explicit team agent answers only", async () => {
       const { context, page } = await open(bob, 'julies-draft');
-      const { pop } = await compose(page, 'Can we move billing?');
+      await dragSelect(page, 'Billing ships first');
+      const pop = page.locator('.tdoc-popup');
+      await pop.waitFor();
+      await pop.locator('textarea').fill('Can we move billing?');
+      await pop.locator('.tdoc-composer-agent').click();
+      if (await pop.locator('.tdoc-agent-pill').count()) throw new Error('somebody else’s agent became the default');
+      const picker = page.locator('.tdoc-mention-menu');
+      await picker.waitFor();
+      await picker.getByRole('option', { name: /tdoc-bot/ }).click();
+      await pop.locator('.tdoc-agent-pill').waitFor();
       if (!(await answersOnly(pop))) throw new Error('no "Answers only"');
       await shot(page, 'composer-ask-only-locked.png');
       await pop.getByRole('button', { name: 'Comment', exact: true }).click();
@@ -312,9 +425,22 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('reader with no agent: tdoc AI with Connect my agent; Answers only; Only me on', async () => {
+    await t('reader with no agent: explicitly chooses tdoc AI; Answers only; Only me on', async () => {
       const { context, page } = await open(reader, 'launch-plan');
-      const { pop, items } = await compose(page, 'Why billing first?');
+      await dragSelect(page, 'Billing ships first');
+      const pop = page.locator('.tdoc-popup');
+      await pop.waitFor();
+      await pop.locator('textarea').fill('Why billing first?');
+      await pop.locator('.tdoc-composer-agent').click();
+      if (await pop.locator('.tdoc-agent-pill').count()) throw new Error('reader inherited the owner’s agent as default');
+      const picker = page.locator('.tdoc-mention-menu');
+      await picker.waitFor();
+      await picker.getByRole('option', { name: /tdoc AI/ }).click();
+      await pop.locator('.tdoc-agent-pill').click();
+      const menu = page.locator('.ui-menu-popup');
+      await menu.waitFor();
+      const items = await menu.innerText();
+      await page.keyboard.press('Escape');
       if (!/tdoc AI/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
       if (!(await answersOnly(pop))) throw new Error('no "Answers only"');
       if (await pop.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
@@ -322,7 +448,7 @@ async function dragSelect(page, phrase) {
     });
 
     await t('long Markdown answer stays readable in the 390px drawer and can expand to full height', async () => {
-      const { context, page } = await open(reader, 'launch-plan', true);
+      const { context, page } = await open(reader, 'launch-plan', true, { unifiedEntry: false });
       await page.setViewportSize({ width: 390, height: 800 });
       if (!(await page.locator('.tdoc-bar-mark').isVisible())) throw new Error('reader logo is missing');
       await page.locator('#tdoc-send-agent-btn').click();
@@ -399,12 +525,32 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
+    await t('phone: one entry; the comment button opens Comments and Ask AI tabs, no Ask AI in the bar', async () => {
+      for (const width of [375, 390, 430]) {
+        const { context, page } = await open(reader, 'launch-plan', true);
+        await page.setViewportSize({ width, height: 800 });
+        if (await page.locator('#tdoc-send-agent-btn').count()) throw new Error(`${width}px: Ask AI is still in the top bar`);
+        await page.locator('.tdoc-fab').click();
+        const tabs = page.getByRole('radiogroup', { name: 'Comments or Ask AI' });
+        await tabs.waitFor();
+        await tabs.getByRole('radio', { name: /Ask AI/ }).click();
+        const box = page.locator('#tdoc-comment-layer').getByRole('textbox', { name: 'Ask about this document' });
+        await box.waitFor();
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        if (overflow > 0) throw new Error(`${width}px: page overflows by ${overflow}px`);
+        await tabs.getByRole('radio', { name: /Comments/ }).click();
+        if (await box.count()) throw new Error(`${width}px: Ask AI panel stays after switching back to Comments`);
+        await shot(page, `unified-entry-${width}.png`);
+        await context.close();
+      }
+    });
+
     await t('Ask AI keeps a long agent list behind More agents on a phone', async () => {
       for (const device of ['studio-a', 'studio-b', 'studio-c', 'studio-d']) {
         const registered = await api('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device, clis: ['codex'] } });
         if (registered.status >= 400) throw new Error(`could not register ${device}: ${registered.status}`);
       }
-      const { context, page } = await open(julie, 'launch-plan', true);
+      const { context, page } = await open(julie, 'launch-plan', true, { unifiedEntry: false });
       await page.setViewportSize({ width: 390, height: 800 });
       await page.locator('#tdoc-send-agent-btn').click();
       const drawer = page.getByRole('dialog', { name: 'Ask AI' });
