@@ -70,14 +70,14 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
                 : turn.status === 'failed' ? turn.error || 'Could not get an answer.' : turn.answer} />
           </div>
           <div className="tdoc-ask-visibility">{turn.public ? 'Posted as a comment · Visible to everyone' : 'Only you can see this'}</div>
-          {turn.status === 'failed' ? <button type="button" onClick={() => onAsk(turn.question, turn.target)}>Retry</button>
+          {turn.status === 'failed' ? <button type="button" className="ui-btn ui-btn-primary ui-btn-m" onClick={() => onAsk(turn.question, turn.target)}>Retry</button>
             : turn.status === 'thinking' || turn.status === 'waiting' ? null
               : <>
                   {turn.public ? null
                     : turn.kept ? <span className="tdoc-ask-private-note">Kept private</span>
                       : <div className="tdoc-ask-answer-actions">
-                        <button type="button" onClick={() => onKeep(turn.id)}>Keep to myself</button>
-                        <button type="button" className="primary" disabled={turn.publishing} onClick={() => onPost(turn.id)}>{turn.publishing ? 'Posting…' : 'Post as comment'}</button>
+                        <button type="button" className="ui-btn ui-btn-secondary ui-btn-m" onClick={() => onKeep(turn.id)}>Keep to myself</button>
+                        <button type="button" className="primary ui-btn ui-btn-primary ui-btn-m" disabled={turn.publishing} onClick={() => onPost(turn.id)}>{turn.publishing ? 'Posting…' : 'Post as comment'}</button>
                       </div>}
                 </>}
         </div>

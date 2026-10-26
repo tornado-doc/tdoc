@@ -1193,3 +1193,31 @@ a.ui-menu-item:visited {
 .ui-checkbox-indicator { display: inline-flex; }
 .ui-checkbox-label { white-space: nowrap; }
 .ui-checkbox-hint { color: #8a8a8a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* AppButton (shell/src/ui/button.jsx): the only button sizes. Surfaces may
+   recolour a variant, never resize it (test/ui-consistency.test.js). */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: 500 13px system-ui, -apple-system, sans-serif;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ui-btn.ui-btn-s { height: 28px; padding: 0 10px; font-size: 12px; }
+.ui-btn-primary { background: var(--td-accent, #1652f0); color: #fff; }
+.ui-btn-primary:hover:not(:disabled) { background: var(--td-accent-hover, #1146c8); }
+.ui-btn-secondary { background: var(--td-ground, #fff); color: var(--td-ink, #1a1a1a); border-color: var(--td-line, #e8e7e3); }
+.ui-btn-secondary:hover:not(:disabled) { background: var(--td-surface-2, #f7f7f5); }
+.ui-btn.ui-btn-quiet { height: auto; padding: 2px 0; border: 0; background: none; color: var(--td-muted, #6b6a66); }
+.ui-btn-quiet:hover:not(:disabled) { color: var(--td-ink, #1a1a1a); }
+.ui-btn:disabled { opacity: .5; cursor: default; }
+.ui-btn:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }

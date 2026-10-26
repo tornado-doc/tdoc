@@ -258,14 +258,14 @@ function ReplyForm({
         </span>
         <div className="tdoc-reply-form-actions">
           {v4 && agentSetupHref && !canSendToAgent ? (
-            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
-          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent" /> : null}
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref} title="Connect an agent first">@agent</a>
+          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent ui-btn ui-btn-secondary ui-btn-m" /> : null}
           {agentButtons && !canSendToAgent && agentSetupHref ? (
-            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref} title="Connect an agent first">@agent</a>
           ) : null}
           {agentButtons && canSendToAgent ? (
             <button
-              className="tdoc-reply-submit agent"
+              className="tdoc-reply-submit agent ui-btn ui-btn-secondary ui-btn-m"
               type="button"
               onClick={() => submit(true)}
               disabled={busy}
@@ -274,7 +274,7 @@ function ReplyForm({
               {busy ? 'Posting…' : '@agent'}
             </button>
           ) : null}
-          <button className="tdoc-reply-submit" type="button" onClick={() => submit(false)} disabled={busy}>
+          <button className="tdoc-reply-submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Reply'}
           </button>
         </div>
