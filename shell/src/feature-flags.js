@@ -16,6 +16,7 @@ export const FLAGS = Object.freeze({
   // Ask AI tabs instead of a separate Ask AI button in the top bar. On in PR
   // previews so it can be tried before it ships.
   unifiedEntry: Object.freeze({ label: 'One comment + Ask AI entry on phones', owner: 'julie', added: '2026-10-26', default: false, preview: true }),
+  teamGuests: Object.freeze({ label: 'Team guests and seats', owner: 'julie', added: '2026-10-26', default: false, preview: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

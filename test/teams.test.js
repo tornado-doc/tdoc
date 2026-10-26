@@ -105,6 +105,49 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     assert(meta.hosted.account_id === 'acct-alice', 'author unchanged');
   });
 
+  await t('team guests are counted once, can read shared docs, and stop at the free limit', async () => {
+    const guests = await Promise.all(Array.from({ length: 6 }, (_, i) => sessionFor(env, `guest${i + 1}`)));
+    const firstFive = Array.from({ length: 5 }, (_, i) => `guest${i + 1}`);
+    const shared = await call('/api/doc/access', { method: 'PATCH', cookie: alice,
+      body: { slug: 'plan', access: { allowed_users: firstFive } } });
+    assert(shared.status === 200, `shared ${shared.status} ${JSON.stringify(shared.body)}`);
+    const read = await call('/d/plan/v/1', { cookie: guests[0] });
+    assert(read.status === 200, `guest reads ${read.status}`);
+    assert((await read.r.text()).includes('"guest":true'), 'guest status reaches document shell');
+    const cannotCreate = await call('/api/doc/create', { method: 'POST', cookie: guests[0], body: { team: team.id } });
+    assert(cannotCreate.status === 403, 'guest cannot create team document');
+    const agentList = await call('/api/docs/plan/my-agent', { cookie: guests[0] });
+    assert(agentList.status === 200 && agentList.body.team_agents.length === 0, 'team agent unavailable to guest');
+    const roster = await call(`/api/team/guests?id=${team.id}`, { cookie: alice });
+    assert(roster.status === 200 && roster.body.guests.length === 5 && roster.body.limit === 5, `roster ${JSON.stringify(roster.body)}`);
+    const teammateRoster = await call(`/api/team/guests?id=${team.id}`, { cookie: bob });
+    assert(teammateRoster.status === 200 && teammateRoster.body.guests.length === 5, 'members see guest list');
+    assert(roster.body.guests[0].documents.some((doc) => doc.slug === 'plan'), 'guest document listed');
+    assert(roster.body.guests[0].added_by === 'alice', 'inviter recorded');
+    const outsider = await call(`/api/team/guests?id=${team.id}`, { cookie: guests[0] });
+    assert(outsider.status === 404, `roster private ${outsider.status}`);
+    const sixth = await call('/api/doc/access', { method: 'PATCH', cookie: alice,
+      body: { slug: 'plan', access: { allowed_users: [...firstFive, 'guest6'] } } });
+    assert(sixth.status === 409 && sixth.body.error === 'team_guest_limit', `sixth ${sixth.status} ${JSON.stringify(sixth.body)}`);
+    const invite = await call('/api/team/guests', { method: 'POST', cookie: alice,
+      body: { id: team.id, invitee: 'guest1', action: 'invite_member' } });
+    assert(invite.status === 200 && invite.body.invites.includes('guest1'), 'member invite created');
+    const request = await call('/api/team/request-join', { method: 'POST', cookie: guests[1], body: { slug: 'plan' } });
+    assert(request.status === 200 && request.body.requested, `join request ${request.status}`);
+    const adminInbox = JSON.parse(await env.META.get('inbox:alice'));
+    assert(adminInbox.items.some((item) => item.kind === 'team_join_request' && item.team_id === team.id), 'admin notified');
+    const removed = await call('/api/team/guests', { method: 'POST', cookie: alice,
+      body: { id: team.id, invitee: 'guest5', action: 'remove' } });
+    assert(removed.status === 200 && removed.body.guests.length === 4, `removed ${JSON.stringify(removed.body)}`);
+    const shareSixth = await call('/api/doc/access', { method: 'PATCH', cookie: alice,
+      body: { slug: 'plan', access: { allowed_users: [...firstFive.slice(0, 4), 'guest6'] } } });
+    assert(shareSixth.status === 200, `after removal ${shareSixth.status}`);
+    await env.META.put(`team-billing:${team.id}`, JSON.stringify({ status: 'active' }));
+    const paid = await call(`/api/team/guests?id=${team.id}`, { cookie: alice });
+    assert(paid.body.limit === 50, 'paid guest limit');
+    await env.META.delete(`team-billing:${team.id}`);
+  });
+
   await t('moving between workspaces clears old personal folder filing', async () => {
     await seedDoc(env, 'folder-trip', 'alice');
     const created = await call('/api/folders', { method: 'POST', cookie: alice, body: { name: 'Old folder' } });

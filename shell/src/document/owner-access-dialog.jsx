@@ -3,7 +3,8 @@ import { Trash2 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AppSwitch } from '../ui/switch.jsx';
-import { deleteDocument, updateDocumentAccess } from './api.js';
+import { deleteDocument, getTeam, getTeamGuests, updateDocumentAccess, updateTeam } from './api.js';
+import { isFeatureOn } from '../feature-flags.js';
 import { rememberTrashed } from '../recent-trash.js';
 import { VersionLinkChoice } from './document-dialogs.jsx';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
@@ -138,6 +139,10 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
   const team = config.teamManage?.team || null;
   const [access, setAccess] = useState(manage?.access || {});
   const [status, setStatus] = useState('');
+  const [teamGuestsEnabled] = useState(() => isFeatureOn('teamGuests'));
+  const [fullTeam, setFullTeam] = useState(null);
+  const [guestLimit, setGuestLimit] = useState(null);
+  const [pendingInvite, setPendingInvite] = useState(null);
   // The boot config never learns about saves, so resetting from it on reopen
   // silently reverted every change the server had already accepted — add an
   // invitee, close, reopen, and the list looked like the invite never
@@ -147,6 +152,11 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
   useEffect(() => {
     if (open) setAccess(savedRef.current);
   }, [open]);
+  useEffect(() => {
+    if (!open || !team || !teamGuestsEnabled) return;
+    getTeam(team.id).then((res) => setFullTeam(res.team)).catch(() => {});
+    getTeamGuests(team.id).then((res) => setGuestLimit(res.limit)).catch(() => {});
+  }, [open, team?.id, teamGuestsEnabled]);
 
   const normalized = useMemo(() => ({
     visibility: 'unlisted',
@@ -172,8 +182,32 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
       setStatus(emailed.length ? `Saved. Invitation emailed to ${emailed.join(', ')}.` : 'Saved.');
     } catch (error) {
       setAccess(previous);
-      setStatus(`Failed: ${error.message}`);
+      setStatus(error?.body?.error === 'team_guest_limit'
+        ? `Guest limit reached (${error.body.limit}). Upgrade the team or invite someone as a member.`
+        : `Failed: ${error.message}`);
     }
+  };
+
+  const inviteUsers = (allowedUsers) => {
+    const added = allowedUsers.find((user) => !normalized.allowed_users.includes(user));
+    const domain = added?.includes('@') ? added.split('@')[1] : '';
+    const memberDomains = new Set((fullTeam?.members || []).map((member) => String(member.email || member.key || '').split('@')[1]).filter(Boolean));
+    if (teamGuestsEnabled && fullTeam && domain && memberDomains.has(domain)) {
+      setPendingInvite({ invitee: added, allowedUsers });
+    } else {
+      save({ allowed_users: allowedUsers });
+    }
+  };
+  const inviteToTeam = async () => {
+    if (!pendingInvite || !fullTeam) return;
+    const invitee = pendingInvite.invitee;
+    setPendingInvite(null);
+    setStatus('Inviting to team…');
+    try {
+      const res = await updateTeam(fullTeam.id, { invites: [...new Set([...(fullTeam.invites || []), invitee])] });
+      setFullTeam(res.team);
+      setStatus(`${res.emailed?.length ? 'Team invitation emailed' : 'Team invitation saved'}. A seat is used after they join.`);
+    } catch (error) { setStatus(`Failed: ${error.message}`); }
   };
 
   const inviteRelevant = normalized.visibility === 'private'
@@ -250,11 +284,19 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
 
         {inviteRelevant ? (
           <>
-            <label className="field">Invite by GitHub username</label>
+            <label className="field">Invite people</label>
             <InviteField
               users={normalized.allowed_users}
-              onChange={(allowedUsers) => save({ allowed_users: allowedUsers })}
+              onChange={inviteUsers}
             />
+            {teamGuestsEnabled && team && guestLimit != null ? <p className="manage-hint">Guests use no seats · team limit {guestLimit}</p> : null}
+            {pendingInvite ? <div className="manage-section" role="group" aria-label="Invitation choice">
+              <p>{pendingInvite.invitee} shares a team email domain. How should they join?</p>
+              <div className="actions">
+                <button type="button" className="primary" onClick={inviteToTeam}>Invite to team (uses a seat)</button>
+                <button type="button" onClick={() => { const users = pendingInvite.allowedUsers; setPendingInvite(null); save({ allowed_users: users }); }}>Only this document (guest)</button>
+              </div>
+            </div> : null}
           </>
         ) : null}
       </section>

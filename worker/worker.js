@@ -5200,6 +5200,17 @@ async function moveFolderToTeam(env, session, team, body) {
   // call's docs where they were; batches already moved stay in the team.
   const blocked = await teamPlanBlocksDocs(env, team, entering);
   if (blocked) return { ok: false, status: 402, body: blocked };
+  if (entering) {
+    const guests = new Set((await teamGuestRoster(env, team)).map((guest) => guest.invitee));
+    const existingGuests = new Set(guests);
+    for (const [, meta] of writes) {
+      for (const invitee of accessFromMeta(meta).allowed_users) {
+        if (!await teamGuestIsMember(env, team, invitee)) guests.add(invitee);
+      }
+    }
+    const limit = await teamGuestLimit(env, team);
+    if (guests.size > limit && [...guests].some((invitee) => !existingGuests.has(invitee))) return fail(409, 'team_guest_limit', { count: guests.size, limit });
+  }
 
   // Folders before the docs that point at them; My docs last, so a failure
   // midway leaves every doc either still in My docs or filed in the team.
@@ -5606,6 +5617,55 @@ async function teamDocCount(env, teamId) {
   const slugs = await docIndexSlugs(env, `w:${teamId}`, teamDocMatcher(teamId));
   const metas = await Promise.all(slugs.map((slug) => loadDocMeta(env, slug)));
   return metas.filter((meta) => meta && meta.workspace_id === teamId && meta.created_from !== 'feedback').length;
+}
+const TEAM_GUEST_FREE_LIMIT = 5;
+const TEAM_GUEST_PAID_LIMIT = 50;
+
+async function teamGuestIsMember(env, team, invitee) {
+  if ((team.members || []).some((member) => {
+    const key = String(member.key || '').toLowerCase();
+    return key === invitee || key === `email:${invitee}` || member.email === invitee;
+  })) return true;
+  if (!invitee.includes('@')) return false;
+  const accountId = await accountIdByEmail(env, invitee);
+  return !!accountId && !!teamMember(team, accountId);
+}
+
+async function teamGuestRoster(env, team) {
+  const slugs = await docIndexSlugs(env, `w:${team.id}`, teamDocMatcher(team.id));
+  const metas = await Promise.all(slugs.map((slug) => loadDocMeta(env, slug)));
+  const guests = new Map();
+  const membership = new Map();
+  for (let i = 0; i < metas.length; i++) {
+    const meta = metas[i];
+    if (!meta || meta.workspace_id !== team.id || meta.created_from === 'feedback') continue;
+    const inviters = meta.guest_invited_by && typeof meta.guest_invited_by === 'object' ? meta.guest_invited_by : {};
+    for (const invitee of accessFromMeta(meta).allowed_users) {
+      if (!membership.has(invitee)) membership.set(invitee, await teamGuestIsMember(env, team, invitee));
+      if (membership.get(invitee)) continue;
+      if (!guests.has(invitee)) guests.set(invitee, { invitee, documents: [], added_by: inviters[invitee] || null });
+      const guest = guests.get(invitee);
+      guest.documents.push({ slug: slugs[i], title: meta.title || slugs[i] });
+      if (!guest.added_by && inviters[invitee]) guest.added_by = inviters[invitee];
+    }
+  }
+  return [...guests.values()].sort((a, b) => a.invitee.localeCompare(b.invitee));
+}
+
+async function teamGuestLimit(env, team) {
+  return (await teamPlanPaid(env, team.id)) ? TEAM_GUEST_PAID_LIMIT : TEAM_GUEST_FREE_LIMIT;
+}
+
+async function teamGuestLimitError(env, team, currentSlug, nextAccess) {
+  const roster = await teamGuestRoster(env, team);
+  const existing = new Set(roster.map((guest) => guest.invitee));
+  const current = new Set(roster.filter((guest) => guest.documents.some((doc) => doc.slug !== currentSlug)).map((guest) => guest.invitee));
+  for (const invitee of nextAccess.allowed_users || []) {
+    if (!await teamGuestIsMember(env, team, invitee)) current.add(invitee);
+  }
+  const limit = await teamGuestLimit(env, team);
+  return current.size > limit && [...current].some((invitee) => !existing.has(invitee))
+    ? { error: 'team_guest_limit', count: current.size, limit } : null;
 }
 // Can `adding` more docs go into this team? Returns null when yes, else the
 // 402 body to answer with.
@@ -6020,6 +6080,7 @@ function teamDetail(team, accountId, origin) {
       account_id: m.account_id,
       name: m.name,
       key: m.key,
+      ...(m.email ? { email: m.email } : {}),
       role: m.role,
       me: m.account_id === accountId,
     })),
@@ -6034,6 +6095,7 @@ function teamMemberFromSession(session, role) {
   return {
     account_id: session.account_id,
     key: actorKey(session),
+    ...(normalizeEmail(session.email) ? { email: normalizeEmail(session.email) } : {}),
     name: actorDisplayName(session),
     role,
     joined: new Date().toISOString(),
@@ -6146,10 +6208,15 @@ async function ensureSessionAccount(env, session, origin) {
 }
 
 async function teamManageFor(env, session, meta, access, isOwner) {
-  if (!meta || !sessionInTeam(session, meta.workspace_id)) return null;
+  if (!meta || !meta.workspace_id || !sessionPrincipal(session)) return null;
   const team = await loadTeam(env, meta.workspace_id);
+  if (!team) return null;
   const role = teamRole(team, session.account_id);
-  if (!role) return null;
+  if (!role) {
+    if (isOwner || !isAllowlisted(access, session, env, meta)) return null;
+    return { team: { id: team.id, name: team.name }, guest: true,
+      invitePending: pendingTeamInvite(team, session) };
+  }
   const canManage = !!isOwner;
   return {
     team: { id: team.id, name: team.name },
@@ -6158,7 +6225,7 @@ async function teamManageFor(env, session, meta, access, isOwner) {
   };
 }
 
-async function sendTeamInviteEmails(env, { added, inviterName, inviterId, team, origin }) {
+async function sendTeamInviteEmails(env, { added, inviterName, inviterId, team, origin, force = false }) {
   const emailed = [];
   if (!emailSenderAvailable(env) || !Array.isArray(added) || !added.length || !team.invite_token) return emailed;
   let host = 'tdoc.dev';
@@ -6175,7 +6242,7 @@ async function sendTeamInviteEmails(env, { added, inviterName, inviterId, team, 
     try { addr = await resolveInviteeAddress(env, invitee); } catch {}
     if (!addr || await env.META.get(`email-optout:${addr}`)) continue;
     const coolKey = `team-invite-sent:${team.id}:${addr}`;
-    if (await env.META.get(coolKey)) continue;
+    if (!force && await env.META.get(coolKey)) continue;
     const tok = rand(16);
     const optoutUrl = `${origin}/email/optout?t=${tok}`;
     try {
@@ -11495,6 +11562,7 @@ function inboxGroupKey(kind, slug, targetId) {
   if (kind === 'reaction') return `reaction:${targetId}`;
   // One row per person asking: each is approved or ignored on its own.
   if (kind === 'access_request') return targetId ? `access_request:${slug}:${targetId}` : `access_request:${slug}`;
+  if (kind === 'team_join_request') return `team_join_request:${slug}:${targetId || ''}`;
   return `other:${slug || 'x'}`;
 }
 
@@ -11532,6 +11600,7 @@ function applyInboxEvent(inbox, ev) {
     actor: ev.actor || null,
     preview: ev.preview || '',
     title: ev.title || ev.slug,
+    ...(ev.team_id ? { team_id: ev.team_id } : {}),
     at: ev.at,
     read: false,
     count: 1,
@@ -12155,7 +12224,7 @@ async function deliverInbox(env, recipientLogin, ev, delivery = {}) {
 const PUSH_SUBS_MAX = 10;
 const PUSH_TTL_S = 24 * 60 * 60;
 const PUSH_PREVIEW_MAX = 280;
-const PUSH_KINDS = new Set(['comment', 'mention', 'reply', 'access_request', 'access_granted']);
+const PUSH_KINDS = new Set(['comment', 'mention', 'reply', 'access_request', 'access_granted', 'team_join_request']);
 // The worker POSTs to whatever endpoint a subscription names, so only the
 // browsers' own push services are accepted -- never an arbitrary URL.
 const PUSH_HOSTS = [
@@ -12322,7 +12391,7 @@ async function dropPushSubscription(env, keys, endpoint) {
 function pushRow(row) {
   const clip = (s, n) => { const t = String(s || ''); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
   return {
-    id: row.id, kind: row.kind, slug: row.slug, version: row.version,
+    id: row.id, kind: row.kind, slug: row.slug, team_id: row.team_id, version: row.version,
     comment_id: row.comment_id, thread_id: row.thread_id,
     actor: row.actor ? { login: row.actor.login, name: clip(row.actor.name, 80) } : null,
     preview: clip(row.preview, PUSH_PREVIEW_MAX), title: clip(row.title, 120),
@@ -12357,7 +12426,7 @@ async function pushInboxRow(env, who, row) {
 //   - the permanent opt-out (email-optout:<addr>) and the per-person switch
 //     in Notifications (notify-email-off:<actor key>) are checked first
 //   - no sender configured: nothing, and not an error
-const EMAIL_NOTIFY_KINDS = new Set(['mention', 'reply', 'comment', 'access_request']);
+const EMAIL_NOTIFY_KINDS = new Set(['mention', 'reply', 'comment', 'access_request', 'team_join_request']);
 const EMAIL_NOTIFY_COOLDOWN_S = 30 * 60;
 const EMAIL_NOTIFY_DAILY_CAP = 30;
 
@@ -15013,11 +15082,18 @@ async function handleMyAgent(env, req, url, slug) {
   const team = await teamAskTargets(env, { meta, session });
   if (req.method === 'GET') {
     const asks = accountId ? (await loadAgentAsks(env, slug, asker)).slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
+    const guestTeam = meta.workspace_id && !await isTeamMemberSession(env, session, meta.workspace_id)
+      && isAllowlisted(accessFromMeta(meta), session, env, meta)
+      ? await loadTeam(env, meta.workspace_id) : null;
     return json({
       tier: state.tier,
       agent: agentAskTargetView(state.reachable[0] || null),
       agents: state.own.map(agentAskTargetView),
       team_agents: team.targets.map(agentAskTargetView),
+      disabled_team_agents: guestTeam ? teamAgents(guestTeam).map((agent) => ({
+        provider: 'local', agent_sub: agent.id, agent_name: agent.name,
+        team_agent: { id: agent.id, name: agent.name }, disabled: true,
+      })) : [],
       // tdoc AI is offered to everyone, within their free answers.
       tdoc_ai: askConfig(env).available,
       asks,
@@ -18110,6 +18186,86 @@ const tdocHandlers = {
       return json({ ok: true, team: teamDetail(team, s.account_id, url.origin), emailed });
     }
 
+    if (p === '/api/team/guests' && (method === 'GET' || method === 'POST')) {
+      if (method === 'POST' && !sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      let body = {};
+      if (method === 'POST') { try { body = await req.json(); } catch {} }
+      const id = method === 'GET' ? url.searchParams.get('id') : body.id;
+      const team = await loadTeam(env, id);
+      if (!teamMember(team, gate.session.account_id)) return json({ error: 'not_found' }, { status: 404 });
+      if (method === 'POST' && teamRole(team, gate.session.account_id) !== 'admin') return json({ error: 'admin_required' }, { status: 403 });
+      let emailed = [];
+      if (method === 'POST') {
+        const invitee = normalizeInvitee(body.invitee);
+        if (!invitee || !['invite_member', 'resend', 'remove'].includes(body.action)) return json({ error: 'invalid_guest_action' }, { status: 400 });
+        const roster = await teamGuestRoster(env, team);
+        const guest = roster.find((item) => item.invitee === invitee);
+        if (body.action === 'remove') {
+          if (!guest) return json({ error: 'guest_not_found' }, { status: 404 });
+          if (Array.isArray(team.invites) && team.invites.includes(invitee)) {
+            team.invites = team.invites.filter((item) => item !== invitee);
+            await saveTeam(env, team);
+          }
+          for (const doc of guest.documents) {
+            const meta = await loadDocMeta(env, doc.slug);
+            if (!meta || meta.workspace_id !== team.id) continue;
+            const access = accessFromMeta(meta);
+            access.allowed_users = access.allowed_users.filter((item) => item !== invitee);
+            const invitedBy = { ...(meta.guest_invited_by || {}) };
+            delete invitedBy[invitee];
+            await putDocMetaJson(env, doc.slug, JSON.stringify({ ...meta, access, guest_invited_by: invitedBy }));
+          }
+        } else {
+          const invites = Array.isArray(team.invites) ? team.invites : [];
+          if (body.action === 'resend' && !invites.includes(invitee)) return json({ error: 'invite_not_found' }, { status: 404 });
+          if (body.action === 'invite_member' && !guest) return json({ error: 'guest_not_found' }, { status: 404 });
+          if (!invites.includes(invitee)) {
+            if (invites.length >= TEAM_INVITES_MAX) return json({ error: 'team_invites_full', limit: TEAM_INVITES_MAX }, { status: 409 });
+            team.invites = [...invites, invitee];
+            await saveTeam(env, team);
+          }
+          try {
+            emailed = await sendTeamInviteEmails(env, {
+              added: [invitee], inviterName: actorDisplayName(gate.session),
+              inviterId: actorKey(gate.session), team, origin: url.origin,
+              force: body.action === 'resend',
+            });
+          } catch {}
+        }
+      }
+      return json({ ok: true, guests: await teamGuestRoster(env, team), limit: await teamGuestLimit(env, team), invites: team.invites || [], emailed });
+    }
+
+    if (p === '/api/team/request-join' && method === 'POST') {
+      if (!sameOrigin(req, url)) return json({ error: 'forbidden' }, { status: 403 });
+      const gate = await teamSession(env, req, url.origin);
+      if (!gate.ok) return gate.response;
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const slug = body.slug;
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      const meta = await loadDocMeta(env, slug);
+      const team = meta && meta.workspace_id ? await loadTeam(env, meta.workspace_id) : null;
+      if (!team || teamMember(team, gate.session.account_id) || !isAllowlisted(accessFromMeta(meta), gate.session, env, meta)) {
+        return json({ error: 'guest_required' }, { status: 403 });
+      }
+      const requester = actorKey(gate.session);
+      const key = `team-join-request:${team.id}:${requester}`;
+      if (!await env.META.get(key)) {
+        for (const admin of team.members.filter((member) => member.role === 'admin')) {
+          await writeInboxEvent(env, admin.key, {
+            kind: 'team_join_request', slug, team_id: team.id, title: team.name,
+            target_id: requester, requester, at: new Date().toISOString(),
+            actor: { login: requester, name: actorDisplayName(gate.session), avatar_url: gate.session.avatar_url || '' },
+          }, { ctx, origin: url.origin });
+        }
+        await env.META.put(key, '1', { expirationTtl: 24 * 60 * 60 });
+      }
+      return json({ ok: true, requested: true });
+    }
+
     // Customer-owned backup mirror. Browser admins only: these credentials
     // can copy every team document, so a terminal token and a team member are
     // intentionally insufficient. The destination is tested before its
@@ -18662,6 +18818,15 @@ const tdocHandlers = {
       if (team) {
         const blocked = await teamPlanBlocksDocs(env, team, metas.length);
         if (blocked) return json(blocked, { status: 402 });
+        const guests = new Set((await teamGuestRoster(env, team)).map((guest) => guest.invitee));
+        const existingGuests = new Set(guests);
+        for (const [, meta] of metas) {
+          for (const invitee of accessFromMeta(meta).allowed_users) {
+            if (!await teamGuestIsMember(env, team, invitee)) guests.add(invitee);
+          }
+        }
+        const limit = await teamGuestLimit(env, team);
+        if (guests.size > limit && [...guests].some((invitee) => !existingGuests.has(invitee))) return json({ error: 'team_guest_limit', count: guests.size, limit }, { status: 409 });
       }
       for (const [slug, meta] of metas) {
         const next = { ...meta };
@@ -20574,9 +20739,25 @@ const tdocHandlers = {
         delete incoming.created_from;
         delete incoming.feedback;
         delete incoming.trashed_at;
+        delete incoming.guest_invited_by;
         const prev = writeGate.meta;
-        if (!incoming.access && prev && prev.access) {
-          incoming.access = prev.access;
+        if (prev && prev.guest_invited_by) incoming.guest_invited_by = prev.guest_invited_by;
+        // A checkout can carry a stale access snapshot. The browser's Share
+        // edits are authoritative until this request explicitly names the
+        // fields to change; a routine republish must not evict invitees.
+        if (prev) incoming.access = prev.access;
+        if (body.access_patch != null) {
+          const patch = body.access_patch;
+          if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return json({ error: 'invalid_access_patch' }, { status: 400 });
+          const { allowed_users_add: add, ...fields } = patch;
+          const validated = validateAccessWrite(fields);
+          if (validated.error) return json({ error: validated.error, ...(validated.field ? { field: validated.field } : {}), ...(validated.fields ? { fields: validated.fields } : {}) }, { status: 400 });
+          if (add != null && (!Array.isArray(add) || add.some((item) => !normalizeInvitee(item)))) {
+            return json({ error: 'invalid_access_value', field: 'allowed_users_add' }, { status: 400 });
+          }
+          const baseAccess = incoming.access || newDocAccess();
+          incoming.access = { ...baseAccess, ...validated.access };
+          if (add) incoming.access.allowed_users = [...new Set([...(incoming.access.allowed_users || []), ...add.map(normalizeInvitee)])];
         }
         // A brand-new doc that names no access is shared by link, not
         // published to the web. An existing doc keeps what it has.
@@ -20611,6 +20792,14 @@ const tdocHandlers = {
         if (writeGate.teamDoc) {
           incoming.hosted = prev.hosted;
           incoming.access = prev.access;
+        }
+        const guestChange = !prev || (body.access_patch && ('allowed_users' in body.access_patch || 'allowed_users_add' in body.access_patch));
+        if (prevTeam && guestChange && !writeGate.teamDoc) {
+          const team = await loadTeam(env, prevTeam);
+          if (team) {
+            const blocked = await teamGuestLimitError(env, team, slug, incoming.access);
+            if (blocked) return json(blocked, { status: 409 });
+          }
         }
       }
       if (auth.actor && auth.actor.kind === 'hosted' && !writeGate.teamDoc) {
@@ -21105,11 +21294,28 @@ const tdocHandlers = {
       if (next.error) {
         return json({ error: next.error, ...(next.field ? { field: next.field } : {}), ...(next.fields ? { fields: next.fields } : {}) }, { status: 400 });
       }
+      if (meta.workspace_id) {
+        const team = await loadTeam(env, meta.workspace_id);
+        if (team) {
+          const blocked = await teamGuestLimitError(env, team, slug, next.access);
+          if (blocked) return json(blocked, { status: 409 });
+        }
+      }
+      const added = (next.access.allowed_users || []).filter((x) => !prevAllowed.includes(x));
+      if (meta.workspace_id) {
+        const inviter = auth.session ? actorDisplayName(auth.session)
+          : ((auth.actor && (auth.actor.github_login || (auth.actor.email || '').split('@')[0])) || 'Someone');
+        const invitedBy = { ...(meta.guest_invited_by || {}) };
+        for (const item of added) invitedBy[item] = inviter;
+        for (const item of Object.keys(invitedBy)) {
+          if (!next.access.allowed_users.includes(item)) delete invitedBy[item];
+        }
+        next.meta.guest_invited_by = invitedBy;
+      }
       await putDocMetaJson(env, slug, JSON.stringify(next.meta));
       // The one moment an invitation exists as an event rather than a list
       // entry: mail the people the owner just added, never the ones who were
       // already there.
-      const added = (next.access.allowed_users || []).filter((x) => !prevAllowed.includes(x));
       let emailed = [];
       if (added.length) {
         const inviterName = auth.session ? actorDisplayName(auth.session)
