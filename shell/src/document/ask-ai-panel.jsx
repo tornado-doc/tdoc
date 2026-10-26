@@ -9,7 +9,7 @@ import { Author, CommentMessageText, ReplyMessage } from './comment-card.jsx';
 // editor stays a separate action, visible only when comments are ready.
 export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets, viewer,
   turns, busy, remaining, onAsk, onKeep, onPost, readyCount, onSendReady,
-  activityOpen, onActivityOpen, unreadCount, children }) {
+  activityOpen, onActivityOpen, unreadCount, signInToAsk = false, children }) {
   const input = useRef(null);
   const [expandedTurnId, setExpandedTurnId] = useState(null);
   useEffect(() => {
@@ -44,9 +44,9 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
         <button type="submit" aria-label="Send question" disabled={!draft.trim() || busy || !selected || noFreeAnswers}>↑</button>
       </div>
     </form>
-    <div className="tdoc-ask-only-hint">Answers only · won’t edit this document</div>
+    <div className="tdoc-ask-only-hint">{signInToAsk ? 'Free · sign in to get your answer' : 'Answers only · won’t edit this document'}</div>
     {noFreeAnswers ? <div className="tdoc-ask-notice">No free tdoc AI answers left. <a href="/start">Connect my agent</a> to keep asking.</div> : null}
-    {!targets.length ? <div className="tdoc-ask-notice">Connect an agent to ask about this document. <a href="/start">Connect my agent</a></div> : null}
+    {!targets.length && !signInToAsk ? <div className="tdoc-ask-notice">Connect an agent to ask about this document. <a href="/start">Connect my agent</a></div> : null}
     {readyCount > 0 && onSendReady ? <div className="tdoc-ask-ready">
       <span>{readyCount} {readyCount === 1 ? 'comment' : 'comments'} not sent</span>
       <button type="button" onClick={onSendReady}>Send to agent →</button>
@@ -82,9 +82,9 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
         </div>
       </div>)}
     </div> : null}
-    <button type="button" className="tdoc-ask-activity-toggle" aria-expanded={activityOpen} onClick={() => onActivityOpen(!activityOpen)}>
+    {children ? <button type="button" className="tdoc-ask-activity-toggle" aria-expanded={activityOpen} onClick={() => onActivityOpen(!activityOpen)}>
       <span>Agent activity</span><span>{unreadCount ? `${unreadCount} new · ` : ''}{activityOpen ? '⌃' : '›'}</span>
-    </button>
-    {activityOpen ? <div className="tdoc-ask-activity">{children}</div> : null}
+    </button> : null}
+    {children && activityOpen ? <div className="tdoc-ask-activity">{children}</div> : null}
   </div>;
 }

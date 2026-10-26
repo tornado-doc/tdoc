@@ -750,6 +750,9 @@ export function DocumentShell({ boot, config }) {
   // tdoc AI: the server's free answers, where it has a model, on a
   // published doc, for a signed-in person.
   const askEnabled = Boolean(config.ask?.available) && config.mode === 'published' && !config.isLanding && Boolean(config.identity);
+  // Signed-out readers still see Ask AI; sending asks them to sign in, which
+  // is the point: a question is the reason to make an account.
+  const signedOutAsk = Boolean(config.ask?.available) && config.mode === 'published' && !config.isLanding && !config.identity && !config.demoComments;
   const recipientFor = (target) => (target.tdoc_ai ? { tdoc_ai: true } : target);
   // Hand a posted comment to an agent to EDIT the doc (Ask only off). The
   // server decides whether this agent may (agentEditPolicy).
@@ -930,7 +933,7 @@ export function DocumentShell({ boot, config }) {
   // Phones get one entry: the comment button's drawer carries an Ask AI tab,
   // and the top bar keeps only Share and ⋯ (flag: unifiedEntry).
   const [unifiedEntryFlag] = useState(() => isFeatureOn('unifiedEntry'));
-  const unifiedEntry = narrow && askAiPanelEnabled && unifiedEntryFlag;
+  const unifiedEntry = narrow && (askAiPanelEnabled || signedOutAsk) && unifiedEntryFlag;
   const [drawerTab, setDrawerTab] = useState('comments');
   const myAgent = useMyAgent(config.slug, myAgentEnabled && Boolean(config.identity));
   // The composer's @ list: agents that may edit this doc, then those that
@@ -945,9 +948,9 @@ export function DocumentShell({ boot, config }) {
     const agents = orderedAskAiChoices([...(myAgent.state?.agents || []), ...(myAgent.state?.team_agents || [])], recent);
     return [
       ...agents.map((agent) => ({ key: targetKey(agent), label: agentDisplayName(agent, agents), target: agent, tdocAi: false })),
-      ...(askEnabled ? [{ key: 'tdoc-ai', label: 'tdoc AI', target: TDOC_AI, tdocAi: true }] : []),
+      ...(askEnabled || signedOutAsk ? [{ key: 'tdoc-ai', label: 'tdoc AI', target: TDOC_AI, tdocAi: true }] : []),
     ];
-  }, [askEnabled, myAgent.state?.agents, myAgent.state?.team_agents, notifyTargets.default, notifyTargets.candidates]);
+  }, [askEnabled, signedOutAsk, myAgent.state?.agents, myAgent.state?.team_agents, notifyTargets.default, notifyTargets.candidates]);
   // Relevance controls menu order, not who receives a private question by
   // default. A team agent (or another person's agent) cannot answer privately
   // for this viewer, even when it wrote the latest document version.
@@ -965,6 +968,7 @@ export function DocumentShell({ boot, config }) {
     ? askAiTargetKey : defaultAskAiTargetKey;
   const askAiSend = async (retryText = null, retryTarget = null) => {
     const question = String(retryText || askAiDraft).trim();
+    if (signedOutAsk) { if (question) signIn(); return; }
     const choice = retryTarget
       ? askAiTargets.find((item) => sameTarget(item.target, retryTarget))
       : askAiTargets.find((item) => item.key === selectedAskAiTargetKey);
@@ -1518,7 +1522,8 @@ export function DocumentShell({ boot, config }) {
       activityOpen={agentActivityOpen}
       onActivityOpen={setAgentActivityOpen}
       unreadCount={unreadAgentReplies}
-    ><HandoffDetailsPanel
+      signInToAsk={signedOutAsk}
+    >{signedOutAsk ? null : <HandoffDetailsPanel
       slug={config.slug}
       open={panelOpen}
       comments={visibleHandoffComments}
@@ -1545,7 +1550,7 @@ export function DocumentShell({ boot, config }) {
       onReply={config.canComment ? async (comment, text) => replyTo(comment.id, text,
         canSendToAgent ? { sendToAgent: true, handoffCommentId: comment.id, recipient: comment.handoff_to }
           : { target: comment.handoff_to, askOnly: true }) : null}
-    /></AskAiPanel>
+    />}</AskAiPanel>
   );
   const commentFilterControl = resolvedCount ? (
     <SegmentedControl
@@ -1614,7 +1619,7 @@ export function DocumentShell({ boot, config }) {
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
           !comparing && <>
             <DocumentEdited config={config} onCompare={() => changeComparison(true)} />
-            {askAiPanelEnabled && !unifiedEntry ? (
+            {(askAiPanelEnabled || signedOutAsk) && !unifiedEntry ? (
               <DocumentSendAgentAction
                 counts={Object.fromEntries(Object.entries(handoffBuckets).map(([state, list]) => [state, list.length]))}
                 unread={unreadAgentReplies}
