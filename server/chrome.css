@@ -841,6 +841,22 @@
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-answer-body .text,
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-question .text { font-size: 15px; line-height: 1.55; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-panel > h2 { display: none; }
+  body.tdoc-narrow .tdoc-fab .tdoc-fab-ai { margin-left: -4px; margin-top: -10px; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions button.primary { background: var(--td-accent, #1652f0); color: #fff; border-color: var(--td-accent, #1652f0); }
+  body.tdoc-narrow .tdoc-drawer-empty .tdoc-link-btn { border: 0; background: transparent; color: var(--td-muted); text-decoration: underline; text-underline-offset: 3px; }
+  body.tdoc-narrow .tdoc-howto-dismiss { margin-top: 14px; border: 0; background: transparent; color: var(--td-muted); font: 12px system-ui, sans-serif; cursor: pointer; }
+  body.tdoc-narrow .tdoc-howto-demo { position: relative; width: 220px; height: 74px; margin: 0 auto 14px; padding: 12px 14px; box-sizing: border-box; border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; text-align: left; font: 13px/1.5 system-ui, sans-serif; color: var(--td-ink, #1a1a1a); }
+  body.tdoc-narrow .tdoc-howto-line { display: block; white-space: nowrap; }
+  body.tdoc-narrow .tdoc-howto-line.short { width: 60%; height: 8px; margin-top: 8px; border-radius: 4px; background: var(--td-line, #e8e7e3); }
+  body.tdoc-narrow .tdoc-howto-line mark { background: linear-gradient(var(--td-accent-tint, #e8eefe), var(--td-accent-tint, #e8eefe)) no-repeat left / 0% 100%; color: inherit; animation: tdoc-howto-select 3.2s ease-in-out infinite; }
+  body.tdoc-narrow .tdoc-howto-pill { position: absolute; right: 12px; bottom: 10px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; background: var(--td-accent, #1652f0); color: #fff; font: 600 11px system-ui, sans-serif; opacity: 0; animation: tdoc-howto-pill 3.2s ease-in-out infinite; }
+  @keyframes tdoc-howto-select { 0%, 8% { background-size: 0% 100%; } 35%, 85% { background-size: 100% 100%; } 100% { background-size: 0% 100%; } }
+  @keyframes tdoc-howto-pill { 0%, 35% { opacity: 0; transform: translateY(4px); } 45%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { body.tdoc-narrow .tdoc-howto-line mark { animation: none; background-size: 100% 100%; } body.tdoc-narrow .tdoc-howto-pill { animation: none; opacity: 1; } }
+  .tdoc-bar .tdoc-mode-trigger { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--td-ink, #1a1a1a); font: 500 13.5px/1 system-ui, -apple-system, sans-serif; white-space: nowrap; cursor: pointer; flex-shrink: 0; }
+  .tdoc-bar .tdoc-mode-trigger:hover, .tdoc-bar .tdoc-mode-trigger[data-popup-open] { background: var(--td-surface-2, #f7f7f5); }
+  .tdoc-bar .tdoc-mode-chevron { color: var(--td-muted); }
+  @media (max-width: 700px) { .tdoc-bar .tdoc-mode-label { display: none; } .tdoc-bar .tdoc-mode-trigger { padding: 0 6px; gap: 2px; } }
   body.tdoc-narrow .tdoc-drawer-empty { padding: 28px 12px 36px; text-align: center; color: var(--td-muted); font: 14px system-ui, sans-serif; }
   body.tdoc-narrow .tdoc-drawer-empty p { margin: 0 0 14px; }
   body.tdoc-narrow .tdoc-drawer-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }

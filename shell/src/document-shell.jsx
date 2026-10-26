@@ -40,7 +40,8 @@ import {
 } from './document/document-toolbar.jsx';
 import {
   EditorToolbar,
-  availableModes,
+
+  DocumentModeControl,
   LinkDialog,
   SaveConflictDialog,
   SaveNoticeDialog,
@@ -1669,6 +1670,14 @@ export function DocumentShell({ boot, config }) {
                 {askAiPanel(handoffDetailsOpen)}
               </DocumentSendAgentAction>
             ) : null}
+            <DocumentModeControl
+              mode={editor.mode}
+              canComment={config.canComment}
+              canEdit={config.canEdit}
+              signInToComment={Boolean(config.signInToComment)}
+              onSignIn={() => signIn()}
+              onChange={(value) => editor.changeMode(value)}
+            />
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
@@ -1690,11 +1699,6 @@ export function DocumentShell({ boot, config }) {
             onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
             onCompare={() => changeComparison(true)}
-            mode={{
-              modes: availableModes({ canComment: config.canComment, canEdit: config.canEdit, signInToComment: Boolean(config.signInToComment) }),
-              value: editor.mode,
-              onChange: (value) => (value === 'comment' && !config.canComment && config.signInToComment ? signIn() : editor.changeMode(value)),
-            }}
           />
         )}
         onThemeChange={(nextTheme) => {

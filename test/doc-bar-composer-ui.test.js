@@ -144,12 +144,13 @@ async function dragSelect(page, phrase) {
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
 
   try {
-    await t('desktop bar: logo · title; Edited · ✈ · Share · ⋯ · space chip · avatar; modes in ⋯; the filter heads the comments', async () => {
+    await t('desktop bar: logo · title; Edited · ✈ · Share · ⋯ · space chip · avatar; mode switch in the bar; the filter heads the comments', async () => {
       const { context, page } = await open(julie, 'launch-plan');
       await page.locator('.tdoc-bar .tdoc-space-trigger', { hasText: 'My docs' }).waitFor();
       if (await page.locator('.tdoc-crumbs, .tdoc-crumb').count()) throw new Error('space / folder crumbs are back');
       if (!(await page.locator('.tdoc-bar-left .doc-title').isVisible())) throw new Error('no title on the left');
-      if (await page.locator('.tdoc-mode-trigger, #tdoc-show-resolved, #tdoc-theme-btn, #tdoc-star-btn').count()) throw new Error('an old bar control is back');
+      if (await page.locator('#tdoc-show-resolved, #tdoc-theme-btn, #tdoc-star-btn').count()) throw new Error('an old bar control is back');
+      if (!(await page.locator('.tdoc-bar .tdoc-mode-trigger').isVisible())) throw new Error('the mode switch is not in the bar');
       if (!/^Edited /.test((await page.locator('#tdoc-version-toggle').textContent()).trim())) throw new Error('no Edited …');
       await page.locator('#tdoc-send-agent-btn').waitFor();
       desktopAskIcon = await page.locator('#tdoc-send-agent-btn .tdoc-ask-ai-mark').evaluate((el) => el.outerHTML);
@@ -161,11 +162,11 @@ async function dragSelect(page, phrase) {
       });
       if (askStyle.background !== 'rgba(0, 0, 0, 0)' || askStyle.border !== '0px') throw new Error(`Ask AI has a pill: ${JSON.stringify(askStyle)}`);
       if (await page.locator('.tdoc-account-trigger .name').isVisible()) throw new Error('the avatar shows a name');
-      await page.locator('#tdoc-more-btn').click();
+      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
       await page.getByRole('menuitemradio', { name: /Comment/ }).waitFor();
       await page.getByRole('menuitemradio', { name: /Read/ }).click();
-      await page.locator('#tdoc-more-btn').click();
-      if (await page.getByRole('menuitemradio', { name: /Read/ }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from ⋯');
+      await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
+      if (await page.getByRole('menuitemradio', { name: /Read/ }).getAttribute('aria-checked') !== 'true') throw new Error('mode did not change from the bar');
       await page.keyboard.press('Escape');
       const filter = page.locator('.tdoc-comment-filter');
       await filter.waitFor();

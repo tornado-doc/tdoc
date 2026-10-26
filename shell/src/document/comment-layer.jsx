@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { CommentIcon } from '../ui/comment-icon.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
+import { AskIcon } from '../ui/ask-icon.jsx';
 import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { CommentThreadList } from './comment-thread-list.jsx';
@@ -177,6 +178,39 @@ export function DesktopCommentLayer({
   );
 }
 
+const HOWTO_KEY = 'tdoc-howto-comment-dismissed';
+
+// The empty drawer teaches the one gesture that matters (select, then
+// Comment) until the reader says they have it; Ask AI stays one tap away.
+function EmptyCommentsHowTo({ onComment, onAskAi }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(HOWTO_KEY) === '1'; } catch { return false; }
+  });
+  const dismiss = () => {
+    try { localStorage.setItem(HOWTO_KEY, '1'); } catch {}
+    setDismissed(true);
+  };
+  return (
+    <div className="tdoc-drawer-empty">
+      {dismissed ? <p>No comments here yet.</p> : (
+        <>
+          <div className="tdoc-howto-demo" aria-hidden="true">
+            <span className="tdoc-howto-line">Billing ships <mark>first, in March</mark></span>
+            <span className="tdoc-howto-line short" />
+            <span className="tdoc-howto-pill"><CommentIcon size={11} /> Comment</span>
+          </div>
+          <p>Select any text, then tap <strong>Comment</strong>.</p>
+        </>
+      )}
+      <div className="tdoc-drawer-empty-actions">
+        {onComment ? <button type="button" className="primary" onClick={onComment}>Leave a comment</button> : null}
+        {onAskAi ? <button type="button" className="tdoc-link-btn" onClick={onAskAi}>or Ask AI</button> : null}
+      </div>
+      {dismissed ? null : <button type="button" className="tdoc-howto-dismiss" onClick={dismiss}>Got it, don’t show again</button>}
+    </div>
+  );
+}
+
 export function MobileCommentDrawer({
   // The Open / Resolved / All control, above the list.
   filter = null,
@@ -240,6 +274,7 @@ export function MobileCommentDrawer({
     <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
       <Drawer.Trigger className={`tdoc-fab${hideFab ? ' is-hidden' : ''}`} aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
         <CommentIcon size={16} />
+        {askAi ? <AskIcon className="tdoc-fab-ai" size={11} /> : null}
         {openCount > 0 ? <span id="tdoc-fab-count">{openCount}</span> : null}
         {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
       </Drawer.Trigger>
@@ -263,14 +298,10 @@ export function MobileCommentDrawer({
             {showAsk ? <div className="tdoc-drawer-ask">{askAi}</div> : (
             <Drawer.Content className="tdoc-drawer-list">
               {filter ? <div className="tdoc-comment-filter-row">{filter}</div> : null}
-              {!comments.length ? <div className="tdoc-drawer-empty">
-                <p>No comments here yet.</p>
-                <div className="tdoc-drawer-empty-actions">
-                  {onStartComment ? <button type="button" onClick={() => { onOpenChange(false); onStartComment(); }}>Leave a comment</button> : null}
-                  {askAi && onTab ? <button type="button" onClick={() => onTab('ask')}>Ask AI</button>
-                    : onAskAi ? <button type="button" onClick={() => { onOpenChange(false); onAskAi(); }}>Ask AI</button> : null}
-                </div>
-              </div> : null}
+              {!comments.length ? <EmptyCommentsHowTo
+                onComment={onStartComment ? () => { onOpenChange(false); onStartComment(); } : null}
+                onAskAi={askAi && onTab ? () => onTab('ask') : onAskAi ? () => { onOpenChange(false); onAskAi(); } : null}
+              /> : null}
               <CommentThreadList
                 comments={comments}
                 selectedId={openCommentId}

@@ -444,7 +444,7 @@ async function t(name, fn) {
       await fab.click();
       const empty = page.locator('.tdoc-drawer-empty');
       await empty.getByRole('button', { name: 'Leave a comment', exact: true }).waitFor();
-      await empty.getByRole('button', { name: 'Ask AI', exact: true }).waitFor();
+      await empty.getByRole('button', { name: 'or Ask AI', exact: true }).waitFor();
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-drawer-empty.png') });
       await empty.getByRole('button', { name: 'Leave a comment', exact: true }).click();
       await page.locator('.tdoc-popup').getByText('On this document').waitFor();
@@ -452,7 +452,7 @@ async function t(name, fn) {
       await page.locator('.tdoc-popup').getByRole('button', { name: 'Comment', exact: true }).click();
       assert.deepEqual(JSON.parse(await page.locator('#mobile-comment-log').textContent()), { text: 'Please clarify the pricing', anchor: null });
       await fab.click();
-      await page.locator('.tdoc-drawer-empty').getByRole('button', { name: 'Ask AI', exact: true }).click();
+      await page.locator('.tdoc-drawer-empty').getByRole('button', { name: 'or Ask AI', exact: true }).click();
       await page.locator('.tdoc-popup').getByText('On this document').waitFor();
       assert.match(await page.locator('.tdoc-popup textarea').inputValue(), /tdoc AI/);
       assert.deepEqual(errors, []);
