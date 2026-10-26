@@ -182,7 +182,7 @@ const HOWTO_KEY = 'tdoc-howto-comment-dismissed';
 
 // The empty drawer teaches the one gesture that matters (select, then
 // Comment) until the reader says they have it; Ask AI stays one tap away.
-function EmptyCommentsHowTo({ onComment, onAskAi }) {
+function EmptyCommentsHowTo({ onAskAi }) {
   const [dismissed, setDismissed] = useState(() => {
     try { return localStorage.getItem(HOWTO_KEY) === '1'; } catch { return false; }
   });
@@ -192,7 +192,7 @@ function EmptyCommentsHowTo({ onComment, onAskAi }) {
   };
   return (
     <div className="tdoc-drawer-empty">
-      {dismissed ? <p>No comments here yet.</p> : (
+      {dismissed ? <p>No comments here yet. Select any text to comment.</p> : (
         <>
           <div className="tdoc-howto-demo" aria-hidden="true">
             <span className="tdoc-howto-line">Billing ships <mark>first, in March</mark></span>
@@ -203,7 +203,6 @@ function EmptyCommentsHowTo({ onComment, onAskAi }) {
         </>
       )}
       <div className="tdoc-drawer-empty-actions">
-        {onComment ? <button type="button" className="primary" onClick={onComment}>Leave a comment</button> : null}
         {onAskAi ? <button type="button" className="tdoc-link-btn" onClick={onAskAi}>or Ask AI</button> : null}
       </div>
       {dismissed ? null : <button type="button" className="tdoc-howto-dismiss" onClick={dismiss}>Got it, don’t show again</button>}
@@ -299,7 +298,6 @@ export function MobileCommentDrawer({
             <Drawer.Content className="tdoc-drawer-list">
               {filter ? <div className="tdoc-comment-filter-row">{filter}</div> : null}
               {!comments.length ? <EmptyCommentsHowTo
-                onComment={onStartComment ? () => { onOpenChange(false); onStartComment(); } : null}
                 onAskAi={askAi && onTab ? () => onTab('ask') : onAskAi ? () => { onOpenChange(false); onAskAi(); } : null}
               /> : null}
               <CommentThreadList
