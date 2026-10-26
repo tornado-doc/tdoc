@@ -124,7 +124,7 @@ async function startServer(worker, env) {
             if (name === '/setup') {
               // The setup dialog traps focus over My docs; dismiss it before
               // testing the shared header underneath.
-              await page.getByRole('heading', { name: 'How will you use tdoc?', exact: true }).waitFor();
+              await page.getByRole('heading', { name: 'Which AI do you use?', exact: true }).waitFor();
               await page.keyboard.press('Escape');
               await page.getByRole('dialog').waitFor({ state: 'hidden' });
             }
