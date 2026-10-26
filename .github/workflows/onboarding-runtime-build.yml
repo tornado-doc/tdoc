@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - name: Install CLI test prerequisite
+        run: apt-get update && apt-get install -y --no-install-recommends jq
       - run: npm ci
       - run: npm run build:shell
       - run: npm run build:feedback
