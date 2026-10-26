@@ -63,7 +63,13 @@ async function dragSelect(page, phrase) {
     for (let n = w.nextNode(); n; n = w.nextNode()) { const i = n.nodeValue.indexOf(needle); if (i < 0) continue; const range = document.createRange(); range.setStart(n, i); range.setEnd(n, i + needle.length); const rects = range.getClientRects(); const a = rects[0]; const b = rects[rects.length - 1]; return { x1: a.left + 1, y1: a.top + a.height / 2, x2: b.right - 1, y2: b.top + b.height / 2 }; }
   }, phrase);
   await page.mouse.move(box.x + r.x1, box.y + r.y1); await page.mouse.down();
-  await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 }); await page.mouse.up();
+  await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 });
+  if (await frame.locator('.tdoc-selection-action').isVisible()) throw new Error('Comment action flashed during selection drag');
+  await page.mouse.up();
+  const action = frame.getByRole('button', { name: 'Comment', exact: true });
+  await action.waitFor();
+  if (await page.locator('.tdoc-popup').isVisible()) throw new Error('selection opened a composer before Comment was clicked');
+  await action.click();
   await page.locator('.tdoc-popup textarea').waitFor();
 }
 
@@ -119,6 +125,7 @@ async function dragSelect(page, phrase) {
     page.on('pageerror', (e) => { throw e; });
     await page.goto(`${base}/d/${slug}`);
     await page.frameLocator('iframe').locator('h1').waitFor({ timeout: 15000 });
+    await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
     return { context, page };
   };
   const shot = async (page, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${name}` }); } };
@@ -151,8 +158,8 @@ async function dragSelect(page, phrase) {
       await dragSelect(page, 'Billing ships first');
       const pop = page.locator('.tdoc-popup');
       await shot(page, 'selection-composer-desktop.png');
-      const selected = await page.frameLocator('iframe').locator('body').evaluate(() => window.getSelection().toString());
-      if (!selected.includes('Billing ships')) throw new Error(`frame selection lost: ${JSON.stringify(selected)}`);
+      const selected = (await pop.locator('.head .h').textContent()).replace(/^"|"$/g, '');
+      if (!selected.includes('Billing ships')) throw new Error(`composer lost selected text: ${JSON.stringify(selected)}`);
       const textarea = pop.locator('textarea');
       if (!(await textarea.evaluate((el) => document.activeElement === el))) throw new Error('desktop composer did not focus its textarea');
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
@@ -172,85 +179,67 @@ async function dragSelect(page, phrase) {
       await page.locator('.tdoc-bar .tdoc-mode-trigger').click();
       await page.getByRole('menuitemradio', { name: /Read/ }).click();
       await page.locator('.tdoc-bar .tdoc-mode-trigger[data-mode="read"]').waitFor();
-      await page.waitForFunction(() => JSON.parse(localStorage.getItem('tdoc-draft:launch-plan:julie') || '{}').mode === 'read');
+      await page.waitForFunction(() => localStorage.getItem('tdoc-mode:launch-plan:julie') === 'read');
       await page.reload();
       await page.locator('.tdoc-bar .tdoc-mode-trigger[data-mode="read"]').waitFor();
       await context.close();
     });
 
-    await t('phone starts in Read, keeps a chosen Comment mode, and clears a dismissed selection', async () => {
+    await t('phone keeps native copy, shows Comment after release, and remembers a chosen Read per document', async () => {
       const { context, page } = await open(julie, 'launch-plan', true);
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-      await page.locator('.tdoc-mode-trigger[data-mode="read"]').waitFor();
-      await page.locator('.tdoc-mode-trigger').click();
-      await page.getByRole('menuitemradio', { name: 'Comment' }).click();
-      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
-      await page.waitForFunction(() => JSON.parse(localStorage.getItem('tdoc-draft:launch-plan:julie') || '{}').modeExplicit === true);
-      await page.reload();
       await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
       const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
-      await frame.evaluate(() => {
+      const select = async () => frame.evaluate(() => {
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
           const index = node.nodeValue.indexOf('Billing ships first');
           if (index < 0) continue;
           const range = document.createRange();
           range.setStart(node, index); range.setEnd(node, index + 'Billing ships first'.length);
-          const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-          document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }));
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+          const rect = range.getBoundingClientRect();
+          const touch = new Touch({ identifier: 1, target: document.body, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 });
+          document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
+          document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
           return;
         }
       });
+      await select();
+      const action = frame.getByRole('button', { name: 'Comment', exact: true });
+      await action.waitFor();
+      if (await page.locator('.tdoc-popup').count()) throw new Error('selection opened the composer before Comment was clicked');
+      const selected = await frame.evaluate(() => getSelection().toString());
+      if (selected !== 'Billing ships first') throw new Error(`native selection was lost: ${JSON.stringify(selected)}`);
+      const geometry = await frame.evaluate(() => ({
+        selectedBottom: getSelection().getRangeAt(0).getBoundingClientRect().bottom,
+        actionTop: document.querySelector('.tdoc-selection-action').getBoundingClientRect().top,
+      }));
+      if (geometry.actionTop < geometry.selectedBottom) throw new Error(`phone action covered the system Copy menu: ${JSON.stringify(geometry)}`);
+      const nativeCopy = await frame.evaluate(() => {
+        const data = new DataTransfer();
+        document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+        return data.getData('text/plain');
+      });
+      if (nativeCopy !== selected) throw new Error(`native copy did not preserve selected text: ${JSON.stringify(nativeCopy)}`);
+      await action.click();
       const pop = page.locator('.tdoc-popup');
       await pop.waitFor();
-      const selected = await frame.evaluate(() => getSelection().toString());
-      if (selected !== 'Billing ships first') throw new Error(`phone selection was cleared: ${JSON.stringify(selected)}`);
       if (await pop.locator('textarea').evaluate((el) => document.activeElement === el)) throw new Error('phone composer opened the keyboard');
-      const modeStyle = await page.locator('.tdoc-mode-trigger').evaluate((el) => ({
-        background: getComputedStyle(el).backgroundColor,
-        border: getComputedStyle(el).borderWidth,
-        marker: getComputedStyle(el, '::before').content,
-      }));
-      if (modeStyle.background !== 'rgba(0, 0, 0, 0)' || modeStyle.border !== '0px' || !['none', 'normal'].includes(modeStyle.marker)) throw new Error(`phone mode has a filled pill: ${JSON.stringify(modeStyle)}`);
       await shot(page, 'selection-composer-phone.png');
       await frame.evaluate(() => {
-        const rect = getSelection().getRangeAt(0).getClientRects()[0];
-        const touch = new Touch({ identifier: 1, target: document.body, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 });
-        document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
-        document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
-      });
-      if (!(await pop.isVisible()) || (await frame.evaluate(() => getSelection().toString())) !== selected) throw new Error('tapping the selected passage closed its copy/composer controls');
-      await pop.getByRole('button', { name: 'Copy selected text' }).click();
-      if ((await page.evaluate(() => navigator.clipboard.readText())) !== selected) throw new Error('phone copy icon missed the quote');
-      await frame.evaluate(() => {
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          const index = node.nodeValue.indexOf('Search follows in April');
-          if (index < 0) continue;
-          const range = document.createRange();
-          range.setStart(node, index); range.setEnd(node, index + 'Search follows in April'.length);
-          const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-          document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }));
-          return;
-        }
-      });
-      await page.waitForFunction(() => document.querySelector('.tdoc-popup .h')?.textContent?.includes('Search follows in April'));
-      const pendingText = await frame.evaluate(() => Array.from(CSS.highlights.get('tdoc-pending') || []).map((range) => range.toString()));
-      if (pendingText.length !== 1 || pendingText[0] !== 'Search follows in April') throw new Error(`old phone highlight survived a new selection: ${JSON.stringify(pendingText)}`);
-      // iOS does not emit mouse events for a tap on plain document text. A tap
-      // away from the selected passage must dismiss the composer and its
-      // pending yellow highlight without requiring a switch to Read mode.
-      await frame.evaluate(() => {
-        const touch = new Touch({ identifier: 1, target: document.body, clientX: innerWidth - 12, clientY: innerHeight - 12 });
+        const touch = new Touch({ identifier: 2, target: document.body, clientX: innerWidth - 12, clientY: innerHeight - 12 });
         document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
         document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
       });
       await pop.waitFor({ state: 'detached' });
-      const cleared = await frame.evaluate(() => ({
-        selection: getSelection().toString(),
-        pending: Boolean(window.CSS?.highlights?.has('tdoc-pending')),
-      }));
-      if (cleared.selection || cleared.pending) throw new Error(`phone tap left a selected passage behind: ${JSON.stringify(cleared)}`);
+      if (await frame.evaluate(() => getSelection().toString() || window.CSS?.highlights?.has('tdoc-pending'))) throw new Error('tap away left selection or pending highlight');
+      await page.locator('.tdoc-mode-trigger').click();
+      await page.getByRole('menuitemradio', { name: /Read/ }).click();
+      await page.reload();
+      await page.locator('.tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await page.goto(`${base}/d/own-agent-draft`);
+      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
       await context.close();
     });
 

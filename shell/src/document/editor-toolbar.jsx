@@ -40,12 +40,17 @@ export function availableModes({ canComment, canEdit, signInToComment = false })
     option.value === 'read'
     || (option.value === 'comment' && (canComment || signInToComment))
     || (option.value === 'edit' && canEdit)
-  )).map((option) => (option.value === 'comment' && !canComment && signInToComment ? { ...option, label: 'Sign in to comment', signIn: true } : option));
+  ))
+    .map((option) => (option.value === 'comment' && !canComment && signInToComment ? { ...option, label: 'Sign in to comment', signIn: true } : option));
 }
 
 export function DocumentModeControl({ mode, canComment, canEdit, onChange, signInToComment = false, onSignIn }) {
   const options = availableModes({ canComment, canEdit, signInToComment });
-  if (options.length < 2) return null;
+  if (options.length < 2) return !canComment && !signInToComment ? (
+    <span className="tdoc-mode-trigger tdoc-mode-readonly" aria-label="Read only; commenting is disabled by the author" title="Commenting is disabled by the author">
+      <Eye size={15} /><span className="tdoc-mode-label">Read</span>
+    </span>
+  ) : null;
   const current = options.find((option) => option.value === mode) || options[0];
   const CurrentIcon = current.Icon;
   return (

@@ -41,19 +41,17 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         }
         assert(view.w <= view.room + 1, `card fits the column: ${view.w} > ${view.room}`);
         assert(view.overflow <= 1, `no sideways overflow in slide view: ${view.overflow}`);
-        await page.locator('.tdoc-document-comments').getByText('A note about the whole deck.').waitFor();
+        await page.locator('.tdoc-pin-document').waitFor();
         const commentPlacement = await frame.locator('html').evaluate(() => {
-          const slot = document.querySelector('[data-tdoc-document-comments-slot]');
           const last = document.querySelector('#s3');
           const first = document.querySelector('#s1');
           const present = document.querySelector('.tdoc-present-open');
-          return { afterDeck: slot.previousElementSibling === last && slot.parentElement === last.parentElement,
-            height: slot.getBoundingClientRect().height,
+          return { noSpacer: !document.querySelector('[data-tdoc-document-comments-slot]'),
             firstTop: first.getBoundingClientRect().top,
             presentBottom: present.getBoundingClientRect().bottom };
         });
-        assert(commentPlacement.afterDeck && commentPlacement.height > 50,
-          `whole-document comments must follow the deck: ${JSON.stringify(commentPlacement)}`);
+        assert(commentPlacement.noSpacer,
+          `whole-document comments must not change the deck layout: ${JSON.stringify(commentPlacement)}`);
         assert(commentPlacement.presentBottom <= commentPlacement.firstTop + 1,
           `Present must remain above the first card: ${JSON.stringify(commentPlacement)}`);
         if (process.env.TDOC_TEST_SCREENSHOTS) {
@@ -87,6 +85,7 @@ const { chromium } = requirePlaywrightOrSkip('slides-mode.test.js');
         // above the full-screen frame.
         const card = width < 700 ? page.locator('#tdoc-comment-layer.open') : page.locator('.tdoc-floating-open');
         await card.waitFor();
+        if (width < 700) await page.waitForFunction(() => document.querySelector('#tdoc-comment-layer')?.getBoundingClientRect().top < window.innerHeight - 30);
         const cb = await card.boundingBox();
         assert(cb && cb.width > 0 && cb.y >= 0 && cb.y < 820, `comment card visible while presenting: ${JSON.stringify(cb)}`);
         const first = await card.textContent();

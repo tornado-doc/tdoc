@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check } from 'lucide-react';
 import { CommentIcon } from '../ui/comment-icon.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
@@ -13,6 +12,7 @@ function Pin({
   cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
 }) {
   const single = cluster.items.length === 1 ? cluster.items[0].comment : null;
+  const documentPin = cluster.items.every((item) => item.comment.document);
   const resolved = single?.resolved
     || (!single && cluster.items.every((item) => item.comment.resolved));
   const live = single && commentsById ? commentsById.get(single.id) : null;
@@ -24,6 +24,7 @@ function Pin({
       className={[
         'tdoc-pin',
         single ? '' : 'tdoc-pin-cluster',
+        documentPin ? 'tdoc-pin-document' : '',
         single?.resolved && (!live?.handoff_at || live?.resolved_by) ? 'tdoc-pin-resolved' : '',
         // A tombstone keeps its pin — that is the way back to the replies
         // under it — but it must not look like a comment somebody is waiting
@@ -36,38 +37,31 @@ function Pin({
       ].filter(Boolean).join(' ')}
       data-id={single?.id}
       data-key={cluster.key}
-      title={state?.title}
-      style={{ top: Math.max(frameTop + 4, top), left }}
+      title={documentPin ? `${cluster.items.length} comment${cluster.items.length === 1 ? '' : 's'} on this document` : state?.title}
+      aria-label={documentPin ? `${cluster.items.length} comment${cluster.items.length === 1 ? '' : 's'} on this document` : undefined}
+      style={{ top: Math.max(frameTop + 4, top), left: documentPin ? Math.min(left, window.innerWidth - 50) : left }}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={() => single ? onOpenComment(single.id) : onOpenCluster(cluster.key)}
     >
-      <CommentPinFace comment={single} state={state} clusterCount={cluster.items.length} />
+      {documentPin && !single ? <span className="tdoc-document-pin-faces" aria-hidden="true">
+        {cluster.items.slice(0, 3).map(({ comment }, index) => {
+          const avatar = avatarFor(comment);
+          return avatar ? <img key={comment.id} src={avatar} alt="" style={{ zIndex: 3 - index }} />
+            : <span key={comment.id} className="tdoc-pin-anon" style={{ zIndex: 3 - index }} />;
+        })}
+      </span> : <CommentPinFace comment={single} state={state} clusterCount={cluster.items.length} />}
     </button>
   );
 }
 
-function ClusterPopover({ cluster, commentsById, top, left, onSelect }) {
+function ClusterPopover({ cluster, commentsById, top, left, cardProps }) {
   return (
     <div
-      className="tdoc-cluster-pop open"
-      style={{ top, left }}
+      className="tdoc-cluster-pop tdoc-cluster-cards open"
+      style={{ top, left, maxHeight: Math.max(160, window.innerHeight - top - 16) }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {cluster.items.map(({ comment }) => (
-        <button
-          key={comment.id}
-          type="button"
-          className="tdoc-cluster-row"
-          data-id={comment.id}
-          onClick={() => onSelect(comment.id)}
-        >
-          {avatarFor(comment) ? <img src={avatarFor(comment)} alt="" /> : null}
-          <span className="tdoc-cluster-snip">
-            {commentsById.get(comment.id)?.text?.slice(0, 60)}
-          </span>
-          {comment.resolved ? <Check size={13} /> : null}
-        </button>
-      ))}
+      <CommentThreadList comments={cluster.items.map(({ comment }) => commentsById.get(comment.id) || comment)} cardProps={cardProps} />
     </div>
   );
 }
@@ -110,6 +104,11 @@ export function DesktopCommentLayer({
     return () => clearInterval(timer);
   }, []);
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
+  const cardProps = {
+    currentUser, handoffViewer, isOwner, mentionable, demo, canSendToAgent,
+    agentSetupHref, onReply, onReact, onDelete, onResolve, onEdit, onReanchor,
+    handoff, onResendHandoff, onSendHandoffElsewhere,
+  };
 
   return (
     <>
@@ -140,12 +139,9 @@ export function DesktopCommentLayer({
         <ClusterPopover
           cluster={openCluster}
           commentsById={commentsById}
-          top={Math.max(
-            frameTop + 4,
-            Math.min(frameTop + openCluster.y - frameScrollY, window.innerHeight - 200),
-          )}
-          left={Math.max(8, pinLeft - 268)}
-          onSelect={onOpenComment}
+          top={Math.max(frameTop + 4, Math.min(frameTop + openCluster.y - frameScrollY, window.innerHeight - 240))}
+          left={Math.max(8, pinLeft - 300)}
+          cardProps={cardProps}
         />
       ) : null}
 
@@ -270,7 +266,7 @@ export function MobileCommentDrawer({
   }, [open, openCommentId]);
 
   return (
-    <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
+    <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down" snapPoints={[0.7, 1]} defaultSnapPoint={0.7}>
       <Drawer.Trigger className={`tdoc-fab${hideFab ? ' is-hidden' : ''}`} aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
         <CommentIcon size={16} />
         {askAi ? <AskIcon className="tdoc-fab-ai" size={11} /> : null}

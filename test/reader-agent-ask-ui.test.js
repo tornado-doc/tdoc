@@ -84,6 +84,9 @@ async function dragSelect(page, phrase) {
   await page.mouse.down();
   await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 });
   await page.mouse.up();
+  const action = frame.getByRole('button', { name: 'Comment', exact: true });
+  await action.waitFor();
+  await action.click();
   await page.locator('.tdoc-popup textarea').waitFor();
 }
 
@@ -102,6 +105,7 @@ async function touchSelect(page, phrase) {
       return;
     }
   }, phrase);
+  await frame.getByRole('button', { name: 'Comment', exact: true }).click();
   await page.locator('.tdoc-popup textarea').waitFor();
 }
 
@@ -282,11 +286,8 @@ async function touchSelect(page, phrase) {
       if (!posted || !(posted.replies || []).some((r) => r.text === 'The mobile app remains planned for Q4.')) {
         throw new Error(`agent answer not posted: ${JSON.stringify(posted)}`);
       }
-      const documentSection = page.locator('.tdoc-document-comments');
-      await documentSection.getByText('Can my agent check the Q4 plan?').waitFor();
-      if (await page.locator(`.tdoc-pin[data-id="${posted.id}"]`).count()) {
-        throw new Error('public Ask AI answer appeared as a margin pin instead of under the title');
-      }
+      await page.locator(`.tdoc-pin-document[data-id="${posted.id}"]`).waitFor();
+      if (await page.locator('.tdoc-document-comments').count()) throw new Error('old inline comment section remains');
       await context.close();
     });
 

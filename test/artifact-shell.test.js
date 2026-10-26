@@ -564,7 +564,7 @@ const SLUG = 'hostile-body-css';
       if (!agentAuthor) throw new Error('card did not render the agent author with a logo');
     });
 
-    await t('co-located comments cluster into one count badge with a popover', async () => {
+    await t('co-located comments cluster into one count badge and open together', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       // two comments anchor the same sentence → one cluster badge reading "2"
@@ -574,14 +574,11 @@ const SLUG = 'hostile-body-css';
       // the co-located comments are NOT also rendered as their own single pins
       const singles = await page.evaluate(() => document.querySelectorAll('.tdoc-pin[data-id="c_fixture_4"], .tdoc-pin[data-id="c_fixture_5"]').length);
       if (singles) throw new Error('clustered comments leaked as standalone pins');
-      // clicking the badge opens a popover listing both comments
+      // One click opens both full cards; a second click is unnecessary.
       await page.click('.tdoc-pin.tdoc-pin-cluster');
       await page.waitForSelector('.tdoc-cluster-pop.open', { timeout: 2000 });
-      const rows = await page.evaluate(() => document.querySelectorAll('.tdoc-cluster-pop.open .tdoc-cluster-row').length);
-      if (rows !== 2) throw new Error('cluster popover should list 2 comments, got ' + rows);
-      // picking a row opens that comment's card
-      await page.click('.tdoc-cluster-pop.open .tdoc-cluster-row[data-id="c_fixture_4"]');
-      await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_4"]', { timeout: 2000 });
+      const cards = await page.evaluate(() => document.querySelectorAll('.tdoc-cluster-pop.open .tdoc-margin-comment').length);
+      if (cards !== 2) throw new Error('cluster should expand 2 full comments, got ' + cards);
     });
 
     await t('?comment= deep-link opens the target comment card on load', async () => {

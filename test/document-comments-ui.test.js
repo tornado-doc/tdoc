@@ -13,23 +13,21 @@ async function check(name, run) {
 
 (async () => {
   const seeded = JSON.parse(initial);
-  seeded.push({
-    id: 'c_document_existing', version: 1, text: 'A comment on the whole document',
-    author: { login: 'tester' }, status: 'open', created: '2026-08-22T00:00:06Z',
-    anchor: null, replies: [],
-  }, {
-    id: 'c_document_ai', version: 1, text: 'What should change in this report?',
-    author: { login: 'tester' }, status: 'open', created: '2026-08-22T00:00:07Z',
-    anchor: null, replies: [{ id: 'r_document_ai', parent_id: 'c_document_ai',
+  for (let i = 0; i < 12; i++) seeded.push({
+    id: `c_document_${i}`, version: 1,
+    text: i === 1 ? 'What should change in this report?' : `Whole-document thought ${i}`,
+    author: { login: i % 2 ? 'editor' : 'tester' },
+    status: i === 2 ? 'applied' : 'open', ...(i === 2 ? { applied_in: 1 } : {}),
+    created: `2026-08-22T00:00:${String(i + 6).padStart(2, '0')}Z`,
+    anchor: null, replies: i === 1 ? [{ id: 'r_document_ai', parent_id: 'c_document_1',
       text: 'The public AI answer', author: { kind: 'agent', login: 'tdoc-ai' },
-      created: '2026-08-22T00:00:08Z' }],
+      created: '2026-08-22T00:01:00Z' }] : [],
   });
   fs.writeFileSync(commentsFile, JSON.stringify(seeded));
   let server;
   try {
     server = await resolveTarget({ e2eUser: 'tester' });
-    const base = server.url.replace(/\/d\/.*/, '');
-    const url = `${base}/d/hostile-body-css/v/1?shell=1`;
+    const url = `${server.url.replace(/\/d\/.*/, '')}/d/hostile-body-css/v/1?shell=1`;
     for (const [engineName, engine] of [['chromium', chromium], ['webkit', webkit]]) {
       const browser = await engine.launch({ headless: true });
       try {
@@ -37,105 +35,76 @@ async function check(name, run) {
           const page = await browser.newPage({ viewport: { width, height: 850 } });
           try {
             await page.goto(url, { waitUntil: 'networkidle' });
-            await check(`${engineName} ${width}: existing whole-document and AI threads appear below title`, async () => {
-              const section = page.locator('.tdoc-document-comments');
-              await section.getByText('A comment on the whole document').waitFor({ timeout: 5000 });
-              await section.getByText('What should change in this report?').waitFor({ timeout: 5000 });
-              if (await page.locator('.tdoc-pin[data-id="c_document_existing"], .tdoc-pin[data-id="c_document_ai"]').count()) {
-                throw new Error('document comment leaked into margin pin');
-              }
-              const frame = page.frames().find((item) => item !== page.mainFrame() && item.url().includes('hostile-body-css'));
-              const slot = await frame.evaluate(() => {
-                const heading = document.querySelector('h1');
-                const spacer = document.querySelector('[data-tdoc-document-comments-slot]');
-                return { follows: spacer.previousElementSibling === heading, height: spacer.getBoundingClientRect().height,
-                  nextTop: heading.nextElementSibling.getBoundingClientRect().top };
-              });
-              if (!slot.follows || slot.height < 80) throw new Error(`slot does not reserve space after h1: ${JSON.stringify(slot)}`);
-              const card = section.locator('[data-comment-id="c_document_existing"]');
-              const border = await card.evaluate((node) => getComputedStyle(node).borderTopColor);
-              if (border !== 'rgb(232, 234, 237)') throw new Error(`idle card has an emphasized border: ${border}`);
-              await card.getByRole('button', { name: 'More actions' }).click();
-              if (await page.getByRole('menuitem', { name: /Re-anchor|Move anchor/ }).count()) throw new Error('whole-document comment offers re-anchor');
-              await page.keyboard.press('Escape');
+            const frame = page.frames().find((item) => item !== page.mainFrame() && item.url().includes('hostile-body-css'));
+            await check(`${engineName} ${width}: document comments have one title pin and no spacer`, async () => {
+              const pin = page.locator('.tdoc-pin-document');
+              await pin.waitFor({ timeout: 5000 });
+              if (await pin.count() !== 1) throw new Error('whole-document comments were not grouped');
+              const layout = await frame.evaluate(() => ({
+                titleY: document.querySelector('h1').getBoundingClientRect().top,
+                spacer: !!document.querySelector('[data-tdoc-document-comments-slot]'),
+              }));
+              if (layout.spacer) throw new Error('old inline spacer still changes the document');
+              const pinBox = await pin.boundingBox();
+              const frameBox = await page.locator('iframe').boundingBox();
+              if (Math.abs(pinBox.y - frameBox.y - layout.titleY) > 45) throw new Error('pin is not beside the title');
+              if (pinBox.x + pinBox.width > width + 1) throw new Error('pin extends beyond viewport');
             });
-            if (width === 1400 && engineName === 'chromium') {
-              await check('desktop: wheel over the inline section scrolls the document', async () => {
-                const frame = page.frames().find((item) => item !== page.mainFrame() && item.url().includes('hostile-body-css'));
-                await frame.evaluate(() => {
-                  const filler = document.createElement('div');
-                  filler.style.height = '2000px';
-                  filler.setAttribute('data-scroll-fixture', '');
-                  document.body.append(filler);
-                });
-                await page.locator('.tdoc-document-comments').hover();
-                await page.mouse.wheel(0, 280);
-                await frame.waitForFunction(() => window.scrollY > 0, null, { timeout: 3000 });
-                const scrolled = await frame.evaluate(() => window.scrollY);
-                if (!scrolled) throw new Error('wheel did not scroll the frame');
+            if (width === 1400) {
+              await check(`${engineName}: one click expands all title comments, with internal scrolling`, async () => {
+                await page.locator('.tdoc-pin-document').click();
+                const cards = page.locator('.tdoc-cluster-cards .tdoc-margin-comment[data-comment-id]');
+                await cards.first().waitFor();
+                if (await cards.count() !== 12) throw new Error(`expected 12 cards, got ${await cards.count()}; popovers=${await page.locator('.tdoc-cluster-cards').count()}; ids=${(await cards.evaluateAll((nodes) => nodes.map((node) => node.dataset.commentId))).join(',')}`);
+                const size = await page.locator('.tdoc-cluster-cards').evaluate((el) => ({
+                  top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom,
+                  scroll: el.scrollHeight, visible: el.clientHeight,
+                }));
+                if (size.top < 48 || size.bottom > 834 || size.scroll <= size.visible) throw new Error(`cluster overflows viewport or cannot scroll: ${JSON.stringify(size)}`);
+                await cards.first().getByRole('button', { name: 'More actions' }).click();
+                if (await page.getByRole('menuitem', { name: /Re-anchor|Move anchor/ }).count()) throw new Error('whole-document comment offers re-anchor');
               });
-              await check('explicit custom template keeps comments outside a nested title hero', async () => {
-                const frame = page.frames().find((item) => item !== page.mainFrame() && item.url().includes('hostile-body-css'));
-                await frame.evaluate(() => {
-                  const hero = document.createElement('div');
-                  hero.setAttribute('data-custom-hero', '');
-                  document.querySelector('h1').before(hero);
-                  hero.append(document.querySelector('h1'));
-                  document.documentElement.setAttribute('data-tdoc-design', 'custom');
-                });
-                await page.evaluate(() => document.querySelector('iframe').contentWindow.postMessage({
-                  source: 'tdoc-shell', type: 'tdoc:anchors', comments: [],
-                }, '*'));
-                await frame.waitForFunction(() => {
-                  const slot = document.querySelector('[data-tdoc-document-comments-slot]');
-                  return slot === document.body.lastElementChild;
-                });
-                const outsideHero = await frame.evaluate(() => !document.querySelector('[data-custom-hero]').contains(
-                  document.querySelector('[data-tdoc-document-comments-slot]')));
-                if (!outsideHero) throw new Error('custom hero contains document comments');
+            } else {
+              await check(`${engineName}: phone pin opens document comments first and restores filters`, async () => {
+                await page.locator('.tdoc-pin-document').click();
+                const drawer = page.locator('#tdoc-comment-layer');
+                await drawer.waitFor();
+                await drawer.getByText('Whole-document thought 0').waitFor();
+                const filter = drawer.locator('.tdoc-comment-filter');
+                await filter.waitFor({ timeout: 5000 });
+                const ids = await drawer.locator('.tdoc-margin-comment[data-comment-id]').evaluateAll((cards) => cards.map((card) => card.dataset.commentId));
+                if (!ids[0]?.startsWith('c_document_') || ids.slice(0, 11).some((id) => !id.startsWith('c_document_'))) {
+                  throw new Error(`document comments are not first: ${ids.slice(0, 12)}`);
+                }
+                await filter.getByRole('radio', { name: /Resolved/ }).click({ timeout: 5000 });
+                await drawer.getByText('Whole-document thought 2').waitFor();
+                if (await drawer.getByText('Whole-document thought 0').count()) throw new Error('Resolved filter still shows open comment');
+                await filter.getByRole('radio', { name: 'All' }).click();
+                await drawer.getByText('Whole-document thought 0').waitFor();
               });
-            }
-            if (width === 390 && engineName === 'chromium') {
-              await check('phone: inline Add a comment creates a null-anchor thread', async () => {
-                await page.locator('.tdoc-document-comment-add').click();
-                const inline = page.locator('.tdoc-document-comments .tdoc-inline-composer');
-                await inline.waitFor();
-                if (!(await inline.getByText('On this document').count())) throw new Error('composer has no document label');
-                await inline.locator('textarea').fill('New inline whole-document thought');
-                await inline.getByRole('button', { name: 'Comment', exact: true }).click();
-                await page.locator('.tdoc-document-comments').getByText('New inline whole-document thought').waitFor();
-                const saved = JSON.parse(fs.readFileSync(commentsFile, 'utf8'))
-                  .find((item) => item.text === 'New inline whole-document thought');
-                if (!saved || saved.anchor !== null) throw new Error('new thread was not saved at document level');
-              });
-              await check('phone: without h1 the same section moves to the document top', async () => {
-                const frame = page.frames().find((item) => item !== page.mainFrame() && item.url().includes('hostile-body-css'));
-                await frame.evaluate(() => { document.querySelector('h1').remove(); window.dispatchEvent(new Event('resize')); });
-                await page.waitForFunction(() => document.querySelector('.tdoc-document-comments')?.getBoundingClientRect().top < 145);
-                const atTop = await frame.evaluate(() => {
-                  const root = document.body;
-                  return root.firstElementChild?.hasAttribute('data-tdoc-document-comments-slot');
-                });
-                if (!atTop) throw new Error('slot did not move to document top');
+              if (engineName === 'chromium') await check('phone drawer can snap from partial to full height', async () => {
+                const drawer = page.locator('#tdoc-comment-layer');
+                const handle = drawer.locator('.tdoc-drawer-handle');
+                const before = await drawer.boundingBox();
+                const box = await handle.boundingBox();
+                const x = box.x + box.width / 2, y = box.y + box.height / 2;
+                const cdp = await page.context().newCDPSession(page);
+                await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+                for (let step = 1; step <= 10; step++) {
+                  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - 17 * step }] });
+                }
+                await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+                await page.waitForTimeout(300);
+                const after = await drawer.boundingBox();
+                if (after.y >= before.y - 100 || after.y > 30) throw new Error(`drawer did not expand: ${before.y} → ${after.y}`);
+                const filter = drawer.locator('.tdoc-comment-filter-row');
+                if (!(await filter.isVisible())) throw new Error('filter disappeared in full drawer');
               });
             }
           } finally { await page.close(); }
         }
       } finally { await browser.close(); }
     }
-    fs.writeFileSync(commentsFile, initial);
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage({ viewport: { width: 1400, height: 850 } });
-      await page.goto(url, { waitUntil: 'networkidle' });
-      await check('empty document section shows only the quiet Add a comment row', async () => {
-        await page.locator('.tdoc-document-comment-add').waitFor();
-        if (await page.locator('.tdoc-document-comments h2, .tdoc-document-comment-row').count()) {
-          throw new Error('empty section has a heading or an empty card');
-        }
-      });
-      await page.close();
-    } finally { await browser.close(); }
   } finally {
     if (server) await server.stop();
     fs.writeFileSync(commentsFile, initial);

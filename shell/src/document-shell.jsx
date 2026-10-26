@@ -19,7 +19,6 @@ import {
   requestTeamJoin,
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
-import { DocumentCommentsSection } from './document/document-comments-section.jsx';
 import {
   DesktopCommentLayer,
   MobileCommentDrawer,
@@ -444,8 +443,13 @@ export function DocumentShell({ boot, config }) {
         .finally(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }));
       return;
     }
+    if (!config.canComment) {
+      bridgeRef.current?.({ type: 'tdoc:clearPending' });
+      if (config.signInToComment) signIn();
+      return;
+    }
     setComposer(selection);
-  }, [comments.moveAnchor]);
+  }, [comments.moveAnchor, config.canComment, config.signInToComment, signIn]);
 
   const bridge = useFrameBridge({
     'tdoc:visualState': (message) => setVisualOpen(message.open === true),
@@ -523,6 +527,9 @@ export function DocumentShell({ boot, config }) {
 
   const disableCommentSelection = useCallback(() => {
     setComposer(null);
+    setOpenCommentId(null);
+    setOpenClusterKey(null);
+    setDrawerOpen(false);
     bridge.send({ type: 'tdoc:clearPending' });
   }, [bridge.send]);
 
@@ -566,7 +573,10 @@ export function DocumentShell({ boot, config }) {
   // One visible set drives the margin and the frame. Selection must never
   // override the filter; explicit links enable it before opening a thread.
   const shownComments = commentArea.shown;
-  const shownDocumentComments = shownComments.filter(isDocumentComment);
+  const drawerComments = useMemo(() => [
+    ...shownComments.filter(isDocumentComment),
+    ...shownComments.filter((comment) => !isDocumentComment(comment)),
+  ], [shownComments]);
   const visibleCommentsById = commentArea.shownById;
   const seenMap = commentArea.seenMap;
   // Lost pins are seats, not anchors: they give the card somewhere to be drawn
@@ -579,9 +589,6 @@ export function DocumentShell({ boot, config }) {
     () => layoutPins(bridge.layout.pins, bridge.layout.docHeight),
     [bridge.layout.docHeight, bridge.layout.pins],
   );
-  const updateDocumentCommentsHeight = useCallback((height) => {
-    bridge.send({ type: 'tdoc:documentCommentsHeight', height });
-  }, [bridge.send]);
 
   const setCommentFilter = useCallback((next) => {
     setCommentFilterState(next);
@@ -615,7 +622,8 @@ export function DocumentShell({ boot, config }) {
   useEffect(() => {
     reanchorRef.current = reanchorId;
     document.body.classList.toggle('tdoc-reanchoring', Boolean(reanchorId));
-  }, [reanchorId]);
+    bridge.send({ type: 'tdoc:reanchorMode', active: Boolean(reanchorId) });
+  }, [reanchorId, bridge.send]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -637,15 +645,6 @@ export function DocumentShell({ boot, config }) {
       // A direct link is an explicit request to reveal this thread. Reflect
       // that in the filter instead of bypassing its visibility contract.
       setCommentFilterState('all');
-      return;
-    }
-    if (isDocumentComment(root)) {
-      const slot = bridge.layout.documentComments;
-      if (!slot) return;
-      bridge.send({ type: 'tdoc:scrollTo', docY: Math.max(0, slot.docY - 60) });
-      setDrawerOpen(false);
-      setOpenCommentId(root.id);
-      setDeepTarget(null);
       return;
     }
     if (narrow) {
@@ -757,7 +756,7 @@ export function DocumentShell({ boot, config }) {
     if (value?.id) setOpenCommentId(value.id);
     if (value?.id && selection?.kind === 'document') {
       setCommentFilterState('open');
-      setDrawerOpen(false);
+      setDrawerOpen(true);
       bridge.send({ type: 'tdoc:scrollTo', docY: Math.max(0, (bridge.layout.documentComments?.docY || 0) - 60) });
     }
     if (!value?.id) return;
@@ -1532,7 +1531,7 @@ export function DocumentShell({ boot, config }) {
   // Only when there is something to filter.
   const openCount = commentArea.openCount;
   const mobileUnread = commentArea.unreadCount > 0;
-  const startDocumentComment = (askAi = false, inline = false) => {
+  const startDocumentComment = (askAi = false) => {
     if (!config.canComment) { if (config.signInToComment) signIn(); return; }
     if (editor.mode === 'edit' && editor.dirty) {
       showToast('Save or discard the draft before commenting', true);
@@ -1545,7 +1544,7 @@ export function DocumentShell({ boot, config }) {
     editor.changeMode('comment');
     setDrawerOpen(false);
     const y = window.innerHeight - 80;
-    setComposer({ kind: 'document', intent: askAi ? 'ask-ai' : 'comment', inline, rect: { top: y, bottom: y, left: 16 } });
+    setComposer({ kind: 'document', intent: askAi ? 'ask-ai' : 'comment', rect: { top: y, bottom: y, left: 16 } });
   };
   const closeAskAi = () => { setHandoffDetailsOpen(false); if (unifiedEntry) setDrawerOpen(false); };
   // A question typed before signing in comes back after it, in the open panel.
@@ -1610,7 +1609,7 @@ export function DocumentShell({ boot, config }) {
           : { target: comment.handoff_to, askOnly: true }) : null}
     />}</AskAiPanel>
   );
-  const commentFilterControl = resolvedCount ? (
+  const commentFilterControl = comments.comments.length ? (
     <SegmentedControl
       className="tdoc-comment-filter"
       ariaLabel="Show comments"
@@ -1649,7 +1648,6 @@ export function DocumentShell({ boot, config }) {
   const composerView = composer ? (
     <CommentComposer
       selection={composer}
-      inline={Boolean(composer.inline)}
       initialText={composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices[0]
         ? `@${AGENT_TAG_JOINER}${agentMentionName(agentChoices[0], agentChoices)} ` : ''}
       mentionable={mentionable}
@@ -1669,19 +1667,6 @@ export function DocumentShell({ boot, config }) {
       onCopyToast={showToast}
     />
   ) : null;
-  const documentCardProps = {
-    currentUser: config.identity?.login || 'anon', handoffViewer,
-    isOwner: Boolean(config.isOwner), mentionable, demo: !!config.demoComments,
-    canSendToAgent, agentSetupHref: notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound'
-      ? '/me?view=settings#agents' : null,
-    onReply: replyTo, onReact: reactTo, onDelete: removeComment,
-    onResolve: resolveComment, onEdit: editComment, onReanchor: setReanchorId,
-    handoff: handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen,
-      onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null,
-    onResendHandoff: canSendToAgent ? resendHandoff : null,
-    onSendHandoffElsewhere: canSendToAgent ? sendHandoffElsewhere : null,
-  };
-
   return (
     <div
       className="tdoc-document-app"
@@ -1879,23 +1864,6 @@ export function DocumentShell({ boot, config }) {
         src={boot.frameSrc}
       />
 
-      <DocumentCommentsSection
-        slot={bridge.layout.documentComments}
-        frameTop={frameTop}
-        scrollY={bridge.layout.scrollY}
-        comments={shownDocumentComments}
-        active={!comparing && !visualOpen && editor.mode !== 'edit' && (shownDocumentComments.length > 0 || config.canComment || config.signInToComment)}
-        selectedId={openCommentId}
-        cardProps={documentCardProps}
-        seenMap={seenMap}
-        handoffViewer={handoffViewer}
-        isOwner={Boolean(config.isOwner)}
-        onAdd={config.canComment || config.signInToComment ? () => startDocumentComment(false, true) : null}
-        onHeight={updateDocumentCommentsHeight}
-        onScroll={(deltaY) => bridge.send({ type: 'tdoc:scrollBy', deltaY })}
-        composer={composer?.inline ? composerView : null}
-      />
-
       <DocumentFooter visible={bridge.layout.footerVisible} />
 
       {!narrow && commentFilterControl && !comparing ? (
@@ -1903,7 +1871,23 @@ export function DocumentShell({ boot, config }) {
           {commentFilterControl}
         </div>
       ) : null}
-      {narrow ? (
+      {narrow ? (<>
+        {editor.mode !== 'read' ? <DesktopCommentLayer
+          clusters={clusters.filter((cluster) => cluster.items.every(({ comment }) => comment.document))}
+          commentsById={commentsById}
+          seenMap={seenMap}
+          frameScrollY={bridge.layout.scrollY}
+          frameTop={frameTop}
+          pinLeft={pinLeft}
+          openComment={null}
+          openClusterKey={null}
+          pinIds={pinIds}
+          currentUser={config.identity?.login || 'anon'}
+          handoffViewer={handoffViewer}
+          isOwner={Boolean(config.isOwner)}
+          onOpenComment={(id) => { setOpenCommentId(id); setDrawerTab('comments'); setDrawerOpen(true); }}
+          onOpenCluster={() => { setOpenCommentId(null); setDrawerTab('comments'); setDrawerOpen(true); }}
+        /> : null}
         <MobileCommentDrawer
           filter={commentFilterControl}
           open={drawerOpen && !comparing}
@@ -1913,7 +1897,7 @@ export function DocumentShell({ boot, config }) {
           // pins out of the document but left every one of them in the drawer,
           // which on a phone IS the comment list. "Hide resolved" appeared to
           // do nothing at all.
-          comments={shownComments}
+          comments={drawerComments}
           pinIds={pinIds}
           seenMap={seenMap}
           currentUser={config.identity?.login || 'anon'}
@@ -1926,7 +1910,7 @@ export function DocumentShell({ boot, config }) {
           canSendToAgent={canSendToAgent}
           agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
           onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
-          hideFab={handoffDetailsOpen}
+          hideFab={handoffDetailsOpen || editor.mode === 'read'}
           askAi={unifiedEntry ? askAiPanel(drawerOpen && drawerTab === 'ask') : null}
           tab={drawerTab}
           onTab={setDrawerTab}
@@ -1941,18 +1925,20 @@ export function DocumentShell({ boot, config }) {
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
           onResendHandoff={canSendToAgent ? resendHandoff : null}
           onSendHandoffElsewhere={canSendToAgent ? sendHandoffElsewhere : null}
-          onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
+          onNavigate={(id) => isDocumentComment(commentsById.get(id))
+            ? setOpenCommentId(id)
+            : focusComment(id, { scroll: true, closeDrawer: true })}
         />
-      ) : (
+      </>) : (
         <DesktopCommentLayer
-          clusters={clusters}
+          clusters={editor.mode === 'read' ? [] : clusters}
           commentsById={commentsById}
           seenMap={seenMap}
           hoveredAnchorId={hoveredAnchorId}
           frameScrollY={bridge.layout.scrollY}
           frameTop={frameTop}
           pinLeft={pinLeft}
-          openComment={openComment && !isDocumentComment(openComment) ? openComment : null}
+          openComment={editor.mode === 'read' ? null : openComment}
           openClusterKey={openClusterKey}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
@@ -1967,9 +1953,10 @@ export function DocumentShell({ boot, config }) {
           onOpenComment={(id) => {
             focusComment(id);
           }}
-          onOpenCluster={(key) => setOpenClusterKey(
-            openClusterKey === key ? null : key
-          )}
+          onOpenCluster={(key) => {
+            setOpenCommentId(null);
+            setOpenClusterKey(openClusterKey === key ? null : key);
+          }}
           onReply={replyTo}
           onEdit={editComment}
           onReact={reactTo}
@@ -1982,7 +1969,7 @@ export function DocumentShell({ boot, config }) {
         />
       )}
 
-      {!composer?.inline ? composerView : null}
+      {composerView}
 
       </div>
 

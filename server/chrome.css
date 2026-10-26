@@ -465,7 +465,11 @@
   .tdoc-pin.tdoc-pin-deleted:hover { opacity: 1; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
   .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
+  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster { width: 42px; background: transparent; border: 0; box-shadow: none; }
+  .tdoc-document-pin-faces { display: flex; align-items: center; padding-left: 2px; }
+  .tdoc-document-pin-faces img, .tdoc-document-pin-faces .tdoc-pin-anon { position: relative; flex: 0 0 21px; width: 21px; height: 21px; margin-left: -5px; border: 2px solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 1px 3px rgba(0,0,0,.16); }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
+  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster.tdoc-cluster-allresolved { background: transparent; border: 0; }
   .tdoc-pin.tdoc-pin-cluster::after { content: none; }
 
   /* Floating card: when open via a pin, it sits to the left of the gutter and
@@ -488,6 +492,9 @@
   .tdoc-cluster-pop { position: absolute; pointer-events: auto; width: 260px; max-height: 60vh; overflow-y: auto; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.16); padding: 6px; z-index: 999997; font: 13px system-ui; display: none; }
   .tdoc-cluster-row.tdoc-cluster-current { background: #eef2ff; }
   .tdoc-cluster-pop.open { display: block; }
+  .tdoc-cluster-cards { width: 300px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; }
+  .tdoc-cluster-cards .tdoc-margin-comment { position: relative; top: auto; left: auto; width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+  .tdoc-cluster-cards .tdoc-margin-comment:last-child { margin-bottom: 0; }
   .tdoc-cluster-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
   .tdoc-cluster-row:hover { background: #f5f6f8; }
   .tdoc-cluster-row img { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; }
@@ -859,8 +866,10 @@
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow #tdoc-comment-layer { display: block; position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
-  body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
+  body.tdoc-narrow .tdoc-drawer-viewport { position: fixed; inset: 0; height: 100dvh; z-index: 1000001; }
+  body.tdoc-narrow .tdoc-drawer-backdrop { position: fixed; inset: 0; z-index: 1000000; background: rgba(0,0,0,.28); }
+  body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px max(24px, env(safe-area-inset-bottom)); box-sizing: border-box; z-index: 999998; }
+  body.tdoc-narrow #tdoc-comment-layer[data-starting-style], body.tdoc-narrow #tdoc-comment-layer[data-ending-style] { transform: translateY(100%); }
   /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
      tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
      plain body text, so the document-level "close on outside click" never fires
@@ -877,7 +886,9 @@
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab.is-hidden { display: none; }
   body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
-  body.tdoc-narrow .tdoc-drawer-tabs { display: flex; justify-content: center; margin: 0 0 10px; }
+  body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
+  body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  body.tdoc-narrow .tdoc-comment-filter-row { position: sticky; top: 0; z-index: 1; padding: 4px 0 10px; background: #fff; }
   body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg { width: 100%; }
   body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg button { flex: 1; }
   body.tdoc-narrow .tdoc-tab-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--td-accent, #1652f0); vertical-align: middle; }
@@ -900,6 +911,7 @@
   @media (prefers-reduced-motion: reduce) { body.tdoc-narrow .tdoc-howto-line mark { animation: none; background-size: 100% 100%; } body.tdoc-narrow .tdoc-howto-pill { animation: none; opacity: 1; } }
   .tdoc-bar .tdoc-mode-trigger { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--td-ink, #1a1a1a); font: 500 13.5px/1 system-ui, -apple-system, sans-serif; white-space: nowrap; cursor: pointer; flex-shrink: 0; }
   .tdoc-bar .tdoc-mode-trigger:hover, .tdoc-bar .tdoc-mode-trigger[data-popup-open] { background: var(--td-surface-2, #f7f7f5); }
+  .tdoc-bar .tdoc-mode-readonly, .tdoc-bar .tdoc-mode-readonly:hover { cursor: default; opacity: .65; background: transparent; }
   .tdoc-bar .tdoc-mode-chevron { color: var(--td-muted); }
   @media (max-width: 700px) { .tdoc-bar .tdoc-mode-label { display: none; } .tdoc-bar .tdoc-mode-trigger { padding: 0 6px; gap: 2px; } }
   body.tdoc-narrow .tdoc-drawer-empty { padding: 28px 12px 36px; text-align: center; color: var(--td-muted); font: 14px system-ui, sans-serif; }

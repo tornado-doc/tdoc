@@ -53,6 +53,9 @@ async function dragSelect(page, phrase) {
   }, phrase);
   await page.mouse.move(box.x + r.x1, box.y + r.y1); await page.mouse.down();
   await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 }); await page.mouse.up();
+  const action = frame.getByRole('button', { name: 'Comment', exact: true });
+  await action.waitFor();
+  await action.click();
   await page.locator('.tdoc-popup textarea').waitFor();
 }
 
