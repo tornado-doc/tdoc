@@ -20,6 +20,9 @@ export const FLAGS = Object.freeze({
   // previews so it can be tried before it ships.
   unifiedEntry: Object.freeze({ label: 'One comment + Ask AI entry on phones', owner: 'julie', added: '2026-10-26', default: true }),
   teamGuests: Object.freeze({ label: 'Team guests and seats', owner: 'julie', added: '2026-10-26', default: true }),
+  // Try visibility-based read receipts in PR previews before enabling for
+  // every document. The existing explicit read controls remain off-preview.
+  autoReadComments: Object.freeze({ label: 'Read replies when seen', owner: 'julie', added: '2026-10-26', default: false, preview: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

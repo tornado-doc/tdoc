@@ -8,6 +8,18 @@ import { CommentThreadList } from './comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from './comment-pin.jsx';
 import { avatarFor, isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
 
+const DOCUMENT_PIN_FACE_SIZE = { width: 21, height: 21, maxWidth: 21, maxHeight: 21 };
+
+export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = null }) {
+  if (!filter && !(unreadCount && onMarkAllRead)) return null;
+  return <div className={`tdoc-comment-filter-row${unreadCount > 0 && onMarkAllRead ? ' has-mark-all' : ''}`}>
+    {filter}
+    {unreadCount > 0 && onMarkAllRead ? (
+      <button type="button" className="tdoc-comment-mark-all" onClick={() => onMarkAllRead()}>Mark all as read</button>
+    ) : null}
+  </div>;
+}
+
 function Pin({
   cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
 }) {
@@ -46,7 +58,8 @@ function Pin({
       {documentPin && !single ? <span className="tdoc-document-pin-faces" aria-hidden="true">
         {cluster.items.slice(0, 3).map(({ comment }, index) => {
           const avatar = avatarFor(comment);
-          return avatar ? <img key={comment.id} src={avatar} alt="" style={{ zIndex: 3 - index }} />
+          return avatar ? <img key={comment.id} src={avatar} alt="" width="21" height="21"
+            style={{ ...DOCUMENT_PIN_FACE_SIZE, zIndex: 3 - index }} />
             : <span key={comment.id} className="tdoc-pin-anon" style={{ zIndex: 3 - index }} />;
         })}
       </span> : <CommentPinFace comment={single} state={state} clusterCount={cluster.items.length} />}
@@ -97,6 +110,7 @@ export function DesktopCommentLayer({
   handoff = null,
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
+  onMarkRead = null,
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -104,6 +118,15 @@ export function DesktopCommentLayer({
     return () => clearInterval(timer);
   }, []);
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
+  useEffect(() => {
+    if (!onMarkRead) return;
+    const markUnread = (comment) => {
+      if (commentPinState(comment, { seenMap, handoffViewer, isOwner }).unread) onMarkRead(comment);
+    };
+    if (openCluster) {
+      for (const { comment } of openCluster.items) markUnread(commentsById.get(comment.id) || comment);
+    } else if (openComment) markUnread(openComment);
+  }, [onMarkRead, openCluster, openComment, commentsById, seenMap, handoffViewer, isOwner]);
   const cardProps = {
     currentUser, handoffViewer, isOwner, mentionable, demo, canSendToAgent,
     agentSetupHref, onReply, onReact, onDelete, onResolve, onEdit, onReanchor,
@@ -213,6 +236,7 @@ export function MobileCommentDrawer({
   comments,
   openCount = comments.length,
   unread = false,
+  unreadCount = 0,
   pinIds,
   seenMap = {},
   currentUser,
@@ -238,6 +262,8 @@ export function MobileCommentDrawer({
   handoff = null,
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
+  onMarkRead = null,
+  onMarkAllRead = null,
   // Unified entry: the same drawer also holds the Ask AI panel, one tab away.
   askAi = null,
   tab = 'comments',
@@ -292,7 +318,7 @@ export function MobileCommentDrawer({
             </div> : null}
             {showAsk ? <div className="tdoc-drawer-ask">{askAi}</div> : (
             <Drawer.Content className="tdoc-drawer-list">
-              {filter ? <div className="tdoc-comment-filter-row">{filter}</div> : null}
+              <CommentListControls filter={filter} unreadCount={unreadCount} onMarkAllRead={onMarkAllRead} />
               {!comments.length ? <EmptyCommentsHowTo
                 onAskAi={askAi && onTab ? () => onTab('ask') : onAskAi ? () => { onOpenChange(false); onAskAi(); } : null}
               /> : null}
@@ -302,6 +328,7 @@ export function MobileCommentDrawer({
                 expandReplies={expandReplies}
                 isAnchored={(comment) => isDocumentComment(comment) || pinIds.has(comment.id)}
                 isUnread={(comment) => commentPinState(comment, { seenMap, handoffViewer, isOwner }).unread}
+                onSeen={open && !showAsk ? onMarkRead : null}
                 onNavigate={onNavigate}
                 cardProps={{
                   currentUser, handoffViewer, isOwner, mentionable, demo,

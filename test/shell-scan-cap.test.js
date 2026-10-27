@@ -34,6 +34,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(desc.includes("Big report Lead line of the report."), `excerpt: ${desc.slice(0, 80)}`);
   });
 
+  await t('document HTML is not cached across shell deployments', async () => {
+    for (const path of ['/d/big-report', '/d/big-report/v/1']) {
+      const r = await worker.fetch(req(path), env, {});
+      assert(r.status === 200, `${path}: status ${r.status}`);
+      assert(r.headers.get('cache-control') === 'private, no-store', `${path}: ${r.headers.get('cache-control')}`);
+    }
+  });
+
   await t('only the head is scanned: a /start link past it does not turn the page into onboarding', async () => {
     const r = await worker.fetch(req('/d/big-report/v/1'), env, {});
     const page = await r.text();

@@ -194,7 +194,7 @@ async function touchSelect(page, phrase) {
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
       if (labels.join('|') !== '@agent|Comment') throw new Error(`popover buttons: ${labels.join('|')}`);
       const { row } = await ask(page, 'Why billing first?');
-      if (!/^tdoc AI/.test(row) || !/5 free/.test(row)) throw new Error(`first row: ${row}`);
+      if (!/^tdoc AI/.test(row) || !/Limited-time free/.test(row)) throw new Error(`first row: ${row}`);
       await answersOnly(pop);
       const onlyMe = pop.locator('.tdoc-only-me [role=checkbox]');
       if (await onlyMe.getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
