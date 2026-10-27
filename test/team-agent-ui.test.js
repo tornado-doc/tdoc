@@ -186,6 +186,10 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await dialog.getByRole('button', { name: 'Add', exact: true }).click();
         const connect = page.getByRole('dialog', { name: `Connect ${agentName}` });
         await connect.waitFor();
+        await shot('connect-dialog');
+        // The command reads as text, not as a disabled field.
+        const ink = await connect.locator('.tm-agent-command code').evaluate((el) => getComputedStyle(el).color);
+        if (ink === 'rgb(230, 230, 230)') throw new Error(`setup command text is faded: ${ink}`);
         const command = await connect.locator('.tm-agent-command code').innerText();
         const code = (command.match(/tdts_[a-f0-9]{48}/) || [])[0];
         if (!code || !command.includes('connect-team')) throw new Error(`command: ${command}`);

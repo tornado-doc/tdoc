@@ -798,7 +798,8 @@ function AddTeamAgentDialog({ team, issued = null, onClose, onAdded }) {
           <>
             <p>Run this once on that machine. It installs tdoc if needed, connects as <b>{added.agent.name} · {team.name} team agent</b>, and starts picking up comments. It works once, within the hour.</p>
             <div className="tm-agent-command">
-              <code>{added.command}</code>
+              {/* One step per line to read; Copy takes the exact one-line command. */}
+              <code>{added.command.split('; ').join(';\n')}</code>
               <CopyPromptButton text={added.command} />
             </div>
             <p className="manage-hint">It reaches {team.name}&apos;s docs and nothing else: no one&apos;s personal docs, no other team. It cannot share, delete, invite or change billing. It belongs to the team, so it keeps working if you leave; remove it here to stop it.</p>
