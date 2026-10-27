@@ -105,14 +105,6 @@ export function MentionField({
     ref.current.setSelectionRange(pos, pos);
   }, [value]);
 
-  // The @agent button inserts a bare @ when this doc has no evidenced
-  // default. Open the existing mention picker once the controlled textarea
-  // has rendered that insertion, so the person explicitly chooses.
-  useEffect(() => {
-    if (!value.endsWith('@') || document.activeElement !== ref.current) return;
-    setQuery(mentionQueryAt(value, ref.current.selectionStart));
-  }, [value, ref]);
-
   useEffect(() => { setActive(0); }, [query?.query]);
 
   // Where to draw the menu, in viewport coordinates. It renders in a portal

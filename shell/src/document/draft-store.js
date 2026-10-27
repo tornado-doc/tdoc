@@ -178,7 +178,7 @@ export function saveDraft(key, bodyHtml, meta = {}) {
 }
 
 export async function saveDraftMode(key, mode) {
-  return patchDraft(key, { mode, modeExplicit: true });
+  return patchDraft(key, { mode });
 }
 
 export async function clearDraftBody(key, expectedBodyHtml) {

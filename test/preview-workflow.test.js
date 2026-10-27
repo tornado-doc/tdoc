@@ -56,15 +56,13 @@ t('sticky comment matches the #148 template', () => {
   assert(wf.includes('/d/conway-life/v/2'), 'the demo doc must still be linked');
   assert(/"access":\{"visibility":"public","commenting":"signed_in","history_visibility":"public"/.test(wf),
     'the linked demo doc must be anonymously readable without enabling anonymous writes');
-  assert(wf.includes('tdoc-preview-publish-landing.sh'), 'the preview must seed the landing doc');
+  assert(/seed .*landing|seeded landing/.test(wf), 'the preview must seed the landing doc');
   const reset = wf.indexOf('reset_preview_slug conway-life');
   const seed = wf.indexOf('seed 1 test/fixtures/tdocs/sample-doc/v1/index.html');
   assert(reset !== -1 && reset < seed,
     'reruns must clear the retained preview fixtures before reseeding v1');
-  assert(!wf.includes('reset_preview_slug tornado-doc') && wf.includes('replace:true'),
-    'the shared landing must be replaced in place, not moved to Trash on every PR');
-  assert(wf.includes('bash bin/tdoc-preview-publish-landing.sh') && wf.includes('LANDING_STATUS='),
-    'preview seed must recover a trashed landing and recheck it before skipping reseed');
+  assert(wf.includes('reset_preview_slug tornado-doc'),
+    'reruns must clear the retained landing fixture before reseeding it');
   assert(/-X DELETE[\s\\]*\n[\s\S]*\/api\/doc\?slug=\$slug/.test(wf),
     'preview fixture reset must use the authenticated document delete route');
   assert(wf.includes('200|404)'),
@@ -96,62 +94,6 @@ t('unchanged PR fixtures do not burn the daily KV write budget', () => {
   assert(wf.includes('wrangler kv key put "$FIXTURE_MARKER" "$FIXTURE_FINGERPRINT"'),
     'a successful seed must record its fingerprint');
   assert(wf.includes('--ttl 1209600'), 'the fixture marker must expire with 14-day preview data');
-});
-
-t('landing seed publishes normally, restores Trash before retry, and rejects unrelated conflicts', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-preview-landing-seed-'));
-  const curl = path.join(dir, 'curl');
-  const sleep = path.join(dir, 'sleep');
-  const payload = path.join(dir, 'landing.json');
-  const log = path.join(dir, 'calls');
-  const count = path.join(dir, 'count');
-  const script = path.join(root, 'bin/tdoc-preview-publish-landing.sh');
-  try {
-    fs.writeFileSync(payload, JSON.stringify({ slug: 'tornado-doc', version: 1, replace: true }));
-    fs.writeFileSync(sleep, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-    fs.writeFileSync(curl, `#!/bin/sh
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -o) out="$2"; shift 2 ;;
-    -X|-H|--data|--data-binary|--connect-timeout|--max-time|-w) shift 2 ;;
-    http://*) url="$1"; shift ;;
-    *) shift ;;
-  esac
-done
-case "$url" in
-  */api/upload)
-    echo upload >> "$MOCK_LOG"
-    n=0; [ ! -f "$MOCK_COUNT" ] || n=$(cat "$MOCK_COUNT")
-    n=$((n+1)); echo "$n" > "$MOCK_COUNT"
-    if [ "$MOCK_SCENARIO" = trash ] && [ "$n" = 1 ]; then
-      echo '{"error":"doc_in_trash","slug":"tornado-doc"}' > "$out"; printf 409
-    elif [ "$MOCK_SCENARIO" = conflict ]; then
-      echo '{"error":"version_conflict"}' > "$out"; printf 409
-    else echo '{"ok":true}' > "$out"; printf 200; fi ;;
-  */api/trash/restore)
-    echo restore >> "$MOCK_LOG"
-    echo '{"ok":true,"restored":["tornado-doc"]}' > "$out"; printf 200 ;;
-  *) exit 2 ;;
-esac
-`, { mode: 0o755 });
-    for (const [scenario, expectedStatus, expectedCalls] of [
-      ['normal', 0, 'upload'],
-      ['trash', 0, 'upload\nrestore\nupload'],
-      ['conflict', 1, 'upload'],
-    ]) {
-      fs.writeFileSync(log, '');
-      fs.writeFileSync(count, '0');
-      const run = spawnSync('bash', [script, 'http://preview.test', payload], {
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, MOCK_LOG: log, MOCK_COUNT: count,
-          MOCK_SCENARIO: scenario, TDOC_PREVIEW_UPLOAD_TOKEN: 'test-preview-only',
-          TDOC_PREVIEW_LANDING_RESPONSE: path.join(dir, 'response.json') }, encoding: 'utf8',
-      });
-      assert(run.status === expectedStatus, `${scenario} exited ${run.status}: ${run.stderr}`);
-      assert(fs.readFileSync(log, 'utf8').trim() === expectedCalls, `${scenario} called ${fs.readFileSync(log, 'utf8')}`);
-    }
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 t('never uses a personal Worker or the production upload token', () => {

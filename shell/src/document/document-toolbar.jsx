@@ -11,12 +11,12 @@ import {
   FolderInput,
   History,
   Share2,
+  Sparkles,
   Star,
   Trash2,
   Upload,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
-import { AskIcon } from '../ui/ask-icon.jsx';
 import { usePortalContainer } from '../ui/portal.js';
 
 // The label after a version number. "current" read as "latest" from an old
@@ -193,7 +193,7 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
   ].filter(Boolean).join(' · ');
   const label = `Ask AI${details ? ` · ${details}` : ''}`;
   const triggerContents = <>
-    <AskIcon className="tdoc-ask-ai-mark" size={18} color="var(--td-accent, #1652f0)" />
+    <Sparkles className="tdoc-ask-ai-mark" size={18} strokeWidth={2} color="var(--td-accent, #1652f0)" aria-hidden="true" />
     <span className="tdoc-ask-ai-label">Ask AI</span>
     {unread ? <span className="tdoc-send-agent-badge is-unread" aria-hidden="true" />
       : ready ? <span className="tdoc-send-agent-badge is-ready" aria-hidden="true" /> : null}

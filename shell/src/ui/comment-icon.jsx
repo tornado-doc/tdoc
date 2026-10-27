@@ -3,7 +3,7 @@ import React from 'react';
 // The top-left point is also the pointer hotspot in the document frame.
 export const COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
 
-export function CommentIcon({ size = 24, className = '', outline = false, ...props }) {
+export function CommentIcon({ size = 24, className = '', ...props }) {
   return (
     <svg
       {...props}
@@ -11,11 +11,8 @@ export function CommentIcon({ size = 24, className = '', outline = false, ...pro
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill={outline ? 'none' : 'currentColor'}
-      stroke={outline ? 'currentColor' : 'none'}
-      strokeWidth={outline ? 2 : undefined}
-      strokeLinecap={outline ? 'round' : undefined}
-      strokeLinejoin={outline ? 'round' : undefined}
+      fill="currentColor"
+      stroke="none"
       aria-hidden="true"
       focusable="false"
     >

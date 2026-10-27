@@ -1,7 +1,7 @@
 // The @agent in a thread's reply box is the new-comment composer's
 // (Julie, 2026-10-24), in the real shell against the real worker:
 //   - @agent puts the default agent in as a pill at the caret, no menu; the
-//     pill's dropdown (short names tagged Mine / Team / "Limited-time free", Connect
+//     pill's dropdown (short names tagged Mine / Team / "5 free", Connect
 //     my agent) swaps it;
 //     typing @ makes the same pill; Backspace takes the whole pill away.
 //   - no mode control: an agent that may edit (authorship) gets the thread
@@ -53,10 +53,6 @@ async function dragSelect(page, phrase) {
   }, phrase);
   await page.mouse.move(box.x + r.x1, box.y + r.y1); await page.mouse.down();
   await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 }); await page.mouse.up();
-  const action = frame.getByRole('button', { name: 'Comment', exact: true });
-  await action.waitFor();
-  await action.click();
-  await page.locator('.tdoc-popup textarea').waitFor();
 }
 
 (async () => {
@@ -187,15 +183,11 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t("reply, member on a doc Julie's agent wrote: choose the team agent for Answers only; answer under the reply", async () => {
+    await t("reply, member on a doc Julie's agent wrote: Answers only (no control); Reply asks the team agent, answer under the reply", async () => {
       const { context, page } = await open(bob, 'julies-draft');
       const { form } = await replyBox(page, t2.body.id);
       await form.locator('textarea').fill('Why not April?');
       await form.locator('.tdoc-reply-agent').click();
-      if (await form.locator('.tdoc-agent-pill').count()) throw new Error('another member inherited the owner’s agent as default');
-      const picker = page.locator('.tdoc-mention-menu');
-      await picker.waitFor();
-      await picker.getByRole('option', { name: /tdoc-bot/ }).click();
       await form.locator('.tdoc-agent-pill').waitFor();
       await noMode(form);
       if (!(await answersOnly(form))) throw new Error('no "Answers only"');
@@ -242,10 +234,6 @@ async function dragSelect(page, phrase) {
       const { card, form } = await replyBox(page, c1.body.id);
       await form.locator('textarea').fill('Why billing first?');
       await form.locator('.tdoc-reply-agent').click();
-      if (await form.locator('.tdoc-agent-pill').count()) throw new Error('reader inherited the owner’s agent as default');
-      const picker = page.locator('.tdoc-mention-menu');
-      await picker.waitFor();
-      await picker.getByRole('option', { name: /tdoc AI/ }).click();
       await form.locator('.tdoc-agent-pill').waitFor();
       if (await form.locator('.tdoc-only-me [role=checkbox]').getAttribute('aria-checked') !== 'true') throw new Error('Only me is not on for tdoc AI');
       await form.getByRole('button', { name: 'Reply', exact: true }).click();
@@ -288,7 +276,7 @@ async function dragSelect(page, phrase) {
       if (!after) throw new Error('⌘⇧Enter did not hand it to the agent');
       await context.close();
     });
-    await t('typed @ and the pill dropdown list the same agents the same way: short name, grey tag (Mine / Team / Limited-time free), no group headers -- tdoc AI is not cut off for someone with agents of their own', async () => {
+    await t('typed @ and the pill dropdown list the same agents the same way: short name, grey tag (Mine / Team / free left), no group headers -- tdoc AI is not cut off for someone with agents of their own', async () => {
       const { context, page } = await open(julie, 'team-plan');
       const { form } = await replyBox(page, t1.body.id);
       const box = form.locator('textarea');
@@ -297,7 +285,7 @@ async function dragSelect(page, phrase) {
       await list.locator('.tdoc-mention-agent').first().waitFor();
       const rowsOf = (menu, row, name) => menu.evaluate((el, [r, n]) => [...el.querySelectorAll(r)].map((x) => `${x.querySelector(n).textContent.trim()} | ${(x.querySelector('.tdoc-agent-menu-tag') || { textContent: '' }).textContent.trim()}`), [row, name]);
       const typed = await rowsOf(list, '.tdoc-mention-agent', '.tdoc-mention-login');
-      if (!typed.includes('tdoc-bot | Team') || !typed.includes('tdoc AI | Limited-time free') || !typed.some((x) => / \| Mine$/.test(x))) throw new Error(JSON.stringify(typed));
+      if (!typed.includes('tdoc-bot | Team') || !typed.some((x) => /^tdoc AI \| (\d+ free)?$/.test(x)) || !typed.some((x) => / \| Mine$/.test(x))) throw new Error(JSON.stringify(typed));
       if (typed.some((x) => x.includes('·'))) throw new Error(`a long name in the @ list: ${JSON.stringify(typed)}`);
       if (await list.locator('.tdoc-mention-group', { hasText: /^(Mine|Team|tdoc AI)$/ }).count()) throw new Error('group headers in the @ list');
       await shot(page, 'reply-typed-at-list.png');

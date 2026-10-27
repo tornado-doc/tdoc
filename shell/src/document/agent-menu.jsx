@@ -3,16 +3,19 @@ import { Check } from 'lucide-react';
 import { agentDisplayName, agentMentionName, targetKey } from './agent-choices.js';
 import { ProviderMark } from './notify-handoff.jsx';
 import { AppMenuItem, AppMenuLinkItem, AppSubmenu } from '../ui/menu.jsx';
+import { FEW_FREE_LEFT } from './ai-answerer.js';
 
 // Whose an agent is, the order both agent lists keep: Mine, Team, tdoc AI.
 export const AGENT_GROUPS = ['Mine', 'Team', 'tdoc AI'];
 export const whose = (t) => (t.tdoc_ai ? 'tdoc AI' : t.team_agent ? 'Team' : 'Mine');
 
-// The small grey tag at a row's right end, in both agent lists.
+// The small grey tag at a row's right end, in both agent lists: "Mine",
+// "Team", or tdoc AI's free answers left when few are ("5 free").
 export function agentTag(t, ai = null) {
   if (!t) return '';
   if (!t.tdoc_ai) return whose(t);
-  return ai?.remaining === 0 ? 'No free answers left' : 'Limited-time free';
+  const left = ai && ai.remaining;
+  return typeof left === 'number' && left <= FEW_FREE_LEFT ? `${left} free` : '';
 }
 
 // The agents a comment may name -- one quiet row each, short name and its

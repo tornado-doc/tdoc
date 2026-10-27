@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { canSeeHandoff, summarizeHandoffSurfaces, threadPhase } from './handoff-state.js';
 import { isThreadUnread, markThreadSeen, readSeenMap } from './thread-seen.js';
 
@@ -31,24 +31,23 @@ export function deriveCommentArea({ comments = [], filter = 'all', filterMode = 
 }
 
 export function useCommentArea({ comments, slug, selectedId, filter, filterMode,
-  handoffViewer, isOwner, pageUrl, autoMarkSelected = true }) {
+  handoffViewer, isOwner, pageUrl }) {
   const [seenMap, setSeenMap] = useState(() => readSeenMap(slug));
   useEffect(() => { setSeenMap(readSeenMap(slug)); }, [slug]);
   useEffect(() => {
-    if (!autoMarkSelected) return;
     const selected = comments?.find((comment) => comment.id === selectedId);
     if (selected && markThreadSeen(slug, selected)) setSeenMap(readSeenMap(slug));
-  }, [autoMarkSelected, comments, selectedId, slug]);
+  }, [comments, selectedId, slug]);
   const area = useMemo(() => deriveCommentArea({ comments, filter, filterMode,
     selectedId, handoffViewer, isOwner, seenMap, pageUrl }),
   [comments, filter, filterMode, selectedId, handoffViewer, isOwner, seenMap, pageUrl]);
-  const markRead = useCallback((comment) => {
+  const markRead = (comment) => {
     if (markThreadSeen(slug, comment)) setSeenMap(readSeenMap(slug));
-  }, [slug]);
-  const markAllRead = useCallback((commentsToMark = area.unread) => {
+  };
+  const markAllRead = (commentsToMark = area.unread) => {
     let changed = false;
     for (const comment of commentsToMark) changed = markThreadSeen(slug, comment) || changed;
     if (changed) setSeenMap(readSeenMap(slug));
-  }, [slug, area.unread]);
+  };
   return { ...area, seenMap, markRead, markAllRead };
 }

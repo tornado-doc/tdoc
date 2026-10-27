@@ -16,11 +16,9 @@ const chrome = read('server/chrome.css');
 
 console.log('resolved visibility and anchor fallback contracts');
 
-t('the shell sends only visible comments to the frame and mobile drawer', () => {
+t('the shell sends the same visible set to the frame and the margin', () => {
   assert(shell.includes("bridge.send({ type: 'tdoc:anchors', comments: shownComments });"), 'the frame bypasses comment visibility');
-  assert(shell.includes('...shownComments.filter(isDocumentComment)')
-    && shell.includes('...shownComments.filter((comment) => !isDocumentComment(comment))')
-    && shell.includes('comments={drawerComments}'), 'the mobile drawer bypasses comment visibility');
+  assert(shell.includes('comments={shownComments}'), 'the margin bypasses comment visibility');
 });
 t('hidden threads are excluded before any targets or highlights are registered', () => {
   const start = probe.indexOf('(comments || []).forEach(function (c)');

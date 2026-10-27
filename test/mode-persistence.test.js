@@ -11,26 +11,25 @@ const editorHook = fs.readFileSync(path.join(root, 'shell/src/hooks/use-document
 console.log('mode persistence (localStorage)');
 
 t('mode storage key and helpers exist', () => {
-  assert(editorHook.includes('tdoc-mode:${config.slug}:${config.identity?.login'), 'mode must be keyed by document and viewer');
-  assert(editorHook.includes('function getStoredMode(config)'), 'getStoredMode helper missing');
-  assert(editorHook.includes('function storeMode(config, mode)'), 'storeMode helper missing');
-  assert(!editorHook.includes("localStorage.getItem('tdoc-mode')"), 'old global mode must not affect another document');
+  assert(editorHook.includes("const MODE_STORAGE_KEY = 'tdoc-mode'"), 'mode storage key missing');
+  assert(editorHook.includes('function getStoredMode()'), 'getStoredMode helper missing');
+  assert(editorHook.includes('function storeMode(mode)'), 'storeMode helper missing');
 });
 
 t('getStoredMode is wrapped in try/catch for privacy mode', () => {
-  const fnStart = editorHook.indexOf('function getStoredMode(config)');
+  const fnStart = editorHook.indexOf('function getStoredMode()');
   const fnEnd = editorHook.indexOf('function storeMode(', fnStart);
   const fn = editorHook.slice(fnStart, fnEnd);
-  assert(/try \{[\s\S]*localStorage\.getItem\(modeStorageKey\(config\)\)[\s\S]*\} catch/.test(fn),
+  assert(/try \{[\s\S]*localStorage\.getItem\(MODE_STORAGE_KEY\)[\s\S]*\} catch/.test(fn),
     'getStoredMode must catch localStorage throws in privacy mode');
   assert(fn.includes('return null'), 'getStoredMode must return null on error');
 });
 
 t('storeMode is wrapped in try/catch for privacy mode', () => {
-  const fnStart = editorHook.indexOf('function storeMode(config, mode)');
+  const fnStart = editorHook.indexOf('function storeMode(mode)');
   const fnEnd = editorHook.indexOf('export function useDocumentEditor', fnStart);
   const fn = editorHook.slice(fnStart, fnEnd);
-  assert(/try \{[\s\S]*localStorage\.setItem\(modeStorageKey\(config\), mode\)[\s\S]*\} catch/.test(fn),
+  assert(/try \{[\s\S]*localStorage\.setItem\(MODE_STORAGE_KEY, mode\)[\s\S]*\} catch/.test(fn),
     'storeMode must catch localStorage throws in privacy mode');
 });
 
@@ -40,7 +39,7 @@ t('URL ?edit=1 takes precedence over stored mode', () => {
     editorHook.indexOf('const [dirty, setDirty]')
   );
   const editUrlIndex = modeInit.indexOf("get('edit') === '1'");
-  const storedIndex = modeInit.indexOf('getStoredMode(config)');
+  const storedIndex = modeInit.indexOf('getStoredMode()');
   assert(editUrlIndex >= 0 && storedIndex >= 0, 'both URL check and stored check must exist');
   assert(editUrlIndex < storedIndex, '?edit=1 must be checked before stored mode');
 });
@@ -51,13 +50,13 @@ t('stored edit mode requires canEdit permission', () => {
 });
 
 t('stored comment mode requires canComment permission', () => {
-  assert(/stored === 'comment' && \(config\.canComment \|\| config\.signInToComment\)/.test(editorHook),
+  assert(/stored === 'comment' && config\.canComment/.test(editorHook),
     'stored comment mode must be gated on canComment');
 });
 
-t('stored read mode remains Read for a reader who can comment', () => {
+t('stored read mode does not require special permissions', () => {
   assert(/if \(stored === 'read'\) return 'read'/.test(editorHook),
-    'Read preference should remain available when Comment also allows copy');
+    'stored read mode should restore without permission checks');
 });
 
 t('mode is persisted on change via storeMode', () => {
@@ -65,7 +64,7 @@ t('mode is persisted on change via storeMode', () => {
   const changeModeEnd = editorHook.indexOf('const requestDocument = useCallback');
   const changeMode = editorHook.slice(changeModeStart, changeModeEnd);
   assert(changeMode.includes('setMode(nextMode)'), 'changeMode must call setMode');
-  assert(changeMode.includes('storeMode(config, nextMode)'), 'changeMode must persist mode to localStorage');
+  assert(changeMode.includes('storeMode(nextMode)'), 'changeMode must persist mode to localStorage');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

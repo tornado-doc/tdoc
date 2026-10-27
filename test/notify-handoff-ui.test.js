@@ -312,24 +312,6 @@ async function t(name, fn) {
       }
     });
 
-    await t('visible activity rows become read without per-row Read buttons', async () => {
-      for (const width of [390, 1440]) {
-        const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 900 } });
-        await page.goto(`${base}/?view=activity&auto-read=1`);
-        await page.locator('#tdoc-send-agent-btn').click();
-        const details = page.getByRole('dialog', { name: 'Ask AI' });
-        await details.getByRole('button', { name: /Agent activity/ }).click();
-        const question = details.locator('.tdoc-handoff-details-row[data-comment-id="question"]');
-        await question.waitFor();
-        assert.equal(await details.getByRole('button', { name: 'Mark as read' }).count(), 0,
-          `${width}px still requires a per-row Read action`);
-        await question.scrollIntoViewIfNeeded();
-        await question.locator('.tdoc-handoff-details-unread-dot').waitFor({ state: 'detached', timeout: 5000 });
-        console.log(`  ✓ ${width}px visible activity row marked read`);
-        await page.close();
-      }
-    });
-
     await t('Ask AI activity uses one round blue dot without a numeral on phone and desktop', async () => {
       for (const width of [390, 1440]) {
         for (const [query, count] of [['unread=0', 0], ['badge=1', 1], ['badge=9', 9], ['badge=10', 10]]) {
@@ -461,12 +443,16 @@ async function t(name, fn) {
       assert.equal((await fab.textContent()).trim(), '');
       await fab.click();
       const empty = page.locator('.tdoc-drawer-empty');
-      if (await empty.getByRole('button', { name: 'Leave a comment', exact: true }).count()) throw new Error('the empty drawer still offers an unanchored comment');
-      await empty.getByRole('button', { name: 'or Ask AI', exact: true }).waitFor();
+      await empty.getByRole('button', { name: 'Leave a comment', exact: true }).waitFor();
+      await empty.getByRole('button', { name: 'Ask AI', exact: true }).waitFor();
       if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'handoff-mobile-drawer-empty.png') });
-      await page.keyboard.press('Escape');
+      await empty.getByRole('button', { name: 'Leave a comment', exact: true }).click();
+      await page.locator('.tdoc-popup').getByText('On this document').waitFor();
+      await page.locator('.tdoc-popup textarea').fill('Please clarify the pricing');
+      await page.locator('.tdoc-popup').getByRole('button', { name: 'Comment', exact: true }).click();
+      assert.deepEqual(JSON.parse(await page.locator('#mobile-comment-log').textContent()), { text: 'Please clarify the pricing', anchor: null });
       await fab.click();
-      await page.locator('.tdoc-drawer-empty').getByRole('button', { name: 'or Ask AI', exact: true }).click();
+      await page.locator('.tdoc-drawer-empty').getByRole('button', { name: 'Ask AI', exact: true }).click();
       await page.locator('.tdoc-popup').getByText('On this document').waitFor();
       assert.match(await page.locator('.tdoc-popup textarea').inputValue(), /tdoc AI/);
       assert.deepEqual(errors, []);

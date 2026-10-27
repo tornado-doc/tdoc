@@ -20,22 +20,6 @@ import { TeamJoinPage } from './team-join.jsx';
 
 const OnboardingPreview = lazy(() => import('./onboarding-preview.jsx'));
 
-// An open tab can request a lazy chunk after a deploy has replaced the
-// Worker bundle. Old content-hashed assets are no longer served then. Refresh
-// once to load the new shell instead of leaving the page with a failed import.
-window.addEventListener('vite:preloadError', (event) => {
-  const key = `tdoc:preload-reload:${window.location.pathname}`;
-  try {
-    const lastReload = Number(sessionStorage.getItem(key) || 0);
-    if (Date.now() - lastReload < 60_000) return;
-    sessionStorage.setItem(key, String(Date.now()));
-  } catch {
-    return; // Without the guard, a persistent load failure could reload forever.
-  }
-  event.preventDefault();
-  window.location.reload();
-});
-
 const appRoot = document.getElementById('tdoc-app-root');
 const appBoot = window.__TDOC_APP_BOOT__;
 

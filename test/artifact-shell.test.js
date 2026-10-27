@@ -103,7 +103,7 @@ const SLUG = 'hostile-body-css';
     await t('the shell renders the REAL top bar + footer (1:1 chrome)', async () => {
       const chrome = await page.evaluate(() => ({
         mark: !!document.querySelector('.tdoc-bar .tdoc-bar-mark img'),
-        mode: !!document.querySelector('.tdoc-bar .tdoc-mode-trigger'),
+        version: !!document.querySelector('.tdoc-bar #tdoc-version-toggle'),
         more: !!document.querySelector('.tdoc-bar #tdoc-more-btn'),   // ⋯ menu (Copy as Markdown lives here now)
         // This fixture supplies its own background and text palette. Reader
         // theme is intentionally hidden; custom-design-theme tests both cases.
@@ -122,7 +122,7 @@ const SLUG = 'hostile-body-css';
         slot.innerHTML = '<div class="tdoc-oldver-strip tdoc-oldver-visible">Old version</div>';
         document.querySelector('.tdoc-bar').after(slot);
       });
-      await page.click('#tdoc-more-btn');
+      await page.click('#tdoc-version-toggle');
       await page.waitForSelector('.ui-menu-positioner');
       const layers = await page.evaluate(() => {
         const menu = document.querySelector('.ui-menu-positioner');
@@ -160,7 +160,7 @@ const SLUG = 'hostile-body-css';
     });
 
     // --- #2 COMMENTS ACROSS THE BOUNDARY -------------------------------------
-    await t('selecting text inside the iframe offers a comment action', async () => {
+    await t('selecting text inside the iframe opens the composer in the shell', async () => {
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
       if (!frame) throw new Error('author-content frame not found');
       // Select the first paragraph's text inside the iframe.
@@ -174,8 +174,6 @@ const SLUG = 'hostile-body-css';
           clientX: rect.left + 20, clientY: rect.top + 8, bubbles: true, cancelable: true, view: window, button: 0,
         }));
       });
-      await frame.waitForSelector('.tdoc-selection-action', { state: 'visible', timeout: 2000 });
-      await frame.click('.tdoc-selection-action');
       await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
     });
 
@@ -566,7 +564,7 @@ const SLUG = 'hostile-body-css';
       if (!agentAuthor) throw new Error('card did not render the agent author with a logo');
     });
 
-    await t('co-located comments cluster into one count badge and open together', async () => {
+    await t('co-located comments cluster into one count badge with a popover', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       // two comments anchor the same sentence → one cluster badge reading "2"
@@ -576,11 +574,14 @@ const SLUG = 'hostile-body-css';
       // the co-located comments are NOT also rendered as their own single pins
       const singles = await page.evaluate(() => document.querySelectorAll('.tdoc-pin[data-id="c_fixture_4"], .tdoc-pin[data-id="c_fixture_5"]').length);
       if (singles) throw new Error('clustered comments leaked as standalone pins');
-      // One click opens both full cards; a second click is unnecessary.
+      // clicking the badge opens a popover listing both comments
       await page.click('.tdoc-pin.tdoc-pin-cluster');
       await page.waitForSelector('.tdoc-cluster-pop.open', { timeout: 2000 });
-      const cards = await page.evaluate(() => document.querySelectorAll('.tdoc-cluster-pop.open .tdoc-margin-comment').length);
-      if (cards !== 2) throw new Error('cluster should expand 2 full comments, got ' + cards);
+      const rows = await page.evaluate(() => document.querySelectorAll('.tdoc-cluster-pop.open .tdoc-cluster-row').length);
+      if (rows !== 2) throw new Error('cluster popover should list 2 comments, got ' + rows);
+      // picking a row opens that comment's card
+      await page.click('.tdoc-cluster-pop.open .tdoc-cluster-row[data-id="c_fixture_4"]');
+      await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_4"]', { timeout: 2000 });
     });
 
     await t('?comment= deep-link opens the target comment card on load', async () => {
@@ -950,7 +951,6 @@ const SLUG = 'hostile-body-css';
             if (!remode) throw new Error('re-anchor banner/mode did not engage');
             // select para-2 in the frame → shell PATCHes the anchor instead of opening a composer
             const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
-            await frame.waitForFunction(() => document.documentElement.hasAttribute('data-tdoc-reanchoring'));
             await frame.evaluate(() => {
               const p = document.getElementById('para-2');
               const r = document.createRange(); r.selectNodeContents(p);

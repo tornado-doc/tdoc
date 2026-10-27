@@ -107,7 +107,7 @@ function ActivityDemo() {
         <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} handoffViewer="julie" onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
           onSendElsewhere={(comment) => { setLog(`elsewhere:${comment.id}`); setOpen(false); }}
-          onMarkRead={commentArea.markRead} onMarkAllRead={commentArea.markAllRead} autoRead={params.has('auto-read')} />
+          onMarkRead={commentArea.markRead} onMarkAllRead={commentArea.markAllRead} />
         <button id="activity-refresh" type="button" onClick={() => setLog('refreshed')}>Refresh comments</button>
         </AskAiPanel>
       </DocumentSendAgentAction>

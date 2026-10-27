@@ -154,7 +154,6 @@ const OFFLINE = [
   'preview-cards.test.js',    // versioned OG cards, PNG rendering and access gate
   'preview-screenshot.test.js', // page screenshot as the card: PNG checks, write access, precedence
   'preview-workflow.test.js', // #148 PR preview GitHub Action contract
-  'ci-workflow.test.js',      // browser CI image matches locked playwright; suites sharded
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
   'widget-island.test.js',    // #138 sandboxed widget route + host iframe rewrite
   'stampaids.test.js',        // aid-stamp regex hardening (equivalence + edges)
@@ -197,7 +196,7 @@ const BROWSER = [
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
-  'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, mode switch in the bar, comments filter) and the composer's @agent pill / Answers only / Only me, desktop + phone, team docs
+  'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, modes in ⋯, comments filter) and the composer's @agent pill / Answers only / Only me, desktop + phone, team docs
   'reply-agent-ui.test.js',    // the reply box's @agent = the composer's: pill at the caret, pill dropdown (Mine / Team / tdoc AI), Answers only where it may not edit, Only me in a reply; the @ list shows every agent
   'phone-top-bar-ui.test.js', // signed in on a phone: ⋯ stays on screen, spaces under ⋯ → Switch space
   'document-move-ui.test.js', // open doc overflow: move to personal/another team, desktop + phone
@@ -227,13 +226,7 @@ const INTEGRATION = ['onboarding.test.js', 'publish.test.js'];
 const RUNTIME = ['preview-workerd.test.js']; // needs npm ci; real workerd WASM and font modules
 const runAll = process.argv.includes('--all');
 const runBrowser = process.argv.includes('--browser');
-const allFiles = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
-// --shard i/n runs every n-th suite starting at i, so CI can split the
-// browser regressions across parallel jobs (each suite starts its own server).
-const shardArg = process.argv.find((a) => a.startsWith('--shard='));
-const [shardIndex, shardCount] = shardArg ? shardArg.slice(8).split('/').map(Number) : [1, 1];
-if (!(shardCount >= 1 && shardIndex >= 1 && shardIndex <= shardCount)) throw new Error(`bad --shard ${shardArg}`);
-const files = allFiles.filter((_, i) => i % shardCount === shardIndex - 1);
+const files = runAll ? [...OFFLINE, ...RUNTIME, ...BROWSER, ...EXTENDED_BROWSER, ...INTEGRATION] : runBrowser ? BROWSER : OFFLINE;
 if (runAll || runBrowser) {
   // A requested browser suite must never report success by skipping every test.
   const probe = spawnSync(process.execPath, ['-e',

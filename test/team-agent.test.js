@@ -268,20 +268,6 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     // The owner keeps her own agent, and only that.
     const julies = await call('/api/notify/targets?slug=befreed-report', { cookie: julie.cookie });
     assert(!JSON.stringify(julies.body).includes('vid3o'), `owner offered the team agent on a doc her agent wrote: ${julies.text}`);
-    // Older account-stamped versions do not identify which personal agent
-    // published. One connected agent is unambiguous for its own author;
-    // adding another must remove that inferred default.
-    const ownKey = `account-notify:${julie.account_id}`;
-    const oldOwn = await env.META.get(ownKey);
-    const ownAgent = { provider: 'local', server_id: 'juliesmac', agent_sub: 'juliesmac_claude', device: 'juliesmac', cli: 'claude', agent_name: 'Claude Code' };
-    await env.META.put(ownKey, JSON.stringify([ownAgent]));
-    const sole = await call('/api/notify/targets?slug=befreed-report', { cookie: julie.cookie });
-    assert(sole.body.default?.agent_sub === ownAgent.agent_sub, `owner's sole agent not selected: ${sole.text}`);
-    await env.META.put(ownKey, JSON.stringify([ownAgent, { ...ownAgent, server_id: 'studio', agent_sub: 'studio_codex', device: 'studio', cli: 'codex' }]));
-    const ambiguous = await call('/api/notify/targets?slug=befreed-report', { cookie: julie.cookie });
-    assert(ambiguous.body.default === null, `owner's ambiguous agents were selected: ${ambiguous.text}`);
-    if (oldOwn == null) await env.META.delete(ownKey);
-    else await env.META.put(ownKey, oldOwn);
     // Nor may the team agent write over it (authorship at write time) --
     // until a person edits it in the browser.
     const over = await upload(agentToken, 'befreed-report', { version: 5 });

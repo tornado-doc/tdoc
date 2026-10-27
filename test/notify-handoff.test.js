@@ -192,17 +192,16 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   }
   const link = (env, token, body) => worker.fetch(req('/api/notify/link', { method: 'POST', token, body }), env, {});
 
-  await t('linking a second agent leaves an unrelated doc without a default', async () => {
+  await t('a link code plus an account token binds the agent as a fallback recipient', async () => {
     const { env, token, slug } = await seed();
     const code = await pendingLink(env);
     const r = await link(env, token, { link_code: code });
     const body = await r.json();
     assert(r.status === 200 && body.ok, `link ${r.status}: ${JSON.stringify(body)}`);
     assert(body.target.agent_sub === 'uuid-a', 'the bound target is the agent that signed in');
-    await link(env, token, { link_code: await pendingLink(env, 'lk_other', { agent_sub: 'uuid-b', agent_name: 'other' }) });
-    // Connection order alone does not choose between two agents.
+    // A doc nobody has touched now resolves to the account fallback.
     const targets = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
-    assert(targets.default === null && targets.candidates.some((t) => t.agent_sub === 'uuid-a'), `expected an offered agent, not a default: ${JSON.stringify(targets)}`);
+    assert(targets.default && targets.default.source === 'account', `expected the account fallback, got ${JSON.stringify(targets.default)}`);
   });
 
   await t('a link code alone is worthless without a token', async () => {
@@ -309,7 +308,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 200 && body.ok, `link with both credentials failed: ${r.status} ${JSON.stringify(body)}`);
     assert(body.target.agent_sub === 'uuid-a', 'bound the agent that signed in');
     const targets = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
-    assert(targets.default?.agent_sub === 'uuid-a', 'the author’s sole connected agent should be selected');
+    assert(targets.default && targets.default.source === 'account', 'it became the account fallback');
   });
 
   // ---- why the button is disabled ----
@@ -326,7 +325,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const { env, token, slug } = await seed();
     await link(env, token, { link_code: await pendingLink(env, 'lk_reason') });
     const r = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
-    assert(r.default?.agent_sub === 'uuid-a' && r.reason === null, `expected the sole recipient and no reason, got ${JSON.stringify(r)}`);
+    assert(r.default && r.reason === null, `expected a recipient and no reason, got ${JSON.stringify(r.reason)}`);
   });
 
   // ---- the Raft wire format ----
@@ -504,7 +503,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       body: { slug, parent_id: commentId, text: 'done', status: 'applied', applied_in: 1, agent_login: 'claude' },
     }), env, {});
     const t2 = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
-    assert(t2.default?.source === 'doc' && !t2.default.last_writer, `a reply is doc activity, not an exact publisher claim: ${JSON.stringify(t2)}`);
+    assert(t2.default && t2.default.source === 'doc', `expected a doc-level agent, got ${JSON.stringify(t2.default)}`);
   });
 
   await t('publishing without a Raft identity binds nobody and still succeeds', async () => {
@@ -608,12 +607,10 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   // account -- linking needs the token AND a Raft-verified identity -- and the
   // seat it earns only chooses who is pinged; it never grants access.
   const LINKED = { provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', server_slug: 'julie', agent_name: 'xiaocc' };
-  async function seedLinked(slug = 'self-report-doc', second = false) {
+  async function seedLinked(slug = 'self-report-doc') {
     const env = makeEnv(mod.CommentsStore);
     const tok = await issue(worker, env, 'owner');
-    await env.META.put(`account-notify:${tok.account_id}`, JSON.stringify(second
-      ? [LINKED, { ...LINKED, agent_sub: 'uuid-b', agent_name: 'other' }]
-      : [LINKED]));
+    await env.META.put(`account-notify:${tok.account_id}`, JSON.stringify([LINKED]));
     return { env, tok, slug };
   }
   const publishAs = (env, tok, slug, claim, version = 1) => worker.fetch(req('/api/upload', {
@@ -633,72 +630,37 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.default.agent_name === 'xiaocc', `expected the linked agent, got ${r.default.agent_name}`);
   });
 
-  await t('the latest version stores only the verified publisher, then falls back to this doc handoff', async () => {
-    const { env, tok, slug } = await seedLinked('publisher-choice');
-    const other = { ...LINKED, agent_sub: 'uuid-b', agent_name: 'other' };
-    await env.META.put(`account-notify:${tok.account_id}`, JSON.stringify([other, LINKED]));
-    const forged = { provider: 'raft', server_id: 'S1', agent_sub: 'forged' };
-    const first = await worker.fetch(req('/api/upload', { method: 'POST', token: tok.token,
-      headers: { 'X-Tdoc-Raft-Agent': 'S1/uuid-a' },
-      body: { slug, version: 1, html: '<h1>one</h1>', meta: { versions: [{ n: 1, publisher_agent: forged }] } },
-    }), env, {});
-    assert(first.status === 200, `publish ${first.status}`);
-    const stored = JSON.parse(await env.META.get(`meta:${slug}`));
-    assert(stored.versions[0].publisher_agent?.agent_sub === 'uuid-a', 'client publisher claim was stored');
-    const published = await targetsOf(env, tok, slug);
-    assert(published.default?.agent_sub === 'uuid-a' && published.default.last_writer, JSON.stringify(published));
-    // A newer upload without a verifiable agent identity must not silently
-    // keep the previous writer as the default.
-    const next = await publishAs(env, tok, slug, null, 2);
-    assert(next.status === 200, `second publish ${next.status}`);
-    const unknown = await targetsOf(env, tok, slug);
-    assert(unknown.default === null, `older doc activity became the default: ${JSON.stringify(unknown)}`);
-    await env.META.put(`handoffs:${slug}`, JSON.stringify([
-      { recipient: other, delivery: { status: 'failed' } },
-      { recipient: LINKED, delivery: { status: 'delivered' } },
-    ]));
-    const handed = await targetsOf(env, tok, slug);
-    assert(handed.default?.agent_sub === 'uuid-a', `latest successful doc handoff was ignored: ${JSON.stringify(handed)}`);
-  });
-
-  await t('an agent that is not linked to the account is ignored without inventing a default', async () => {
-    const { env, tok, slug } = await seedLinked('unlinked-agent', true);
+  await t('an agent that is not linked to the account is ignored, and the account default stands', async () => {
+    const { env, tok, slug } = await seedLinked();
     await publishAs(env, tok, slug, 'S1/uuid-stranger');
     const r = await targetsOf(env, tok, slug);
-    assert(r.default === null && r.candidates.some((agent) => agent.agent_sub === 'uuid-a'),
-      `an unlinked claim took the seat: ${JSON.stringify(r.default)}`);
+    assert(r.default && r.default.source === 'account',
+      `an unlinked claim took the seat: ${JSON.stringify(r.default)} -- a leaked token could route comments to a stranger`);
   });
 
   await t('the same agent on another Raft server does not match', async () => {
-    const { env, tok, slug } = await seedLinked('wrong-server-agent', true);
+    const { env, tok, slug } = await seedLinked();
     await publishAs(env, tok, slug, 'S2/uuid-a');
     const r = await targetsOf(env, tok, slug);
-    assert(r.default === null, `matched on agent id alone: ${JSON.stringify(r.default)}`);
+    assert(r.default.source === 'account', `matched on agent id alone: ${JSON.stringify(r.default)}`);
   });
 
   await t('a malformed claim is ignored rather than trusted', async () => {
-    const { env, tok, slug } = await seedLinked('malformed-agent', true);
+    const { env, tok, slug } = await seedLinked();
     await publishAs(env, tok, slug, 'S1/uuid-a/extra; drop');
     const r = await targetsOf(env, tok, slug);
-    assert(r.default === null, `a malformed header was honoured: ${JSON.stringify(r.default)}`);
+    assert(r.default.source === 'account', `a malformed header was honoured: ${JSON.stringify(r.default)}`);
   });
 
-  await t('an account-stamped older version with one linked agent defaults to that agent', async () => {
+  await t('no claim at all changes nothing -- the old behaviour holds', async () => {
     const { env, tok, slug } = await seedLinked();
     await publishAs(env, tok, slug, null);
     const r = await targetsOf(env, tok, slug);
-    assert(r.default?.agent_sub === LINKED.agent_sub, `sole agent was not selected: ${JSON.stringify(r.default)}`);
-  });
-
-  await t('an account-stamped older version with multiple agents has no default', async () => {
-    const { env, tok, slug } = await seedLinked('ambiguous-older-doc', true);
-    await publishAs(env, tok, slug, null);
-    const r = await targetsOf(env, tok, slug);
-    assert(r.default === null && r.candidates.length === 2, `ambiguous author was selected: ${JSON.stringify(r)}`);
+    assert(r.default.source === 'account', `expected the account default, got ${JSON.stringify(r.default)}`);
   });
 
   await t('answering a comment claims the seat the same way publishing does', async () => {
-    const { env, tok, slug } = await seedLinked('self-report-reply', true);
+    const { env, tok, slug } = await seedLinked('self-report-reply');
     await publishAs(env, tok, slug, null);
     const reader = await putSession(env, 'reader');
     const posted = await worker.fetch(req('/api/comments', {
@@ -707,15 +669,15 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     }), env, {});
     const comment = await posted.json();
     const r0 = await targetsOf(env, tok, slug);
-    assert(r0.default === null, 'precondition: nobody holds the seat yet');
+    assert(r0.default.source === 'account', 'precondition: nobody holds the seat yet');
     const replied = await worker.fetch(req('/api/agent/reply', {
       method: 'POST', token: tok.token, headers: { 'X-Tdoc-Raft-Agent': 'S1/uuid-a' },
       body: { slug, parent_id: comment.id, text: 'because' },
     }), env, {});
     assert(replied.status === 200, `reply ${replied.status}`);
     const r = await targetsOf(env, tok, slug);
-    assert(r.default === null && r.candidates.some((agent) => agent.agent_name === 'xiaocc'),
-      `a reply should rank the agent without silently choosing it: ${JSON.stringify(r)}`);
+    assert(r.default.source === 'doc' && r.default.agent_name === 'xiaocc',
+      `replying did not claim the seat: ${JSON.stringify(r.default)}`);
   });
 
   await t('a handoff drops threads where an agent already has the last word', async () => {

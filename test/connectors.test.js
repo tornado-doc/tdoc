@@ -94,7 +94,7 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     const { env, owner, commentId } = await seed();
     const made = await addHook(env, owner.cookie);
     posts.length = 0;
-    const r = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug: 'cdoc', comment_ids: [commentId], recipient: made.target } }), env, {})).json();
+    const r = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug: 'cdoc', comment_ids: [commentId] } }), env, {})).json();
     assert(r.delivery && r.delivery.status === 'delivered', JSON.stringify(r));
     assert(posts.length === 1, `posts ${posts.length}`);
     const body = JSON.parse(posts[0].body);
@@ -118,12 +118,12 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     const { env, owner, commentId } = await seed();
     const made = await addHook(env, owner.cookie);
     const key = { provider: 'webhook', server_id: 'webhook', agent_sub: made.target.agent_sub };
-    // The sole linked agent is the unambiguous fallback for an account-stamped
-    // version; disconnect must still remove it from this document.
+    // The connector also holds a seat on the doc, the way an agent that
+    // replied would.
     const reply = await worker.fetch(req('/api/agent/reply', { method: 'POST', token: owner.token, headers: { 'X-Tdoc-Agent': `webhook/webhook/${made.target.agent_sub}` }, body: { slug: 'cdoc', parent_id: commentId, text: 'on it', status: 'partial' } }), env, {});
     assert(reply.status === 200, `reply ${reply.status}`);
     const before = await (await worker.fetch(req('/api/notify/targets?slug=cdoc', { cookie: owner.cookie }), env, {})).json();
-    assert(before.default?.agent_sub === made.target.agent_sub, `agent not offered: ${JSON.stringify(before)}`);
+    assert(before.default && before.default.source === 'doc', `seat not claimed: ${JSON.stringify(before.default)}`);
     const rm = await worker.fetch(post('/api/me/connectors/remove', owner.cookie, key), env, {});
     assert(rm.status === 200, `remove ${rm.status}`);
     const after = await (await worker.fetch(req('/api/notify/targets?slug=cdoc', { cookie: owner.cookie }), env, {})).json();
@@ -163,27 +163,27 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
   const replyAs = (ctx, headers) => worker.fetch(req('/api/agent/reply', { method: 'POST', token: ctx.owner.token, headers, body: { slug: 'cdoc', parent_id: ctx.commentId, text: 'answer', status: 'partial' } }), ctx.env, {});
   const targetsOf = async (ctx) => (await worker.fetch(req('/api/notify/targets?slug=cdoc', { cookie: ctx.owner.cookie }), ctx.env, {})).json();
 
-  await t('an unlinked agent on a connected Raft server is offered for its doc', async () => {
+  await t('an unlinked agent on a connected Raft server takes the seat on its doc', async () => {
     const ctx = await seedRaft();
     const reply = await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-b', 'X-Tdoc-Raft-Agent-Name': encodeURIComponent('小c') });
     const posted = await reply.json();
     assert(posted.author.provider === 'raft' && posted.author.handle === '@小c', JSON.stringify(posted.author));
     const r = await targetsOf(ctx);
-    assert(!r.default && r.candidates.some((t) => t.agent_sub === 'agent-b' && t.agent_name === '小c' && t.server_slug === 'acme'), JSON.stringify(r));
+    assert(r.default && r.default.source === 'doc' && r.default.agent_sub === 'agent-b' && r.default.agent_name === '小c' && r.default.server_slug === 'acme', JSON.stringify(r.default));
   });
 
   await t('an agent on a server that is not connected claims nothing', async () => {
     const ctx = await seedRaft();
     await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S2/agent-x', 'X-Tdoc-Raft-Agent-Name': 'xavier' });
     const r = await targetsOf(ctx);
-    assert(r.default?.agent_sub === 'agent-a' && !r.candidates.some((t) => t.agent_sub === 'agent-x'), JSON.stringify(r));
+    assert(r.default && r.default.source === 'account' && r.default.agent_sub === 'agent-a', JSON.stringify(r.default));
   });
 
   await t('without its handle an agent cannot be routed, so it claims nothing', async () => {
     const ctx = await seedRaft();
     await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-b' });
     const r = await targetsOf(ctx);
-    assert(r.default?.agent_sub === 'agent-a' && !r.candidates.some((t) => t.agent_sub === 'agent-b'), JSON.stringify(r));
+    assert(r.default && r.default.agent_sub === 'agent-a', JSON.stringify(r.default));
   });
 
   await t('the list shows one row per connector; disconnecting a server stops all its agents', async () => {
@@ -252,7 +252,7 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     assert(!theirs.connectors.length, 'the other account got the server');
   });
 
-  await t('an account-stamped doc with one connected agent selects it', async () => {
+  await t('after connecting, a default agent is set by handle and receives handoffs', async () => {
     const env = makeEnv(mod.CommentsStore, RAFT);
     const owner = await issue(worker, env, 'owner');
     await connectRaft(env, owner.cookie);
@@ -262,7 +262,7 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     assert(set.ok && set.target.agent_name === '小c' && set.target.server_slug === 'julies-server', JSON.stringify(set));
     await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'rdoc', version: 1, html: '<p>x</p>' } }), env, {});
     const r = await (await worker.fetch(req('/api/notify/targets?slug=rdoc', { cookie: owner.cookie }), env, {})).json();
-    assert(r.default?.agent_name === '小c', JSON.stringify(r));
+    assert(r.default && r.default.agent_name === '小c', JSON.stringify(r.default));
   });
 
   await t('a connected Raft server with no agent yet says so, instead of looking unconnected', async () => {
@@ -278,17 +278,17 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
       && connected.raft_servers[0].server_id === 'S9' && connected.raft_servers[0].server_slug === 'julies-server', JSON.stringify(connected.raft_servers));
     await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_name: 'serena-bot' }), env, {});
     const named = await (await worker.fetch(req('/api/notify/targets?slug=ndoc', { cookie: owner.cookie }), env, {})).json();
-    assert(named.default?.agent_name === 'serena-bot' && !named.reason, JSON.stringify(named));
+    assert(named.default && named.default.agent_name === 'serena-bot' && !named.reason && !named.raft_servers, JSON.stringify(named));
   });
 
-  await t('Send to agent offers every account agent; a reply alone does not preselect one', async () => {
+  await t('Send to agent offers every account agent, with the doc\'s last-touched one preselected', async () => {
     const ctx = await seedRaft();
     await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-b', 'X-Tdoc-Raft-Agent-Name': 'beta' });
     const r = await targetsOf(ctx);
-    assert(!r.default && r.candidates.some((c) => c.agent_sub === 'agent-b'), `targets: ${JSON.stringify(r)}`);
+    assert(r.default && r.default.agent_sub === 'agent-b' && r.default.source === 'doc', `default: ${JSON.stringify(r.default)}`);
     const alpha = (r.candidates || []).find((c) => c.agent_sub === 'agent-a');
     assert(alpha && alpha.source === 'account', `account agent not offered: ${JSON.stringify(r.candidates)}`);
-    assert(r.candidates.filter((c) => c.agent_sub === 'agent-b').length === 1, 'the replying agent is listed twice');
+    assert(!(r.candidates || []).some((c) => c.agent_sub === 'agent-b'), 'the preselected agent is listed twice');
     // A fresh comment: the one the agent answered is the person's turn now.
     const fresh = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: ctx.owner.cookie, body: { slug: 'cdoc', version: 1, text: 'and this', anchor: { kind: 'text', text: 'world' } } }), ctx.env, {})).json();
     const sent = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: ctx.owner.cookie, body: { slug: 'cdoc', comment_ids: [fresh.id], recipient: alpha } }), ctx.env, {})).json();
@@ -296,11 +296,10 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     const handoffs = await (await worker.fetch(req('/api/notify/handoffs?slug=cdoc', { cookie: ctx.owner.cookie }), ctx.env, {})).json();
     const to = handoffs.handoffs[0] && handoffs.handoffs[0].recipient;
     assert(to && to.agent_sub === 'agent-a', `sent to ${JSON.stringify(to)}`);
-    // This fixture has no Raft delivery provider. A failed handoff may put
-    // alpha near the top of the picker, but cannot make it the default.
+    // Picking alpha for this doc makes alpha the doc's agent: the next
+    // @agent and Send to agent go to alpha, not back to beta.
     const after = await targetsOf(ctx);
-    assert(sent.delivery.status === 'failed' && sent.delivery.error === 'provider_not_configured', JSON.stringify(sent.delivery));
-    assert(!after.default && after.candidates.some((c) => c.agent_sub === 'agent-a'), `failed delivery selected an agent: ${JSON.stringify(after)}`);
+    assert(after.default && after.default.agent_sub === 'agent-a' && after.default.source === 'doc', `the pick did not stick: ${JSON.stringify(after.default)}`);
     assert(after.candidates.some((c) => c.agent_sub === 'agent-b'), 'beta is still offered');
   });
 
@@ -386,7 +385,7 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
       await worker.fetch(post('/api/me/connectors/raft/default', owner.cookie, { server_id: 'S9', agent_sub: 'id-alpha' }), env, {});
       await worker.fetch(req('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'sdoc', version: 1, html: '<p>x</p>' } }), env, {});
       const r = await (await worker.fetch(req('/api/notify/targets?slug=sdoc', { cookie: owner.cookie }), env, {})).json();
-      assert(!r.default && r.candidates.some((c) => c.agent_sub === 'id-alpha' && c.status === 'stopped'), `targets: ${JSON.stringify(r)}`);
+      assert(r.default && r.default.agent_sub === 'id-alpha' && r.default.status === 'stopped', `default: ${JSON.stringify(r.default)}`);
       const beta = r.candidates.find((c) => c.agent_sub === 'id-beta');
       const gamma = r.candidates.find((c) => c.agent_sub === 'id-gamma');
       assert(beta && beta.status === 'active', JSON.stringify(beta));
@@ -478,7 +477,7 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
       const r = await (await worker.fetch(req('/api/notify/targets?slug=hdoc', { cookie: owner.cookie }), env, {})).json();
       const alpha = r.candidates.find((t) => t.agent_sub === 'id-alpha');
       assert(alpha, `a disconnected agent is missing from the picker: ${JSON.stringify(r.candidates)}`);
-      assert(!r.default, 'an unrelated account default was chosen automatically');
+      assert(r.default && r.default.agent_sub === 'id-beta', 'and it is not chosen automatically');
       const c = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: owner.cookie, body: { slug: 'hdoc', version: 1, text: 'fix', anchor: { kind: 'text', text: 'hello' } } }), env, {})).json();
       const sent = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug: 'hdoc', comment_ids: [c.id], recipient: alpha } }), env, {})).json();
       assert(sent.ok && sent.delivery.status === 'delivered', JSON.stringify(sent));
@@ -507,7 +506,7 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     } finally { directory = null; }
   });
 
-  await t('an agent stamped removed by an old server disconnect is offered after a reply', async () => {
+  await t('an agent stamped removed by an old server disconnect is still recorded when it works on a doc', async () => {
     // 小c, 2026-10-06: earn-with-ai-claw wrote befreed-skill-audit, yet its
     // comments went to the account fallback, because its old per-agent stamp
     // made tdoc refuse to record it as the doc's agent.
@@ -515,7 +514,7 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     await ctx.env.META.put(`account-notify-removed:${ctx.owner.account_id}`, JSON.stringify(['raft:S1:agent-b']));
     await replyAs(ctx, { 'X-Tdoc-Raft-Agent': 'S1/agent-b', 'X-Tdoc-Raft-Agent-Name': 'beta' });
     const r = await targetsOf(ctx);
-    assert(!r.default && r.candidates.some((t) => t.agent_sub === 'agent-b'), `the agent that worked on it was not offered: ${JSON.stringify(r)}`);
+    assert(r.default && r.default.agent_sub === 'agent-b' && r.default.source === 'doc', `the agent that worked on it does not follow the doc: ${JSON.stringify(r.default)}`);
   });
 
   await t('a rejected upload token says how to sign in again', async () => {

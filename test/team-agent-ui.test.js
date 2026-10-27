@@ -240,14 +240,11 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         if (other.status !== 200) throw new Error(`owner comment: ${other.status}`);
         await page.goto(`${base}/d/${slug}`);
         await caption('Bob (member) opens a BeFreed doc');
+        const send = page.locator('#tdoc-send-agent-btn');
+        await send.waitFor();
         await pause(page, 1500);
-        if (label === 'phone') {
-          await page.locator('.tdoc-fab').click();
-          await page.getByRole('radiogroup', { name: 'Comments or Ask AI' }).getByRole('radio', { name: /Ask AI/ }).click();
-        } else {
-          await page.locator('#tdoc-send-agent-btn').click();
-        }
-        const activity = page.locator(label === 'phone' ? '#tdoc-comment-layer' : '.tdoc-handoff-popover');
+        await send.click();
+        const activity = page.locator(label === 'phone' ? '.tdoc-ask-mobile-drawer' : '.tdoc-handoff-popover');
         await activity.waitFor();
         const readySummary = activity.locator('.tdoc-ask-ready');
         if (!(await readySummary.innerText()).includes('1 comment not sent')) throw new Error('the team member has no ready-to-send summary');
@@ -259,9 +256,8 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await readySummary.getByRole('button', { name: /Send to agent/ }).click();
         const dialog = page.getByRole('dialog', { name: 'Send to agent' });
         await dialog.waitFor();
-        const recipient = await dialog.locator('#tdoc-notify-recipient').inputValue();
-        const description = await dialog.locator('.ui-dialog-description').innerText();
-        if (!description.includes('for the team agent') || !recipient.includes(`${agentName} · BeFreed team agent`)) throw new Error(`recipient: ${description} / ${recipient}`);
+        const recipient = await dialog.locator('.tdoc-notify-recipient').innerText();
+        if (!recipient.includes('Send to team agent') || !recipient.includes(`${agentName} · BeFreed team agent`)) throw new Error(`recipient: ${recipient}`);
         await caption('Send to team agent');
         await pause(page, 1800);
         await shot('send-dialog');

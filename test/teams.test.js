@@ -237,11 +237,10 @@ async function seedDoc(env, slug, owner, access = { visibility: 'private', comme
     const memberTargets = await call('/api/notify/targets?slug=plan', { cookie: bob });
     assert(memberTargets.status === 200 && !memberTargets.body.default && ['no_team_agent', 'team_agent_not_writer'].includes(memberTargets.body.reason), `member targets ${JSON.stringify(memberTargets.body)}`);
     const adminTargets = await call('/api/notify/targets?slug=plan', { cookie: alice });
-    assert(adminTargets.status === 200 && !adminTargets.body.default
-      && (adminTargets.body.candidates || []).some((x) => x.provider === 'local' && x.server_id === 'alice-mac'), `admin targets ${JSON.stringify(adminTargets.body)}`);
+    assert(adminTargets.status === 200 && adminTargets.body.default?.provider === 'local' && adminTargets.body.default.server_id === 'alice-mac', `admin targets ${JSON.stringify(adminTargets.body)}`);
     assert((adminTargets.body.candidates || []).some((x) => x.provider === 'raft' && x.agent_sub === 'alice-bot'), 'team picker includes the admin Raft agents');
-    // The admin's own connections remain available, without guessing a default.
-    assert(adminTargets.body.candidates.some((x) => x.provider === 'local' && x.owner?.display === 'alice'), `team owner ${JSON.stringify(adminTargets.body.candidates)}`);
+    // The admin's own connections, so the admin is who they act for.
+    assert(adminTargets.body.default.owner?.display === 'alice', `team owner ${JSON.stringify(adminTargets.body.default.owner)}`);
     const outsiderTargets = await call('/api/notify/targets?slug=plan', { cookie: dave });
     assert(outsiderTargets.status === 403 || outsiderTargets.status === 401, `outsider targets ${outsiderTargets.status}`);
     const adminComment = await call('/api/comments', { method: 'POST', cookie: alice, body: { slug: 'plan', version: 2, text: 'Admin request', anchor: null } });

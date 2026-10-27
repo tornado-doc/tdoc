@@ -115,12 +115,12 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const { env, owner, slug } = await seed();
     await register(env, owner.token);
     let targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
-    assert(!targets.default && targets.candidates.some((t) => t.provider === 'local' && t.status === 'active'), JSON.stringify(targets));
-    assert(targets.candidates.some((t) => t.provider === 'local' && t.last_seen), 'last_seen rides on the target');
+    assert(targets.default && targets.default.provider === 'local' && targets.default.status === 'active', JSON.stringify(targets.default));
+    assert(targets.default.last_seen, 'last_seen rides on the target');
     // 31 minutes of silence from the daemon.
     await env.META.put('local-agents-seen:' + owner.account_id, JSON.stringify({ juliesmac: new Date(Date.now() - 31 * 60000).toISOString() }));
     targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
-    assert(targets.candidates.some((t) => t.provider === 'local' && t.status === 'inactive'), `expected inactive: ${JSON.stringify(targets)}`);
+    assert(targets.default.status === 'inactive', `expected inactive, got ${targets.default.status}`);
   });
 
   await t('a handoff to a local agent is queued, not delivered, and lands in the owner pending list only', async () => {
@@ -232,7 +232,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(g.status === 403, `another account got ${g.status}`);
   });
 
-  await t('a reply from the daemon-run CLI wears the local mark and is offered for the doc', async () => {
+  await t('a reply from the daemon-run CLI wears the local mark and takes the doc seat', async () => {
     const { env, owner, slug, ids } = await seed();
     await register(env, owner.token);
     const r = await worker.fetch(req('/api/agent/reply', {
@@ -245,7 +245,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(body.author.cli === 'codex' && !body.author.handle && body.author.location === 'juliesmac', JSON.stringify(body.author));
     assert(body.author.owner && body.author.owner.display === owner.login, JSON.stringify(body.author.owner));
     const targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
-    assert(!targets.default && targets.candidates.some((t) => t.cli === 'codex'), `targets: ${JSON.stringify(targets)}`);
+    assert(targets.default.source === 'doc' && targets.default.cli === 'codex', `seat: ${JSON.stringify(targets.default)}`);
     const unknown = await worker.fetch(req('/api/agent/reply', {
       method: 'POST', token: owner.token, headers: { 'X-Tdoc-Agent': 'local/strangerbox/strangerbox_claude' },
       body: { slug, parent_id: ids[1], text: 'hi', status: 'applied', agent_login: 'claude' },
@@ -270,7 +270,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const back = await register(env, owner.token);
     assert(back.body.added === 2, 'registering after a disconnect adds them again');
     targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
-    assert(!targets.default && targets.candidates.some((t) => t.provider === 'local'), 'and they are offered again');
+    assert(targets.default && targets.default.provider === 'local', 'and they are offered again');
   });
 
   // Who may make the owner's computer run. authorizeDocEdit admits more
