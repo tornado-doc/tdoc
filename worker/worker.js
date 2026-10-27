@@ -13337,8 +13337,10 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null) {
   const writer = docLastWriter(meta);
   const publisher = writer?.kind === 'agent' ? writer.agent : null;
   const docHandoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
-  const evidenced = [publisher, docHandoff]
-    .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
+  // The AI-onboarding tutorial doc records the agent its owner picked in setup.
+  const tutorialAgent = meta && meta.created_from === 'daemon-practice' ? meta.tutorial_agent || null : null;
+  const evidenced = [publisher, docHandoff, tutorialAgent]
+    .map((agent) => agent && offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
     && !writer.agent && writer.account_id === viewerAccountId && offered.length === 1 ? offered[0] : null;
   const preferred = evidenced || soleAuthorAgent;
@@ -19216,7 +19218,11 @@ const tdocHandlers = {
       }
       if (record.first_doc !== slug) await adoptFirstDocFor(env, accountId, slug);
       // An explicit choice, scoped to this practice doc. Other docs keep their agent.
-      if (target) await touchDocAgent(env, slug, target);
+      if (target) {
+        await touchDocAgent(env, slug, target);
+        const practiceMeta = await loadDocMeta(env, slug);
+        if (practiceMeta) await putDocMetaJson(env, slug, JSON.stringify({ ...practiceMeta, tutorial_agent: notifyTargetIdentity(target) }));
+      }
       const tutorialRecord = await loadOnboarding(env, accountId);
       const product = ['chatgpt', 'cowork', 'claude', 'codex', 'grok', 'raft', 'cursor', 'other'].includes(body.product) ? body.product : null;
       await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({ ...tutorialRecord, tutorial_mode: body.mode === 'platform' ? 'platform' : body.mode === 'manual' ? 'manual' : 'computer', tutorial_product: product }));
