@@ -606,6 +606,46 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         assert(JSON.parse(fs.readFileSync(config, 'utf8')).upload_token === 'tdoc_x', 'config replaced');
       } finally { fs.rmSync(HOME, { recursive: true, force: true }); }
     });
+
+    await t('(9) an admin reissues the setup command of an agent not yet connected; the old code stops working', async () => {
+      const mk = async (name) => (await call2('/api/teams', { method: 'POST', cookie: ann.cookie, headers: origin, body: { name } })).body.team;
+      const deck = await mk('Deck');
+      const other = await mk('Other');
+      await call2('/api/team/join', { method: 'POST', cookie: ben.cookie, body: { token: deck.invite_url.split('/').pop() } });
+      const deckNow = () => JSON.parse(env2.META.map.get(`team:${deck.id}`));
+      const first = (await call2('/api/team/agents', { method: 'POST', cookie: ann.cookie, headers: origin, body: { id: deck.id, name: 'later' } })).body;
+      assert(first && first.setup_code, 'added');
+      const reissue = (who, id, agent, headers = origin) => call2('/api/team/agents', { method: 'POST', cookie: who.cookie, headers, body: { id, agent, action: 'reissue' } });
+
+      const member = await reissue(ben, deck.id, first.agent.id);
+      assert(member.status === 403 && member.body.error === 'admin_required', `member: ${member.status} ${member.text}`);
+      const outsider = await reissue(cat, deck.id, first.agent.id);
+      assert(outsider.status === 404, `outsider: ${outsider.status}`);
+      const crossSite = await reissue(ann, deck.id, first.agent.id, { Origin: 'https://evil.example' });
+      assert(crossSite.status === 403, `cross-site: ${crossSite.status}`);
+      const crossTeam = await reissue(ann, other.id, first.agent.id);
+      assert(crossTeam.status === 404 && crossTeam.body.error === 'agent_not_found', `cross-team: ${crossTeam.status} ${crossTeam.text}`);
+      const byToken = await call2('/api/team/agents', { method: 'POST', token: ann.token, headers: origin, body: { id: deck.id, agent: first.agent.id, action: 'reissue' } });
+      assert(byToken.status === 401 || byToken.status === 403, `admin token: ${byToken.status}`);
+      assert(env2.META.map.has(`team-agent-setup:${deckNow().agents[0].setup_hash}`), 'refusals left the first code in place');
+
+      const before = deckNow().agents[0];
+      const r = await reissue(ann, deck.id, first.agent.id);
+      assert(r.status === 200 && /^tdts_[a-f0-9]{48}$/.test(r.body.setup_code) && r.body.setup_code !== first.setup_code, r.text);
+      assert(r.body.command.includes(`connect-team ${r.body.setup_code} --base https://tdoc.dev`) && r.body.expires_in === 3600, r.body.command);
+      assert(r.body.agent.id === first.agent.id && r.body.agent.connected === false && r.body.agents.length === 1, r.text);
+      const after = deckNow().agents[0];
+      assert(after.setup_hash !== before.setup_hash && Date.parse(after.setup_expires) >= Date.parse(before.setup_expires), 'hash/expiry replaced');
+      assert(!env2.META.map.has(`team-agent-setup:${before.setup_hash}`), 'old KV key kept');
+      assert(![...env2.META.map.values()].some((v) => String(v).includes(r.body.setup_code)), 'plaintext code stored');
+
+      assert((await connect(first.setup_code)).status === 404, 'old code still connects');
+      const ok = await connect(r.body.setup_code, 'deck-box');
+      assert(ok.status === 200 && await works(ok), ok.text);
+      const connected = await reissue(ann, deck.id, first.agent.id);
+      assert(connected.status === 409 && connected.body.error === 'already_connected', `connected: ${connected.status} ${connected.text}`);
+      assert(deckNow().agents[0].token_hash && !deckNow().agents[0].setup_hash, 'connected agent untouched');
+    });
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

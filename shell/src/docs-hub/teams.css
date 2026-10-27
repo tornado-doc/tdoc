@@ -212,6 +212,13 @@
 .tm-agent-command { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
 .tm-agent-command code { flex: 1; min-width: 0; padding: 10px; border-radius: 8px; background: #1e1e1e; color: #e6e6e6; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .tm-agent-row .tm-person-text > span { white-space: normal; overflow-wrap: anywhere; }
+.tm-agent-row .tm-person-right { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Phone: the actions go under the name, as on guest rows. */
+@media (max-width: 600px) {
+  .tm-agent-row { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; }
+  .tm-agent-row .tm-person-right { grid-column: 2; justify-content: flex-start; }
+  .tm-agent-row .tm-text-btn { min-height: 44px; }
+}
 
 /* Settings -> Sign-in methods (#58). */
 .tm-sim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
