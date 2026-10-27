@@ -162,6 +162,7 @@ export function FeedbackSpace({ boot }) {
                   key={c.id}
                   comment={c}
                   currentUser={(identity && identity.login) || 'anon'}
+                  handoffViewer={[(identity && identity.login) || 'anon', ...((identity && identity.linked_actor_keys) || [])]}
                   isOwner={Boolean(isOwner)}
                   mentionable={mentionable}
                   canSendToAgent={canSendToAgent}
