@@ -114,9 +114,9 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
             setPlatformTargets(targets);
             setPlatformTarget(old => targets.find(t => t.server_id === old?.server_id && t.agent_sub === old?.agent_sub) || targets[0] || null);
             if (!targets.length) setError('Your account is connected. Ask your agent to finish connecting its task receiver.');
+            else setError('');
           } else { setCompletedPath('manual'); setStage('done'); return; }
-        }
-        setError('');
+        } else setError('');
       } catch (e) {
         if (cancelled) return;
         if (e.status === 410) { setError('This instruction expired. Get a new one and paste it into your AI.'); setAttempt(null); return; }
@@ -214,9 +214,10 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
       : done ? { eyebrow: 'Set up Tdoc', title: 'You’re connected', description: `${completedPath === 'connect' && chosen ? labelOf(chosen) : product.label} is ready for your comments.` }
         : computerRoute && pickRuntime ? { eyebrow: 'Set up Tdoc', title: 'Choose your AI', description: `The AI on ${computer?.device || 'this computer'} that edits your docs.` }
           : computerRoute ? { eyebrow: 'Set up Tdoc', title: 'Connect a computer', description: 'A computer is where your AI runs. Tdoc sends it your comments, even when the AI is closed.' }
-            : { eyebrow: 'Set up Tdoc', title: `Connect ${product.label}`, description: platformRoute ? `Your ${product.label} agent connects Tdoc to your account and receives your comments.` : `${product.label} connects Tdoc to your account. New chats can use it after this.` };
+            : { eyebrow: 'Set up Tdoc', title: `Connect ${product.label}`, description: platformRoute ? `Your ${product.label} agent connects Tdoc to your account and receives your comments.` : `${product.label} connects to your Tdoc account and edits your docs when you ask.` };
   const back = done || intro ? null : computerRoute && pickRuntime ? { label: 'Not this computer? Start over', go: () => setPickRuntime(false) } : { label: 'Choose another AI', go: () => choosePath('intro') };
-  const cmd = (label, text, name, ref) => <div className="ui-setup-cmd" key={name}>
+  // Terminal commands stay on one line, as in Raft; the AI instruction keeps its two lines.
+  const cmd = (label, text, name, ref) => <div className={`ui-setup-cmd${name === 'instruction' ? '' : ' is-line'}`} key={name}>
     <p className="ui-setup-cmd-label">{label}</p>
     <div className="ui-setup-cmd-row">
       <code ref={ref} className="ui-setup-instruction">{text || 'Preparing…'}</code>

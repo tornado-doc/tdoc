@@ -139,6 +139,24 @@ export function ActivatePage({ boot, preview = null }) {
     </div>
   ));
 
+  // AI onboarding (dev mode) mirrors Raft's approved page word for word.
+  if (approved && isFeatureOn('aiOnboarding')) {
+    return frame(
+      <main className="tdoc-status-page tdoc-activate-page">
+        <div className="tdoc-activate-stack tdoc-activate-raft">
+        {mark}
+        <h1>Device login approved</h1>
+        <p>Sign-in is complete. You can close this browser page.</p>
+        {partial ? <p className="tdoc-activate-hint">It can reach {workspaceSummary(workspaces, picked)}.</p> : null}
+        <div className="tdoc-status-actions">
+          <button type="button" className="primary" onClick={() => window.close()}>Close this page</button>
+        </div>
+        <p className="tdoc-activate-hint">If this tab stays open, close it manually.</p>
+        </div>
+      </main>
+    );
+  }
+
   if (approved) {
     return frame(
       <main className="tdoc-status-page tdoc-activate-page">

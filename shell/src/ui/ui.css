@@ -1338,4 +1338,15 @@ a.ui-menu-item:visited {
 .ui-setup-modal .ui-setup-status, .ui-setup-modal .ui-setup-steps li::before, .ui-setup-field-label { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .ui-setup-split-form .ui-select-trigger, .ui-setup-split-form button[role="combobox"] { width: 100%; box-sizing: border-box; }
 .ui-setup-split-form > * { max-width: 100%; }
+/* Raft keeps each command on one 38px line; a long one scrolls sideways. */
+.ui-setup-cmd.is-line .ui-setup-instruction { height: 38px; white-space: nowrap; overflow-x: auto; overflow-y: hidden; overflow-wrap: normal; scrollbar-width: thin; }
+.ui-setup-modal .actions button { min-height: 40px; height: 40px; padding: 0 18px; }
+/* Runtime screen: the two columns span the dialog edge to edge, never wider. */
+.ui-setup-modal .ui-setup-split { width: 100%; margin: 0; box-sizing: border-box; }
+.ui-setup-split > * { min-width: 0; box-sizing: border-box; }
+.ui-setup-modal .ui-setup-split-visual { padding-left: 0; }
+.ui-setup-modal .ui-setup-split-form { padding-right: 0; }
+@media (max-width: 600px) { .ui-setup-modal .ui-setup-split-visual { padding: 16px 0; } .ui-setup-modal .ui-setup-split-form { padding: 16px 0; } }
+/* Raft's approved page: one wide button. */
+.tdoc-activate-raft .tdoc-status-actions .primary { width: min(448px, 100%); min-height: 40px; }
 

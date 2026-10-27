@@ -17,15 +17,18 @@ export function TutorialCoach({ slug, step, product, automatic, agentState, onCo
     try { localStorage.setItem(key, '1'); } catch {}
     setOpen(false);
   };
-  if (!step || !open || (step === 'handoff' && agentState !== 'idle')) return null;
   const manual = step === 'handoff' && !automatic;
+  // Copying the instruction keeps this panel where it is (as on the connect page);
+  // it turns into the wait. An automatic handoff has the step bar for that.
+  const waiting = manual && agentState !== 'idle';
+  if (!step || !open || (step === 'handoff' && agentState !== 'idle' && !manual)) return null;
   return <AppDialog open={open} onOpenChange={value => { if (!value) close(); }} side className="ui-tutorial-coach"
-    title={step === 'comment' ? 'Leave a comment' : single ? 'Send one comment' : manual ? `Send it to ${PRODUCTS[product] || 'your AI'}` : 'Send it to your AI'}
-    description={step === 'comment' ? 'Select a sentence and say what you want to change.' : single ? 'Reply on your comment, then choose @AI.' : manual ? 'Paste the instruction into the chat you used to connect Tdoc.' : 'Send your comments together, or mention your AI on one comment.'}
+    title={step === 'comment' ? 'Leave a comment' : single ? 'Send one comment' : waiting ? `Waiting for ${PRODUCTS[product] || 'your AI'}` : manual ? `Send it to ${PRODUCTS[product] || 'your AI'}` : 'Send it to your AI'}
+    description={step === 'comment' ? 'Select a sentence and say what you want to change.' : single ? 'Reply on your comment, then choose @AI.' : waiting ? 'Paste it into the chat you used to connect Tdoc. The new version appears here on its own.' : manual ? 'Paste the instruction into the chat you used to connect Tdoc.' : 'Send your comments together, or mention your AI on one comment.'}
     actions={<>
       <button type="button" onClick={close}>Skip</button>
       {step === 'comment' ? <button type="button" className="primary" onClick={close}>Try it</button>
-        : manual ? <button type="button" className="primary" onClick={async () => { const ok = await onCopy(); if (ok !== false) close(); }}>Copy instruction</button>
+        : manual ? <button type="button" className="primary" onClick={() => onCopy()}>{waiting ? 'Copy again' : 'Copy instruction'}</button>
           : single ? <button type="button" className="primary" onClick={() => { close(); onComment(); }}>Show comment</button>
             : <button type="button" className="primary" onClick={() => { close(); onSendAll(); }}>Send all comments</button>}
     </>}
