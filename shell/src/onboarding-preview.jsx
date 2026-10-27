@@ -14,7 +14,7 @@ import './docs-hub.css';
 import './onboarding-preview.css';
 
 const identity = { name: 'Alex Morgan', email: 'alex.morgan@example.com' };
-const states = ['Start', 'Connect your AI', 'AI ready', 'Computer ready', 'Computers & AI', 'Approved', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial manual', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
+const states = ['Start', 'Connect your AI', 'AI ready', 'Computer ready', 'Computers & AI', 'Approved', 'Approved (AI onboarding)', 'Confirm device', 'Enter code', 'Expired code', 'Approving', 'Long account', 'Sign in', 'Sign in with code', 'Sign-in complete', 'Sign-in error', 'GitHub dialog', 'Setup sign in', 'Connect agent', 'Connection help', 'Connected', 'Use without helper', 'AI missing', 'AI needs check', 'AI offline', 'First document', 'Document published', 'Checklist', 'Checklist after publishing', 'Checklist after commenting', 'Tutorial comment', 'Tutorial manual', 'Tutorial handoff', 'Tutorial waiting', 'Tutorial reading', 'Tutorial stuck', 'Tutorial complete', 'Tutorial shared'];
 
 function TutorialPreview({ state }) {
   const [agentState, setAgentState] = useState(state.replace('Tutorial ', ''));
@@ -23,12 +23,14 @@ function TutorialPreview({ state }) {
   const done = ['Tutorial complete', 'Tutorial shared'].includes(state);
   const comment = { id: 'preview-comment', text: 'Make this introduction more concise.', author: { login: 'alex', name: 'Alex Morgan' }, replies: [], status: done ? 'applied' : 'open', applied_version: 2 };
   const noop = () => {};
+  // Always show the tip here, and let the step bar reopen it, so every state can be reviewed again.
+  const [reopen, setReopen] = useState(1);
   return <div className="op-tutorial">
     {done ? <div className="tdoc-onboard-banner" role="status">
       <span>{shared ? 'Link copied.' : 'Answered 1 comment in v2. Share it.'}</span>
       {shared ? <a href="/me">My docs</a> : <button onClick={() => setShared(true)}>Copy link</button>}
-    </div> : <DocStepHint step={state === 'Tutorial comment' ? 'comment' : 'handoff'} agentState={['waiting', 'reading', 'stuck'].includes(agentState) ? agentState : 'idle'} onGo={noop} />}
-    <TutorialCoach slug={`preview-${state.replaceAll(' ', '-').toLowerCase()}`} step={done ? null : state === 'Tutorial comment' ? 'comment' : 'handoff'} product="chatgpt" automatic={state !== 'Tutorial manual'} agentState={['waiting','reading','stuck'].includes(agentState) ? agentState : 'idle'} onComment={noop} onSendAll={noop} onCopy={() => true} />
+    </div> : <DocStepHint step={state === 'Tutorial comment' ? 'comment' : 'handoff'} agentState={['waiting', 'reading', 'stuck'].includes(agentState) ? agentState : 'idle'} onGo={() => setReopen(value => value + 1)} />}
+    <TutorialCoach slug={`preview-${state.replaceAll(' ', '-').toLowerCase()}`} step={done ? null : state === 'Tutorial comment' ? 'comment' : 'handoff'} product="chatgpt" automatic={state !== 'Tutorial manual'} agentState={['waiting','reading','stuck'].includes(agentState) ? agentState : 'idle'} reopen={reopen} onComment={noop} onSendAll={noop} onCopy={() => { if (state === 'Tutorial manual') setAgentState('waiting'); return true; }} />
     <div className="op-tutorial-card"><CommentCard comment={comment} currentUser="alex" onReply={noop} onReact={noop} onDelete={noop} onResolve={noop} onEdit={noop}
       handoff={state === 'Tutorial comment' || done ? null : {threadId:comment.id, open, line:'Read https://tdoc.dev/d/my-first-tdoc and fix the comments.', state:['waiting','reading','stuck'].includes(agentState) ? agentState : 'idle', onCopy:()=>setAgentState('waiting'), onToggle:()=>setOpen(value=>!value)}} />
     </div>
@@ -65,7 +67,7 @@ export default function OnboardingPreview() {
     screen = <div className="docs-hub op-checklist"><OnboardingChecklist key={state} record={{started:true, agent_connected:true, first_doc:state === 'Checklist' ? null : 'my-first-tdoc', commented:state === 'Checklist after commenting'}} docs={state === 'Checklist' ? [] : [{slug:'my-first-tdoc',title:'My first tdoc'}]} /></div>;
   } else {
     screen = <ActivatePage key={state} boot={{code:state === 'Sign in' ? '' : 'ABCD-1234',identity:['Sign in','Sign in with code'].includes(state) ? null : state === 'Long account' ? {email:'alex.morgan.research-and-development@example.com'} : identity,oidcAuth:true}}
-      preview={{approved:state === 'Approved',pending:['Confirm device','Approving','Long account'].includes(state) ? {label:'Preview terminal'} : null,busy:state === 'Approving',error:state === 'Expired code' ? 'This code has expired. Ask your agent to connect again.' : ''}} />;
+      preview={{approved:state.startsWith('Approved'),ai:state === 'Approved (AI onboarding)',pending:['Confirm device','Approving','Long account'].includes(state) ? {label:'Preview terminal'} : null,busy:state === 'Approving',error:state === 'Expired code' ? 'This code has expired. Ask your agent to connect again.' : ''}} />;
   }
   const keepInPreview = event => {
     const target = event.target.closest('a,button');

@@ -140,7 +140,7 @@ export function ActivatePage({ boot, preview = null }) {
   ));
 
   // AI onboarding (dev mode) mirrors Raft's approved page word for word.
-  if (approved && isFeatureOn('aiOnboarding')) {
+  if (approved && (preview?.ai || isFeatureOn('aiOnboarding'))) {
     return frame(
       <main className="tdoc-status-page tdoc-activate-page">
         <div className="tdoc-activate-stack tdoc-activate-raft">

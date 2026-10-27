@@ -1340,7 +1340,8 @@ a.ui-menu-item:visited {
 .ui-setup-split-form > * { max-width: 100%; }
 /* Raft keeps each command on one 38px line; a long one scrolls sideways. */
 .ui-setup-cmd.is-line .ui-setup-instruction { height: 38px; white-space: nowrap; overflow-x: auto; overflow-y: hidden; overflow-wrap: normal; scrollbar-width: thin; }
-.ui-setup-modal .actions button { min-height: 40px; height: 40px; padding: 0 18px; }
+.ui-setup-modal .actions button:not(.ui-setup-link) { min-height: 40px; height: 40px; padding: 0 18px; }
+.ui-setup-modal .actions .ui-setup-link { min-height: 0; height: auto; padding: 0; white-space: nowrap; }
 /* Runtime screen: the two columns span the dialog edge to edge, never wider. */
 .ui-setup-modal .ui-setup-split { width: 100%; margin: 0; box-sizing: border-box; }
 .ui-setup-split > * { min-width: 0; box-sizing: border-box; }
