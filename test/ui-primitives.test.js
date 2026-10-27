@@ -169,7 +169,8 @@ t('AppButton owns button sizes: only ui.css sizes .ui-btn', () => {
 
 t('no new hand-sized button styles (allowlist only shrinks; use AppButton)', () => {
   const allowed = new Set(JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/button-sizing-allowlist.json'), 'utf8')));
-  const current = buttonSizingRules().filter((rule) => !rule.startsWith('shell/src/ui/ui.css :: .ui-btn'));
+  // ui.css owns every .ui-btn size, including its phone touch heights.
+  const current = buttonSizingRules().filter((rule) => !(rule.startsWith('shell/src/ui/ui.css :: ') && /\.ui-btn/.test(rule)));
   const added = current.filter((rule) => !allowed.has(rule));
   assert(!added.length, `new button sizing outside AppButton: ${added.join('; ')}`);
   const gone = [...allowed].filter((rule) => !current.includes(rule));
@@ -188,6 +189,38 @@ t('comment surfaces use AppButton sizes (composer, reply, private answer, Ask AI
     const n = (fs.readFileSync(path.join(ROOT, file), 'utf8').match(/ui-btn ui-btn-(primary|secondary|quiet) ui-btn-[ms]/g) || []).length;
     assert(n >= min, `${file}: ${n} AppButton-sized buttons, expected at least ${min}`);
   }
+});
+
+t('team settings, Share, notifications, the Agents page and dialogs use AppButton', () => {
+  const files = {
+    'shell/src/docs-hub/teams.jsx': 20,
+    'shell/src/document/owner-access-dialog.jsx': 5,
+    'shell/src/notifications-dialog.jsx': 5,
+    'shell/src/connectors-page.jsx': 5,
+    'shell/src/document/document-dialogs.jsx': 5,
+  };
+  for (const [file, min] of Object.entries(files)) {
+    const n = (fs.readFileSync(path.join(ROOT, file), 'utf8').match(/<AppButton\b/g) || []).length;
+    assert(n >= min, `${file}: ${n} AppButtons, expected at least ${min}`);
+  }
+});
+
+const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
+
+t('command blocks are CodeBlock: readable, no mid-word breaks, Copy inside', () => {
+  const connectors = read('shell/src/connectors-page.jsx');
+  assert(!/tdoc-conn-pre/.test(connectors), 'Agents page still has a bare <pre> command block');
+  assert((connectors.match(/<CodeBlock\b/g) || []).length >= 4, 'Agents page command/prompt blocks are not CodeBlocks');
+  const ui = read('shell/src/ui/ui.css');
+  const block = ui.slice(ui.indexOf('/* CodeBlock'));
+  assert(/word-break: normal; overflow-wrap: normal; overflow-x: auto/.test(block), 'CodeBlock may break mid-word');
+  assert(!/break-all/.test(block), 'CodeBlock breaks mid-word');
+});
+
+t('docs-hub.css keeps its tokens and base type inside the docs-hub root', () => {
+  const css = read('shell/src/docs-hub.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert(!/(^|\})\s*:root\s*\{/.test(css), 'docs-hub.css redefines tokens on :root');
+  assert(!/(^|\})\s*(body|h1|a|a:hover)\s*\{/.test(css), 'docs-hub.css styles body / h1 / a for every page');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
