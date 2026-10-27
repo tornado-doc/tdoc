@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Copy, Loader2 } from 'lucide-react';
+import { Check, Copy, Loader2, Monitor } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent, createOnboardingPractice, startConversationSetup, conversationSetupStatus, updateComputer, getSetupConnectors, testSetupConnector } from './document/api.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
@@ -51,6 +51,8 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // The computer route is two screens, as in Raft: connect the computer, then pick its runtime.
+  const [pickRuntime, setPickRuntime] = useState(Boolean(preview?.pickRuntime));
   const active = useRef(true);
   useEffect(() => () => { active.current = false; }, []);
   const started = useRef(Date.now());
@@ -148,7 +150,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     if (!preview) postOnboardingEvent('copy_clicked').catch(() => {});
   };
   const choosePath = (path) => {
-    setStage(path); setError(''); setCopied(''); setCopyFailed(false);
+    setStage(path); setError(''); setCopied(''); setCopyFailed(false); setPickRuntime(false);
     if (!preview && path !== 'intro') postOnboardingEvent('door_own_agent').catch(() => {});
     if (path === 'connect' && !preview) {
       setLoaded(false); setAgents([]); setComputers([]); started.current = Date.now(); setElapsed(0);
@@ -165,6 +167,10 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const instruction = instructionBase.replaceAll('https://tdoc.dev/SKILL.md', `${host}/SKILL.md`)
     .replace(SETUP_PROMPT, releaseRef === 'main' ? SETUP_PROMPT : pinnedSetup);
   const copyInstruction = () => copy(instruction, 'instruction', instructionRef);
+  const installCommand = releaseRef === 'main' ? INSTALL_PROMPT : `${pinnedSetup} -s -- --install-only`;
+  const setupCommand = host === 'https://tdoc.dev' ? CONNECT_PROMPT : `TDOC_HOSTED_BASE=${host} ${CONNECT_PROMPT}`;
+  const installRef = useRef(null); const setupRef = useRef(null);
+  const runtimeOptions = RUNTIMES.filter(r => (computer?.runtimes || []).some(x => x.cli === r.value && x.state !== 'not_installed'));
   const chooseProduct = (id) => {
     setProductId(id); setSelected(id === 'claude' || id === 'codex' ? id : '');
     setPlatformTargets([]); setPlatformTarget(null); choosePath(AI_PRODUCTS.find(p => p.value === id)?.route || 'manual');
@@ -202,54 +208,85 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     }
   };
 
+  const computerRoute = stage === 'connect';
+  const head = !signedIn ? { eyebrow: 'Set up Tdoc', title: 'Sign in', description: 'Sign in to connect your AI.' }
+    : intro ? { eyebrow: 'Set up Tdoc', title: 'Which AI do you use?', description: 'Tdoc sends your comments to this AI, and it edits your doc.' }
+      : done ? { eyebrow: 'Set up Tdoc', title: 'You’re connected', description: `${completedPath === 'connect' && chosen ? labelOf(chosen) : product.label} is ready for your comments.` }
+        : computerRoute && pickRuntime ? { eyebrow: 'Set up Tdoc', title: 'Choose your AI', description: `The AI on ${computer?.device || 'this computer'} that edits your docs.` }
+          : computerRoute ? { eyebrow: 'Set up Tdoc', title: 'Connect a computer', description: 'A computer is where your AI runs. Tdoc sends it your comments, even when the AI is closed.' }
+            : { eyebrow: 'Set up Tdoc', title: `Connect ${product.label}`, description: platformRoute ? `Your ${product.label} agent connects Tdoc to your account and receives your comments.` : `${product.label} connects Tdoc to your account. New chats can use it after this.` };
+  const back = done || intro ? null : computerRoute && pickRuntime ? { label: 'Not this computer? Start over', go: () => setPickRuntime(false) } : { label: 'Choose another AI', go: () => choosePath('intro') };
+  const cmd = (label, text, name, ref) => <div className="ui-setup-cmd" key={name}>
+    <p className="ui-setup-cmd-label">{label}</p>
+    <div className="ui-setup-cmd-row">
+      <code ref={ref} className="ui-setup-instruction">{text || 'Preparing…'}</code>
+      <button type="button" className="ui-setup-cmd-copy" aria-label={`Copy ${name}`} title={copied === name ? 'Copied' : 'Copy'} disabled={!text} onClick={() => copy(text, name, ref)}>
+        {copied === name ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
+      </button>
+    </div>
+  </div>;
+  const status = (text, ready = false) => <p role="status" className="ui-setup-status">{ready ? <Check size={14} aria-hidden="true" /> : <Loader2 size={14} aria-hidden="true" className="ui-setup-spin" />}{text}</p>;
+
   return (
     <AppDialog open={open} onOpenChange={next => { if (!next) close(); }}
-      title={done ? 'You’re connected' : intro ? 'Which AI do you use?' : `Connect ${product.label}`}
-      eyebrow={done ? null : intro ? 'Set up Tdoc' : 'Connect your AI'}
-      className="ui-setup-modal ui-setup-simple" focusTitle
-      description={intro || done ? null : manual ? `Paste this into a new ${product.label} chat.` : 'Paste this into Claude Code or Codex on this computer.'}
+      eyebrow={head.eyebrow} title={head.title} description={head.description}
+      className="ui-setup-modal" focusTitle
       actions={<>
-        <button type="button" className="ui-setup-later" disabled={busy} onClick={done ? close : intro ? close : () => choosePath('intro')}>{done || intro ? 'Skip' : 'Back'}</button>
+        {back ? <button type="button" className="ui-setup-later ui-setup-link" disabled={busy} onClick={back.go}>{back.label}</button>
+          : <button type="button" className="ui-setup-later ui-setup-link" disabled={busy} onClick={close}>Skip</button>}
         {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
           : done ? <button type="button" className="primary" disabled={busy} onClick={tutorial}>{busy ? 'Opening…' : 'Continue'}</button>
             : canReturn ? <button type="button" className="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</button>
-              : !intro ? <button type="button" className="primary" disabled={busy || !(platformRoute ? platformTarget : !manual && runtimeReady)}
-                onClick={platformRoute ? verifyPlatform : finishConnection}>
-                {busy ? 'Checking…' : platformRoute && platformTarget ? 'Check connection' : 'Continue'}
-              </button> : null}
+              : intro ? null
+                : computerRoute && !pickRuntime ? <button type="button" className="primary" disabled={!connected} onClick={() => setPickRuntime(true)}>Next</button>
+                  : computerRoute ? <button type="button" className="primary" disabled={busy || !runtimeReady} onClick={finishConnection}>{busy ? 'Checking…' : 'Continue'}</button>
+                    : <button type="button" className="primary" disabled={busy || !(platformRoute && platformTarget)} onClick={verifyPlatform}>{busy ? 'Checking…' : platformRoute && platformTarget ? 'Check connection' : 'Next'}</button>}
       </>}
     >
       {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to connect your AI.' : 'Sign-in is unavailable on this host.'}</p>
         : intro ? <AIPicker onChoose={chooseProduct} />
-          : done ? <div className="ui-setup-ready"><Check size={44} aria-hidden="true" /><p>Try a comment. Watch your AI make the change.</p></div>
-            : <div className="ui-setup-connection">
-              <div className="ui-setup-prompt">
-                <p className="ui-setup-instruction" ref={instructionRef}>{manual && !attempt ? 'Preparing…' : instruction}</p>
-                <button type="button" className="ui-setup-copy" aria-label="Copy instruction" disabled={manual && !attempt} onClick={copyInstruction}>
-                  {copied === 'instruction' ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}<span>{copied === 'instruction' ? 'Copied' : 'Copy'}</span>
-                </button>
+          : done ? <div className="ui-setup-ready"><Check size={36} aria-hidden="true" /><p>Try a comment. Watch your AI make the change.</p></div>
+            : computerRoute && pickRuntime ? <div className="ui-setup-split">
+              <div className="ui-setup-split-visual">
+                <Monitor size={64} strokeWidth={1.5} aria-hidden="true" />
+                <strong>{computer?.device || 'This computer'}</strong>
+                <span>{connected ? 'Connected' : computer?.status === 'paused' ? 'Paused' : 'Offline'}</span>
               </div>
-              <ol className="ui-setup-steps">
-                <li>Paste it into {manual && !platformRoute ? product.label : platformRoute ? `your ${product.label} agent` : 'your AI'}.</li>
-                <li>Approve Tdoc in your browser.</li>
-                <li>This page updates on its own.</li>
-              </ol>
-              {platformRoute && platformTargets.length > 1 ? <label className="ui-setup-ai-select">Agent <AppSelect ariaLabel="Platform agent" value={platformTarget ? `${platformTarget.server_id}:${platformTarget.agent_sub}` : ''} options={platformTargets.map(t => ({ value: `${t.server_id}:${t.agent_sub}`, label: [t.agent_name || t.agent_sub, t.server_slug].filter(Boolean).join(' · ') }))} onChange={id => setPlatformTarget(platformTargets.find(t => `${t.server_id}:${t.agent_sub}` === id))} /></label> : null}
-              <p role="status" className="ui-setup-wait">{copyFailed ? COPY_FALLBACK : platformTarget ? 'Linked. Check that it can receive a task.' : !manual && runtimeReady ? `${labelOf(chosen)} is ready.`
-                : <><Loader2 size={16} aria-hidden="true" className="ui-setup-spin" />Waiting for {product.label}…</>}</p>
-              {!attempt && error && manual ? <button type="button" onClick={() => setRetry(value => value + 1)}>Try again</button> : null}
-              {!manual && connected && !runtimeReady ? <section className="ui-setup-runtime-help" aria-label="Local AI installation">
-                <h3>Finish your AI’s sign-in</h3>
-                {RUNTIMES.map(option => <details className="ui-setup-runtime" key={option.value}>
-                  <summary>{option.label}<ChevronRight size={18} aria-hidden="true" /></summary>
-                  <p>Open <a href={option.url} target="_blank" rel="noreferrer">{option.label}</a> and sign in.</p>
-                  <button type="button" onClick={() => copyText(`${CONNECT_PROMPT} --cli ${option.value}`)}>Copy check instruction</button>
-                </details>)}
-              </section> : null}
-              {!manual && readyOnComputer.length > 1 ? <label className="ui-setup-ai-select">AI <AppSelect ariaLabel="AI for automatic updates" value={runtime} onChange={setSelected} options={RUNTIMES.filter(r => readyOnComputer.some(a => a.cli === r.value))} /></label> : null}
-              {!manual && computer && !connected ? <p role="status">{computer.status === 'paused' ? <>Updates are paused. <a href="/me?view=settings#computers">Resume in Settings</a>.</> : 'Wake your computer to continue.'}</p> : null}
-              {!manual && state === 'stuck' ? <button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy connection check</button> : null}
-            </div>}
+              <div className="ui-setup-split-form">
+                <label className="ui-setup-field-label" htmlFor="ui-setup-runtime">Runtime <span aria-hidden="true">*</span></label>
+                <AppSelect id="ui-setup-runtime" ariaLabel="AI for automatic updates" value={runtime} onChange={setSelected} options={runtimeOptions.length ? runtimeOptions : RUNTIMES} />
+                <p className="ui-setup-field-help">The AI runtime that edits your docs on this computer.</p>
+                {observed?.state !== 'ready' ? <>
+                  <p className="ui-setup-field-help">Sign in to {RUNTIMES.find(r => r.value === runtime)?.label} on this computer, then run this again:</p>
+                  {cmd('Check', `${setupCommand} --cli ${runtime}`, 'check', setupRef)}
+                </> : null}
+                {status(runtimeReady ? `${labelOf(chosen)} is ready.` : !connected ? 'Wake your computer to continue.' : `Waiting for ${RUNTIMES.find(r => r.value === runtime)?.label} to be ready…`, runtimeReady)}
+              </div>
+            </div>
+              : <div className="ui-setup-connection">
+                <p className="ui-setup-label">{computerRoute ? 'Connect command' : 'Instruction'}</p>
+                {computerRoute ? <>
+                  {cmd('1. Install', installCommand, 'install', installRef)}
+                  {cmd('2. Setup', setupCommand, 'setup', setupRef)}
+                </> : cmd(platformRoute ? `Send to your ${product.label} agent` : `Paste into a new ${product.label} chat`, manual && !attempt ? '' : instruction, 'instruction', instructionRef)}
+                <ol className="ui-setup-steps">
+                  {computerRoute ? <>
+                    <li>Paste the commands above into your terminal and press Enter.</li>
+                    <li>Approve the request when it opens in your browser.</li>
+                    <li>Your computer shows up here on its own. No need to refresh.</li>
+                  </> : <>
+                    <li>{platformRoute ? `Send the instruction above to your ${product.label} agent.` : `Paste the instruction above into a new ${product.label} chat.`}</li>
+                    <li>Approve the request when it opens in your browser.</li>
+                    <li>{product.label} shows up here on its own. No need to refresh.</li>
+                  </>}
+                </ol>
+                {platformRoute && platformTargets.length > 1 ? <label className="ui-setup-ai-select">Agent <AppSelect ariaLabel="Platform agent" value={platformTarget ? `${platformTarget.server_id}:${platformTarget.agent_sub}` : ''} options={platformTargets.map(t => ({ value: `${t.server_id}:${t.agent_sub}`, label: [t.agent_name || t.agent_sub, t.server_slug].filter(Boolean).join(' · ') }))} onChange={id => setPlatformTarget(platformTargets.find(t => `${t.server_id}:${t.agent_sub}` === id))} /></label> : null}
+                {copyFailed ? <p role="status" className="ui-setup-status">{COPY_FALLBACK}</p>
+                  : computerRoute ? status(connected ? `${computer.device} is connected.` : computer?.status === 'paused' ? 'Updates are paused. Resume them in Settings.' : 'Waiting for you to run the command and approve it in your browser…', connected)
+                    : status(platformTarget ? 'Linked. Check that it can receive a task.' : manual && !attempt ? 'Preparing your instruction…' : 'Waiting for you to paste the instruction and approve it in your browser…', Boolean(platformTarget))}
+                {!attempt && error && manual ? <button type="button" onClick={() => setRetry(value => value + 1)}>Try again</button> : null}
+                {computerRoute && state === 'stuck' ? <button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy connection check</button> : null}
+              </div>}
       {error ? <p className="ui-setup-error" role="alert">{error}</p> : null}
     </AppDialog>
   );

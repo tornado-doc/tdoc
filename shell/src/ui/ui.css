@@ -1230,14 +1230,6 @@ a.ui-menu-item:visited {
 .ui-setup-manual { max-width: 660px; font-size: 14px; line-height: 1.6; }
 .ui-setup-subject { display: grid; gap: 10px; margin: 6px 0 20px; font-size: 14px; }
 .ui-setup-subject input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--td-line, #ddd); border-radius: 0; background: var(--td-bg, #fff); color: var(--td-fg, #111); font: inherit; }
-.ui-setup-prompt { display: flex; align-items: flex-start; gap: 8px; }
-.ui-setup-prompt .ui-setup-instruction, .tdoc-modal .ui-setup-prompt p.ui-setup-instruction { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; padding: 10px 14px; border-radius: 10px; background: #1d1d1f; color: #f5f5f7; overflow-wrap: anywhere; font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.ui-setup-modal .ui-setup-copy { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px; border: 1px solid var(--td-line, #ddd); border-radius: 10px; background: var(--td-bg, #fff); color: var(--td-ink, #222); box-shadow: none; font: 500 14px/1 -apple-system, system-ui, sans-serif; cursor: pointer; }
-.ui-setup-modal .ui-setup-copy:hover { background: var(--td-surface, #f5f5f7); }
-.ui-setup-modal .ui-setup-connection .ui-setup-steps { margin: 20px 0 0; padding: 0; font-size: 14px; line-height: 22px; color: var(--td-ink, #222); }
-.ui-setup-modal .ui-setup-connection .ui-setup-steps li { margin: 0 0 4px; gap: 10px; }
-.ui-setup-modal .ui-setup-connection .ui-setup-steps li::before { width: 18px; border-radius: 4px; font: 11px/18px ui-monospace, monospace; }
-.ui-setup-wait { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--td-muted, #666); }
 .ui-setup-spin { animation: ui-setup-spin 1s linear infinite; flex: none; }
 @keyframes ui-setup-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ui-setup-spin { animation: none; } }
@@ -1287,7 +1279,7 @@ a.ui-menu-item:visited {
 .ui-ai-label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; font: 16px/1.4 -apple-system, system-ui, sans-serif; }
 .ui-ai-label strong { font-weight: 600; }
 .ui-ai-option > svg { flex: none; }
-.ui-setup-connection { max-width: none; margin: 20px 0 0; font-size: 16px; line-height: 1.6; }
+.ui-setup-connection { margin: 4px 0 0; }
 .ui-setup-simple .ui-setup-details, .ui-setup-simple .ui-setup-ai-select, .ui-setup-simple .ui-setup-runtime-help, .ui-setup-simple .ui-setup-runtime-help h3 { font-size: 16px; }
 .ui-setup-progress { margin: 0 0 40px; padding: 0; list-style: none; counter-reset: connect; display: grid; gap: 22px; }
 .ui-setup-progress li { display: flex; align-items: center; gap: 16px; counter-increment: connect; }
@@ -1309,9 +1301,41 @@ a.ui-menu-item:visited {
 .ui-tutorial-single { padding: 12px 16px; border: 1px solid var(--td-line, #ddd); background: var(--td-bg, #fff); color: inherit; border-radius: 8px; cursor: pointer; }
 
 .ui-dialog-popup.ui-setup-simple { border-radius: 16px; }
+
+/* Setup, laid out like Raft's onboarding windows (Desktop 2026-09-09 15:16–15:36):
+   a labelled command row with an icon-only Copy beside it that never resizes,
+   boxed steps, a monospace status line, a text link left and one button right
+   in the footer; Runtime is Raft's two-column "Meet Cindy" screen. Tdoc's own
+   colors and radius. */
+.ui-setup-cmd { margin: 10px 0 0; }
+.ui-setup-cmd-label { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--td-ink, #222); }
+.ui-setup-cmd-row { display: flex; align-items: stretch; gap: 8px; }
+.ui-setup-cmd-row .ui-setup-instruction { flex: 1; min-width: 0; min-height: 38px; box-sizing: border-box; padding: 9px 12px; border-radius: 8px; background: #101010; color: #f5f5f7; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/20px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ui-setup-modal .ui-setup-cmd-copy { flex: none; display: grid; place-items: center; width: 38px; height: 38px; min-height: 38px; padding: 0; border: 1px solid var(--td-line, #ddd); border-radius: 8px; background: var(--td-bg, #fff); color: var(--td-ink, #222); }
+.ui-setup-modal .ui-setup-cmd-copy:hover { background: var(--td-surface, #f5f5f7); }
+.ui-setup-modal .ui-setup-steps { margin: 16px 0 0; }
+.ui-setup-modal .ui-setup-status svg { flex: none; }
+.ui-setup-spin { animation: ui-setup-spin 1s linear infinite; }
+@keyframes ui-setup-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ui-setup-spin { animation: none; } }
+.ui-setup-modal .ui-setup-link { border: 0; background: none; padding: 0; color: var(--td-muted, #666); text-decoration: underline; text-underline-offset: 3px; font-size: 13px; cursor: pointer; }
+.ui-setup-split { display: grid; grid-template-columns: 1fr 1fr; margin: -16px -36px -24px; min-height: 100%; }
+.ui-setup-split-visual { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 32px; border-right: 1px solid var(--td-line, #e5e5e5); text-align: center; }
+.ui-setup-split-visual strong { font-size: 24px; line-height: 1.2; }
+.ui-setup-split-visual span { font-size: 14px; color: var(--td-muted, #666); }
+.ui-setup-split-form { padding: 32px; }
+.ui-setup-field-label { display: block; margin: 0 0 6px; font: 600 13px/1.4 ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
+.ui-setup-field-label span { color: var(--td-accent, #1652f0); }
+.ui-setup-field-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--td-muted, #666); }
 @media (max-width: 600px) {
-  .ui-setup-prompt { flex-direction: column-reverse; align-items: stretch; }
-  .ui-setup-modal .ui-setup-copy { align-self: flex-end; min-height: 36px; }
-  .ui-setup-prompt .ui-setup-instruction, .tdoc-modal .ui-setup-prompt p.ui-setup-instruction { font-size: 13px; }
+  .ui-setup-split { grid-template-columns: 1fr; margin: -16px -20px -24px; }
+  .ui-setup-split-visual { border-right: 0; border-bottom: 1px solid var(--td-line, #e5e5e5); padding: 20px; }
+  .ui-setup-split-form { padding: 20px; }
 }
+.ui-dialog-popup.ui-setup-modal { border-radius: 16px; }
+/* Raft's stage label and section labels are uppercase, letter-spaced monospace. */
+.ui-setup-modal .ui-dialog-eyebrow, .ui-setup-modal .ui-setup-label { text-transform: uppercase; letter-spacing: .08em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ui-setup-modal .ui-setup-status, .ui-setup-modal .ui-setup-steps li::before, .ui-setup-field-label { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ui-setup-split-form .ui-select-trigger, .ui-setup-split-form button[role="combobox"] { width: 100%; box-sizing: border-box; }
+.ui-setup-split-form > * { max-width: 100%; }
 

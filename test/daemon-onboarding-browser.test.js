@@ -59,10 +59,10 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    assert.ok(await page.locator('.ui-ai-label span').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=16),'no small-print product labels');
    await page.waitForFunction(() => [...document.querySelectorAll('.ui-ai-option img')].every(img => img.complete && img.naturalWidth > 0));
    await shot('products');
-   for(const [product,title] of [['ChatGPT Work','Connect ChatGPT Work'],['Claude Cowork','Connect Claude Cowork'],['Claude Code','Connect Claude Code'],['Codex','Connect Codex'],['Grok Bot','Connect Grok Bot'],['Raft','Connect Raft'],['Cursor','Connect Cursor'],['Other AI / Agent','Connect Other AI / Agent']]){
+   for(const [product,title] of [['ChatGPT Work','Connect ChatGPT Work'],['Claude Cowork','Connect Claude Cowork'],['Claude Code','Connect a computer'],['Codex','Connect a computer'],['Grok Bot','Connect Grok Bot'],['Raft','Connect Raft'],['Cursor','Connect Cursor'],['Other AI / Agent','Connect Other AI / Agent']]){
      await page.getByRole('button',{name:new RegExp('^'+product.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))}).click();
      await page.getByRole('heading',{name:title,exact:true}).waitFor();
-     await page.getByRole('button',{name:'Back',exact:true}).click();
+     await page.getByRole('button',{name:'Choose another AI',exact:true}).click();
    }
    await page.keyboard.press('Escape');
    await page.getByRole('dialog').waitFor({state:'hidden'});
@@ -121,9 +121,22 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    // An old pairing and a live computer without a verified runtime are not ready.
    await page.goto(base+'?setup=1');
    await page.getByRole('button',{name:/^Codex Your computer/}).click();
+   // Raft's two screens: Connect a computer (Install + Setup), then Choose your AI.
+   await page.getByRole('heading',{name:'Connect a computer',exact:true}).waitFor();
+   assert.match(await page.locator('.ui-setup-instruction').first().innerText(),/tdoc-install/);
+   assert.match(await page.locator('.ui-setup-instruction').nth(1).innerText(),/tdoc setup/);
+   assert.ok(await page.getByRole('button',{name:'Next',exact:true}).isDisabled(),'Next waits for the computer');
+   await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:()=>Promise.resolve()}}));
+   const copyBox=await page.getByRole('button',{name:'Copy install',exact:true}).boundingBox();
+   await page.getByRole('button',{name:'Copy install',exact:true}).click();
+   const copiedBox=await page.getByRole('button',{name:'Copy install',exact:true}).boundingBox();
+   assert.deepEqual([copiedBox.width,copiedBox.height],[copyBox.width,copyBox.height],'Copy does not change the layout');
+   await shot('computer-connect');
    const computer={device:'alex-mac',status:'active',connected_at:'2026-10-25T01:00:00Z',runtimes:[{cli:'codex',state:'needs_check'}]};
    computers=[computer];
-   await page.getByRole('heading',{name:'Finish your AI’s sign-in',exact:true}).waitFor();
+   await page.getByText('alex-mac is connected.',{exact:true}).waitFor();
+   await page.getByRole('button',{name:'Next',exact:true}).click();
+   await page.getByRole('heading',{name:'Choose your AI',exact:true}).waitFor();
    assert.ok(await page.getByRole('button',{name:'Continue',exact:true}).isDisabled());
    computer.runtimes[0].state='ready';agents=[{device:'alex-mac',cli:'codex',ready:true,status:'active'}];
    await page.getByText('Codex on alex-mac is ready.',{exact:true}).waitFor();
