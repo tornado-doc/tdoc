@@ -78,6 +78,12 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const manual = stage === 'manual' || platformRoute;
   const intro = stage === 'intro';
   const done = stage === 'done';
+  // Like Raft: once the computer shows up, move on to Choose your AI by itself.
+  const wasConnected = useRef(connected);
+  useEffect(() => {
+    if (connected && !wasConnected.current && stage === 'connect') setPickRuntime(true);
+    wasConnected.current = connected;
+  }, [connected, stage]);
   useEffect(() => {
     if (!signedIn || preview || manual || done) return undefined;
     let cancelled = false;

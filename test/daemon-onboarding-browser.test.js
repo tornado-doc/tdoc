@@ -135,8 +135,7 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await shot('computer-connect');
    const computer={device:'alex-mac',status:'active',connected_at:'2026-10-25T01:00:00Z',runtimes:[{cli:'codex',state:'needs_check'}]};
    computers=[computer];
-   await page.getByText('alex-mac is connected.',{exact:true}).waitFor();
-   await page.getByRole('button',{name:'Next',exact:true}).click();
+   // The page moves on by itself once the computer connects; no Next click.
    await page.getByRole('heading',{name:'Choose your AI',exact:true}).waitFor();
    assert.ok(await page.locator('.ui-dialog-body').evaluate(el=>el.scrollWidth<=el.clientWidth),'the runtime screen never scrolls sideways');
    assert.ok(await page.getByRole('button',{name:'Continue',exact:true}).isDisabled());
