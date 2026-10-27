@@ -350,16 +350,10 @@
         CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange()));
       } catch (e) {}
     }
-    var rect = selectionRect(range);
-    // On a phone the shell composer takes over copying. Release Safari's
-    // native selection before its callout can overlap our pending highlight.
-    if (window.innerWidth <= 700) {
-      try { window.getSelection().removeAllRanges(); } catch (e) {}
-    }
     post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after,
            occurrence: placed ? placed.occurrence : null,
            occurrences: placed ? placed.occurrences : null,
-           rect: rect });
+           rect: selectionRect(range) });
   }
   function reportSelection() {
     if (interactionMode !== 'comment' || visualViewerOpen()) return;
