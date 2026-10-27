@@ -100,24 +100,8 @@
   var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
-  var selectionAction = null;
-  var selectedPassage = null;
-  var selectionTimer = null;
-  var pointerSelecting = false;
-  var touchSelecting = false;
-  var selectionActionActivated = false;
-  var selectionCopyRequest = 0;
-  var capturedTouchSelection = false;
   var reanchorMode = false;
-  var pointerHadSelection = false;
-  var pointerDownInSelection = false;
   var pointerStartX = 0, pointerStartY = 0;
-  function hideSelectionAction() {
-    selectedPassage = null;
-    if (capturedTouchSelection && HL) CSS.highlights.delete('tdoc-pending');
-    capturedTouchSelection = false;
-    if (selectionAction) selectionAction.style.setProperty('display', 'none', 'important');
-  }
   function highlightCss(dark) {
     var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
     // The block that replaced a visible comment's words: a light, dashed mark.
@@ -155,14 +139,6 @@
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
-      // A small text toolbar keeps both selection actions visible. All sizing
-      // lives in the provider frame because author CSS can style any button.
-      'div.tdoc-selection-action[data-tdoc-provider]{all:initial!important;position:fixed!important;z-index:2147483645!important;display:inline-flex!important;align-items:stretch!important;box-sizing:border-box!important;width:auto!important;height:38px!important;min-height:38px!important;max-height:38px!important;padding:2px!important;margin:0!important;border:1px solid #d9dee8!important;border-radius:8px!important;background:#fff!important;box-shadow:0 2px 10px rgba(22,31,49,.13)!important;white-space:nowrap!important;touch-action:manipulation!important;}' +
-      'html[data-tdoc-interaction-mode="comment"] .tdoc-selection-action button.tdoc-selection-action-button{all:initial!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;box-sizing:border-box!important;min-width:72px!important;height:32px!important;padding:0 10px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#25272b!important;font:500 12px/1 system-ui,sans-serif!important;text-align:center!important;cursor:pointer!important;touch-action:manipulation!important;}' +
-      'html[data-tdoc-interaction-mode="comment"] .tdoc-selection-action button.tdoc-selection-action-button:hover{background:#f2f5fb!important;}' +
-      'html[data-tdoc-interaction-mode="comment"] .tdoc-selection-action button.tdoc-selection-comment{color:' + COMMENT_ACCENT + '!important;}' +
-      'div.tdoc-selection-action[data-tdoc-provider] .tdoc-selection-divider{all:initial!important;display:block!important;align-self:center!important;flex:0 0 1px!important;width:1px!important;height:18px!important;margin:0 1px!important;background:#dce1e9!important;}' +
-      '@media(max-width:700px){div.tdoc-selection-action[data-tdoc-provider]{height:44px!important;min-height:44px!important;max-height:44px!important;}html[data-tdoc-interaction-mode="comment"] .tdoc-selection-action button.tdoc-selection-action-button{min-width:78px!important;height:38px!important;font-size:13px!important;}}' +
       'figure[data-tdoc-artifact="Diagram"][aria-label="Diagram"][data-tdoc-excalidraw]{border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;}' +
       'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;box-sizing:border-box;padding-right:52px;margin-bottom:4px;}' +
@@ -365,127 +341,27 @@
   }
 
   function postTextSelection(range, text) {
-    selectionActionActivated = true;
-    hideSelectionAction();
     var placed = placeInView(range, text);
     var ctx = placed ? { before: placed.before, after: placed.after } : context(range, 60);
-    // Paint the pending anchor so it stays visibly marked while the composer
-    // (in the shell document) has focus; cleared on cancel/close (#281 parity).
+    // Keep the selected passage visible while the shell composer has focus.
     if (HL) {
       try {
         CSS.highlights.delete('tdoc-selecting');
         CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange()));
       } catch (e) {}
     }
-    var rect = selectionRect(range);
-    // The pending highlight keeps the quoted passage visible. Clear the native
-    // range once the action is chosen so the next drag selects fresh text.
-    try { window.getSelection().removeAllRanges(); } catch (e) {}
     post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after,
            occurrence: placed ? placed.occurrence : null,
            occurrences: placed ? placed.occurrences : null,
-           rect: rect });
-  }
-  function showSelectionAction(range, text, captureSelection) {
-    selectedPassage = { range: range.cloneRange(), text: text };
-    if (!selectionAction) {
-      selectionAction = document.createElement('div');
-      selectionAction.className = 'tdoc-selection-action';
-      selectionAction.setAttribute('data-tdoc-provider', '');
-      selectionAction.setAttribute('role', 'toolbar');
-      selectionAction.setAttribute('aria-label', 'Selected text actions');
-      selectionAction.innerHTML = '<button type="button" class="tdoc-selection-action-button tdoc-selection-comment">Comment</button><span class="tdoc-selection-divider" aria-hidden="true"></span><button type="button" class="tdoc-selection-action-button tdoc-selection-copy">Copy</button>';
-      selectionAction.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); });
-      function activateSelectionComment(e) {
-        e.preventDefault(); e.stopPropagation();
-        var passage = selectedPassage;
-        if (passage) postTextSelection(passage.range, passage.text);
-      }
-      function activateSelectionCopy(e) {
-        e.preventDefault(); e.stopPropagation();
-        var passage = selectedPassage;
-        if (!passage) return;
-        // On iOS the click has a user gesture here, but a postMessage to the
-        // shell may lose it before clipboard.writeText runs. Restore the saved
-        // range only for this synchronous copy, then release it again.
-        if (capturedTouchSelection) {
-          try {
-            var copySelection = window.getSelection();
-            copySelection.removeAllRanges();
-            copySelection.addRange(passage.range.cloneRange());
-            var copied = document.execCommand('copy');
-            copySelection.removeAllRanges();
-            if (copied) {
-              selectionAction.querySelector('.tdoc-selection-copy').textContent = 'Copied';
-              return;
-            }
-          } catch (x) {
-            try { window.getSelection().removeAllRanges(); } catch (ignored) {}
-          }
-        }
-        post({ type: 'tdoc:copySelection', text: passage.text, requestId: ++selectionCopyRequest });
-      }
-      var commentButton = selectionAction.querySelector('.tdoc-selection-comment');
-      var copyButton = selectionAction.querySelector('.tdoc-selection-copy');
-      commentButton.addEventListener('click', activateSelectionComment);
-      copyButton.addEventListener('click', activateSelectionCopy);
-      // The shell takes focus to dismiss iOS's native selection menu. On a
-      // real phone the first tap back into this frame need not produce click,
-      // so perform toolbar actions during the touch gesture itself.
-      commentButton.addEventListener('touchend', activateSelectionComment, { passive: false });
-      copyButton.addEventListener('touchend', activateSelectionCopy, { passive: false });
-      document.documentElement.appendChild(selectionAction);
-    }
-    selectionAction.querySelector('.tdoc-selection-copy').textContent = 'Copy';
-    var rect = selectionRect(range);
-    var mobile = window.innerWidth <= 700;
-    var width = selectionAction.getBoundingClientRect().width || (mobile ? 164 : 152);
-    var height = mobile ? 44 : 38;
-    // Keep the phone actions below the passage and desktop actions above it.
-    var top = mobile ? rect.bottom + 10 : rect.top - height - 10;
-    if (!mobile && top < 8) top = rect.bottom + 10;
-    if (mobile && top + height > window.innerHeight - 8) {
-      window.scrollBy(0, top + height - window.innerHeight + 8);
-      rect = selectionRect(range);
-      top = rect.bottom + 10;
-    }
-    var left = rect.left + (rect.width || 0) / 2 - width / 2;
-    selectionAction.style.setProperty('left', Math.max(8, Math.min(left, window.innerWidth - width - 8)) + 'px', 'important');
-    selectionAction.style.setProperty('top', Math.max(8, top) + 'px', 'important');
-    selectionAction.style.setProperty('display', 'inline-flex', 'important');
-    // A point gesture is tdoc's own word selection on either device. A phone
-    // drag also releases the browser selection before its native menu opens.
-    // Desktop drags retain their range so Cmd+C keeps working.
-    if (captureSelection) {
-      try {
-        if (HL) {
-          CSS.highlights.delete('tdoc-selecting');
-          CSS.highlights.set('tdoc-pending', new Highlight(selectedPassage.range));
-        }
-        capturedTouchSelection = true;
-        window.getSelection().removeAllRanges();
-        if (mobile) {
-          // The old mobile flow focused the shell composer immediately. With
-          // the inline toolbar, text focus otherwise stays in the frame and
-          // iOS keeps its own Copy menu above our actions.
-          selectionAction.querySelector('.tdoc-selection-comment').focus({ preventScroll: true });
-          post({ type: 'tdoc:focusSelectionActions' });
-        }
-      } catch (e) { capturedTouchSelection = false; }
-    }
+           rect: selectionRect(range) });
   }
   function reportSelection() {
-    if (interactionMode !== 'comment' || visualViewerOpen() || shellUiOpen || selectionActionActivated || capturedTouchSelection) return;
+    if (interactionMode !== 'comment' || visualViewerOpen()) return;
     var sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideSelectionAction(); return; }
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     var text = sel.toString().trim();
-    if (!text) { hideSelectionAction(); return; }
-    showSelectionAction(sel.getRangeAt(0), text, window.innerWidth <= 700);
-  }
-  function scheduleSelectionAction(delay) {
-    clearTimeout(selectionTimer);
-    if (pointerSelecting || touchSelecting || selectionActionActivated) { hideSelectionAction(); return; }
-    selectionTimer = setTimeout(reportSelection, delay);
+    if (!text) return;
+    postTextSelection(sel.getRangeAt(0), text);
   }
   function caretAtPoint(x, y) {
     if (document.caretPositionFromPoint) {
@@ -538,7 +414,7 @@
   }
   function reportPointSelection(event) {
     if (interactionMode !== 'comment' || event.button !== 0) return false;
-    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill,.tdoc-selection-action')) return false;
+    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
     var current = window.getSelection();
     if (current && !current.isCollapsed) return false; // a drag selection owns this click
     var point = caretAtPoint(event.clientX, event.clientY);
@@ -553,9 +429,9 @@
       // Clicked past the text, not on it: leave the click to the clear path so
       // it dismisses whatever is open instead of commenting on a neighbour.
       if (!pointOverRange(range, event.clientX, event.clientY)) return false;
+      if (current) { current.removeAllRanges(); current.addRange(range); }
       event.preventDefault(); event.stopPropagation();
-      if (reanchorMode) postTextSelection(range, text);
-      else showSelectionAction(range, text, true);
+      postTextSelection(range, text);
       return true;
     } catch (e) {}
     return false;
@@ -577,9 +453,7 @@
       }
       return;
     }
-    // The floating Comment action can sit over an existing text anchor. Its
-    // own click must reach its handler instead of opening that older thread.
-    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill,.tdoc-selection-action')) return;
+    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
     if (reanchorMode) { reportPointSelection(e); return; }
     // A drag across existing highlighted text can still finish with a click
     // event. Keep that gesture as a selection; opening the old thread would
@@ -608,7 +482,6 @@
   document.addEventListener('mouseup', function (e) {
     if (visualViewerOpen()) return;
     clearSelectingCursor();
-    pointerSelecting = false;
     if (reanchorMode) {
       var reanchorSelection = window.getSelection();
       if (reanchorSelection && !reanchorSelection.isCollapsed && reanchorSelection.rangeCount) {
@@ -616,15 +489,6 @@
         if (reanchorText) postTextSelection(reanchorSelection.getRangeAt(0), reanchorText);
       }
       return;
-    }
-    var wasOutsideSelection = pointerHadSelection && !pointerDownInSelection;
-    pointerHadSelection = false;
-    pointerDownInSelection = false;
-    if (wasOutsideSelection && Math.abs(e.clientX - pointerStartX) <= 4
-      && Math.abs(e.clientY - pointerStartY) <= 4
-      && !(e.target && e.target.closest && e.target.closest('.tdoc-selection-action'))) {
-      try { var oldSelection = window.getSelection(); if (oldSelection) oldSelection.removeAllRanges(); } catch (x) {}
-      hideSelectionAction();
     }
     // A dismissing click must not report a selection either. Content styled
     // `user-select: all` selects its whole block on a single click, which came
@@ -640,7 +504,7 @@
       var live = multi ? window.getSelection() : null;
       if (multi && live && !live.isCollapsed && live.rangeCount) {
         post({ type: 'tdoc:cleared' });
-        scheduleSelectionAction(0);
+        setTimeout(reportSelection, 0);
         return;
       }
       // A click whose only job is to dismiss. Content styled `user-select: all`
@@ -651,7 +515,7 @@
       post({ type: 'tdoc:cleared' });
       return;
     }
-    scheduleSelectionAction(0);
+    setTimeout(reportSelection, 0);
   }, true);
   // A tap on highlighted text. iOS Safari sends no click (and no mouse
   // events) for a tap on plain, non-interactive text, and a highlight is a
@@ -660,38 +524,30 @@
   // the tap itself: one finger, short, barely moved.
   var _tap = null;
   document.addEventListener('touchstart', function (e) {
-    touchSelecting = true;
     var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
     var selected = t ? window.getSelection() : null;
     _tap = t ? {
       x: t.clientX, y: t.clientY, at: Date.now(),
-      hadAction: !!selectedPassage,
       // A tap on the selected passage is for the native copy menu. A tap
       // elsewhere dismisses the composer, even on iOS where plain text taps
       // never produce the mouse events used by the desktop clear path.
       inSelection: !!(selected && !selected.isCollapsed && selected.rangeCount
         && pointOverRange(selected.getRangeAt(0), t.clientX, t.clientY))
     } : null;
-    if (!(e.target && e.target.closest && e.target.closest('.tdoc-selection-action'))) hideSelectionAction();
   }, { capture: true, passive: true });
   document.addEventListener('touchend', function (e) {
-    touchSelecting = false;
     var start = _tap;
     _tap = null;
-    // A toolbar button may cover an existing highlighted comment. Let the
-    // button handle the gesture before any anchor hit-testing or dismissal.
-    if (e.target && e.target.closest && e.target.closest('.tdoc-selection-action')) return;
     var t = e.changedTouches && e.changedTouches[0];
     var still = start && t && Math.abs(t.clientX - start.x) < 10
       && Math.abs(t.clientY - start.y) < 10 && Date.now() - start.at < 600;
-    if (still && (shellUiOpen || start.hadAction) && interactionMode === 'comment' && !start.inSelection
+    if (still && shellUiOpen && interactionMode === 'comment' && !start.inSelection
       && !visualViewerOpen() && !(e.target && e.target.closest
         && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
       // The pending CSS highlight outlives the browser selection. Clear both
       // before closing the composer so no yellow passage remains on the page.
       if (e.cancelable) e.preventDefault();
       if (HL) CSS.highlights.delete('tdoc-pending');
-      hideSelectionAction();
       try { var pendingSelection = window.getSelection(); if (pendingSelection) pendingSelection.removeAllRanges(); } catch (x) {}
       setActiveAnchor(null, false);
       post({ type: 'tdoc:cleared' });
@@ -718,21 +574,9 @@
           preventDefault: function () { if (e.cancelable) e.preventDefault(); },
           stopPropagation: function () { e.stopPropagation(); } })) return;
     }
-    // An existing range can be captured in this gesture, before iOS schedules
-    // its own Copy callout. Some engines finish selection after touchend, so
-    // keep the next-task fallback for those cases.
-    if (interactionMode === 'comment' && !visualViewerOpen()) {
-      var released = window.getSelection();
-      if (released && !released.isCollapsed && released.rangeCount) {
-        if (e.cancelable) e.preventDefault();
-        reportSelection();
-        return;
-      }
-    }
-    scheduleSelectionAction(0);
+    setTimeout(reportSelection, 0);
   }, true);
-  window.addEventListener('blur', function () { clearSelectingCursor(); pointerSelecting = false; touchSelecting = false; });
-  document.addEventListener('touchcancel', function () { touchSelecting = false; hideSelectionAction(); }, true);
+  window.addEventListener('blur', clearSelectingCursor);
   document.addEventListener('copy', function (e) {
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount || !e.clipboardData) return;
@@ -747,10 +591,7 @@
     } catch (x) {}
   }, true);
   document.addEventListener('mousedown', function (e) {
-    pointerSelecting = true;
     pointerStartX = e.clientX; pointerStartY = e.clientY;
-    pointerHadSelection = !!selectedPassage;
-    pointerDownInSelection = !!(selectedPassage && pointOverRange(selectedPassage.range, e.clientX, e.clientY));
     if (visualViewerOpen()) return;
     // Edit mode opts out of comment behaviour, but not out of dismissal: a card
     // opened from a pin stayed open there while every other mode closed it on
@@ -764,7 +605,7 @@
     // The pill is our own UI, so a click on it normally opens the composer
     // rather than clearing. While something is open it is outside that card
     // like anything else, and dismissal wins.
-    if (!shellUiOpen && e.target && e.target.closest && e.target.closest('.tdoc-comment-pill,.tdoc-selection-action')) return;
+    if (!shellUiOpen && e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
     // Dismissal does not hit-test. While the shell has something open, an anchor
     // under the pointer stops being special — the click that closes a card must
     // not also open the next one. Fall through rather than returning, so a drag
@@ -785,12 +626,10 @@
     // is in the middle of dragging. This sits AFTER the painting setup above:
     // an early return here stops a drag from painting at all.
     if (shellUiOpen) return;
-    hideSelectionAction();
     if (HL) CSS.highlights.delete('tdoc-pending');
     setActiveAnchor(null, false);
     post({ type: 'tdoc:cleared' });
   }, true);
-  window.addEventListener('scroll', hideSelectionAction, { passive: true });
 
   // --- element/region commenting (slice 1: hover a commentable artifact →
   //     outline + pill → click to comment on the whole element). Mirrors the
@@ -1558,7 +1397,6 @@
   document.addEventListener('selectionchange', function () {
     if (interactionMode === 'comment' && HL) {
       try {
-        if (capturedTouchSelection) return;
         var live = window.getSelection();
         if (live && !live.isCollapsed && live.rangeCount) {
           CSS.highlights.set('tdoc-selecting', new Highlight(live.getRangeAt(0).cloneRange()));
@@ -1778,7 +1616,6 @@
       }
     }
     if (HL && next !== 'comment') CSS.highlights.delete('tdoc-selecting');
-    if (next !== 'comment') hideSelectionAction();
     if (next === 'edit' || next !== 'comment' || !elementComment) { hideHover(); }
     if (next === 'edit') enableEditing();
   }
@@ -1833,8 +1670,6 @@
     if (d.type === 'tdoc:anchors') reportPins(d.comments);
     else if (d.type === 'tdoc:documentCommentsHeight') { /* old shells may still send this */ }
     else if (d.type === 'tdoc:clearPending') {
-      selectionActionActivated = false;
-      hideSelectionAction();
       if (HL) CSS.highlights.delete('tdoc-pending');
       // Drop the reader's own selection too. The browser paints it OVER our
       // anchor highlight, so after a comment is posted or an anchor is moved
@@ -1848,14 +1683,10 @@
       reanchorMode = !!d.active;
       document.documentElement.toggleAttribute('data-tdoc-reanchoring', reanchorMode);
       if (reanchorMode) {
-        hideSelectionAction();
         try { window.getSelection().removeAllRanges(); } catch (x) {}
       }
     }
-    else if (d.type === 'tdoc:uiOpen') { shellUiOpen = !!d.open; if (!shellUiOpen) selectionActionActivated = false; }
-    else if (d.type === 'tdoc:copySelectionResult' && d.requestId === selectionCopyRequest && d.ok && selectedPassage && selectionAction && selectionAction.style.display !== 'none') {
-      selectionAction.querySelector('.tdoc-selection-copy').textContent = 'Copied';
-    }
+    else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:diagramApply') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!applyDiagram(d) });
     else if (d.type === 'tdoc:diagramInsert') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!insertDiagram(d) });
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);

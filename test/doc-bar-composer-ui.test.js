@@ -54,7 +54,7 @@ async function startServer(worker, env) {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   return { server, base: `http://127.0.0.1:${server.address().port}` };
 }
-async function dragSelect(page, phrase, openComposer = true) {
+async function dragSelect(page, phrase) {
   const frameEl = await page.locator('iframe').first().elementHandle();
   const frame = await frameEl.contentFrame();
   await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
@@ -74,16 +74,9 @@ async function dragSelect(page, phrase, openComposer = true) {
   }, phrase);
   await page.mouse.move(box.x + r.x1, box.y + r.y1); await page.mouse.down();
   await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 });
-  if (await frame.locator('.tdoc-selection-action').isVisible()) throw new Error('Comment action flashed during selection drag');
   await page.mouse.up();
-  const action = frame.getByRole('button', { name: 'Comment', exact: true });
-  await action.waitFor();
-  const copy = frame.getByRole('button', { name: 'Copy', exact: true });
-  await copy.waitFor();
-  if (await page.locator('.tdoc-popup').isVisible()) throw new Error('selection opened a composer before Comment was clicked');
-  if (!openComposer) return frame;
-  await action.click();
   await page.locator('.tdoc-popup textarea').waitFor();
+  return frame;
 }
 
 (async () => {
@@ -178,17 +171,18 @@ async function dragSelect(page, phrase, openComposer = true) {
       });
       const box = await frameEl.boundingBox();
       await page.mouse.click(box.x + point.x, box.y + point.y);
-      await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
+      await page.locator('.tdoc-popup textarea').waitFor();
       const ownSelection = await frame.evaluate(() => ({
         text: getSelection().toString(),
         painted: CSS.highlights.has('tdoc-pending'),
       }));
-      if (ownSelection.text || !ownSelection.painted) throw new Error(`Comment point used native selection: ${JSON.stringify(ownSelection)}`);
+      if (!ownSelection.painted) throw new Error(`Comment point lost tdoc highlight: ${JSON.stringify(ownSelection)}`);
+      await page.locator('.tdoc-popup .x').click();
       await page.locator('.tdoc-mode-trigger').click();
       await page.getByRole('menuitemradio', { name: /Read/ }).click();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'read');
       await page.mouse.click(box.x + point.x, box.y + point.y);
-      if (await frame.locator('.tdoc-selection-action').isVisible()) throw new Error('Read point opened Comment actions');
+      if (await page.locator('.tdoc-popup').count()) throw new Error('Read point opened Comment composer');
       await context.close();
     });
 
@@ -204,9 +198,9 @@ async function dragSelect(page, phrase, openComposer = true) {
         node.parentElement.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
         node.parentElement.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
       });
-      await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
+      await page.locator('.tdoc-popup textarea').waitFor();
       const state = await frame.evaluate(() => ({ text: getSelection().toString(), painted: CSS.highlights.has('tdoc-pending') }));
-      if (state.text || !state.painted) throw new Error(`phone tap used native selection: ${JSON.stringify(state)}`);
+      if (!state.painted) throw new Error(`phone tap lost tdoc highlight: ${JSON.stringify(state)}`);
       await context.close();
     });
 
@@ -214,19 +208,7 @@ async function dragSelect(page, phrase, openComposer = true) {
       const { context, page } = await open(julie, 'launch-plan');
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
       await page.setViewportSize({ width: 1280, height: 800 });
-      const frame = await dragSelect(page, 'Billing ships first', false);
-      const selectedRect = await frame.evaluate(() => getSelection().getRangeAt(0).getBoundingClientRect().toJSON());
-      const toolbarRect = await frame.locator('.tdoc-selection-action').boundingBox();
-      const iframeRect = await page.locator('iframe').first().boundingBox();
-      if (toolbarRect.y + toolbarRect.height > iframeRect.y + selectedRect.top) throw new Error(`desktop toolbar is not above the selection: ${JSON.stringify({ toolbarRect, iframeRect, selectedRect })}`);
-      await shot(page, 'selection-actions-desktop-1280.png');
-      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
-      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'Billing ships first') throw new Error('native desktop copy was blocked by the toolbar');
-      await page.evaluate(() => navigator.clipboard.writeText('sentinel'));
-      await frame.getByRole('button', { name: 'Copy', exact: true }).click();
-      await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();
-      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'Billing ships first') throw new Error('toolbar Copy did not write the selected text');
-      await frame.getByRole('button', { name: 'Comment', exact: true }).click();
+      await dragSelect(page, 'Billing ships first');
       const pop = page.locator('.tdoc-popup');
       await pop.locator('textarea').waitFor();
       await shot(page, 'selection-composer-desktop.png');
@@ -258,59 +240,29 @@ async function dragSelect(page, phrase, openComposer = true) {
       await context.close();
     });
 
-    await t('phone replaces the native selection menu with Comment and Copy, and remembers Read per document', async () => {
+    await t('phone Comment selection opens the old composer immediately and can copy its quote', async () => {
       const { context, page } = await open(julie, 'launch-plan', true);
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
       await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
       const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
-      const select = async () => frame.evaluate(() => {
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          const index = node.nodeValue.indexOf('Billing ships first');
-          if (index < 0) continue;
-          const range = document.createRange();
-          range.setStart(node, index); range.setEnd(node, index + 'Billing ships first'.length);
-          getSelection().removeAllRanges(); getSelection().addRange(range);
-          const rect = range.getBoundingClientRect();
-          const touch = new Touch({ identifier: 1, target: document.body, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 });
-          document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
-          document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
-          return;
-        }
-      });
-      await select();
-      const action = frame.getByRole('button', { name: 'Comment', exact: true });
-      await action.waitFor();
-      const copy = frame.getByRole('button', { name: 'Copy', exact: true });
-      await copy.waitFor();
-      if (await frame.locator('.tdoc-selection-action').count() !== 1) throw new Error('phone selection showed more than one toolbar');
-      if (await page.locator('.tdoc-popup').count()) throw new Error('selection opened the composer before Comment was clicked');
-      const selected = 'Billing ships first';
-      if (await frame.evaluate(() => getSelection().toString())) throw new Error('phone retained the native selection menu');
-      if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-pending')))) throw new Error(`phone lost the pending highlight: ${JSON.stringify(await frame.evaluate(() => ({ action: getComputedStyle(document.querySelector('.tdoc-selection-action')).display, native: getSelection().toString(), highlights: [...CSS.highlights.keys()] })))}`);
-      await page.waitForFunction(() => document.activeElement?.id === 'tdoc-selection-focus-target');
-      const geometry = await frame.evaluate(() => ({
-        selectedBottom: CSS.highlights.get('tdoc-pending').values().next().value.getBoundingClientRect().bottom,
-        actionTop: document.querySelector('.tdoc-selection-action').getBoundingClientRect().top,
-      }));
-      if (geometry.actionTop < geometry.selectedBottom) throw new Error(`phone toolbar covered the system Copy menu: ${JSON.stringify(geometry)}`);
-      await shot(page, 'selection-actions-phone-390.png');
-      await copy.click();
-      await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();
-      if ((await page.evaluate(() => navigator.clipboard.readText())) !== selected) throw new Error('phone toolbar Copy did not write the selected text');
-      await action.click();
-      const pop = page.locator('.tdoc-popup');
-      await pop.waitFor();
-      if (await pop.locator('.tdoc-keyboard-shortcut-hint').isVisible()) throw new Error('desktop keyboard shortcuts appear on phone');
-      if (await pop.locator('textarea').evaluate((el) => document.activeElement === el)) throw new Error('phone composer opened the keyboard');
-      await shot(page, 'selection-composer-phone.png');
       await frame.evaluate(() => {
-        const touch = new Touch({ identifier: 2, target: document.body, clientX: innerWidth - 12, clientY: innerHeight - 12 });
-        document.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
-        document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
+        const node = document.querySelector('p').firstChild;
+        const range = document.createRange();
+        range.setStart(node, 0); range.setEnd(node, 'Billing ships first'.length);
+        getSelection().removeAllRanges(); getSelection().addRange(range);
+        document.dispatchEvent(new Event('touchend', { bubbles: true, cancelable: true }));
       });
+      const pop = page.locator('.tdoc-popup');
+      await pop.locator('textarea').waitFor();
+      if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-pending')))) throw new Error('phone lost the pending highlight');
+      if (!(await pop.locator('textarea').evaluate((el) => document.activeElement === el))) throw new Error('phone composer did not take focus');
+      if (await pop.locator('.tdoc-keyboard-shortcut-hint').isVisible()) throw new Error('desktop keyboard shortcuts appear on phone');
+      await pop.getByRole('button', { name: 'Copy selected text' }).click();
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'Billing ships first') throw new Error('phone composer did not copy the selected text');
+      await shot(page, 'selection-composer-phone.png');
+      await pop.getByRole('button', { name: 'Close' }).click();
       await pop.waitFor({ state: 'detached' });
-      if (await frame.evaluate(() => getSelection().toString() || window.CSS?.highlights?.has('tdoc-pending'))) throw new Error('tap away left selection or pending highlight');
+      await frame.waitForFunction(() => !getSelection().toString() && !window.CSS?.highlights?.has('tdoc-pending'));
       await page.locator('.tdoc-mode-trigger').click();
       await page.getByRole('menuitemradio', { name: /Read/ }).click();
       await page.reload();
@@ -320,7 +272,7 @@ async function dragSelect(page, phrase, openComposer = true) {
       await context.close();
     });
 
-    await t('WebKit phone Copy writes text the user can paste after native selection is released', async () => {
+    await t('WebKit phone Comment selection focuses the composer and Copy can be pasted', async () => {
       const browser = await webkit.launch({ headless: true });
       try {
         const context = await browser.newContext({ ...devices['iPhone 13'], defaultBrowserType: undefined });
@@ -328,73 +280,7 @@ async function dragSelect(page, phrase, openComposer = true) {
         const page = await context.newPage();
         await page.goto(`${base}/d/launch-plan`);
         let frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
-        await frame.locator('h1').waitFor();
         await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
-        const tapPoint = await frame.evaluate(() => {
-          const node = document.querySelector('p').firstChild;
-          const range = document.createRange();
-          range.setStart(node, 1); range.setEnd(node, 5);
-          const r = range.getBoundingClientRect();
-          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-        });
-        const frameBox = await page.locator('iframe').first().boundingBox();
-        await page.touchscreen.tap(frameBox.x + tapPoint.x, frameBox.y + tapPoint.y);
-        await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
-        if (await frame.evaluate(() => getSelection().toString() || !CSS.highlights.has('tdoc-pending'))) throw new Error('WebKit tap did not use Comment point selection');
-        await page.reload();
-        frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
-        await frame.locator('h1').waitFor();
-        const immediate = await frame.evaluate(() => {
-          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-            const index = node.nodeValue.indexOf('Billing ships first');
-            if (index < 0) continue;
-            const range = document.createRange();
-            range.setStart(node, index); range.setEnd(node, index + 'Billing ships first'.length);
-            getSelection().removeAllRanges(); getSelection().addRange(range);
-            document.dispatchEvent(new Event('touchend', { bubbles: true, cancelable: true }));
-            return {
-              native: getSelection().toString(),
-              toolbar: getComputedStyle(document.querySelector('.tdoc-selection-action')).display,
-            };
-          }
-          throw new Error('selection fixture missing');
-        });
-        if (immediate.native || immediate.toolbar === 'none') throw new Error(`WebKit did not capture selection during touchend: ${JSON.stringify(immediate)}`);
-        await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
-        if (await frame.evaluate(() => getSelection().toString() || !CSS.highlights.has('tdoc-pending'))) throw new Error('WebKit kept the native menu or lost the pending highlight');
-        await page.waitForFunction(() => document.activeElement?.id === 'tdoc-selection-focus-target');
-        await shot(page, 'selection-actions-webkit-phone-390.png');
-        await frame.waitForFunction(() => CSS.highlights.get('tdoc-anchor')?.size > 0);
-        const overlapAnchor = async (buttonName) => frame.evaluate((name) => {
-          const highlighted = CSS.highlights.get('tdoc-anchor');
-          const anchor = Array.from(highlighted.values()).find((range) => range.toString().includes('Search follows in April'));
-          if (!anchor) throw new Error('existing comment anchor missing');
-          const rect = Array.from(anchor.getClientRects()).find((r) => r.width > 80);
-          const action = document.querySelector('.tdoc-selection-action');
-          const button = action.querySelector(name === 'Copy' ? '.tdoc-selection-copy' : '.tdoc-selection-comment');
-          const actionRect = action.getBoundingClientRect();
-          const buttonRect = button.getBoundingClientRect();
-          action.style.setProperty('left', `${actionRect.left + rect.left + rect.width / 2 - buttonRect.left - buttonRect.width / 2}px`, 'important');
-          action.style.setProperty('top', `${actionRect.top + rect.top + rect.height / 2 - buttonRect.top - buttonRect.height / 2}px`, 'important');
-          const moved = button.getBoundingClientRect();
-          const x = moved.left + moved.width / 2, y = moved.top + moved.height / 2;
-          if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) throw new Error('toolbar did not overlap the existing comment anchor');
-          if (!highlighted || !Array.from(highlighted.values()).some((anchor) => Array.from(anchor.getClientRects()).some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom))) {
-            throw new Error('toolbar did not cover a painted comment anchor');
-          }
-        }, buttonName);
-        await overlapAnchor('Copy');
-        let buttonBox = await frame.getByRole('button', { name: 'Copy', exact: true }).boundingBox();
-        await page.touchscreen.tap(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2);
-        await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();
-        await page.evaluate(() => { const el = document.createElement('textarea'); el.id = 'paste-check'; document.body.appendChild(el); el.focus(); });
-        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
-        if ((await page.locator('#paste-check').inputValue()) !== 'Billing ships first') throw new Error('WebKit could not paste the copied selection');
-        await page.reload();
-        frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
-        await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
-        await frame.waitForFunction(() => CSS.highlights.get('tdoc-anchor')?.size > 0);
         await frame.evaluate(() => {
           const node = document.querySelector('p').firstChild;
           const range = document.createRange();
@@ -402,15 +288,15 @@ async function dragSelect(page, phrase, openComposer = true) {
           getSelection().removeAllRanges(); getSelection().addRange(range);
           document.dispatchEvent(new Event('touchend', { bubbles: true, cancelable: true }));
         });
-        await frame.getByRole('button', { name: 'Comment', exact: true }).waitFor();
-        await page.waitForFunction(() => document.activeElement?.id === 'tdoc-selection-focus-target');
-        // Reposition the action over an existing anchored comment. Touchend
-        // must reach the action even when anchor hit-testing matches beneath it.
-        await overlapAnchor('Comment');
-        buttonBox = await frame.getByRole('button', { name: 'Comment', exact: true }).boundingBox();
-        await page.touchscreen.tap(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2);
-        await page.locator('.tdoc-popup textarea').waitFor();
-        await page.locator('.tdoc-popup textarea').fill('A comment from the phone');
+        const pop = page.locator('.tdoc-popup');
+        await pop.locator('textarea').waitFor();
+        if (!(await pop.locator('textarea').evaluate((el) => document.activeElement === el))) throw new Error('WebKit composer did not focus its textarea');
+        if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-pending')))) throw new Error('WebKit pending highlight missing');
+        await pop.getByRole('button', { name: 'Copy selected text' }).click();
+        await page.evaluate(() => { const el = document.createElement('textarea'); el.id = 'paste-check'; document.body.appendChild(el); el.focus(); });
+        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
+        if ((await page.locator('#paste-check').inputValue()) !== 'Billing ships first') throw new Error('WebKit could not paste the selected text');
+        await shot(page, 'selection-composer-webkit-phone-390.png');
         await context.close();
       } finally { await browser.close(); }
     });

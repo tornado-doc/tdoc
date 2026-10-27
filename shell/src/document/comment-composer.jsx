@@ -188,7 +188,7 @@ export function CommentComposer({
         <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
       </div>
       <div><MentionField
-        autoFocus={viewport.width > 700}
+        autoFocus
         fieldRef={field}
         placeholder={demo
           ? 'What should change? Type a GitHub @ — or @email'
