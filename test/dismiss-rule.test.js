@@ -47,7 +47,7 @@ t('the dismissal happens on mouseup, not mousedown', () => {
 t('the artifact pill is inside the rule, not exempt from it', () => {
   // The pill is our own UI, so it used to be waved through. While something is
   // open it is outside that card like anything else.
-  assert(/!shellUiOpen && e\.target && e\.target\.closest && e\.target\.closest\('\.tdoc-comment-pill'\)/.test(probe),
+  assert(/!shellUiOpen && e\.target && e\.target\.closest && e\.target\.closest\('\.tdoc-comment-pill,\.tdoc-selection-action'\)/.test(probe),
     'the comment pill is exempt from dismissal again');
   assert(/closest\('\.tdoc-comment-pill, a\[href\]'\)/.test(probe),
     'a swallowed click no longer stops the pill from opening an element comment');
@@ -58,7 +58,7 @@ t('a multi-click selection while a card is open is a comment, not only a dismiss
   // closed the card, and the sentence had to be selected again.
   const mouseup = probe.slice(probe.indexOf("addEventListener('mouseup'"), probe.indexOf("addEventListener('touchend'"));
   assert(/var multi = e\.detail >= 2 && interactionMode === 'comment';/.test(mouseup), 'the click count no longer distinguishes a selection from a dismissal');
-  assert(/if \(multi && live && !live\.isCollapsed && live\.rangeCount\) \{\s*post\(\{ type: 'tdoc:cleared' \}\);\s*setTimeout\(reportSelection, 0\);/.test(mouseup), 'the multi-click selection is no longer reported after the card closes');
+  assert(/if \(multi && live && !live\.isCollapsed && live\.rangeCount\) \{\s*post\(\{ type: 'tdoc:cleared' \}\);\s*scheduleSelectionAction\(0\);/.test(mouseup), 'the multi-click selection is no longer offered after the card closes');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

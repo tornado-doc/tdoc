@@ -84,6 +84,10 @@ async function dragSelect(page, phrase) {
   await page.mouse.down();
   await page.mouse.move(box.x + r.x2, box.y + r.y2, { steps: 6 });
   await page.mouse.up();
+  const action = frame.getByRole('button', { name: 'Comment', exact: true });
+  await action.waitFor();
+  await action.click();
+  await page.locator('.tdoc-popup textarea').waitFor();
 }
 
 // A phone selects by long-press; the probe reports it on touchend.
@@ -101,6 +105,8 @@ async function touchSelect(page, phrase) {
       return;
     }
   }, phrase);
+  await frame.getByRole('button', { name: 'Comment', exact: true }).click();
+  await page.locator('.tdoc-popup textarea').waitFor();
 }
 
 (async () => {
@@ -280,6 +286,8 @@ async function touchSelect(page, phrase) {
       if (!posted || !(posted.replies || []).some((r) => r.text === 'The mobile app remains planned for Q4.')) {
         throw new Error(`agent answer not posted: ${JSON.stringify(posted)}`);
       }
+      await page.locator(`.tdoc-pin-document[data-id="${posted.id}"]`).waitFor();
+      if (await page.locator('.tdoc-document-comments').count()) throw new Error('old inline comment section remains');
       await context.close();
     });
 
@@ -287,7 +295,7 @@ async function touchSelect(page, phrase) {
       await setTier('offline');
       const { context, page } = await open(reader, PHONE);
       await noBarAsk(page);
-      await page.getByRole('button', { name: 'More actions' }).click();
+      await page.locator('#tdoc-more-btn').click();
       await page.locator('.ui-menu-popup').waitFor();
       for (const name of ['Ask AI', 'Copy for my agent', 'Send to my agent', 'Connect my agent']) {
         if (await page.getByRole('menuitem', { name }).count()) throw new Error(`⋯ still has ${name}`);
@@ -320,7 +328,7 @@ async function touchSelect(page, phrase) {
       await context.close();
     });
 
-    await t('the owner keeps the paper plane; the composer is @agent + Comment; @agent puts the default in and lists tdoc AI with what is left', async () => {
+    await t('without a connected agent the comment @agent button opens the connection guide', async () => {
       const { context, page } = await open(owner, DESKTOP);
       await page.locator('#tdoc-send-agent-btn').waitFor();
       await noBarAsk(page);
@@ -329,24 +337,12 @@ async function touchSelect(page, phrase) {
       await pop.waitFor();
       const labels = (await pop.locator('.tdoc-composer-foot-actions button').allTextContents()).map((x) => x.trim());
       if (labels.join('|') !== '@agent|Comment') throw new Error(`owner popover buttons: ${labels.join('|')}`);
-      if (await pop.locator('.tdoc-ask-row, .tdoc-agent-pill').count()) throw new Error('agent options before any agent is named');
       await pop.locator('textarea').fill('Tighten this');
-      // @agent puts the default agent in as a pill, no menu to go through.
       await pop.locator('.tdoc-composer-agent').click();
-      await pop.locator('.tdoc-agent-pill').waitFor();
-      if (await page.locator('.ui-menu-popup').count()) throw new Error('@agent opened a menu');
-      if (!/@\u2060tdoc AI/.test(await pop.locator('textarea').inputValue())) throw new Error(`default not put in: ${await pop.locator('textarea').inputValue()}`);
-      // The pill's dropdown lists the agents, tdoc AI with what is left.
-      await pop.locator('.tdoc-agent-pill').click();
-      const menu = page.locator('.ui-menu-popup');
-      await menu.waitFor();
-      const items = await menu.innerText();
-      if (!/tdoc AI/.test(items) || !/\d+ free/.test(items) || !/Connect my agent/.test(items)) throw new Error(`menu: ${items}`);
-      if (await menu.locator('a[href="/start"]').count() !== 1) throw new Error('no Connect my agent link');
-      await page.keyboard.press('Escape');
-      // The owner has no agent of their own here: tdoc AI only asks.
-      await answersOnly(pop);
-      if (!(await pop.locator('.tdoc-only-me').count())) throw new Error('no Only me for tdoc AI');
+      await pop.getByText('No agent is connected yet.').waitFor();
+      if (await pop.locator('.tdoc-agent-pill').count()) throw new Error('an unrelated agent was preselected');
+      if (await pop.getByRole('link', { name: 'Set up an agent' }).count() !== 1) throw new Error('missing setup action');
+      if (await pop.getByText('Or paste this into your agent').count() !== 1) throw new Error('missing existing connection prompt');
       await context.close();
     });
   } finally {
