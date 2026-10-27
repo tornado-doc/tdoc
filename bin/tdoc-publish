@@ -104,10 +104,12 @@ build_payload() {
       if (Buffer.byteLength(svg) > 128 * 1024) throw new Error("preview.svg exceeds 128 KB");
       out.preview_svg = svg;
     }
-    // Where a NEW doc should land. Only an agent connection limited to some
-    // workspaces reads these (it files the doc there at once); any other
-    // credential publishes to My docs and the move below places it. --team
-    // is a demand (refused if unreachable); the default team is a preference.
+    // Where a NEW doc should land. An agent connection limited to some
+    // workspaces reads both (it files the doc there at once). Any other
+    // credential reads only --team, and only for a team the account is in
+    // (so a full My docs never refuses a team doc); otherwise it publishes
+    // to My docs and the move below places it (a no-op if already there).
+    // --team is a demand; the default team is a preference.
     if (process.env.TDOC_UPLOAD_TEAM) out.team = process.env.TDOC_UPLOAD_TEAM;
     if (process.env.TDOC_UPLOAD_TEAM_DEFAULT) out.team_default = process.env.TDOC_UPLOAD_TEAM_DEFAULT;
     const widgets = JSON.parse(widgetsJson || "{}");
