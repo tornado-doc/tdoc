@@ -1,7 +1,7 @@
 // The @agent in a thread's reply box is the new-comment composer's
 // (Julie, 2026-10-24), in the real shell against the real worker:
 //   - @agent puts the default agent in as a pill at the caret, no menu; the
-//     pill's dropdown (short names tagged Mine / Team / "5 free", Connect
+//     pill's dropdown (short names tagged Mine / Team / "Limited-time free", Connect
 //     my agent) swaps it;
 //     typing @ makes the same pill; Backspace takes the whole pill away.
 //   - no mode control: an agent that may edit (authorship) gets the thread
@@ -288,7 +288,7 @@ async function dragSelect(page, phrase) {
       if (!after) throw new Error('⌘⇧Enter did not hand it to the agent');
       await context.close();
     });
-    await t('typed @ and the pill dropdown list the same agents the same way: short name, grey tag (Mine / Team / free left), no group headers -- tdoc AI is not cut off for someone with agents of their own', async () => {
+    await t('typed @ and the pill dropdown list the same agents the same way: short name, grey tag (Mine / Team / Limited-time free), no group headers -- tdoc AI is not cut off for someone with agents of their own', async () => {
       const { context, page } = await open(julie, 'team-plan');
       const { form } = await replyBox(page, t1.body.id);
       const box = form.locator('textarea');
@@ -297,7 +297,7 @@ async function dragSelect(page, phrase) {
       await list.locator('.tdoc-mention-agent').first().waitFor();
       const rowsOf = (menu, row, name) => menu.evaluate((el, [r, n]) => [...el.querySelectorAll(r)].map((x) => `${x.querySelector(n).textContent.trim()} | ${(x.querySelector('.tdoc-agent-menu-tag') || { textContent: '' }).textContent.trim()}`), [row, name]);
       const typed = await rowsOf(list, '.tdoc-mention-agent', '.tdoc-mention-login');
-      if (!typed.includes('tdoc-bot | Team') || !typed.some((x) => /^tdoc AI \| (\d+ free)?$/.test(x)) || !typed.some((x) => / \| Mine$/.test(x))) throw new Error(JSON.stringify(typed));
+      if (!typed.includes('tdoc-bot | Team') || !typed.includes('tdoc AI | Limited-time free') || !typed.some((x) => / \| Mine$/.test(x))) throw new Error(JSON.stringify(typed));
       if (typed.some((x) => x.includes('·'))) throw new Error(`a long name in the @ list: ${JSON.stringify(typed)}`);
       if (await list.locator('.tdoc-mention-group', { hasText: /^(Mine|Team|tdoc AI)$/ }).count()) throw new Error('group headers in the @ list');
       await shot(page, 'reply-typed-at-list.png');

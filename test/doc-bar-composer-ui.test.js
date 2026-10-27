@@ -387,6 +387,8 @@ async function dragSelect(page, phrase) {
       await panel.getByRole('button', { name: 'Who should answer?' }).click();
       const first = await page.locator('.tdoc-agent-menu').getByRole('menuitem').first().innerText();
       if (!first.includes('tdoc-bot') || !first.includes('Edited last')) throw new Error(`last editor is not explained in the menu: ${first}`);
+      const aiRow = await page.locator('.tdoc-agent-menu').getByRole('menuitem', { name: /tdoc AI/ }).innerText();
+      if (!aiRow.includes('Limited-time free')) throw new Error(`tdoc AI offer is unclear: ${aiRow}`);
       await page.keyboard.press('Escape');
       await panel.locator('textarea').fill('Why billing first?');
       await panel.getByRole('button', { name: 'Send question' }).click();
@@ -483,46 +485,71 @@ async function dragSelect(page, phrase) {
     });
 
     await t('Ask AI opens for a reader, answers privately, preserves follow-ups and posts only on request', async () => {
-      const { context, page } = await open(reader, 'launch-plan');
-      await page.locator('#tdoc-send-agent-btn').click();
-      const panel = page.getByRole('dialog', { name: 'Ask AI' });
-      await panel.waitFor();
-      const filterBox = await page.locator('.tdoc-comment-filter').boundingBox();
-      const panelBox = await panel.boundingBox();
-      if (filterBox && panelBox && panelBox.y < filterBox.y + filterBox.height) throw new Error('Ask AI panel overlaps the comment filters');
-      await shot(page, 'ask-ai-reader-empty.png');
-      const input = panel.getByRole('textbox', { name: 'Ask about this document' });
-      if (!(await input.evaluate((el) => document.activeElement === el))) throw new Error('Ask input did not receive focus');
-      if (await input.evaluate((el) => getComputedStyle(el).resize) !== 'none') throw new Error('textarea resize handle is visible');
-      await input.fill('What is the conclusion?');
-      await panel.getByRole('button', { name: 'Send question' }).click();
-      await panel.getByText('Billing goes first.').waitFor();
-      await panel.locator('.tdoc-ask-answer-body h2').waitFor();
-      const questionBox = await panel.locator('.tdoc-ask-turn .tdoc-ask-question').boundingBox();
-      const answerBox = await panel.locator('.tdoc-ask-turn .tdoc-ask-answer').boundingBox();
-      if (!questionBox || !answerBox || questionBox.x <= answerBox.x) throw new Error('private question and answer do not read as a conversation');
-      const before = (await api('/api/comments?slug=launch-plan&version=1', { cookie: reader.cookie })).body;
-      if (JSON.stringify(before).includes('What is the conclusion?')) throw new Error('private question was posted');
-      await panel.getByRole('button', { name: 'Keep to myself' }).click();
-      await panel.getByText('Kept private').waitFor();
-      await input.fill('What happens next?');
-      await input.press('Enter');
-      await panel.getByText('Billing goes first.').last().waitFor();
-      if (await panel.locator('.tdoc-ask-turn').count() !== 1 || await panel.locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('previous answer did not collapse');
-      await panel.locator('.tdoc-ask-turn-summary').click();
-      if (!(await panel.locator('.tdoc-ask-turn').getByText('Kept private').isVisible())) throw new Error('previous answer did not expand');
-      await panel.locator('.tdoc-ask-turn-collapse').click();
-      await panel.getByRole('button', { name: 'Post as comment' }).click();
-      await panel.getByText('Posted as a comment').waitFor();
-      if (!(await panel.locator('.tdoc-ask-turn.is-public .tdoc-margin-comment').count()) || !(await panel.locator('.tdoc-ask-turn.is-public .tdoc-reply').count())) throw new Error('posted turn did not return to comment and reply cards');
-      if (await panel.locator('.tdoc-ask-turn').getByText('Only you can see this').count()) throw new Error('public answer still looks private');
-      const after = (await api('/api/comments?slug=launch-plan&version=1', { cookie: reader.cookie })).body;
-      if (!JSON.stringify(after).includes('What happens next?')) throw new Error('public question was not posted');
-      await page.locator('#tdoc-send-agent-btn').click();
-      await page.locator('#tdoc-send-agent-btn').click();
-      if (await page.getByRole('dialog', { name: 'Ask AI' }).locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('conversation disappeared after closing the panel');
-      await shot(page, 'ask-ai-reader-desktop.png');
-      await context.close();
+      // A real profile photo may be thousands of pixels across. Posting an
+      // Ask AI answer creates both a document pin and a public comment card;
+      // neither is allowed to render that image at its natural size.
+      const sessionKey = `session:${reader.cookie.split('=')[1]}`;
+      const oldSession = env.META.map.get(sessionKey);
+      env.META.map.set(sessionKey, JSON.stringify({ ...JSON.parse(oldSession), avatar_url: '/tdoc_logo.png' }));
+      let context;
+      try {
+        const opened = await open(reader, 'launch-plan');
+        ({ context } = opened);
+        const { page } = opened;
+        await page.locator('#tdoc-send-agent-btn').click();
+        const panel = page.getByRole('dialog', { name: 'Ask AI' });
+        await panel.waitFor();
+        const filterBox = await page.locator('.tdoc-comment-filter').boundingBox();
+        const panelBox = await panel.boundingBox();
+        if (filterBox && panelBox && panelBox.y < filterBox.y + filterBox.height) throw new Error('Ask AI panel overlaps the comment filters');
+        await shot(page, 'ask-ai-reader-empty.png');
+        const input = panel.getByRole('textbox', { name: 'Ask about this document' });
+        if (!(await input.evaluate((el) => document.activeElement === el))) throw new Error('Ask input did not receive focus');
+        if (await input.evaluate((el) => getComputedStyle(el).resize) !== 'none') throw new Error('textarea resize handle is visible');
+        await input.fill('What is the conclusion?');
+        await panel.getByRole('button', { name: 'Send question' }).click();
+        await panel.getByText('Billing goes first.').waitFor();
+        await panel.locator('.tdoc-ask-answer-body h2').waitFor();
+        const questionBox = await panel.locator('.tdoc-ask-turn .tdoc-ask-question').boundingBox();
+        const answerBox = await panel.locator('.tdoc-ask-turn .tdoc-ask-answer').boundingBox();
+        if (!questionBox || !answerBox || questionBox.x <= answerBox.x) throw new Error('private question and answer do not read as a conversation');
+        const before = (await api('/api/comments?slug=launch-plan&version=1', { cookie: reader.cookie })).body;
+        if (JSON.stringify(before).includes('What is the conclusion?')) throw new Error('private question was posted');
+        await panel.getByRole('button', { name: 'Keep to myself' }).click();
+        await panel.getByText('Kept private').waitFor();
+        await input.fill('What happens next?');
+        await input.press('Enter');
+        await panel.getByText('Billing goes first.').last().waitFor();
+        if (await panel.locator('.tdoc-ask-turn').count() !== 1 || await panel.locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('previous answer did not collapse');
+        await panel.locator('.tdoc-ask-turn-summary').click();
+        if (!(await panel.locator('.tdoc-ask-turn').getByText('Kept private').isVisible())) throw new Error('previous answer did not expand');
+        await panel.locator('.tdoc-ask-turn-collapse').click();
+        await panel.getByRole('button', { name: 'Post as comment' }).click();
+        await panel.getByText('Posted as a comment').waitFor();
+        // Recreate an out-of-date/overriding image rule from a document page.
+        // The component must still bound its own avatar pixels.
+        await page.addStyleTag({ content: '.tdoc-pin-document img, .tdoc-ask-question .author img, .tdoc-floating-open .author img { width: auto; height: auto; max-width: none; max-height: none; }' });
+        await page.locator('.tdoc-pin-document img').waitFor();
+        const pinPhoto = await page.locator('.tdoc-pin-document img').boundingBox();
+        if (!pinPhoto || pinPhoto.width > 24 || pinPhoto.height > 24) throw new Error(`document pin photo exceeds its marker: ${JSON.stringify(pinPhoto)}`);
+        const questionPhoto = await panel.locator('.tdoc-ask-question .author img').boundingBox();
+        if (!questionPhoto || questionPhoto.width > 24 || questionPhoto.height > 24) throw new Error(`Ask AI question photo exceeds its row: ${JSON.stringify(questionPhoto)}`);
+        if (!(await panel.locator('.tdoc-ask-turn.is-public .tdoc-margin-comment').count()) || !(await panel.locator('.tdoc-ask-turn.is-public .tdoc-reply').count())) throw new Error('posted turn did not return to comment and reply cards');
+        if (await panel.locator('.tdoc-ask-turn').getByText('Only you can see this').count()) throw new Error('public answer still looks private');
+        const after = (await api('/api/comments?slug=launch-plan&version=1', { cookie: reader.cookie })).body;
+        if (!JSON.stringify(after).includes('What happens next?')) throw new Error('public question was not posted');
+        await page.locator('#tdoc-send-agent-btn').click();
+        await page.locator('#tdoc-send-agent-btn').click();
+        if (await page.getByRole('dialog', { name: 'Ask AI' }).locator('.tdoc-ask-turn-summary').count() !== 1) throw new Error('conversation disappeared after closing the panel');
+        await shot(page, 'ask-ai-reader-desktop.png');
+        await page.locator('.tdoc-pin-document').click();
+        const cardPhoto = await page.locator('.tdoc-floating-open .author img').first().boundingBox();
+        if (!cardPhoto || cardPhoto.width > 24 || cardPhoto.height > 24) throw new Error(`public comment photo exceeds its card: ${JSON.stringify(cardPhoto)}`);
+        await shot(page, 'ask-ai-public-comment-avatar.png');
+      } finally {
+        if (context) await context.close();
+        env.META.map.set(sessionKey, oldSession);
+      }
     });
 
     await t('phone: one entry; the comment button opens Comments and Ask AI tabs, no Ask AI in the bar', async () => {

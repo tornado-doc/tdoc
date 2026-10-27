@@ -5,6 +5,7 @@ const { chromium, webkit } = requirePlaywrightOrSkip('document-comments-ui.test.
 
 const commentsFile = path.join(__dirname, 'fixtures/tdocs/hostile-body-css/comments.json');
 const initial = fs.readFileSync(commentsFile, 'utf8');
+const shots = process.env.TDOC_UI_SHOTS;
 let failures = 0;
 async function check(name, run) {
   try { await run(); console.log(`  ✓ ${name}`); }
@@ -16,7 +17,7 @@ async function check(name, run) {
   for (let i = 0; i < 12; i++) seeded.push({
     id: `c_document_${i}`, version: 1,
     text: i === 1 ? 'What should change in this report?' : `Whole-document thought ${i}`,
-    author: { login: i % 2 ? 'editor' : 'tester' },
+    author: { login: i % 2 ? 'editor' : 'tester', avatar_url: '/tdoc_logo.png' },
     status: i === 2 ? 'applied' : 'open', ...(i === 2 ? { applied_in: 1 } : {}),
     created: `2026-08-22T00:00:${String(i + 6).padStart(2, '0')}Z`,
     anchor: null, replies: i === 1 ? [{ id: 'r_document_ai', parent_id: 'c_document_1',
@@ -49,6 +50,8 @@ async function check(name, run) {
               const frameBox = await page.locator('iframe').boundingBox();
               if (Math.abs(pinBox.y - frameBox.y - layout.titleY) > 45) throw new Error('pin is not beside the title');
               if (pinBox.x + pinBox.width > width + 1) throw new Error('pin extends beyond viewport');
+              const avatar = await pin.locator('img').first().boundingBox();
+              if (!avatar || avatar.width > 24 || avatar.height > 24) throw new Error(`document avatar exceeds its pin: ${JSON.stringify(avatar)}`);
             });
             if (width === 1400) {
               await check(`${engineName}: one click expands all title comments, with internal scrolling`, async () => {
@@ -61,6 +64,9 @@ async function check(name, run) {
                   scroll: el.scrollHeight, visible: el.clientHeight,
                 }));
                 if (size.top < 48 || size.bottom > 834 || size.scroll <= size.visible) throw new Error(`cluster overflows viewport or cannot scroll: ${JSON.stringify(size)}`);
+                const avatar = await cards.first().locator('.author img').boundingBox();
+                if (!avatar || avatar.width > 24 || avatar.height > 24) throw new Error(`comment avatar exceeds its card: ${JSON.stringify(avatar)}`);
+                if (shots && engineName === 'chromium') await page.screenshot({ path: path.join(shots, 'document-avatars-desktop.png') });
                 await cards.first().getByRole('button', { name: 'More actions' }).click();
                 if (await page.getByRole('menuitem', { name: /Re-anchor|Move anchor/ }).count()) throw new Error('whole-document comment offers re-anchor');
               });
@@ -70,6 +76,12 @@ async function check(name, run) {
                 const drawer = page.locator('#tdoc-comment-layer');
                 await drawer.waitFor();
                 await drawer.getByText('Whole-document thought 0').waitFor();
+                const avatar = await drawer.locator('.tdoc-margin-comment .author img').first().boundingBox();
+                if (!avatar || avatar.width > 24 || avatar.height > 24) throw new Error(`phone avatar exceeds its card: ${JSON.stringify(avatar)}`);
+                if (shots && engineName === 'chromium') {
+                  await page.waitForTimeout(300);
+                  await page.screenshot({ path: path.join(shots, 'document-avatars-phone.png') });
+                }
                 const filter = drawer.locator('.tdoc-comment-filter');
                 await filter.waitFor({ timeout: 5000 });
                 const ids = await drawer.locator('.tdoc-margin-comment[data-comment-id]').evaluateAll((cards) => cards.map((card) => card.dataset.commentId));

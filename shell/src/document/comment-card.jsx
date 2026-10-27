@@ -15,6 +15,8 @@ import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
 import { productPageUrl } from './product-url.js';
 
+const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };
+
 function authorLine(author) {
   if (!author) return 'anonymous';
   if (author.kind === 'agent') {
@@ -89,9 +91,9 @@ export function Author({ author, timestamp }) {
           title={`View ${authorLine(author)}'s public profile`}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}>
-          <img src={avatar} alt="" />
+          <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />
         </a>
-      ) : <img src={avatar} alt="" />) : null}
+      ) : <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />) : null}
       <span className="tdoc-cc-who">
         {hoverCard ? <AgentAuthorName author={author} /> : <span className="login">{authorLine(author)}</span>}
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
