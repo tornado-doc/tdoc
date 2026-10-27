@@ -114,7 +114,7 @@
   var pointerStartX = 0, pointerStartY = 0;
   function hideSelectionAction() {
     selectedPassage = null;
-    if (capturedTouchSelection && HL) CSS.highlights.delete('tdoc-selecting');
+    if (capturedTouchSelection && HL) CSS.highlights.delete('tdoc-pending');
     capturedTouchSelection = false;
     if (selectionAction) selectionAction.style.setProperty('display', 'none', 'important');
   }
@@ -438,8 +438,7 @@
     var mobile = window.innerWidth <= 700;
     var width = selectionAction.getBoundingClientRect().width || (mobile ? 164 : 152);
     var height = mobile ? 44 : 38;
-    // The iOS native selection menu sits above the passage. Keep our two
-    // actions below it; on desktop use the space above the selected text.
+    // Keep the phone actions below the passage and desktop actions above it.
     var top = mobile ? rect.bottom + 10 : rect.top - height - 10;
     if (!mobile && top < 8) top = rect.bottom + 10;
     if (mobile && top + height > window.innerHeight - 8) {
@@ -451,11 +450,13 @@
     selectionAction.style.setProperty('left', Math.max(8, Math.min(left, window.innerWidth - width - 8)) + 'px', 'important');
     selectionAction.style.setProperty('top', Math.max(8, top) + 'px', 'important');
     selectionAction.style.setProperty('display', 'inline-flex', 'important');
-    // Keep the passage painted while releasing iOS's native selection/menu.
+    // Use the same pending highlight as the original comment gesture while
+    // releasing iOS's native selection/menu.
     // Desktop retains the native range so Cmd+C continues to work.
     if (mobile && HL) {
       try {
-        CSS.highlights.set('tdoc-selecting', new Highlight(selectedPassage.range));
+        CSS.highlights.delete('tdoc-selecting');
+        CSS.highlights.set('tdoc-pending', new Highlight(selectedPassage.range));
         capturedTouchSelection = true;
         sel.removeAllRanges();
       } catch (e) { capturedTouchSelection = false; }
@@ -466,9 +467,6 @@
     if (pointerSelecting || touchSelecting || selectionActionActivated) { hideSelectionAction(); return; }
     selectionTimer = setTimeout(reportSelection, delay);
   }
-  document.addEventListener('selectionchange', function () {
-    if (interactionMode === 'comment' && !shellUiOpen && !capturedTouchSelection) scheduleSelectionAction(250);
-  });
   function caretAtPoint(x, y) {
     if (document.caretPositionFromPoint) {
       var pos = document.caretPositionFromPoint(x, y);
@@ -688,9 +686,9 @@
         }
       }
     }
-    // Native iOS selection settles after touchend. Do not show an action
-    // while a handle is still moving or before the system Copy menu appears.
-    scheduleSelectionAction(250);
+    // Match the original comment gesture: capture on release before iOS has
+    // time to open its native selection menu.
+    scheduleSelectionAction(0);
   }, true);
   window.addEventListener('blur', function () { clearSelectingCursor(); pointerSelecting = false; touchSelecting = false; });
   document.addEventListener('touchcancel', function () { touchSelecting = false; hideSelectionAction(); }, true);

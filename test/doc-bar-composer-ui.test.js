@@ -242,9 +242,9 @@ async function dragSelect(page, phrase, openComposer = true) {
       if (await page.locator('.tdoc-popup').count()) throw new Error('selection opened the composer before Comment was clicked');
       const selected = 'Billing ships first';
       if (await frame.evaluate(() => getSelection().toString())) throw new Error('phone retained the native selection menu');
-      if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-selecting')))) throw new Error(`phone lost the painted selection: ${JSON.stringify(await frame.evaluate(() => ({ action: getComputedStyle(document.querySelector('.tdoc-selection-action')).display, native: getSelection().toString(), highlights: [...CSS.highlights.keys()] })))}`);
+      if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-pending')))) throw new Error(`phone lost the pending highlight: ${JSON.stringify(await frame.evaluate(() => ({ action: getComputedStyle(document.querySelector('.tdoc-selection-action')).display, native: getSelection().toString(), highlights: [...CSS.highlights.keys()] })))}`);
       const geometry = await frame.evaluate(() => ({
-        selectedBottom: CSS.highlights.get('tdoc-selecting').values().next().value.getBoundingClientRect().bottom,
+        selectedBottom: CSS.highlights.get('tdoc-pending').values().next().value.getBoundingClientRect().bottom,
         actionTop: document.querySelector('.tdoc-selection-action').getBoundingClientRect().top,
       }));
       if (geometry.actionTop < geometry.selectedBottom) throw new Error(`phone toolbar covered the system Copy menu: ${JSON.stringify(geometry)}`);
@@ -296,6 +296,9 @@ async function dragSelect(page, phrase, openComposer = true) {
           }
           throw new Error('selection fixture missing');
         });
+        await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
+        if (await frame.evaluate(() => getSelection().toString() || !CSS.highlights.has('tdoc-pending'))) throw new Error('WebKit kept the native menu or lost the pending highlight');
+        await shot(page, 'selection-actions-webkit-phone-390.png');
         await frame.getByRole('button', { name: 'Copy', exact: true }).click();
         await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();
         await page.evaluate(() => { const el = document.createElement('textarea'); el.id = 'paste-check'; document.body.appendChild(el); el.focus(); });
