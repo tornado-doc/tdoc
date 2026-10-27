@@ -8,6 +8,8 @@ import { CommentThreadList } from './comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from './comment-pin.jsx';
 import { avatarFor, isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
 
+const DOCUMENT_PIN_FACE_SIZE = { width: 21, height: 21, maxWidth: 21, maxHeight: 21 };
+
 function Pin({
   cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
 }) {
@@ -46,7 +48,8 @@ function Pin({
       {documentPin && !single ? <span className="tdoc-document-pin-faces" aria-hidden="true">
         {cluster.items.slice(0, 3).map(({ comment }, index) => {
           const avatar = avatarFor(comment);
-          return avatar ? <img key={comment.id} src={avatar} alt="" style={{ zIndex: 3 - index }} />
+          return avatar ? <img key={comment.id} src={avatar} alt="" width="21" height="21"
+            style={{ ...DOCUMENT_PIN_FACE_SIZE, zIndex: 3 - index }} />
             : <span key={comment.id} className="tdoc-pin-anon" style={{ zIndex: 3 - index }} />;
         })}
       </span> : <CommentPinFace comment={single} state={state} clusterCount={cluster.items.length} />}
