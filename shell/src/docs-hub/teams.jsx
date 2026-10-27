@@ -884,7 +884,7 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
         <p>Manage this workspace in one place.</p>
       </div>
       {team.role === 'admin' ? <TeamBillingCard team={team} /> : null}
-      {guestsEnabled ? <SegmentedControl ariaLabel="Team settings" value={tab} onChange={setTab} options={[
+      {guestsEnabled ? <SegmentedControl ariaLabel="Team settings" className="tm-settings-tabs" value={tab} onChange={setTab} options={[
         { value: 'members', label: 'Members' },
         ...(team.role === 'admin' ? [{ value: 'guests', label: 'Guests' }] : []),
         { value: 'agents', label: 'Agents' },

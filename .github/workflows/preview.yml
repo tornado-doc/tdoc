@@ -227,12 +227,20 @@ jobs:
           STORED_FINGERPRINT="$(wrangler kv key get "$FIXTURE_MARKER" \
             --namespace-id "$PREVIEW_KV_ID" --text --remote 2>/dev/null || true)"
           if [ "$STORED_FINGERPRINT" = "$FIXTURE_FINGERPRINT" ]; then
-            echo "preview fixtures unchanged; skipping KV delete/reseed"
-            exit 0
+            # A concurrent PR can remove the shared landing after this PR's
+            # marker was written. A matching fingerprint alone is not proof
+            # that the preview homepage still exists.
+            LANDING_STATUS="$(curl -sS --connect-timeout 10 --max-time 20 \
+              "$BASE/d/tornado-doc/v/1" -o /dev/null -w '%{http_code}')"
+            if [ "$LANDING_STATUS" = 200 ]; then
+              echo "preview fixtures unchanged; skipping KV delete/reseed"
+              exit 0
+            fi
+            echo "preview landing missing (HTTP $LANDING_STATUS); reseeding fixtures"
           fi
 
           # A PR reuses its alias and preview storage across pushes. Clear the
-          # two deterministic fixtures before reseeding so an older preview
+          # deterministic fixtures before reseeding so an older preview
           # cannot reject v1 as a stale write (or keep serving old PR code).
           reset_preview_slug() {
             local slug="$1"
@@ -270,7 +278,6 @@ jobs:
             esac
           }
           reset_preview_slug conway-life
-          reset_preview_slug tornado-doc
 
           seed() {
             local v="$1" html="$2"
@@ -375,17 +382,14 @@ jobs:
             --argjson version 1 \
             --rawfile html "$LANDING_DIR/v1/index.html" \
             --slurpfile meta "$LANDING_DIR/meta.json" \
-            '{slug:$slug, version:$version, html:$html, meta:$meta[0]}' \
+            '{slug:$slug, version:$version, html:$html, meta:$meta[0], replace:true}' \
             > /tmp/tdoc-preview-landing.json
-          curl -sS --connect-timeout 10 --max-time 90 -X POST "$BASE/api/upload" \
-            -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data-binary @/tmp/tdoc-preview-landing.json \
-            | tee /tmp/tdoc-preview-landing-resp.json
-          jq -e '.ok == true' /tmp/tdoc-preview-landing-resp.json >/dev/null
+          # The homepage slug is shared by every PR preview. Replace v1 in
+          # place instead of deleting it on every run (DELETE puts it in
+          # Trash, racing other PRs). Recover a leftover Trash state once.
+          bash bin/tdoc-preview-publish-landing.sh "$BASE" /tmp/tdoc-preview-landing.json
           wrangler kv key put "$FIXTURE_MARKER" "$FIXTURE_FINGERPRINT" \
             --namespace-id "$PREVIEW_KV_ID" --remote --ttl 1209600
-          echo "seeded landing"
 
       - name: Sticky preview comment
         env:
