@@ -374,19 +374,23 @@ function mayDelete(item, currentUser, isOwner) {
   return authoredBy(item, currentUser) || (isOwner && item.author?.kind === 'agent');
 }
 
-// Mirrors the worker's canMutate(): re-anchoring is the author's or the doc
-// owner's, nobody else's. Without this the button rendered for every reader
-// and the server's 403 (`not_author`) was the only thing stopping them — a
-// toast where there should have been no affordance at all. Delete used to
-// share this gate; it is authoredBy's now.
-function mayMutate(item, currentUser, isOwner) {
-  return Boolean(
-    isOwner
-    || (currentUser
-      && currentUser !== 'anon'
-      && item.author?.login
-      && item.author.login === currentUser),
-  );
+// Mirrors the worker's canMutate(): resolving and re-anchoring are the
+// author's or the doc owner's, nobody else's. Without this the buttons
+// rendered for every reader and the server's 403 (`not_author`) was the only
+// thing stopping them — a toast where there should have been no affordance at
+// all. Delete used to share this gate; it is authoredBy's now.
+//   - isOwner is the worker's isDocOwnerSession(), sent as is: the doc's
+//     owner, or for a team doc the team's admins, or a feedback space's owner.
+//   - the author is matched like actorKeys(session): case-insensitive, and
+//     against every key the viewer is known by (handoffViewer carries the
+//     linked ones). An exact compare on one login hid ✓ from an author who
+//     signed in with the other half of a linked account (Julie, 2026-10-27).
+export function mayMutate(item, currentUser, isOwner, viewerKeys = []) {
+  const who = String(item.author?.login || '').trim().toLowerCase();
+  if (isOwner) return true;
+  if (!who) return false;
+  return [currentUser, ...[].concat(viewerKeys || [])]
+    .some((key) => key && key !== 'anon' && String(key).trim().toLowerCase() === who);
 }
 
 function hasReactions(item) {
@@ -750,7 +754,7 @@ export function CommentCard({
   const reactionCount = hasReactions(comment);
   const isMine = authoredBy(comment, currentUser);
   const canDelete = mayDelete(comment, currentUser, isOwner);
-  const canMutate = mayMutate(comment, currentUser, isOwner);
+  const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);
   const createdAt = formatCreated(comment.created);
   const replies = comment.replies || [];
   // Orphans — their parent reply was deleted — still show under the root

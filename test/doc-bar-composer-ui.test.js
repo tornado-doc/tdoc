@@ -726,6 +726,47 @@ async function dragSelect(page, phrase) {
       if (!picked.startsWith(selected.trim())) throw new Error(`agent choice was not selected: ${picked} / ${selected}`);
       await context.close();
     });
+
+    // Serena, 2026-10-27: More agents opened behind the Ask AI popover. Menus
+    // and their submenus sit above the desktop popover and the phone drawer.
+    await t('More agents opens on top of the Ask AI popover and the phone drawer', async () => {
+      const onTop = (page) => page.evaluate(() => {
+        const sub = [...document.querySelectorAll('.ui-menu-popup')].at(-1);
+        const r = sub.getBoundingClientRect();
+        return sub.contains(document.elementFromPoint(r.left + 12, r.top + r.height / 2));
+      });
+      const openMore = async (page, scope) => {
+        await scope.getByRole('button', { name: 'Who should answer?' }).click();
+        await page.locator('.tdoc-agent-menu').getByRole('menuitem', { name: 'More agents' }).click();
+        await page.locator('.ui-menu-popup').nth(1).waitFor({ state: 'visible' });
+        await page.waitForTimeout(250);
+      };
+      {
+        const { context, page } = await open(julie, 'launch-plan');
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.locator('#tdoc-send-agent-btn').click();
+        const panel = page.getByRole('dialog', { name: 'Ask AI' });
+        await panel.locator('textarea').fill('Why billing first?');
+        // An answer makes the popover tall enough to sit under the submenu.
+        await panel.getByRole('button', { name: 'Who should answer?' }).click();
+        await page.locator('.tdoc-agent-menu').getByRole('menuitem', { name: /tdoc AI/ }).click();
+        await panel.getByRole('button', { name: 'Send question' }).click();
+        await panel.getByText('Invoices block two renewals.').waitFor();
+        await openMore(page, panel);
+        if (!(await onTop(page))) throw new Error('1280px: More agents is behind the Ask AI popover');
+        await shot(page, 'ask-ai-more-agents-1280.png');
+        await context.close();
+      }
+      {
+        const { context, page } = await open(julie, 'launch-plan', true);
+        await page.locator('.tdoc-fab').click();
+        await page.getByRole('radiogroup', { name: 'Comments or Ask AI' }).getByRole('radio', { name: /Ask AI/ }).click();
+        await openMore(page, page.locator('#tdoc-comment-layer'));
+        if (!(await onTop(page))) throw new Error('390px: More agents is behind the comment drawer');
+        await shot(page, 'ask-ai-more-agents-drawer-390.png');
+        await context.close();
+      }
+    });
   } finally {
     await browser.close();
     server.close();

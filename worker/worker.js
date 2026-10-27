@@ -16602,7 +16602,7 @@ const tdocHandlers = {
               shareUrl: `/d/${encodeURIComponent(slug)}?doc=1&share=1`,
               docUrl: `/d/${encodeURIComponent(slug)}/v/${Number(vStr)}?doc=1`,
               bookmarklet: feedbackBookmarklet(feedbackScriptSrc(url.origin)),
-              identity: signedIn ? { login: actorKey(viewer), avatar_url: viewer.avatar_url || '', name: actorDisplayName(viewer) } : null,
+              identity: signedIn ? { login: actorKey(viewer), linked_actor_keys: actorKeys(viewer), avatar_url: viewer.avatar_url || '', name: actorDisplayName(viewer) } : null,
               isOwner,
               joined,
               canComment: signedIn && canCommentOnDoc(access, viewer, env, gate.meta),
