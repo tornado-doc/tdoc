@@ -113,7 +113,6 @@ function ActivityDemo() {
         <button id="activity-refresh" type="button" onClick={() => setLog('refreshed')}>Refresh comments</button>
         </AskAiPanel>
       </DocumentSendAgentAction>
-      {!phone ? <DocumentSendToAgentButton count={counts.ready} onClick={() => setLog(`send-plane:${buckets.ready.map((item) => item.id).join(',')}`)} /> : null}
       {!phone ? <><strong>Share</strong><span>⋯</span><span style={{ color: '#888' }}>Tdoc ▾</span><span style={{ background: '#1652f0', color: '#fff', borderRadius: '50%', width: 26, height: 26, display: 'grid', placeItems: 'center' }}>J</span></> : null}
     </div>
     <main style={{ margin: phone ? '28px 20px' : '70px 0 0 145px', maxWidth: 720, fontSize: phone ? 16 : 20, lineHeight: 2 }}>

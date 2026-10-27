@@ -1714,7 +1714,6 @@ export function DocumentShell({ boot, config }) {
                 {askAiPanel(handoffDetailsOpen)}
               </DocumentSendAgentAction>
             ) : null}
-            {notifyEnabled && !unifiedEntry ? sendToAgentButton : null}
             <DocumentModeControl
               mode={editor.mode}
               canComment={config.canComment}
