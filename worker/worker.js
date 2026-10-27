@@ -20688,6 +20688,8 @@ const tdocHandlers = {
       // publish goes ahead with the automatic card.
       const previewShot = body.preview_png == null ? null : validatePreviewPng(body.preview_png);
       if (previewShot && previewShot.error) previewWarning = `preview_png: ${previewShot.message}`;
+      // (An unscoped account token's new doc may land in a team too; see
+      // the else branch below.)
       // Where a new doc from a workspace-scoped token lands, so it never
       // exists somewhere the token could not see it again: the team the
       // client names (`team`, id or name: the CLI's --team) if the token
@@ -20718,6 +20720,20 @@ const tdocHandlers = {
           }
           scopedNewTeam = scope.teams[0];
         }
+      } else if (!writeGate.meta && auth.actor && auth.actor.kind === 'hosted') {
+        // Any other account credential: the CLI used to publish to My docs
+        // and move the doc afterwards, so a full My docs refused a doc meant
+        // for a team. The team the client names (`team`, the CLI's --team)
+        // takes the doc at once when this account is in it -- where the
+        // CLI's move would put it, which is then a no-op. It is resolved
+        // among the account's own teams only. Any other name is not refused
+        // here: the doc goes to My docs and the CLI's move says why, as
+        // before. The default team (`team_default`) stays the CLI's to apply.
+        const hint = typeof body.team === 'string' ? body.team.trim() : '';
+        if (hint) {
+          const named = await resolveMemberTeam(env, auth.actor.account_id, await loadAccountTeamIds(env, auth.actor.account_id), hint);
+          if (named) scopedNewTeam = named.id;
+        }
       }
       const firstHostedPublish = !!(
         auth.actor && auth.actor.kind === 'hosted' && !writeGate.meta && verNum === 1
@@ -20736,7 +20752,9 @@ const tdocHandlers = {
           const blocked = await teamPlanBlocksDocs(env, team, 1);
           if (blocked) return json(blocked, { status: 402 });
         }
-        if (!writeGate.meta) {
+        // A new doc landing in a team is the team's (its plan, above), not
+        // one of this account's My docs.
+        if (!writeGate.meta && !scopedNewTeam) {
           const limit = await hostedMaxDocsFor(env, auth.actor.account_id);
           const used = await countHostedDocs(env, auth.actor.account_id);
           if (used >= limit) {
@@ -20812,8 +20830,7 @@ const tdocHandlers = {
         // Team placement is moved only through /api/team/move; a publish
         // neither sets it nor drops it, and keeps the team share flag unless
         // the client says otherwise.
-        // A workspace-scoped token's new doc may go straight into a team
-        // (scopedNewTeam above).
+        // A new doc may go straight into a team (scopedNewTeam above).
         const prevTeam = (prev && prev.workspace_id) || (!prev && scopedNewTeam) || null;
         if (prevTeam) incoming.workspace_id = prevTeam;
         else delete incoming.workspace_id;

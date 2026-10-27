@@ -10,6 +10,7 @@ import {
   FileDown,
   FolderInput,
   History,
+  Send,
   Share2,
   Star,
   Trash2,
@@ -149,6 +150,28 @@ export function DocumentPrimaryAction({
   ) : (
     <button id="tdoc-share-btn" type="button" className="tdoc-share-quiet tdoc-document-primary" aria-label="Share" onClick={onShare}>
       <Share2 size={15} /> <span>Share</span>
+    </button>
+  );
+}
+
+// Send to agent, one click: opens the Send dialog with the comments ready to
+// hand off. It sits beside Ask AI (desktop bar) or in the comments drawer
+// header (phone), so sending never hides inside the Ask AI panel.
+export function DocumentSendToAgentButton({ count = 0, onClick }) {
+  const label = count > 0 ? `Send to agent (${count} ready)` : 'Send to agent';
+  return (
+    <button
+      id="tdoc-send-plane-btn"
+      type="button"
+      className="tdoc-send-plane-action"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <Send size={16} aria-hidden="true" />
+      {count > 0 ? (
+        <span className="tdoc-send-plane-badge">{count > 99 ? '99+' : count}</span>
+      ) : null}
     </button>
   );
 }
