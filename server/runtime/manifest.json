@@ -1,5 +1,6 @@
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
   "_arc-UPbZixjh.js": {
     "file": "assets/arc-UPbZixjh.js",
 ||||||| cbc8ae113
@@ -9,8 +10,16 @@
   "_arc-Btnlix4n.js": {
     "file": "assets/arc-Btnlix4n.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_arc-CmoDtFyf.js": {
+    "file": "assets/arc-CmoDtFyf.js",
+=======
+  "_arc-mZ9DBrRG.js": {
+    "file": "assets/arc-mZ9DBrRG.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "arc",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -18,8 +27,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_channel-D4AGQ4kO.js": {
     "file": "assets/channel-D4AGQ4kO.js",
@@ -30,8 +45,16 @@
   "_channel-BggTKzyr.js": {
     "file": "assets/channel-BggTKzyr.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_channel-swWi0qyt.js": {
+    "file": "assets/channel-swWi0qyt.js",
+=======
+  "_channel-D48Kzn_j.js": {
+    "file": "assets/channel-D48Kzn_j.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "channel",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -39,8 +62,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-2Q5K7J3B-IuK27uQ7.js": {
     "file": "assets/chunk-2Q5K7J3B-IuK27uQ7.js",
@@ -51,8 +80,16 @@
   "_chunk-2Q5K7J3B-BWLsPB0p.js": {
     "file": "assets/chunk-2Q5K7J3B-BWLsPB0p.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-2Q5K7J3B-0uc9udF7.js": {
+    "file": "assets/chunk-2Q5K7J3B-0uc9udF7.js",
+=======
+  "_chunk-2Q5K7J3B-C1CuyU_D.js": {
+    "file": "assets/chunk-2Q5K7J3B-C1CuyU_D.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-2Q5K7J3B",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -60,8 +97,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-5VM5RSS4-Bb_DXOjb.js": {
     "file": "assets/chunk-5VM5RSS4-Bb_DXOjb.js",
@@ -72,8 +115,16 @@
   "_chunk-5VM5RSS4-bQQKGqrG.js": {
     "file": "assets/chunk-5VM5RSS4-bQQKGqrG.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-5VM5RSS4-RS1Ndwfg.js": {
+    "file": "assets/chunk-5VM5RSS4-RS1Ndwfg.js",
+=======
+  "_chunk-5VM5RSS4-BRgA4GJ1.js": {
+    "file": "assets/chunk-5VM5RSS4-BRgA4GJ1.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-5VM5RSS4",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -81,8 +132,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-F27PBJKO-BaNDg3SW.js": {
     "file": "assets/chunk-F27PBJKO-BaNDg3SW.js",
@@ -93,8 +150,16 @@
   "_chunk-F27PBJKO-CwNL9cP3.js": {
     "file": "assets/chunk-F27PBJKO-CwNL9cP3.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-F27PBJKO-BTqv3_sL.js": {
+    "file": "assets/chunk-F27PBJKO-BTqv3_sL.js",
+=======
+  "_chunk-F27PBJKO-IdZNOY4U.js": {
+    "file": "assets/chunk-F27PBJKO-IdZNOY4U.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-F27PBJKO",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -102,8 +167,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-IMKFNOWR-Cq37AmPI.js": {
     "file": "assets/chunk-IMKFNOWR-Cq37AmPI.js",
@@ -114,8 +185,16 @@
   "_chunk-IMKFNOWR-DlOgZ20O.js": {
     "file": "assets/chunk-IMKFNOWR-DlOgZ20O.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-IMKFNOWR-CY6kHitX.js": {
+    "file": "assets/chunk-IMKFNOWR-CY6kHitX.js",
+=======
+  "_chunk-IMKFNOWR-C-PrAYmW.js": {
+    "file": "assets/chunk-IMKFNOWR-C-PrAYmW.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-IMKFNOWR",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-XXDRQBXY-BLTHJ7Fv.js",
       "_chunk-POPQ4Y6H-BH3laKkk.js",
@@ -132,8 +211,20 @@
       "_index-kIpsL1CW.js",
       "_chunk-F27PBJKO-CwNL9cP3.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js"
+=======
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-JWPE2WC7-3ALvsRKb.js": {
     "file": "assets/chunk-JWPE2WC7-3ALvsRKb.js",
@@ -144,8 +235,16 @@
   "_chunk-JWPE2WC7-cYYAt36w.js": {
     "file": "assets/chunk-JWPE2WC7-cYYAt36w.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-JWPE2WC7-p-TmaiTv.js": {
+    "file": "assets/chunk-JWPE2WC7-p-TmaiTv.js",
+=======
+  "_chunk-JWPE2WC7-Cq6Yoite.js": {
+    "file": "assets/chunk-JWPE2WC7-Cq6Yoite.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-JWPE2WC7",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -153,8 +252,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-POPQ4Y6H-BH3laKkk.js": {
     "file": "assets/chunk-POPQ4Y6H-BH3laKkk.js",
@@ -165,8 +270,16 @@
   "_chunk-POPQ4Y6H-B4zMvmUq.js": {
     "file": "assets/chunk-POPQ4Y6H-B4zMvmUq.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-POPQ4Y6H-CXX8GCBO.js": {
+    "file": "assets/chunk-POPQ4Y6H-CXX8GCBO.js",
+=======
+  "_chunk-POPQ4Y6H-CKPXTlEs.js": {
+    "file": "assets/chunk-POPQ4Y6H-CKPXTlEs.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-POPQ4Y6H",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -174,8 +287,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-SVP7TREG-C2oZPBZd.js": {
     "file": "assets/chunk-SVP7TREG-C2oZPBZd.js",
@@ -186,8 +305,16 @@
   "_chunk-SVP7TREG-DHQhYGyD.js": {
     "file": "assets/chunk-SVP7TREG-DHQhYGyD.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-SVP7TREG-JpJfLzJW.js": {
+    "file": "assets/chunk-SVP7TREG-JpJfLzJW.js",
+=======
+  "_chunk-SVP7TREG-BPlAtfVg.js": {
+    "file": "assets/chunk-SVP7TREG-BPlAtfVg.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-SVP7TREG",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -195,8 +322,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-TICWLB2K-4eSuNkMb.js": {
     "file": "assets/chunk-TICWLB2K-4eSuNkMb.js",
@@ -207,8 +340,16 @@
   "_chunk-TICWLB2K-AlD6E0HL.js": {
     "file": "assets/chunk-TICWLB2K-AlD6E0HL.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-TICWLB2K-CigK8bxH.js": {
+    "file": "assets/chunk-TICWLB2K-CigK8bxH.js",
+=======
+  "_chunk-TICWLB2K-D6vOb6C6.js": {
+    "file": "assets/chunk-TICWLB2K-D6vOb6C6.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-TICWLB2K",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-5VM5RSS4-Bb_DXOjb.js",
       "_chunk-XXDRQBXY-BLTHJ7Fv.js",
@@ -228,8 +369,22 @@
       "_index-kIpsL1CW.js",
       "_chunk-F27PBJKO-CwNL9cP3.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-5VM5RSS4-RS1Ndwfg.js",
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js"
+=======
+      "_chunk-5VM5RSS4-BRgA4GJ1.js",
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_chunk-XXDRQBXY-BLTHJ7Fv.js": {
     "file": "assets/chunk-XXDRQBXY-BLTHJ7Fv.js",
@@ -240,8 +395,16 @@
   "_chunk-XXDRQBXY-PF_J3R--.js": {
     "file": "assets/chunk-XXDRQBXY-PF_J3R--.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_chunk-XXDRQBXY-6zROlnY8.js": {
+    "file": "assets/chunk-XXDRQBXY-6zROlnY8.js",
+=======
+  "_chunk-XXDRQBXY-1--5tPN8.js": {
+    "file": "assets/chunk-XXDRQBXY-1--5tPN8.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "chunk-XXDRQBXY",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -249,8 +412,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_cynefin-OW5HDTMX-C_eOQctO.js": {
     "file": "assets/cynefin-OW5HDTMX-C_eOQctO.js",
@@ -261,6 +430,13 @@
   "_cynefin-OW5HDTMX-Cf1YG46d.js": {
     "file": "assets/cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_cynefin-OW5HDTMX-ByxumjPl.js": {
+    "file": "assets/cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+  "_cynefin-OW5HDTMX-Bg_8gBdR.js": {
+    "file": "assets/cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "cynefin-OW5HDTMX",
     "imports": [
       "shell/src/main.jsx"
@@ -275,6 +451,7 @@
     "name": "defaultLocale"
   },
 <<<<<<< HEAD
+<<<<<<< HEAD
   "_flowDiagram-HODETNUW-BiQp-O07.js": {
     "file": "assets/flowDiagram-HODETNUW-BiQp-O07.js",
 ||||||| cbc8ae113
@@ -284,9 +461,17 @@
   "_flowDiagram-HODETNUW-LwUjezvl.js": {
     "file": "assets/flowDiagram-HODETNUW-LwUjezvl.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_flowDiagram-HODETNUW-BeHm04iQ.js": {
+    "file": "assets/flowDiagram-HODETNUW-BeHm04iQ.js",
+=======
+  "_flowDiagram-HODETNUW-DfXc0xG1.js": {
+    "file": "assets/flowDiagram-HODETNUW-DfXc0xG1.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "flowDiagram-HODETNUW",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-5VM5RSS4-Bb_DXOjb.js",
       "_chunk-XXDRQBXY-BLTHJ7Fv.js",
@@ -309,8 +494,24 @@
       "_chunk-F27PBJKO-CwNL9cP3.js",
       "_channel-BggTKzyr.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-5VM5RSS4-RS1Ndwfg.js",
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+      "_channel-swWi0qyt.js"
+=======
+      "_chunk-5VM5RSS4-BRgA4GJ1.js",
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+      "_channel-D48Kzn_j.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_index-Dpo9pxjt.js": {
     "file": "assets/index-Dpo9pxjt.js",
@@ -321,6 +522,13 @@
   "_index-kIpsL1CW.js": {
     "file": "assets/index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_index-CVw6H_RS.js": {
+    "file": "assets/index-CVw6H_RS.js",
+=======
+  "_index-CVbxxqwF.js": {
+    "file": "assets/index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "index",
     "isDynamicEntry": true,
     "imports": [
@@ -334,6 +542,7 @@
       "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
       "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
 <<<<<<< HEAD
+<<<<<<< HEAD
       "_flowDiagram-HODETNUW-BiQp-O07.js",
       "_flowDiagram-HODETNUW-BiQp-O07.js",
 ||||||| cbc8ae113
@@ -343,6 +552,13 @@
       "_flowDiagram-HODETNUW-LwUjezvl.js",
       "_flowDiagram-HODETNUW-LwUjezvl.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_flowDiagram-HODETNUW-BeHm04iQ.js",
+      "_flowDiagram-HODETNUW-BeHm04iQ.js",
+=======
+      "_flowDiagram-HODETNUW-DfXc0xG1.js",
+      "_flowDiagram-HODETNUW-DfXc0xG1.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
       "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
       "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
@@ -359,12 +575,18 @@
       "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
       "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
 <<<<<<< HEAD
+<<<<<<< HEAD
       "_flowDiagram-HODETNUW-BiQp-O07.js",
 ||||||| cbc8ae113
       "_flowDiagram-HODETNUW-BeHm04iQ.js",
 =======
       "_flowDiagram-HODETNUW-LwUjezvl.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_flowDiagram-HODETNUW-BeHm04iQ.js",
+=======
+      "_flowDiagram-HODETNUW-DfXc0xG1.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
       "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
       "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
@@ -391,6 +613,7 @@
     "name": "init"
   },
 <<<<<<< HEAD
+<<<<<<< HEAD
   "_layout-BbAvo7qP.js": {
     "file": "assets/layout-BbAvo7qP.js",
 ||||||| cbc8ae113
@@ -400,8 +623,16 @@
   "_layout-fQECIvyD.js": {
     "file": "assets/layout-fQECIvyD.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_layout-QaRCBHFw.js": {
+    "file": "assets/layout-QaRCBHFw.js",
+=======
+  "_layout-BrzcPnuz.js": {
+    "file": "assets/layout-BrzcPnuz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "layout",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js"
 ||||||| cbc8ae113
@@ -409,8 +640,14 @@
 =======
       "_index-kIpsL1CW.js"
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js"
+=======
+      "_index-CVbxxqwF.js"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
+<<<<<<< HEAD
 <<<<<<< HEAD
   "_linear-B6toV4kJ.js": {
     "file": "assets/linear-B6toV4kJ.js",
@@ -421,8 +658,16 @@
   "_linear-C6Kh4U20.js": {
     "file": "assets/linear-C6Kh4U20.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_linear-Cc9ArwEo.js": {
+    "file": "assets/linear-Cc9ArwEo.js",
+=======
+  "_linear-BtwNEM0o.js": {
+    "file": "assets/linear-BtwNEM0o.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "linear",
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -430,6 +675,11 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "_init-Gi6I4Gst.js",
       "_defaultLocale-DX6XiGOO.js"
     ]
@@ -442,6 +692,7 @@
     ]
   },
 <<<<<<< HEAD
+<<<<<<< HEAD
   "_percentages-BXMCSKIN-DREaLffj.js": {
     "file": "assets/percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -451,6 +702,13 @@
   "_percentages-BXMCSKIN-CPaxfpHU.js": {
     "file": "assets/percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_percentages-BXMCSKIN-PPklI3CY.js": {
+    "file": "assets/percentages-BXMCSKIN-PPklI3CY.js",
+=======
+  "_percentages-BXMCSKIN-BRPzOloz.js": {
+    "file": "assets/percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "percentages-BXMCSKIN",
     "isDynamicEntry": true,
     "imports": [
@@ -466,12 +724,18 @@
       "node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js",
       "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
 <<<<<<< HEAD
+<<<<<<< HEAD
       "_pica-C2_21B2e.js",
 ||||||| cbc8ae113
       "_pica-DpfVxOhD.js",
 =======
       "_pica-DnKhnkPE.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_pica-DpfVxOhD.js",
+=======
+      "_pica-BP86GHkq.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
       "node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js",
       "node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js",
@@ -527,6 +791,7 @@
       "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js",
       "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js",
 <<<<<<< HEAD
+<<<<<<< HEAD
       "_index-Dpo9pxjt.js",
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -536,6 +801,13 @@
       "_index-kIpsL1CW.js",
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "node_modules/canvas-roundrect-polyfill/roundRect.js"
     ],
     "css": [
@@ -549,6 +821,7 @@
     ]
   },
 <<<<<<< HEAD
+<<<<<<< HEAD
   "_pica-C2_21B2e.js": {
     "file": "assets/pica-C2_21B2e.js",
 ||||||| cbc8ae113
@@ -558,6 +831,13 @@
   "_pica-DnKhnkPE.js": {
     "file": "assets/pica-DnKhnkPE.js",
 >>>>>>> origin/main
+||||||| 35b200639
+  "_pica-DpfVxOhD.js": {
+    "file": "assets/pica-DpfVxOhD.js",
+=======
+  "_pica-BP86GHkq.js": {
+    "file": "assets/pica-BP86GHkq.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "pica",
     "isDynamicEntry": true,
     "imports": [
@@ -586,16 +866,23 @@
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js": {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "assets/ar-SA-G6X2FPQ2-BM9C_r0M.js",
 ||||||| cbc8ae113
     "file": "assets/ar-SA-G6X2FPQ2-Ct-TTeKQ.js",
 =======
     "file": "assets/ar-SA-G6X2FPQ2-CFdJ4sVd.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ar-SA-G6X2FPQ2-Ct-TTeKQ.js",
+=======
+    "file": "assets/ar-SA-G6X2FPQ2-US6uO53I.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ar-SA-G6X2FPQ2",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -603,10 +890,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/az-AZ-76LH7QW2-BfZHXr08.js",
 ||||||| cbc8ae113
@@ -614,10 +907,16 @@
 =======
     "file": "assets/az-AZ-76LH7QW2-ImOOOltI.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/az-AZ-76LH7QW2-B0tTZ4EE.js",
+=======
+    "file": "assets/az-AZ-76LH7QW2-aVGaKvBG.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "az-AZ-76LH7QW2",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -625,10 +924,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/bg-BG-XCXSNQG7-BlirhbfX.js",
 ||||||| cbc8ae113
@@ -636,10 +941,16 @@
 =======
     "file": "assets/bg-BG-XCXSNQG7-Di0GKion.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/bg-BG-XCXSNQG7-Cen7aPgE.js",
+=======
+    "file": "assets/bg-BG-XCXSNQG7-qoGn2OJI.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "bg-BG-XCXSNQG7",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -647,10 +958,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/bn-BD-2XOGV67Q.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/bn-BD-2XOGV67Q-MMQCfB9Z.js",
 ||||||| cbc8ae113
@@ -658,10 +975,16 @@
 =======
     "file": "assets/bn-BD-2XOGV67Q-Cd2XDODb.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/bn-BD-2XOGV67Q-ebxvyN7U.js",
+=======
+    "file": "assets/bn-BD-2XOGV67Q-DTiLqRdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "bn-BD-2XOGV67Q",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/bn-BD-2XOGV67Q.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -669,10 +992,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/ca-ES-6MX7JW3Y.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ca-ES-6MX7JW3Y-Dd_dZsoW.js",
 ||||||| cbc8ae113
@@ -680,10 +1009,16 @@
 =======
     "file": "assets/ca-ES-6MX7JW3Y-Bq3UrXrM.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ca-ES-6MX7JW3Y-D9Pqha3b.js",
+=======
+    "file": "assets/ca-ES-6MX7JW3Y-CnZYh6gK.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ca-ES-6MX7JW3Y",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ca-ES-6MX7JW3Y.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -691,10 +1026,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/cs-CZ-2BRQDIVT.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/cs-CZ-2BRQDIVT-BN-bF4JM.js",
 ||||||| cbc8ae113
@@ -702,10 +1043,16 @@
 =======
     "file": "assets/cs-CZ-2BRQDIVT-DIrsNCr3.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/cs-CZ-2BRQDIVT-B4dcpNcw.js",
+=======
+    "file": "assets/cs-CZ-2BRQDIVT-B2AeYk1k.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "cs-CZ-2BRQDIVT",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/cs-CZ-2BRQDIVT.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -713,10 +1060,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/da-DK-5WZEPLOC.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/da-DK-5WZEPLOC-DBGSaQ9e.js",
 ||||||| cbc8ae113
@@ -724,10 +1077,16 @@
 =======
     "file": "assets/da-DK-5WZEPLOC-BgbNgN7i.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/da-DK-5WZEPLOC-Bvz0Zlkd.js",
+=======
+    "file": "assets/da-DK-5WZEPLOC-BuN9YqiW.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "da-DK-5WZEPLOC",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/da-DK-5WZEPLOC.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -735,10 +1094,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/de-DE-XR44H4JA.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/de-DE-XR44H4JA-BejdwI76.js",
 ||||||| cbc8ae113
@@ -746,10 +1111,16 @@
 =======
     "file": "assets/de-DE-XR44H4JA-CAlXSC4k.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/de-DE-XR44H4JA-DXdynVZf.js",
+=======
+    "file": "assets/de-DE-XR44H4JA-BW1xe5RY.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "de-DE-XR44H4JA",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/de-DE-XR44H4JA.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -757,10 +1128,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/el-GR-BZB4AONW.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/el-GR-BZB4AONW-BfJJpZwN.js",
 ||||||| cbc8ae113
@@ -768,10 +1145,16 @@
 =======
     "file": "assets/el-GR-BZB4AONW-CQZ17qDD.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/el-GR-BZB4AONW-D4svqtCF.js",
+=======
+    "file": "assets/el-GR-BZB4AONW-CQzYFWtm.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "el-GR-BZB4AONW",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/el-GR-BZB4AONW.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -779,10 +1162,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/es-ES-U4NZUMDT.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/es-ES-U4NZUMDT-Bya5JIVz.js",
 ||||||| cbc8ae113
@@ -790,10 +1179,16 @@
 =======
     "file": "assets/es-ES-U4NZUMDT-BK6Gfv_T.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/es-ES-U4NZUMDT-D9nbZr1z.js",
+=======
+    "file": "assets/es-ES-U4NZUMDT-C52QwdCu.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "es-ES-U4NZUMDT",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/es-ES-U4NZUMDT.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -801,10 +1196,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/eu-ES-A7QVB2H4.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/eu-ES-A7QVB2H4-DJuuCkV7.js",
 ||||||| cbc8ae113
@@ -812,10 +1213,16 @@
 =======
     "file": "assets/eu-ES-A7QVB2H4-C3aHlzpN.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/eu-ES-A7QVB2H4-Dv5jizk1.js",
+=======
+    "file": "assets/eu-ES-A7QVB2H4-N8mUiKTM.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "eu-ES-A7QVB2H4",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/eu-ES-A7QVB2H4.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -823,10 +1230,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/fa-IR-HGAKTJCU.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/fa-IR-HGAKTJCU-CPWsXcu6.js",
 ||||||| cbc8ae113
@@ -834,10 +1247,16 @@
 =======
     "file": "assets/fa-IR-HGAKTJCU-DVIN5h8v.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/fa-IR-HGAKTJCU-flGy0MQ6.js",
+=======
+    "file": "assets/fa-IR-HGAKTJCU-CLLztVNm.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "fa-IR-HGAKTJCU",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/fa-IR-HGAKTJCU.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -845,10 +1264,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/fi-FI-Z5N7JZ37.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/fi-FI-Z5N7JZ37-CBOw8eZF.js",
 ||||||| cbc8ae113
@@ -856,10 +1281,16 @@
 =======
     "file": "assets/fi-FI-Z5N7JZ37-B9sMDOYy.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/fi-FI-Z5N7JZ37-C_a5Hj0F.js",
+=======
+    "file": "assets/fi-FI-Z5N7JZ37-DjDt_kds.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "fi-FI-Z5N7JZ37",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/fi-FI-Z5N7JZ37.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -867,10 +1298,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/fr-FR-RHASNOE6.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/fr-FR-RHASNOE6-DV8AGPBB.js",
 ||||||| cbc8ae113
@@ -878,10 +1315,16 @@
 =======
     "file": "assets/fr-FR-RHASNOE6-BqJIdota.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/fr-FR-RHASNOE6-DCCz14um.js",
+=======
+    "file": "assets/fr-FR-RHASNOE6-CbnWYMvf.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "fr-FR-RHASNOE6",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/fr-FR-RHASNOE6.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -889,10 +1332,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/gl-ES-HMX3MZ6V.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/gl-ES-HMX3MZ6V-B6rIVAMm.js",
 ||||||| cbc8ae113
@@ -900,10 +1349,16 @@
 =======
     "file": "assets/gl-ES-HMX3MZ6V-OZtXNAxP.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/gl-ES-HMX3MZ6V-BrcOkiZn.js",
+=======
+    "file": "assets/gl-ES-HMX3MZ6V-KR3l7l8K.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "gl-ES-HMX3MZ6V",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/gl-ES-HMX3MZ6V.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -911,10 +1366,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/he-IL-6SHJWFNN.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/he-IL-6SHJWFNN-DkSlSPa4.js",
 ||||||| cbc8ae113
@@ -922,10 +1383,16 @@
 =======
     "file": "assets/he-IL-6SHJWFNN-DbUq8LlU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/he-IL-6SHJWFNN-DzRRdhn6.js",
+=======
+    "file": "assets/he-IL-6SHJWFNN-CFh2qSmq.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "he-IL-6SHJWFNN",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/he-IL-6SHJWFNN.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -933,10 +1400,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/hi-IN-IWLTKZ5I.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/hi-IN-IWLTKZ5I-CzkpRfpT.js",
 ||||||| cbc8ae113
@@ -944,10 +1417,16 @@
 =======
     "file": "assets/hi-IN-IWLTKZ5I-B8uCQVrc.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/hi-IN-IWLTKZ5I-CMDX9uKN.js",
+=======
+    "file": "assets/hi-IN-IWLTKZ5I-Bz1VU-Lt.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "hi-IN-IWLTKZ5I",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/hi-IN-IWLTKZ5I.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -955,10 +1434,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/hu-HU-A5ZG7DT2.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/hu-HU-A5ZG7DT2-CbteLzm0.js",
 ||||||| cbc8ae113
@@ -966,10 +1451,16 @@
 =======
     "file": "assets/hu-HU-A5ZG7DT2-ckWc7Epk.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/hu-HU-A5ZG7DT2-D3C2UK1V.js",
+=======
+    "file": "assets/hu-HU-A5ZG7DT2-BkXUssN0.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "hu-HU-A5ZG7DT2",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/hu-HU-A5ZG7DT2.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -977,10 +1468,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/id-ID-SAP4L64H.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/id-ID-SAP4L64H-BeVYo_4y.js",
 ||||||| cbc8ae113
@@ -988,10 +1485,16 @@
 =======
     "file": "assets/id-ID-SAP4L64H-D5oN8BVx.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/id-ID-SAP4L64H-CJMsWyGR.js",
+=======
+    "file": "assets/id-ID-SAP4L64H-Qxn3D1hU.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "id-ID-SAP4L64H",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/id-ID-SAP4L64H.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -999,10 +1502,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/it-IT-JPQ66NNP.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/it-IT-JPQ66NNP-D8IVjlAQ.js",
 ||||||| cbc8ae113
@@ -1010,10 +1519,16 @@
 =======
     "file": "assets/it-IT-JPQ66NNP-DCcL3B88.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/it-IT-JPQ66NNP-kR-4KcKf.js",
+=======
+    "file": "assets/it-IT-JPQ66NNP-BCi_bRXn.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "it-IT-JPQ66NNP",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/it-IT-JPQ66NNP.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1021,10 +1536,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/ja-JP-DBVTYXUO.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ja-JP-DBVTYXUO-DjrhVh4R.js",
 ||||||| cbc8ae113
@@ -1032,10 +1553,16 @@
 =======
     "file": "assets/ja-JP-DBVTYXUO-DYSXD_Fw.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ja-JP-DBVTYXUO-BjJoxk-_.js",
+=======
+    "file": "assets/ja-JP-DBVTYXUO-BSKY4CQc.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ja-JP-DBVTYXUO",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ja-JP-DBVTYXUO.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1043,10 +1570,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/kaa-6HZHGXH3.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/kaa-6HZHGXH3-CM1v53yu.js",
 ||||||| cbc8ae113
@@ -1054,10 +1587,16 @@
 =======
     "file": "assets/kaa-6HZHGXH3-SgUvrP5D.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/kaa-6HZHGXH3-BkS4D1Qo.js",
+=======
+    "file": "assets/kaa-6HZHGXH3-Dj3J-oDJ.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "kaa-6HZHGXH3",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/kaa-6HZHGXH3.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1065,10 +1604,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/kab-KAB-ZGHBKWFO.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/kab-KAB-ZGHBKWFO-Bb-nQktO.js",
 ||||||| cbc8ae113
@@ -1076,10 +1621,16 @@
 =======
     "file": "assets/kab-KAB-ZGHBKWFO-BcAyvwtH.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/kab-KAB-ZGHBKWFO-DkBORE3d.js",
+=======
+    "file": "assets/kab-KAB-ZGHBKWFO-BR7jl8H7.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "kab-KAB-ZGHBKWFO",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/kab-KAB-ZGHBKWFO.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1087,10 +1638,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/kk-KZ-P5N5QNE5.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/kk-KZ-P5N5QNE5-DtYTuF42.js",
 ||||||| cbc8ae113
@@ -1098,10 +1655,16 @@
 =======
     "file": "assets/kk-KZ-P5N5QNE5-B5PlvFci.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/kk-KZ-P5N5QNE5-D5ZcIGpx.js",
+=======
+    "file": "assets/kk-KZ-P5N5QNE5-DHCDVRGj.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "kk-KZ-P5N5QNE5",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/kk-KZ-P5N5QNE5.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1109,10 +1672,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/km-KH-HSX4SM5Z.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/km-KH-HSX4SM5Z-ByakvFHB.js",
 ||||||| cbc8ae113
@@ -1120,10 +1689,16 @@
 =======
     "file": "assets/km-KH-HSX4SM5Z-DuoMEjwR.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/km-KH-HSX4SM5Z-DiAiQ2_G.js",
+=======
+    "file": "assets/km-KH-HSX4SM5Z-2hb0e8cP.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "km-KH-HSX4SM5Z",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/km-KH-HSX4SM5Z.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1131,10 +1706,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/ko-KR-MTYHY66A.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ko-KR-MTYHY66A-Dp2Q7QB0.js",
 ||||||| cbc8ae113
@@ -1142,10 +1723,16 @@
 =======
     "file": "assets/ko-KR-MTYHY66A-63QnIUGT.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ko-KR-MTYHY66A-BaNMo4Z1.js",
+=======
+    "file": "assets/ko-KR-MTYHY66A-CqbYbKfE.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ko-KR-MTYHY66A",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ko-KR-MTYHY66A.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1153,10 +1740,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/ku-TR-6OUDTVRD.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ku-TR-6OUDTVRD-BIjz8rym.js",
 ||||||| cbc8ae113
@@ -1164,10 +1757,16 @@
 =======
     "file": "assets/ku-TR-6OUDTVRD-Dph3knAs.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ku-TR-6OUDTVRD-BVKblUeq.js",
+=======
+    "file": "assets/ku-TR-6OUDTVRD-BvntNhVB.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ku-TR-6OUDTVRD",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ku-TR-6OUDTVRD.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1175,10 +1774,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/lt-LT-XHIRWOB4.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/lt-LT-XHIRWOB4-BKE-PG0_.js",
 ||||||| cbc8ae113
@@ -1186,10 +1791,16 @@
 =======
     "file": "assets/lt-LT-XHIRWOB4-C6yBsKvH.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/lt-LT-XHIRWOB4-DrbERdQm.js",
+=======
+    "file": "assets/lt-LT-XHIRWOB4-D4d9JNhf.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "lt-LT-XHIRWOB4",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/lt-LT-XHIRWOB4.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1197,10 +1808,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/lv-LV-5QDEKY6T.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/lv-LV-5QDEKY6T-CdTTCqc7.js",
 ||||||| cbc8ae113
@@ -1208,10 +1825,16 @@
 =======
     "file": "assets/lv-LV-5QDEKY6T-H1le4B9B.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/lv-LV-5QDEKY6T-DV4UmUZC.js",
+=======
+    "file": "assets/lv-LV-5QDEKY6T-DiU1M4TR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "lv-LV-5QDEKY6T",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/lv-LV-5QDEKY6T.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1219,10 +1842,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/mr-IN-CRQNXWMA.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/mr-IN-CRQNXWMA-Sd79kXDZ.js",
 ||||||| cbc8ae113
@@ -1230,10 +1859,16 @@
 =======
     "file": "assets/mr-IN-CRQNXWMA-xP_H2BaG.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/mr-IN-CRQNXWMA-BAitDAmK.js",
+=======
+    "file": "assets/mr-IN-CRQNXWMA-CNobVdKi.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "mr-IN-CRQNXWMA",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/mr-IN-CRQNXWMA.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1241,10 +1876,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/my-MM-5M5IBNSE.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/my-MM-5M5IBNSE-CdBabaoh.js",
 ||||||| cbc8ae113
@@ -1252,10 +1893,16 @@
 =======
     "file": "assets/my-MM-5M5IBNSE-CPQNYLWV.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/my-MM-5M5IBNSE-xf5mcdA9.js",
+=======
+    "file": "assets/my-MM-5M5IBNSE-DZHocaoa.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "my-MM-5M5IBNSE",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/my-MM-5M5IBNSE.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1263,10 +1910,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/nb-NO-T6EIAALU.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/nb-NO-T6EIAALU-cxt-Htr3.js",
 ||||||| cbc8ae113
@@ -1274,10 +1927,16 @@
 =======
     "file": "assets/nb-NO-T6EIAALU-DdrMijiK.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/nb-NO-T6EIAALU-Bwe8NWqa.js",
+=======
+    "file": "assets/nb-NO-T6EIAALU-C-LmEUAS.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "nb-NO-T6EIAALU",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/nb-NO-T6EIAALU.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1285,10 +1944,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/nl-NL-IS3SIHDZ.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/nl-NL-IS3SIHDZ-DT56BExi.js",
 ||||||| cbc8ae113
@@ -1296,10 +1961,16 @@
 =======
     "file": "assets/nl-NL-IS3SIHDZ-B1w8xhkA.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/nl-NL-IS3SIHDZ-CDvBOuWq.js",
+=======
+    "file": "assets/nl-NL-IS3SIHDZ-BBq55-HF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "nl-NL-IS3SIHDZ",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/nl-NL-IS3SIHDZ.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1307,10 +1978,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/nn-NO-6E72VCQL.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/nn-NO-6E72VCQL-DmhAMtWz.js",
 ||||||| cbc8ae113
@@ -1318,10 +1995,16 @@
 =======
     "file": "assets/nn-NO-6E72VCQL-BFjnx8I6.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/nn-NO-6E72VCQL-D25xVPpZ.js",
+=======
+    "file": "assets/nn-NO-6E72VCQL-6VIRBCD_.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "nn-NO-6E72VCQL",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/nn-NO-6E72VCQL.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1329,10 +2012,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/oc-FR-POXYY2M6.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/oc-FR-POXYY2M6-B2X-VrOj.js",
 ||||||| cbc8ae113
@@ -1340,10 +2029,16 @@
 =======
     "file": "assets/oc-FR-POXYY2M6-DSlGwpkl.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/oc-FR-POXYY2M6-CY8v51nk.js",
+=======
+    "file": "assets/oc-FR-POXYY2M6-BeZNoSJY.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "oc-FR-POXYY2M6",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/oc-FR-POXYY2M6.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1351,10 +2046,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/pa-IN-N4M65BXN.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/pa-IN-N4M65BXN-x1ZBemt7.js",
 ||||||| cbc8ae113
@@ -1362,10 +2063,16 @@
 =======
     "file": "assets/pa-IN-N4M65BXN-DQrK54Va.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/pa-IN-N4M65BXN-Ha9e--ld.js",
+=======
+    "file": "assets/pa-IN-N4M65BXN-BTmdr9Fo.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "pa-IN-N4M65BXN",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/pa-IN-N4M65BXN.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1373,10 +2080,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/pl-PL-T2D74RX3.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/pl-PL-T2D74RX3-rzJ0i3La.js",
 ||||||| cbc8ae113
@@ -1384,10 +2097,16 @@
 =======
     "file": "assets/pl-PL-T2D74RX3-DoN-u5Fy.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/pl-PL-T2D74RX3-CMXSiP3y.js",
+=======
+    "file": "assets/pl-PL-T2D74RX3-DVlFqdim.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "pl-PL-T2D74RX3",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/pl-PL-T2D74RX3.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1395,10 +2114,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-BR-5N22H2LF.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/pt-BR-5N22H2LF-DJbtszw3.js",
 ||||||| cbc8ae113
@@ -1406,10 +2131,16 @@
 =======
     "file": "assets/pt-BR-5N22H2LF-DZaiMRDx.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/pt-BR-5N22H2LF-DrY1OYqC.js",
+=======
+    "file": "assets/pt-BR-5N22H2LF-CYJIIzHv.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "pt-BR-5N22H2LF",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-BR-5N22H2LF.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1417,10 +2148,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-PT-UZXXM6DQ.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/pt-PT-UZXXM6DQ-DS103YZg.js",
 ||||||| cbc8ae113
@@ -1428,10 +2165,16 @@
 =======
     "file": "assets/pt-PT-UZXXM6DQ-D6zAVV9C.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/pt-PT-UZXXM6DQ-_wMVbVhp.js",
+=======
+    "file": "assets/pt-PT-UZXXM6DQ-BtLlb856.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "pt-PT-UZXXM6DQ",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-PT-UZXXM6DQ.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1439,10 +2182,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/ro-RO-JPDTUUEW.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ro-RO-JPDTUUEW-NeopsbhB.js",
 ||||||| cbc8ae113
@@ -1450,10 +2199,16 @@
 =======
     "file": "assets/ro-RO-JPDTUUEW-D4_MDBL9.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ro-RO-JPDTUUEW--e4mgpdD.js",
+=======
+    "file": "assets/ro-RO-JPDTUUEW-NEK7U4zu.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ro-RO-JPDTUUEW",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ro-RO-JPDTUUEW.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1461,10 +2216,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/ru-RU-B4JR7IUQ.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ru-RU-B4JR7IUQ-CEiyvxFI.js",
 ||||||| cbc8ae113
@@ -1472,10 +2233,16 @@
 =======
     "file": "assets/ru-RU-B4JR7IUQ-DBMj3UQ1.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ru-RU-B4JR7IUQ-CiMx5WmY.js",
+=======
+    "file": "assets/ru-RU-B4JR7IUQ-aNTtU5DR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ru-RU-B4JR7IUQ",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ru-RU-B4JR7IUQ.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1483,10 +2250,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/si-LK-N5RQ5JYF.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/si-LK-N5RQ5JYF-CimC_PQ6.js",
 ||||||| cbc8ae113
@@ -1494,10 +2267,16 @@
 =======
     "file": "assets/si-LK-N5RQ5JYF-CO86_1Ue.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/si-LK-N5RQ5JYF-CwXvrp9b.js",
+=======
+    "file": "assets/si-LK-N5RQ5JYF-CLD-iO3l.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "si-LK-N5RQ5JYF",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/si-LK-N5RQ5JYF.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1505,10 +2284,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/sk-SK-C5VTKIMK.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/sk-SK-C5VTKIMK-0EoGUHoD.js",
 ||||||| cbc8ae113
@@ -1516,10 +2301,16 @@
 =======
     "file": "assets/sk-SK-C5VTKIMK-BEH6y6WV.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/sk-SK-C5VTKIMK-BD3IzI6b.js",
+=======
+    "file": "assets/sk-SK-C5VTKIMK-D3RjjxbT.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "sk-SK-C5VTKIMK",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/sk-SK-C5VTKIMK.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1527,10 +2318,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/sl-SI-NN7IZMDC.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/sl-SI-NN7IZMDC-CwSrfCpS.js",
 ||||||| cbc8ae113
@@ -1538,10 +2335,16 @@
 =======
     "file": "assets/sl-SI-NN7IZMDC-BOttoJgY.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/sl-SI-NN7IZMDC-B3xfp-3t.js",
+=======
+    "file": "assets/sl-SI-NN7IZMDC-B3VCPUTs.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "sl-SI-NN7IZMDC",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/sl-SI-NN7IZMDC.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1549,10 +2352,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/sv-SE-XGPEYMSR.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/sv-SE-XGPEYMSR-BfiWJV-j.js",
 ||||||| cbc8ae113
@@ -1560,10 +2369,16 @@
 =======
     "file": "assets/sv-SE-XGPEYMSR-CnnJR_mv.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/sv-SE-XGPEYMSR-gQH3-KPK.js",
+=======
+    "file": "assets/sv-SE-XGPEYMSR-CyUQAR_3.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "sv-SE-XGPEYMSR",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/sv-SE-XGPEYMSR.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1571,10 +2386,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/ta-IN-2NMHFXQM.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ta-IN-2NMHFXQM-wanVDl7Z.js",
 ||||||| cbc8ae113
@@ -1582,10 +2403,16 @@
 =======
     "file": "assets/ta-IN-2NMHFXQM-C7D-JDP6.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ta-IN-2NMHFXQM-CHLv6CZ8.js",
+=======
+    "file": "assets/ta-IN-2NMHFXQM-BDtpHL-Q.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ta-IN-2NMHFXQM",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ta-IN-2NMHFXQM.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1593,10 +2420,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/th-TH-HPSO5L25.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/th-TH-HPSO5L25-C-qrbe3F.js",
 ||||||| cbc8ae113
@@ -1604,10 +2437,16 @@
 =======
     "file": "assets/th-TH-HPSO5L25-DGZ5xyW_.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/th-TH-HPSO5L25-BPBVdx89.js",
+=======
+    "file": "assets/th-TH-HPSO5L25-CNJLC7Br.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "th-TH-HPSO5L25",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/th-TH-HPSO5L25.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1615,10 +2454,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/tr-TR-DEFEU3FU.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/tr-TR-DEFEU3FU-Dv3XilDx.js",
 ||||||| cbc8ae113
@@ -1626,10 +2471,16 @@
 =======
     "file": "assets/tr-TR-DEFEU3FU-CzKzz36F.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/tr-TR-DEFEU3FU-sitm4CvU.js",
+=======
+    "file": "assets/tr-TR-DEFEU3FU-CRLcoyOI.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "tr-TR-DEFEU3FU",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/tr-TR-DEFEU3FU.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1637,10 +2488,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/uk-UA-QMV73CPH.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/uk-UA-QMV73CPH-CQPNAujp.js",
 ||||||| cbc8ae113
@@ -1648,10 +2505,16 @@
 =======
     "file": "assets/uk-UA-QMV73CPH-CcGykuAP.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/uk-UA-QMV73CPH-x9_OIrwr.js",
+=======
+    "file": "assets/uk-UA-QMV73CPH-foEDzdO_.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "uk-UA-QMV73CPH",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/uk-UA-QMV73CPH.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1659,10 +2522,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/vi-VN-M7AON7JQ.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/vi-VN-M7AON7JQ-CpGbHcHM.js",
 ||||||| cbc8ae113
@@ -1670,10 +2539,16 @@
 =======
     "file": "assets/vi-VN-M7AON7JQ-o7Eze5pR.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/vi-VN-M7AON7JQ-BaS7WaAE.js",
+=======
+    "file": "assets/vi-VN-M7AON7JQ-Cd2r2toP.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "vi-VN-M7AON7JQ",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/vi-VN-M7AON7JQ.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1681,10 +2556,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-CN-LNUGB5OW.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/zh-CN-LNUGB5OW-Gj0lc9NZ.js",
 ||||||| cbc8ae113
@@ -1692,10 +2573,16 @@
 =======
     "file": "assets/zh-CN-LNUGB5OW-ChUjEttL.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/zh-CN-LNUGB5OW-CZiTaw4p.js",
+=======
+    "file": "assets/zh-CN-LNUGB5OW-Bkf7MT0S.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "zh-CN-LNUGB5OW",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-CN-LNUGB5OW.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1703,10 +2590,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/zh-HK-E62DVLB3-CVwBK_5x.js",
 ||||||| cbc8ae113
@@ -1714,10 +2607,16 @@
 =======
     "file": "assets/zh-HK-E62DVLB3-Dbn0onvA.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/zh-HK-E62DVLB3-BWL3au9x.js",
+=======
+    "file": "assets/zh-HK-E62DVLB3-DeMd748C.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "zh-HK-E62DVLB3",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1725,10 +2624,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/zh-TW-RAJ6MFWO-B14QcBao.js",
 ||||||| cbc8ae113
@@ -1736,10 +2641,16 @@
 =======
     "file": "assets/zh-TW-RAJ6MFWO-CAdU4F_t.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/zh-TW-RAJ6MFWO-BnPK2Jgh.js",
+=======
+    "file": "assets/zh-TW-RAJ6MFWO-ByS2KIqC.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "zh-TW-RAJ6MFWO",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1747,10 +2658,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/subset-shared.chunk-BUPlYzOD.js",
 ||||||| cbc8ae113
@@ -1758,10 +2675,16 @@
 =======
     "file": "assets/subset-shared.chunk-DqNvoaHR.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/subset-shared.chunk-DHA-uhdq.js",
+=======
+    "file": "assets/subset-shared.chunk-D2i055Yb.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "subset-shared.chunk",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1769,10 +2692,16 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/subset-worker.chunk-CUZyu6fk.js",
 ||||||| cbc8ae113
@@ -1780,11 +2709,17 @@
 =======
     "file": "assets/subset-worker.chunk-DUpbFM71.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/subset-worker.chunk-DrcLeisg.js",
+=======
+    "file": "assets/subset-worker.chunk-BsjaNjfV.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "subset-worker.chunk",
     "src": "node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js",
     "isDynamicEntry": true,
     "imports": [
       "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -1792,6 +2727,11 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
@@ -1851,16 +2791,23 @@
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs": {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "assets/abnfDiagram-VCTEODGH-BGyNO9nP.js",
 ||||||| cbc8ae113
     "file": "assets/abnfDiagram-VCTEODGH-CEhrl-e4.js",
 =======
     "file": "assets/abnfDiagram-VCTEODGH-LH9yii3f.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/abnfDiagram-VCTEODGH-CEhrl-e4.js",
+=======
+    "file": "assets/abnfDiagram-VCTEODGH-BaSPvKR9.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "abnfDiagram-VCTEODGH",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-SVP7TREG-C2oZPBZd.js",
       "_chunk-JWPE2WC7-3ALvsRKb.js",
@@ -1877,10 +2824,22 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-SVP7TREG-JpJfLzJW.js",
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-SVP7TREG-BPlAtfVg.js",
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/architectureDiagram-5GKGNRK7-8FNNp45S.js",
 ||||||| cbc8ae113
@@ -1888,10 +2847,16 @@
 =======
     "file": "assets/architectureDiagram-5GKGNRK7-4WDBkyEj.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/architectureDiagram-5GKGNRK7-BTUa_RAb.js",
+=======
+    "file": "assets/architectureDiagram-5GKGNRK7-CZpib2_n.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "architectureDiagram-5GKGNRK7",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-JWPE2WC7-3ALvsRKb.js",
       "_index-Dpo9pxjt.js",
@@ -1905,11 +2870,21 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "_cytoscape.esm-Ix0LnXOy.js",
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/blockDiagram-I7D4REHJ-CWj_nY1K.js",
 ||||||| cbc8ae113
@@ -1917,10 +2892,16 @@
 =======
     "file": "assets/blockDiagram-I7D4REHJ-gFY0ugjh.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/blockDiagram-I7D4REHJ-Dy91p0VD.js",
+=======
+    "file": "assets/blockDiagram-I7D4REHJ-DJVU1WvU.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "blockDiagram-I7D4REHJ",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-5VM5RSS4-Bb_DXOjb.js",
       "_index-Dpo9pxjt.js",
@@ -1934,10 +2915,20 @@
       "_index-kIpsL1CW.js",
       "_channel-BggTKzyr.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-5VM5RSS4-RS1Ndwfg.js",
+      "_index-CVw6H_RS.js",
+      "_channel-swWi0qyt.js",
+=======
+      "_chunk-5VM5RSS4-BRgA4GJ1.js",
+      "_index-CVbxxqwF.js",
+      "_channel-D48Kzn_j.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/c4Diagram-7LVT6UL2-CiZpWxq4.js",
 ||||||| cbc8ae113
@@ -1945,10 +2936,16 @@
 =======
     "file": "assets/c4Diagram-7LVT6UL2-C3F2dWsJ.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/c4Diagram-7LVT6UL2-B7BnLhlx.js",
+=======
+    "file": "assets/c4Diagram-7LVT6UL2-CAvveWk8.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "c4Diagram-7LVT6UL2",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-F27PBJKO-BaNDg3SW.js",
       "_index-Dpo9pxjt.js",
@@ -1959,10 +2956,18 @@
       "_chunk-F27PBJKO-CwNL9cP3.js",
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+      "_index-CVw6H_RS.js",
+=======
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/classDiagram-ZZMXUADV-D1XKYJpJ.js",
 ||||||| cbc8ae113
@@ -1970,10 +2975,16 @@
 =======
     "file": "assets/classDiagram-ZZMXUADV-Dfc09mzn.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/classDiagram-ZZMXUADV-Cb3okvkv.js",
+=======
+    "file": "assets/classDiagram-ZZMXUADV-c34MTRWj.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "classDiagram-ZZMXUADV",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-TICWLB2K-4eSuNkMb.js",
       "_index-Dpo9pxjt.js",
@@ -1996,10 +3007,26 @@
       "_chunk-POPQ4Y6H-B4zMvmUq.js",
       "_chunk-F27PBJKO-CwNL9cP3.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-TICWLB2K-CigK8bxH.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-5VM5RSS4-RS1Ndwfg.js",
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+=======
+      "_chunk-TICWLB2K-D6vOb6C6.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-5VM5RSS4-BRgA4GJ1.js",
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/classDiagram-v2-VYDZK3BY-D1XKYJpJ.js",
 ||||||| cbc8ae113
@@ -2007,10 +3034,16 @@
 =======
     "file": "assets/classDiagram-v2-VYDZK3BY-Dfc09mzn.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/classDiagram-v2-VYDZK3BY-Cb3okvkv.js",
+=======
+    "file": "assets/classDiagram-v2-VYDZK3BY-c34MTRWj.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "classDiagram-v2-VYDZK3BY",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-TICWLB2K-4eSuNkMb.js",
       "_index-Dpo9pxjt.js",
@@ -2033,10 +3066,26 @@
       "_chunk-POPQ4Y6H-B4zMvmUq.js",
       "_chunk-F27PBJKO-CwNL9cP3.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-TICWLB2K-CigK8bxH.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-5VM5RSS4-RS1Ndwfg.js",
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+=======
+      "_chunk-TICWLB2K-D6vOb6C6.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-5VM5RSS4-BRgA4GJ1.js",
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/cose-bilkent-JH36ORCC-DYWq7ZOG.js",
 ||||||| cbc8ae113
@@ -2044,10 +3093,16 @@
 =======
     "file": "assets/cose-bilkent-JH36ORCC-E9fjEoUd.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/cose-bilkent-JH36ORCC-D1EtrP6N.js",
+=======
+    "file": "assets/cose-bilkent-JH36ORCC-CYWsbA02.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "cose-bilkent-JH36ORCC",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -2055,11 +3110,17 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "_cytoscape.esm-Ix0LnXOy.js",
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/cynefinDiagram-5FMLGOSQ-V3BhSlv8.js",
 ||||||| cbc8ae113
@@ -2067,10 +3128,16 @@
 =======
     "file": "assets/cynefinDiagram-5FMLGOSQ-CBSW3wT-.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/cynefinDiagram-5FMLGOSQ-BcsxlQet.js",
+=======
+    "file": "assets/cynefinDiagram-5FMLGOSQ-BJAWyttj.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "cynefinDiagram-5FMLGOSQ",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-JWPE2WC7-3ALvsRKb.js",
       "_index-Dpo9pxjt.js",
@@ -2084,10 +3151,20 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/dagre-GXQ25YYZ-N_AB9KMU.js",
 ||||||| cbc8ae113
@@ -2095,10 +3172,16 @@
 =======
     "file": "assets/dagre-GXQ25YYZ-BStmMdQ5.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/dagre-GXQ25YYZ-BvYf35OF.js",
+=======
+    "file": "assets/dagre-GXQ25YYZ-BfUKD4Lt.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "dagre-GXQ25YYZ",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
       "_layout-BbAvo7qP.js",
@@ -2109,10 +3192,18 @@
       "_index-kIpsL1CW.js",
       "_layout-fQECIvyD.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+      "_layout-QaRCBHFw.js",
+=======
+      "_index-CVbxxqwF.js",
+      "_layout-BrzcPnuz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/diagram-S7CK7UJ4-D2Lhd58S.js",
 ||||||| cbc8ae113
@@ -2120,10 +3211,16 @@
 =======
     "file": "assets/diagram-S7CK7UJ4-B0C9wKr_.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/diagram-S7CK7UJ4-COWKW1kv.js",
+=======
+    "file": "assets/diagram-S7CK7UJ4-B-Z1yIlx.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "diagram-S7CK7UJ4",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-2Q5K7J3B-IuK27uQ7.js",
       "_chunk-JWPE2WC7-3ALvsRKb.js",
@@ -2140,10 +3237,22 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-2Q5K7J3B-0uc9udF7.js",
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-2Q5K7J3B-C1CuyU_D.js",
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/diagram-UQ7AKVKN--N8AyojN.js",
 ||||||| cbc8ae113
@@ -2151,10 +3260,16 @@
 =======
     "file": "assets/diagram-UQ7AKVKN-C6FVswXv.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/diagram-UQ7AKVKN-DTZqcwgC.js",
+=======
+    "file": "assets/diagram-UQ7AKVKN-LyBS4rPC.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "diagram-UQ7AKVKN",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-JWPE2WC7-3ALvsRKb.js",
       "_index-Dpo9pxjt.js",
@@ -2168,10 +3283,20 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/diagram-VSXAHHWV-D9qFuNLM.js",
 ||||||| cbc8ae113
@@ -2179,10 +3304,16 @@
 =======
     "file": "assets/diagram-VSXAHHWV-As0j9jiz.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/diagram-VSXAHHWV-CV0yOGvy.js",
+=======
+    "file": "assets/diagram-VSXAHHWV-Ce3gWqfi.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "diagram-VSXAHHWV",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-JWPE2WC7-3ALvsRKb.js",
       "_index-Dpo9pxjt.js",
@@ -2196,10 +3327,20 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/diagram-VX7I27RA-C62lqZYq.js",
 ||||||| cbc8ae113
@@ -2207,10 +3348,16 @@
 =======
     "file": "assets/diagram-VX7I27RA-DKvvWqZh.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/diagram-VX7I27RA-Gt8nrtZD.js",
+=======
+    "file": "assets/diagram-VX7I27RA-BnN5vjV0.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "diagram-VX7I27RA",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-JWPE2WC7-3ALvsRKb.js",
       "_index-Dpo9pxjt.js",
@@ -2227,6 +3374,17 @@
       "_chunk-POPQ4Y6H-B4zMvmUq.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "_defaultLocale-DX6XiGOO.js",
       "_ordinal-Cboi1Yqb.js",
       "shell/src/main.jsx",
@@ -2235,16 +3393,23 @@
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs": {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "assets/diagram-Z3DM3KII-929GaXiv.js",
 ||||||| cbc8ae113
     "file": "assets/diagram-Z3DM3KII-JfMASE4_.js",
 =======
     "file": "assets/diagram-Z3DM3KII-shctgd0L.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/diagram-Z3DM3KII-JfMASE4_.js",
+=======
+    "file": "assets/diagram-Z3DM3KII-DT1Dz7cQ.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "diagram-Z3DM3KII",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-JWPE2WC7-3ALvsRKb.js",
       "_index-Dpo9pxjt.js",
@@ -2258,10 +3423,20 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ebnfDiagram-PWID7BFC-BPYD2na9.js",
 ||||||| cbc8ae113
@@ -2269,10 +3444,16 @@
 =======
     "file": "assets/ebnfDiagram-PWID7BFC-YS3R-REX.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ebnfDiagram-PWID7BFC-9pFgo57F.js",
+=======
+    "file": "assets/ebnfDiagram-PWID7BFC-q_KzAv10.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ebnfDiagram-PWID7BFC",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-SVP7TREG-C2oZPBZd.js",
       "_chunk-JWPE2WC7-3ALvsRKb.js",
@@ -2289,10 +3470,22 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-SVP7TREG-JpJfLzJW.js",
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-SVP7TREG-BPlAtfVg.js",
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/erDiagram-RLTQ6QDP-Cjav8VCY.js",
 ||||||| cbc8ae113
@@ -2300,10 +3493,16 @@
 =======
     "file": "assets/erDiagram-RLTQ6QDP-OJ6Lu8qz.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/erDiagram-RLTQ6QDP-BnZ_bOls.js",
+=======
+    "file": "assets/erDiagram-RLTQ6QDP-BVFRfLbm.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "erDiagram-RLTQ6QDP",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-XXDRQBXY-BLTHJ7Fv.js",
       "_chunk-POPQ4Y6H-BH3laKkk.js",
@@ -2320,10 +3519,22 @@
       "_index-kIpsL1CW.js",
       "_channel-BggTKzyr.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_index-CVw6H_RS.js",
+      "_channel-swWi0qyt.js",
+=======
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_index-CVbxxqwF.js",
+      "_channel-D48Kzn_j.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ganttDiagram-EL5Y4UJY-B3mGYJFz.js",
 ||||||| cbc8ae113
@@ -2331,10 +3542,16 @@
 =======
     "file": "assets/ganttDiagram-EL5Y4UJY-3tqB_KtO.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ganttDiagram-EL5Y4UJY-B-UfzB7m.js",
+=======
+    "file": "assets/ganttDiagram-EL5Y4UJY-DPDHbTXc.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ganttDiagram-EL5Y4UJY",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -2342,7 +3559,13 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx",
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_linear-B6toV4kJ.js",
 ||||||| cbc8ae113
@@ -2350,11 +3573,17 @@
 =======
       "_linear-C6Kh4U20.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_linear-Cc9ArwEo.js",
+=======
+      "_linear-BtwNEM0o.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "_init-Gi6I4Gst.js",
       "_defaultLocale-DX6XiGOO.js"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/gitGraphDiagram-WWUBYQGX-eVlvl4p1.js",
 ||||||| cbc8ae113
@@ -2362,10 +3591,16 @@
 =======
     "file": "assets/gitGraphDiagram-WWUBYQGX-ZSyeynCJ.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/gitGraphDiagram-WWUBYQGX-E3ppsp4a.js",
+=======
+    "file": "assets/gitGraphDiagram-WWUBYQGX-CnTxM-7z.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "gitGraphDiagram-WWUBYQGX",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-2Q5K7J3B-IuK27uQ7.js",
       "_chunk-JWPE2WC7-3ALvsRKb.js",
@@ -2382,10 +3617,22 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-2Q5K7J3B-0uc9udF7.js",
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-2Q5K7J3B-C1CuyU_D.js",
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/infoDiagram-27XIBGKW-C6xmwRJy.js",
 ||||||| cbc8ae113
@@ -2393,10 +3640,16 @@
 =======
     "file": "assets/infoDiagram-27XIBGKW-DxcBdovj.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/infoDiagram-27XIBGKW-BQ1FAvut.js",
+=======
+    "file": "assets/infoDiagram-27XIBGKW-BcwHAN8t.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "infoDiagram-27XIBGKW",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
       "_cynefin-OW5HDTMX-C_eOQctO.js",
@@ -2407,10 +3660,18 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/ishikawaDiagram-5VMMS53U-eZENmlEU.js",
 ||||||| cbc8ae113
@@ -2418,10 +3679,16 @@
 =======
     "file": "assets/ishikawaDiagram-5VMMS53U-Q3kngaB4.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/ishikawaDiagram-5VMMS53U-eYu0ymxM.js",
+=======
+    "file": "assets/ishikawaDiagram-5VMMS53U-DBpdBzBZ.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "ishikawaDiagram-5VMMS53U",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -2429,10 +3696,16 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/journeyDiagram-3NMN7TZE-CFQXCftt.js",
 ||||||| cbc8ae113
@@ -2440,10 +3713,16 @@
 =======
     "file": "assets/journeyDiagram-3NMN7TZE-Bvs_8OEK.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/journeyDiagram-3NMN7TZE-CV7IbjGa.js",
+=======
+    "file": "assets/journeyDiagram-3NMN7TZE-BE7CIeQ1.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "journeyDiagram-3NMN7TZE",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-5VM5RSS4-Bb_DXOjb.js",
       "_chunk-F27PBJKO-BaNDg3SW.js",
@@ -2460,10 +3739,22 @@
       "_index-kIpsL1CW.js",
       "_arc-Btnlix4n.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-5VM5RSS4-RS1Ndwfg.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+      "_index-CVw6H_RS.js",
+      "_arc-CmoDtFyf.js",
+=======
+      "_chunk-5VM5RSS4-BRgA4GJ1.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+      "_index-CVbxxqwF.js",
+      "_arc-mZ9DBrRG.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/kanban-definition-UXKFOSKX-DVvhQA_e.js",
 ||||||| cbc8ae113
@@ -2471,10 +3762,16 @@
 =======
     "file": "assets/kanban-definition-UXKFOSKX-ZpGBiMMM.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/kanban-definition-UXKFOSKX-BlntO8DT.js",
+=======
+    "file": "assets/kanban-definition-UXKFOSKX-CD3lRKqP.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "kanban-definition-UXKFOSKX",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
       "_chunk-5VM5RSS4-Bb_DXOjb.js",
@@ -2485,10 +3782,18 @@
       "_index-kIpsL1CW.js",
       "_chunk-5VM5RSS4-bQQKGqrG.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+      "_chunk-5VM5RSS4-RS1Ndwfg.js",
+=======
+      "_index-CVbxxqwF.js",
+      "_chunk-5VM5RSS4-BRgA4GJ1.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/mindmap-definition-YA3MSWOX-B0UvR-v-.js",
 ||||||| cbc8ae113
@@ -2496,10 +3801,16 @@
 =======
     "file": "assets/mindmap-definition-YA3MSWOX-CoDCr1i3.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/mindmap-definition-YA3MSWOX-1NBoIxYH.js",
+=======
+    "file": "assets/mindmap-definition-YA3MSWOX-CtVkwcmj.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "mindmap-definition-YA3MSWOX",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-XXDRQBXY-BLTHJ7Fv.js",
       "_chunk-POPQ4Y6H-BH3laKkk.js",
@@ -2513,10 +3824,20 @@
       "_chunk-POPQ4Y6H-B4zMvmUq.js",
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_index-CVw6H_RS.js",
+=======
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/pegDiagram-XKGWAZYB-B34cnNMA.js",
 ||||||| cbc8ae113
@@ -2524,10 +3845,16 @@
 =======
     "file": "assets/pegDiagram-XKGWAZYB-CGRd2JYZ.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/pegDiagram-XKGWAZYB-EsIfOMnm.js",
+=======
+    "file": "assets/pegDiagram-XKGWAZYB-jmVc8nwn.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "pegDiagram-XKGWAZYB",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-SVP7TREG-C2oZPBZd.js",
       "_chunk-JWPE2WC7-3ALvsRKb.js",
@@ -2544,10 +3871,22 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-SVP7TREG-JpJfLzJW.js",
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-SVP7TREG-BPlAtfVg.js",
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/pieDiagram-E7YTZNPT-D3MasnfJ.js",
 ||||||| cbc8ae113
@@ -2555,10 +3894,16 @@
 =======
     "file": "assets/pieDiagram-E7YTZNPT-n2HXDy0V.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/pieDiagram-E7YTZNPT-Bm29IrbI.js",
+=======
+    "file": "assets/pieDiagram-E7YTZNPT-D5GmdX5Y.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "pieDiagram-E7YTZNPT",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-JWPE2WC7-3ALvsRKb.js",
       "_index-Dpo9pxjt.js",
@@ -2575,6 +3920,17 @@
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
       "_arc-Btnlix4n.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+      "_arc-CmoDtFyf.js",
+=======
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+      "_arc-mZ9DBrRG.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "_ordinal-Cboi1Yqb.js",
       "shell/src/main.jsx",
       "_init-Gi6I4Gst.js"
@@ -2582,16 +3938,23 @@
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs": {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "assets/quadrantDiagram-AXDQQJYC-BOWE7uJg.js",
 ||||||| cbc8ae113
     "file": "assets/quadrantDiagram-AXDQQJYC-oZskinyw.js",
 =======
     "file": "assets/quadrantDiagram-AXDQQJYC-DFA2WkZY.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/quadrantDiagram-AXDQQJYC-oZskinyw.js",
+=======
+    "file": "assets/quadrantDiagram-AXDQQJYC-DUHQxMy5.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "quadrantDiagram-AXDQQJYC",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
       "_linear-B6toV4kJ.js",
@@ -2602,6 +3965,13 @@
       "_index-kIpsL1CW.js",
       "_linear-C6Kh4U20.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+      "_linear-Cc9ArwEo.js",
+=======
+      "_index-CVbxxqwF.js",
+      "_linear-BtwNEM0o.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx",
       "_init-Gi6I4Gst.js",
       "_defaultLocale-DX6XiGOO.js"
@@ -2609,16 +3979,23 @@
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs": {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "assets/railroadDiagram-O6MQD6OU-C706TeTX.js",
 ||||||| cbc8ae113
     "file": "assets/railroadDiagram-O6MQD6OU-DNV4WhyC.js",
 =======
     "file": "assets/railroadDiagram-O6MQD6OU-BtLptKkn.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/railroadDiagram-O6MQD6OU-DNV4WhyC.js",
+=======
+    "file": "assets/railroadDiagram-O6MQD6OU-D-m96p7i.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "railroadDiagram-O6MQD6OU",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-SVP7TREG-C2oZPBZd.js",
       "_chunk-JWPE2WC7-3ALvsRKb.js",
@@ -2635,10 +4012,22 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-SVP7TREG-JpJfLzJW.js",
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-SVP7TREG-BPlAtfVg.js",
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/requirementDiagram-BXWQKSXE-j-U-o_r-.js",
 ||||||| cbc8ae113
@@ -2646,10 +4035,16 @@
 =======
     "file": "assets/requirementDiagram-BXWQKSXE-5GwsqJHZ.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/requirementDiagram-BXWQKSXE-tY1yDYUr.js",
+=======
+    "file": "assets/requirementDiagram-BXWQKSXE-Po89cFeW.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "requirementDiagram-BXWQKSXE",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-XXDRQBXY-BLTHJ7Fv.js",
       "_chunk-POPQ4Y6H-BH3laKkk.js",
@@ -2663,10 +4058,20 @@
       "_chunk-POPQ4Y6H-B4zMvmUq.js",
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_index-CVw6H_RS.js",
+=======
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/sankeyDiagram-P5KCCOFB-DXT3uhhf.js",
 ||||||| cbc8ae113
@@ -2674,10 +4079,16 @@
 =======
     "file": "assets/sankeyDiagram-P5KCCOFB-C5Bcs8jF.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/sankeyDiagram-P5KCCOFB-B3yQQzwf.js",
+=======
+    "file": "assets/sankeyDiagram-P5KCCOFB-Dq27EsDo.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "sankeyDiagram-P5KCCOFB",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -2685,6 +4096,11 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "_ordinal-Cboi1Yqb.js",
       "shell/src/main.jsx",
       "_init-Gi6I4Gst.js"
@@ -2692,16 +4108,23 @@
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs": {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "assets/sequenceDiagram-WJ2MYXX4-C1jko0z8.js",
 ||||||| cbc8ae113
     "file": "assets/sequenceDiagram-WJ2MYXX4-FTlCOXWH.js",
 =======
     "file": "assets/sequenceDiagram-WJ2MYXX4-UGJcjrmd.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/sequenceDiagram-WJ2MYXX4-FTlCOXWH.js",
+=======
+    "file": "assets/sequenceDiagram-WJ2MYXX4-D6CU3eJw.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "sequenceDiagram-WJ2MYXX4",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-2Q5K7J3B-IuK27uQ7.js",
       "_index-Dpo9pxjt.js",
@@ -2715,10 +4138,20 @@
       "_index-kIpsL1CW.js",
       "_chunk-F27PBJKO-CwNL9cP3.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-2Q5K7J3B-0uc9udF7.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+=======
+      "_chunk-2Q5K7J3B-C1CuyU_D.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/sizeCapture-INFHLROL-V_Irw7L3.js",
 ||||||| cbc8ae113
@@ -2726,10 +4159,16 @@
 =======
     "file": "assets/sizeCapture-INFHLROL-DzhAthN0.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/sizeCapture-INFHLROL-g_DueFf4.js",
+=======
+    "file": "assets/sizeCapture-INFHLROL-DuH4cRsV.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "sizeCapture-INFHLROL",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -2737,10 +4176,16 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/stateDiagram-D77RDMKH-CKqaJWnS.js",
 ||||||| cbc8ae113
@@ -2748,10 +4193,16 @@
 =======
     "file": "assets/stateDiagram-D77RDMKH-VFkywpV2.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/stateDiagram-D77RDMKH-Bvb0IJr1.js",
+=======
+    "file": "assets/stateDiagram-D77RDMKH-BZv8m0PQ.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "stateDiagram-D77RDMKH",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-IMKFNOWR-Cq37AmPI.js",
       "_index-Dpo9pxjt.js",
@@ -2774,10 +4225,26 @@
       "_chunk-POPQ4Y6H-B4zMvmUq.js",
       "_chunk-F27PBJKO-CwNL9cP3.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-IMKFNOWR-CY6kHitX.js",
+      "_index-CVw6H_RS.js",
+      "_layout-QaRCBHFw.js",
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+=======
+      "_chunk-IMKFNOWR-C-PrAYmW.js",
+      "_index-CVbxxqwF.js",
+      "_layout-BrzcPnuz.js",
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/stateDiagram-v2-MP3YSRHH-B8f5-bqE.js",
 ||||||| cbc8ae113
@@ -2785,10 +4252,16 @@
 =======
     "file": "assets/stateDiagram-v2-MP3YSRHH-BwCWqHdU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/stateDiagram-v2-MP3YSRHH-BS5RFgde.js",
+=======
+    "file": "assets/stateDiagram-v2-MP3YSRHH-BrKqwCa9.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "stateDiagram-v2-MP3YSRHH",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-IMKFNOWR-Cq37AmPI.js",
       "_index-Dpo9pxjt.js",
@@ -2808,10 +4281,24 @@
       "_chunk-POPQ4Y6H-B4zMvmUq.js",
       "_chunk-F27PBJKO-CwNL9cP3.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-IMKFNOWR-CY6kHitX.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+=======
+      "_chunk-IMKFNOWR-C-PrAYmW.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/swimlanes-42K2YHIH-Dn5ZXmZ7.js",
 ||||||| cbc8ae113
@@ -2819,10 +4306,16 @@
 =======
     "file": "assets/swimlanes-42K2YHIH-CpTROMNt.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/swimlanes-42K2YHIH-A67oGgZn.js",
+=======
+    "file": "assets/swimlanes-42K2YHIH-CuV41cJs.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "swimlanes-42K2YHIH",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -2830,10 +4323,16 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/swimlanesDiagram-VR7AAH4N-DGQ9TWws.js",
 ||||||| cbc8ae113
@@ -2841,10 +4340,16 @@
 =======
     "file": "assets/swimlanesDiagram-VR7AAH4N-BoTTOEiS.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/swimlanesDiagram-VR7AAH4N-Cg9O_xrh.js",
+=======
+    "file": "assets/swimlanesDiagram-VR7AAH4N-DtFuZ5aM.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "swimlanesDiagram-VR7AAH4N",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_flowDiagram-HODETNUW-BiQp-O07.js",
       "_index-Dpo9pxjt.js",
@@ -2870,10 +4375,28 @@
       "_chunk-F27PBJKO-CwNL9cP3.js",
       "_channel-BggTKzyr.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_flowDiagram-HODETNUW-BeHm04iQ.js",
+      "_index-CVw6H_RS.js",
+      "_chunk-5VM5RSS4-RS1Ndwfg.js",
+      "_chunk-XXDRQBXY-6zROlnY8.js",
+      "_chunk-POPQ4Y6H-CXX8GCBO.js",
+      "_chunk-F27PBJKO-BTqv3_sL.js",
+      "_channel-swWi0qyt.js",
+=======
+      "_flowDiagram-HODETNUW-DfXc0xG1.js",
+      "_index-CVbxxqwF.js",
+      "_chunk-5VM5RSS4-BRgA4GJ1.js",
+      "_chunk-XXDRQBXY-1--5tPN8.js",
+      "_chunk-POPQ4Y6H-CKPXTlEs.js",
+      "_chunk-F27PBJKO-IdZNOY4U.js",
+      "_channel-D48Kzn_j.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/timeline-definition-24CTP7MA-CPLfRRuA.js",
 ||||||| cbc8ae113
@@ -2881,10 +4404,16 @@
 =======
     "file": "assets/timeline-definition-24CTP7MA-DiKRsd5g.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/timeline-definition-24CTP7MA-B0-cjTds.js",
+=======
+    "file": "assets/timeline-definition-24CTP7MA-C5twgSKX.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "timeline-definition-24CTP7MA",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
       "_arc-UPbZixjh.js",
@@ -2895,10 +4424,18 @@
       "_index-kIpsL1CW.js",
       "_arc-Btnlix4n.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+      "_arc-CmoDtFyf.js",
+=======
+      "_index-CVbxxqwF.js",
+      "_arc-mZ9DBrRG.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/vennDiagram-4TSXK5OY-CspgrDrG.js",
 ||||||| cbc8ae113
@@ -2906,10 +4443,16 @@
 =======
     "file": "assets/vennDiagram-4TSXK5OY-31SboVNG.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/vennDiagram-4TSXK5OY-CUIktJgW.js",
+=======
+    "file": "assets/vennDiagram-4TSXK5OY-BXRbiv1A.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "vennDiagram-4TSXK5OY",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -2917,10 +4460,16 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/wardleyDiagram-VM6X3IG4-CQFWXP0l.js",
 ||||||| cbc8ae113
@@ -2928,10 +4477,16 @@
 =======
     "file": "assets/wardleyDiagram-VM6X3IG4-DpAbz41f.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/wardleyDiagram-VM6X3IG4-FETnZrn-.js",
+=======
+    "file": "assets/wardleyDiagram-VM6X3IG4-DogypnPa.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "wardleyDiagram-VM6X3IG4",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_chunk-JWPE2WC7-3ALvsRKb.js",
       "_index-Dpo9pxjt.js",
@@ -2945,10 +4500,20 @@
       "_index-kIpsL1CW.js",
       "_cynefin-OW5HDTMX-Cf1YG46d.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_chunk-JWPE2WC7-p-TmaiTv.js",
+      "_index-CVw6H_RS.js",
+      "_cynefin-OW5HDTMX-ByxumjPl.js",
+=======
+      "_chunk-JWPE2WC7-Cq6Yoite.js",
+      "_index-CVbxxqwF.js",
+      "_cynefin-OW5HDTMX-Bg_8gBdR.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx"
     ]
   },
   "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/xychartDiagram-S5SC5T6Z-Cv-qzcv4.js",
 ||||||| cbc8ae113
@@ -2956,10 +4521,16 @@
 =======
     "file": "assets/xychartDiagram-S5SC5T6Z-BrkkAC3f.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/xychartDiagram-S5SC5T6Z-DqhqJm-B.js",
+=======
+    "file": "assets/xychartDiagram-S5SC5T6Z-D62dSlMi.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "xychartDiagram-S5SC5T6Z",
     "src": "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
     "isDynamicEntry": true,
     "imports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_index-Dpo9pxjt.js",
 ||||||| cbc8ae113
@@ -2967,8 +4538,14 @@
 =======
       "_index-kIpsL1CW.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_index-CVw6H_RS.js",
+=======
+      "_index-CVbxxqwF.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "_init-Gi6I4Gst.js",
       "_ordinal-Cboi1Yqb.js",
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_linear-B6toV4kJ.js",
 ||||||| cbc8ae113
@@ -2976,11 +4553,17 @@
 =======
       "_linear-C6Kh4U20.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_linear-Cc9ArwEo.js",
+=======
+      "_linear-BtwNEM0o.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/main.jsx",
       "_defaultLocale-DX6XiGOO.js"
     ]
   },
   "shell/src/main.jsx": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "shell.COaLR2bU.js",
 ||||||| cbc8ae113
@@ -2988,10 +4571,16 @@
 =======
     "file": "shell.IrdErjhM.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "shell.B4q0PlrZ.js",
+=======
+    "file": "shell.C6xQQiq5.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "main",
     "src": "shell/src/main.jsx",
     "isEntry": true,
     "dynamicImports": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "_percentages-BXMCSKIN-DREaLffj.js",
 ||||||| cbc8ae113
@@ -2999,9 +4588,15 @@
 =======
       "_percentages-BXMCSKIN-CPaxfpHU.js",
 >>>>>>> origin/main
+||||||| 35b200639
+      "_percentages-BXMCSKIN-PPklI3CY.js",
+=======
+      "_percentages-BXMCSKIN-BRPzOloz.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
       "shell/src/onboarding-preview.jsx"
     ],
     "css": [
+<<<<<<< HEAD
 <<<<<<< HEAD
       "shell.BMViSkCa.css"
 ||||||| cbc8ae113
@@ -3009,9 +4604,15 @@
 =======
       "shell.gz_7qmRK.css"
 >>>>>>> origin/main
+||||||| 35b200639
+      "shell.DO3eA4YK.css"
+=======
+      "shell.RY5ppKna.css"
+>>>>>>> origin/fix/phone-ask-ai-scroll
     ]
   },
   "shell/src/onboarding-preview.jsx": {
+<<<<<<< HEAD
 <<<<<<< HEAD
     "file": "assets/onboarding-preview-BP4NVluT.js",
 ||||||| cbc8ae113
@@ -3019,6 +4620,11 @@
 =======
     "file": "assets/onboarding-preview-BsPYNW5e.js",
 >>>>>>> origin/main
+||||||| 35b200639
+    "file": "assets/onboarding-preview-BTs8BoJx.js",
+=======
+    "file": "assets/onboarding-preview-Bf9FsunQ.js",
+>>>>>>> origin/fix/phone-ask-ai-scroll
     "name": "onboarding-preview",
     "src": "shell/src/onboarding-preview.jsx",
     "isDynamicEntry": true,
