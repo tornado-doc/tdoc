@@ -494,6 +494,13 @@ export function DocumentShell({ boot, config }) {
     'tdoc:editSnapshot': (message) => editorRef.current?.frameHandlers.editSnapshot(message),
     'tdoc:editDocument': (message) => editorRef.current?.frameHandlers.editDocument(message),
     'tdoc:copyText': (message) => copyText(message.text || ''),
+    'tdoc:copySelection': (message) => {
+      const text = typeof message.text === 'string' ? message.text : '';
+      const write = navigator.clipboard?.writeText;
+      Promise.resolve(write && text ? write.call(navigator.clipboard, text) : Promise.reject(new Error('clipboard unavailable')))
+        .then(() => bridge.send({ type: 'tdoc:copySelectionResult', requestId: message.requestId, ok: true }))
+        .catch(() => bridge.send({ type: 'tdoc:copySelectionResult', requestId: message.requestId, ok: false }));
+    },
     'tdoc:docMarkdown': (message) => {
       copyText(message.markdown || '').then((copied) => {
         showToast(copied ? 'Copied as Markdown' : 'Copy failed', !copied);

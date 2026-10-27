@@ -54,7 +54,7 @@ async function startServer(worker, env) {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   return { server, base: `http://127.0.0.1:${server.address().port}` };
 }
-async function dragSelect(page, phrase) {
+async function dragSelect(page, phrase, openComposer = true) {
   const frameEl = await page.locator('iframe').first().elementHandle();
   const frame = await frameEl.contentFrame();
   await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
@@ -78,7 +78,10 @@ async function dragSelect(page, phrase) {
   await page.mouse.up();
   const action = frame.getByRole('button', { name: 'Comment', exact: true });
   await action.waitFor();
+  const copy = frame.getByRole('button', { name: 'Copy', exact: true });
+  await copy.waitFor();
   if (await page.locator('.tdoc-popup').isVisible()) throw new Error('selection opened a composer before Comment was clicked');
+  if (!openComposer) return frame;
   await action.click();
   await page.locator('.tdoc-popup textarea').waitFor();
 }
@@ -165,8 +168,22 @@ async function dragSelect(page, phrase) {
     await t('selection opens a composer; an empty draft copies the quote while a typed draft keeps native copy', async () => {
       const { context, page } = await open(julie, 'launch-plan');
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-      await dragSelect(page, 'Billing ships first');
+      await page.setViewportSize({ width: 1280, height: 800 });
+      const frame = await dragSelect(page, 'Billing ships first', false);
+      const selectedRect = await frame.evaluate(() => getSelection().getRangeAt(0).getBoundingClientRect().toJSON());
+      const toolbarRect = await frame.locator('.tdoc-selection-action').boundingBox();
+      const iframeRect = await page.locator('iframe').first().boundingBox();
+      if (toolbarRect.y + toolbarRect.height > iframeRect.y + selectedRect.top) throw new Error(`desktop toolbar is not above the selection: ${JSON.stringify({ toolbarRect, iframeRect, selectedRect })}`);
+      await shot(page, 'selection-actions-desktop-1280.png');
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+C' : 'Control+C');
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'Billing ships first') throw new Error('native desktop copy was blocked by the toolbar');
+      await page.evaluate(() => navigator.clipboard.writeText('sentinel'));
+      await frame.getByRole('button', { name: 'Copy', exact: true }).click();
+      await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'Billing ships first') throw new Error('toolbar Copy did not write the selected text');
+      await frame.getByRole('button', { name: 'Comment', exact: true }).click();
       const pop = page.locator('.tdoc-popup');
+      await pop.locator('textarea').waitFor();
       await shot(page, 'selection-composer-desktop.png');
       if (!(await pop.locator('.tdoc-keyboard-shortcut-hint').isVisible())) throw new Error('desktop shortcut hint disappeared');
       const selected = (await pop.locator('.head .h').textContent()).replace(/^"|"$/g, '');
@@ -196,7 +213,7 @@ async function dragSelect(page, phrase) {
       await context.close();
     });
 
-    await t('phone keeps native copy, shows Comment after release, and remembers a chosen Read per document', async () => {
+    await t('phone replaces the native selection menu with Comment and Copy, and remembers Read per document', async () => {
       const { context, page } = await open(julie, 'launch-plan', true);
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
       await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
@@ -219,21 +236,22 @@ async function dragSelect(page, phrase) {
       await select();
       const action = frame.getByRole('button', { name: 'Comment', exact: true });
       await action.waitFor();
-      if (await frame.locator('.tdoc-selection-action').count() !== 1) throw new Error('phone selection showed more than one custom action');
+      const copy = frame.getByRole('button', { name: 'Copy', exact: true });
+      await copy.waitFor();
+      if (await frame.locator('.tdoc-selection-action').count() !== 1) throw new Error('phone selection showed more than one toolbar');
       if (await page.locator('.tdoc-popup').count()) throw new Error('selection opened the composer before Comment was clicked');
-      const selected = await frame.evaluate(() => getSelection().toString());
-      if (selected !== 'Billing ships first') throw new Error(`native selection was lost: ${JSON.stringify(selected)}`);
+      const selected = 'Billing ships first';
+      if (await frame.evaluate(() => getSelection().toString())) throw new Error('phone retained the native selection menu');
+      if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-selecting')))) throw new Error(`phone lost the painted selection: ${JSON.stringify(await frame.evaluate(() => ({ action: getComputedStyle(document.querySelector('.tdoc-selection-action')).display, native: getSelection().toString(), highlights: [...CSS.highlights.keys()] })))}`);
       const geometry = await frame.evaluate(() => ({
-        selectedBottom: getSelection().getRangeAt(0).getBoundingClientRect().bottom,
+        selectedBottom: CSS.highlights.get('tdoc-selecting').values().next().value.getBoundingClientRect().bottom,
         actionTop: document.querySelector('.tdoc-selection-action').getBoundingClientRect().top,
       }));
-      if (geometry.actionTop < geometry.selectedBottom) throw new Error(`phone action covered the system Copy menu: ${JSON.stringify(geometry)}`);
-      const nativeCopy = await frame.evaluate(() => {
-        const data = new DataTransfer();
-        document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
-        return data.getData('text/plain');
-      });
-      if (nativeCopy !== selected) throw new Error(`native copy did not preserve selected text: ${JSON.stringify(nativeCopy)}`);
+      if (geometry.actionTop < geometry.selectedBottom) throw new Error(`phone toolbar covered the system Copy menu: ${JSON.stringify(geometry)}`);
+      await shot(page, 'selection-actions-phone-390.png');
+      await copy.click();
+      await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== selected) throw new Error('phone toolbar Copy did not write the selected text');
       await action.click();
       const pop = page.locator('.tdoc-popup');
       await pop.waitFor();

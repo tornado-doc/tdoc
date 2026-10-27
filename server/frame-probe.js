@@ -106,13 +106,17 @@
   var pointerSelecting = false;
   var touchSelecting = false;
   var selectionActionActivated = false;
+  var selectionCopyRequest = 0;
+  var capturedTouchSelection = false;
   var reanchorMode = false;
   var pointerHadSelection = false;
   var pointerDownInSelection = false;
   var pointerStartX = 0, pointerStartY = 0;
   function hideSelectionAction() {
     selectedPassage = null;
-    if (selectionAction) selectionAction.style.display = 'none';
+    if (capturedTouchSelection && HL) CSS.highlights.delete('tdoc-selecting');
+    capturedTouchSelection = false;
+    if (selectionAction) selectionAction.style.setProperty('display', 'none', 'important');
   }
   function highlightCss(dark) {
     var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
@@ -151,11 +155,14 @@
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
-      // This button lives in the author's frame. Lock its visual geometry so
-      // document button/SVG rules cannot add a white frame or enlarge the icon.
-      'button.tdoc-comment-pill.tdoc-selection-action[data-tdoc-provider]{position:absolute!important;z-index:2147483645!important;width:36px!important;min-width:36px!important;max-width:36px!important;height:36px!important;min-height:36px!important;max-height:36px!important;box-sizing:border-box!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;border-radius:50%!important;background:' + COMMENT_ACCENT + '!important;color:#fff!important;box-shadow:0 2px 8px rgba(22,82,240,.22)!important;cursor:pointer!important;touch-action:manipulation!important;appearance:none!important;line-height:1!important;}' +
-      'button.tdoc-comment-pill.tdoc-selection-action[data-tdoc-provider]:hover{background:#1244c5!important;color:#fff!important;}' +
-      'button.tdoc-comment-pill.tdoc-selection-action[data-tdoc-provider] svg{display:block!important;flex:0 0 16px!important;width:16px!important;min-width:16px!important;max-width:16px!important;height:16px!important;min-height:16px!important;max-height:16px!important;margin:0!important;padding:0!important;fill:currentColor!important;stroke:none!important;}' +
+      // A small text toolbar keeps both selection actions visible. All sizing
+      // lives in the provider frame because author CSS can style any button.
+      'div.tdoc-selection-action[data-tdoc-provider]{all:initial!important;position:fixed!important;z-index:2147483645!important;display:inline-flex!important;align-items:stretch!important;box-sizing:border-box!important;width:auto!important;height:38px!important;min-height:38px!important;max-height:38px!important;padding:2px!important;margin:0!important;border:1px solid #d9dee8!important;border-radius:8px!important;background:#fff!important;box-shadow:0 2px 10px rgba(22,31,49,.13)!important;white-space:nowrap!important;touch-action:manipulation!important;}' +
+      'html[data-tdoc-interaction-mode="comment"] .tdoc-selection-action button.tdoc-selection-action-button{all:initial!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;box-sizing:border-box!important;min-width:72px!important;height:32px!important;padding:0 10px!important;border:0!important;border-radius:5px!important;background:transparent!important;color:#25272b!important;font:500 12px/1 system-ui,sans-serif!important;text-align:center!important;cursor:pointer!important;touch-action:manipulation!important;}' +
+      'html[data-tdoc-interaction-mode="comment"] .tdoc-selection-action button.tdoc-selection-action-button:hover{background:#f2f5fb!important;}' +
+      'html[data-tdoc-interaction-mode="comment"] .tdoc-selection-action button.tdoc-selection-comment{color:' + COMMENT_ACCENT + '!important;}' +
+      'div.tdoc-selection-action[data-tdoc-provider] .tdoc-selection-divider{all:initial!important;display:block!important;align-self:center!important;flex:0 0 1px!important;width:1px!important;height:18px!important;margin:0 1px!important;background:#dce1e9!important;}' +
+      '@media(max-width:700px){div.tdoc-selection-action[data-tdoc-provider]{height:44px!important;min-height:44px!important;max-height:44px!important;}html[data-tdoc-interaction-mode="comment"] .tdoc-selection-action button.tdoc-selection-action-button{min-width:78px!important;height:38px!important;font-size:13px!important;}}' +
       'figure[data-tdoc-artifact="Diagram"][aria-label="Diagram"][data-tdoc-excalidraw]{border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;}' +
       'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;box-sizing:border-box;padding-right:52px;margin-bottom:4px;}' +
@@ -380,7 +387,7 @@
            rect: rect });
   }
   function reportSelection() {
-    if (interactionMode !== 'comment' || visualViewerOpen() || shellUiOpen || selectionActionActivated) return;
+    if (interactionMode !== 'comment' || visualViewerOpen() || shellUiOpen || selectionActionActivated || capturedTouchSelection) return;
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideSelectionAction(); return; }
     var text = sel.toString().trim();
@@ -388,32 +395,52 @@
     var range = sel.getRangeAt(0);
     selectedPassage = { range: range.cloneRange(), text: text };
     if (!selectionAction) {
-      selectionAction = document.createElement('button');
-      selectionAction.type = 'button';
-      selectionAction.className = 'tdoc-comment-pill tdoc-selection-action';
+      selectionAction = document.createElement('div');
+      selectionAction.className = 'tdoc-selection-action';
       selectionAction.setAttribute('data-tdoc-provider', '');
-      selectionAction.setAttribute('aria-label', 'Comment');
-      selectionAction.title = 'Comment';
-      selectionAction.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
+      selectionAction.setAttribute('role', 'toolbar');
+      selectionAction.setAttribute('aria-label', 'Selected text actions');
+      selectionAction.innerHTML = '<button type="button" class="tdoc-selection-action-button tdoc-selection-comment">Comment</button><span class="tdoc-selection-divider" aria-hidden="true"></span><button type="button" class="tdoc-selection-action-button tdoc-selection-copy">Copy</button>';
       selectionAction.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); });
-      selectionAction.addEventListener('click', function (e) {
+      selectionAction.querySelector('.tdoc-selection-comment').addEventListener('click', function (e) {
         e.preventDefault(); e.stopPropagation();
         var passage = selectedPassage;
         if (passage) postTextSelection(passage.range, passage.text);
       });
-      document.body.appendChild(selectionAction);
+      selectionAction.querySelector('.tdoc-selection-copy').addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        var passage = selectedPassage;
+        if (passage) post({ type: 'tdoc:copySelection', text: passage.text, requestId: ++selectionCopyRequest });
+      });
+      document.documentElement.appendChild(selectionAction);
     }
+    selectionAction.querySelector('.tdoc-selection-copy').textContent = 'Copy';
     var rect = selectionRect(range);
     var mobile = window.innerWidth <= 700;
-    var top = mobile ? rect.bottom + 8 : rect.top - 4;
-    // Keep the native iOS Copy menu above the passage clear. If the passage
-    // ends at the screen edge, flip so the action stays reachable.
-    if (top + 36 > window.innerHeight - 8) top = rect.top - 44;
-    var left = mobile ? rect.left + (rect.width || 0) / 2 - 18 : rect.right + 8;
-    if (!mobile && left + 36 > window.innerWidth - 8) left = rect.left - 44;
-    selectionAction.style.left = Math.max(8, Math.min(left, window.innerWidth - 44)) + (window.scrollX || 0) + 'px';
-    selectionAction.style.top = Math.max(8, top) + (window.scrollY || 0) + 'px';
-    selectionAction.style.display = 'inline-flex';
+    var width = selectionAction.getBoundingClientRect().width || (mobile ? 164 : 152);
+    var height = mobile ? 44 : 38;
+    // The iOS native selection menu sits above the passage. Keep our two
+    // actions below it; on desktop use the space above the selected text.
+    var top = mobile ? rect.bottom + 10 : rect.top - height - 10;
+    if (!mobile && top < 8) top = rect.bottom + 10;
+    if (mobile && top + height > window.innerHeight - 8) {
+      window.scrollBy(0, top + height - window.innerHeight + 8);
+      rect = selectionRect(range);
+      top = rect.bottom + 10;
+    }
+    var left = rect.left + (rect.width || 0) / 2 - width / 2;
+    selectionAction.style.setProperty('left', Math.max(8, Math.min(left, window.innerWidth - width - 8)) + 'px', 'important');
+    selectionAction.style.setProperty('top', Math.max(8, top) + 'px', 'important');
+    selectionAction.style.setProperty('display', 'inline-flex', 'important');
+    // Keep the passage painted while releasing iOS's native selection/menu.
+    // Desktop retains the native range so Cmd+C continues to work.
+    if (mobile && HL) {
+      try {
+        CSS.highlights.set('tdoc-selecting', new Highlight(selectedPassage.range));
+        capturedTouchSelection = true;
+        sel.removeAllRanges();
+      } catch (e) { capturedTouchSelection = false; }
+    }
   }
   function scheduleSelectionAction(delay) {
     clearTimeout(selectionTimer);
@@ -421,7 +448,7 @@
     selectionTimer = setTimeout(reportSelection, delay);
   }
   document.addEventListener('selectionchange', function () {
-    if (interactionMode === 'comment' && !shellUiOpen) scheduleSelectionAction(250);
+    if (interactionMode === 'comment' && !shellUiOpen && !capturedTouchSelection) scheduleSelectionAction(250);
   });
   function caretAtPoint(x, y) {
     if (document.caretPositionFromPoint) {
@@ -1473,6 +1500,7 @@
   document.addEventListener('selectionchange', function () {
     if (interactionMode === 'comment' && HL) {
       try {
+        if (capturedTouchSelection) return;
         var live = window.getSelection();
         if (live && !live.isCollapsed && live.rangeCount) {
           CSS.highlights.set('tdoc-selecting', new Highlight(live.getRangeAt(0).cloneRange()));
@@ -1767,6 +1795,9 @@
       }
     }
     else if (d.type === 'tdoc:uiOpen') { shellUiOpen = !!d.open; if (!shellUiOpen) selectionActionActivated = false; }
+    else if (d.type === 'tdoc:copySelectionResult' && d.requestId === selectionCopyRequest && d.ok && selectedPassage && selectionAction && selectionAction.style.display !== 'none') {
+      selectionAction.querySelector('.tdoc-selection-copy').textContent = 'Copied';
+    }
     else if (d.type === 'tdoc:diagramApply') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!applyDiagram(d) });
     else if (d.type === 'tdoc:diagramInsert') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!insertDiagram(d) });
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
