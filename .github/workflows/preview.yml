@@ -76,6 +76,7 @@ jobs:
         id: ns
         env:
           TDOC_PREVIEW_OIDC_CLIENT_ID: ${{ vars.TDOC_PREVIEW_OIDC_CLIENT_ID }}
+          TDOC_DEV_DEBUG_ACCOUNTS: ${{ vars.TDOC_DEV_DEBUG_ACCOUNTS }}
         run: |
           set -euo pipefail
           if ! wrangler r2 bucket list 2>/dev/null | grep -q 'tdoc-preview-docs'; then
@@ -93,7 +94,11 @@ jobs:
             exit 1
           fi
           echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
+          # Dev-mode testers: the same repository variable tdoc.dev uses. Unset
+          # leaves the placeholder, which the worker reads as nobody.
+          ACCOUNTS="$(printf '%s' "${TDOC_DEV_DEBUG_ACCOUNTS}" | tr '\r\n' ',,' | sed -e 's/,\{1,\}/,/g' -e 's/^,//' -e 's/,$//')"
           sed -e "s/PLACEHOLDER_PREVIEW_KV_ID/${KV_ID}/g" \
+            -e "s/PLACEHOLDER_DEBUG_ACCOUNTS/${ACCOUNTS:-PLACEHOLDER_DEBUG_ACCOUNTS}/g" \
             worker/wrangler.preview.toml.template > worker/wrangler.preview.toml
           node bin/tdoc-preview-oidc-config.js worker/wrangler.preview.toml
           # Guard: never bind production storage even if the template drifts.

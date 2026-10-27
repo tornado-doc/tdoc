@@ -17,6 +17,7 @@ const path = require('path');
 const OFFLINE = [
   'version-diff.test.js', // bounded block matching and Unicode edits
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
+  'preview-owner-store.test.js', // PR previews keep doc ownership in their own KV (no Durable Object)
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)

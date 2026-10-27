@@ -11091,7 +11091,25 @@ function tokenUsedKey(tokenHash) {
   return `token-used:${tokenHash}`;
 }
 
+// PR previews cannot have a Durable Object (Cloudflare will not mint their
+// URLs), so there ownership lives in the preview's own, isolated KV. Not
+// atomic, which a throwaway preview can afford; production never takes this path.
+async function previewOwnerOp(env, slug, op) {
+  const key = `preview-owner:${slug}`;
+  if (op && op.kind === 'release_owner') { await env.META.delete(key); return { ok: true }; }
+  const accountId = op && typeof op.account_id === 'string' ? op.account_id : '';
+  if (!accountId) return { ok: false, status: 400, error: 'account_id_required' };
+  const current = await env.META.get(key);
+  if (op.kind === 'claim_owner') {
+    if (current === null) { await env.META.put(key, accountId); return { ok: true }; }
+    return current === accountId ? { ok: true } : { ok: false, status: 403, error: 'not_doc_owner' };
+  }
+  if (op.kind === 'verify_owner') return current === accountId ? { ok: true } : { ok: false, status: 403, error: 'not_doc_owner' };
+  return { ok: false, status: 400, error: 'bad_owner_op' };
+}
+
 async function hostedOwnerOp(env, slug, op) {
+  if (!env.COMMENTS && env.TDOC_PREVIEW === '1' && env.META) return previewOwnerOp(env, slug, op);
   if (!env.COMMENTS) {
     return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
   }
