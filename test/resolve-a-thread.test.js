@@ -48,11 +48,10 @@ t('the status op writes one event per version, so it converges', () => {
     'both status kinds must share one event id per version');
 });
 
-t('a person resolving does not leave an emoji in their name', () => {
+t('resolution records its author without synthesizing reactions', () => {
   const start = worker.indexOf("case 'marked_applied':");
   const block = worker.slice(start, worker.indexOf("case 'deleted':", start));
-  assert(/snap\._agentVerdict = e\.human \? null : \(e\.agent_status \|\| 'applied'\)/.test(block),
-    'the ✅/🟡/❓ reaction is the agent verdict, and a human decision is not one');
+  assert(!block.includes('_agentVerdict'), 'resolution still stages a synthetic reaction');
   assert(/snap\.resolved_by = e\.human \? \(e\.by \|\| ''\) : ''/.test(block),
     'the card needs to know a person resolved it, and which person');
   // Every event written before people could resolve lacks `human`, so the
@@ -61,10 +60,12 @@ t('a person resolving does not leave an emoji in their name', () => {
 });
 
 t('the chip says who decided, because they are different claims', () => {
+  assert(card.includes("comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, handoffViewer, isOwner)) ? '✅ Done'"),
+    'an agent handoff resolved by the agent should show Done');
   assert(/comment\.resolved_by\s*\n?\s*\? `✓ resolved by @\$\{comment\.resolved_by\}`/.test(card),
     'a person resolving should not read as "fixed"');
   assert(/: `✓ fixed\$\{comment\.applied_in \? ` · v\$\{comment\.applied_in\}` : ''\}`/.test(card),
-    "an agent's verdict keeps the wording it had");
+    'a resolved comment without a handoff retains its prior wording');
 });
 
 t('resolve sits with the thread actions, behind canMutate', () => {
@@ -77,53 +78,69 @@ t('resolve sits with the thread actions, behind canMutate', () => {
   assert(card.slice(start - 200, start).includes('canMutate ? ('), 'resolve must be gated like delete');
 });
 
+// Julie, 2026-10-27: no ✓ on Serena's threads. The client gate has to agree
+// with the worker's canMutate(): isDocOwnerSession (sent as isOwner), or the
+// author among actorKeys(session) -- lowercased, linked accounts included.
+t('the resolve gate matches the worker: owner, or the author under any linked key, any case', () => {
+  const start = card.indexOf('export function mayMutate(');
+  const body = card.slice(start, card.indexOf('\n}\n', start) + 2).replace(/^export /, '');
+  const mayMutate = new Function(`${body}; return mayMutate;`)();
+  const serena = { author: { login: 'Serena-Q' } };
+  assert(mayMutate(serena, 'julie', true) === true, 'the doc owner (or team admin) cannot resolve');
+  assert(mayMutate(serena, 'julie', false, ['julie', 'email:julie@x.ai']) === false, 'a stranger can resolve');
+  assert(mayMutate(serena, 'serena-q', false) === true, 'case differs from the stored login');
+  assert(mayMutate(serena, 'email:serena@befreed.ai', false, ['email:serena@befreed.ai', 'serena-q']) === true,
+    'an author signed in through a linked account cannot resolve');
+  assert(mayMutate({ author: { login: 'email:Serena@BeFreed.ai' } }, 'email:serena@befreed.ai', false) === true,
+    'an email-keyed author cannot resolve');
+  assert(mayMutate({ author: {} }, 'anon', false, ['anon']) === false, 'an authorless record is resolvable');
+  assert(mayMutate(serena, 'anon', false, 'anon') === false, 'anon matched');
+  assert(card.includes('const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);'),
+    'the card must pass the viewer\'s linked keys');
+  const fbspace = read('shell/src/feedback-space.jsx');
+  assert(fbspace.includes('identity.linked_actor_keys') && /page: 'feedback-space'[\s\S]{0,1200}linked_actor_keys: actorKeys\(viewer\)/.test(worker),
+    'the feedback space page must send and use the linked keys');
+});
+
 t('resolved visibility governs selection without deleting stored comments', () => {
-  const start = shell.indexOf('const shownComments = useMemo');
-  const block = shell.slice(start, shell.indexOf('), [', start) + 120);
-  assert(/comment\.status !== 'applied'/.test(block), 'resolved threads should not be sent as anchors');
-  assert(!/comment\.id === (openCommentId|deepTarget)/.test(block),
+  const model = read('shell/src/document/comment-area.js');
+  assert(model.includes("filterMode === 'resolution' && filter === 'open' && phase(comment) !== 'resolved'"),
+    'resolved threads should not be sent as anchors');
+  assert(!/comment\.id === (openCommentId|deepTarget)/.test(model),
     'selection or a notification link must not bypass the visibility switch');
-  assert(shell.includes('const openComment = visibleCommentsById.get(openCommentId);'),
+  assert(shell.includes('const openComment = commentArea.selected;')
+    && model.includes('selected: shown.find((comment) => comment.id === selectedId)'),
     'the card must obey the same visible set as the frame');
   // Hidden records remain available for status changes and explicit reveals.
-  assert(/const commentsById = useMemo\(\s*\n\s*\(\) => new Map\(comments\.comments/.test(shell),
+  assert(shell.includes('const commentsById = commentArea.byId;')
+    && model.includes('const byId = new Map(all.map((comment) => [comment.id, comment]));'),
     'hiding must not discard the stored comment');
 });
 
-t('the way back is a switch in the bar, off by default', () => {
-  const sw = read('shell/src/ui/switch.jsx');
-  assert(sw.includes('Switch.Root') && sw.includes('Switch.Thumb'),
-    'the switch should lean on the primitive for its semantics, not fake them');
-  assert(/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar has no switch');
-  assert(/label=\{`Resolved \(\$\{resolvedCount\}\)`\}/.test(shell), 'the switch should say how many are hidden');
-  assert(/\{resolvedCount \? \(/.test(shell), 'a control that can only do nothing is worse than no control');
-  // Off by default: the margin starts quiet, and a reader who wants it noisy
-  // says so once.
-  assert(/try \{ return localStorage\.getItem\(RESOLVED_KEY\) === '1'; \} catch \{ return false; \}/.test(shell),
-    'default off, and storage that throws still means off rather than a crash');
+t('resolved visibility is a filter in the comments area (Open / Resolved / All), All by default', () => {
+  const seg = read('shell/src/ui/segmented-control.jsx');
+  assert(seg.includes('role="radiogroup"') && seg.includes('role="radio"'),
+    'the filter should lean on the primitive for its semantics, not fake them');
+  assert(/className="tdoc-comment-filter"/.test(shell), 'there is no comments filter');
+  assert(/label: `Resolved \(\$\{resolvedCount\}\)`/.test(shell), 'the filter should say how many are resolved');
+  assert(/const commentFilterControl = comments\.comments\.length \? \(/.test(shell), 'the filter should appear when there are comments to filter');
+  assert(!/<AppSwitch\s*\n\s*id="tdoc-show-resolved"/.test(shell), 'the bar switch is back');
+  // Show all threads by default; only an explicitly saved choice narrows them.
+  assert(/return v === '0' \? 'open' : v === 'resolved' \? 'resolved' : 'all';\s*\n\s*\} catch \{ return 'all'; \}/.test(shell),
+    'default All, including when storage is unavailable');
   assert(/localStorage\.setItem\(RESOLVED_KEY/.test(shell), 'the choice should survive a reload');
 });
 
-t('the ⋯ menu carries it only where the bar cannot', () => {
-  assert(/data-action="show-resolved"/.test(toolbar), 'the narrow-width fallback is gone');
-  assert(/className="tdoc-action-menu-item tdoc-mobile-overflow-only"\s*\n\s*data-action="show-resolved"/.test(toolbar),
-    'the menu item must be overflow-only, or it duplicates the switch at desktop width');
-  // The switch folds with the controls it stands beside, not on its own rule —
-  // chrome.css has several max-width:700px blocks, so anchor on the group.
-  const css = read('server/chrome.css');
-  const at = css.indexOf('.tdoc-bar #tdoc-star-btn,');
-  assert(at >= 0, 'the bar fold group is gone');
-  const group = css.slice(at, css.indexOf('display: none;', at));
-  assert(group.includes('.tdoc-bar .tdoc-switch,'),
-    'the switch has to fold with the rest of the bar, or it crowds the title on a phone');
-  assert(css.lastIndexOf('@media (max-width: 700px)', at) > css.lastIndexOf('@media (max-width: 900px)', at),
-    'that group has to be the 700px block');
+t('on a phone the filter heads the comments drawer, and ⋯ no longer carries it', () => {
+  assert(/filter=\{commentFilterControl\}/.test(shell), 'the drawer does not get the filter');
+  assert(/tdoc-comment-filter-row/.test(read('shell/src/document/comment-layer.jsx')), 'the drawer does not show it');
+  assert(!/data-action="show-resolved"/.test(toolbar), 'the ⋯ row is back beside the filter');
 });
 
 t('resolving closes the card it was pressed on', () => {
   const start = shell.indexOf('const resolveComment = async');
   const block = shell.slice(start, shell.indexOf('\n  const ', start + 20));
-  assert(/if \(resolved && !showResolved\) setOpenCommentId\(null\)/.test(block),
+  assert(/if \(\(resolved && commentFilter === 'open'\) \|\| \(!resolved && commentFilter === 'resolved'\)\) setOpenCommentId\(null\)/.test(block),
     'the card has to go with the thread, or it is pinned to nothing');
 });
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Dialog } from '@base-ui/react/dialog';
+import { usePortalContainer } from './portal.js';
 
 // The one modal surface. Visuals come from chrome.css's `.tdoc-modal` rules —
 // the same sheet the rest of the reader chrome uses — so a dialog looks the
@@ -16,13 +17,18 @@ export function AppDialog({
   // assistive tech and hides it from view; `className` widens the sheet.
   hideTitle = false,
   className = '',
+  // `side`: a panel docked at the right edge (a bottom sheet on a phone) that
+  // leaves the page readable and scrollable beside it — no backdrop, no
+  // focus trap. Escape and the panel's own Close still dismiss it.
+  side = false,
 }) {
+  const container = usePortalContainer();
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="ui-dialog-backdrop" />
-        <Dialog.Viewport className="ui-dialog-viewport">
-          <Dialog.Popup className={`ui-dialog-popup tdoc-modal${className ? ` ${className}` : ''}`}>
+    <Dialog.Root open={open} onOpenChange={onOpenChange} modal={side ? false : true} disablePointerDismissal={side}>
+      <Dialog.Portal container={container}>
+        {side ? null : <Dialog.Backdrop className="ui-dialog-backdrop" />}
+        <Dialog.Viewport className={`ui-dialog-viewport${side ? ' ui-dialog-side' : ''}`}>
+          <Dialog.Popup className={`ui-dialog-popup tdoc-modal${side ? ' ui-dialog-side-popup' : ''}${className ? ` ${className}` : ''}`}>
             <Dialog.Title className={`ui-dialog-title${hideTitle ? ' ui-sr-only' : ''}`} render={<h3 />}>{title}</Dialog.Title>
             {description ? (
               <Dialog.Description className="muted ui-dialog-description">

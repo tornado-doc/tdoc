@@ -10,6 +10,7 @@
 // bar, menus, Publish dialog, comment card/reply/composer, dark mode, phone
 // drawer, the owner Share panel (boot payload rewritten in-flight), and /me.
 const { chromium } = require('playwright');
+const { toggleTheme } = require('../helpers/theme-toggle');
 const { spawn } = require('child_process');
 const fs = require('fs'); const path = require('path'); const os = require('os'); const net = require('net');
 const OUT = process.argv[2];
@@ -75,8 +76,8 @@ const SCENES = [
     await p.mouse.up();
     await settle(p, 900);
   } },
-  { name: '08-dark', run: async (p) => { await tryClick(p, '#tdoc-theme-btn'); await settle(p, 600); } },
-  { name: '09-dark-card', run: async (p) => { await tryClick(p, '#tdoc-theme-btn'); await tryClick(p, '.tdoc-pin'); await settle(p, 400); } },
+  { name: '08-dark', run: async (p) => { await toggleTheme(p).catch(() => {}); await settle(p, 600); } },
+  { name: '09-dark-card', run: async (p) => { await toggleTheme(p).catch(() => {}); await tryClick(p, '.tdoc-pin'); await settle(p, 400); } },
   { name: '10-mobile-drawer', viewport: { width: 375, height: 812 }, run: async (p) => { await tryClick(p, '.tdoc-fab'); await settle(p, 500); } },
   { name: '10b-mobile-reaction-picker', viewport: { width: 375, height: 812 }, run: async (p) => { await tryClick(p, '.tdoc-fab'); await settle(p, 500); await tryClick(p, '.tdoc-reactions .tdoc-react-add, .tdoc-react-add'); await settle(p, 400); } },
   { name: '11-mobile-more', viewport: { width: 375, height: 812 }, run: async (p) => { await tryClick(p, '#tdoc-more-btn'); } },

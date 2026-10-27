@@ -26,7 +26,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          # 22: node:sqlite stands in for the search store's Durable Object
+          # SQLite (full-text-search.test.js); the deploy already tests on 22.
+          node-version: '22'
       # jq is needed by the CLI tests that drive bin/tdoc-* hermetically.
       - name: Ensure jq
         run: jq --version || sudo apt-get update && sudo apt-get install -y jq
@@ -67,7 +69,7 @@ jobs:
       # intentional scaffolding vars (e.g. HTML_PATH, HAS_JQ). The gate is for
       # the dangerous classes (quoting/word-splitting/injection), not lint nits.
       - name: ShellCheck CLIs
-        run: shellcheck --severity=warning --exclude=SC2034 bin/tdoc-publish bin/tdoc-doctor bin/tdoc-pull bin/tdoc-new bin/tdoc-unpublish bin/tdoc-update
+        run: shellcheck --severity=warning --exclude=SC2034 bin/tdoc-publish bin/tdoc-doctor bin/tdoc-pull bin/tdoc-new bin/tdoc-unpublish bin/tdoc-restore bin/tdoc-update
 
   svg-preview:
     name: SVG preview and font coverage
@@ -81,19 +83,35 @@ jobs:
       - run: npm run test:svg
 
   browser:
-    name: browser regressions
+    name: browser regressions (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Browsers and their system libraries come preinstalled in the official
+    # image, so no apt step (it hung for 15+ min on some runners). The tag
+    # must match the locked playwright version (test/ci-workflow.test.js).
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --ipc=host
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          # 22 for node:sqlite (full-text-search-ui.test.js).
+          node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:browser
-      - run: TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
-      - run: TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
+      - run: node test/run.js --browser --shard=${{ matrix.shard }}/4
+      - if: matrix.shard == 4
+        run: |
+          TDOC_TEST_BROWSER=webkit node test/resolved-visibility-ui.test.js
+          TDOC_TEST_BROWSER=webkit node test/version-diff-ui.test.js
+          TDOC_TEST_BROWSER=webkit node test/custom-design-theme.test.js
+          TDOC_TEST_BROWSER=webkit node test/visual-viewer.test.js
+          TDOC_TEST_BROWSER=webkit node test/reply-activity-ui.test.js
 
   shell-runtime:
     name: shell runtime
@@ -112,6 +130,12 @@ jobs:
       # A diff here means someone edited shell/src without `npm run build:shell`.
       - run: npm ci
       - run: npm run build:shell
+      # build:shell clears the output directory; restore the independently built bookmarklet.
+      - run: npm run build:feedback
+      # Same for the push service worker (/tdoc-sw.js).
+      - run: npm run build:sw
+      - name: Preview renderer in workerd
+        run: npm run test:workerd
       - name: Committed runtime matches shell/src
         run: |
           git add -N server/runtime

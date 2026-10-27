@@ -101,6 +101,8 @@ t('names tdoc and tornado-doc', () => {
   // Hero mark is Julie's square stroke, not the old filled tornado path.
   assert(/class="brand-mark"[^>]*viewBox="0 0 436 436"/.test(html), 'brand-mark is not the square stroke');
   assert(!/viewBox="201\.2 205\.2 597\.6 597\.6"/.test(html), 'old filled tornado mark still in landing');
+  assert(/<svg class="brand-mark"[^>]*aria-hidden="true"/.test(html),
+    'the decorative logo beside the wordmark must not offer visual expansion');
 });
 
 t('links to the GitHub repo and install path', () => {
@@ -274,6 +276,29 @@ t('carries no unfinished placeholder content', () => {
   assert(/Works with/.test(visible), 'trusted-by label should be Works with, not a borrowed user list');
 });
 
+t('names the apps it runs in, and the chats it does not', () => {
+  // Newcomers went to claude.ai and ChatGPT because the page showed those
+  // marks under "Works with" and "No setup", and said nothing to install.
+  const visible = html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ');
+  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Works with'));
+  assert(/Works in\s+Claude Code\s+or\s+Codex\s+on your computer/.test(hero), 'the hero does not name Claude Code and Codex');
+  assert(/Not yet in the claude\.ai or ChatGPT chat/.test(hero), 'the hero does not say which chats are unsupported');
+  const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
+  const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
+  assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
+  const strip = html.slice(html.indexOf('<p class="trust-label">Works with</p>'), html.indexOf('<!-- ══ THE LOOP ══ -->'));
+  assert(/Claude Code/.test(strip) && /Codex/.test(strip), 'Works with does not list Claude Code and Codex');
+  assert(!/#i-(google|cloudflare|claude)"|Berkeley|tlogo-img|class="marquee"/.test(strip), 'Works with still shows company logos');
+  assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
+  const setup = html.slice(html.indexOf('<!-- ══ ONE PASTE ══'), html.indexOf('<!-- ══ FEATURES'));
+  assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-terminal/.test(setup), 'Claude Code is not drawn as a terminal');
+  assert(!/#i-claude"|#i-grok"|#i-cursor"/.test(setup), 'setup shows apps tdoc does not install into');
+  assert(/sign in once/.test(setup), 'setup does not say you sign in once');
+});
+
 console.log('tdoc.dev / route');
 
 t('homepage renders the landing doc, not a hardcoded page', () => {
@@ -305,7 +330,7 @@ t('homepage fails safe to the neutral page', () => {
 t('doc view and homepage share one render path', () => {
   // Regression guard: the /d/ route used to inline the whole render. If it
   // grows a second copy, the homepage and doc pages drift on access/CSP.
-  assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?\)/.test(worker), 'missing serveDocVersion');
+  assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?(, \{[^)]*\})?\)/.test(worker), 'missing serveDocVersion');
   // One shared render call site: EVERYTHING (homepage included) renders as the
   // cross-origin shell — the overlay path is deleted. Access/CSP/version wiring
   // cannot drift because there is exactly one render.

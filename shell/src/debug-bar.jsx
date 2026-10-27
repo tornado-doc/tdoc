@@ -1,7 +1,10 @@
 import React, { useRef, useState } from 'react';
 import './debug-bar.css';
+import { ChevronRight } from 'lucide-react';
+import { AppMenuItem, AppSubmenu } from './ui/menu.jsx';
 
-// The internal bar, on every page a walk passes through.
+// Internal onboarding controls, reachable from the account menu on every page
+// a walk passes through.
 //
 // It lived inside the gate, which meant a walk could only be restarted from
 // step 1 -- and step 1 is not where a walk starts. A new reader arrives at the
@@ -75,12 +78,14 @@ export function DebugBar({ record, onState, surface = 'hub' }) {
   const doc = record && record.first_doc;
 
   return (
-    <div className="sg-debug" role="group" aria-label="Internal testing">
-      <span className="sg-debug-tag">Internal</span>
+    <AppSubmenu
+      className="tdoc-onboarding-test-trigger"
+      trigger={<>Onboarding test <ChevronRight className="tdoc-submenu-chevron" size={14} /></>}
+    >
+      <div className="tdoc-onboarding-test-status">Current: {recordName(record)}</div>
       {states.map((name) => (
-        <button
+        <AppMenuItem
           key={name}
-          type="button"
           disabled={Boolean(busy)}
           onClick={async () => {
             setBusy(name);
@@ -88,11 +93,11 @@ export function DebugBar({ record, onState, surface = 'hub' }) {
             if (onState) await onState(name);
             setBusy('');
           }}
-        >{busy === name ? '…' : name}</button>
+        >{busy === name ? '…' : name}</AppMenuItem>
       ))}
-      <button
-        type="button"
-        className={`sg-debug-replay${armed ? ' armed' : ''}`}
+      <AppMenuItem
+        className={armed ? 'tdoc-onboarding-test-armed' : ''}
+        closeOnClick={false}
         disabled={Boolean(busy)}
         onClick={async () => {
           // Two presses, and the first one says what will be destroyed by
@@ -125,9 +130,8 @@ export function DebugBar({ record, onState, surface = 'hub' }) {
           // never show what `new` looks like.
           location.reload();
         }}
-      >{busy === 'replay' ? '…' : armed ? (doc ? `delete ${doc}?` : 'replay?') : 'replay'}</button>
-      <span className="sg-debug-now">record: {recordName(record)}</span>
-    </div>
+      >{busy === 'replay' ? '…' : armed ? (doc ? `delete ${doc}?` : 'replay?') : 'replay'}</AppMenuItem>
+    </AppSubmenu>
   );
 }
 

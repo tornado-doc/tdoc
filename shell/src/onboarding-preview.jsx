@@ -55,7 +55,7 @@ export default function OnboardingPreview() {
   }
   const keepInPreview = event => {
     const target = event.target.closest('a,button');
-    if (target && (target.tagName === 'A' || /^(Sign in|Use Another Account)/.test(target.textContent))) {
+    if (target && (target.tagName === 'A' || /^(Sign in|Use another account)/.test(target.textContent))) {
       event.preventDefault(); event.stopPropagation(); setNotice('Preview only. No account changes.');
     }
   };

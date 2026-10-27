@@ -1,20 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Popover } from '@base-ui/react/popover';
+import { Drawer } from '@base-ui/react/drawer';
 import {
-  ChevronDown,
+  Check,
   ChevronRight,
-  CircleCheck,
   Copy,
   CopyPlus,
   Download,
   FileDown,
+  FolderInput,
   History,
   Share2,
-  Send,
   Star,
   Trash2,
   Upload,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
+import { AskIcon } from '../ui/ask-icon.jsx';
+import { usePortalContainer } from '../ui/portal.js';
 
 // The label after a version number. "current" read as "latest" from an old
 // version (round-4 tester), so the two facts get their own words: where you
@@ -80,52 +83,57 @@ function DocumentTitle({ title, canRename, onRename }) {
   );
 }
 
-export function DocumentBreadcrumbs({ config, title, starred, onRename, onToggleStar, onCompare }) {
-  if (config.isLanding) return null;
+// "Edited 3m ago": when the version on screen was made, in words.
+export function editedAgo(iso, now = Date.now()) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return '';
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 60) return 'Edited just now';
+  if (s < 3600) return `Edited ${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `Edited ${Math.floor(s / 3600)}h ago`;
+  if (s < 7 * 86400) return `Edited ${Math.floor(s / 86400)}d ago`;
+  return `Edited ${new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+}
 
+// The bar's left side after the logo: the document's title, renameable by its
+// owner. No space or folder crumbs (they led nowhere -- there is no sidebar
+// behind them); the space is the switcher chip on the right, as on My docs.
+// Version and star moved: the version is behind "Edited …" on the right, the
+// star in ⋯.
+export function DocumentBreadcrumbs({ config, title, onRename }) {
+  if (config.isLanding) return null;
+  return <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />;
+}
+
+// "Edited 3m ago", muted, on the right: the version on screen. A click lists
+// the versions and View changes (it was the v1 chip beside the title).
+export function DocumentEdited({ config, onCompare }) {
+  if (config.isLanding || config.mode === 'local') return null;
+  const current = (config.versions || []).find((v) => Number(v.n) === Number(config.version)) || null;
+  const words = editedAgo(current?.created) || `v${config.version}`;
   return (
-    <>
-      <AppMenu
-        align="start"
-        trigger={(
-          <button id="tdoc-version-toggle" type="button" className="tdoc-version-toggle">
-            v{config.version}
-            {config.versions?.length > 1 ? <ChevronDown size={11} /> : null}
-          </button>
-        )}
-      >
-        {(config.versions || []).map((version) => (
-          <AppMenuItem
-            key={version.n}
-            className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
-            onClick={() => {
-              location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`;
-            }}
-          >
-            v{version.n}{versionLabel(version.n, config)}
-          </AppMenuItem>
-        ))}
-        <AppMenuSeparator />
-        <AppMenuItem onClick={onCompare}>View changes</AppMenuItem>
-      </AppMenu>
-      <DocumentTitle title={title} canRename={Boolean(config.isOwner)} onRename={onRename} />
-      {/* Whose document this is. Absent for anything published before hosted
-          accounts, for the landing doc, and on a self-hosted worker — those
-          name nobody rather than guessing. Folds away before the title does. */}
-      {config.author ? <span className="doc-author">{config.author}</span> : null}
-      {config.viewerStar ? (
-        <button
-          id="tdoc-star-btn"
-          type="button"
-          className={`tdoc-star-btn${starred ? ' is-starred' : ''}`}
-          aria-pressed={starred}
-          aria-label={starred ? 'Remove from starred' : 'Add to starred'}
-          onClick={onToggleStar}
-        >
-          <Star size={15} fill={starred ? 'currentColor' : 'none'} />
+    <AppMenu
+      align="end"
+      trigger={(
+        <button id="tdoc-version-toggle" type="button" className="tdoc-edited" title={`Version ${config.version}`}>
+          {words}
         </button>
-      ) : null}
-    </>
+      )}
+    >
+      {[...(config.versions || [])].reverse().map((version) => (
+        <AppMenuItem
+          key={version.n}
+          className={`tdoc-version-item${version.n === config.version ? ' current' : ''}`}
+          onClick={() => {
+            location.href = `/d/${encodeURIComponent(config.slug)}/v/${version.n}`;
+          }}
+        >
+          v{version.n}{versionLabel(version.n, config)}
+        </AppMenuItem>
+      ))}
+      <AppMenuSeparator />
+      <AppMenuItem onClick={onCompare}>View changes</AppMenuItem>
+    </AppMenu>
   );
 }
 
@@ -139,31 +147,91 @@ export function DocumentPrimaryAction({
       <Upload size={14} /> <span>Publish</span>
     </button>
   ) : (
-    <button id="tdoc-share-btn" type="button" className="primary tdoc-document-primary" aria-label="Share" onClick={onShare}>
-      <Share2 size={14} /> <span>Share</span>
+    <button id="tdoc-share-btn" type="button" className="tdoc-share-quiet tdoc-document-primary" aria-label="Share" onClick={onShare}>
+      <Share2 size={15} /> <span>Share</span>
     </button>
   );
 }
 
-// Always-visible Send to agent entry (desktop + mobile). Badge = comments
-// still on handoff_status note (not yet sent). Prefer a paper-plane over a bottom strip.
-export function DocumentSendAgentAction({ count = 0, onClick }) {
-  const label = count > 0 ? `Send to agent (${count} open)` : 'Send to agent';
-  return (
-    <button
-      id="tdoc-send-agent-btn"
-      type="button"
-      className="tdoc-send-agent-action"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-    >
-      <Send size={16} aria-hidden="true" />
-      {count > 0 ? (
-        <span className="tdoc-send-agent-badge">{count > 99 ? '99+' : count}</span>
-      ) : null}
-    </button>
-  );
+// One document-level entry for handoff activity and unsent comments. The
+// comment card itself carries the state of that one comment.
+export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenChange, narrow = false, children }) {
+  const portalContainer = usePortalContainer();
+  const [visibleViewport, setVisibleViewport] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const dragStart = useRef(null);
+  const dragged = useRef(false);
+  useEffect(() => {
+    if (!narrow || !open) return undefined;
+    const visual = window.visualViewport;
+    const update = () => {
+      const height = Math.round(visual?.height || window.innerHeight);
+      if (window.innerHeight - height > 100) setExpanded(true);
+      setVisibleViewport({
+        bottom: Math.max(0, window.innerHeight - ((visual?.offsetTop || 0) + height)),
+        height,
+      });
+    };
+    update();
+    visual?.addEventListener('resize', update);
+    visual?.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    return () => {
+      visual?.removeEventListener('resize', update);
+      visual?.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [narrow, open]);
+  const ready = counts.ready || 0;
+  const waiting = (counts.waiting || 0) + (counts.received || 0);
+  const failed = counts.failed || 0;
+  const details = [
+    ready ? `${ready} to send` : null,
+    waiting ? `${waiting} waiting for agent` : null,
+    unread ? `${unread} new agent ${unread === 1 ? 'reply' : 'replies'}` : null,
+    failed ? `${failed} not delivered` : null,
+  ].filter(Boolean).join(' · ');
+  const label = `Ask AI${details ? ` · ${details}` : ''}`;
+  const triggerContents = <>
+    <AskIcon className="tdoc-ask-ai-mark" size={18} color="var(--td-accent, #1652f0)" />
+    <span className="tdoc-ask-ai-label">Ask AI</span>
+    {unread ? <span className="tdoc-send-agent-badge is-unread" aria-hidden="true" />
+      : ready ? <span className="tdoc-send-agent-badge is-ready" aria-hidden="true" /> : null}
+  </>;
+  const triggerProps = { id: 'tdoc-send-agent-btn', type: 'button', className: 'tdoc-send-agent-action', 'aria-label': label, title: label };
+  if (narrow) return <Drawer.Root open={open} onOpenChange={(next) => { if (!next) setExpanded(false); onOpenChange(next); }} swipeDirection="down">
+    <Drawer.Trigger {...triggerProps}>{triggerContents}</Drawer.Trigger>
+    <Drawer.Portal container={portalContainer}>
+      <Drawer.Backdrop className="tdoc-ask-drawer-backdrop" />
+      <Drawer.Viewport className="tdoc-ask-drawer-viewport">
+        <Drawer.Popup className="tdoc-ask-mobile-drawer" style={{ bottom: visibleViewport?.bottom ?? 0, height: Math.max(120, expanded ? (visibleViewport?.height || 600) - 48 : (visibleViewport?.height || 600) * 0.7 - 8) }}>
+          <Drawer.Title className="tdoc-visually-hidden">Ask AI</Drawer.Title>
+          <button type="button" className="tdoc-ask-drawer-grip" aria-label={expanded ? 'Collapse Ask AI' : 'Expand Ask AI'}
+            onClick={() => { if (!dragged.current) setExpanded(!expanded); dragged.current = false; }}
+            onPointerDown={(event) => { dragStart.current = event.clientY; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId); }}
+            onPointerUp={(event) => {
+              if (dragStart.current != null && Math.abs(dragStart.current - event.clientY) > 48) {
+                dragged.current = true;
+                setExpanded(event.clientY < dragStart.current);
+              }
+              dragStart.current = null;
+            }}><span /></button>
+          <Drawer.Close className="tdoc-ask-drawer-close" aria-label="Close Ask AI">×</Drawer.Close>
+          <Drawer.Content className="tdoc-ask-drawer-content">{children}</Drawer.Content>
+        </Drawer.Popup>
+      </Drawer.Viewport>
+    </Drawer.Portal>
+  </Drawer.Root>;
+  return <Popover.Root open={open} onOpenChange={onOpenChange}>
+    <Popover.Trigger {...triggerProps}>{triggerContents}</Popover.Trigger>
+    <Popover.Portal container={portalContainer}>
+      <Popover.Positioner side="bottom" align="end" sideOffset={narrow ? 8 : 48} collisionPadding={8} positionMethod="fixed" className="tdoc-picker-positioner">
+        <Popover.Popup className="tdoc-handoff-popover" aria-label="Ask AI">
+          {children}
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>;
 }
 
 export function DocumentOverflowActions({
@@ -176,14 +244,38 @@ export function DocumentOverflowActions({
   onDuplicate,
   onDownload,
   onPrint,
+  onMoveDocument,
   onDelete,
-  resolvedCount,
-  showResolved,
-  onToggleResolved,
   onCompare,
+  // Read / Comment / Edit, at the top of ⋯ with the current one ticked
+  // (it was a dropdown in the bar): { modes: [{ value, label, Icon }], value, onChange }.
+  mode = null,
 }) {
   return (
     <>
+      {mode && mode.modes.length > 1 ? (
+        <>
+          <div className="tdoc-menu-label">Mode</div>
+          {mode.modes.map((option) => {
+            const Icon = option.Icon;
+            const selected = option.value === mode.value;
+            return (
+              <AppMenuItem
+                key={option.value}
+                className={`tdoc-action-menu-item tdoc-mode-item${selected ? ' current' : ''}`}
+                role="menuitemradio"
+                aria-checked={selected}
+                data-action={`mode-${option.value}`}
+                onClick={() => mode.onChange(option.value)}
+              >
+                <Icon size={15} /> <span>{option.label}</span>
+                {selected ? <Check className="tdoc-mode-check" size={14} /> : null}
+              </AppMenuItem>
+            );
+          })}
+          <AppMenuSeparator />
+        </>
+      ) : null}
       <AppMenuItem className="tdoc-action-menu-item" data-action="compare" onClick={onCompare}>
         <History size={15} /> View changes
       </AppMenuItem>
@@ -198,7 +290,7 @@ export function DocumentOverflowActions({
       )}
       {(config.versions || []).length > 1 ? (
         <AppSubmenu
-          className="tdoc-action-menu-item tdoc-mobile-overflow-only tdoc-version-submenu-trigger"
+          className="tdoc-action-menu-item tdoc-version-submenu-trigger"
           popupClassName="tdoc-version-submenu"
           trigger={(
             <>
@@ -221,19 +313,9 @@ export function DocumentOverflowActions({
         </AppSubmenu>
       ) : null}
       {config.viewerStar ? (
-        <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" data-action="star" onClick={onToggleStar}>
+        <AppMenuItem className="tdoc-action-menu-item" data-action="star" onClick={onToggleStar}>
           <Star size={15} fill={starred ? 'currentColor' : 'none'} />
           {starred ? 'Remove from starred' : 'Add to starred'}
-        </AppMenuItem>
-      ) : null}
-      {resolvedCount ? (
-        <AppMenuItem
-          className="tdoc-action-menu-item tdoc-mobile-overflow-only"
-          data-action="show-resolved"
-          onClick={onToggleResolved}
-        >
-          <CircleCheck size={15} />
-          {showResolved ? 'Hide resolved' : `Show resolved (${resolvedCount})`}
         </AppMenuItem>
       ) : null}
       {/* Four groups: what this doc is, how to take a copy of it, the app, the
@@ -241,7 +323,7 @@ export function DocumentOverflowActions({
           separator carries tdoc-mobile-overflow-only because everything above
           it does — on a desktop that group is not rendered, and a rule floating
           at the top of the menu would be the only thing left of it. */}
-      <AppMenuSeparator className="tdoc-mobile-overflow-only" />
+      <AppMenuSeparator />
       {/* One row instead of three. Taking a copy of the document is a single
           intent; which format is a detail that belongs one level down.
           Duplicate stays out here — it makes a new document on tdoc, which is
@@ -271,7 +353,12 @@ export function DocumentOverflowActions({
           <CopyPlus size={15} /> Duplicate
         </AppMenuItem>
       ) : null}
-      {config.ownerManage ? <AppMenuSeparator /> : null}
+      {onMoveDocument || config.ownerManage ? <AppMenuSeparator /> : null}
+      {onMoveDocument ? (
+        <AppMenuItem className="tdoc-action-menu-item" data-action="move-document" onClick={onMoveDocument}>
+          <FolderInput size={15} /> Move document…
+        </AppMenuItem>
+      ) : null}
       {config.ownerManage ? (
         <AppMenuItem className="tdoc-action-menu-item" data-action="delete" tone="danger" onClick={onDelete}>
           <Trash2 size={15} /> Delete doc…

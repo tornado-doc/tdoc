@@ -1,3 +1,19 @@
+/* The doc's text and a note on taking part, written into the page for agents
+   whose fetch tools never run the app or open its frame. Visually hidden
+   rather than display:none, which those tools drop; main.jsx removes it as
+   soon as the app starts. */
+.tdoc-agent-view {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* dvh, not vh. On iOS 100vh is the LARGE viewport — the height the page would
    have if Safari's toolbars were collapsed — so while a toolbar is showing the
    shell is taller than the screen and the PAGE itself scrolls. The bar is
@@ -38,22 +54,46 @@ body,
   display: block;
 }
 
+/* Keep the original sandbox mounted: expanding an interactive visual must
+   not reload its iframe or discard its current state. */
+.tdoc-document-app[data-visual-open] > :not(.tdoc-reader-surface),
+.tdoc-document-app[data-visual-open] .tdoc-reader-surface > :not(.tdoc-doc-frame) {
+  display: none !important;
+}
+.tdoc-document-app[data-visual-open] .tdoc-doc-frame {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  z-index: 1000;
+  filter: none !important;
+}
+/* The viewer applies its own theme inside the sandbox. An invert/counter-
+   invert pair in the shell clips saturated image colors even when it cancels. */
+html:has(.tdoc-document-app[data-visual-open]) { filter: none !important; }
+/* Presenting slides keeps commenting: the composer and the open comment card
+   stay above the full-screen frame. Pins stay hidden; the presenter's own bar
+   counts the threads on the slide shown. */
+.tdoc-document-app[data-presenting] .tdoc-reader-surface > .tdoc-popup,
+.tdoc-document-app[data-presenting] .tdoc-reader-surface > .tdoc-floating-open {
+  display: block !important;
+  z-index: 1001 !important;
+}
+
 .tdoc-bar button.tdoc-mode-trigger {
   box-sizing: border-box;
   height: 32px;
   flex: none;
   padding: 0 9px;
-  border: 1px solid #dedee3;
-  background: #fff;
-  color: #555;
-  font: 600 12px system-ui, sans-serif;
+  border: 0;
+  background: transparent;
+  color: var(--td-ink, #1a1a1a);
+  font: 500 13.5px system-ui, sans-serif;
 }
 
-.tdoc-bar button.tdoc-mode-trigger[data-mode="comment"],
-.tdoc-bar button.tdoc-mode-trigger[data-mode="edit"] {
-  border-color: #c6d4f5;
-  background: var(--td-accent-tint);
-  color: var(--td-accent);
+.tdoc-bar button.tdoc-mode-trigger:hover,
+.tdoc-bar button.tdoc-mode-trigger[data-popup-open] {
+  background: var(--td-surface-2, #f0f1f4);
 }
 
 .tdoc-mode-chevron { color: #98989f; }
@@ -160,34 +200,10 @@ body,
 
 @media (max-width: 700px) {
   .tdoc-bar button.tdoc-mode-trigger {
-    position: relative;
     width: 44px;
     padding: 0;
-    border-color: transparent;
-    background: transparent;
     justify-content: center;
   }
-  .tdoc-bar button.tdoc-mode-trigger:hover { background: transparent; }
-  .tdoc-bar button.tdoc-mode-trigger::before {
-    position: absolute;
-    inset: 6px;
-    z-index: 0;
-    border: 1px solid #dedee3;
-    border-radius: 6px;
-    background: #fff;
-    content: '';
-  }
-  .tdoc-bar button.tdoc-mode-trigger[data-mode="comment"],
-  .tdoc-bar button.tdoc-mode-trigger[data-mode="edit"] {
-    border-color: transparent;
-    background: transparent;
-  }
-  .tdoc-bar button.tdoc-mode-trigger[data-mode="comment"]::before,
-  .tdoc-bar button.tdoc-mode-trigger[data-mode="edit"]::before {
-    border-color: #c6d4f5;
-    background: var(--td-accent-tint);
-  }
-  .tdoc-bar button.tdoc-mode-trigger > * { position: relative; z-index: 1; }
   .tdoc-mode-label,
   .tdoc-mode-chevron { display: none; }
   .tdoc-editor-toolbar { padding: 6px 8px; gap: 6px; }
@@ -234,6 +250,10 @@ body,
 
 body.tdoc-narrow .tdoc-pin {
   display: none;
+}
+
+body.tdoc-narrow .tdoc-pin-document {
+  display: flex;
 }
 
 .tdoc-fab {

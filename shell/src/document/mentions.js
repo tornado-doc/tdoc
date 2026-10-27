@@ -22,21 +22,37 @@ export function mentionQueryAt(text, caret) {
 // People whose login or display name contains the query, best-effort ranked:
 // a prefix hit before a substring hit, alphabetical inside each group.
 export function matchMentionable(people, query) {
-  const q = String(query || '').trim().toLowerCase();
+  // The server already ordered people by relevance (in this doc, teammate,
+  // recently worked with); matching only filters and lifts better matches.
+  // A name matches on any word, so "shi" finds "Jingyu Shi", and an email
+  // person matches on the address and its local part.
+  const q = String(query || '').trim().toLowerCase().replace(/^@/, '');
   const rank = (person) => {
-    const login = String(person.login || '').toLowerCase();
-    const name = String(person.name || '').toLowerCase();
     if (!q) return 0;
+    const login = String(person.login || '').toLowerCase().replace(/^email:/, '');
+    const name = String(person.name || '').toLowerCase();
+    const words = name.split(/[\s()._-]+/).filter(Boolean);
     if (login.startsWith(q) || name.startsWith(q)) return 0;
-    if (login.includes(q) || name.includes(q)) return 1;
+    if (words.some((w) => w.startsWith(q)) || login.split(/[@._-]/).some((w) => w.startsWith(q))) return 1;
+    if (login.includes(q) || name.includes(q)) return 2;
     return -1;
   };
   return (Array.isArray(people) ? people : [])
-    .map((person) => ({ person, r: rank(person) }))
+    .map((person, i) => ({ person, r: rank(person), i }))
     .filter((row) => row.r >= 0)
-    .sort((a, b) => (a.r - b.r) || String(a.person.login).localeCompare(String(b.person.login)))
+    .sort((a, b) => (a.r - b.r) || (a.i - b.i))
     .slice(0, 6)
     .map((row) => row.person);
+}
+
+// Why a person is offered, in the menu's own words.
+export function mentionReason(person) {
+  const tags = Array.isArray(person && person.tags) ? person.tags : [];
+  if (tags.includes('teammate')) return 'teammate';
+  if (tags.includes('doc')) return 'in this doc';
+  if (tags.includes('invited')) return 'invited';
+  if (tags.includes('recent')) return 'recent';
+  return '';
 }
 
 // Replace the token under the caret with `@login `, and report where the caret

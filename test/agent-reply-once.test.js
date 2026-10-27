@@ -118,21 +118,23 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       `expected comment_deleted, got ${JSON.stringify(r)}`);
   });
 
-  await t('two different agents each get their own first answer', async () => {
+  // Julie, 2026-10-01: "人没回复的话 ai 不要回复 ai". Once any agent has
+  // spoken, the next word belongs to a person — whichever agent asks next.
+  await t('a second agent may not answer an agent: the next turn is a person\'s', async () => {
     const { env, token, slug, commentId } = await seed();
     const a = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Claude did it.', status: 'applied', applied_in: 1, agent_login: 'claude' })).json();
     const b = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'Codex looked too.', status: 'applied', applied_in: 1, agent_login: 'codex' })).json();
     assert(a.id && !a.skipped, 'first agent was refused');
-    assert(b.id && !b.skipped, `a different agent must not inherit another agent's turn: ${JSON.stringify(b)}`);
+    assert(b.skipped === true && b.reason === 'already_answered', `an agent answered an agent: ${JSON.stringify(b)}`);
   });
 
-  await t('force: true is the way to say it on purpose', async () => {
+  await t('force no longer lets an agent answer itself', async () => {
     const { env, token, slug, commentId } = await seed();
     await reply(worker, env, slug, token, { parent_id: commentId, text: 'Rewrote it.', status: 'applied', applied_in: 1, agent_login: 'claude' });
     const forced = await (await reply(worker, env, slug, token, { parent_id: commentId, text: 'And once more.', status: 'applied', applied_in: 1, agent_login: 'claude', force: true })).json();
-    assert(forced.id && !forced.skipped, `force should post: ${JSON.stringify(forced)}`);
+    assert(forced.skipped === true && forced.reason === 'already_answered', `force posted anyway: ${JSON.stringify(forced)}`);
     const [c] = await listComments(env, slug);
-    assert(c.replies.length === 2, `expected both replies, got ${c.replies.length}`);
+    assert(c.replies.length === 1, `expected one reply, got ${c.replies.length}`);
   });
 
   // ---- the gate itself, on hand-built logs -------------------------------

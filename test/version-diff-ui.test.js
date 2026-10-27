@@ -33,6 +33,8 @@ const { resolveTarget } = require('./helpers/fixture-server');
       throw new Error('Frame did not attach: '+name);
     };
     let before = await frame('Previous version'), after = await frame('New version');
+    assert.equal(await before.locator('.tdoc-visual-open').count(), 0, 'comparison panes keep their own navigation');
+    assert.equal(await after.locator('.tdoc-visual-open').count(), 0, 'viewer controls belong to the document reader');
     assert.equal(await before.locator('#removed').getAttribute('data-tdoc-change'), 'delete');
     assert.equal(await after.locator('#added').getAttribute('data-tdoc-change'), 'add');
     assert.equal(await after.locator('#workflow #review').getAttribute('data-tdoc-change'), 'add');

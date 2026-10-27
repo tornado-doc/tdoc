@@ -1,10 +1,12 @@
 import React from 'react';
 import { Folder, MoreHorizontal, Star } from 'lucide-react';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { isFeatureOn } from '../feature-flags.js';
 
 export const day = (iso) => (typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '');
 
-export const docHref = (doc) => `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest}`;
+// The doc's own address: always its newest version, and the URL people copy.
+export const docHref = (doc) => `/d/${encodeURIComponent(doc.slug)}`;
 
 // Row-level "⋯" menu. Items: { label, icon?, tone?, className?, onSelect }.
 // Built on the shared AppMenu facade so every row gets outside-click and
@@ -56,7 +58,9 @@ export function StarButton({ doc, onToggle }) {
 export function DocRow({
   doc,
   meta,
+  path,
   selection,
+  layout = 'list',
   starrable = true,
   onToggleStar,
   menuItems = [],
@@ -66,7 +70,8 @@ export function DocRow({
   const dataAttrs = Object.fromEntries(
     Object.entries(data).map(([key, value]) => [`data-${key}`, value]),
   );
-  const classes = ['doc-row', selection?.checked ? 'is-selected' : null, className]
+  const thumbnail = layout === 'grid' && isFeatureOn('docThumbnails');
+  const classes = ['doc-row', layout === 'grid' ? 'is-card' : null, layout === 'grid' && !thumbnail ? 'is-text-card' : null, selection?.checked ? 'is-selected' : null, className]
     .filter(Boolean)
     .join(' ');
   return (
@@ -81,8 +86,25 @@ export function DocRow({
           />
         </label>
       ) : null}
+      {thumbnail ? (
+        <a className="doc-card-preview" href={docHref(doc)} aria-label={`Open ${doc.title}`}>
+          <span>{doc.excerpt || doc.title}</span>
+          {doc.image ? (
+            <img
+              src={doc.image}
+              alt=""
+              loading="lazy"
+              onError={(event) => { event.currentTarget.hidden = true; }}
+            />
+          ) : null}
+        </a>
+      ) : null}
       <div className="doc-info">
-        <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
+        <div className="doc-title-line">
+          {path ? <span className="doc-path" title={path}>{path} ›</span> : null}
+          <a className="doc-title" href={docHref(doc)}>{doc.title}</a>
+        </div>
+        {doc.excerpt ? <div className="doc-preview-excerpt">{doc.excerpt}</div> : null}
         <div className="doc-meta">{meta}</div>
       </div>
       <div className="row-actions">
@@ -93,7 +115,28 @@ export function DocRow({
   );
 }
 
-export function FolderRow({ folder, count, onOpen, menuItems = [] }) {
+// One list surface for personal and team spaces. The caller supplies only the
+// actions/metadata that differ; preview layout, selection state, and empty
+// treatment stay identical instead of slowly becoming two products.
+export function DocList({ docs, rowProps, selecting = false, empty = null, layout = 'list' }) {
+  return (
+    <>
+      <div className={`doc-list is-${layout}${selecting ? ' is-selecting' : ''}`}>
+        {docs.map((doc) => <DocRow key={doc.slug} doc={doc} layout={layout} {...rowProps(doc)} />)}
+      </div>
+      {!docs.length && empty ? <p className="empty">{empty}</p> : null}
+    </>
+  );
+}
+
+function folderMeta({ folders = 0, docs = 0 } = {}) {
+  const parts = [];
+  if (folders) parts.push(`${folders} ${folders === 1 ? 'folder' : 'folders'}`);
+  if (docs || !folders) parts.push(`${docs} ${docs === 1 ? 'doc' : 'docs'}`);
+  return parts.join(' · ');
+}
+
+export function FolderRow({ folder, contents, onOpen, menuItems = [] }) {
   return (
     <div
       className="doc-row folder-row"
@@ -108,7 +151,7 @@ export function FolderRow({ folder, count, onOpen, menuItems = [] }) {
       <span className="folder-ico"><Folder size={18} /></span>
       <div className="doc-info" onClick={onOpen}>
         <span className="doc-title">{folder.name}</span>
-        <div className="doc-meta">{count} {count === 1 ? 'doc' : 'docs'}</div>
+        <div className="doc-meta">{folderMeta(contents)}</div>
       </div>
       <div className="row-actions">
         <RowMenu label="Folder actions" items={menuItems} />

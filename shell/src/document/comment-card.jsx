@@ -1,104 +1,65 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
 import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
+import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
-import { MentionField, MentionText } from './mention-field.jsx';
+import { usePortalContainer } from '../ui/portal.js';
+import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
+import { agentFacts, agentName, agentOwner } from './agent-choices.js';
+import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
+import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, QUICK_REACTIONS } from './model.js';
-import { formatHandoffAgo } from './handoff-banner.jsx';
+import { HandoffStatusChips } from './handoff-status-line.jsx';
+import { canSeeHandoff } from './handoff-state.js';
+import { productPageUrl } from './product-url.js';
+import { observeVisibleRead } from './visible-read.js';
 
-/** Latest agent verdict on a reply, if any (applied / partial / question). */
-function latestAgentVerdict(comment) {
-  const replies = comment?.replies || [];
-  for (let i = replies.length - 1; i >= 0; i -= 1) {
-    const status = replies[i]?.agent_status;
-    if (status === 'partial' || status === 'question' || status === 'applied') return status;
-  }
-  return null;
-}
-
-function hasAgentReply(comment) {
-  return (comment?.replies || []).some(
-    (r) => r && (r.author?.kind === 'agent' || r.agent_status),
-  );
-}
-
-function HandoffStatusChips({ comment }) {
-  // Tick so "3m ago" advances while the card stays open with a sent handoff.
-  const [, setTick] = useState(0);
-  const verdict = latestAgentVerdict(comment);
-  // Once the agent has posted on the thread, "Waiting" is stale even if
-  // handoff_status is still sent (resolve is a separate step).
-  const waiting = comment.handoff_status === 'sent'
-    && comment.handoff_delivery?.status !== 'failed'
-    && !hasAgentReply(comment)
-    && !verdict;
-  useEffect(() => {
-    if (!waiting) return undefined;
-    const id = window.setInterval(() => setTick((n) => n + 1), 30000);
-    return () => window.clearInterval(id);
-  }, [waiting]);
-  const ago = comment.handoff_at ? formatHandoffAgo(comment.handoff_at) : '';
-  const chips = [];
-
-  if (comment.handoff_status === 'sent' && comment.handoff_delivery?.status === 'failed') {
-    chips.push(
-      <span
-        key="failed"
-        className="tdoc-handoff-chip is-failed"
-        title={comment.handoff_delivery?.error || undefined}
-      >
-        Not delivered
-      </span>,
-    );
-  } else if (waiting) {
-    chips.push(
-      <span key="waiting" className="tdoc-handoff-chip is-waiting">
-        Waiting on agent{ago ? ` · ${ago}` : ''}
-      </span>,
-    );
-  }
-
-  if (verdict === 'partial') {
-    chips.push(
-      <span key="partial" className="tdoc-handoff-chip is-partial">
-        Partial — needs you
-      </span>,
-    );
-  } else if (verdict === 'question') {
-    chips.push(
-      <span key="question" className="tdoc-handoff-chip is-question">
-        Agent asked
-      </span>,
-    );
-  }
-
-  if (comment.handoff_status === 'resolved') {
-    chips.push(
-      <span key="resolved" className="tdoc-handoff-chip is-resolved">
-        Agent done
-      </span>,
-    );
-  }
-
-  if (!chips.length) return null;
-  return <>{chips}</>;
-}
+const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };
 
 function authorLine(author) {
   if (!author) return 'anonymous';
   if (author.kind === 'agent') {
-    // §4: brand stays on the avatar; the text line is handle · principal.
+    // Brand stays on the avatar; the text line is name · owner, the owner
+    // being the account whose token posted it (stamped by the server).
+    if (agentOwner(author)) return `${agentName(author)} · ${agentOwner(author)}`;
+    // Older replies, from before the owner was stamped: handle · principal.
     const handle = author.handle || null;
     const principal = author.principal?.display || null;
     if (handle && principal) return `${handle} · ${principal}`;
     if (principal) return principal;
     if (handle) return handle;
   }
-  return author.name || author.login || 'anonymous';
+  return author.name || (author.login ? replyName(author) : 'anonymous');
 }
 
-function Author({ author, timestamp }) {
+// An agent's name with the five facts behind it on hover: name, who it acts
+// for, program, where it runs, and scope. Only for replies that carry an
+// owner; older ones keep their plain line.
+function AgentAuthorName({ author }) {
+  return (
+    <PreviewCard.Root>
+      <PreviewCard.Trigger render={<span className="login tdoc-agent-name" tabIndex={0} />} delay={300}>
+        {authorLine(author)}
+      </PreviewCard.Trigger>
+      <PreviewCard.Portal container={usePortalContainer()}>
+        <PreviewCard.Positioner side="bottom" align="start" sideOffset={6} collisionPadding={8}
+          positionMethod="fixed" className="tdoc-picker-positioner">
+          <PreviewCard.Popup className="tdoc-agent-card">
+            <dl>
+              {agentFacts(author).map((f) => (
+                <React.Fragment key={f.label}><dt>{f.label}</dt><dd>{f.value}</dd></React.Fragment>
+              ))}
+            </dl>
+          </PreviewCard.Popup>
+        </PreviewCard.Positioner>
+      </PreviewCard.Portal>
+    </PreviewCard.Root>
+  );
+}
+
+export function Author({ author, timestamp }) {
   if (!author) {
     return (
       <div className="author">
@@ -111,29 +72,44 @@ function Author({ author, timestamp }) {
   }
 
   const avatar = avatarFor(author);
+  const providerAvatar = author.kind === 'agent' && author.provider;
   const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
     && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
     ? author.profile_url : null;
-  const title = author.kind === 'agent' && author.principal?.terminal
+  const hoverCard = author.kind === 'agent' && !!agentOwner(author);
+  const title = author.kind === 'agent' && !hoverCard && author.principal?.terminal
     ? author.principal.terminal
     : undefined;
   return (
     <div className={`author${author.kind === 'agent' ? ' tdoc-agent-author' : ''}`} title={title}>
-      {avatar ? (profileUrl ? (
+      {providerAvatar ? (
+        <span className="tdoc-agent-provider-mark" aria-hidden="true">
+          <ProviderMark target={author} size={18} />
+        </span>
+      ) : avatar ? (profileUrl ? (
         <a className="tdoc-author-profile" href={profileUrl}
           aria-label={`View ${authorLine(author)}'s public profile`}
           title={`View ${authorLine(author)}'s public profile`}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}>
-          <img src={avatar} alt="" />
+          <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />
         </a>
-      ) : <img src={avatar} alt="" />) : null}
+      ) : <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />) : null}
       <span className="tdoc-cc-who">
-        <span className="login">{authorLine(author)}</span>
+        {hoverCard ? <AgentAuthorName author={author} /> : <span className="login">{authorLine(author)}</span>}
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
       </span>
     </div>
   );
+}
+
+// The same safe body is used by comments, replies, and private Ask AI turns.
+export function CommentMessageText({ text, mentions = [] }) {
+  return <div className="text"><MentionText text={text} mentions={mentions} /></div>;
+}
+
+export function ReplyMessage({ author, text, mentions = [] }) {
+  return <><Author author={author} /><CommentMessageText text={text} mentions={mentions} /></>;
 }
 
 function ReactionPicker({ onPick }) {
@@ -142,7 +118,7 @@ function ReactionPicker({ onPick }) {
       <Popover.Trigger className="tdoc-react-add" title="Add reaction">
         <SmilePlus size={14} />
       </Popover.Trigger>
-      <Popover.Portal>
+      <Popover.Portal container={usePortalContainer()}>
         {/* Legacy placement: under the button, left edges aligned, flipped or
             shifted to stay on screen. positionMethod="fixed" because the card
             it opens from is itself fixed to the viewport. */}
@@ -197,21 +173,70 @@ function Reactions({ item, me, onReact }) {
   );
 }
 
-function ReplyForm({ commentId, onReply, replyingTo, mentionable, demo = false }) {
+function ReplyForm({
+  commentId,
+  handoffCommentId,
+  onReply,
+  replyingTo,
+  mentionable,
+  demo = false,
+  canSendToAgent = false,
+  // Owner with no agent connected: @agent stays visible and leads to setup.
+  agentSetupHref = null,
+}) {
   const [text, setText] = useState('');
   // One submit at a time, same as the comment composer: ⌘+Enter and the
   // button share the lock, so a second press while the first reply is still
   // in flight does not post a twin.
   const [busy, setBusy] = useState(false);
+  const agentButtons = useContext(AgentButtonsContext);
+  // The same @agent as the new-comment composer (agent-ask.jsx): the button
+  // that puts the default agent's pill in, the pill's dropdown, Only me. The
+  // feedback overlay keeps its own @agent buttons (AgentButtonsContext).
+  const field = useRef(null);
+  const ask = useAgentAsk(text, setText, field);
+  const { agents, target } = ask;
+  const v4 = !agentButtons && !demo;
+  // An "Only me" question asked from this reply box: its answer shows here.
+  const privateAsk = agents.privateReply && agents.privateReply.parentId === commentId ? agents.privateReply : null;
+  // Asked: the question has gone, so the box it came from starts empty.
+  useEffect(() => { if (privateAsk) setText(''); }, [Boolean(privateAsk)]);
 
-  const submit = async () => {
+  const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
+    if (sendToAgent && v4 && !target && !agents.preselected) { ask.putDefault(); return; }
     setBusy(true);
     try {
+      let opts;
+      let body = text;
+      if (v4) {
+        // ⌘⇧Enter puts the default agent in, then sends. A named agent that
+        // may edit gets the thread to answer or change; one that may not (or
+        // Only me) answers only, under this reply or to the asker alone.
+        const out = ask.outgoing(sendToAgent);
+        body = out.text;
+        const recipient = canSendToAgent && out.target && !out.askOnly ? out.target : null;
+        opts = { sendToAgent: Boolean(recipient), recipient, target: out.target, askOnly: out.askOnly, onlyMe: out.onlyMe };
+      } else {
+        opts = { sendToAgent: canSendToAgent && sendToAgent, recipient: null, target: null, askOnly: false, onlyMe: false };
+      }
       // onReply resolves false when the shell reported a failure; keep the draft.
-      if (await onReply(commentId, text) !== false) setText('');
+      const ok = await onReply(commentId, opts.target || mentionsAi(body) ? joinAiTags(body) : body, {
+        ...opts,
+        handoffCommentId: handoffCommentId || commentId,
+      });
+      if (ok !== false) setText('');
     } finally { setBusy(false); }
   };
+
+  if (privateAsk) {
+    return (
+      <div className="tdoc-reply-form open tdoc-private-ask" data-parent-id={commentId}>
+        {replyingTo ? <div className="tdoc-reply-to">Replying to @{replyingTo}</div> : null}
+        <PrivateAnswer privateAsk={privateAsk} onMakePublic={agents.onMakePublic} onClose={agents.onClosePrivate} submitClassName="tdoc-reply-submit" />
+      </div>
+    );
+  }
 
   return (
     <div className="tdoc-reply-form open" data-parent-id={commentId}>
@@ -221,17 +246,41 @@ function ReplyForm({ commentId, onReply, replyingTo, mentionable, demo = false }
         // clicking Reply put a composer on screen and left the caret wherever
         // it was, so the first thing you do is click the thing you just opened.
         autoFocus
-        placeholder={demo ? 'Reply… GitHub @ or @email' : 'Reply… (@ to notify someone)'}
+        fieldRef={field}
+        placeholder={demo ? 'Reply… GitHub @ or @email'
+          : v4 && (agents.choices || []).length ? 'Reply, or type @ to ask an agent' : 'Reply… (@ to notify someone)'}
         value={text}
         people={mentionable}
         onChange={setText}
-        onSubmit={submit}
+        onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
+      {v4 ? <AgentAskRow ask={ask} hint={agentAskHint(ask)} /> : null}
       <div className="tdoc-reply-form-foot">
-        <span className="hint" />
-        <button className="tdoc-reply-submit" type="button" onClick={submit} disabled={busy}>
-          {busy ? 'Posting…' : 'Reply'}
-        </button>
+        <span className="hint">
+          {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
+        </span>
+        <div className="tdoc-reply-form-actions">
+          {v4 && agentSetupHref && !canSendToAgent ? (
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
+          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent" /> : null}
+          {agentButtons && !canSendToAgent && agentSetupHref ? (
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
+          ) : null}
+          {agentButtons && canSendToAgent ? (
+            <button
+              className="tdoc-reply-submit agent"
+              type="button"
+              onClick={() => submit(true)}
+              disabled={busy}
+              title="Reply and hand to the following agent"
+            >
+              {busy ? 'Posting…' : '@agent'}
+            </button>
+          ) : null}
+          <button className="tdoc-reply-submit" type="button" onClick={() => submit(false)} disabled={busy}>
+            {busy ? 'Posting…' : 'Reply'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -287,6 +336,27 @@ function EditForm({ item, onSave, onCancel }) {
 // rewriting nor removing somebody else's comment is a power owning the
 // document confers. The worker enforces the same rule on PATCH and DELETE,
 // and this keeps the buttons from rendering where they would 403.
+// Under a tdoc AI answer, for the person who asked and nobody else: one muted
+// line with what is left of the free answers and the way to unlimited ones.
+function TdocAiQuota({ reply, currentUser }) {
+  const { ai } = useContext(AgentMentionContext);
+  if (!isOwnTdocAiReply(reply, currentUser)) return null;
+  // Only when few are left: the allowance is large (freeLeftText).
+  const left = freeLeftText(ai && ai.remaining);
+  return (
+    <div className="tdoc-ai-quota">
+      {left ? <>tdoc AI · {left} · <a href="/start">Connect your agent for unlimited</a></> : 'tdoc AI'}
+    </div>
+  );
+}
+
+// Whoever answers Ask AI is writing an answer somewhere in this thread.
+function AiAnswering({ ids }) {
+  const { ai } = useContext(AgentMentionContext);
+  if (!ai || !ai.thinking || !ids.has(ai.thinking.id)) return null;
+  return <div className="tdoc-ai-quota tdoc-ai-answering" aria-live="polite">{ai.thinking.label} is answering…</div>;
+}
+
 function authoredBy(item, currentUser) {
   return Boolean(
     currentUser
@@ -304,19 +374,23 @@ function mayDelete(item, currentUser, isOwner) {
   return authoredBy(item, currentUser) || (isOwner && item.author?.kind === 'agent');
 }
 
-// Mirrors the worker's canMutate(): re-anchoring is the author's or the doc
-// owner's, nobody else's. Without this the button rendered for every reader
-// and the server's 403 (`not_author`) was the only thing stopping them — a
-// toast where there should have been no affordance at all. Delete used to
-// share this gate; it is authoredBy's now.
-function mayMutate(item, currentUser, isOwner) {
-  return Boolean(
-    isOwner
-    || (currentUser
-      && currentUser !== 'anon'
-      && item.author?.login
-      && item.author.login === currentUser),
-  );
+// Mirrors the worker's canMutate(): resolving and re-anchoring are the
+// author's or the doc owner's, nobody else's. Without this the buttons
+// rendered for every reader and the server's 403 (`not_author`) was the only
+// thing stopping them — a toast where there should have been no affordance at
+// all. Delete used to share this gate; it is authoredBy's now.
+//   - isOwner is the worker's isDocOwnerSession(), sent as is: the doc's
+//     owner, or for a team doc the team's admins, or a feedback space's owner.
+//   - the author is matched like actorKeys(session): case-insensitive, and
+//     against every key the viewer is known by (handoffViewer carries the
+//     linked ones). An exact compare on one login hid ✓ from an author who
+//     signed in with the other half of a linked account (Julie, 2026-10-27).
+export function mayMutate(item, currentUser, isOwner, viewerKeys = []) {
+  const who = String(item.author?.login || '').trim().toLowerCase();
+  if (isOwner) return true;
+  if (!who) return false;
+  return [currentUser, ...[].concat(viewerKeys || [])]
+    .some((key) => key && key !== 'anon' && String(key).trim().toLowerCase() === who);
 }
 
 function hasReactions(item) {
@@ -368,13 +442,22 @@ function descendantsOf(replies, parentId, rootId) {
   return out;
 }
 
+// The name in "Replying to @…": a GitHub login, else the display name. An
+// email account's key is an address (or, for other readers, an alias), and
+// neither belongs on screen.
+function replyName(author) {
+  const login = String(author?.login || '');
+  if (login && login !== 'email-hidden' && !login.includes(':') && !login.includes('@')) return login;
+  return String(author?.name || '').split('@')[0] || 'someone';
+}
+
 // Who a reply is answering, for the line a flattened reply carries in place of
 // the indentation it lost.
 function answers(replies, reply, rootComment) {
   const parent = reply.parent_id === rootComment.id || !reply.parent_id
     ? rootComment
     : replies.find((other) => other.id === reply.parent_id) || rootComment;
-  return parent.author?.login || parent.author?.name || '';
+  return replyName(parent.author);
 }
 
 // A comment or reply whose text was taken down but whose slot still holds a
@@ -409,6 +492,9 @@ function ReplyCard({
   isOwner,
   mentionable,
   demo = false,
+  canSendToAgent = false,
+  // Owner with no agent connected: @agent stays visible and leads to setup.
+  agentSetupHref = null,
   replyTarget,
   onReplyTarget,
   editTarget,
@@ -420,7 +506,7 @@ function ReplyCard({
 }) {
   const kids = childrenOf(replies, reply.id, rootId);
   const reacted = hasReactions(reply);
-  const author = reply.author?.login || reply.author?.name || '';
+  const author = replyName(reply.author);
   // A deep link lands on a reply that may live inside a continuation, so an
   // expanded thread opens its continuations too — otherwise the link arrives
   // at a thread with its own target folded away.
@@ -443,6 +529,8 @@ function ReplyCard({
       isOwner={isOwner}
       mentionable={mentionable}
       demo={demo}
+      canSendToAgent={canSendToAgent}
+      agentSetupHref={agentSetupHref}
       replyTarget={replyTarget}
       onReplyTarget={onReplyTarget}
       editTarget={editTarget}
@@ -500,12 +588,12 @@ function ReplyCard({
       {flattened ? (
         <div className="tdoc-reply-to">Replying to @{answers(replies, reply, rootComment)}</div>
       ) : null}
-      <Author author={reply.author} />
       {editTarget === reply.id ? (
-        <EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} />
+        <><Author author={reply.author} /><EditForm item={reply} onSave={onEdit} onCancel={() => onEditTarget(null)} /></>
       ) : (
-        <div className="text"><MentionText text={reply.text} mentions={reply.mentions} /></div>
+        <ReplyMessage author={reply.author} text={reply.text} mentions={reply.mentions} />
       )}
+      <TdocAiQuota reply={reply} currentUser={currentUser} />
       {reacted ? <Reactions item={reply} me={currentUser} onReact={onReact} /> : null}
 
       <div className="meta">
@@ -539,7 +627,16 @@ function ReplyCard({
       </div>
 
       {replyTarget === reply.id ? (
-        <ReplyForm commentId={reply.id} onReply={onReply} replyingTo={author} mentionable={mentionable} demo={demo} />
+        <ReplyForm
+          commentId={reply.id}
+          handoffCommentId={rootId}
+          onReply={onReply}
+          replyingTo={author}
+          mentionable={mentionable}
+          demo={demo}
+          canSendToAgent={canSendToAgent}
+            agentSetupHref={agentSetupHref}
+        />
       ) : null}
 
       {kidCards}
@@ -547,9 +644,32 @@ function ReplyCard({
   );
 }
 
+// A comment left on an app (feedback overlay) points at a page and an element
+// of that app, not at anything in this document. Without this line the card,
+// seen on the doc page, says what is wrong but not where.
+function ProductWhere({ anchor, origin }) {
+  if (!anchor || anchor.kind !== 'product' || !anchor.url) return null;
+  const webUrl = productPageUrl(anchor.url);
+  const safeUrl = productPageUrl(anchor.url, origin);
+  let path = webUrl ? 'Page outside this site' : 'Invalid page link';
+  if (safeUrl) { const u = new URL(safeUrl); path = `${u.host}${u.pathname}${u.search}`; }
+  const text = String(anchor.text || '').trim();
+  const what = anchor.accessible_name || (text ? `${anchor.tag || 'element'} “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”` : anchor.tag || '');
+  const st = anchor.state || {};
+  const inState = [
+    st.dialog ? `in dialog “${st.dialog}”` : (st.layer ? `in “${st.layer}”` : ''),
+    st.tabs && st.tabs.length ? `tab ${st.tabs.join(' › ')}` : '',
+  ].filter(Boolean).join(' · ');
+  const label = <>{path}{inState ? ` · ${inState}` : ''}{what ? ` · ${what}` : ''}</>;
+  return safeUrl
+    ? <a className="tdoc-product-where" href={safeUrl} target="_blank" rel="noopener noreferrer" title={safeUrl}>{label}</a>
+    : <span className="tdoc-product-where">{label}</span>;
+}
+
 export function CommentCard({
   comment,
   currentUser,
+  handoffViewer = currentUser,
   isOwner = false,
   mentionable = [],
   demo = false,
@@ -558,6 +678,13 @@ export function CommentCard({
   position,
   expandReplies = false,
   selected = false,
+  unread = false,
+  onMarkRead = null,
+  onSeen = null,
+  productLinkOrigin = null,
+  canSendToAgent = false,
+  // Owner with no agent connected: @agent stays visible and leads to setup.
+  agentSetupHref = null,
   onActivate,
   onReply,
   onReact,
@@ -568,13 +695,30 @@ export function CommentCard({
   // Bridge 2, on the owner's own doc: { line, state, onCopy }. Shown under
   // every thread the agent has not answered yet — one paste covers them all.
   handoff = null,
+  // The owner's way out of a handoff nobody picked up (handoff-status-line).
+  onResendHandoff = null,
+  onSendHandoffElsewhere = null,
 }) {
   const [repliesOpen, setRepliesOpen] = useState(expandReplies);
+  // A thread that asked AI opens its replies, so the answer is in view when
+  // it lands.
+  const { ai: asking } = useContext(AgentMentionContext);
+  const thinkingId = asking?.thinking?.id;
+  const askingHere = Boolean(thinkingId) && (thinkingId === comment.id || (comment.replies || []).some((r) => r.id === thinkingId));
+  useEffect(() => { if (askingHere) setRepliesOpen(true); }, [askingHere]);
   const [replyTarget, setReplyTarget] = useState(null);
   // One record at a time is being rewritten — this card's comment or any reply
   // under it — the same way one reply form is open at a time.
   const [editTarget, setEditTarget] = useState(null);
   const cardRef = useRef(null);
+  const onSeenRef = useRef(onSeen);
+  const commentRef = useRef(comment);
+  onSeenRef.current = onSeen;
+  commentRef.current = comment;
+  useEffect(() => {
+    if (!unread || !onSeen || !cardRef.current) return undefined;
+    return observeVisibleRead(cardRef.current, () => onSeenRef.current?.(commentRef.current));
+  }, [comment.id, unread, Boolean(onSeen)]);
   const [clampedTop, setClampedTop] = useState(null);
 
   // Legacy positionCard(): keep the whole card on screen, measured after
@@ -592,8 +736,8 @@ export function CommentCard({
   // fold: the reply was saved, nothing visibly changed, and only a page
   // refresh cleared the box. A failure (onReply === false) keeps the composer
   // and its draft so the text isn't lost.
-  const submitReply = async (parentId, text) => {
-    const result = await onReply(parentId, text);
+  const submitReply = async (parentId, text, opts = {}) => {
+    const result = await onReply(parentId, text, opts);
     if (result === false) return false;
     setReplyTarget(null);
     setRepliesOpen(true);
@@ -610,7 +754,7 @@ export function CommentCard({
   const reactionCount = hasReactions(comment);
   const isMine = authoredBy(comment, currentUser);
   const canDelete = mayDelete(comment, currentUser, isOwner);
-  const canMutate = mayMutate(comment, currentUser, isOwner);
+  const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);
   const createdAt = formatCreated(comment.created);
   const replies = comment.replies || [];
   // Orphans — their parent reply was deleted — still show under the root
@@ -655,6 +799,8 @@ export function CommentCard({
             isOwner={isOwner}
             mentionable={mentionable}
             demo={demo}
+            canSendToAgent={canSendToAgent}
+            agentSetupHref={agentSetupHref}
             replyTarget={replyTarget}
             onReplyTarget={setReplyTarget}
             editTarget={editTarget}
@@ -706,12 +852,17 @@ export function CommentCard({
       <div className="tdoc-status-row">
         {comment.status === 'applied' ? (
           <span className="tdoc-resolved-chip">
-            {comment.resolved_by
+            {comment.handoff_at && !comment.resolved_by && (demo || canSeeHandoff(comment, handoffViewer, isOwner)) ? '✅ Done' : comment.resolved_by
               ? `✓ resolved by @${comment.resolved_by}`
               : `✓ fixed${comment.applied_in ? ` · v${comment.applied_in}` : ''}`}
           </span>
         ) : null}
-        <HandoffStatusChips comment={comment} />
+        {demo || canSeeHandoff(comment, handoffViewer, isOwner) ? (
+          <HandoffStatusChips comment={comment} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
+        ) : null}
+        {unread ? (onMarkRead && !onSeen
+          ? <button type="button" className="tdoc-thread-mark-read" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)}><span className="tdoc-thread-unread-dot" aria-hidden="true" /></button>
+          : <span className="tdoc-thread-unread-dot" role="status" aria-label="New agent reply" title="New agent reply" />) : null}
       </div>
       <header className="tdoc-cc-head">
         <Author
@@ -752,7 +903,7 @@ export function CommentCard({
                   descendant rules, and a menu renders through a portal OUTSIDE
                   the card, so both spans stayed display:none and the row came
                   out empty — an invisible item reads as a gap in the menu. */}
-              {canMutate ? (
+              {canMutate && comment.anchor && comment.anchor.kind !== 'document' ? (
                 <AppMenuItem
                   className="tdoc-reanchor-btn"
                   onClick={() => onReanchor(comment.id)}
@@ -769,10 +920,11 @@ export function CommentCard({
           ) : null}
         </div>
       </header>
+      <ProductWhere anchor={comment.anchor} origin={productLinkOrigin} />
       {editTarget === comment.id ? (
         <EditForm item={comment} onSave={saveEdit} onCancel={() => setEditTarget(null)} />
       ) : (
-        <div className="text"><MentionText text={comment.text} mentions={comment.mentions} /></div>
+        <CommentMessageText text={comment.text} mentions={comment.mentions} />
       )}
       {reactionCount ? (
         <Reactions item={comment} me={currentUser} onReact={onReact} />
@@ -855,9 +1007,18 @@ export function CommentCard({
       </div>
 
       {threadBlock}
+      <AiAnswering ids={known} />
 
       {replyTarget === comment.id ? (
-        <ReplyForm commentId={comment.id} onReply={submitReply} mentionable={mentionable} demo={demo} />
+        <ReplyForm
+          commentId={comment.id}
+          handoffCommentId={comment.id}
+          onReply={submitReply}
+          mentionable={mentionable}
+          demo={demo}
+          canSendToAgent={canSendToAgent}
+            agentSetupHref={agentSetupHref}
+        />
       ) : null}
     </article>
   );

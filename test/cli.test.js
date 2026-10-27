@@ -30,7 +30,7 @@ console.log('cli (Batch D resilience)');
 
 // ---- static checks across all CLIs ----
 t('every curl call carries --max-time (no unbounded hang)', () => {
-  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply', 'tdoc-me']) {
+  for (const f of ['tdoc-publish', 'tdoc-pull', 'tdoc-doctor', 'tdoc-agent-reply', 'tdoc-me', 'tdoc-move', 'tdoc-folder', 'tdoc-site']) {
     const src = readBin(f);
     // Actual invocations only: `curl` in COMMAND position — at the start of a
     // line or right after |, ;, &, ( or $( — and followed by a flag, quote or
@@ -960,6 +960,174 @@ t('tdoc-agent-reply gates on HTTP status and on 200-with-error bodies', () => {
   assert(raw.length === 0, `raw curl to /api/agent/reply outside post_reply:\n      ${raw.join('\n      ')}`);
 });
 
+t('tdoc-move resolves a team by name and moves; unknown team fails without moving unless --create', () => {
+  const bin = path.join(BIN, 'tdoc-move');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-move-home-'));
+  const log = path.join(home, 'calls.log');
+  const stub = startStub(
+    `(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
+    `require('fs').appendFileSync(${JSON.stringify(log)},q.method+' '+q.url+' '+(q.headers.authorization||'')+' '+b+'\\n');` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `if(q.url==='/api/teams'&&q.method==='POST')return s.end(JSON.stringify({ok:true,team:{id:'t_new',name:JSON.parse(b).name,role:'admin'}}));` +
+    `if(q.url==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_bf',name:'BeFreed',role:'member'}]}));` +
+    `s.end(JSON.stringify({ok:true,moved:1}));});}`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${stub.port}`, upload_token: 'tok-1' }));
+    const env = { ...process.env, HOME: home };
+    const ok = spawnSync(bin, ['--team', 'befreed', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(ok.status === 0, `move exited ${ok.status}: ${ok.stderr}`);
+    const calls = fs.readFileSync(log, 'utf8');
+    assert(/POST \/api\/team\/move Bearer tok-1 \{"team":"t_bf","slugs":\["daily-2026-10-07"\]\}/.test(calls), `wrong move call:\n${calls}`);
+    const back = spawnSync(bin, ['--personal', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(back.status === 0 && /"team":null/.test(fs.readFileSync(log, 'utf8')), `move back failed: ${back.stderr}`);
+    fs.writeFileSync(log, '');
+    const bad = spawnSync(bin, ['--team', 'nope', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(bad.status !== 0 && /not in a team called "nope".*BeFreed/.test(bad.stderr), `unknown team: ${bad.status} ${bad.stderr}`);
+    assert(!/team\/move/.test(fs.readFileSync(log, 'utf8')), 'moved despite an unknown team');
+    const setDef = spawnSync(bin, ['--set-default', 'befreed'], { env, encoding: 'utf8', timeout: 20000 });
+    const cfg = JSON.parse(fs.readFileSync(path.join(home, '.tdoc', 'published.json'), 'utf8'));
+    assert(setDef.status === 0 && cfg.default_team && cfg.default_team.id === 't_bf' && cfg.default_team.name === 'BeFreed', `set-default: ${setDef.stderr} ${JSON.stringify(cfg)}`);
+    assert(cfg.upload_token === 'tok-1', 'set-default lost the token');
+    const show = spawnSync(bin, ['--default'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(/team t_bf \(from this machine \(BeFreed\)\)/.test(show.stdout), `--default: ${show.stdout}`);
+    // Nearest wins: a project's .tdoc.json beats the machine; TDOC_TEAM beats both.
+    const proj = path.join(home, 'proj', 'sub');
+    fs.mkdirSync(proj, { recursive: true });
+    fs.writeFileSync(path.join(home, 'proj', '.tdoc.json'), JSON.stringify({ team: 'Growth' }));
+    const fromProject = spawnSync(bin, ['--default-id'], { env, cwd: proj, encoding: 'utf8', timeout: 20000 });
+    assert(fromProject.stdout === 'Growth', `project default: ${JSON.stringify(fromProject.stdout)}`);
+    const fromEnv = spawnSync(bin, ['--default-id'], { env: { ...env, TDOC_TEAM: 'Ops' }, cwd: proj, encoding: 'utf8', timeout: 20000 });
+    assert(fromEnv.stdout === 'Ops', `env default: ${JSON.stringify(fromEnv.stdout)}`);
+    const fromMachine = spawnSync(bin, ['--default-id'], { env, cwd: home, encoding: 'utf8', timeout: 20000 });
+    assert(fromMachine.stdout === 't_bf', `machine default: ${JSON.stringify(fromMachine.stdout)}`);
+    const clear = spawnSync(bin, ['--set-default', 'personal'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(clear.status === 0 && !JSON.parse(fs.readFileSync(path.join(home, '.tdoc', 'published.json'), 'utf8')).default_team, 'personal did not clear it');
+    const none = spawnSync(bin, ['--default-id'], { env, cwd: home, encoding: 'utf8', timeout: 20000 });
+    assert(none.status === 0 && none.stdout === '', `cleared default still resolves: ${JSON.stringify(none.stdout)}`);
+    const made = spawnSync(bin, ['--team', 'Agents', '--create', 'daily-2026-10-07'], { env, encoding: 'utf8', timeout: 20000 });
+    const after = fs.readFileSync(log, 'utf8');
+    assert(made.status === 0 && /POST \/api\/teams Bearer tok-1 \{"name":"Agents"\}/.test(after) && /"team":"t_new"/.test(after), `--create: ${made.status} ${made.stderr}\n${after}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-move prints the free-plan warning near the limit and the upgrade message past it', () => {
+  const bin = path.join(BIN, 'tdoc-move');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-move-plan-'));
+  const stub = startStub(
+    `(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
+    `s.writeHead(q.url==='/api/team/move'&&b.includes('over')?402:200,{'content-type':'application/json'});` +
+    `if(q.url==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_bf',name:'BeFreed',role:'member'}]}));` +
+    `if(b.includes('over'))return s.end(JSON.stringify({error:'team_plan_required',message:'BeFreed is on the free plan, which holds 80 docs. Ask an admin to upgrade to the Team plan to add more.'}));` +
+    `s.end(JSON.stringify({ok:true,moved:1,plan_warning:{docs:77,limit:80,left:3,message:'BeFreed has 77 of 80 free docs; 3 left before the Team plan is needed.'}}));});}`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${stub.port}`, upload_token: 'tok-1' }));
+    const env = { ...process.env, HOME: home };
+    const near = spawnSync(bin, ['--team', 'befreed', 'near-doc'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(near.status === 0, `a warning must not fail the move: ${near.stderr}`);
+    assert(/warning: BeFreed has 77 of 80 free docs; 3 left/.test(near.stderr), `no warning: ${near.stderr}`);
+    const over = spawnSync(bin, ['--team', 'befreed', 'over-doc'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(over.status !== 0 && /free plan, which holds 80 docs\. Ask an admin to upgrade/.test(over.stderr), `over: ${over.status} ${over.stderr}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-folder resolves team + folder names, creates idempotently, files docs; tdoc-move --folder files after moving', () => {
+  const bin = path.join(BIN, 'tdoc-folder');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-folder-home-'));
+  const log = path.join(home, 'calls.log');
+  // A tiny stateful folder store: one personal space, one team space.
+  const stub = startStub(
+    `((st)=>(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
+    `require('fs').appendFileSync(${JSON.stringify(log)},q.method+' '+q.url+' '+(q.headers.authorization||'')+' '+b+'\\n');` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `const u=new URL(q.url,'http://x');const body=b?JSON.parse(b):{};` +
+    `if(u.pathname==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_0123456789abcdef',name:'BeFreed',role:'member'}]}));` +
+    `if(u.pathname==='/api/team/move')return s.end(JSON.stringify({ok:true,moved:1}));` +
+    `const sp=(u.searchParams.get('team')||body.team||'me');st[sp]=st[sp]||[];` +
+    `if(u.pathname==='/api/folders'&&q.method==='GET')return s.end(JSON.stringify({ok:true,folders:st[sp],docs:sp==='me'?{}:undefined}));` +
+    `if(u.pathname==='/api/folders'&&q.method==='POST'){const hit=st[sp].find(f=>f.name.toLowerCase()===body.name.toLowerCase()&&(f.parent||'')===(body.parent||''));` +
+    `if(hit)return s.end(JSON.stringify({ok:true,existed:true,folder:hit}));const f={id:'f_'+(st[sp].length+1),name:body.name,parent:body.parent||''};st[sp].push(f);return s.end(JSON.stringify({ok:true,folder:f}));}` +
+    `if(u.pathname==='/api/folders/move'){if(body.slugs.includes('not-mine'))return s.end(JSON.stringify({error:'not_owner',slug:'not-mine'}));return s.end(JSON.stringify({ok:true,moved:body.slugs.length}));}` +
+    `s.end('{}');});})({})`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${stub.port}`, upload_token: 'tok-1' }));
+    const env = { ...process.env, HOME: home };
+    const run = (args, b = bin) => spawnSync(b, args, { env, encoding: 'utf8', timeout: 20000 });
+    const calls = () => fs.readFileSync(log, 'utf8');
+    const missing = run(['add', 'daily-1', '--folder', 'Daily reports']);
+    assert(missing.status !== 0 && /no folder "Daily reports" in My docs; pass --create/.test(missing.stderr), `missing folder: ${missing.status} ${missing.stderr}`);
+    assert(!/folders\/move/.test(calls()), 'filed into a folder that does not exist');
+    const made = run(['add', 'daily-1', '--folder', 'Daily reports', '--create']);
+    assert(made.status === 0, `add --create: ${made.stderr}`);
+    assert(/POST \/api\/folders Bearer tok-1 \{"name":"Daily reports","parent":null,"team":null,"existing_ok":true,"known":\[\]\}/.test(calls()), `create call:\n${calls()}`);
+    assert(/POST \/api\/folders\/move Bearer tok-1 \{"slugs":\["daily-1"\],"folder":"f_1","folder_def":\{"id":"f_1","name":"Daily reports","parent":null\},"team":null\}/.test(calls()), `move call:\n${calls()}`);
+    fs.writeFileSync(log, '');
+    const again = run(['add', 'daily-2', 'daily-3', '--folder', 'daily REPORTS', '--create']);
+    assert(again.status === 0 && !/POST \/api\/folders /.test(calls()) && /"slugs":\["daily-2","daily-3"\],"folder":"f_1","folder_def":\{"id":"f_1"/.test(calls()), `existing folder by name:\n${calls()}`);
+    const created = run(['create', 'Daily reports']);
+    assert(created.status === 0 && /already in My docs/.test(created.stderr), `idempotent create: ${created.stderr}`);
+    const nested = run(['create', '2026', '--parent', 'Daily reports']);
+    assert(nested.status === 0 && /"name":"2026","parent":"f_1"/.test(calls()), `nested create:\n${calls()}`);
+    const byPath = run(['add', 'daily-4', '--folder', 'Daily reports/2026']);
+    assert(byPath.status === 0 && /"slugs":\["daily-4"\],"folder":"f_2"/.test(calls()), `path resolve:\n${calls()}`);
+    const list = run(['list']);
+    assert(list.status === 0 && /^f_1\tDaily reports\t0 docs$/m.test(list.stdout) && /^f_2\tDaily reports\/2026\t/m.test(list.stdout), `list: ${list.stdout}`);
+    fs.writeFileSync(log, '');
+    const team = run(['add', 'team-daily', '--team', 'befreed', '--folder', '日报', '--create']);
+    assert(team.status === 0, `team add: ${team.stderr}`);
+    assert(/GET \/api\/folders\?team=t_0123456789abcdef /.test(calls()) && /"name":"日报","parent":null,"team":"t_0123456789abcdef","existing_ok":true/.test(calls())
+      && /"slugs":\["team-daily"\],"folder":"f_1","folder_def":\{"id":"f_1","name":"日报","parent":null\},"team":"t_0123456789abcdef"/.test(calls()), `team calls:\n${calls()}`);
+    const refused = run(['add', 'not-mine', '--folder', 'Daily reports']);
+    assert(refused.status !== 0 && /cannot file not-mine/.test(refused.stderr), `refusal: ${refused.status} ${refused.stderr}`);
+    const unknownTeam = run(['list', '--team', 'nope']);
+    assert(unknownTeam.status !== 0 && /not in a team called "nope"/.test(unknownTeam.stderr), 'unknown team');
+    fs.writeFileSync(log, '');
+    const moved = run(['--team', 'BeFreed', '--folder', '日报', 'team-daily-2'], path.join(BIN, 'tdoc-move'));
+    assert(moved.status === 0, `tdoc-move --folder: ${moved.stderr}`);
+    assert(/POST \/api\/team\/move [^\n]*"team":"t_0123456789abcdef"/.test(calls()) && /"slugs":\["team-daily-2"\],"folder":"f_1","folder_def":\{"id":"f_1","name":"日报","parent":null\},"team":"t_0123456789abcdef"/.test(calls()), `move + file:\n${calls()}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-folder add retries a folder_not_found once, then explains it', () => {
+  const bin = path.join(BIN, 'tdoc-folder');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-folder-retry-'));
+  const log = path.join(home, 'calls.log');
+  // The move answers folder_not_found to the first `misses` calls.
+  const stub = startStub(
+    `((st)=>(q,s)=>{let b='';q.on('data',d=>b+=d).on('end',()=>{` +
+    `require('fs').appendFileSync(${JSON.stringify(log)},q.method+' '+q.url+'\\n');` +
+    `s.writeHead(200,{'content-type':'application/json'});const u=new URL(q.url,'http://x');const body=b?JSON.parse(b):{};` +
+    `if(u.pathname==='/api/folders'&&q.method==='GET')return s.end(JSON.stringify({ok:true,folders:[{id:'f_1',name:'Daily'}],docs:{}}));` +
+    `if(u.pathname==='/api/folders/move'){if(body.slugs[0]==='once'&&!st.once){st.once=1;return s.end(JSON.stringify({error:'folder_not_found'}));}` +
+    `if(body.slugs[0]==='never')return s.end(JSON.stringify({error:'folder_not_found'}));return s.end(JSON.stringify({ok:true}));}` +
+    `s.end('{}');});})({})`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${stub.port}`, upload_token: 'tok-1' }));
+    const env = { ...process.env, HOME: home, TDOC_FOLDER_RETRY_DELAY: '0' };
+    const moves = () => (fs.readFileSync(log, 'utf8').match(/folders\/move/g) || []).length;
+    const once = spawnSync(bin, ['add', 'once', '--folder', 'Daily'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(once.status === 0 && moves() === 2 && !/not in My docs/.test(once.stderr), `retry: ${once.status} ${moves()} ${once.stderr}`);
+    fs.writeFileSync(log, '');
+    const never = spawnSync(bin, ['add', 'never', '--folder', 'Daily'], { env, encoding: 'utf8', timeout: 20000 });
+    assert(never.status !== 0 && moves() === 2 && /that folder is not in My docs/.test(never.stderr), `gave up: ${never.status} ${moves()} ${never.stderr}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 t('tdoc-agent-reply exits non-zero when the server rejects the reply', () => {
   const bin = path.join(BIN, 'tdoc-agent-reply');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
@@ -1034,7 +1202,8 @@ t('tdoc-agent-reply posts to .base on a hosted config', () => {
   }));
   try {
     const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'ok'], {
-      env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000,
+      env: { ...process.env, HOME: home, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
+      encoding: 'utf8', timeout: 30000,
     });
     assert(r.status === 0, `hosted reply exited ${r.status}; stderr=${r.stderr}`);
     assert(/"id":"c_hosted"/.test(r.stdout),
@@ -1170,18 +1339,18 @@ t('bin/tdoc-new still defaults to NOT publishing', () => {
   assert(/--publish\)\s*PUBLISH=1/.test(src), '--publish must remain the opt-in');
 });
 
-t('the handoff line does not claim a plain publish is unlisted', () => {
-  // A publish with no flags stores no access block and takes the legacy
-  // policy (public + full history). Telling the user "unlisted" would
-  // understate what a recipient can see. Keeping the default as-is is a
-  // product decision (#245/#246 closed); the copy has to match it.
+t('the handoff line describes a plain publish as anyone with the link', () => {
+  // A new doc published with no flags gets the worker's NEW_DOC_ACCESS:
+  // anyone with the link, noindex, history owner-only. The copy has to match
+  // it, and must not steer agents to Public, which search engines index.
   const skill = fs.readFileSync(path.join(__dirname, '..', 'SKILL.md'), 'utf8');
   const step = skill.slice(skill.indexOf('*Hosted (the default).*'), skill.indexOf('*Self-host.*'));
-  assert(!/live and \*\*unlisted\*\*/.test(step), 'handoff still calls a plain publish unlisted');
   // The blockquote wraps, so match across the "> " continuation.
-  assert(/page back[\s>]+through earlier versions/.test(step),
-    'handoff should say earlier versions are reachable');
-  assert(/--history owner/.test(step), 'handoff should point at the way to change it');
+  assert(/Anyone with this link can read it/.test(step), 'handoff should say anyone with the link reads it');
+  assert(/not[\s>]+listed anywhere or shown to search engines/.test(step), 'handoff should say it is not listed or indexed');
+  assert(/Earlier versions stay visible to you only/.test(step), 'handoff should say history is owner-only');
+  assert(/--history public/.test(step), 'handoff should point at the way to change it');
+  assert(/Do \*\*not\*\* publish `--visibility public` unless/.test(step), 'handoff should keep Public an explicit choice');
 });
 
 t('SKILL.md states the localhost rule and no longer promises localhost by default', () => {
@@ -1678,7 +1847,10 @@ function startStubWorker(state) {
     `if(u==='/api/comments')return s.end(JSON.stringify(st.comments));` +
     `if(u==='/api/agent/reply'){st.lastReply=JSON.parse(b||'{}');` +
     `return s.end(JSON.stringify({ok:true,echo:st.lastReply}));}` +
-    `if(u==='/api/doc')return s.end(JSON.stringify({ok:true,deleted:3}));` +
+    `if(u==='/api/doc')return s.end(JSON.stringify({ok:true,trashed:true,purge_at:'2026-11-23T08:00:00.000Z'}));` +
+    `if(u==='/api/trash/restore'){const x=JSON.parse(b||'{}');if(x.slug==='gone-doc')return s.end(JSON.stringify({ok:true,restored:[x.slug]}));` +
+    `s.statusCode=404;return s.end(JSON.stringify({error:'not_in_trash'}));}` +
+    `if(u==='/api/trash')return s.end(JSON.stringify({ok:true,items:[{kind:'doc',slug:'gone-doc',title:'Gone',days_left:29}]}));` +
     `s.statusCode=404;s.end('{}');});})(${JSON.stringify(state)})`);
 }
 
@@ -1840,8 +2012,31 @@ t('tdoc-unpublish works with no jq on PATH', () => {
     });
     assert(noJq(r), `tdoc-unpublish still needs jq:\n      ${r.stdout}\n      ${r.stderr}`);
     assert(r.status === 0, `unpublish exited ${r.status}: ${r.stderr}`);
-    assert(/Unpublished gone-doc/.test(r.stdout), `no confirmation: ${r.stdout}`);
-    assert(/"deleted": 3/.test(r.stdout), `the worker response was not printed: ${r.stdout}`);
+    assert(/Moved gone-doc to Trash/.test(r.stdout) && /2026-11-23/.test(r.stdout) && /tdoc-restore gone-doc/.test(r.stdout),
+      `delete must say it went to Trash and how to get it back: ${r.stdout}`);
+    assert(/"trashed": true/.test(r.stdout), `the worker response was not printed: ${r.stdout}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+t('tdoc-restore brings a doc back from Trash, lists Trash, and explains a miss', () => {
+  const stub = startStubWorker({ comments: [] });
+  const home = hostedHome(stub.base);
+  try {
+    const binDir = jqFreePath(home);
+    const run = (args) => spawnSync(path.join(BIN, 'tdoc-restore'), args, {
+      env: { ...process.env, PATH: binDir, HOME: home, TDOC_SKIP_UPDATE_CHECK: '1' },
+      encoding: 'utf8', timeout: 60000,
+    });
+    const ok = run(['gone-doc']);
+    assert(ok.status === 0 && /Restored gone-doc from Trash/.test(ok.stdout), `restore: ${ok.status} ${ok.stdout} ${ok.stderr}`);
+    const miss = run(['never-was']);
+    assert(miss.status !== 0 && /not in Trash/.test(miss.stderr), `miss: ${miss.status} ${miss.stderr}`);
+    const list = run(['--list']);
+    assert(list.status === 0 && /gone-doc\s+Gone\s+29 days left/.test(list.stdout), `list: ${list.stdout} ${list.stderr}`);
+    assert(noJq(ok) && noJq(list), 'tdoc-restore needs jq');
   } finally {
     stub.stop();
     fs.rmSync(home, { recursive: true, force: true });
@@ -2101,6 +2296,63 @@ t('validator rejects a numeral cell class that lands on prose', () => {
     assert(house.status !== 0, 'the house-style path should apply the same rule');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+// ---- an agent connection limited to some workspaces ----
+// The person unticked workspaces on the Allow page. Publishing outside them
+// must say so in words and point at Settings > Agents, not dump JSON; a new
+// doc headed for a team (--team) names it on the upload, so a connection
+// without My docs files it there directly.
+t('a workspace-limited connection: a clear refusal outside, the team named on upload inside', () => {
+  const bin = path.join(BIN, 'tdoc-publish');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-scope-'));
+  const seen = path.join(home, 'uploads.log');
+  const stub = startStub(
+    `((log)=>(q,s)=>{let b='';q.on('data',d=>b+=d);q.on('end',()=>{` +
+    `s.setHeader('content-type','application/json');` +
+    `const u=q.url.split('?')[0];` +
+    `if(u==='/api/upload'){const j=JSON.parse(b||'{}');require('fs').appendFileSync(log,JSON.stringify({slug:j.slug,team:j.team||null,team_default:j.team_default||null})+'\\n');` +
+    `if(j.team==='abby'){s.statusCode=403;return s.end(JSON.stringify({error:'token_scope',` +
+    `message:'This agent connection cannot publish to the team "abby". Its owner can change which workspaces it reaches in Settings → Agents: https://tdoc.dev/me?view=settings#agent-access'}));}` +
+    `return s.end(JSON.stringify({ok:true,size:42,new_doc:true,scoped:true,team:j.team?'t_b':null}));}` +
+    `if(u==='/api/teams')return s.end(JSON.stringify({ok:true,teams:[{id:'t_b',name:'befreed',role:'member'}],workspaces:['t_b']}));` +
+    `if(u==='/api/team/move'){require('fs').appendFileSync(log,JSON.stringify({move:b})+'\\n');return s.end(JSON.stringify({ok:true,moved:1,team:'t_b'}));}` +
+    `s.statusCode=404;s.end('{}');});})(${JSON.stringify(seen)})`);
+  try {
+    fs.mkdirSync(path.join(home, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({
+      platform: 'hosted', base: stub.base, public_host: '127.0.0.1', upload_token: 'tok', github_login: 'tester',
+    }));
+    for (const slug of ['scoped-out', 'scoped-in', 'scoped-default']) {
+      const docs = path.join(home, 'tdocs', slug, 'v1');
+      fs.mkdirSync(docs, { recursive: true });
+      fs.writeFileSync(path.join(docs, 'index.html'), '<!doctype html><body><div class="wrap"><h1>D</h1></div></body>');
+      fs.writeFileSync(path.join(home, 'tdocs', slug, 'meta.json'), JSON.stringify({ title: 'D', slug, versions: [{ n: 1, created: '2026-01-01T00:00:00Z' }] }));
+    }
+    const env = { ...process.env, HOME: home, TDOC_DIR: path.join(home, 'tdocs'), TDOC_SKIP_UPDATE_CHECK: '1' };
+    const out = spawnSync(bin, ['--team', 'abby', 'scoped-out'], { env, encoding: 'utf8', timeout: 60000 });
+    assert(out.status !== 0, `published outside its workspaces: ${out.stdout}`);
+    assert(/Not published: This agent connection cannot publish to the team "abby"/.test(out.stderr), `no plain refusal: ${out.stderr}`);
+    assert(/me\?view=settings#agent-access/.test(out.stderr), `no way to change it: ${out.stderr}`);
+    assert(!/upload FAILED: \{/.test(out.stderr), `raw JSON dumped: ${out.stderr}`);
+    const inside = spawnSync(bin, ['--team', 'befreed', 'scoped-in'], { env, encoding: 'utf8', timeout: 60000 });
+    assert(inside.status === 0, `publish into its team failed: ${inside.stderr}`);
+    const uploads = fs.readFileSync(seen, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert(uploads.some((u) => u.slug === 'scoped-in' && u.team === 'befreed'), `the team was not named on upload: ${JSON.stringify(uploads)}`);
+    // A default team (here TDOC_TEAM) is only a preference: sent apart from
+    // --team so the server can fall back, and never moved into afterwards.
+    const moves = () => fs.readFileSync(seen, 'utf8').split('\n').filter((l) => l.includes('"move"')).length;
+    const movesBefore = moves();
+    const byDefault = spawnSync(bin, ['scoped-default'], { env: { ...env, TDOC_TEAM: 'abby' }, encoding: 'utf8', timeout: 60000 });
+    assert(byDefault.status === 0, `a default team outside the connection failed the publish: ${byDefault.stderr}`);
+    const last = fs.readFileSync(seen, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((u) => u.slug === 'scoped-default').pop();
+    assert(last && last.team === null && last.team_default === 'abby', `default sent as a demand: ${JSON.stringify(last)}`);
+    assert(moves() === movesBefore, 'the default team was applied on top of the server placement');
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

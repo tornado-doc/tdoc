@@ -23,6 +23,8 @@
 #   --html-stdin               read HTML for v1 from stdin
 #   --widgets-dir <path>       optional directory of sandboxed widget HTML
 #                              files; copied to v1/widgets/<name>.html.
+#   --preview-file <path>      optional 1200×630 SVG share card; copied to
+#                              v<n>/preview.svg and uploaded with the version.
 #
 # Optional:
 #   --prompt "<one-line>"      prompt-of-record stored in meta.json (defaults
@@ -57,6 +59,12 @@
 #   - With --publish: also prints the published URL on a second line.
 
 set -euo pipefail
+# A reader's question run under the local agent daemon (TDOC_DAEMON_ASK)
+# answers; it never writes a version. tdoc-write lands here too.
+if [ -n "${TDOC_DAEMON_ASK:-}" ]; then
+  echo "[tdoc] a question run cannot write a document; answer with tdoc-agent-reply --ask." >&2
+  exit 2
+fi
 
 # ─────────────────────────────── arg parsing ──────────────────────────────
 SLUG=""
@@ -64,6 +72,7 @@ TITLE=""
 HTML_FILE=""
 HTML_STDIN=0
 WIDGETS_DIR=""
+PREVIEW_FILE=""
 PROMPT=""
 PUBLISH=0
 OPEN_URL=0
@@ -89,6 +98,7 @@ while [ $# -gt 0 ]; do
     --html-file)  HTML_FILE="${2:-}"; shift 2 ;;
     --html-stdin) HTML_STDIN=1; shift ;;
     --widgets-dir) WIDGETS_DIR="${2:-}"; shift 2 ;;
+    --preview-file) PREVIEW_FILE="${2:-}"; shift 2 ;;
     --prompt)     PROMPT="${2:-}"; shift 2 ;;
     --publish)    PUBLISH=1; shift ;;
     --open)       OPEN_URL=1; shift ;;
@@ -135,6 +145,9 @@ if [ -n "$HTML_FILE" ] && [ ! -f "$HTML_FILE" ]; then
 fi
 if [ -n "$WIDGETS_DIR" ] && [ ! -d "$WIDGETS_DIR" ]; then
   die "--widgets-dir not found: $WIDGETS_DIR"
+fi
+if [ -n "$PREVIEW_FILE" ] && [ ! -f "$PREVIEW_FILE" ]; then
+  die "--preview-file not found: $PREVIEW_FILE"
 fi
 case "$STYLE" in
   default|technical|editorial|paper) ;;
@@ -228,6 +241,19 @@ if [ -n "$WIDGETS_DIR" ]; then
   [ "$WIDGET_COUNT" -gt 0 ] || die "--widgets-dir contains no .html files"
   [ "$WIDGET_COUNT" -le 32 ] || die "--widgets-dir contains more than 32 widgets"
 fi
+if [ -n "$PREVIEW_FILE" ]; then
+  [ "$(wc -c < "$PREVIEW_FILE" | tr -d ' ')" -le 131072 ] || die "--preview-file exceeds 128 KB"
+  cp "$PREVIEW_FILE" "$STAGE_DIR/v$VERSION_N/preview.svg" || die "could not read --preview-file '$PREVIEW_FILE'"
+  node - "$STAGE_DIR/v$VERSION_N/preview.svg" "$(cd "$(dirname "$0")/.." && pwd)/server/preview/validate-svg.js" <<'JS' || die "--preview-file must be a safe 1200×630 SVG"
+const fs = require('fs');
+const { previewNormalizeSvg } = require(process.argv[3]);
+const result = previewNormalizeSvg(fs.readFileSync(process.argv[2], 'utf8'));
+if (result.error) {
+  console.error(`[tdoc] preview.svg rejected: ${result.error}`);
+  process.exit(1);
+}
+JS
+fi
 
 if [ ! -s "$STAGE_HTML" ]; then
   die "html content was empty (existing doc, if any, left untouched)"
@@ -251,6 +277,30 @@ fi
 # origin shell serves author HTML in an isolated frame and injects nothing
 # into storage). bin/tdoc-bake owns the operation and is idempotent, so every
 # path that writes a version can call it without checking first.
+# The explicit creation mode owns design. Do not infer it later from fonts,
+# colors, or the presence of a baked reader block.
+python3 - "$STAGE_HTML" "$CUSTOM_TEMPLATE" <<'PY'
+import sys, re
+from html import escape
+from html.parser import HTMLParser
+from pathlib import Path
+p = Path(sys.argv[1]); source = p.read_text()
+class Root(HTMLParser):
+    span = None
+    def handle_starttag(self, tag, attrs):
+        if tag != 'html' or self.span is not None: return
+        line, col = self.getpos()
+        start = sum(len(s) for s in source.splitlines(keepends=True)[:line-1]) + col
+        attrs = [(k, v) for k, v in attrs if k != 'data-tdoc-design']
+        attrs.append(('data-tdoc-design', 'custom' if sys.argv[2] == '1' else 'tdoc'))
+        self.span = (start, start + len(self.get_starttag_text()), '<html' + ''.join(' ' + k + ('' if v is None else '="' + escape(v, quote=True) + '"') for k, v in attrs) + '>')
+r = Root(); r.feed(source)
+if r.span:
+    start, end, tag = r.span; source = source[:start] + tag + source[end:]
+else:
+    source = re.sub(r'(?i)(<!doctype[^>]*>)?', lambda m: (m[0] or '') + '<html data-tdoc-design="' + ('custom' if sys.argv[2] == '1' else 'tdoc') + '">', source, count=1) + '</html>'
+p.write_text(source)
+PY
 node "$(cd "$(dirname "$0")" && pwd)/tdoc-bake" "$STAGE_HTML" >/dev/null \
   || die "reader-template bake failed (existing doc, if any, left untouched)"
 

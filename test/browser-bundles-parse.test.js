@@ -34,6 +34,7 @@ for (const rel of ['server/shell.js', 'server/frame-probe.js', 'server/edit-mark
 // parse the rest as a script — an unbalanced literal anywhere in the file
 // still fails, which is the whole point.
 const asScript = (src) => src
+  .replace(/^import [A-Za-z_$][\w$]* from ["'][^"']+["'];?\s*$/gm, '')
   .replace(/^export default /gm, 'const __default = ')
   .replace(/^export (class|function|const|let|var) /gm, '$1 ');
 

@@ -53,7 +53,9 @@
      display:inline-flex + align-items:center but no horizontal centring, so a
      24px mark in a 32px padding-0 box sits flush left and the hover highlight
      lands 8px off to the right of the drawing. */
-  .tdoc-bar button.tdoc-bar-mark { width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; justify-content: center; }
+  /* A link (it goes to My docs), so it supplies the box the button rule gave it. */
+  .tdoc-bar .tdoc-bar-mark { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; padding: 0; border-radius: 8px; background: transparent; transition: background .12s; }
+  .tdoc-bar .tdoc-bar-mark:hover { background: #f0f1f4; }
   .tdoc-bar-mark img { width: 24px; height: 24px; display: block; }
   .tdoc-bar .tdoc-github-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border-radius: 8px; color: #555; font: 600 12.5px/1 -apple-system, system-ui, sans-serif; }
   .tdoc-bar .tdoc-github-btn:hover { background: #f0f1f4; color: #1a1a1a; }
@@ -72,26 +74,21 @@
   .tdoc-bar button.doc-title-edit:hover { border-color: #e5e5e7; background: #fafafa; }
   .tdoc-bar .doc-title-input { border: 1px solid var(--td-accent); background: #fff; padding: 2px 6px; margin: 0 -6px; border-radius: 6px; font: inherit; font-weight: 600; font-size: 14px; color: #1a1a1a; outline: none; min-width: 12ch; max-width: 40ch; }
 
-  /* Whose document this is. flex-shrink:0 with its own max-width so a long
-     login truncates itself instead of eating the title's room. */
-  .tdoc-bar .doc-author { color: #8a8a8f; font-size: 13px; flex: 0 0 auto; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tdoc-bar .doc-author::before { content: "·"; color: #c8c8cc; margin: 0 6px 0 0; }
-
   /* Slide switch in the bar. The label is part of the control, so the whole
      thing is one click target. */
   /* Sized to the mode trigger it stands beside — 32px, same radius — so the
      three controls share a baseline instead of stepping. It stays borderless
      until hovered: Publish is the only thing in this row that should look
      filled. */
-  .tdoc-bar .tdoc-switch { display: inline-flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box; padding: 0 12px 0 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; user-select: none; }
-  .tdoc-bar .tdoc-switch:hover { border-color: #e5e5e7; background: #fafafa; }
-  .tdoc-bar .tdoc-switch-track { position: relative; flex: 0 0 auto; width: 28px; height: 16px; padding: 0; border: none; border-radius: 999px; background: #d4d4d9; cursor: pointer; transition: background .14s; }
-  .tdoc-bar .tdoc-switch-track[data-checked] { background: #1a7340; }
-  .tdoc-bar .tdoc-switch-track:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
-  .tdoc-bar .tdoc-switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .14s; }
-  .tdoc-bar .tdoc-switch-track[data-checked] .tdoc-switch-thumb { transform: translateX(12px); }
-  .tdoc-bar .tdoc-switch-label { font-size: 13px; color: #555; white-space: nowrap; }
-  .tdoc-bar .tdoc-switch:hover .tdoc-switch-label { color: #1a1a1a; }
+  .tdoc-bar .tdoc-switch, .tdoc-modal .tdoc-switch { display: inline-flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box; padding: 0 12px 0 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; user-select: none; }
+  .tdoc-bar .tdoc-switch:hover, .tdoc-modal .tdoc-switch:hover { border-color: #e5e5e7; background: #fafafa; }
+  .tdoc-bar .tdoc-switch-track, .tdoc-modal .tdoc-switch-track { min-width: 0; min-height: 0; box-shadow: none; position: relative; flex: 0 0 auto; width: 28px; height: 16px; padding: 0; border: none; border-radius: 999px; background: #d4d4d9; cursor: pointer; transition: background .14s; }
+  .tdoc-bar .tdoc-switch-track[data-checked], .tdoc-modal .tdoc-switch-track[data-checked] { background: #1a7340; }
+  .tdoc-bar .tdoc-switch-track:focus-visible, .tdoc-modal .tdoc-switch-track:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
+  .tdoc-bar .tdoc-switch-thumb, .tdoc-modal .tdoc-switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .14s; }
+  .tdoc-bar .tdoc-switch-track[data-checked] .tdoc-switch-thumb, .tdoc-modal .tdoc-switch-track[data-checked] .tdoc-switch-thumb { transform: translateX(12px); }
+  .tdoc-bar .tdoc-switch-label, .tdoc-modal .tdoc-switch-label { font-size: 13px; color: #555; white-space: nowrap; }
+  .tdoc-bar .tdoc-switch:hover .tdoc-switch-label, .tdoc-modal .tdoc-switch:hover .tdoc-switch-label { color: #1a1a1a; }
 
   /* Default action button — icon and/or label, no border, hover bg only. */
   .tdoc-bar button { background: transparent; border: none; color: #555; padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; transition: background .12s, color .12s; display: inline-flex; align-items: center; gap: 6px; }
@@ -147,11 +144,44 @@
   .tdoc-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; background: #f0f1f4; border-radius: 999px; cursor: pointer; color: #1a1a1a; font: inherit; border: none; position: relative; }
   .tdoc-chip:hover { background: #e5e6ea; }
   .tdoc-chip img { width: 26px; height: 26px; border-radius: 50%; }
-  .tdoc-chip .name { font-size: 13px; font-weight: 500; }
+  /* A long name ends in … rather than pushing the bar's buttons left. */
+  .tdoc-chip .name { font-size: 13px; font-weight: 500; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tdoc-chip.signin { padding: 7px 14px; background: var(--td-accent); color: #fff; font-weight: 600; }
   .tdoc-chip.signin:hover { background: var(--td-accent-hover); }
-  /* Only new inbox chrome: a red dot on the existing identity chip. */
-  .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #e11d48; border: 1.5px solid #fff; pointer-events: none; }
+  /* One Sign in / primary-action shape across every page's bar: the 6px
+     button the doc page's Share uses. <a> chips missed the bar's button rule
+     and came out as pills. */
+  .tdoc-bar .tdoc-chip.signin, .tdoc-bar a.tdoc-chip.signin { border-radius: 6px; padding: 7px 14px; font-weight: 600; line-height: 1.2; }
+  a.tdoc-chip { text-decoration: none; }
+  .tdoc-product-where { display: block; margin: -2px 0 6px; font-size: 12px; color: var(--td-muted, #6b6a66); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  a.tdoc-product-where:hover { color: var(--td-accent, #1652f0); }
+  .tdoc-popup .submit.agent.tdoc-agent-unlinked { opacity: .7; }
+  .tdoc-connectors { display: grid; gap: 12px; }
+  .tdoc-connector { border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 12px; display: grid; gap: 8px; }
+  .tdoc-connector-head { display: flex; gap: 12px; align-items: flex-start; }
+  .tdoc-connector-logo { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 10px; background: var(--td-surface, #f5f5f3); display: inline-flex; align-items: center; justify-content: center; }
+  .tdoc-connector-title { display: grid; gap: 2px; }
+  .tdoc-connector-badge { justify-self: start; margin: 2px 0; padding: 1px 7px; border-radius: 999px; background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); font-size: 11px; font-weight: 600; }
+  .tdoc-connector-head .muted { font-size: 12.5px; }
+  .tdoc-connector code { display: block; padding: 8px; border-radius: 6px; background: var(--td-surface, #f7f7f5); font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
+  .tdoc-connector .primary { justify-self: start; }
+  /* Agents surfaces share one look: 12px cards, 6px buttons. */
+  .tdoc-connector { border-radius: 12px !important; padding: 16px !important; gap: 12px !important; }
+  .tdoc-raft-btn { justify-self: start; display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 10px; border-radius: 6px; background: #141111; color: #fff !important; font: 600 13px/1 -apple-system, system-ui, sans-serif; text-decoration: none; }
+  .tdoc-raft-btn:hover { background: #2a2626; }
+  .tdoc-connector .tdoc-connector-action { justify-self: start; display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 13px/1.2 system-ui, sans-serif; text-decoration: none; }
+  .tdoc-connector details summary { cursor: pointer; }
+  .tdoc-connector details[open] { display: grid; gap: 8px; }
+  .tdoc-connect-agent .tdoc-connect-agent-cta { display: inline-block; margin: 0 0 8px; padding: 5px 10px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 12px system-ui, sans-serif; text-decoration: none; }
+  .tdoc-connect-agent details summary { cursor: pointer; color: #bbb; margin-bottom: 6px; }
+  /* Lives inside the dark composer popup. */
+  .tdoc-connect-agent { margin: 8px 0 4px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.08); color: #ddd; font-size: 12.5px; line-height: 1.45; }
+  .tdoc-connect-agent p { margin: 0 0 6px; color: #ccc; }
+  .tdoc-connect-agent p strong { color: #fff; }
+  .tdoc-connect-agent code { display: block; margin: 0 0 8px; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.14); color: #f2f2f2; font: 11.5px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
+  .tdoc-connect-agent button { appearance: none; border: 0; border-radius: 6px; padding: 5px 10px; background: var(--td-accent, #1652f0); color: #fff; font: 600 12px system-ui, sans-serif; cursor: pointer; }
+  /* A round blue dot signals unread activity across the bar. */
+  .tdoc-unread-dot { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: #1652f0; border: 1.5px solid #fff; pointer-events: none; }
   /* Inbox rows reuse cluster-row: action + preview stacked, relative time on the right. */
   #tdoc-inbox-list .tdoc-cluster-row > .muted { flex-shrink: 0; white-space: nowrap; font-size: 12px; }
 
@@ -168,10 +198,51 @@
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
+  /* Whole-document threads sit in the article flow, directly under its title.
+     The sandboxed frame reserves their measured height; the shell paints the
+     same shared CommentCard and composer controls over that empty slot. */
+  .tdoc-document-comments-layer {
+    position: fixed; left: 0; right: 0; bottom: 0; overflow: hidden;
+    pointer-events: none; z-index: 999995;
+  }
+  .tdoc-document-comments {
+    position: absolute; box-sizing: border-box; padding: 8px 0 12px;
+    display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+    pointer-events: auto; overscroll-behavior: contain;
+    color: var(--td-ink, #1a1a1a); font: 13px/1.4 Inter, system-ui, sans-serif;
+  }
+  .tdoc-document-comments h2 {
+    margin: 0 0 2px; color: var(--td-muted, #73777f);
+    font: 600 12px/1.4 Inter, system-ui, sans-serif;
+  }
+  .tdoc-document-comment-row { width: 100%; }
+  .tdoc-document-comments .tdoc-document-comment-row .tdoc-margin-comment {
+    position: relative; top: auto; left: auto; width: 100%; box-sizing: border-box;
+    max-height: none; margin: 0;
+  }
+  .tdoc-document-comments .tdoc-margin-comment.active:not(.tdoc-current-comment) {
+    border-color: #e8eaed;
+    box-shadow: 0 1px 3px rgba(60,64,67,.15), 0 4px 8px rgba(60,64,67,.08);
+  }
+  .tdoc-document-comment-add {
+    appearance: none; width: 100%; min-height: 36px; padding: 8px 12px;
+    box-sizing: border-box; text-align: left; border: 1px solid var(--td-line, #e8e7e3);
+    border-radius: 8px; background: var(--td-ground, #fff);
+    color: var(--td-muted, #73777f); font: 13px/1.4 Inter, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .tdoc-document-comment-add:hover, .tdoc-document-comment-add:focus-visible {
+    border-color: var(--td-accent, #1652f0); color: var(--td-accent, #1652f0);
+  }
+  .tdoc-document-comments .tdoc-popup.tdoc-inline-composer {
+    position: relative; top: auto; left: auto; width: 100%; max-width: none;
+    box-sizing: border-box; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  }
+  body.tdoc-narrow .tdoc-document-comments .tdoc-popup.tdoc-inline-composer {
+    left: auto !important; width: 100%; max-width: none;
+  }
   /* Parent-level resolved chip (distinct from the per-reply status chip). */
-  /* Same chip geometry for comment-axis (✓ fixed) and handoff-axis pills. */
-  .tdoc-resolved-chip,
-  .tdoc-handoff-chip {
+  .tdoc-resolved-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -183,8 +254,24 @@
     margin: 0;
     white-space: nowrap;
   }
-  .tdoc-resolved-chip { background: #e8f5ed; color: #1a7340; }
-  .tdoc-handoff-chip { color: #5a5a56; background: #f0efea; }
+  .tdoc-resolved-chip { background: #eaf6ee; color: #1d7a3a; }
+  .tdoc-handoff-chip {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    color: #555;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.25;
+    padding: 2px 7px;
+    margin: 0;
+    background: #f1f1ef;
+    border: 0;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
   /* Homepage in-memory comment demo — same chip shape, quiet amber. */
   .tdoc-demo-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; margin: 0 0 8px; background: #f5efe0; color: #7a5c14; }
   /* Re-anchor is a ⋯ menu item now. Its old inline-button dress — 10px, grey,
@@ -245,6 +332,15 @@
      applied / partial / question. */
   .tdoc-agent-badge { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #f2f2f2; flex-shrink: 0; }
   .tdoc-agent-author img { width: 24px; height: 24px; border-radius: 50%; object-fit: contain; background: #fff; flex-shrink: 0; }
+  .tdoc-agent-provider-mark { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #fff; flex-shrink: 0; }
+  .tdoc-reply .tdoc-agent-provider-mark { width: 18px; height: 18px; }
+  .tdoc-agent-provider-mark svg { width: 72%; height: 72%; }
+  /* Hover card on an agent's name: the five facts its one-line label leaves out. */
+  .tdoc-agent-name { cursor: default; }
+  .tdoc-agent-card { background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 8px 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); font: 12px/1.4 system-ui, sans-serif; color: #111; max-width: 280px; }
+  .tdoc-agent-card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+  .tdoc-agent-card dt { color: #777; }
+  .tdoc-agent-card dd { margin: 0; overflow-wrap: anywhere; }
   .tdoc-agent-reply { background: #fafafb; border-left: 3px solid #111; padding-left: 8px; }
   .tdoc-agent-status { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; margin: 0 0 6px; font-weight: 600; }
   .tdoc-agent-status-applied { background: #e8f5ed; color: #1a7340; }
@@ -315,12 +411,49 @@
      how they would drift.) */
 
   .tdoc-pin { position: absolute; pointer-events: auto; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #cdd3dc; box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; transition: transform .12s, border-color .12s, box-shadow .12s; box-sizing: border-box; }
-  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active { transform: scale(1.12); border-color: var(--td-accent); box-shadow: 0 2px 8px var(--td-accent-ring-soft); z-index: 1; }
+  .tdoc-pin:hover, .tdoc-pin.tdoc-pin-active, .tdoc-pin.tdoc-pin-anchor-hover { transform: scale(1.12); border-color: var(--td-accent); box-shadow: 0 2px 8px var(--td-accent-ring-soft); z-index: 1; }
   .tdoc-pin img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
   .tdoc-pin .tdoc-pin-anon { width: 100%; height: 100%; border-radius: 50%; background: #8a93a2; }
   /* Resolved pins get a green ring + a small ✓ overlay badge. */
   .tdoc-pin.tdoc-pin-resolved { border-color: #1a7340; }
   .tdoc-pin.tdoc-pin-resolved::after { content: "✓"; position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; background: #1a7340; color: #fff; font-size: 9px; line-height: 14px; text-align: center; font-weight: 700; }
+  /* Handoff cues on the margin pin — readable without opening the card. */
+  .tdoc-pin.is-waiting-handoff {
+    border-color: var(--td-accent, #1652f0);
+    animation: tdoc-pin-wait 1.1s ease-in-out infinite;
+  }
+  .tdoc-pin.is-waiting-handoff.tdoc-pin-anchor-hover { animation: none; transform: scale(1.12); box-shadow: 0 0 0 4px var(--td-accent-ring-soft); }
+  /* One corner marker for the agent's latest result; unread is a separate dot. */
+  .tdoc-pin .tdoc-pin-handoff-badge {
+    position: absolute; right: -6px; bottom: -5px;
+    display: flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; box-sizing: border-box;
+    border: 1px solid #fff; border-radius: 50%;
+    background: #fff; font: 11px/1 system-ui, sans-serif;
+    box-shadow: 0 1px 3px rgba(0,0,0,.16);
+  }
+  .tdoc-pin .tdoc-pin-handoff-badge.is-warning { color: #8a5a00; background: #fdf3dc; }
+  .tdoc-pin .tdoc-pin-unread-dot {
+    position: absolute; right: -2px; top: -2px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #1652f0;
+    border: 2px solid #fff;
+    box-sizing: border-box;
+    box-shadow: 0 0 0 1px color-mix(in srgb, #1652f0 35%, transparent);
+  }
+  @keyframes tdoc-pin-wait {
+    0%, 100% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-accent, #1652f0) 55%, transparent);
+      transform: scale(1);
+    }
+    50% {
+      box-shadow: 0 0 0 10px color-mix(in srgb, var(--td-accent, #1652f0) 0%, transparent);
+      transform: scale(1.08);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tdoc-pin.is-waiting-handoff { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-accent, #3b6cff) 35%, transparent); }
+  }
   /* A tombstone's pin (#354): the thread under it is still worth opening, so
      the pin stays, but it is faded and dashed and does not show whose face it
      was — otherwise a deleted comment reads, at a glance, exactly like one
@@ -332,7 +465,11 @@
   .tdoc-pin.tdoc-pin-deleted:hover { opacity: 1; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
   .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
+  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster { width: 42px; background: transparent; border: 0; box-shadow: none; }
+  .tdoc-document-pin-faces { display: flex; align-items: center; padding-left: 2px; }
+  .tdoc-document-pin-faces img, .tdoc-document-pin-faces .tdoc-pin-anon { position: relative; flex: 0 0 21px; width: 21px; height: 21px; margin-left: -5px; border: 2px solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 1px 3px rgba(0,0,0,.16); }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
+  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster.tdoc-cluster-allresolved { background: transparent; border: 0; }
   .tdoc-pin.tdoc-pin-cluster::after { content: none; }
 
   /* Floating card: when open via a pin, it sits to the left of the gutter and
@@ -355,6 +492,9 @@
   .tdoc-cluster-pop { position: absolute; pointer-events: auto; width: 260px; max-height: 60vh; overflow-y: auto; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.16); padding: 6px; z-index: 999997; font: 13px system-ui; display: none; }
   .tdoc-cluster-row.tdoc-cluster-current { background: #eef2ff; }
   .tdoc-cluster-pop.open { display: block; }
+  .tdoc-cluster-cards { width: 300px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; }
+  .tdoc-cluster-cards .tdoc-margin-comment { position: relative; top: auto; left: auto; width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+  .tdoc-cluster-cards .tdoc-margin-comment:last-child { margin-bottom: 0; }
   .tdoc-cluster-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
   .tdoc-cluster-row:hover { background: #f5f6f8; }
   .tdoc-cluster-row img { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; }
@@ -464,10 +604,13 @@
   .tdoc-edit-form textarea { min-height: 96px; }
   .tdoc-reply-form textarea:focus,
   .tdoc-edit-form textarea:focus { border-color: var(--td-accent); }
-  .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
-  .tdoc-reply-form-foot .hint { color: #888; font-size: 11px; }
+  .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
+  .tdoc-reply-form-foot .hint { color: #888; font-size: 11px; min-width: 0; }
+  .tdoc-reply-form-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
   .tdoc-reply-form-foot .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
   .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: var(--td-accent-hover); }
+  .tdoc-reply-form-foot .tdoc-reply-submit.agent { background: #f4f4f5; color: #202124; border: 1px solid #d0d0d6; }
+  .tdoc-reply-form-foot .tdoc-reply-submit.agent:hover { background: #eaeaec; }
 
   /* Editing a comment in place: the reply form's textarea, with Cancel/Save
      where the composer has its hint and submit. */
@@ -537,6 +680,8 @@
   .tdoc-popup .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   .tdoc-popup .head .h { flex: 1; min-width: 0; color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
+  .tdoc-popup .head .tdoc-copy-quote { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #aaa; cursor: pointer; }
+  .tdoc-popup .head .tdoc-copy-quote:hover, .tdoc-popup .head .tdoc-copy-quote:focus-visible { background: #292929; color: #fff; }
   .tdoc-popup .tdoc-demo-chip { margin: 0; flex-shrink: 0; background: #3a3424; color: #e8d5a3; }
   .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
   /* iOS Safari zooms the page whenever a focused field's text is smaller than
@@ -579,6 +724,11 @@
   /* Marks a row that came from GitHub's search rather than from this doc — the
      difference between answering someone here and pulling in a newcomer. */
   .tdoc-mention-source { margin-left: auto; flex: none; color: var(--td-muted); font-size: 11px; border: 1px solid var(--td-line); border-radius: 4px; padding: 0 4px; }
+  /* Agents get their own small group above people: tagging one hands the
+     comment to it, which is a different act from notifying a person. */
+  .tdoc-mention-group { padding: 4px 8px 2px; color: var(--td-muted); font: 600 11px system-ui, sans-serif; }
+  .tdoc-mention-agent-mark { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--td-muted); }
+  .tdoc-mention-agent .tdoc-mention-login { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Modal (sign-in) */
   .tdoc-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1000000; display: flex; align-items: center; justify-content: center; font: 14px system-ui, sans-serif; }
@@ -613,7 +763,21 @@
   .tdoc-seg button { border: none; border-radius: 0; padding: 7px 14px; background: #fff; color: #444; }
   .tdoc-seg button + button { border-left: 1px solid #ddd; }
   .tdoc-seg button.active { background: var(--td-accent); color: #fff; }
+  .tdoc-seg button:disabled { color: #aaa; cursor: not-allowed; }
   .tdoc-modal .manage-hint { font-size: 12px; color: #888; margin: 6px 0 0; }
+  /* Share: who has access. Three rows, each a name and one plain line. */
+  .tdoc-modal .tdoc-access-options { display: flex; flex-direction: column; gap: 6px; }
+  .tdoc-modal .tdoc-access-option { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-height: 44px; box-sizing: border-box; padding: 9px 12px; border: 1px solid #e2e2e6; border-radius: 8px; background: #fff; color: #1a1a1a; text-align: left; font: inherit; cursor: pointer; }
+  .tdoc-modal .tdoc-access-option:hover { border-color: #c9c9cf; background: #fafafa; }
+  .tdoc-modal .tdoc-access-option:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
+  .tdoc-modal .tdoc-access-option.active { border-color: var(--td-accent); background: #f6f8ff; }
+  .tdoc-modal .tdoc-access-dot { flex: 0 0 auto; width: 14px; height: 14px; margin-top: 2px; box-sizing: border-box; border: 1.5px solid #b5b5bd; border-radius: 50%; background: #fff; }
+  .tdoc-modal .tdoc-access-option.active .tdoc-access-dot { border: 4px solid var(--td-accent); }
+  .tdoc-modal .tdoc-access-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .tdoc-modal .tdoc-access-label { font-size: 14px; font-weight: 600; line-height: 1.3; }
+  .tdoc-modal .tdoc-access-hint { font-size: 12px; color: #6b6b73; line-height: 1.35; }
+  .tdoc-modal .tdoc-access-sub { margin: 6px 0 0; }
+  .tdoc-modal .tdoc-access-sub .tdoc-switch-label { white-space: normal; }
   .tdoc-modal .manage-action { width: 100%; text-align: left; }
   .tdoc-modal .manage-action.danger-btn { color: var(--td-danger); border-color: #f1b8b2; }
   .tdoc-modal .manage-action.danger-btn:hover { background: var(--td-danger); color: #fff; border-color: var(--td-danger); }
@@ -642,8 +806,8 @@
   .tdoc-ac-item .login { font-size: 13px; font-weight: 600; color: #222; }
   /* Simplified Share panel: one plain-language access dropdown, an Advanced
      disclosure for the secondary axes, and a de-emphasised danger row. */
-  .tdoc-modal .tdoc-select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 10px; font: inherit; color: inherit; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
-  .tdoc-modal .tdoc-select:focus { outline: none; border-color: var(--td-accent); }
+  .tdoc-select, .tdoc-modal .tdoc-select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 32px 8px 10px; font: inherit; color: inherit; cursor: pointer; appearance: none; -webkit-appearance: none; -moz-appearance: none; background-color: #fff; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23666' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
+  .tdoc-select:focus, .tdoc-modal .tdoc-select:focus { outline: none; border-color: var(--td-accent); }
   /* Notify instruction is a real textarea — do not reuse .tdoc-select (dropdown arrow). */
   .tdoc-modal textarea.tdoc-notify-instruction { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font: inherit; color: inherit; resize: vertical; min-height: 48px; background: #fff; cursor: text; }
   .tdoc-modal textarea.tdoc-notify-instruction:focus { outline: none; border-color: var(--td-accent); }
@@ -674,14 +838,13 @@
   @media (max-width: 900px) {
     .tdoc-chip .name { display: none; }
     .tdoc-chip { padding: 3px; }
-    /* The title has to outlive the author: one names the document, the other
-       annotates it. */
-    .tdoc-bar .doc-author { display: none; }
   }
   @media (max-width: 700px) {
     .tdoc-bar { padding: 0 8px; gap: 4px; }
     .tdoc-bar button { min-width: 44px; min-height: 44px; justify-content: center; }
-    .tdoc-bar button.tdoc-bar-mark { width: 44px; height: 44px; }
+    .tdoc-bar .tdoc-bar-mark { width: 44px; height: 44px; }
+    .tdoc-bar .tdoc-ask-ai-label { display: none; }
+    .tdoc-bar .tdoc-send-agent-action { width: 44px; padding: 0; }
     .tdoc-version-wrap, .tdoc-bar #tdoc-version-toggle { display: none; }
     .tdoc-bar .doc-title { flex: 1 1 auto; font-size: 13px; }
     /* The 44px touch-target rule above centres every button in the bar, which
@@ -691,18 +854,22 @@
        a flex box, so justify-content is what places the text. */
     .tdoc-bar button.doc-title-edit { justify-content: flex-start; }
     .tdoc-bar #tdoc-star-btn,
-    .tdoc-bar .tdoc-document-primary,
-    .tdoc-bar #tdoc-theme-btn,
+    .tdoc-bar #tdoc-publish-btn,
     .tdoc-bar .tdoc-switch,
     .tdoc-bar .tdoc-account-trigger { display: none; }
+    /* Share stays on a phone, as its icon. */
+    .tdoc-bar .tdoc-share-quiet span { display: none; }
+    .tdoc-bar .tdoc-share-quiet { padding: 0; }
     .tdoc-bar .tdoc-secondary-toggle.tdoc-mobile-overflow-trigger { display: inline-flex; }
     .tdoc-bar-right, .tdoc-bar-actions { gap: 0; }
   }
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow #tdoc-comment-layer { display: block; position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
-  body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
+  body.tdoc-narrow .tdoc-drawer-viewport { position: fixed; inset: 0; height: 100dvh; z-index: 1000001; }
+  body.tdoc-narrow .tdoc-drawer-backdrop { position: fixed; inset: 0; z-index: 1000000; background: rgba(0,0,0,.28); }
+  body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px max(24px, env(safe-area-inset-bottom)); box-sizing: border-box; z-index: 999998; }
+  body.tdoc-narrow #tdoc-comment-layer[data-starting-style], body.tdoc-narrow #tdoc-comment-layer[data-ending-style] { transform: translateY(100%); }
   /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
      tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
      plain body text, so the document-level "close on outside click" never fires
@@ -717,6 +884,42 @@
   body.tdoc-narrow #tdoc-comment-layer .tdoc-drawer-handle:active { cursor: grabbing; }
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  body.tdoc-narrow .tdoc-fab.is-hidden { display: none; }
+  body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
+  body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
+  body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  body.tdoc-narrow .tdoc-comment-filter-row { position: sticky; top: 0; z-index: 1; padding: 4px 0 10px; background: #fff; }
+  body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg { width: 100%; }
+  body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg button { flex: 1; }
+  body.tdoc-narrow .tdoc-tab-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--td-accent, #1652f0); vertical-align: middle; }
+  body.tdoc-narrow .tdoc-drawer-ask { padding-bottom: env(safe-area-inset-bottom); color: var(--td-ink, #1a1a1a); font: 13px/1.4 Inter, system-ui, sans-serif; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-conversation { max-height: none; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-answer-body .text,
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-question .text { font-size: 15px; line-height: 1.55; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-panel > h2 { display: none; }
+  body.tdoc-narrow .tdoc-fab .tdoc-fab-ai { margin-left: -4px; margin-top: -10px; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions button.primary { background: var(--td-accent, #1652f0); color: #fff; border-color: var(--td-accent, #1652f0); }
+  body.tdoc-narrow .tdoc-drawer-empty .tdoc-link-btn { border: 0; background: transparent; color: var(--td-muted); text-decoration: underline; text-underline-offset: 3px; }
+  body.tdoc-narrow .tdoc-howto-dismiss { margin-top: 14px; border: 0; background: transparent; color: var(--td-muted); font: 12px system-ui, sans-serif; cursor: pointer; }
+  body.tdoc-narrow .tdoc-howto-demo { position: relative; width: 220px; height: 74px; margin: 0 auto 14px; padding: 12px 14px; box-sizing: border-box; border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; text-align: left; font: 13px/1.5 system-ui, sans-serif; color: var(--td-ink, #1a1a1a); }
+  body.tdoc-narrow .tdoc-howto-line { display: block; white-space: nowrap; }
+  body.tdoc-narrow .tdoc-howto-line.short { width: 60%; height: 8px; margin-top: 8px; border-radius: 4px; background: var(--td-line, #e8e7e3); }
+  body.tdoc-narrow .tdoc-howto-line mark { background: linear-gradient(var(--td-accent-tint, #e8eefe), var(--td-accent-tint, #e8eefe)) no-repeat left / 0% 100%; color: inherit; animation: tdoc-howto-select 3.2s ease-in-out infinite; }
+  body.tdoc-narrow .tdoc-howto-pill { position: absolute; right: 12px; bottom: 10px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; background: var(--td-accent, #1652f0); color: #fff; font: 600 11px system-ui, sans-serif; opacity: 0; animation: tdoc-howto-pill 3.2s ease-in-out infinite; }
+  @keyframes tdoc-howto-select { 0%, 8% { background-size: 0% 100%; } 35%, 85% { background-size: 100% 100%; } 100% { background-size: 0% 100%; } }
+  @keyframes tdoc-howto-pill { 0%, 35% { opacity: 0; transform: translateY(4px); } 45%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { body.tdoc-narrow .tdoc-howto-line mark { animation: none; background-size: 100% 100%; } body.tdoc-narrow .tdoc-howto-pill { animation: none; opacity: 1; } }
+  .tdoc-bar .tdoc-mode-trigger { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--td-ink, #1a1a1a); font: 500 13.5px/1 system-ui, -apple-system, sans-serif; white-space: nowrap; cursor: pointer; flex-shrink: 0; }
+  .tdoc-bar .tdoc-mode-trigger:hover, .tdoc-bar .tdoc-mode-trigger[data-popup-open] { background: var(--td-surface-2, #f7f7f5); }
+  .tdoc-bar .tdoc-mode-readonly, .tdoc-bar .tdoc-mode-readonly:hover { cursor: default; opacity: .65; background: transparent; }
+  .tdoc-bar .tdoc-mode-chevron { color: var(--td-muted); }
+  @media (max-width: 700px) { .tdoc-bar .tdoc-mode-label { display: none; } .tdoc-bar .tdoc-mode-trigger { padding: 0 6px; gap: 2px; } }
+  body.tdoc-narrow .tdoc-drawer-empty { padding: 28px 12px 36px; text-align: center; color: var(--td-muted); font: 14px system-ui, sans-serif; }
+  body.tdoc-narrow .tdoc-drawer-empty p { margin: 0 0 14px; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions button:not(.tdoc-link-btn) { border: 1px solid var(--td-accent); border-radius: 999px; background: #fff; color: var(--td-accent); padding: 10px 16px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions button.primary { background: var(--td-accent); color: #fff; }
+  body.tdoc-narrow .tdoc-drawer-empty .tdoc-link-btn { padding: 10px 4px; font: 500 13px system-ui, sans-serif; cursor: pointer; }
   body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
   body.tdoc-narrow .tdoc-modal { padding: 20px; }
@@ -737,8 +940,6 @@
     .tdoc-emoji-picker button.tdoc-emoji-text { grid-column: span 5; }
   }
 
-  /* Theme toggle — icon-only, lives in the bar's right cluster. */
-  .tdoc-theme-btn { flex-shrink: 0; }
   .tdoc-theme-icon-sun { display: none; }
   html[data-tdoc-theme="dark"] .tdoc-theme-icon-moon { display: none; }
   html[data-tdoc-theme="dark"] .tdoc-theme-icon-sun { display: block; }
@@ -796,54 +997,240 @@
     flex-wrap: nowrap;
     align-items: center;
     gap: 4px;
-    margin: 0 0 6px;
+    margin: 0 0 4px;
     min-width: 0;
   }
-  .tdoc-status-row:not(:has(.tdoc-resolved-chip, .tdoc-handoff-chip)) {
+  .tdoc-status-row:not(:has(.tdoc-resolved-chip, .tdoc-handoff-chip, .tdoc-thread-unread-dot)) {
     display: none;
     margin: 0;
   }
-  /* Agent done stays neutral gray — green is reserved for comment-axis ✓ fixed. */
-  .tdoc-handoff-chip.is-resolved { color: #5a5a56; background: #f0efea; }
-  .tdoc-handoff-chip.is-failed { color: #8a3b2b; background: #f7ebe7; }
-  .tdoc-handoff-chip.is-waiting {
-    color: #1a3f8f;
-    background: #e8eeff;
-    animation: tdoc-handoff-pulse 1.8s ease-in-out infinite;
+  .tdoc-thread-unread-dot {
+    flex: none; width: 8px; height: 8px; margin-left: auto;
+    border-radius: 50%; background: var(--td-accent, #1652f0);
   }
-  .tdoc-handoff-chip.is-partial { color: #7a5b12; background: #f7f0d8; }
-  .tdoc-handoff-chip.is-question { color: #5b3d8a; background: #f0eaf7; }
-  @keyframes tdoc-handoff-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
+  .tdoc-thread-mark-read {
+    appearance: none; border: 0; background: transparent; cursor: pointer;
+    margin-left: auto; padding: 6px; border-radius: 50%;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .tdoc-handoff-chip.is-waiting { animation: none; }
+  .tdoc-thread-mark-read:hover { background: var(--td-accent-ring-soft); }
+  .tdoc-thread-mark-read .tdoc-thread-unread-dot { display: block; margin: 0; }
+  /* Keep one compact pill for the current step, including the agent's reply
+     verdict. Delivery and reply are stages of one sequence, not two badges. */
+  .tdoc-handoff-chip.is-done { color: #1d7a3a; background: #eaf6ee; }
+  .tdoc-handoff-chip.is-question { color: #1652f0; background: #eef2fe; }
+  .tdoc-handoff-chip.is-partial,
+  .tdoc-handoff-chip.is-stale,
+  .tdoc-handoff-chip.is-failed { color: #8a5a00; background: #fdf3dc; }
+  /* The handoff line can name a long handle; it shortens, never spills. */
+  .tdoc-handoff-chip.tdoc-handoff-status-text { flex: 0 1 auto; min-width: 0; max-width: 100%; gap: 2px; }
+  .tdoc-handoff-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-handoff-line-tail { flex: 0 0 auto; white-space: pre; }
+  .tdoc-handoff-chip .tdoc-handoff-chip-action {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    margin-left: 2px;
+    line-height: 1;
   }
-
-  .tdoc-handoff-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 8px 16px;
-    font-size: 13px;
-    color: var(--td-ink, #1a1a1a);
-    background: var(--td-accent-tint, #e8eeff);
-    border-bottom: 1px solid var(--td-line, #e6e4dc);
+  .tdoc-handoff-chip .tdoc-handoff-chip-action:disabled { opacity: 0.55; cursor: not-allowed; }
+  .tdoc-handoff-popover {
+    width: min(400px, calc(100vw - 24px));
+    max-height: calc(100vh - 72px);
+    overflow: auto;
     box-sizing: border-box;
+    padding: 12px;
+    border: 1px solid var(--td-line, #e6e4dc);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--td-ink, #1a1a1a);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
+    font: 13px/1.4 Inter, system-ui, sans-serif;
   }
-  .tdoc-handoff-banner.is-failed {
-    background: #f7ebe7;
+  .tdoc-handoff-popover:focus { outline: none; }
+  .tdoc-ask-drawer-backdrop { position: fixed; inset: 0; z-index: 999997; background: rgba(0,0,0,.28); }
+  .tdoc-ask-drawer-viewport { position: fixed; inset: 0; z-index: 999998; pointer-events: none; }
+  .tdoc-ask-mobile-drawer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    width: 100%;
+    padding: 12px 16px max(16px, env(safe-area-inset-bottom));
+    box-sizing: border-box;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+    border: 1px solid var(--td-line, #e8e7e3);
+    border-radius: 16px 16px 0 0;
+    background: #fff;
+    color: var(--td-ink, #1a1a1a);
+    box-shadow: 0 -4px 24px rgba(0,0,0,.12);
+    font: 13px/1.4 Inter, system-ui, sans-serif;
+    transition: height .28s ease;
   }
-  .tdoc-handoff-banner-text { font-weight: 600; }
-  .tdoc-handoff-banner-actions {
+  .tdoc-ask-mobile-drawer[data-swiping] { transition: none; }
+  .tdoc-ask-drawer-grip { display: flex; align-items: center; justify-content: center; flex: none; align-self: center; width: 64px; height: 24px; margin: -8px auto 4px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
+  .tdoc-ask-drawer-grip span { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--td-line); }
+  .tdoc-ask-drawer-close { position: absolute; top: 2px; right: 5px; width: 44px; height: 44px; border: 0; background: transparent; color: var(--td-muted); font: 23px/1 system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-drawer-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+  .tdoc-ask-mobile-drawer .tdoc-ask-conversation { max-height: none; }
+  .tdoc-ask-mobile-drawer .tdoc-ask-answer-body .text { font-size: 15px; line-height: 1.55; }
+  .tdoc-ask-mobile-drawer .tdoc-ask-question .text { font-size: 15px; line-height: 1.55; }
+  .tdoc-ask-panel h2 { margin: 0 0 12px; font: 700 16px/1.3 Inter, system-ui, sans-serif; }
+  .tdoc-ask-form { border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 8px 10px 9px; }
+  .tdoc-ask-form:focus-within { border-color: var(--td-accent, #1652f0); }
+  .tdoc-ask-form textarea { display: block; width: 100%; min-height: 44px; max-height: 160px; resize: none; overflow-y: auto; padding: 2px 0; border: 0; outline: 0; background: transparent; color: var(--td-ink, #1a1a1a); font: 16px/1.5 Inter, system-ui, sans-serif; box-sizing: border-box; }
+  .tdoc-ask-form-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  /* A quiet text selector, not a filled pill: who answers is a setting, the
+     question is the focus. */
+  .tdoc-ask-form-bottom button.tdoc-ask-target-pill { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; max-width: calc(100% - 42px); padding: 0 6px; margin-left: -6px; border: 0; border-radius: 6px; background: transparent; box-shadow: none; color: var(--td-muted); font: 500 13px Inter, system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .tdoc-ask-form-bottom button.tdoc-ask-target-pill:hover, .tdoc-ask-form-bottom button.tdoc-ask-target-pill[data-popup-open] { background: var(--td-surface-2, #f4f4f2); color: var(--td-ink); box-shadow: none; }
+  .tdoc-ask-only-hint { margin-top: 5px; color: var(--td-muted, #6b6a66); font-size: 11px; }
+  .tdoc-ask-form-bottom button[type="submit"] { width: 28px; height: 28px; border: 0; border-radius: 8px; background: var(--td-accent, #1652f0); color: #fff; font: 700 19px/1 Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }
+  .tdoc-ask-notice { margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
+  .tdoc-ask-notice a { color: var(--td-accent, #1652f0); font-weight: 650; }
+  .tdoc-ask-ready { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
+  .tdoc-ask-ready button { border: 0; padding: 0; background: transparent; color: var(--td-accent, #1652f0); font: 650 12px Inter, system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
+  .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
+  .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }
+  .tdoc-ask-turn { display: grid; min-width: 0; gap: 8px; }
+  .tdoc-margin-comment.tdoc-ask-question { position: static; width: auto; max-width: none; padding: 12px; z-index: auto; box-shadow: none; }
+  .tdoc-ask-answer.tdoc-reply { padding: 2px 0 2px 12px; }
+  /* Private turns read as a conversation. Posted turns keep the same comment
+     and reply shape they have in the document margin. */
+  .tdoc-ask-turn:not(.is-public) .tdoc-ask-question { justify-self: end; max-width: 88%; border-radius: 12px 12px 3px 12px; background: var(--td-surface-2, #f7f7f5); }
+  .tdoc-ask-turn:not(.is-public) .tdoc-ask-answer { justify-self: start; max-width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 12px 12px 12px 3px; background: var(--td-surface, #fff); }
+  .tdoc-ask-answer.is-error .text { color: var(--td-danger); }
+  .tdoc-ask-visibility { margin-top: 6px; color: var(--td-muted, #6b6a66); font-size: 11px; }
+  .tdoc-ask-answer-body, .tdoc-ask-answer-body .text { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .tdoc-ask-answer-body .text { white-space: normal; }
+  .tdoc-ask-answer-body .tdoc-md-p { display: block; margin: 0 0 8px; }
+  .tdoc-ask-answer-body .tdoc-md-pre { max-width: 100%; overflow-x: auto; box-sizing: border-box; }
+  .tdoc-ask-turn-summary { display: flex; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; box-sizing: border-box; padding: 10px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-ground); color: var(--td-ink); font: 13px/1.4 Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
+  .tdoc-ask-turn-summary span:first-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .tdoc-ask-turn-summary span:last-child { flex: none; color: var(--td-accent); font-size: 11px; }
+  .tdoc-ask-turn-collapse { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--td-accent); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-margin-comment .text .tdoc-md-heading, .tdoc-reply .text .tdoc-md-heading { margin: 6px 0 3px; font-size: 1em; }
+  .tdoc-ask-answer-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { border: 1px solid var(--td-line, #e8e7e3); border-radius: 6px; padding: 6px 14px; background: var(--td-ground); color: var(--td-ink, #1a1a1a); font: inherit; font-weight: 500; cursor: pointer; }
+  .tdoc-ask-answer-actions button.primary, .tdoc-ask-answer.is-error button { border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff; }
+  .tdoc-ask-answer-actions button:disabled { opacity: .55; cursor: default; }
+  .tdoc-ask-private-note { display: block; margin-top: 8px; color: var(--td-muted, #6b6a66); font-size: 11px; }
+  .tdoc-ask-activity-toggle { display: flex; width: 100%; justify-content: space-between; margin-top: 14px; padding: 10px 0 0; border: 0; border-top: 1px solid var(--td-line, #e8e7e3); background: transparent; color: var(--td-muted, #6b6a66); font: 650 12px Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
+  .tdoc-ask-activity-toggle span:last-child { color: var(--td-accent, #1652f0); }
+  .tdoc-ask-activity { margin-top: 12px; }
+  .tdoc-handoff-details-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .tdoc-handoff-popover .tdoc-handoff-details-section-title { margin: 0; font-size: 13px; font-weight: 650; }
+  .tdoc-handoff-popover button.tdoc-handoff-details-mark-all { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--td-accent, #1652f0); font: inherit; font-size: 11px; cursor: pointer; }
+  .tdoc-handoff-popover button.tdoc-handoff-details-mark-all:hover { text-decoration: underline; }
+  .tdoc-handoff-details-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-height: min(50vh, 430px);
+    overflow: auto;
+  }
+  .tdoc-handoff-details-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 2px;
+    border-bottom: 1px solid var(--td-line, #e6e4dc);
+    background: transparent;
+  }
+  .tdoc-handoff-details-main { flex: 1 1 auto; min-width: 0; }
+  .tdoc-handoff-details-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tdoc-handoff-details-meta { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+  .tdoc-handoff-details-recipient { color: #888; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tdoc-handoff-popover button.tdoc-handoff-details-jump {
+    flex: 1 1 auto;
+    min-width: 0;
+    appearance: none;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+    min-width: 0;
+    min-height: 0;
+    font: inherit;
+    color: inherit;
+  }
+  .tdoc-handoff-details-jump:hover .tdoc-handoff-details-preview { color: var(--td-accent, #1652f0); }
+  .tdoc-handoff-details-state {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    gap: 2px;
+    max-width: 100%;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #f0efea;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 650;
+    color: #5a5a56;
+    margin-bottom: 0;
+    flex: 0 0 auto;
   }
-  .tdoc-handoff-banner .text-btn {
+  .tdoc-handoff-details-state.is-failed { color: #8a5a00; background: #fdf3dc; }
+  .tdoc-handoff-details-state.is-stale,
+  .tdoc-handoff-details-state.is-expired { color: #7a5b12; background: #f7f0d8; }
+  .tdoc-handoff-details-state.is-waiting,
+  .tdoc-handoff-details-state.is-received,
+  .tdoc-handoff-details-state.is-replied { color: #555; background: #f1f1ef; }
+  .tdoc-handoff-details-state.is-question { color: #1652f0; background: #eef2fe; }
+  .tdoc-handoff-details-state.is-partial { color: #8a6100; background: #fdf6e3; }
+  .tdoc-handoff-details-state.is-ready { color: #1a7340; background: #e8f5ed; }
+  .tdoc-handoff-details-state.is-resolved { color: #1d7a3a; background: #eaf6ee; }
+  .tdoc-handoff-details-unread-dot {
+    appearance: none;
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    margin-left: 0;
+    padding: 0;
+    border: 0;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: transparent;
+    vertical-align: middle;
+    cursor: pointer;
+  }
+  .tdoc-handoff-details-unread-dot::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #1652f0; }
+  .tdoc-handoff-details-unread-dot:hover { background: var(--td-accent-tint, #e8eeff); }
+  .tdoc-handoff-details-unread-dot:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 3px; }
+  .tdoc-handoff-details-preview {
+    display: block;
+    font-size: 13px;
+    line-height: 1.35;
+    color: #202124;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tdoc-handoff-details-reply {
+    display: block;
+    color: #5f6368;
+    font-size: 12px;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+  .tdoc-handoff-details-state .tdoc-handoff-details-resend,
+  .tdoc-handoff-details-history .tdoc-handoff-details-elsewhere {
     appearance: none;
     border: 0;
     background: transparent;
@@ -853,43 +1240,208 @@
     cursor: pointer;
     padding: 0;
   }
-  .tdoc-handoff-banner .text-btn:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .tdoc-handoff-banner.is-failed .text-btn { color: #8a3b2b; }
+  .tdoc-handoff-details-state .tdoc-handoff-details-resend:disabled { opacity: .55; cursor: not-allowed; }
+  .tdoc-handoff-popover button.tdoc-handoff-details-expand { border: 0; background: transparent; color: var(--td-accent, #1652f0); padding: 0; min-height: 0; font: inherit; font-size: 11px; cursor: pointer; }
+  .tdoc-handoff-details-history { color: #5f6368; font-size: 11px; line-height: 1.5; padding: 5px 0 0 8px; border-left: 2px solid #e8eeff; }
+  .tdoc-handoff-details-reply-form { display: flex; gap: 6px; margin-top: 8px; }
+  .tdoc-handoff-details-reply-form input { min-width: 0; flex: 1; border: 1px solid #c9d7f5; border-radius: 7px; padding: 7px; font: 12px Inter, system-ui, sans-serif; }
+  .tdoc-handoff-details-reply-form button { border: 0; border-radius: 7px; padding: 0 10px; background: var(--td-accent, #1652f0); color: #fff; font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-handoff-details-reply-form button:disabled { opacity: .5; cursor: default; }
+  .tdoc-handoff-ready { border-top: 1px solid var(--td-line, #e6e4dc); padding-top: 10px; }
+  .tdoc-handoff-ready h3 { margin: 0 0 6px; color: #888; font-size: 11px; font-weight: 500; }
+  .tdoc-handoff-ready-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; font-size: 12px; }
+  .tdoc-handoff-ready-row input { flex: 0 0 auto; }
+  .tdoc-handoff-ready-send { display: block; width: 100%; margin-top: 8px; padding: 7px 10px; border: 0; border-radius: 7px; background: var(--td-accent, #1652f0); color: #fff; font: 600 12px/1.4 Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-handoff-ready-send:hover { background: var(--td-accent-hover, #1245d0); }
 
-  /* Send to agent: icon in the top bar (desktop + mobile), not a bottom strip. */
+  /* Asking in the comment composer: @ hands a comment to an agent; tagging
+     the answerer (their own agent, answers only, or tdoc AI) shows "Only me",
+     which keeps the question and its answer private until Make public. One
+     muted line under a tdoc AI reply tells its asker what is left. */
+  .tdoc-popup .tdoc-ask-boxes { display: inline-flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; overflow: hidden; color: #e8e8e8; }
+  .tdoc-popup .tdoc-ask-boxes .ui-checkbox-hint { color: #9a9a9a; }
+  .tdoc-popup .tdoc-ask-boxes .ui-checkbox-box:not([data-checked]) { border-color: #8a8a90; }
+  .tdoc-popup .foot .tdoc-composer-foot-actions { flex: none; margin-left: auto; }
+  .tdoc-popup.tdoc-private-ask p.tdoc-private-q { margin: 8px 0 6px; color: #fff; font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+  .tdoc-popup.tdoc-private-ask .tdoc-private-a { max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: #1d1d1f; color: #e8e8e8; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .tdoc-popup.tdoc-private-ask .tdoc-private-who { display: block; margin-bottom: 4px; font-size: 11px; font-weight: 600; color: #9aa4ff; }
+  .tdoc-popup.tdoc-private-ask .tdoc-private-status { color: #9a9a9a; }
+  .tdoc-popup.tdoc-private-ask .hint { display: inline-flex; align-items: center; gap: 4px; }
+  .tdoc-ai-quota { margin: 2px 0 4px; font-size: 11.5px; color: #8a8a8a; }
+  .tdoc-ai-quota a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .tdoc-ai-quota a:hover { color: var(--td-accent, #1652f0); }
+  .tdoc-ai-answering { padding: 4px 0 0; }
+
+  /* Ask AI and agent activity share one top-bar entry. The blue corner dot
+     signals activity; the full count stays in the accessible label and panel. */
   .tdoc-bar .tdoc-send-agent-action {
     position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
-    padding: 0;
+    gap: 7px;
+    height: 32px;
+    padding: 0 11px;
     border: 0;
-    border-radius: 8px;
+    border-radius: 6px;
     background: transparent;
     color: var(--td-ink, #1a1a1a);
+    font: 500 13.5px/1 system-ui, -apple-system, sans-serif;
+    white-space: nowrap;
     cursor: pointer;
     flex-shrink: 0;
   }
   .tdoc-bar .tdoc-send-agent-action:hover {
-    background: var(--td-accent-tint, #e8eeff);
-    color: var(--td-accent, #1652f0);
+    background: transparent;
   }
+  .tdoc-bar .tdoc-send-agent-action:active { background: var(--td-surface-2, #f7f7f5); }
+  .tdoc-bar .tdoc-send-agent-action:focus-visible {
+    outline: 2px solid var(--td-accent, #1652f0);
+    outline-offset: 2px;
+  }
+  .tdoc-bar .tdoc-ask-ai-mark {
+    width: 18px;
+    height: 18px;
+    flex: none;
+  }
+  /* Top-right of the "Ask AI" label on desktop (like the avatar's dot), never
+     over it; in the corner of the icon-only phone button. */
   .tdoc-bar .tdoc-send-agent-badge {
-    position: absolute;
-    top: 2px;
-    right: 0;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 999px;
+    flex: none;
+    align-self: flex-start;
+    width: 8px;
+    height: 8px;
+    margin: 4px 0 0 -4px;
+    border: 1.5px solid #fff;
+    border-radius: 50%;
     background: var(--td-accent, #1652f0);
-    color: #fff;
-    font: 650 10px/16px inherit;
-    text-align: center;
-    box-sizing: border-box;
   }
+  @media (max-width: 700px) {
+    .tdoc-bar .tdoc-send-agent-badge { position: absolute; top: 8px; right: 6px; margin: 0; }
+  }
+
+/* A navigation is under way (shell/src/nav-progress.js): a thin bar along the
+   top of the window from the click until the next page replaces this one, so
+   a page that is slow to answer never looks like a click that did nothing. */
+html[data-tdoc-navigating] body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483647;
+  width: 100%;
+  height: 2px;
+  background: var(--td-accent, #2f6feb);
+  transform-origin: 0 50%;
+  animation: tdoc-nav-progress 8s cubic-bezier(.1, .7, .2, 1) forwards;
+  pointer-events: none;
+}
+html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; }
+@keyframes tdoc-nav-progress {
+  from { transform: scaleX(0.05); }
+  to { transform: scaleX(0.92); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-tdoc-navigating] body::after { animation: none; transform: scaleX(0.6); }
+}
+
+/* The comment composer's @agent button, the agent pill's menu
+   and the Answers only / Only me row under the text. */
+.tdoc-popup .tdoc-composer-agent { padding: 6px 10px; border: 1px solid #4a4a4a; border-radius: 6px; background: #2c2c2c; color: #f0f0f0; font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.tdoc-popup .tdoc-composer-agent:hover { background: #3a3a3a; }
+.tdoc-popup .tdoc-ask-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; color: #e8e8e8; }
+.tdoc-popup .tdoc-ask-mode { border-color: #4a4a4a; flex-wrap: nowrap; }
+.tdoc-popup .tdoc-ask-mode button { padding: 4px 10px; background: #1d1d1f; color: #d8d8d8; font-size: 12px; white-space: nowrap; }
+.tdoc-popup .tdoc-ask-mode button + button { border-left-color: #4a4a4a; }
+.tdoc-popup .tdoc-ask-mode button.active { background: var(--td-accent); color: #fff; }
+.tdoc-popup .tdoc-ask-mode button:disabled { color: #6e6e73; }
+.tdoc-popup .tdoc-ask-row .ui-checkbox-box:not([data-checked]) { border-color: #8a8a90; }
+/* The agent pill's dropdown in the typed-@ list's light style (Julie,
+   2026-10-25): its box, rows and highlight are .tdoc-mention-menu's and
+   .tdoc-mention-option's; no group headers, no focus ring. Each row: mark,
+   short name, a small grey tag (Mine / Team / "5 free"), a quiet check on
+   the agent in the text. Connect my agent is a quiet link row. */
+.ui-menu-popup.tdoc-agent-menu { min-width: 200px; max-width: 320px; padding: 4px; background: #fff; border: 1px solid var(--td-line, #e5e5e7); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); outline: none; }
+.ui-menu-item.tdoc-agent-menu-item { display: flex; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box; padding: 4px 8px; border-radius: 6px; font: 13px system-ui, sans-serif; color: var(--td-ink, #1a1a1a); outline: none; }
+.ui-menu-item.tdoc-agent-menu-item[data-highlighted] { background: var(--td-accent-tint, #e8eeff); }
+.ui-menu-item.tdoc-agent-menu-more { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
+.ui-menu-item.tdoc-agent-menu-more::after { content: '›'; font-size: 18px; color: var(--td-muted); }
+.tdoc-agent-menu-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.tdoc-agent-menu-tag { margin-left: auto; flex: none; color: var(--td-muted, #8a8a8a); font-size: 11px; white-space: nowrap; }
+.tdoc-mention-agent .tdoc-mention-login { flex: 0 1 auto; }
+.tdoc-agent-menu-check { width: 13px; flex: none; display: inline-flex; color: var(--td-muted, #8a8a8a); }
+a.ui-menu-item.tdoc-agent-menu-connect { display: block; padding: 5px 8px 5px 34px; border-radius: 6px; font: 12px system-ui, sans-serif; color: var(--td-muted, #8a8a8a); outline: none; }
+a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; color: var(--td-ink, #1a1a1a); text-decoration: underline; }
+.tdoc-mention-menu a.tdoc-mention-connect { display: block; padding: 5px 8px 5px 34px; font: 12px system-ui, sans-serif; color: var(--td-muted); text-decoration: none; }
+.tdoc-mention-menu a.tdoc-mention-connect:hover { color: var(--td-ink); text-decoration: underline; }
+
+/* The document bar: logo · title on the left; Edited … · ✈ · Share · ⋯ ·
+   space chip · avatar on the right. Calm:
+   muted words and quiet buttons, the one accent is the unread dot. */
+.tdoc-bar .tdoc-edited { height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: #8a8a8f; font: 13px system-ui, -apple-system, sans-serif; white-space: nowrap; cursor: pointer; }
+.tdoc-bar .tdoc-edited:hover { background: #f0f1f4; color: #1a1a1a; }
+.tdoc-bar .tdoc-share-quiet { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: #1a1a1a; font: 500 13.5px system-ui, -apple-system, sans-serif; cursor: pointer; }
+.tdoc-bar .tdoc-share-quiet:hover { background: #f0f1f4; }
+.tdoc-bar .tdoc-share-quiet svg { width: 18px; height: 18px; }
+/* Keep the three phone actions equal. These rules follow the shared desktop
+   button styles so their padding cannot reappear through the CSS cascade. */
+@media (max-width: 700px) {
+  .tdoc-bar .tdoc-send-agent-action,
+  .tdoc-bar .tdoc-share-quiet,
+  .tdoc-bar .tdoc-secondary-toggle.tdoc-mobile-overflow-trigger {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    padding: 0;
+  }
+}
+/* Avatar only: the name is the menu's title, not the bar's. */
+.tdoc-bar .tdoc-account-trigger .name { display: none; }
+.tdoc-bar .tdoc-chip.tdoc-account-trigger:not(.signin) { padding: 3px; }
+/* Mode rows at the top of ⋯. */
+.tdoc-menu-label { padding: 6px 10px 2px; font: 600 11px system-ui, -apple-system, sans-serif; color: #8a8a8a; }
+.ui-menu-item.tdoc-mode-item .tdoc-mode-check { margin-left: auto; color: var(--td-accent, #1652f0); }
+/* Open / Resolved / All, docked at the top of the comment column on a wide
+   screen, and above the list in the phone drawer. */
+.tdoc-comment-filter-dock { position: fixed; z-index: 999990; }
+.tdoc-comment-filter.tdoc-seg { background: #fff; border-color: #e3e3e6; box-shadow: 0 1px 2px rgba(0,0,0,.04); flex-wrap: nowrap; }
+.tdoc-comment-filter.tdoc-seg button { padding: 4px 10px; font: 12px system-ui, -apple-system, sans-serif; white-space: nowrap; }
+.tdoc-comment-filter-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.tdoc-comment-filter-row:not(.has-mark-all) { justify-content: center; }
+.tdoc-comment-filter-dock .tdoc-comment-filter-row { align-items: flex-end; flex-direction: column; margin: 0; }
+.tdoc-comment-mark-all { appearance: none; border: 0; padding: 4px 2px; background: transparent; color: var(--td-accent, #1652f0); font: 500 12px Inter, system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+.tdoc-comment-mark-all:hover { text-decoration: underline; }
+.tdoc-comment-mark-all:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; border-radius: 3px; }
+.tdoc-bar .tdoc-secondary-toggle { position: relative; }
+.tdoc-bar .tdoc-secondary-toggle .tdoc-unread-dot { top: 8px; right: 6px; }
+
+/* The agent pill: a layer over the composer's textarea that draws the agent
+   tag as a pill with a dropdown (MentionField's AgentPillMirror). It mirrors
+   the textarea's box and text exactly, with the text itself invisible, so the
+   pill sits on the tag; only the pill takes clicks. */
+.tdoc-agent-pill-layer { position: absolute; box-sizing: border-box; margin: 0; border-style: solid; border-color: transparent; white-space: pre-wrap; overflow-wrap: break-word; word-wrap: break-word; overflow: hidden; color: transparent; pointer-events: none; z-index: 1; }
+.tdoc-agent-pill { position: relative; pointer-events: auto; -webkit-box-decoration-break: clone; box-decoration-break: clone; cursor: pointer; color: var(--td-accent, #1652f0); background: #e8eefe; border-radius: 4px; box-shadow: 0 0 0 2px #e8eefe; font-weight: inherit; }
+.tdoc-agent-pill:hover, .tdoc-agent-pill[data-popup-open] { background: #d6e1fd; box-shadow: 0 0 0 2px #d6e1fd; }
+.tdoc-agent-pill-caret { position: relative; color: transparent; }
+.tdoc-agent-pill-caret svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--td-accent, #1652f0); }
+.tdoc-popup .tdoc-agent-pill { color: #c9d6ff; background: #26324f; box-shadow: 0 0 0 2px #26324f; }
+.tdoc-popup .tdoc-agent-pill:hover, .tdoc-popup .tdoc-agent-pill[data-popup-open] { background: #2f3e63; box-shadow: 0 0 0 2px #2f3e63; }
+.tdoc-popup .tdoc-agent-pill-caret svg { color: #c9d6ff; }
+/* The reply box's @agent button and its Ask row, on the light card. */
+.tdoc-reply-form .tdoc-ask-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; font-size: 12px; color: #444; }
+.tdoc-reply-form .tdoc-ask-mode { flex-wrap: nowrap; }
+.tdoc-reply-form .tdoc-ask-mode button { padding: 3px 9px; font-size: 12px; white-space: nowrap; }
+.tdoc-ask-only-label { font-size: 12px; color: #888; }
+.tdoc-popup .tdoc-ask-only-label { color: #a8a8ad; }
+.tdoc-reply-form.tdoc-private-ask .tdoc-private-q { margin: 4px 0 6px; font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.tdoc-reply-form.tdoc-private-ask .tdoc-private-a { max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: #f4f4f5; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.tdoc-reply-form.tdoc-private-ask .tdoc-private-who { display: block; margin-bottom: 4px; font-size: 11px; font-weight: 600; color: var(--td-accent, #1652f0); }
+.tdoc-reply-form.tdoc-private-ask .tdoc-private-status { color: #888; }
+.tdoc-reply-form.tdoc-private-ask .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
+.tdoc-reply-form.tdoc-private-ask .hint { display: inline-flex; align-items: center; gap: 4px; color: #888; font-size: 11px; }
+.tdoc-reply-form.tdoc-private-ask .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
+.tdoc-reply-form.tdoc-private-ask .tdoc-reply-submit:disabled { opacity: .5; cursor: default; }
+.tdoc-reply-form.tdoc-private-ask .tdoc-composer-foot-actions { display: inline-flex; gap: 6px; }
+.tdoc-private-dismiss { background: none; border: 1px solid #d0d0d6; border-radius: 6px; padding: 4px 10px; font: 12px system-ui; color: #444; cursor: pointer; }
+.tdoc-popup .tdoc-private-dismiss { border-color: #4a4a4a; color: #d8d8d8; }
+.tdoc-reply-form .tdoc-ask-hint { color: #888; font-size: 11px; }

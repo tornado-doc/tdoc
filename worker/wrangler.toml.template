@@ -20,6 +20,11 @@ head_sampling_rate = 1
 binding = "PRODUCT_ANALYTICS"
 dataset = "tdoc_product_events"
 
+# Trash: deleted docs wait 30 days, then the scheduled handler erases them
+# (purgeExpiredTrash, a bounded batch per run, so hourly keeps up).
+[triggers]
+crons = ["23 * * * *"]
+
 [[r2_buckets]]
 binding = "DOCS"
 bucket_name = "tdoc-docs"
@@ -27,6 +32,35 @@ bucket_name = "tdoc-docs"
 [[kv_namespaces]]
 binding = "META"
 id = "PLACEHOLDER_KV_ID"
+
+# Team/Pro Data Mirror. Publishing stays on the request path; customer-owned
+# S3/R2 backup writes happen here with retries and a dead-letter queue, so a
+# destination outage cannot break tdoc. CD creates both queues idempotently.
+[[queues.producers]]
+binding = "BACKUP_QUEUE"
+queue = "tdoc-backups"
+
+[[queues.consumers]]
+queue = "tdoc-backups"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 10
+dead_letter_queue = "tdoc-backups-dlq"
+
+# Preview rendering runs outside the upload request so complex SVG cannot
+# consume publish CPU. The Worker also consumes this queue.
+# BEGIN PREVIEW_QUEUE
+[[queues.producers]]
+binding = "PREVIEW_QUEUE"
+queue = "tdoc-previews"
+
+[[queues.consumers]]
+queue = "tdoc-previews"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 2
+dead_letter_queue = "tdoc-previews-dlq"
+# END PREVIEW_QUEUE
 
 # Invitation emails need ONE of two delivery plugs, and BOTH are optional —
 # with neither, the worker sends nothing and invitations stay in-app only:
@@ -80,7 +114,24 @@ TDOC_OWNER = "PLACEHOLDER_OWNER"
 # without waiting for a deploy.
 TDOC_DEBUG_ACCOUNTS = "PLACEHOLDER_DEBUG_ACCOUNTS"
 
+# Raft App installations tdoc cannot learn from Connect with Raft yet, as
+# { "<Raft server id or slug>": "<installation id>" }. An installation id is
+# shown on the App's settings page and is not a credential: listing a
+# server's agents still needs RAFT_CLIENT_ID/SECRET and the Agent permission
+# that server approved. Today: the App owner's own server ("julie").
+RAFT_INSTALLATION_IDS = '{"1ed923e0-27a4-47ff-b09a-ea27efe06877":"b3177b35-c920-4960-b459-b7de83086812"}'
+
+# Ask this doc (free AI answers for signed-in readers without an agent):
+#   Secret: ASK_API_KEY — `wrangler secret put ASK_API_KEY`. Unset = the
+#   feature is off: the endpoint answers 503 and the doc page hides the entry.
+#   Optional vars: ASK_API_BASE (any OpenAI-compatible base, default
+#   https://openrouter.ai/api/v1), ASK_MODEL (default anthropic/claude-haiku-5.5),
+#   ASK_FREE_LIMIT (questions per account, ever; default 5), ASK_MAX_TOKENS
+#   (default 4500).
 # Secret: TDOC_UPLOAD_TOKEN — set via `wrangler secret put TDOC_UPLOAD_TOKEN`
+# Secret (recommended): TDOC_DATA_MIRROR_KEY — stable high-entropy key used
+# only to encrypt customer S3 credentials in KV. Existing installs fall back
+# to TDOC_UPLOAD_TOKEN so a deploy never silently disables configured mirrors.
 # Secret: GITHUB_CLIENT_SECRET — set via `wrangler secret put GITHUB_CLIENT_SECRET`.
 #   The web OAuth redirect flow (browsers) needs it to exchange the code for a
 #   token; generate it on the SAME OAuth App as GITHUB_CLIENT_ID above, and set
@@ -99,3 +150,32 @@ TDOC_DEBUG_ACCOUNTS = "PLACEHOLDER_DEBUG_ACCOUNTS"
 # sign-in exactly as before.
 # Secret: OIDC_CLIENT_SECRET — `wrangler secret put OIDC_CLIENT_SECRET`.
 #   The issuer must accept https://<host>/auth/oidc/callback as a redirect URI.
+# Team plan billing (#48). Off until the key and both prices are set: a
+# deploy without them has no doc limit and shows no plan card. Members are
+# always free; a free team holds 80 docs (TDOC_TEAM_FREE_DOCS overrides). The Team plan (unlimited docs, Data
+# backup) bills every admin and member per seat.
+# Secret: STRIPE_SECRET_KEY      — `wrangler secret put STRIPE_SECRET_KEY` (sk_live_… / rk_live_…)
+# Secret: STRIPE_PRICE_MONTHLY   — the $5 / seat / month recurring Price id (price_…)
+# Secret: STRIPE_PRICE_YEARLY    — the $50 / seat / year recurring Price id (price_…)
+# Secret: STRIPE_WEBHOOK_SECRET  — signing secret (whsec_…) of a Stripe webhook endpoint at
+#   https://<host>/api/stripe/webhook listening for checkout.session.completed and
+#   customer.subscription.created / .updated / .deleted.
+# Enable the Customer Portal in Stripe (Settings → Billing → Customer portal) so
+# admins can change cards, switch period and cancel.
+# AppSumo lifetime licenses (#61). Off until all three are set. Tier 1 / 2 / 3
+# covers 5 / 15 / 40 seats (APPSUMO_TIER_SEATS). In the AppSumo Partner Portal:
+#   Webhook URL        https://<host>/api/appsumo/webhook
+#   OAuth Redirect URL https://<host>/appsumo/activate
+# Secret: APPSUMO_API_KEY        — the product's Licensing API key; also signs webhooks
+# Secret: APPSUMO_CLIENT_ID      — OAuth client id, shown once both URLs validate
+# Secret: APPSUMO_CLIENT_SECRET  — OAuth client secret
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true

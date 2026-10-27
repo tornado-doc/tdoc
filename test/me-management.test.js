@@ -84,7 +84,7 @@ t('shell builder emits a generic empty app root rather than /me HTML', () => {
 t('remote delete uses the shared owner authorization gate', () => {
   const start = worker.indexOf("if (p === '/api/doc' && method === 'DELETE')");
   const route = worker.slice(start, start + 2200);
-  assert(route.includes('await authorizeOwnerMutation(req, env, slug)'), 'shared owner gate missing');
+  assert(/await authorizeOwnerMutation\(req, env, slug[,)]/.test(route), 'shared owner gate missing');
 });
 
 t('unknown and unauthorized navigation preserves a neutral landing notice', () => {
