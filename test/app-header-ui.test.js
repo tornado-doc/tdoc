@@ -129,7 +129,8 @@ async function startServer(worker, env) {
             if (width > 700) {
               const chip = page.locator('.tdoc-bar .tdoc-account-trigger');
               await chip.waitFor();
-              assert.match(await chip.innerText(), /Julie/);
+              // Avatar only in the bar; the name is its label and tooltip.
+              assert.match(await chip.getAttribute('aria-label'), /Julie/);
               await chip.click();
               for (const item of ['My docs', 'Agents', 'Sign out']) await page.getByRole('menuitem', { name: item, exact: true }).waitFor();
               await page.keyboard.press('Escape');

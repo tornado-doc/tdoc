@@ -56,8 +56,9 @@ if [ -n "${TDOC_DAEMON_SLUG:-}" ] && [ "$PRINT_IDENTITY" != "1" ] && [ "$SLUG" !
   echo "[tdoc] the daemon may only reply on \"$TDOC_DAEMON_SLUG\"." >&2
   exit 2
 fi
-# A question run (TDOC_DAEMON_ASK) answers that one question, privately: no
-# comment replies, no other question.
+# A question run (TDOC_DAEMON_ASK) answers that one question and nothing else:
+# no other comment replies, no other question. (Asked in a comment, the server
+# posts the answer as the reply under it.)
 if [ -n "${TDOC_DAEMON_ASK:-}" ] && [ "$PRINT_IDENTITY" != "1" ] && [ "$ASK" != "$TDOC_DAEMON_ASK" ]; then
   echo "[tdoc] this run may only answer question \"$TDOC_DAEMON_ASK\" (--ask $TDOC_DAEMON_ASK)." >&2
   exit 2
@@ -161,6 +162,14 @@ post_reply() {
   body="${resp%$'\n'*}"         # everything before it = body
   printf '%s\n' "$body"
   if ! printf '%s' "$http" | grep -qE '^2[0-9][0-9]$'; then
+    local _rerr _rmsg
+    _rerr="$(printf '%s' "$body" | json_get error 2>/dev/null)"
+    _rmsg="$(printf '%s' "$body" | json_get message 2>/dev/null)"
+    if [ "$_rerr" = "agent_not_author_editor" ] || [ "$_rerr" = "answer_only_run" ]; then
+      echo "[tdoc] agent reply NOT posted ($_rerr): ${_rmsg:-this agent may not change this doc.}" >&2
+      [ "$_rerr" = "agent_not_author_editor" ] && echo "[tdoc] Post it as an answer instead: drop --status applied/partial." >&2
+      return 1
+    fi
     echo "[tdoc] agent reply NOT posted: $url returned HTTP $http" >&2
     return 1
   fi

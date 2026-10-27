@@ -74,10 +74,31 @@ A reader's question is a different line, and it is not an edit:
 > Read https://tdoc.dev/d/<slug> and answer: <question>
 
 Pull or read the doc and answer in the chat. Do not edit, publish or comment.
-When it came from tdoc as a handoff with an `ask_id` (Send to my agent), answer
-only the person who asked, with
-`bash "$SKILL_DIR/bin/tdoc-agent-reply" --slug <slug> --ask <ask_id> --text "..."`;
-tdoc shows that answer to them alone until they choose to post it.
+When it came from tdoc as a handoff with an `ask_id` (a reader's Ask AI or
+@AI in a comment, or Send to my agent), answer with
+`bash "$SKILL_DIR/bin/tdoc-agent-reply" --slug <slug> --ask <ask_id> --text "..."`.
+Asked in a comment (the handoff has a `comment_id`), tdoc posts the answer as
+your reply under that comment, for everyone who can see it; otherwise only
+the person who asked sees it.
+
+tdoc enforces who may edit when you write, not only when work is handed to
+you. Two refusals mean "answer, do not edit":
+
+- `403 answer_only_run`: you were asked a question on this doc. Until your
+  answer lands (`tdoc-agent-reply --ask`), tdoc refuses your publishes and
+  other replies there; ending the run (`ask-done`) does not lift it, only
+  the answer, or the person who asked cancelling. Answer the question; do
+  not retry the edit.
+- `403 agent_not_author_editor` (`reason`: `written_by_other` or
+  `team_agent_wrote`, `writer`: who wrote it): on a team doc, an agent may
+  change only what authorship allows. A team agent edits docs the team agent
+  or a person in the browser last wrote. A person's own agent edits docs
+  that person owns, or that they or their own agent last wrote, or that a
+  person last edited in the browser. Nobody's agent writes over another
+  person's agent. The same
+  applies to renaming or deleting a doc with an agent token. Do not retry or work around it: answer in the thread with
+  `tdoc-agent-reply` (no `--status applied`) and say the writer named in the
+  refusal can make the change.
 
 ### Documents produced inside another workflow
 
@@ -95,6 +116,7 @@ record the calling skill in `meta.json`.
   <slug>/
     meta.json          # { title, created, versions: [...] }
     v1/index.html
+    v1/preview.svg     # optional 1200×630 share card, rasterized on publish
     v1/widgets/<name>.html  # optional; sandboxed JS island, served at /widget/<name>
     v2/index.html
     comments.json      # [{ id, version, anchor, text, status }]
@@ -310,7 +332,7 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
      programmatic callers must make that exception visible with
      `--custom-template`.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
-4. **Hand the HTML to `bin/tdoc-write`. Do not write into `~/tdocs` yourself.**
+4. **Hand the HTML to `bin/tdoc-write`.** The server automatically makes a title-and-excerpt preview card when you publish; do not create a custom card by default. Only when the user explicitly asks for a cover or preview image, copy `$SKILL_DIR/authoring/preview-card.svg` to a temporary file, replace its title and conclusion with this document's words, and replace the sample `42%` panel with a real key result or remove it. Keep text inside the card at 1200×630; escape XML characters. Use colors that fit the document. Do not insert scripts, external images, CSS, or links. Do not write into `~/tdocs` yourself.
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-write" \
@@ -322,7 +344,8 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
    One call does everything a version needs: validates the host, bakes the
    reading template so the document is self-contained, writes
    `v1/index.html`, writes `meta.json`, and initializes `comments.json`. It
-   prints the local URL on the last line.
+   prints the local URL on the last line. If the user explicitly requested a
+   cover or preview image, add `--preview-file /tmp/<slug>-preview.svg`.
 
    Doing these by hand is what let documents ship without a reading template —
    validation and baking are properties of *writing a version*, not of any one
@@ -439,6 +462,7 @@ TDOC_NEW_CALLER=document-release \
 - `--widgets-dir <path>` — optional directory of sandboxed widget HTML files.
   Each `<name>.html` is stored as `v1/widgets/<name>.html`; JavaScript belongs
   there, never in the host HTML.
+- `--preview-file <path>` — optional 1200×630 SVG share card, used only when the user explicitly requests a cover or preview image. Without it, publishing generates a card from the title and excerpt.
 - `--prompt "<one-line>"` — prompt-of-record in `meta.json` (defaults
   to `Imported via tdoc-new by <caller>`).
 - `--publish` — also run `tdoc-publish` so a shareable URL is returned.
@@ -532,7 +556,7 @@ silently is the #1 source of regression complaints.
    - `anchor.context_before` / `anchor.context_after` — surrounding text
      (~60 chars each side) for disambiguation when the same text appears
      multiple times
-5. **Hand it to `bin/tdoc-write --version next`. Do not write `v<n+1>/` yourself.**
+5. **Hand it to `bin/tdoc-write --version next`.** Do not create a new share card unless the user explicitly asks for a new cover or preview image. Without a new SVG, an existing custom card carries forward; otherwise publishing generates a title-and-excerpt card. If requested, use `authoring/preview-card.svg` as a starting point. Do not write `v<n+1>/` yourself.
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-write" \
@@ -543,7 +567,9 @@ silently is the #1 source of regression complaints.
 
    Same gateway as `/tdoc new`, so a new version gets the same treatment a
    first version does: validated, baked, `meta.json` appended, and
-   `comments.json` left alone — the thread you are answering survives.
+   `comments.json` left alone — the thread you are answering survives. If the
+   user explicitly requested a new cover or preview image, add
+   `--preview-file /tmp/<slug>-preview.svg`.
    Earlier versions are untouched.
 
    This is not a convenience. Writing `v<n+1>/index.html` by hand skipped the
@@ -701,9 +727,10 @@ and the daemon runs only handoffs tdoc says that account queued.
 `@botiverse/oar`, which skips permissions) are explicit opt-ins. If you are the CLI the daemon
 started (`TDOC_DAEMON=1` in the environment), follow the edit flow for the one
 doc named in the prompt and stop; the daemon resolves the handoff when you
-exit. A reader's own question (Send to my agent on a doc they can read) also
-reaches their own daemon: the prompt then asks for an answer through
-`tdoc-agent-reply --ask`, and no edit. That run is claude only, with a smaller
+exit. A reader's own question (Ask AI in a comment on a doc they can read)
+also reaches their own daemon: the prompt then asks for an answer through
+`tdoc-agent-reply --ask`, which lands as the reply in their comment's thread,
+and no edit. That run is claude only, with a smaller
 allow-list (read the doc folder, `tdoc-pull` and `tdoc-agent-reply`; no Edit,
 no `tdoc-write` / `tdoc-publish`, which refuse under `TDOC_DAEMON_ASK`).
 

@@ -22,6 +22,15 @@ const http = require('http');
 const { spawn } = require('child_process');
 const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { loadWorker, makeEnv, req, issue } = require('./helpers/worker-harness');
+const browserEdit = (env, slug, login) => {
+  // A person's last edit in the browser (what the editor stamps), so the
+  // team agent may write the doc: authorship is enforced at write time.
+  const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+  const last = meta.versions.reduce((a, b) => (Number(b.n) > Number(a.n) ? b : a));
+  Object.assign(last, { source: 'browser', author: login });
+  delete last.by;
+  env.META.map.set(`meta:${slug}`, JSON.stringify(meta));
+};
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
 const { chromium } = requirePlaywrightOrSkip('team-agent-ui.test.js');
@@ -218,19 +227,41 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
 
       let commentId = null;
       await t(`${label}: a member sends a comment on a team doc to the team agent`, async () => {
+        // The team agent edits what it wrote (agentEditPolicy): it publishes
+        // this doc's latest version first.
+        const agentToken = JSON.parse(fs.readFileSync(path.join(HOME, '.tdoc', 'published.json'), 'utf8')).upload_token;
+        browserEdit(env, slug, 'julie');
+        const v2 = await call('/api/upload', { method: 'POST', token: agentToken, body: { slug, version: 2, html: docHtml, meta: { title: 'Weekly report' } } });
+        if (v2.status !== 200) throw new Error(`agent v2: ${v2.status} ${JSON.stringify(v2.body)}`);
         await as(bob);
         const posted = await call('/api/comments', { method: 'POST', cookie: bob.cookie, body: { slug, version: 1, text: 'Can you add last week for comparison?', anchor: { kind: 'text', text: 'Signups grew 12% this week' } } });
         commentId = posted.body.id;
+        const other = await call('/api/comments', { method: 'POST', cookie: julie.cookie, body: { slug, version: 1, text: 'Owner-only handoff candidate', anchor: { kind: 'text', text: 'Signups grew 12% this week' } } });
+        if (other.status !== 200) throw new Error(`owner comment: ${other.status}`);
         await page.goto(`${base}/d/${slug}`);
         await caption('Bob (member) opens a BeFreed doc');
-        const send = page.locator('#tdoc-send-agent-btn');
-        await send.waitFor();
         await pause(page, 1500);
-        await send.click();
+        if (label === 'phone') {
+          await page.locator('.tdoc-fab').click();
+          await page.getByRole('radiogroup', { name: 'Comments or Ask AI' }).getByRole('radio', { name: /Ask AI/ }).click();
+        } else {
+          await page.locator('#tdoc-send-agent-btn').click();
+        }
+        const activity = page.locator(label === 'phone' ? '#tdoc-comment-layer' : '.tdoc-handoff-popover');
+        await activity.waitFor();
+        const readySummary = activity.locator('.tdoc-ask-ready');
+        if (!(await readySummary.innerText()).includes('1 comment not sent')) throw new Error('the team member has no ready-to-send summary');
+        await activity.getByRole('button', { name: /Agent activity/ }).click();
+        const ready = activity.locator('.tdoc-handoff-ready');
+        if (!(await ready.innerText()).includes('Can you add last week for comparison?')) throw new Error('comment missing from Ready to send');
+        if ((await ready.innerText()).includes('Owner-only handoff candidate')) throw new Error('team member can send the owner\'s comment');
+        if ((await ready.locator('input[type="checkbox"]').count()) !== 1) throw new Error('team member sees another author\'s Ready to send checkbox');
+        await readySummary.getByRole('button', { name: /Send to agent/ }).click();
         const dialog = page.getByRole('dialog', { name: 'Send to agent' });
         await dialog.waitFor();
-        const recipient = await dialog.locator('.tdoc-notify-recipient').innerText();
-        if (!recipient.includes('Send to team agent') || !recipient.includes(`${agentName} · BeFreed team agent`)) throw new Error(`recipient: ${recipient}`);
+        const recipient = await dialog.locator('#tdoc-notify-recipient').inputValue();
+        const description = await dialog.locator('.ui-dialog-description').innerText();
+        if (!description.includes('for the team agent') || !recipient.includes(`${agentName} · BeFreed team agent`)) throw new Error(`recipient: ${description} / ${recipient}`);
         await caption('Send to team agent');
         await pause(page, 1800);
         await shot('send-dialog');

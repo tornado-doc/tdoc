@@ -41,7 +41,7 @@ const purgeHelper = block('async function purgeTrashedDoc(env, slug) {', '// Who
 const deleteBody = block('async function deleteDocEverywhere(env, slug', 'async function loadDocMeta');
 const wipeRoute = block("url.searchParams.get('all') === '1'", '// Soft-delete:');
 const agentReplyRoute = block("if (p === '/api/agent/reply' && method === 'POST')", '// ---- admin upload');
-const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env, slug) {');
+const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env, slug');
 const authorizeEnd = worker.indexOf('// #34 — Per-slug write serialization', authorizeStart);
 const authorizeSrc = worker.slice(authorizeStart, authorizeEnd);
 
@@ -145,7 +145,7 @@ t('Hosted slug ownership claim is backed by per-slug Durable Object storage', ()
 
 t('Access mutation and delete go through the shared gate with the slug', () => {
   for (const [name, route] of [['access', accessRoute], ['delete', deleteRoute]]) {
-    assert(route.includes('authorizeOwnerMutation(req, env, slug)'), `${name}: combined gate missing slug`);
+    assert(route.includes('authorizeOwnerMutation(req, env, slug'), `${name}: combined gate missing slug`);
     const gate = route.indexOf('authorizeOwnerMutation(req, env, slug)');
     const metaWrite = route.indexOf('env.META.put');
     const docDelete = route.indexOf('env.DOCS.delete');

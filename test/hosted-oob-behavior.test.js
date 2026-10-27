@@ -100,6 +100,42 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert((await doc.text()).includes('A'), 'denied second upload overwrote document bytes');
   });
 
+  await t('republish preserves web sharing; explicit access patch changes only requested fields', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'share-owner');
+    const stale = { title: 'Share doc', access: { visibility: 'private', commenting: 'invited', allowed_users: ['alice@example.com'] } };
+    const upload = async (version, patch) => worker.fetch(req('/api/upload', {
+      method: 'POST', token: owner.token,
+      body: { slug: 'shared-doc', version, html: `<p>v${version}</p>`, meta: stale, ...(patch ? { access_patch: patch } : {}) },
+    }), env, {});
+    assert((await upload(1)).status === 200, 'first upload failed');
+    const shared = await worker.fetch(req('/api/doc/access', {
+      method: 'PATCH', cookie: owner.cookie,
+      body: { slug: 'shared-doc', access: { allowed_users: ['alice@example.com', 'bob@example.com'] } },
+    }), env, {});
+    assert(shared.status === 200, `browser share ${shared.status}`);
+    assert((await upload(2)).status === 200, 'republish failed');
+    let access = JSON.parse(await env.META.get('meta:shared-doc')).access;
+    assert(access.allowed_users.includes('bob@example.com'), `browser guest was overwritten: ${JSON.stringify(access)}`);
+    // A pre-access_patch CLI sends only meta.access. It must still be able to
+    // tighten policy without replacing the current browser Share invitees.
+    const legacy = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: owner.token,
+      body: { slug: 'shared-doc', version: 3, html: '<p>legacy</p>',
+        meta: { title: 'Share doc', access: { visibility: 'private', commenting: 'owner', history_visibility: 'owner', allowed_users: ['alice@example.com'] } } },
+    }), env, {});
+    assert(legacy.status === 200, `legacy CLI upload ${legacy.status}`);
+    access = JSON.parse(await env.META.get('meta:shared-doc')).access;
+    assert(access.visibility === 'private' && access.commenting === 'owner' && access.history_visibility === 'owner'
+      && access.allowed_users.includes('bob@example.com'), `legacy policy ignored or Share invitees lost: ${JSON.stringify(access)}`);
+    assert((await upload(4, { visibility: 'unlisted', allowed_users_add: ['carol@example.com'] })).status === 200, 'explicit access patch failed');
+    access = JSON.parse(await env.META.get('meta:shared-doc')).access;
+    assert(access.visibility === 'unlisted' && access.commenting === 'owner'
+      && ['alice@example.com', 'bob@example.com', 'carol@example.com'].every((u) => access.allowed_users.includes(u)), JSON.stringify(access));
+    const invalid = await upload(5, { allowed_users_add: ['not an invite!'] });
+    assert(invalid.status === 400 && !(await env.DOCS.head('docs/shared-doc/v5/index.html')), 'invalid patch wrote document bytes');
+  });
+
   await t('create against orphan R2 bytes (no hostedOwner) returns slug_taken 409', async () => {
     const env = makeEnv(mod.CommentsStore);
     const tok = await issue(worker, env, 'orphan-claimer');

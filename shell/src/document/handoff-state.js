@@ -137,6 +137,36 @@ export function handoffWaitState(comment, now = Date.now()) {
   return 'waiting';
 }
 
+/** Viewer-specific handoff cues are private to the commenter and doc owner. */
+export function canSeeHandoff(comment, viewerLogin, isOwner) {
+  const author = String(comment?.author?.login || '').trim().toLowerCase();
+  const logins = (Array.isArray(viewerLogin) ? viewerLogin : [viewerLogin])
+    .map((login) => String(login || '').trim().toLowerCase())
+    .filter((login) => login && login !== 'anon');
+  return Boolean(isOwner || (author && logins.includes(author)));
+}
+
+/** Compact corner marker for a collapsed comment avatar. */
+export function handoffPinBadge(comment, now = Date.now()) {
+  if (!comment?.handoff_at || comment.deleted) return null;
+  if (comment.status === 'applied') return comment.resolved_by ? null : 'done';
+  const state = handoffWaitState(comment, now);
+  if (state === 'failed' || state === 'stale' || state === 'expired') return 'warning';
+  if (state !== 'replied') return null;
+  let latest = null;
+  let latestAt = 0;
+  for (const reply of comment.replies || []) {
+    if (!reply || reply.deleted || !(reply.author?.kind === 'agent' || reply.agent_status)) continue;
+    const at = ts(reply.created);
+    if (!latest || at >= latestAt) { latest = reply; latestAt = at; }
+  }
+  const verdict = latest?.agent_status;
+  if (verdict === 'question') return 'question';
+  if (verdict === 'partial') return 'partial';
+  if (verdict === 'applied' || verdict === 'answered') return 'done';
+  return null;
+}
+
 /** Whole minutes since the handoff was last sent (0 when unknown). */
 export function handoffWaitMinutes(comment, now = Date.now()) {
   const sent = handoffSentAt(comment);

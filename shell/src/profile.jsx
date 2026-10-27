@@ -13,6 +13,7 @@ import {
   profileUrl,
 } from './profile-posters.js';
 import './docs-hub.css';
+import { isFeatureOn } from './feature-flags.js';
 
 const PICK_VIEW_KEY = 'tdoc.profilePickView';
 
@@ -135,6 +136,7 @@ export function Profile({ boot }) {
   const login = boot.handle || boot.login || '';
   const githubLogin = boot.github_login || '';
   const mine = Boolean(boot.mine);
+  const [thumbnails] = useState(() => isFeatureOn('docThumbnails'));
   const [docs, setDocs] = useState(() => (Array.isArray(boot.docs) ? boot.docs : []));
   const [bio, setBio] = useState(() => (typeof boot.bio === 'string' ? boot.bio : ''));
   const [catalog, setCatalog] = useState(() => (Array.isArray(boot.catalog) ? boot.catalog : []));
@@ -425,6 +427,7 @@ export function Profile({ boot }) {
           <section className={`profile-picks is-${pickView}`}>
             {docs.map((doc) => {
               const isPreview = pickView === 'preview';
+              const image = thumbnails ? doc.image : null;
               const href = doc.url || `/d/${encodeURIComponent(doc.slug)}/v/${doc.latest || 1}`;
               const published = day(doc.published || doc.updated);
               const card = !isPreview ? (
@@ -437,15 +440,12 @@ export function Profile({ boot }) {
                   </span>
                 </a>
               ) : (
-                // Preview = title + lead inside the card. No auto-picked graphics
-                // (inline SVGs / task icons were unreliable).
-                <a className="profile-pick-card has-preview" href={href}>
+                <a className={`profile-pick-card has-preview${image ? ' has-image' : ''}`} href={href} aria-label={doc.title || doc.slug}>
                   <span className="profile-pick-surface">
+                    {image ? <span className="profile-pick-media"><img src={image} alt="" loading="lazy" /></span> : null}
                     <span className="profile-pick-copy">
                       <span className="profile-pick-title">{doc.title || doc.slug}</span>
-                      {doc.excerpt ? (
-                        <span className="profile-pick-excerpt">{doc.excerpt}</span>
-                      ) : null}
+                      {doc.excerpt ? <span className="profile-pick-excerpt">{doc.excerpt}</span> : null}
                     </span>
                   </span>
                   <span className="profile-pick-meta">

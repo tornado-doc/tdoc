@@ -40,6 +40,7 @@ const path = require('path');
 const os = require('os');
 const net = require('net');
 const { spawn } = require('child_process');
+const { commentId } = require('../server/comment-id');
 
 // Pick a free ephemeral port so concurrent test runs don't collide on :7878.
 function freePort() {
@@ -76,6 +77,15 @@ function waitReady(port, ms = 5000) {
   await waitReady(PORT);
   console.log(`testing local API at ${HOST}:${PORT} (hermetic, TDOC_DIR=${TMP_DIR})\n`);
 
+  // A fixed millisecond used to give adjacent replies the same ID, so the API
+  // could find the wrong parent and lose nested replies.
+  await t('comment IDs stay unique within one millisecond', async () => {
+    const ids = new Set(Array.from({ length: 100 }, () => commentId('r', 1_000_000)));
+    if (ids.size !== 100 || [...ids].some(id => !/^r_1000000_[0-9a-f]{16}$/.test(id))) {
+      throw new Error('reply IDs collide within one millisecond');
+    }
+  });
+
   // Seed: create a doc directory + meta + empty comments (in the temp dir)
   const docDir = path.join(TMP_DIR, SLUG);
   fs.mkdirSync(path.join(docDir, 'v1'), { recursive: true });
@@ -83,13 +93,29 @@ function waitReady(port, ms = 5000) {
   fs.writeFileSync(path.join(docDir, 'meta.json'), JSON.stringify({ title: 'api test', versions: [{ n: 1 }] }));
   fs.writeFileSync(path.join(docDir, 'comments.json'), '[]');
 
+  await t('local product anchors reject unsafe page URLs on create and re-anchor', async () => {
+    try {
+      const anchor = (url) => ({ kind: 'product', url, selector: '#invite' });
+      for (const url of ['javascript:alert(1)', '/dashboard', 'file:///tmp/page']) {
+        const r = await req('POST', '/api/comments', { slug: SLUG, version: 1, text: `unsafe ${url}`, anchor: anchor(url) });
+        if (r.status !== 400 || r.body.error !== 'invalid_product_url') throw new Error(`create ${url}: ${r.status}`);
+      }
+      const made = await req('POST', '/api/comments', { slug: SLUG, version: 1, text: 'valid product link', anchor: anchor('http://localhost:3000/dashboard') });
+      if (made.status !== 200) throw new Error(`valid create: ${made.status}`);
+      const re = await req('PATCH', '/api/comments', { slug: SLUG, version: 1, id: made.body.id, anchor: anchor('data:text/html,hello') });
+      if (re.status !== 400 || re.body.error !== 'invalid_product_url') throw new Error(`unsafe re-anchor: ${re.status}`);
+    } finally {
+      fs.writeFileSync(path.join(docDir, 'comments.json'), '[]');
+    }
+  });
+
   let topId;
   let replyId;
 
   await t('POST /api/comments (top-level) returns 200 with id + replies:[] + reactions:{}', async () => {
     const r = await req('POST', '/api/comments', { slug: SLUG, version: 1, text: 'hello', anchor: null });
     if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
-    if (!r.body.id) throw new Error('no id');
+    if (!/^c_\d+_[0-9a-f]{16}$/.test(r.body.id)) throw new Error(`invalid comment id ${r.body.id}`);
     if (!Array.isArray(r.body.replies)) throw new Error('replies not array');
     if (typeof r.body.reactions !== 'object') throw new Error('reactions not object');
     topId = r.body.id;
@@ -98,7 +124,7 @@ function waitReady(port, ms = 5000) {
   await t('POST /api/comments with parent_id creates a reply', async () => {
     const r = await req('POST', '/api/comments', { slug: SLUG, parent_id: topId, text: 'a reply' });
     if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
-    if (!r.body.id || !r.body.id.startsWith('r_')) throw new Error(`reply id should start with r_, got ${r.body.id}`);
+    if (!/^r_\d+_[0-9a-f]{16}$/.test(r.body.id)) throw new Error(`invalid reply id ${r.body.id}`);
     replyId = r.body.id;
   });
 
@@ -114,6 +140,7 @@ function waitReady(port, ms = 5000) {
     const r = await req('POST', '/api/comments', { slug: SLUG, parent_id: replyId, text: 'a nested reply' });
     if (r.status !== 200) throw new Error(`status ${r.status}: ${JSON.stringify(r.body)}`);
     if (r.body.parent_id !== replyId) throw new Error(`nested parent_id ${r.body.parent_id}`);
+    if (r.body.id === replyId) throw new Error('nested reply reused its parent ID');
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
     const replies = after.body[0].replies || [];
     if (replies.length !== 2) throw new Error(`expected 2 replies, got ${replies.length}`);
@@ -172,7 +199,7 @@ function waitReady(port, ms = 5000) {
     const after = await req('GET', `/api/comments?slug=${SLUG}`);
     const c = after.body[0];
     if (c.agent_actor !== 'codex-pm') throw new Error(`wrong parent agent_actor ${c.agent_actor}`);
-    if (!c.reactions['✅']?.includes('codex-pm')) throw new Error('agent verdict reaction did not use agent login');
+    if (Object.keys(c.reactions || {}).length) throw new Error('agent verdict added an automatic reaction');
     const historical = (await req('GET', `/api/comments?slug=${SLUG}&version=1`)).body.find(c => c.id === topId);
     if (historical.status !== 'open') throw new Error('future fix leaked into old version');
     if (historical.replies.some(reply => reply.id === r.body.id)) throw new Error('future reply text leaked into old version');

@@ -80,6 +80,22 @@ const DAVE = 'dave.reader@example.org';
     assert(calls.length === 0, 'model was called');
   });
 
+  await t('only a preview deployment without a key returns a labelled Markdown example', async () => {
+    env.TDOC_PREVIEW = '1';
+    try {
+      const before = calls.length;
+      const page = await call('/d/plan/v/1', { cookie: bob.cookie });
+      const cfg = bootData(page.text, '__TDOC_SHELL__');
+      assert(cfg.ask?.available, 'preview did not expose Ask AI');
+      const r = await ask('plan', { cookie: bob.cookie });
+      assert(r.status === 200 && r.body.answer.includes('预览示例回答')
+        && r.body.answer.includes('```js') && r.body.answer.includes('[了解 tdoc]'), `${r.status} ${r.text}`);
+      assert(calls.length === before, 'preview mock called the model');
+    } finally { delete env.TDOC_PREVIEW; }
+    const production = await ask('plan', { cookie: bob.cookie });
+    assert(production.status === 503 && production.body.error === 'ask_unavailable', 'production used the preview example');
+  });
+
   env.ASK_API_KEY = 'sk-test-key';
 
   await t('with a key the page says it is available, with the allowance and no key', async () => {
@@ -141,11 +157,13 @@ const DAVE = 'dave.reader@example.org';
     assert(!prompt.includes(alice.account_id) && !prompt.includes('sk-test-key'), 'account data in prompt');
   });
 
-  await t('nothing but the counter is stored', async () => {
+  await t('the counter, and the asker\'s own private answers (for Make public), are all that is stored', async () => {
     const keys = [...env.META.map.keys()].filter((k) => k.startsWith('ask'));
     assert(keys.length === 1 && /^ask-used:/.test(keys[0]), keys.join(','));
-    const all = [...env.META.map.values()].join('\n') + [...env.DOCS.map.values()].join('\n');
-    assert(!all.includes('What ships first?'), 'the question was stored');
+    const kept = [...env.META.map.keys()].filter((k) => k.startsWith('ai-asks:'));
+    assert(kept.length && kept.every((k) => /^ai-asks:[^:]+:(acct|actor):/.test(k)), `private answers kept per doc and account: ${kept.join(',')}`);
+    const elsewhere = [...env.META.map.entries()].filter(([k]) => !k.startsWith('ai-asks:')).map(([, v]) => v).join('\n') + [...env.DOCS.map.values()].join('\n');
+    assert(!elsewhere.includes('What ships first?'), 'the question was stored outside the asker\'s own record');
   });
 
   await t('document and comment text cannot close the fences', async () => {

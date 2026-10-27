@@ -36,6 +36,7 @@ const OPTIONS = [
   console.log('Share panel access choices');
   const out = build();
   const patches = [];
+  const teamInvites = [];
   const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/h.css"></head><body><div id="root"></div><script type="module" src="/h.js"></script></body></html>';
   const server = http.createServer((req, res) => {
     const pathname = req.url.split('?')[0];
@@ -64,6 +65,19 @@ const OPTIONS = [
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
   const open = async (width, doc = '') => {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
+    if (doc.includes('guests=1')) {
+      await page.addInitScript(() => { window.__TDOC_APP_BOOT__ = { devMode: { on: true } }; });
+      await page.route('**/api/team?*', (route) => route.fulfill({ json: { ok: true, team: {
+        id: 'tm_1', name: 'BeFreed', role: 'admin', invites: [], members: [{ email: 'alice@befreed.ai', key: 'alice', role: 'admin' }],
+      } } }));
+      await page.route('**/api/team/guests?*', (route) => route.fulfill({ json: { ok: true, guests: [], limit: 5, invites: [] } }));
+      await page.route('**/api/team', (route) => {
+        teamInvites.push(route.request().postDataJSON());
+        return route.fulfill({ json: { ok: true, team: {
+        id: 'tm_1', name: 'BeFreed', role: 'admin', invites: ['bob@befreed.ai'], members: [{ email: 'alice@befreed.ai', key: 'alice', role: 'admin' }],
+      } } });
+      });
+    }
     await page.goto(`${base}/${doc ? `?doc=${doc}` : ''}`);
     await page.getByRole('dialog', { name: 'Share' }).waitFor();
     return page;
@@ -97,6 +111,20 @@ const OPTIONS = [
         await page.close();
       });
     }
+    await t('the default choice creates a team invitation without sharing this document directly', async () => {
+      patches.length = 0;
+      teamInvites.length = 0;
+      const page = await open(1280, 'team&guests=1');
+      const input = page.getByPlaceholder('Add an email or GitHub username…');
+      await input.fill('bob@befreed.ai');
+      await input.press('Enter');
+      await page.getByRole('button', { name: 'Invite to team (uses a seat)' }).click();
+      await page.getByText('Team invitation saved.').waitFor();
+      assert.equal(teamInvites.length, 1);
+      assert.deepEqual(teamInvites[0].invites, ['bob@befreed.ai']);
+      assert.equal(patches.length, 0, 'document access was not changed');
+      await page.close();
+    });
 
     await t('choosing Public saves visibility public and drops the sign-in switch', async () => {
       const page = await open(1280);
@@ -129,6 +157,23 @@ const OPTIONS = [
       if (SHOTS) await team.screenshot({ path: path.join(SHOTS, 'share-access-team-390.png'), fullPage: true });
       await team.close();
     });
+    for (const width of [1280, 390]) {
+      await t(`${width}px: same-domain invite defaults to a team seat, with document-only guest choice`, async () => {
+        patches.length = 0;
+        const page = await open(width, 'team&guests=1');
+        const input = page.getByPlaceholder('Add an email or GitHub username…');
+        await input.fill('bob@befreed.ai');
+        await input.press('Enter');
+        await page.getByRole('button', { name: 'Invite to team (uses a seat)' }).waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Only this document (guest)' }).count(), 1);
+        assert.equal(patches.some((patch) => patch.allowed_users?.includes('bob@befreed.ai')), false, 'no guest share before choice');
+        await page.getByRole('button', { name: 'Only this document (guest)' }).click();
+        await page.getByText('Saved.').waitFor();
+        assert.equal(patches.at(-1).allowed_users[0], 'bob@befreed.ai');
+        if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `share-guests-${width}.png`), fullPage: true });
+        await page.close();
+      });
+    }
   } finally {
     await browser.close();
     server.close();

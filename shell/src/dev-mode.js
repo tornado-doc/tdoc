@@ -1,5 +1,5 @@
 // Dev mode: an allow-listed account's switch between being a tester (the
-// Internal bar, the onboarding replay) and being a person, who sees exactly
+// Onboarding test submenu and replay) and being a person, who sees exactly
 // what anybody else sees. The server decides who has the switch and keeps its
 // position per account; every page's boot says so in `devMode` -- absent for
 // everybody not on the list, `{ on }` for those who are.
@@ -11,7 +11,7 @@ export function readDevMode() {
   return dev && typeof dev === 'object' ? { on: dev.on !== false } : null;
 }
 
-// Flip it on the server, then reload: the bar, the replay controls and the
+// Flip it on the server, then reload: the test menu, replay controls and the
 // onboarding record the page shows are all drawn from the boot, so a reload is
 // the honest way to switch between the two views of the product.
 export async function setDevMode(on) {

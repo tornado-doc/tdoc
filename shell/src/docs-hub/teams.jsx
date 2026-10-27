@@ -9,9 +9,11 @@ import { copyText } from '../document/model.js';
 import {
   addTeamAgent,
   createTeam,
+  changeTeamGuest,
   getTeamBackup,
   getTeamBilling,
   getTeam,
+  getTeamGuests,
   listTeamAgents,
   listTeamComments,
   moveFolderToTeam,
@@ -24,6 +26,7 @@ import {
   syncTeamBackup,
   updateTeam,
 } from '../document/api.js';
+import { isFeatureOn } from '../feature-flags.js';
 import { DocList, day } from './rows.jsx';
 import { ConnectorsBody } from '../connectors-page.jsx';
 import './teams.css';
@@ -53,9 +56,9 @@ function Avatar({ member }) {
   return <span className="tdoc-avatar-fallback" aria-hidden="true">{String(member.name || key || '?').slice(0, 1).toUpperCase()}</span>;
 }
 
-function PersonRow({ member, name, sub, right }) {
+function PersonRow({ member, name, sub, right, className = '' }) {
   return (
-    <div className="tm-person">
+    <div className={`tm-person ${className}`.trim()}>
       <Avatar member={member} />
       <div className="tm-person-text">
         <span>{name}</span>
@@ -865,6 +868,15 @@ export function TeamAgentsSection({ team }) {
 }
 
 export function TeamSettingsPane({ team, onChanged, onLeave }) {
+  const [guestsEnabled] = useState(() => isFeatureOn('teamGuests'));
+  const [tab, setTab] = useState(() => window.location.hash === '#agents' ? 'agents' : 'members');
+  useEffect(() => {
+    const showLinkedTab = () => {
+      if (window.location.hash === '#agents') setTab('agents');
+    };
+    window.addEventListener('hashchange', showLinkedTab);
+    return () => window.removeEventListener('hashchange', showLinkedTab);
+  }, []);
   return (
     <section className="tm-settings" aria-label={`${team.name} workspace settings`}>
       <div className="tm-settings-title">
@@ -872,8 +884,14 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
         <p>Manage this workspace in one place.</p>
       </div>
       {team.role === 'admin' ? <TeamBillingCard team={team} /> : null}
-      <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} />
-      <section className="tm-settings-card" id="agents">
+      {guestsEnabled ? <SegmentedControl ariaLabel="Team settings" className="tm-settings-tabs" value={tab} onChange={setTab} options={[
+        { value: 'members', label: 'Members' },
+        ...(team.role === 'admin' ? [{ value: 'guests', label: 'Guests' }] : []),
+        { value: 'agents', label: 'Agents' },
+      ]} /> : null}
+      {(!guestsEnabled || tab === 'members') ? <MembersDialog teamId={team.id} inline onChanged={onChanged} onLeave={onLeave} /> : null}
+      {guestsEnabled && team.role === 'admin' && tab === 'guests' ? <TeamGuestsSection team={team} /> : null}
+      {(!guestsEnabled || tab === 'agents') ? <section className="tm-settings-card" id="agents">
         <div className="tm-settings-head"><div><h2>Agents</h2><p>Team agents work for everyone in this workspace. Admins can also use their own connected agents here.</p></div></div>
         <TeamAgentsSection team={team} />
         {team.role === 'admin' ? (
@@ -882,10 +900,56 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
             <ConnectorsBody team={team} returnTo={`/me?team=${encodeURIComponent(team.id)}&view=settings#agents`} />
           </section>
         ) : null}
-      </section>
+      </section> : null}
       {team.role === 'admin' ? <TeamBackupDialog team={team} inline /> : null}
     </section>
   );
+}
+
+// The guest roster is admin-only, so show the full address. A bare invitee is
+// a GitHub login; say so, or "claire" reads like a typo for an email.
+function inviteeLabel(invitee) {
+  const value = String(invitee);
+  return value.includes('@') ? value : `GitHub @${value}`;
+}
+
+function TeamGuestsSection({ team }) {
+  const [data, setData] = useState(null);
+  const [status, setStatus] = useState('');
+  useEffect(() => {
+    getTeamGuests(team.id).then(setData).catch((error) => setStatus(message(error)));
+  }, [team.id]);
+  const act = async (invitee, action) => {
+    setStatus('Saving…');
+    try {
+      const result = await changeTeamGuest(team.id, invitee, action);
+      setData(result);
+      setStatus(action === 'remove' ? 'Guest removed.' : result.emailed?.length ? 'Invitation emailed.' : 'Invitation saved.');
+    } catch (error) { setStatus(message(error)); }
+  };
+  return <section className="tm-settings-card" aria-label="Guests">
+    <div className="tm-settings-head"><div><h2>Guests</h2><p>Guests can open only the team documents shared with them. They do not use a seat.</p></div></div>
+    <p className="manage-hint">{data ? `${data.guests.length} ${data.guests.length === 1 ? 'guest' : 'guests'} · limit ${data.limit}` : 'Loading guests…'}</p>
+    {(data?.guests || []).map((guest) => {
+      const invited = data.invites?.includes(guest.invitee);
+      const documentNames = guest.documents.slice(0, 3).map((doc) => doc.title).join(', ');
+      const moreDocuments = guest.documents.length > 3 ? ` +${guest.documents.length - 3} more` : '';
+      return <PersonRow key={guest.invitee} className="tm-guest-row"
+        member={{ name: guest.invitee, key: guest.invitee }}
+        name={inviteeLabel(guest.invitee)}
+        sub={`${guest.documents.length} ${guest.documents.length === 1 ? 'document' : 'documents'}: ${documentNames}${moreDocuments} · Added by ${guest.added_by || 'unknown'}${guest.documents.length >= 40 ? ' · Frequent collaborator — consider a member seat' : ''}`}
+        right={team.role === 'admin' ? <>
+          <button type="button" className="tm-text-btn" onClick={() => act(guest.invitee, invited ? 'resend' : 'invite_member')}>{invited ? 'Resend invite' : 'Invite to team'}</button>
+          <button type="button" className="tm-text-btn" onClick={() => act(guest.invitee, 'remove')}>Remove</button>
+        </> : null} />;
+    })}
+    {(data?.invites || []).filter((invitee) => !(data?.guests || []).some((guest) => guest.invitee === invitee))
+      .map((invitee) => <PersonRow key={`invite:${invitee}`} className="tm-guest-row"
+        member={{ name: invitee, key: invitee }} name={inviteeLabel(invitee)}
+        sub="Team invitation pending · no document shared"
+        right={team.role === 'admin' ? <button type="button" className="tm-text-btn" onClick={() => act(invitee, 'resend')}>Resend invite</button> : null} />)}
+    <p className="status" role="status">{status}</p>
+  </section>;
 }
 
 export function MoveToTeamDialog({

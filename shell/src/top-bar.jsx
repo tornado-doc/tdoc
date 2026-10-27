@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { readStored, writeStored } from './safe-storage.js';
 import {
   Bell,
@@ -20,6 +20,8 @@ import { useNotifications } from './hooks/use-notifications.js';
 import { BrowserAlertsPrompt, NotificationsDialog, notificationTarget } from './notifications-dialog.jsx';
 import { SpaceMenuItems, WorkspaceSwitcher, spaceLabel, useSpaceTeams } from './workspace-switcher.jsx';
 import { readDevMode, setDevMode } from './dev-mode.js';
+import { devOnlyFlags } from './feature-flags.js';
+import { DebugBar } from './debug-bar.jsx';
 
 // Sign in always asks which account: after Sign out, the provider (and
 // GitHub behind it) still remember the last one, and going straight back in
@@ -53,6 +55,7 @@ export function TopBar({
   currentTeam = null,
   onSpace = null,
   onNewTeam = null,
+  onboardingTest = null,
 }) {
   const [localTheme, setLocalTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
@@ -67,8 +70,24 @@ export function TopBar({
   const spaceTeams = useSpaceTeams(teams, Boolean(identity));
   // Only an allow-listed account has the switch; the boot says so.
   const [devMode] = useState(readDevMode);
-  const toggleDevMode = () => { setDevMode(!devMode.on).catch(() => {}); };
-  const devModeLabel = devMode ? `Dev mode: ${devMode.on ? 'on' : 'off'}` : '';
+  const [exitArmed, setExitArmed] = useState(false);
+  const exitTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(exitTimer.current), []);
+  const toggleDevMode = () => {
+    if (!devMode?.on) { setDevMode(true).catch(() => {}); return; }
+    if (!exitArmed) {
+      setExitArmed(true);
+      window.clearTimeout(exitTimer.current);
+      exitTimer.current = window.setTimeout(() => setExitArmed(false), 4000);
+      return;
+    }
+    window.clearTimeout(exitTimer.current);
+    setExitArmed(false);
+    setDevMode(false).catch(() => {});
+  };
+  const devModeLabel = devMode ? `Dev mode: ${devMode.on ? (exitArmed ? 'exit?' : 'on') : 'off'}` : '';
+  const devFlags = devMode ? devOnlyFlags().map((flag) => flag.label) : [];
+  const devFlagsNote = devFlags.length ? <div className="tdoc-dev-mode-flags" role="note">Dev mode shows: {devFlags.join(', ')}</div> : null;
 
   useEffect(() => {
     if (!viewerKey || profile) return undefined;
@@ -141,6 +160,13 @@ export function TopBar({
   const publicProfileLabel = activeProfile?.handle
     ? `Public profile (@${activeProfile.handle})`
     : 'Claim public profile';
+  const themeLabel = dark ? 'Light mode' : 'Dark mode';
+  // Light / dark is a row of the account menu, not a button of its own. A
+  // signed-out visitor has no account menu, so for them it is in ⋯, which
+  // then shows at every width. ⋯ itself shows on a wide screen only when it
+  // has something in it there.
+  const themeInMore = supportsTheme && !identity;
+  const moreOnDesktop = Boolean(overflowActions) || themeInMore;
 
   return (
     <header className="tdoc-bar">
@@ -162,7 +188,7 @@ export function TopBar({
           <button
             id="tdoc-more-btn"
             type="button"
-            className={`tdoc-secondary-toggle${overflowActions ? '' : ' tdoc-mobile-overflow-trigger'}`}
+            className={`tdoc-secondary-toggle${moreOnDesktop ? '' : ' tdoc-mobile-overflow-trigger'}`}
             aria-label="More actions"
           >
             <MoreHorizontal size={18} />
@@ -170,11 +196,19 @@ export function TopBar({
           </button>
         )}>
           {overflowActions}
-          <AppMenuSeparator className="tdoc-mobile-overflow-only" />
-          <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={toggleTheme}>
-            {dark ? <Sun size={15} /> : <Moon size={15} />}
-            {dark ? 'Light mode' : 'Dark mode'}
-          </AppMenuItem>
+          {supportsTheme ? (
+            <>
+              <AppMenuSeparator className={themeInMore && overflowActions ? '' : 'tdoc-mobile-overflow-only'} />
+              <AppMenuItem
+                className={`tdoc-action-menu-item${themeInMore ? '' : ' tdoc-mobile-overflow-only'}`}
+                data-action="theme"
+                onClick={toggleTheme}
+              >
+                {dark ? <Sun size={15} /> : <Moon size={15} />}
+                {themeLabel}
+              </AppMenuItem>
+            </>
+          ) : null}
           {identity ? (
             <>
               <AppMenuItem className="tdoc-action-menu-item tdoc-mobile-overflow-only" onClick={openNotifications}>
@@ -227,10 +261,12 @@ export function TopBar({
                   <TerminalSquare size={15} /> Agents
                 </AppMenuLinkItem>
                 {devMode ? (
-                  <AppMenuItem className="tdoc-action-menu-item tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} onClick={toggleDevMode}>
+                  <AppMenuItem className="tdoc-action-menu-item tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} closeOnClick={!devMode.on || exitArmed} onClick={toggleDevMode}>
                     <FlaskConical size={15} /> {devModeLabel}
                   </AppMenuItem>
                 ) : null}
+                {devFlagsNote}
+                {devMode?.on && onboardingTest ? <DebugBar {...onboardingTest} /> : null}
                 <AppMenuItem className="tdoc-action-menu-item" onClick={signOut}>
                   <LogOut size={15} /> Sign out
                 </AppMenuItem>
@@ -242,13 +278,10 @@ export function TopBar({
             </AppMenuItem>
           ) : null}
         </AppMenu>
-        {supportsTheme ? <button id="tdoc-theme-btn" type="button" className="tdoc-theme-btn" aria-label={dark ? 'Light mode' : 'Dark mode'} aria-pressed={dark} title={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme}>
-          {dark ? <Sun size={14} /> : <Moon size={14} />}
-        </button> : null}
         {identity ? <WorkspaceSwitcher space={space} teams={spaceTeams} currentTeam={currentTeam} onSpace={onSpace} onNewTeam={onNewTeam} /> : null}
         {identity ? (
           <AppMenu trigger={(
-            <button className="tdoc-chip tdoc-account-trigger" type="button">
+            <button className="tdoc-chip tdoc-account-trigger" type="button" aria-label={`Account: ${identity.name || identity.login}`} title={identity.name || identity.login}>
               {identity.avatar_url ? <img src={identity.avatar_url} alt="" /> : <span className="tdoc-avatar-fallback">{String(identity.name || identity.login || "?").slice(0, 1).toUpperCase()}</span>}
               <span className="name">{identity.name || identity.login}</span>
               {notifications.unread ? <span className="tdoc-unread-dot" /> : null}
@@ -265,10 +298,19 @@ export function TopBar({
             ) : null}
             <AppMenuLinkItem href="/me?view=settings#agents">Agents</AppMenuLinkItem>
             {devMode ? (
-              <AppMenuItem className="tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} onClick={toggleDevMode}>
+              <AppMenuItem className="tdoc-dev-mode-item" role="menuitemcheckbox" aria-checked={devMode.on} closeOnClick={!devMode.on || exitArmed} onClick={toggleDevMode}>
                 {devModeLabel}
               </AppMenuItem>
             ) : null}
+            {devFlagsNote}
+            {devMode?.on && onboardingTest ? <DebugBar {...onboardingTest} /> : null}
+            {supportsTheme ? (
+              <>
+                <AppMenuSeparator />
+                <AppMenuItem data-action="theme" onClick={toggleTheme}>{themeLabel}</AppMenuItem>
+              </>
+            ) : null}
+            <AppMenuSeparator />
             <AppMenuItem onClick={signOut}>Sign out</AppMenuItem>
           </AppMenu>
         ) : authConfigured ? (

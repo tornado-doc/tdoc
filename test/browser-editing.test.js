@@ -34,9 +34,9 @@ function waitForServer(port, timeout = 5_000) {
   });
 }
 
-function selectParagraph(frame) {
-  return frame.evaluate(() => {
-    const paragraph = document.getElementById('editable-paragraph');
+async function selectParagraph(frame, id = 'editable-paragraph') {
+  await frame.evaluate((paragraphId) => {
+    const paragraph = document.getElementById(paragraphId);
     const range = document.createRange();
     range.selectNodeContents(paragraph);
     const selection = window.getSelection();
@@ -46,7 +46,9 @@ function selectParagraph(frame) {
       bubbles: true, cancelable: true, view: window,
       clientX: rect.left + 10, clientY: rect.top + 10,
     }));
-  });
+  }, id);
+  await frame.getByRole('button', { name: 'Comment', exact: true }).click();
+  await frame.page().locator('.tdoc-popup').waitFor({ timeout: 3000 });
 }
 
 async function chooseMode(page, label) {
@@ -156,20 +158,10 @@ async function chooseMode(page, label) {
       await trigger.waitFor();
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
       const cursor = await frame.evaluate(() => getComputedStyle(document.body).cursor);
-      assert(cursor.includes('data:image/svg+xml') && cursor.includes('crosshair'),
-        `Comment mode did not expose its chat cursor: ${cursor}`);
+      assert(!cursor.includes('data:image/svg+xml'), `Comment mode replaced the native text cursor: ${cursor}`);
       const triggerPath = await trigger.locator('svg.tdoc-comment-icon path').getAttribute('d');
-      const decodedCursor = decodeURIComponent(cursor);
-      assert(triggerPath && decodedCursor.includes(triggerPath),
-        'Comment mode trigger and cursor use different icon geometry');
-      assert(cursor.includes(' 2 2, crosshair'),
-        `Comment cursor hotspot is not fixed to the droplet point: ${cursor}`);
-      assert(decodedCursor.includes('fill="#1652f0"') && !decodedCursor.includes('fill="white"'),
-        'Comment cursor is not rendered as a solid brand-blue mark');
-      assert(decodedCursor.includes('width="24" height="24"') && !decodedCursor.includes('stroke='),
-        'Comment cursor has fractional SVG scaling or a raster-like outline');
       await frame.locator('#comment-artifact').hover();
-      const pill = frame.locator('.tdoc-comment-pill');
+      const pill = frame.locator('.tdoc-comment-pill:not(.tdoc-selection-action)');
       await pill.waitFor({ state: 'visible' });
       assert(await pill.locator('svg path').getAttribute('d') === triggerPath,
         'Comment artifact pill and mode trigger use different icon geometry');
@@ -217,11 +209,7 @@ async function chooseMode(page, label) {
       }
 
       await clickAt(geometry.onWord.x, geometry.onWord.y);
-      assert(await selectionText(), 'a click on the word itself stopped selecting it');
-
-      // That last click opened the composer on purpose. Leave the page as this
-      // test found it, or the suite's later modes inherit an open popup.
-      await page.locator('.tdoc-popup button.x').click();
+      assert(await page.locator('.tdoc-popup').count() === 0, 'a plain word click opened a comment');
       await frame.evaluate(() => window.getSelection().removeAllRanges());
     });
 
@@ -252,23 +240,22 @@ async function chooseMode(page, label) {
       };
       const openCount = () => page.locator('.tdoc-popup, .tdoc-margin-comment.active').count();
 
-      await clickAt(geometry.first);
-      assert(await openCount() > 0, 'a click on a word no longer opens the composer');
+      await selectParagraph(frame);
+      assert(await openCount() > 0, 'selection action did not open the composer');
 
       // A second word: the open composer must close, and this word must not
       // become a new one.
       await clickAt(geometry.later);
       assert(await openCount() === 0, 'clicking another word opened something instead of dismissing');
 
-      await clickAt(geometry.first);
+      await selectParagraph(frame);
       assert(await openCount() > 0, 'precondition: composer did not reopen');
       await clickAt(geometry.blank);
       assert(await openCount() === 0, 'clicking blank space left the composer open');
 
-      // With nothing open, a click on a word still starts a comment.
+      // With nothing open, a plain click never starts a comment.
       await clickAt(geometry.first);
-      assert(await openCount() > 0, 'dismissal state leaked: a fresh click stopped opening the composer');
-      await page.locator('.tdoc-popup button.x').click();
+      assert(await openCount() === 0, 'fresh word click opened a composer');
       await frame.evaluate(() => window.getSelection().removeAllRanges());
     });
 
@@ -305,21 +292,21 @@ async function chooseMode(page, label) {
       // 1. A drag while something is open is a selection, not a dismissal.
       //    Clearing on mousedown unmounted the focused composer, and losing
       //    that focus wiped the selection mid-drag.
-      await clickAt(geometry.first);
-      assert(await openCount() > 0, 'precondition: a word click did not open the composer');
+      await selectParagraph(frame);
+      assert(await openCount() > 0, 'precondition: selection action did not open the composer');
       await page.mouse.move(box.x + geometry.drag.x1, box.y + geometry.drag.y);
       await page.mouse.down();
       await page.mouse.move(box.x + geometry.drag.x2, box.y + geometry.drag.y, { steps: 12 });
       await page.mouse.up();
       await page.waitForTimeout(400);
-      assert(await openCount() > 0, 'a drag while something was open reported no selection');
+      assert((await frame.evaluate(() => window.getSelection().toString())).length > 0, 'a drag while something was open lost the selection');
       await page.locator('.tdoc-popup button.x').click().catch(() => {});
       await page.waitForTimeout(200);
 
       // 2. The artifact pill is our own UI, but while a card is open it is
       //    outside that card like anything else: it dismisses, it does not
       //    open an element comment.
-      await clickAt(geometry.first);
+      await selectParagraph(frame);
       assert(await openCount() > 0, 'precondition: composer did not reopen');
       // Dispatch the hover inside the frame: Playwright's own hover() checks
       // actionability against the top document, where the open composer sits
@@ -331,8 +318,8 @@ async function chooseMode(page, label) {
           bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + 12,
         }));
       });
-      await frame.locator('.tdoc-comment-pill').waitFor({ state: 'visible' });
-      const pill = await frame.locator('.tdoc-comment-pill').boundingBox();
+      await frame.locator('.tdoc-comment-pill:not(.tdoc-selection-action)').waitFor({ state: 'visible' });
+      const pill = await frame.locator('.tdoc-comment-pill:not(.tdoc-selection-action)').boundingBox();
       assert(pill, 'hovering the artifact did not show the comment pill');
       await page.mouse.click(box.x + pill.x + pill.width / 2, box.y + pill.y + pill.height / 2);
       await page.waitForTimeout(400);
@@ -341,14 +328,14 @@ async function chooseMode(page, label) {
       await frame.evaluate(() => window.getSelection().removeAllRanges());
     });
 
-    await test('Read mode opens existing anchors but does not create a comment selection', async () => {
-      await chooseMode(page, 'Read');
+    await test('Comment mode opens the composer from the selection action', async () => {
+      await chooseMode(page, 'Comment');
       await selectParagraph(frame);
       await page.waitForTimeout(150);
-      assert(await page.locator('.tdoc-popup').count() === 0, 'Read selection opened the comment composer');
+      assert(await page.locator('.tdoc-popup').count() === 1, 'selection did not open the comment composer');
     });
 
-    await test('Read mode copies the selected document text', async () => {
+    await test('Comment mode copies the selected document text', async () => {
       const paragraph = frame.locator('#editable-paragraph');
       await paragraph.click();
       await paragraph.selectText();
@@ -368,10 +355,10 @@ async function chooseMode(page, label) {
       await page.keyboard.press(`${PRIMARY_MODIFIER}+c`);
       const copied = await page.evaluate(() => navigator.clipboard.readText());
       assert(copied === 'Edit this sentence and save one snapshot.',
-        `Read copy returned the wrong text: ${JSON.stringify(copied)}`);
+        `Comment copy returned the wrong text: ${JSON.stringify(copied)}`);
     });
 
-    await test('Comment mode turns a selection into a composer', async () => {
+    await test('Comment mode turns a selection action into a composer', async () => {
       await chooseMode(page, 'Comment');
       await selectParagraph(frame);
       await page.locator('.tdoc-popup').waitFor({ timeout: 2_000 });
@@ -400,8 +387,8 @@ async function chooseMode(page, label) {
           draggingCursor,
         };
       });
-      assert(liveState.draggingCursor === 'text',
-        `drag selection did not switch to the precise I-beam cursor: ${JSON.stringify(liveState)}`);
+      assert(!liveState.draggingCursor.includes('data:image/svg+xml'),
+        `drag selection uses a custom cursor: ${JSON.stringify(liveState)}`);
       assert(liveState.fallback !== 'rgba(0, 0, 0, 0)' && liveState.fallback !== 'transparent',
         `native live-selection fallback is invisible: ${JSON.stringify(liveState)}`);
       if (liveState.supported) assert(liveState.painted, 'CSS Highlight live selection was not painted');
@@ -411,8 +398,18 @@ async function chooseMode(page, label) {
       });
     });
 
-    await test('Comment mode turns a word click into a precise text anchor', async () => {
+    await test('Comment mode requires selecting a word before commenting', async () => {
       await frame.locator('#editable-paragraph').click({ position: { x: 28, y: 12 } });
+      assert(await page.locator('.tdoc-popup').count() === 0, 'plain word click opened composer');
+      await frame.evaluate(() => {
+        const text = document.querySelector('#editable-paragraph').firstChild;
+        const range = document.createRange();
+        range.setStart(text, 0); range.setEnd(text, 4);
+        const selection = window.getSelection();
+        selection.removeAllRanges(); selection.addRange(range);
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      });
+      await frame.getByRole('button', { name: 'Comment', exact: true }).click();
       const quote = page.locator('.tdoc-popup .head .h');
       await quote.waitFor({ timeout: 2_000 });
       const selected = await quote.textContent();
@@ -599,16 +596,15 @@ async function chooseMode(page, label) {
         toolbarWidth: Math.round(document.querySelector('.tdoc-editor-toolbar').getBoundingClientRect().width),
         modeWidth: Math.round(document.querySelector('.tdoc-mode-trigger').getBoundingClientRect().width),
         modeLabelDisplay: getComputedStyle(document.querySelector('.tdoc-mode-label')).display,
-        versionDisplay: getComputedStyle(document.querySelector('#tdoc-version-toggle')).display,
-        publishDisplay: getComputedStyle(document.querySelector('#tdoc-publish-btn')).display,
-        themeDisplay: getComputedStyle(document.querySelector('#tdoc-theme-btn')).display,
-        accountDisplay: getComputedStyle(document.querySelector('.tdoc-account-trigger')).display,
+        versionDisplay: document.querySelector('#tdoc-version-toggle') ? getComputedStyle(document.querySelector('#tdoc-version-toggle')).display : 'none',
+        publishDisplay: document.querySelector('#tdoc-publish-btn') ? getComputedStyle(document.querySelector('#tdoc-publish-btn')).display : 'none',
+        accountDisplay: document.querySelector('.tdoc-account-trigger') ? getComputedStyle(document.querySelector('.tdoc-account-trigger')).display : 'none',
       }));
       assert(dimensions.scrollWidth <= dimensions.innerWidth + 1,
         `mobile shell overflows: ${JSON.stringify(dimensions)}`);
       assert(dimensions.modeWidth === 44 && dimensions.modeLabelDisplay === 'none',
         `mobile mode control did not collapse to one icon: ${JSON.stringify(dimensions)}`);
-      assert(['versionDisplay', 'publishDisplay', 'themeDisplay', 'accountDisplay'].every((key) => dimensions[key] === 'none'),
+      assert(['versionDisplay', 'publishDisplay', 'accountDisplay'].every((key) => dimensions[key] === 'none'),
         `secondary controls leaked into the mobile primary bar: ${JSON.stringify(dimensions)}`);
       await page.getByRole('button', { name: /Document mode:/ }).click();
       await page.getByRole('menuitemradio', { name: 'Comment' }).waitFor();
@@ -644,11 +640,11 @@ async function chooseMode(page, label) {
       // drawer: the bug is the keyboard eating HEIGHT, not the width. Reload to
       // shed whatever the mobile test above left open in the top bar.
       await page.setViewportSize({ width: 900, height: 664 });
-      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.goto(`http://127.0.0.1:${port}/d/${resolvedSlug}/v/1`, { waitUntil: 'networkidle' });
       const composerFrame = page.frames().find((candidate) => candidate.url().includes('/frame'));
       assert(composerFrame, 'author frame missing');
       await chooseMode(page, 'Comment');
-      await selectParagraph(composerFrame);
+      await selectParagraph(composerFrame, 'resolved-paragraph');
       const popup = page.locator('.tdoc-popup');
       await popup.waitFor();
       const before = await popup.boundingBox();
@@ -686,16 +682,11 @@ async function chooseMode(page, label) {
       const hidden = await entries.count();
       assert(hidden === 2, `the drawer showed ${hidden} threads by default, expected 2`);
 
-      // The control is a ⋯ menu item on a phone, not the bar switch — that one
-      // is display:none below 700px.
-      await page.keyboard.press('Escape');
-      await page.locator('#tdoc-more-btn').click();
-      await page.locator('[data-action="show-resolved"]').click();
-      await page.waitForTimeout(400);
-      await page.locator('.tdoc-fab').first().click();
+      // The filter lives at the top of the phone drawer.
+      await page.locator('#tdoc-comment-layer .tdoc-comment-filter').getByRole('radio', { name: 'Open' }).click();
       await page.waitForTimeout(400);
       const shown = await entries.count();
-      assert(shown === 1, `hiding resolved left ${shown} threads in the drawer, expected 1`);
+      assert(shown === 1, `Open filter left ${shown} threads in the drawer, expected 1`);
     });
 
     // Last on purpose: it navigates away from the doc every test above shares.
@@ -807,7 +798,7 @@ async function chooseMode(page, label) {
         await savedFrame.locator(`#${id} [data-tdoc-diagram-open]`).waitFor();
         assert(await savedFrame.locator(`#${id}`).getByRole('button', { name: 'Edit diagram' }).isVisible(), 'the saved diagram lost its edit action');
         await diagramPage.goto(`${base}/d/${created.slug}/v/1`, { waitUntil: 'networkidle' });
-        await chooseMode(diagramPage, 'Read');
+        await chooseMode(diagramPage, 'Comment');
         const readFrame = diagramPage.frames().find((candidate) => candidate.url().includes('/frame'));
         const editAction = readFrame.locator(`#${id}`).getByRole('button', { name: 'Edit diagram' });
         const expandAction = readFrame.getByRole('button', { name: 'View Diagram fullscreen' }).last();

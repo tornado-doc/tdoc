@@ -709,13 +709,13 @@ t('a page offers only the states it can show', () => {
   assert(states('document') === "['published', 'commented', 'revised']", 'a doc shows its row: comment, handoff, gone');
   assert(states('hub') === 'DEBUG_STATES', 'and the checklist has a face for all six');
   // Each surface says which one it is.
-  assert(gate.includes("surface={step === 'doc' ? 'doc' : 'connect'}"), 'the gate names its step');
-  assert(shell.includes("surface={config.isLanding ? 'landing' : 'document'}"), 'a document names itself');
-  assert(hub.includes('surface="hub"') && /devModeBoot\(env, s\),\n\s*\]\);[\s\S]{0,2000}?\bdebug: dev\.debug,/.test(worker),
+  assert(gate.includes("surface: step === 'doc' ? 'doc' : 'connect'"), 'the gate names its step');
+  assert(shell.includes("surface: config.isLanding ? 'landing' : 'document'"), 'a document names itself');
+  assert(hub.includes("surface: 'hub'") && /devModeBoot\(env, s\),\n\s*\]\);[\s\S]{0,2000}?\bdebug: dev\.debug,/.test(worker),
     'and the hub, where the checklist is');
   // Whatever the page can show, the record's current value is always printed:
   // "you are at revised, and these are the ones this page can show you".
-  assert(bar.includes('record: {recordName(record)}'), 'the current state is always named');
+  assert(bar.includes('Current: {recordName(record)}'), 'the current state is always named');
 });
 
 t('letting a tester in does not need Cloudflare credentials', () => {
@@ -756,8 +756,8 @@ t('replay is new again, not just a blank record', () => {
   // and the gate (the call to action, the sign-in, the first sight of the
   // product) was untestable, and /setup stamps `started` on sight, so a replay
   // that landed there could never show what `new` looks like.
-  assert(shell.includes('{config.debug ? (') && shell.includes('<DebugBar'),
-    'the bar is on every document, the landing page included');
+  assert(shell.includes('onboardingTest={config.debug ? {') && shell.includes("surface: config.isLanding ? 'landing' : 'document'"),
+    'the account menu has onboarding controls on every document, the landing page included');
   assert(worker.includes('...(await devModeBoot(env, session)) }, pageUrl)'),
     'and the server tells the document who is allow-listed');
   assert(bar.includes('location.reload();'), 'a replay stays where it was pressed');
@@ -926,8 +926,8 @@ t('the one button on the gate is never below the fold', () => {
     assert(gateCss.includes(`@media (max-height: ${h}px)`), `a step at ${h}px`);
   }
   const dbg = read('shell/src/debug-bar.css');
-  assert(/@media \(max-height: 710px\) \{ \.sg-split:has\(\.sg-debug\)/.test(dbg),
-    'and the internal strip yields too, rather than pushing the button off');
+  assert(dbg.includes('.tdoc-onboarding-test-status') && !dbg.includes('position: fixed'),
+    'onboarding test is in the menu and no longer floats over the gate');
 });
 
 t('the checklist shows up for a walk that never opened /setup', () => {

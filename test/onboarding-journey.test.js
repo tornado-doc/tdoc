@@ -186,13 +186,14 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
 });
 
 t('a visitor with no session still sees a way to comment, and it is the sign-in', () => {
-  assert(/cfg\.signInToComment = !identity && !isLanding && !!versionWritesEnabled\s*&& accessFromMeta\(docMeta \|\| \{\}\)\.commenting !== 'off'/.test(worker),
+  assert(/cfg\.signInToComment = !identity && !isLanding\s*&& accessFromMeta\(docMeta \|\| \{\}\)\.commenting !== 'off'/.test(worker),
     'the flag is on when the doc takes comments and this visitor has no session');
   assert(server.includes('signInToComment: false'), 'local preview is anonymous by design and may always comment');
   assert(toolbar.includes("(option.value === 'comment' && (canComment || signInToComment))"), 'the Comment option shows for the visitor');
   assert(toolbar.includes("? 'Sign in to comment'"), 'and says what it will do');
   assert(toolbar.includes('? onSignIn?.()'), 'and opens the sign-in rather than the mode');
-  assert(shell.includes('signInToComment={Boolean(config.signInToComment)}') && shell.includes('onSignIn={signIn}'), 'the shell wires it');
+  // The mode switch is back in the bar (DocumentModeControl); Comment there signs in.
+  assert(shell.includes('signInToComment={Boolean(config.signInToComment)}') && shell.includes('onSignIn={() => signIn()}'), 'the shell wires it');
 });
 
 t('bridge 1 is read off the server, and a paired account is never asked for a code', () => {
@@ -294,7 +295,10 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes('Number(config.version) === latestVersion'), 'only on the latest version');
   assert(shell.includes("if (value?.id) setOpenCommentId(value.id);"), 'a posted comment opens its card — the next instruction lives there');
   assert(shell.includes("v/${latest}?revised=1"), 'a new version is arrived at as one');
-  assert((layer.match(/handoff=\{handoff\}/g) || []).length === 2, 'threaded through both the desktop layer and the phone drawer');
+  const sharedList = read('shell/src/document/comment-thread-list.jsx');
+  assert(layer.includes('handoff={handoff}') && layer.includes('onReanchor, handoff, onResendHandoff,')
+    && sharedList.includes('{...cardProps}'),
+  'threaded through both the desktop layer and the phone drawer');
 });
 
 t('the exit is a line on a revised doc, owed until the link is copied', () => {
@@ -332,7 +336,7 @@ t('the two arrivals open the right card and say what happened', () => {
   // pop-up stopped opening, and the checklist rows land through `?step=`.
   assert(!shell.includes("params.get('welcome')"), 'the wizard arrival is gone');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
-  assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
+  assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return 'all';"), 'with resolved threads shown, or v2 looks like nothing happened');
   // A version published without a resolved thread still arrived; the count
   // going to zero must not turn the arrival into a report of failure.
   assert(shell.includes('`v${version} published. Share it.`'), 'the exit line drops the count rather than printing zero');

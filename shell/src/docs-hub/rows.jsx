@@ -1,6 +1,7 @@
 import React from 'react';
 import { Folder, MoreHorizontal, Star } from 'lucide-react';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
+import { isFeatureOn } from '../feature-flags.js';
 
 export const day = (iso) => (typeof iso === 'string' && iso.length >= 10 ? iso.slice(0, 10) : '');
 
@@ -69,7 +70,8 @@ export function DocRow({
   const dataAttrs = Object.fromEntries(
     Object.entries(data).map(([key, value]) => [`data-${key}`, value]),
   );
-  const classes = ['doc-row', layout === 'grid' ? 'is-card' : null, selection?.checked ? 'is-selected' : null, className]
+  const thumbnail = layout === 'grid' && isFeatureOn('docThumbnails');
+  const classes = ['doc-row', layout === 'grid' ? 'is-card' : null, layout === 'grid' && !thumbnail ? 'is-text-card' : null, selection?.checked ? 'is-selected' : null, className]
     .filter(Boolean)
     .join(' ');
   return (
@@ -84,7 +86,7 @@ export function DocRow({
           />
         </label>
       ) : null}
-      {layout === 'grid' ? (
+      {thumbnail ? (
         <a className="doc-card-preview" href={docHref(doc)} aria-label={`Open ${doc.title}`}>
           <span>{doc.excerpt || doc.title}</span>
           {doc.image ? (
@@ -96,14 +98,6 @@ export function DocRow({
             />
           ) : null}
         </a>
-      ) : doc.image ? (
-        <img
-          className="doc-preview-image"
-          src={doc.image}
-          alt=""
-          loading="lazy"
-          onError={(event) => { event.currentTarget.hidden = true; }}
-        />
       ) : null}
       <div className="doc-info">
         <div className="doc-title-line">

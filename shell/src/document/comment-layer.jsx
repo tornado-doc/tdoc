@@ -1,25 +1,34 @@
-import React, { useEffect, useRef } from 'react';
-import { Check } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CommentIcon } from '../ui/comment-icon.jsx';
+import { SegmentedControl } from '../ui/segmented-control.jsx';
+import { AskIcon } from '../ui/ask-icon.jsx';
 import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
-import { avatarFor, TOP_BAR_HEIGHT } from './model.js';
-import { handoffSurfaceState, isHandoffInFlight } from './handoff-state.js';
-import { isThreadUnread } from './thread-seen.js';
+import { CommentThreadList } from './comment-thread-list.jsx';
+import { CommentPinFace, commentPinState } from './comment-pin.jsx';
+import { avatarFor, isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
+
+const DOCUMENT_PIN_FACE_SIZE = { width: 21, height: 21, maxWidth: 21, maxHeight: 21 };
+
+export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = null }) {
+  if (!filter && !(unreadCount && onMarkAllRead)) return null;
+  return <div className={`tdoc-comment-filter-row${unreadCount > 0 && onMarkAllRead ? ' has-mark-all' : ''}`}>
+    {filter}
+    {unreadCount > 0 && onMarkAllRead ? (
+      <button type="button" className="tdoc-comment-mark-all" onClick={() => onMarkAllRead()}>Mark all as read</button>
+    ) : null}
+  </div>;
+}
 
 function Pin({
-  cluster, top, left, frameTop, commentsById, seenMap, onOpenComment, onOpenCluster,
+  cluster, top, left, frameTop, commentsById, seenMap, currentUser, handoffViewer = currentUser, isOwner, hoveredAnchorId, now, onOpenComment, onOpenCluster,
 }) {
   const single = cluster.items.length === 1 ? cluster.items[0].comment : null;
+  const documentPin = cluster.items.every((item) => item.comment.document);
   const resolved = single?.resolved
     || (!single && cluster.items.every((item) => item.comment.resolved));
   const live = single && commentsById ? commentsById.get(single.id) : null;
-  // Pin shows at most three things (plus failed, which is rare and urgent):
-  // waiting pulse / unread solid dot / resolved check. Fine states stay on the card.
-  const handoff = (!resolved && live) ? handoffSurfaceState(live) : null;
-  const waiting = isHandoffInFlight(handoff);
-  const failed = handoff === 'failed';
-  const unread = !resolved && !waiting && live ? isThreadUnread(live, seenMap) : false;
+  const state = single ? commentPinState(live || single, { seenMap, handoffViewer, isOwner, now }) : null;
 
   return (
     <button
@@ -27,59 +36,45 @@ function Pin({
       className={[
         'tdoc-pin',
         single ? '' : 'tdoc-pin-cluster',
-        single?.resolved ? 'tdoc-pin-resolved' : '',
+        documentPin ? 'tdoc-pin-document' : '',
+        single?.resolved && (!live?.handoff_at || live?.resolved_by) ? 'tdoc-pin-resolved' : '',
         // A tombstone keeps its pin — that is the way back to the replies
         // under it — but it must not look like a comment somebody is waiting
         // on. Without this a deleted thread is invisible until you click it.
         single?.deleted ? 'tdoc-pin-deleted' : '',
         !single && resolved ? 'tdoc-cluster-allresolved' : '',
-        waiting ? 'is-waiting-handoff' : '',
-        failed ? 'is-failed-handoff' : '',
-        unread ? 'is-unread-handoff' : '',
+        state?.waiting ? 'is-waiting-handoff' : '',
+        state?.unread ? 'is-unread-handoff' : '',
+        hoveredAnchorId && cluster.items.some((item) => item.comment.id === hoveredAnchorId) ? 'tdoc-pin-anchor-hover' : '',
       ].filter(Boolean).join(' ')}
       data-id={single?.id}
       data-key={cluster.key}
-      title={
-        waiting ? 'Waiting on agent'
-          : failed ? 'Handoff not delivered'
-            : unread ? 'New agent reply'
-              : undefined
-      }
-      style={{ top: Math.max(frameTop + 4, top), left }}
+      title={documentPin ? `${cluster.items.length} comment${cluster.items.length === 1 ? '' : 's'} on this document` : state?.title}
+      aria-label={documentPin ? `${cluster.items.length} comment${cluster.items.length === 1 ? '' : 's'} on this document` : undefined}
+      style={{ top: Math.max(frameTop + 4, top), left: documentPin ? Math.min(left, window.innerWidth - 50) : left }}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={() => single ? onOpenComment(single.id) : onOpenCluster(cluster.key)}
     >
-      {single ? (
-        avatarFor(single)
-          ? <img src={avatarFor(single)} alt="" />
-          : <span className="tdoc-pin-anon" />
-      ) : cluster.items.length}
+      {documentPin && !single ? <span className="tdoc-document-pin-faces" aria-hidden="true">
+        {cluster.items.slice(0, 3).map(({ comment }, index) => {
+          const avatar = avatarFor(comment);
+          return avatar ? <img key={comment.id} src={avatar} alt="" width="21" height="21"
+            style={{ ...DOCUMENT_PIN_FACE_SIZE, zIndex: 3 - index }} />
+            : <span key={comment.id} className="tdoc-pin-anon" style={{ zIndex: 3 - index }} />;
+        })}
+      </span> : <CommentPinFace comment={single} state={state} clusterCount={cluster.items.length} />}
     </button>
   );
 }
 
-function ClusterPopover({ cluster, commentsById, top, left, onSelect }) {
+function ClusterPopover({ cluster, commentsById, top, left, cardProps }) {
   return (
     <div
-      className="tdoc-cluster-pop open"
-      style={{ top, left }}
+      className="tdoc-cluster-pop tdoc-cluster-cards open"
+      style={{ top, left, maxHeight: Math.max(160, window.innerHeight - top - 16) }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {cluster.items.map(({ comment }) => (
-        <button
-          key={comment.id}
-          type="button"
-          className="tdoc-cluster-row"
-          data-id={comment.id}
-          onClick={() => onSelect(comment.id)}
-        >
-          {avatarFor(comment) ? <img src={avatarFor(comment)} alt="" /> : null}
-          <span className="tdoc-cluster-snip">
-            {commentsById.get(comment.id)?.text?.slice(0, 60)}
-          </span>
-          {comment.resolved ? <Check size={13} /> : null}
-        </button>
-      ))}
+      <CommentThreadList comments={cluster.items.map(({ comment }) => commentsById.get(comment.id) || comment)} cardProps={cardProps} />
     </div>
   );
 }
@@ -88,6 +83,7 @@ export function DesktopCommentLayer({
   clusters,
   commentsById,
   seenMap = {},
+  hoveredAnchorId = null,
   frameScrollY,
   frameTop = TOP_BAR_HEIGHT,
   pinLeft,
@@ -95,6 +91,7 @@ export function DesktopCommentLayer({
   openClusterKey,
   pinIds,
   currentUser,
+  handoffViewer = currentUser,
   isOwner,
   mentionable,
   demo = false,
@@ -113,8 +110,28 @@ export function DesktopCommentLayer({
   handoff = null,
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
+  onMarkRead = null,
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
   const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
+  useEffect(() => {
+    if (!onMarkRead) return;
+    const markUnread = (comment) => {
+      if (commentPinState(comment, { seenMap, handoffViewer, isOwner }).unread) onMarkRead(comment);
+    };
+    if (openCluster) {
+      for (const { comment } of openCluster.items) markUnread(commentsById.get(comment.id) || comment);
+    } else if (openComment) markUnread(openComment);
+  }, [onMarkRead, openCluster, openComment, commentsById, seenMap, handoffViewer, isOwner]);
+  const cardProps = {
+    currentUser, handoffViewer, isOwner, mentionable, demo, canSendToAgent,
+    agentSetupHref, onReply, onReact, onDelete, onResolve, onEdit, onReanchor,
+    handoff, onResendHandoff, onSendHandoffElsewhere,
+  };
 
   return (
     <>
@@ -130,6 +147,11 @@ export function DesktopCommentLayer({
             left={pinLeft}
             commentsById={commentsById}
             seenMap={seenMap}
+            currentUser={currentUser}
+            handoffViewer={handoffViewer}
+            isOwner={isOwner}
+            hoveredAnchorId={hoveredAnchorId}
+            now={now}
             onOpenComment={onOpenComment}
             onOpenCluster={onOpenCluster}
           />
@@ -140,12 +162,9 @@ export function DesktopCommentLayer({
         <ClusterPopover
           cluster={openCluster}
           commentsById={commentsById}
-          top={Math.max(
-            frameTop + 4,
-            Math.min(frameTop + openCluster.y - frameScrollY, window.innerHeight - 200),
-          )}
-          left={Math.max(8, pinLeft - 268)}
-          onSelect={onOpenComment}
+          top={Math.max(frameTop + 4, Math.min(frameTop + openCluster.y - frameScrollY, window.innerHeight - 240))}
+          left={Math.max(8, pinLeft - 300)}
+          cardProps={cardProps}
         />
       ) : null}
 
@@ -153,6 +172,7 @@ export function DesktopCommentLayer({
         <CommentCard
           comment={openComment}
           currentUser={currentUser}
+          handoffViewer={handoffViewer}
           isOwner={isOwner}
           mentionable={mentionable}
           demo={demo}
@@ -177,11 +197,50 @@ export function DesktopCommentLayer({
   );
 }
 
+const HOWTO_KEY = 'tdoc-howto-comment-dismissed';
+
+// The empty drawer teaches the one gesture that matters (select, then
+// Comment) until the reader says they have it; Ask AI stays one tap away.
+function EmptyCommentsHowTo({ onAskAi }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(HOWTO_KEY) === '1'; } catch { return false; }
+  });
+  const dismiss = () => {
+    try { localStorage.setItem(HOWTO_KEY, '1'); } catch {}
+    setDismissed(true);
+  };
+  return (
+    <div className="tdoc-drawer-empty">
+      {dismissed ? <p>No comments here yet. Select any text to comment.</p> : (
+        <>
+          <div className="tdoc-howto-demo" aria-hidden="true">
+            <span className="tdoc-howto-line">Billing ships <mark>first, in March</mark></span>
+            <span className="tdoc-howto-line short" />
+            <span className="tdoc-howto-pill"><CommentIcon size={11} /> Comment</span>
+          </div>
+          <p>Select any text, then tap <strong>Comment</strong>.</p>
+        </>
+      )}
+      <div className="tdoc-drawer-empty-actions">
+        {onAskAi ? <button type="button" className="tdoc-link-btn" onClick={onAskAi}>or Ask AI</button> : null}
+      </div>
+      {dismissed ? null : <button type="button" className="tdoc-howto-dismiss" onClick={dismiss}>Got it, don’t show again</button>}
+    </div>
+  );
+}
+
 export function MobileCommentDrawer({
+  // The Open / Resolved / All control, above the list.
+  filter = null,
   open,
   comments,
+  openCount = comments.length,
+  unread = false,
+  unreadCount = 0,
   pinIds,
+  seenMap = {},
   currentUser,
+  handoffViewer = currentUser,
   isOwner,
   mentionable,
   demo = false,
@@ -190,6 +249,9 @@ export function MobileCommentDrawer({
   canSendToAgent = false,
   agentSetupHref = null,
   onOpenChange,
+  hideFab = false,
+  onStartComment = null,
+  onAskAi = null,
   onReply,
   onReact,
   onDelete,
@@ -200,8 +262,15 @@ export function MobileCommentDrawer({
   handoff = null,
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
+  onMarkRead = null,
+  onMarkAllRead = null,
+  // Unified entry: the same drawer also holds the Ask AI panel, one tab away.
+  askAi = null,
+  tab = 'comments',
+  onTab = null,
 }) {
   const drawerRef = useRef(null);
+  const showAsk = Boolean(askAi) && tab === 'ask';
 
   // Tapping a highlight opens the drawer at THAT comment. The drawer mounts
   // and animates in after this effect first runs, so look for the card for a
@@ -222,13 +291,13 @@ export function MobileCommentDrawer({
     return () => cancelAnimationFrame(raf);
   }, [open, openCommentId]);
 
-  if (!comments.length) return null;
-
   return (
-    <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down">
-      <Drawer.Trigger className="tdoc-fab">
+    <Drawer.Root open={open} onOpenChange={onOpenChange} swipeDirection="down" snapPoints={[0.7, 1]} defaultSnapPoint={0.7}>
+      <Drawer.Trigger className={`tdoc-fab${hideFab ? ' is-hidden' : ''}`} aria-label={openCount ? `${openCount} open comments${unread ? ', new agent reply' : ''}` : 'Open comments'}>
         <CommentIcon size={16} />
-        <span id="tdoc-fab-count">{comments.length}</span>
+        {askAi ? <AskIcon className="tdoc-fab-ai" size={11} /> : null}
+        {openCount > 0 ? <span id="tdoc-fab-count">{openCount}</span> : null}
+        {unread ? <span className="tdoc-fab-unread-dot" aria-hidden="true" /> : null}
       </Drawer.Trigger>
       <Drawer.Portal>
         <Drawer.Backdrop className="tdoc-drawer-backdrop" />
@@ -236,33 +305,39 @@ export function MobileCommentDrawer({
           <Drawer.Popup ref={drawerRef} id="tdoc-comment-layer" className="open">
             <Drawer.Title className="tdoc-visually-hidden">Comments</Drawer.Title>
             <Drawer.Close className="tdoc-drawer-handle" aria-label="Close comments" />
+            {askAi ? <div className="tdoc-drawer-tabs">
+              <SegmentedControl
+                ariaLabel="Comments or Ask AI"
+                value={tab}
+                onChange={onTab}
+                options={[
+                  { value: 'comments', label: openCount ? `Comments · ${openCount}` : 'Comments' },
+                  { value: 'ask', label: <>Ask AI{unread ? <span className="tdoc-tab-dot" aria-label="new agent reply" /> : null}</> },
+                ]}
+              />
+            </div> : null}
+            {showAsk ? <div className="tdoc-drawer-ask">{askAi}</div> : (
             <Drawer.Content className="tdoc-drawer-list">
-              {comments.map((comment) => (
-                <CommentCard
-                  key={comment.id}
-                  comment={comment}
-                  currentUser={currentUser}
-                  isOwner={isOwner}
-                  mentionable={mentionable}
-                  demo={demo}
-                  unanchored={!pinIds.has(comment.id)}
-                  expandReplies={openCommentId === comment.id && expandReplies}
-                  selected={openCommentId === comment.id}
-                  canSendToAgent={canSendToAgent}
-          agentSetupHref={agentSetupHref}
-                  onActivate={onNavigate}
-                  onReply={onReply}
-                  onReact={onReact}
-                  onDelete={onDelete}
-                  onResolve={onResolve}
-                  onEdit={onEdit}
-                  onReanchor={onReanchor}
-                  handoff={handoff}
-                  onResendHandoff={onResendHandoff}
-                  onSendHandoffElsewhere={onSendHandoffElsewhere}
-                />
-              ))}
-            </Drawer.Content>
+              <CommentListControls filter={filter} unreadCount={unreadCount} onMarkAllRead={onMarkAllRead} />
+              {!comments.length ? <EmptyCommentsHowTo
+                onAskAi={askAi && onTab ? () => onTab('ask') : onAskAi ? () => { onOpenChange(false); onAskAi(); } : null}
+              /> : null}
+              <CommentThreadList
+                comments={comments}
+                selectedId={openCommentId}
+                expandReplies={expandReplies}
+                isAnchored={(comment) => isDocumentComment(comment) || pinIds.has(comment.id)}
+                isUnread={(comment) => commentPinState(comment, { seenMap, handoffViewer, isOwner }).unread}
+                onSeen={open && !showAsk ? onMarkRead : null}
+                onNavigate={onNavigate}
+                cardProps={{
+                  currentUser, handoffViewer, isOwner, mentionable, demo,
+                  canSendToAgent, agentSetupHref, onReply, onReact, onDelete,
+                  onResolve, onEdit, onReanchor, handoff, onResendHandoff,
+                  onSendHandoffElsewhere,
+                }}
+              />
+            </Drawer.Content>)}
           </Drawer.Popup>
         </Drawer.Viewport>
       </Drawer.Portal>

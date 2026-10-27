@@ -10,13 +10,15 @@ export function AppMenu({
   sideOffset = 6,
   open,
   onOpenChange,
+  popupClassName = '',
+  positionerClassName = '',
 }) {
   return (
     <Menu.Root open={open} onOpenChange={onOpenChange}>
       <Menu.Trigger render={trigger} />
       <Menu.Portal container={usePortalContainer()}>
-        <Menu.Positioner align={align} sideOffset={sideOffset} className="ui-menu-positioner">
-          <Menu.Popup className="ui-menu-popup">{children}</Menu.Popup>
+        <Menu.Positioner align={align} sideOffset={sideOffset} className={`ui-menu-positioner ${positionerClassName}`.trim()}>
+          <Menu.Popup className={`ui-menu-popup ${popupClassName}`.trim()}>{children}</Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>

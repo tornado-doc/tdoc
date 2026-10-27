@@ -8,6 +8,10 @@ name: PR preview
 #   CLOUDFLARE_API_TOKEN
 #   CLOUDFLARE_ACCOUNT_ID
 #   TDOC_PREVIEW_UPLOAD_TOKEN — preview-only; never TDOC_DEV_UPLOAD_TOKEN
+# Optional preview Clerk OAuth application (separate from production):
+#   GitHub Actions variable TDOC_PREVIEW_OIDC_CLIENT_ID
+#   GitHub Actions secret TDOC_PREVIEW_OIDC_CLIENT_SECRET
+#   Clerk redirect URI https://tdoc-preview.jyshi1107.workers.dev/auth/oidc/callback
 #
 # KV id is discovered at runtime (namespace title tdoc-preview-META).
 # R2 bucket tdoc-preview-docs is created if missing.
@@ -36,13 +40,15 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
 
       - name: Require preview secrets
         env:
           TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
+          TDOC_PREVIEW_OIDC_CLIENT_ID: ${{ vars.TDOC_PREVIEW_OIDC_CLIENT_ID }}
+          TDOC_PREVIEW_OIDC_CLIENT_SECRET: ${{ secrets.TDOC_PREVIEW_OIDC_CLIENT_SECRET }}
         run: |
           missing=
           [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
@@ -54,6 +60,11 @@ jobs:
             echo "Do not deploy previews to a personal Worker." >&2
             exit 1
           fi
+          if { [ -n "$TDOC_PREVIEW_OIDC_CLIENT_ID" ] && [ -z "$TDOC_PREVIEW_OIDC_CLIENT_SECRET" ]; } ||
+             { [ -z "$TDOC_PREVIEW_OIDC_CLIENT_ID" ] && [ -n "$TDOC_PREVIEW_OIDC_CLIENT_SECRET" ]; }; then
+            echo "Preview Clerk sign-in needs both TDOC_PREVIEW_OIDC_CLIENT_ID (Actions variable) and TDOC_PREVIEW_OIDC_CLIENT_SECRET (Actions secret)." >&2
+            exit 1
+          fi
 
       - name: Offline test suite
         run: npm test
@@ -63,6 +74,8 @@ jobs:
 
       - name: Ensure preview R2 + KV (not production tdoc-docs / META)
         id: ns
+        env:
+          TDOC_PREVIEW_OIDC_CLIENT_ID: ${{ vars.TDOC_PREVIEW_OIDC_CLIENT_ID }}
         run: |
           set -euo pipefail
           if ! wrangler r2 bucket list 2>/dev/null | grep -q 'tdoc-preview-docs'; then
@@ -82,6 +95,7 @@ jobs:
           echo "kv_id=$KV_ID" >> "$GITHUB_OUTPUT"
           sed -e "s/PLACEHOLDER_PREVIEW_KV_ID/${KV_ID}/g" \
             worker/wrangler.preview.toml.template > worker/wrangler.preview.toml
+          node bin/tdoc-preview-oidc-config.js worker/wrangler.preview.toml
           # Guard: never bind production storage even if the template drifts.
           if grep -q 'bucket_name = "tdoc-docs"' worker/wrangler.preview.toml; then
             echo "preview toml bound production R2" >&2; exit 1
@@ -122,6 +136,7 @@ jobs:
       - name: Put preview-only upload token (never production)
         env:
           TDOC_PREVIEW_UPLOAD_TOKEN: ${{ secrets.TDOC_PREVIEW_UPLOAD_TOKEN }}
+          TDOC_PREVIEW_OIDC_CLIENT_SECRET: ${{ secrets.TDOC_PREVIEW_OIDC_CLIENT_SECRET }}
         working-directory: worker
         run: |
           # Must be the *versions* variant. Previews ship via `wrangler versions
@@ -133,6 +148,9 @@ jobs:
           # every PR. `versions secret put` updates the secret at the version
           # level and is inherited by the version uploaded next.
           printf '%s' "$TDOC_PREVIEW_UPLOAD_TOKEN" | wrangler versions secret put TDOC_UPLOAD_TOKEN --name tdoc-preview
+          if [ -n "$TDOC_PREVIEW_OIDC_CLIENT_SECRET" ]; then
+            printf '%s' "$TDOC_PREVIEW_OIDC_CLIENT_SECRET" | wrangler versions secret put OIDC_CLIENT_SECRET --name tdoc-preview
+          fi
 
       - name: Upload version with pr-N alias
         id: upload
@@ -209,12 +227,20 @@ jobs:
           STORED_FINGERPRINT="$(wrangler kv key get "$FIXTURE_MARKER" \
             --namespace-id "$PREVIEW_KV_ID" --text --remote 2>/dev/null || true)"
           if [ "$STORED_FINGERPRINT" = "$FIXTURE_FINGERPRINT" ]; then
-            echo "preview fixtures unchanged; skipping KV delete/reseed"
-            exit 0
+            # A concurrent PR can remove the shared landing after this PR's
+            # marker was written. A matching fingerprint alone is not proof
+            # that the preview homepage still exists.
+            LANDING_STATUS="$(curl -sS --connect-timeout 10 --max-time 20 \
+              "$BASE/d/tornado-doc/v/1" -o /dev/null -w '%{http_code}')"
+            if [ "$LANDING_STATUS" = 200 ]; then
+              echo "preview fixtures unchanged; skipping KV delete/reseed"
+              exit 0
+            fi
+            echo "preview landing missing (HTTP $LANDING_STATUS); reseeding fixtures"
           fi
 
           # A PR reuses its alias and preview storage across pushes. Clear the
-          # two deterministic fixtures before reseeding so an older preview
+          # deterministic fixtures before reseeding so an older preview
           # cannot reject v1 as a stale write (or keep serving old PR code).
           reset_preview_slug() {
             local slug="$1"
@@ -252,7 +278,6 @@ jobs:
             esac
           }
           reset_preview_slug conway-life
-          reset_preview_slug tornado-doc
 
           seed() {
             local v="$1" html="$2"
@@ -357,17 +382,14 @@ jobs:
             --argjson version 1 \
             --rawfile html "$LANDING_DIR/v1/index.html" \
             --slurpfile meta "$LANDING_DIR/meta.json" \
-            '{slug:$slug, version:$version, html:$html, meta:$meta[0]}' \
+            '{slug:$slug, version:$version, html:$html, meta:$meta[0], replace:true}' \
             > /tmp/tdoc-preview-landing.json
-          curl -sS --connect-timeout 10 --max-time 90 -X POST "$BASE/api/upload" \
-            -H "Authorization: Bearer $TDOC_PREVIEW_UPLOAD_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data-binary @/tmp/tdoc-preview-landing.json \
-            | tee /tmp/tdoc-preview-landing-resp.json
-          jq -e '.ok == true' /tmp/tdoc-preview-landing-resp.json >/dev/null
+          # The homepage slug is shared by every PR preview. Replace v1 in
+          # place instead of deleting it on every run (DELETE puts it in
+          # Trash, racing other PRs). Recover a leftover Trash state once.
+          bash bin/tdoc-preview-publish-landing.sh "$BASE" /tmp/tdoc-preview-landing.json
           wrangler kv key put "$FIXTURE_MARKER" "$FIXTURE_FINGERPRINT" \
             --namespace-id "$PREVIEW_KV_ID" --remote --ttl 1209600
-          echo "seeded landing"
 
       - name: Sticky preview comment
         env:
@@ -388,6 +410,7 @@ jobs:
           **Custom design (no theme switch):** https://${PREVIEW_HOST}/d/custom-design-pr-${PR}/v/1
           **Excalidraw:** https://${PREVIEW_HOST}/d/excalidraw-pr-${PR}/v/1
           **Or a document:** https://${PREVIEW_HOST}/d/conway-life/v/2
+          **Clerk sign-in (when enabled):** the fixed tdoc-preview callback returns to this PR URL.
 
           This link is unique to this PR. New commits update the same URL. It is not [tdoc.dev](https://tdoc.dev).
 

@@ -63,7 +63,7 @@ class FakeR2 {
   }
   async put(k, v) {
     this.putCalls++;
-    this.map.set(k, String(v));
+    this.map.set(k, v instanceof Uint8Array ? new Uint8Array(v) : String(v));
   }
   // `range` as R2 takes it: the shell page reads only the head of a doc.
   async get(k, opts) {
@@ -71,11 +71,16 @@ class FakeR2 {
     let v = this.map.get(k);
     const range = opts && opts.range;
     if (range && typeof range.length === 'number') v = v.slice(range.offset || 0, (range.offset || 0) + range.length);
-    return { text: async () => v, size: this.map.get(k).length };
+    return {
+      text: async () => typeof v === 'string' ? v : new TextDecoder().decode(v),
+      arrayBuffer: async () => typeof v === 'string' ? new TextEncoder().encode(v).buffer : v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength),
+      size: this.map.get(k).length,
+    };
   }
   async head(k) {
     if (!this.map.has(k)) return null;
-    return { size: Buffer.byteLength(this.map.get(k)) };
+    const v = this.map.get(k);
+    return { size: typeof v === 'string' ? Buffer.byteLength(v) : v.byteLength };
   }
   // R2 deletes one key or an array of up to 1,000.
   async delete(k) {
@@ -92,8 +97,29 @@ class FakeR2 {
   }
 }
 
+// SQLite-backed Durable Object storage's sql.exec, on node:sqlite (Node 22+),
+// for the full-text search store. Absent on older Node: storage.sql is then
+// undefined, exactly like a KV-backed Durable Object, and search degrades.
+let nodeSqlite = null;
+try { nodeSqlite = require('node:sqlite'); } catch {}
+function fakeSql() {
+  if (!nodeSqlite) return undefined;
+  const db = new nodeSqlite.DatabaseSync(':memory:');
+  return {
+    exec(query, ...params) {
+      const rows = db.prepare(query).all(...params.map((p) => (p === undefined ? null : p)));
+      const plain = rows.map((row) => ({ ...row }));
+      return { toArray: () => plain, one: () => plain[0], [Symbol.iterator]: () => plain[Symbol.iterator]() };
+    },
+  };
+}
+
 class FakeStorage {
-  constructor() { this.map = new Map(); this.queue = Promise.resolve(); }
+  constructor() { this.map = new Map(); this.queue = Promise.resolve(); this.alarmAt = null; this._sql = undefined; }
+  get sql() { if (this._sql === undefined) this._sql = fakeSql() || null; return this._sql || undefined; }
+  async getAlarm() { return this.alarmAt; }
+  async setAlarm(at) { this.alarmAt = Number(at); }
+  async deleteAlarm() { this.alarmAt = null; }
   async transaction(fn) {
     const run = this.queue.then(() => {
       const txn = {
@@ -119,6 +145,23 @@ class FakeDurableNamespace {
     if (!this.states.has(id)) this.states.set(id, { storage: new FakeStorage() });
     return this.states.get(id);
   }
+  // Run every armed alarm until none is left (or `max` runs), as the
+  // runtime would after their delays.
+  async runAlarms(max = 100) {
+    let runs = 0;
+    for (let again = true; again && runs < max;) {
+      again = false;
+      for (const [id, state] of this.states) {
+        if (state.storage.alarmAt == null) continue;
+        state.storage.alarmAt = null;
+        const store = new this.StoreClass(state, this.env);
+        if (typeof store.alarm === 'function') await store.alarm();
+        runs += 1;
+        again = true;
+      }
+    }
+    return runs;
+  }
   get(id) {
     return {
       fetch: async (url, init = {}) => {
@@ -129,7 +172,7 @@ class FakeDurableNamespace {
   }
 }
 
-async function loadWorker() {
+async function loadWorker({ previewRenderer = false } = {}) {
   const root = path.join(__dirname, '..', '..');
   // TDOC_WORKER_JS: another worker.js to boot (test/bench compares a
   // checkout of main against the working tree with it). Tests never set it.
@@ -146,7 +189,20 @@ async function loadWorker() {
   const probeJs = require(path.join(root, 'server', 'frame-probe-source.js'))();
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
   src = src.replace('/* __TDOC_NOTIFICATION_TEXT__ */', fs.readFileSync(path.join(root, 'shell', 'src', 'notification-text.js'), 'utf8').replace(/^export /gm, ''));
+  src = src.replace('/* __TDOC_PREVIEW_VALIDATOR__ */', fs.readFileSync(path.join(root, 'server', 'preview', 'validate-svg.js'), 'utf8'));
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
+  if (previewRenderer) {
+    const dir = path.join(root, 'server', 'preview');
+    const resvg = fs.readFileSync(path.join(dir, 'resvg.mjs'), 'utf8')
+      .replace(/export\s*\{\s*Resvg2 as Resvg,\s*initWasm\s*\};?\s*$/, 'return { Resvg: Resvg2, initWasm };');
+    src = src.replace(/const PREVIEW_RENDERER = "__TDOC_PREVIEW_RENDERER__";/, 'const PREVIEW_RENDERER = (() => {\n' + resvg + '\n})();');
+    src = src.replace(/const PREVIEW_WASM = "__TDOC_PREVIEW_WASM__";/,
+      'const PREVIEW_WASM = ' + JSON.stringify(fs.readFileSync(path.join(dir, 'resvg.wasm'), 'base64')) + ';');
+    src = src.replace(/const PREVIEW_FONTS = "__TDOC_PREVIEW_FONTS__";/,
+      'const PREVIEW_FONTS = ' + JSON.stringify(['Regular', 'Bold'].map((weight) => fs.readFileSync(path.join(dir, `NotoSansSC-${weight}.ttf`), 'base64'))) + ';');
+    src = src.replace(/const PREVIEW_FONT_COVERAGE = "__TDOC_PREVIEW_FONT_COVERAGE__";/,
+      'const PREVIEW_FONT_COVERAGE = ' + fs.readFileSync(path.join(dir, 'coverage.json'), 'utf8') + ';');
+  }
   const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
   fs.writeFileSync(tmp, src);
   const mod = await import(`file://${tmp}`);

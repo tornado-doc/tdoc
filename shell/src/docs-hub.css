@@ -206,13 +206,14 @@
   .profile-pick-media {
     display: block;
     width: 100%;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: 40 / 21;
     background: var(--td-surface);
   }
   .profile-pick-media img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: top center;
     display: block;
   }
   .profile-pick-copy {
@@ -222,7 +223,7 @@
     padding: 22px 24px 24px;
     flex: 1;
   }
-  .profile-pick-card.has-image .profile-pick-copy { padding: 16px 20px 18px; }
+  .profile-pick-card.has-image .profile-pick-copy { padding: 12px 20px 14px; }
   .profile-pick-body {
     display: flex;
     flex-direction: column;
@@ -256,11 +257,7 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .profile-pick-card.has-image .profile-pick-excerpt {
-    font-size: 14px;
-    color: var(--td-muted);
-    -webkit-line-clamp: 3;
-  }
+  .profile-pick-card.has-image .profile-pick-excerpt { display: none; }
   .profile-pick-meta {
     font-size: 12px;
     color: var(--td-muted);
@@ -368,7 +365,7 @@
     color: var(--td-muted); font-size: 12px;
   }
   .doc-title { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .doc-preview-image { width: 64px; height: 44px; flex: 0 0 64px; object-fit: cover; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-surface); }
+  .doc-preview-image { width: 64px; height: 44px; flex: 0 0 64px; object-fit: contain; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-surface); }
   .doc-preview-excerpt { margin-top: 3px; color: var(--td-ink); font-size: 12.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .78; }
   .doc-meta { color: var(--td-muted); font-size: 12px; margin-top: 2px; }
   button { font: inherit; cursor: pointer; transition: border-color .12s, background .12s, color .12s; }
@@ -386,11 +383,23 @@
   .doc-list.is-grid .doc-row { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--td-line); border-radius: 10px; background: #fff; min-width: 0; }
   .doc-list.is-grid .doc-row:hover { border-color: #c9cbd2; box-shadow: 0 3px 10px rgba(16,18,26,.08); }
   .doc-list.is-grid .row-check { position: absolute; z-index: 1; top: 16px; left: 16px; padding: 4px; border-radius: 5px; background: rgba(255,255,255,.92); }
-  .doc-card-preview { position: relative; grid-column: 1 / -1; aspect-ratio: 4 / 3; min-width: 0; overflow: hidden; display: flex; align-items: flex-start; border: 1px solid var(--td-line); border-radius: 7px; background: var(--td-surface); color: var(--td-ink); text-decoration: none; }
-  .doc-card-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--td-surface); }
+  .doc-card-preview { position: relative; grid-column: 1 / -1; aspect-ratio: 40 / 21; min-width: 0; overflow: hidden; display: flex; align-items: flex-start; border: 1px solid var(--td-line); border-radius: 7px; background: var(--td-surface); color: var(--td-ink); text-decoration: none; }
+  /* Cards and screenshots are 1200 wide, 600-700 tall: cover from the top so a
+     screenshot reads as a miniature of the page's first screen. */
+  .doc-card-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; background: #fff; }
   .doc-card-preview span { display: -webkit-box; margin: 16px; overflow: hidden; -webkit-line-clamp: 6; -webkit-box-orient: vertical; font: 13px/1.55 Georgia, serif; color: var(--td-muted); }
   .doc-list.is-grid .doc-info { align-self: stretch; }
   .doc-list.is-grid .doc-preview-excerpt { display: none; }
+  /* Text card (no thumbnail): title and a few lines of excerpt across the
+     card, then the date with the star and menu on the bottom line. */
+  .doc-list.is-grid .doc-row.is-text-card { grid-template-rows: auto auto 1fr; row-gap: 6px; min-height: 132px; padding: 14px 10px 8px 14px; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-info { display: contents; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-title-line { grid-column: 1 / -1; padding-right: 26px; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-title { font-size: 15px; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-preview-excerpt { grid-column: 1 / -1; display: -webkit-box; margin: 0; white-space: normal; -webkit-line-clamp: 3; -webkit-box-orient: vertical; color: var(--td-muted); opacity: 1; font-size: 13px; line-height: 1.45; }
+  .doc-list.is-grid .doc-row.is-text-card .doc-meta { grid-column: 1; align-self: end; margin: 0; padding-bottom: 6px; }
+  .doc-list.is-grid .doc-row.is-text-card .row-actions { grid-column: 2; grid-row: 3; }
+  .doc-list.is-grid .doc-row.is-text-card .row-check { top: 10px; right: 10px; left: auto; padding: 2px; background: none; }
   .doc-list.is-grid .row-actions { align-self: end; display: flex; align-items: center; }
   /* Google-Docs-style views: My docs / Recent / Starred are pure visibility
      switches over the already-rendered page — no fetch on tab change. */
@@ -447,6 +456,21 @@
 .toolbar .search-field input[type="search"] { width: 100%; padding-left: 34px; }
 .search-syntax { flex: 1 0 100%; margin: -4px 0 0; color: var(--td-muted); font-size: 12px; }
 .search-syntax code { color: inherit; font-size: inherit; }
+/* Full-text results: the hub's own rows, with the matching passage under the
+   title. Marks use the accent tint, the hub's selection colour. */
+.text-search { margin: 22px 0 0; }
+.text-search-hd { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--td-muted); letter-spacing: 0; }
+.text-search-note { margin: 6px 0; color: var(--td-muted); font-size: 13px; }
+.text-search.is-loading .text-search-list { opacity: .6; }
+.text-search-row { align-items: flex-start; color: inherit; text-decoration: none; }
+.text-search-row:hover { background: var(--td-surface); text-decoration: none; }
+.text-search-row:hover .doc-title { color: var(--td-accent); }
+.text-search-row .doc-title-line { display: block; }
+.text-search-snippet { margin: 3px 0 0; color: var(--td-ink); font-size: 13px; line-height: 1.5; opacity: .86; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.text-search-where { color: var(--td-muted); }
+.text-search mark { background: var(--td-accent-tint); color: var(--td-ink); border-radius: 3px; padding: 0 1px; }
+.text-search .doc-title mark { color: inherit; }
 .new-folder-btn { display: inline-flex; align-items: center; gap: 6px; }
 .modal-title { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .modal-title h3 { flex: 1; margin: 0; }

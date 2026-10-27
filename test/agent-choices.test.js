@@ -45,13 +45,25 @@ t('default, then candidates, then fallback — each agent once', () => {
   assert(box.orderedAgentChoices(null).length === 0, 'no targets offers nobody');
 });
 
+t('Ask AI ranks the last editor first and keeps the server recency order, excluding stopped agents', () => {
+  const alice = raft('a', 'alice');
+  const charlie = raft('c', 'charlie');
+  const bob = raft('b', 'bob');
+  const stopped = raft('z', 'zzz', { status: 'stopped' });
+  const list = box.orderedAskAiChoices([charlie, stopped, bob, alice], bob);
+  assert(JSON.stringify(list.map((agent) => agent.agent_name)) === JSON.stringify(['bob', 'charlie', 'alice']), names(list));
+});
+
 t('the dropdown and the picker read the same helper', () => {
   const panel = read('shell/src/document/notify-handoff.jsx');
   const field = read('shell/src/document/mention-field.jsx');
   const shell = read('shell/src/document-shell.jsx');
   assert(/const choices = orderedAgentChoices\(targets\);/.test(panel), 'panel forks the ordering');
-  assert(/orderedAgentChoices\(notifyTargets\)/.test(shell), 'picker list not from orderedAgentChoices');
-  assert(/choices: orderedAgentChoices\(notifyTargets\)[^]*: \{ choices: \[\], preselected: null \}/.test(shell), 'agents offered without canSendToAgent');
+  // The @ list is composerAgents (ai-answerer.js): the edit list is
+  // orderedAgentChoices of the same targets, and only when the viewer may send.
+  const answerer = read('shell/src/document/ai-answerer.js');
+  assert(/const edit = canSendToAgent \? orderedAgentChoices\(notifyTargets\) : \[\];/.test(answerer), 'picker list not from orderedAgentChoices');
+  assert(/composerAgents\(\{\s*canSendToAgent,\s*notifyTargets,/.test(shell), 'the shell does not build the @ list from the send targets');
   assert(/matchAgentChoices\(agentsOnOffer\.choices/.test(field), 'picker does not filter the shared list');
 });
 
@@ -116,21 +128,34 @@ t('the inserted tag names the agent and is never read as a GitHub login', () => 
   const tag = `@${box.AGENT_TAG_JOINER}${box.agentMentionName(local('juliesmac', 'claude'))}`;
   const text = `please fix ${tag} thanks`;
   assert(!new RegExp(box.MENTION_RE.source, 'g').test(text), 'server would parse the tag as @login');
-  assert(text.replace(box.AGENT_TAG_JOINER, '') === 'please fix @Claude Code · julie thanks');
+  assert(text.replace(box.AGENT_TAG_JOINER, '') === 'please fix @Claude Code thanks', text);
   const raw = `@${box.AGENT_TAG_JOINER}${box.agentMentionName(raft('c', 'smarter-tdoc-claw'))}`;
   assert(!new RegExp(box.MENTION_RE.source, 'g').test(`see ${raw}`), 'a handle-named tag reads as @login');
 });
 
+t('the tag is the short name; the owner only when two agents share it (Julie, 2026-10-25)', () => {
+  const list = box.orderedAgentChoices(targets);
+  assert(JSON.stringify(list.map((x) => box.agentMentionName(x, list))) === JSON.stringify(['xiaocc', 'Claude Code', 'Codex', 'devin']));
+  assert(box.agentMentionName({ tdoc_ai: true }, list) === 'tdoc AI');
+  assert(box.agentMentionName({ ...raft('t', 'bot'), team_agent: { id: 'ta', name: 'tdoc-bot' }, owner: { display: 'Tdoc team agent' } }, list) === 'tdoc-bot');
+  const owners = [local('juliesmac', 'claude'), { ...local('bobmac', 'claude'), owner: { display: 'bob' } }];
+  assert(JSON.stringify(owners.map((x) => box.agentMentionName(x, owners))) === JSON.stringify(['Claude Code · julie', 'Claude Code · bob']));
+  // A draft from before the short tags still names its agent, whole.
+  const old = `@${box.AGENT_TAG_JOINER}Claude Code · julie`;
+  const span = box.taggedAgentSpan(`fix ${old} now`, list);
+  assert(span && span.target === list[1] && span.end - span.start === old.length, JSON.stringify(span));
+});
+
 t('a posted text hands itself to the first agent it tags', () => {
   const list = box.orderedAgentChoices(targets);
-  const tag = (x) => `@${box.AGENT_TAG_JOINER}${box.agentMentionName(x)}`;
+  const tag = (x, from = list) => `@${box.AGENT_TAG_JOINER}${box.agentMentionName(x, from)}`;
   assert(box.taggedAgent(`fix ${tag(list[2])} and ${tag(list[3])}`, list) === list[2]);
   assert(box.taggedAgent(`${tag(list[3])}: please`, list) === list[3]);
   // Typed by hand, without the picker, it is a person's @login as before.
   assert(box.taggedAgent('fix @devin please', list) === null);
   assert(box.taggedAgent(`fix ${tag(list[2])}`, []) === null, 'no agents on offer, no handoff');
   const bare = { provider: 'raft', server_id: 'S2', agent_sub: 'd2', agent_name: 'devin' };
-  assert(box.taggedAgent(`fix ${tag(list[3])}`, [bare, ...list]) === list[3], 'a shorter name took the longer tag');
+  assert(box.taggedAgent(`fix ${tag(list[3], [bare, ...list])}`, [bare, ...list]) === list[3], 'a shorter name took the longer tag');
 });
 
 t('a tag with the location suffix hands itself to the right twin', () => {

@@ -67,7 +67,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     call(env, '/api/notify/local/register', { method: 'POST', token, body });
   const pending = (env, token, device = 'juliesmac') =>
     call(env, `/api/notify/local/pending?device=${device}`, { token });
-  const comments = async (env, slug) => (await call(env, `/api/comments?slug=${slug}&version=1`)).body;
+  const comments = async (env, slug, cookie) => (await call(env, `/api/comments?slug=${slug}&version=1`, { cookie })).body;
   const LOCAL_CLAUDE = { provider: 'local', server_id: 'juliesmac', agent_sub: 'juliesmac_claude' };
 
   await t('register needs the account upload token: no session, no feedback token, no anonymous', async () => {
@@ -115,21 +115,21 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const { env, owner, slug } = await seed();
     await register(env, owner.token);
     let targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
-    assert(targets.default && targets.default.provider === 'local' && targets.default.status === 'active', JSON.stringify(targets.default));
-    assert(targets.default.last_seen, 'last_seen rides on the target');
+    assert(!targets.default && targets.candidates.some((t) => t.provider === 'local' && t.status === 'active'), JSON.stringify(targets));
+    assert(targets.candidates.some((t) => t.provider === 'local' && t.last_seen), 'last_seen rides on the target');
     // 31 minutes of silence from the daemon.
     await env.META.put('local-agents-seen:' + owner.account_id, JSON.stringify({ juliesmac: new Date(Date.now() - 31 * 60000).toISOString() }));
     targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
-    assert(targets.default.status === 'inactive', `expected inactive, got ${targets.default.status}`);
+    assert(targets.candidates.some((t) => t.provider === 'local' && t.status === 'inactive'), `expected inactive: ${JSON.stringify(targets)}`);
   });
 
   await t('a handoff to a local agent is queued, not delivered, and lands in the owner pending list only', async () => {
-    const { env, owner, slug, ids } = await seed();
+    const { env, owner, reader, slug, ids } = await seed();
     await register(env, owner.token);
     const r = await call(env, '/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug, comment_ids: ids, recipient: LOCAL_CLAUDE, instruction: 'tighten the intro' } });
     assert(r.status === 200 && r.body.ok, JSON.stringify(r.body));
     assert(r.body.delivery.status === 'queued' && !r.body.delivery.error, JSON.stringify(r.body.delivery));
-    const [c] = await comments(env, slug);
+    const [c] = await comments(env, slug, reader);
     assert(c.handoff_status === 'sent' && c.handoff_to.provider === 'local' && c.handoff_to.agent_name === 'claude on juliesmac', JSON.stringify(c.handoff_to));
     assert(c.handoff_delivery.status === 'queued', 'the card sees queued');
 
@@ -172,7 +172,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   });
 
   await t('ack keeps the handoff pending (a daemon that dies mid-run retries); resolve drops it', async () => {
-    const { env, owner, slug, ids } = await seed();
+    const { env, owner, reader, slug, ids } = await seed();
     await register(env, owner.token);
     const r = await call(env, '/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug, comment_ids: ids, recipient: LOCAL_CLAUDE } });
     const hid = r.body.handoff_id;
@@ -180,13 +180,13 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(ack.status === 200 && ack.body.acked_at, JSON.stringify(ack.body));
     let p = await pending(env, owner.token);
     assert(p.body.pending.length === 1 && p.body.pending[0].acked_at === ack.body.acked_at, 'still pending after ack, and says it was acked');
-    let [c] = await comments(env, slug);
+    let [c] = await comments(env, slug, reader);
     assert(c.handoff_acked_at === ack.body.acked_at, 'the card sees picked up');
     const done = await call(env, '/api/notify/resolve', { method: 'POST', token: owner.token, body: { slug, handoff_id: hid } });
     assert(done.status === 200 && done.body.resolved === 2, JSON.stringify(done.body));
     p = await pending(env, owner.token);
     assert(p.body.pending.length === 0, 'resolved handoffs leave the pending list');
-    [c] = await comments(env, slug);
+    [c] = await comments(env, slug, reader);
     assert(c.handoff_status === 'resolved', `expected resolved, got ${c.handoff_status}`);
   });
 
@@ -201,14 +201,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   });
 
   await t('fail records a failed delivery the card can resend; resend queues it for the daemon again', async () => {
-    const { env, owner, slug, ids } = await seed();
+    const { env, owner, reader, slug, ids } = await seed();
     await register(env, owner.token);
     const r = await call(env, '/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug, comment_ids: ids, recipient: LOCAL_CLAUDE } });
     const hid = r.body.handoff_id;
     const f = await call(env, '/api/notify/local/fail', { method: 'POST', token: owner.token, body: { slug, handoff_id: hid, error: 'exit 1' } });
     assert(f.status === 200 && f.body.delivery.status === 'failed' && f.body.delivery.error === 'agent_run_failed', JSON.stringify(f.body));
     assert((await pending(env, owner.token)).body.pending.length === 0, 'a failed run leaves the pending list');
-    let [c] = await comments(env, slug);
+    let [c] = await comments(env, slug, reader);
     assert(c.handoff_delivery.status === 'failed' && c.handoff_delivery.error === 'agent_run_failed', JSON.stringify(c.handoff_delivery));
     const stored = JSON.parse(await env.META.get(`handoffs:${slug}`)).find((h) => h.handoff_id === hid);
     assert(stored.run && stored.run.error === 'exit 1', 'the run detail is kept on the record');
@@ -216,7 +216,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(again.status === 200 && again.body.delivery.status === 'queued', JSON.stringify(again.body));
     const p = await pending(env, owner.token);
     assert(p.body.pending.length === 1 && p.body.pending[0].handoff_id === hid, 'resend puts it back for the daemon');
-    [c] = await comments(env, slug);
+    [c] = await comments(env, slug, reader);
     assert(c.handoff_delivery.status === 'queued', 'the card is back to queued');
     assert(!JSON.parse(await env.META.get(`handoffs:${slug}`)).find((h) => h.handoff_id === hid).run, 'the old run detail is cleared');
   });
@@ -232,7 +232,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(g.status === 403, `another account got ${g.status}`);
   });
 
-  await t('a reply from the daemon-run CLI wears the local mark and takes the doc seat', async () => {
+  await t('a reply from the daemon-run CLI wears the local mark and is offered for the doc', async () => {
     const { env, owner, slug, ids } = await seed();
     await register(env, owner.token);
     const r = await worker.fetch(req('/api/agent/reply', {
@@ -245,7 +245,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(body.author.cli === 'codex' && !body.author.handle && body.author.location === 'juliesmac', JSON.stringify(body.author));
     assert(body.author.owner && body.author.owner.display === owner.login, JSON.stringify(body.author.owner));
     const targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
-    assert(targets.default.source === 'doc' && targets.default.cli === 'codex', `seat: ${JSON.stringify(targets.default)}`);
+    assert(!targets.default && targets.candidates.some((t) => t.cli === 'codex'), `targets: ${JSON.stringify(targets)}`);
     const unknown = await worker.fetch(req('/api/agent/reply', {
       method: 'POST', token: owner.token, headers: { 'X-Tdoc-Agent': 'local/strangerbox/strangerbox_claude' },
       body: { slug, parent_id: ids[1], text: 'hi', status: 'applied', agent_login: 'claude' },
@@ -270,7 +270,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const back = await register(env, owner.token);
     assert(back.body.added === 2, 'registering after a disconnect adds them again');
     targets = (await call(env, `/api/notify/targets?slug=${slug}`, { cookie: owner.cookie })).body;
-    assert(targets.default && targets.default.provider === 'local', 'and they are offered again');
+    assert(!targets.default && targets.candidates.some((t) => t.provider === 'local'), 'and they are offered again');
   });
 
   // Who may make the owner's computer run. authorizeDocEdit admits more

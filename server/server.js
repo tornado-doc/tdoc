@@ -9,6 +9,16 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const { commentId } = require('./comment-id');
+
+function invalidProductAnchorUrl(anchor) {
+  if (!anchor || anchor.kind !== 'product') return false;
+  if (typeof anchor.url !== 'string') return true;
+  try {
+    const url = new URL(anchor.url);
+    return url.protocol !== 'http:' && url.protocol !== 'https:';
+  } catch { return true; }
+}
 
 
 // The server knows which Node is running it; a spawned child may not. When the
@@ -209,7 +219,7 @@ function seedFirstCommentLocal(slug) {
   const file = path.join(ROOT, slug, 'comments.json');
   const comments = readCommentFile(file);
   comments.push({
-    id: `c_${Date.now()}`, version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
+    id: commentId('c'), version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
     mentions: [], author: SEED_COMMENT_AUTHOR, status: 'open', created: new Date().toISOString(),
     replies: [], reactions: {},
   });
@@ -718,10 +728,8 @@ function isLocalMutation(req) {
 
 // Escape `</script>` and HTML comment terminators so a malicious or stray value
 // inside the JSON payload can't break out of the surrounding <script> block.
-// Replace the acting agent's reaction on a comment with the emoji for the new
-// status. Also removes legacy `tdoc-agent` reactions first so old state
-// can't outlive the new outcome (e.g. an "applied" ✅ after a later
-// "question" outcome on the same comment).
+// Agent verdicts used to create reactions. Keep their set only to clean old
+// local comment files when a thread is reopened; new verdicts do not react.
 const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓', answered: '💬' };
 // The emoji set the agent uses as a verdict marker — used by the per-version
 // fold to strip a stale verdict off snapshots where the comment reads 'open'.
@@ -803,10 +811,10 @@ function agentIdentity(body = {}, env = {}) {
   if (!avatar) avatar = logoForAgentLogin(login);
   return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
 }
-function setAgentReaction(target, status, actor = 'tdoc-agent') {
-  if (!target.reactions) target.reactions = {};
+function clearLegacyAgentReactions(target, actor = 'tdoc-agent') {
+  if (!target.reactions) return;
   const agentUsers = new Set(['tdoc-agent', actor].filter(Boolean));
-  for (const emoji of Object.keys(target.reactions)) {
+  for (const emoji of AGENT_VERDICT_EMOJI) {
     const users = target.reactions[emoji] || [];
     for (let i = users.length - 1; i >= 0; i--) {
       if (agentUsers.has(users[i])) users.splice(i, 1);
@@ -814,11 +822,6 @@ function setAgentReaction(target, status, actor = 'tdoc-agent') {
     if (users.length === 0) delete target.reactions[emoji];
     else target.reactions[emoji] = users;
   }
-  const next = AGENT_STATUS_EMOJI[status];
-  if (!next) return;
-  const u = target.reactions[next] || [];
-  if (!u.includes(actor)) u.push(actor);
-  target.reactions[next] = u;
 }
 
 function safeJsonForScript(obj) {
@@ -1184,7 +1187,7 @@ function foldCommentsAtVersion(comments, version) {
     const resolvedByV = c.status === 'applied' && appliedIn != null && appliedIn <= V;
     // Reactions are stored flat (no per-reaction version), so spreading `...c`
     // would carry the CURRENT reactions — including the agent verdict emoji
-    // (✅/🟡/❓ written by setAgentReaction) — onto every past snapshot. On a
+    // (✅/🟡/❓ written by the old agent-reaction path) — onto every past snapshot. On a
     // version where the comment folds to 'open' that's a contradictory
     // "resolved" emoji, so drop the agent verdict there.
     let reactions = c.reactions;
@@ -2006,6 +2009,7 @@ const server = http.createServer(async (req, res) => {
     // not a comment, and one that gets in cannot be seen or removed (#532).
     const text = typeof body.text === 'string' ? body.text.trim() : body.text;
     if (!slug || !text) return json(res, 400, { error: 'invalid slug or missing text' });
+    if (invalidProductAnchorUrl(anchor)) return json(res, 400, { error: 'invalid_product_url' });
     const file = path.join(ROOT, slug, 'comments.json');
     const comments = readCommentFile(file);
     const created = new Date().toISOString();
@@ -2026,7 +2030,7 @@ const server = http.createServer(async (req, res) => {
       // `r.version` check falls back to the parent's created_in, so replies were
       // never hidden on older versions (diverging from the worker).
       // parent_id is the immediate parent (top-level or another reply).
-      const reply = { id: `r_${Date.now()}`, parent_id, text, mentions, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
+      const reply = { id: commentId('r'), parent_id, text, mentions, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
       thread.replies.push(reply);
       writeJson(file, comments);
       if (E2E_USER) {
@@ -2044,7 +2048,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ...reply, mention_outcome: localMentionOutcome(comments, mentions) });
     }
     const entry = {
-      id: `c_${Date.now()}`,
+      id: commentId('c'),
       version: version || 1,
       anchor: anchor || null,
       text,
@@ -2109,7 +2113,7 @@ const server = http.createServer(async (req, res) => {
     const agent = agentIdentity(body, process.env);
     parent.agent_actor = agent.login;
     const reply = {
-      id: `r_${Date.now()}`,
+      id: commentId('r'),
       parent_id,
       text,
       // Scope the agent reply to the version it was applied at (falls back to
@@ -2127,7 +2131,6 @@ const server = http.createServer(async (req, res) => {
     } else if (agentStatus === 'question' || agentStatus === 'partial' || agentStatus === 'answered') {
       parent.status = 'open';
     }
-    setAgentReaction(parent, agentStatus, agent.login);
     writeJson(file, all);
     return json(res, 200, reply);
   }
@@ -2195,6 +2198,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 404, { error: 'not_found' });
     }
     if (!slug || !id || !anchor) return json(res, 400, { error: 'invalid slug or missing id/anchor' });
+    if (invalidProductAnchorUrl(anchor)) return json(res, 400, { error: 'invalid_product_url' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
     const target = all.find(c => c.id === id);
@@ -2202,7 +2206,7 @@ const server = http.createServer(async (req, res) => {
     target.anchor = anchor;
     target.status = 'open';
     delete target.applied_in;
-    setAgentReaction(target, null, target.agent_actor || 'tdoc-agent');
+    clearLegacyAgentReactions(target, target.agent_actor || 'tdoc-agent');
     delete target.agent_actor;
     writeJson(file, all);
     return json(res, 200, target);

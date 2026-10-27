@@ -35,24 +35,24 @@ const [fixture] = require('./fixtures/tdocs/reply-activity/comments.json');
     });
     await page.goto(url);
     const pin = page.locator('.tdoc-pin[data-id="delivery"]');
-    await page.locator('.tdoc-pin.is-waiting-handoff[data-id="delivery"]').waitFor();
-    await page.getByText('Waiting on agent · 1 comment', { exact: false }).waitFor();
+    // The archived fixture is older than the no-response threshold, so its
+    // initial handoff is a warning marker rather than a pulsing avatar.
+    await pin.locator('.tdoc-pin-handoff-badge.is-warning').waitFor();
     replied = true;
-    await page.getByText('Replied · 1 comment', { exact: true }).waitFor({ timeout: 20000 });
+    await pin.locator('.tdoc-pin-handoff-badge.is-warning').waitFor({ state: 'detached', timeout: 20000 });
     assert(reads >= 2, 'the existing polling received the reply without a reload');
-    assert(!/is-waiting-handoff/.test(await pin.getAttribute('class')), 'reply removes the pulsing class');
-    assert.equal(await pin.evaluate(el => getComputedStyle(el, '::after').animationName), 'none');
+    assert(!/is-waiting-handoff/.test(await pin.getAttribute('class')), 'reply stops the pending cue');
     assert.equal(page.url(), url, 'v3 publishing must not navigate the v2 reader');
     const frame = page.frameLocator('iframe[aria-label="Document content"]');
     assert.equal(await frame.locator('[data-tdoc-aid="delivery"]').innerText(), 'Delivery is planned for Friday.');
     await pin.click();
-    await page.locator('.tdoc-handoff-chip.is-replied').getByText('Agent replied', { exact: true }).waitFor();
+    await page.locator('.tdoc-handoff-chip').getByText('Agent replied', { exact: true }).waitFor();
     assert.equal(await page.getByText(fixture.replies[0].text, { exact: true }).count(), 0, 'v3 reply text is not inserted into v2');
     const shots = process.env.TDOC_REPLY_SHOTS;
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 960 });
       if (width === 390) await page.locator('.tdoc-fab').click();
-      await page.locator('.tdoc-handoff-chip.is-replied:visible').waitFor();
+      await page.locator('.tdoc-handoff-chip:visible').waitFor();
       if (shots) {
         fs.mkdirSync(shots, { recursive: true });
         await page.screenshot({ path: path.join(shots, `replied-${width}.png`) });
@@ -60,13 +60,13 @@ const [fixture] = require('./fixtures/tdocs/reply-activity/comments.json');
     }
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.reload();
-    await page.getByText('Replied · 1 comment', { exact: true }).waitFor();
-    assert(!/is-waiting-handoff/.test(await pin.getAttribute('class')), 'reload cannot revive waiting');
+    await pin.waitFor();
+    assert.equal(await pin.locator('.tdoc-pin-handoff-badge.is-warning').count(), 0, 'reload cannot revive the warning');
     await page.goto(new URL('/d/reply-activity/v/3?comment=delivery', target.url).href);
     await page.getByRole('button', { name: '1 reply', exact: true }).click();
     await page.getByText(fixture.replies[0].text, { exact: true }).waitFor();
     assert.equal(await page.frameLocator('iframe[aria-label="Document content"]').locator('[data-tdoc-aid="delivery"]').innerText(), 'Delivery is planned for Monday.');
     assert.deepEqual(errors, []);
-    console.log('PASS v2 stops pulsing after v3 reply without navigation; desktop, phone, reload and v3 reply remain correct');
+    console.log('PASS v2 clears its no-response marker after v3 reply without navigation; desktop, phone, reload and v3 reply remain correct');
   } finally { await browser?.close(); target.stop(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

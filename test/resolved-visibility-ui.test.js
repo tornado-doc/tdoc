@@ -42,21 +42,55 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
         await page.waitForFunction(() => !document.querySelector('.tdoc-pin[data-id="resolved"],.tdoc-pin[data-id="element"],.tdoc-pin[data-id="moved"],.tdoc-pin[data-id="lost"]'));
       }
     };
-    const toggle = async () => {
-      const control = page.getByRole('switch', { name: /Resolved/ });
-      if (await control.isVisible()) {
-        // Keyboard activation keeps the selected card open until the toggle
-        // itself handles it (pointer-down on the toolbar dismisses cards).
-        await control.focus();
-        await page.keyboard.press('Space');
+    // The filter (Open / Resolved / All) docks at the top of the comment
+    // column on a wide screen and heads the comments drawer on a phone.
+    const filterRadio = async (name) => {
+      const phone = await page.evaluate(() => innerWidth < 700);
+      if (!phone) {
+        const dock = page.locator('.tdoc-comment-filter-dock .tdoc-comment-filter');
+        await dock.waitFor();
+        return dock.getByRole('radio', { name });
       }
-      else {
-        await page.getByRole('button', { name: 'More actions', exact: true }).click();
-        await page.locator('[data-action="show-resolved"]').click();
-      }
+      const drawer = page.locator('#tdoc-comment-layer .tdoc-comment-filter');
+      if (!(await drawer.isVisible().catch(() => false))) await page.locator('.tdoc-fab').click();
+      await drawer.waitFor();
+      return drawer.getByRole('radio', { name });
     };
-    assert.equal(await page.getByRole('switch', { name: /Resolved/ }).getAttribute('aria-checked'), 'true', 'fresh document defaults to showing all comments');
+    const allShown = async () => (await filterRadio(/^All$/)).getAttribute('aria-checked');
+    const toggle = async () => {
+      const on = (await allShown()) === 'true';
+      // Keyboard activation keeps the selected card open until the filter
+      // itself handles it (pointer-down on the page dismisses cards).
+      // The phone drawer re-renders as it opens: find the radio again if it
+      // was replaced under us.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const control = await filterRadio(on ? /^Open/ : /^All$/);
+          await control.focus({ timeout: 3000 });
+          break;
+        } catch (error) {
+          if (attempt >= 4) throw error;
+          await page.waitForTimeout(200);
+        }
+      }
+      await page.keyboard.press('Enter');
+      if (await page.locator('#tdoc-comment-layer .tdoc-comment-filter').isVisible().catch(() => false)) await page.keyboard.press('Escape');
+    };
+    assert.equal(await allShown(), 'true', 'fresh document defaults to showing all comments');
     await settled(true);
+    // The painted underline has no DOM hover target. Moving across its range
+    // still highlights the corresponding margin avatar, without a text label.
+    const hoverPoint = await frame.evaluate(text => {
+      const node = [...document.querySelectorAll('h1,h2,h3,p')].find(element => element.textContent.includes(text));
+      const range = document.createRange(); range.selectNodeContents(node);
+      const rect = range.getClientRects()[0];
+      return { x: rect.x + Math.min(12, rect.width / 2), y: rect.y + rect.height / 2 };
+    }, openText);
+    const frameBox = await page.locator('iframe[aria-label="Document content"]').boundingBox();
+    await page.mouse.move(frameBox.x + hoverPoint.x, frameBox.y + hoverPoint.y);
+    await page.locator('.tdoc-pin[data-id="open"].tdoc-pin-anchor-hover').waitFor();
+    await page.mouse.move(10, 10);
+    await page.waitForFunction(() => !document.querySelector('.tdoc-pin[data-id="open"]')?.classList.contains('tdoc-pin-anchor-hover'));
     await toggle();
     await settled(false);
     await toggle();
@@ -92,7 +126,7 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     await frame.waitForFunction(() => CSS.highlights.get('tdoc-anchor-active')?.size > 0);
     // Pointer activation dismisses the card before onClick. The probe must
     // still forget its old active target when that target becomes hidden.
-    await page.getByRole('switch', { name: /Resolved/ }).click();
+    await (await filterRadio(/^Open/)).click();
     await settled(false);
     await toggle();
     await settled(true);
@@ -121,17 +155,17 @@ const comments = require('./fixtures/resolved-visibility-comments.json');
     assert.equal(await page.locator('.tdoc-margin-comment').count(), 1, 'selected open card stays open');
 
     // A comment link must reveal resolved threads by enabling the filter,
-    // never by painting a resolved thread while the switch still says OFF.
+    // never by painting a resolved thread while the filter still hides it.
     await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto(`${target.url}?comment=resolved`);
     await page.locator('.tdoc-margin-comment').waitFor();
-    assert.equal(await page.getByRole('switch', { name: /Resolved/ }).getAttribute('aria-checked'), 'true', 'resolved deep link must agree with the visibility switch');
+    assert.equal(await allShown(), 'true', 'resolved deep link must agree with the visibility switch');
     await toggle();
     await page.locator('.tdoc-margin-comment').waitFor({ state: 'detached' });
     await page.goto(`${target.url}?comment=moved`);
     const linkedFrame = await getFrame();
     await linkedFrame.waitForFunction(() => CSS.highlights.get('tdoc-anchor-moved')?.size > 0);
-    assert.equal(await page.getByRole('switch', { name: /Resolved/ }).getAttribute('aria-checked'), 'true', 'moved resolved highlight cannot bypass the switch');
+    assert.equal(await allShown(), 'true', 'moved resolved highlight cannot bypass the switch');
     await toggle();
     await linkedFrame.waitForFunction(() => !CSS.highlights.get('tdoc-anchor-moved')?.size && !CSS.highlights.get('tdoc-anchor-active')?.size);
     // Inspect the rendered pixels as well as the registry: older Safari can

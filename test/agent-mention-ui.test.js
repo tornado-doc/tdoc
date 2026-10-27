@@ -1,6 +1,6 @@
 // @ in the composer offers the agents Send to agent would, in its order:
-// the first two with nothing typed, every match once a name is typed, in an
-// "Agents" group above people. Picking one hands the comment to that agent,
+// all of them with nothing typed (the agent pill's list), every match once a
+// name is typed, grouped Mine / Team / tdoc AI above people. Picking one hands the comment to that agent,
 // and the tag in the text is never a GitHub @login. A reader who cannot send
 // to agents sees people only.
 const assert = require('assert/strict');
@@ -64,25 +64,26 @@ async function t(name, fn) {
 
   try {
     for (const width of [1050, 390]) {
-      await t(`@ lists two agents above people; typing searches them all; picking hands over (${width}px)`, async () => {
+      await t(`@ lists every agent above people; typing searches them all; picking hands over (${width}px)`, async () => {
         const { context, page } = await open(width);
         const box = page.locator('textarea');
         await box.click();
         await box.type('please fix @');
         await page.locator('.tdoc-mention-option').first().waitFor();
         const empty = await rows(page);
-        assert.deepEqual(empty.slice(0, 3), ['# Agents', "xiaocc · juliethis doc's agent", 'Claude Code · julie'], JSON.stringify(empty));
-        assert.equal(empty[3], '# People', JSON.stringify(empty));
-        assert.ok(empty[4].startsWith('@dana'), JSON.stringify(empty));
+        // Short names and a grey tag, no group headers: the pill dropdown's rows.
+        assert.deepEqual(empty.slice(0, 4), ['xiaoccMine', 'Claude CodeMine', 'CodexMine', 'devinMine'], JSON.stringify(empty));
+        assert.equal(empty[4], '# People', JSON.stringify(empty));
+        assert.ok(empty[5].startsWith('@dana'), JSON.stringify(empty));
         assert.ok(!empty.some((r) => /^@claude\b/i.test(r)), 'a fake @claude person is offered');
         if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, `agent-mention-${width}.png`) }); }
 
         await box.type('cod');
         await page.waitForFunction(() => document.querySelectorAll('.tdoc-mention-agent').length === 2);
         const typed = await rows(page);
-        assert.deepEqual(typed, ['# Agents', 'Codex · julie', 'Claude Code · julie'], JSON.stringify(typed));
+        assert.deepEqual(typed, ['CodexMine', 'Claude CodeMine'], JSON.stringify(typed));
         await page.keyboard.press('Enter');
-        assert.equal(await box.inputValue(), `please fix @${JOINER}Codex · julie `);
+        assert.equal(await box.inputValue(), `please fix @${JOINER}Codex `);
         await page.getByRole('button', { name: 'Comment', exact: true }).click();
         await page.waitForFunction(() => window.__posts.length === 1);
         const post = await page.evaluate(() => window.__posts[0]);
@@ -93,19 +94,21 @@ async function t(name, fn) {
       });
     }
 
-    await t('the fallback agent, past the first two, is found by name', async () => {
+    await t('the fallback agent is found by name', async () => {
       const { context, page } = await open(1050);
       const box = page.locator('textarea');
       await box.click();
       await box.type('@dev');
       await page.locator('.tdoc-mention-agent').first().waitFor();
-      assert.deepEqual((await rows(page)).slice(0, 2), ['# Agents', 'devin · julie']);
+      assert.deepEqual((await rows(page)).slice(0, 1), ['devinMine']);
       await context.close();
     });
 
     await t('a plain comment that tags no agent is not handed over', async () => {
       const { context, page } = await open(1050);
       await page.locator('textarea').fill('looks good @dana');
+      // The @ list is open over the composer's only button: close it first.
+      await page.locator('.tdoc-popup .h').click();
       await page.getByRole('button', { name: 'Comment', exact: true }).click();
       await page.waitForFunction(() => window.__posts.length === 1);
       const post = await page.evaluate(() => window.__posts[0]);

@@ -6,21 +6,69 @@
 // being eval'd from a string). Keep it dependency-free (no fs/path/window).
 (function () {
   'use strict';
+  // Each search continues where the last one ended. Repeated unclosed tag
+  // openers otherwise make regex-based preview extraction quadratic.
+  function asciiLower(s) { return s.replace(/[A-Z]/g, function (c) { return c.toLowerCase(); }); }
+  function tagEnd(html, from) {
+    let quote = '';
+    for (let i = from; i < html.length; i++) {
+      const ch = html[i];
+      if (quote) { if (ch === quote) quote = ''; }
+      else if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === '>') return i + 1;
+    }
+    return -1;
+  }
+  function closingTagEnd(html, lower, name, from) {
+    let at = from;
+    while ((at = lower.indexOf('</' + name, at)) !== -1) {
+      const next = lower[at + name.length + 2] || '';
+      if (next === '>' || /\s/.test(next)) return tagEnd(html, at + name.length + 2);
+      at += name.length + 2;
+    }
+    return -1;
+  }
+  function visibleTextFromHtml(html, skipHeading) {
+    const lower = asciiLower(html);
+    const out = [];
+    let pos = 0;
+    while (pos < html.length) {
+      const lt = html.indexOf('<', pos);
+      if (lt === -1) { out.push(html.slice(pos)); break; }
+      if (lt > pos) out.push(html.slice(pos, lt));
+      if (lower.startsWith('<!--', lt)) {
+        const end = lower.indexOf('-->', lt + 4);
+        if (end === -1) break;
+        out.push(' '); pos = end + 3; continue;
+      }
+      const end = tagEnd(html, lt + 1);
+      if (end === -1) break;
+      let start = lt + 1;
+      const closing = html[start] === '/';
+      if (closing) start++;
+      let nameEnd = start;
+      while (nameEnd < end && /[a-z0-9]/.test(lower[nameEnd])) nameEnd++;
+      const name = lower.slice(start, nameEnd);
+      if (!closing && !/\/\s*>$/.test(html.slice(lt, end))
+        && (name === 'script' || name === 'style' || name === 'noscript' || (skipHeading && name === 'h1'))) {
+        const closeEnd = closingTagEnd(html, lower, name, end);
+        if (closeEnd === -1) break;
+        if (name === 'h1') skipHeading = false;
+        out.push(' '); pos = closeEnd; continue;
+      }
+      out.push(' '); pos = end;
+    }
+    return out.join('');
+  }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]); }); }
 
   // Plain-text excerpt from author HTML for Open Graph / meta description.
   // Crawlers and share cards never run the sandboxed frame, so the shell has
   // to carry a short summary itself.
-  function excerptFromHtml(html, maxLen) {
+  function excerptFromHtml(html, maxLen, skipHeading) {
     const limit = Math.max(40, Math.min(300, Number(maxLen) || 180));
     if (typeof html !== 'string' || !html) return '';
-    const text = html
-      // Close tags may carry whitespace before `>` — match that so a filter
-      // cannot be skipped with `</script >`.
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
-      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\b[^>]*>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
+    const text = visibleTextFromHtml(html, Boolean(skipHeading))
       // Drop entities entirely (to a space) rather than decoding to `&`, which
       // CodeQL flags as a double-unescape hazard when the string later goes
       // through HTML escaping for meta attributes.
@@ -58,18 +106,34 @@
   // first non-decorative inline <svg> (skip task-list checkboxes).
   function firstImageFromHtml(html) {
     if (typeof html !== 'string' || !html) return '';
-    const re = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
-    let match;
-    while ((match = re.exec(html))) {
-      const src = String(match[1] || '').trim();
+    const lower = asciiLower(html);
+    let pos = 0;
+    let at;
+    while ((at = lower.indexOf('<img', pos)) !== -1) {
+      pos = at + 4;
+      if (!/[\s/>]/.test(lower[pos] || '')) continue;
+      const end = tagEnd(html, pos);
+      if (end === -1) break;
+      pos = end;
+      // No useful image URL needs a megabyte of attributes. Bounding this
+      // slice also keeps malformed repeated `src="` attempts cheap.
+      const match = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(html.slice(at, Math.min(end, at + 8192)));
+      const src = String(match && match[1] || '').trim();
       if (!src || /^data:/i.test(src)) continue;
       if (/(?:favicon|apple-touch-icon|tdoc_logo)/i.test(src)) continue;
       return src;
     }
-    const svgs = html.match(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi) || [];
-    for (let i = 0; i < svgs.length; i++) {
-      const svg = svgs[i];
-      if (isDecorativeSvg(svg) || svg.length > 60000) continue;
+    pos = 0;
+    while ((at = lower.indexOf('<svg', pos)) !== -1) {
+      pos = at + 4;
+      if (!/[\s/>]/.test(lower[pos] || '')) continue;
+      const openEnd = tagEnd(html, pos);
+      if (openEnd === -1) break;
+      const end = closingTagEnd(html, lower, 'svg', openEnd);
+      if (end === -1) break;
+      pos = end;
+      const svg = html.slice(at, end);
+      if (svg.length > 60000 || isDecorativeSvg(svg)) continue;
       return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
     }
     return '';
@@ -94,11 +158,8 @@
   // repeated in the lead — the double-title bug on profile picks.
   function previewFromHtml(html, opts) {
     const o = opts && typeof opts === 'object' ? opts : {};
-    let source = typeof html === 'string' ? html : '';
-    if (o.skipHeading !== false) {
-      source = source.replace(/<h1\b[^>]*>[\s\S]*?<\/h1\b[^>]*>/i, ' ');
-    }
-    let excerpt = excerptFromHtml(source, o.maxLen || 220);
+    const source = typeof html === 'string' ? html : '';
+    let excerpt = excerptFromHtml(source, o.maxLen || 220, o.skipHeading !== false);
     const title = typeof o.title === 'string' ? o.title.trim() : '';
     if (title && excerpt) {
       const lower = excerpt.toLowerCase();
@@ -135,8 +196,9 @@
     if (title) out += '<meta property="og:title" content="' + title + '">\n';
     if (description) out += '<meta property="og:description" content="' + description + '">\n';
     if (image) out += '<meta property="og:image" content="' + image + '">\n';
-    // Logo is square; summary (not summary_large_image) matches it.
-    out += '<meta name="twitter:card" content="summary">\n';
+    // The generated/custom preview card is 1200x630 (summary_large_image);
+    // the square logo fallback keeps summary.
+    out += '<meta name="twitter:card" content="' + (image && seo.image_large ? 'summary_large_image' : 'summary') + '">\n';
     if (title) out += '<meta name="twitter:title" content="' + title + '">\n';
     if (description) out += '<meta name="twitter:description" content="' + description + '">\n';
     if (image) out += '<meta name="twitter:image" content="' + image + '">\n';

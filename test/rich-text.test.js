@@ -35,6 +35,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(nodes[0].items.length === 2, JSON.stringify(nodes[0]));
   });
 
+  await t('headings, ordered lists, and labeled safe links', () => {
+    const nodes = parseRichText('## Summary\n1. first\n2. second\nRead [details](https://tdoc.dev/docs) and [unsafe](javascript:alert(1)).');
+    assert(nodes[0].type === 'heading' && nodes[0].level === 2, JSON.stringify(nodes));
+    assert(nodes[1].type === 'list' && nodes[1].ordered && nodes[1].items.length === 2, JSON.stringify(nodes));
+    const links = nodes.flatMap((node) => node.children || []).filter((node) => node.type === 'link');
+    assert(links.length === 1 && links[0].label === 'details' && links[0].value === 'https://tdoc.dev/docs', JSON.stringify(links));
+  });
+
   await t('bold can wrap a mention (parse order)', () => {
     // Markdown first: **注意 @julie 这段** stays one strong node.
     const nodes = parseRichText('**注意 @julie 这段是粗体** 尾巴');

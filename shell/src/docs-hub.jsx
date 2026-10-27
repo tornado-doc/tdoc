@@ -10,7 +10,6 @@ import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { ConnectorsBody } from './connectors-page.jsx';
 import { DevicesBody } from './tokens-page.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
-import { DebugBar } from './debug-bar.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
 import { QuotaBumpDialog } from './document/document-dialogs.jsx';
@@ -38,6 +37,8 @@ import {
 } from './docs-hub/teams.jsx';
 import { useDocsHub } from './hooks/use-docs-hub.js';
 import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from './docs-hub/search.js';
+import { TextSearchResults, useTextSearch } from './docs-hub/text-search.jsx';
+import { isFeatureOn } from './feature-flags.js';
 import { markShareAfterNav } from './profile-posters.js';
 import './docs-hub.css';
 
@@ -629,6 +630,29 @@ export function DocsHub({ boot }) {
   const teamFolderCounts = folderContents(spaceFolders, allTeamDocs);
   const pickSpace = (id) => { setTeamFolder(''); setSpace(id); };
 
+  // Words inside documents and comments, from the server, for the space on
+  // screen. The title filter above stays instant; these follow it.
+  // Behind the fullTextSearch flag (dev mode only until approved): off, the
+  // hook never asks and the section never shows.
+  const [fullTextSearch] = useState(() => isFeatureOn('fullTextSearch'));
+  const textSearch = useTextSearch(fullTextSearch && view === 'docs' ? hub.query : '', team ? team.id : '');
+  // With no title match, the empty notice waits for the text results and
+  // only shows when they found nothing either.
+  const titleEmpty = (searching) => {
+    if (!searching) return null;
+    if (textSearch.status === 'loading') return null;
+    if (textSearch.status === 'done' && textSearch.results.length) return null;
+    return 'No matches.';
+  };
+  const textResultPath = (item) => {
+    if (item.workspace_id) {
+      const folderPath = team && item.workspace_id === team.id ? teamPathForDoc(item) : '';
+      return [team && item.workspace_id === team.id ? team.name : '', folderPath].filter(Boolean).join(' › ');
+    }
+    if (item.mine) return ['My docs', hub.pathForDoc(item)].filter(Boolean).join(' › ');
+    return item.owner ? `by ${item.owner}` : 'Shared with you';
+  };
+
   useEffect(() => {
     if (space) {
       const folderPart = view === 'docs' && teamFolder ? `&folder=${encodeURIComponent(teamFolder)}` : '';
@@ -948,6 +972,7 @@ export function DocsHub({ boot }) {
         identity={boot.identity}
         profile={boot.profile || null}
         onClaimProfile={boot.profile ? () => setModal({ type: 'claim-handle' }) : null}
+        onboardingTest={boot.debug ? { record: boot.onboarding, surface: 'hub', onState: () => location.reload() } : null}
         space={space}
         teams={teams}
         onSpace={pickSpace}
@@ -1046,8 +1071,13 @@ export function DocsHub({ boot }) {
                   menuFor={teamDocMenu}
                   inFolder={!!teamFolder || shownTeamFolders.length > 0}
                   layout={layout}
-                  empty={teamSearching ? 'No matches.' : undefined}
+                  empty={teamSearching ? titleEmpty(true) : undefined}
                   pathForDoc={teamSearching ? teamPathForDoc : null}
+                />
+                <TextSearchResults
+                  search={textSearch}
+                  exclude={new Set(shownTeamDocs.map((doc) => doc.slug))}
+                  pathFor={textResultPath}
                 />
               </>
             )}
@@ -1056,11 +1086,6 @@ export function DocsHub({ boot }) {
         <>
 
         <OnboardingChecklist record={boot.onboarding} docs={hub.docs} />
-        {/* The checklist is on this page, so all six states show a difference
-            here -- this is the one surface that has a face for every one. */}
-        {boot.debug ? (
-          <DebugBar record={boot.onboarding} surface="hub" onState={() => location.reload()} />
-        ) : null}
         {view === 'docs' ? (
           <section className="pane" id="pane-mine">
             <DocsToolbar query={hub.query} onQuery={hub.setQuery} sort={hub.sort} onSort={hub.setSort}>
@@ -1141,7 +1166,12 @@ export function DocsHub({ boot }) {
                 menuItems: docMenu([doc.slug], doc),
                 data: { created: doc.created, updated: doc.updated, folder: doc.folder },
               })}
-              empty={!hub.shownFolders.length ? (hub.query ? 'No matches.' : 'No published docs here.') : null}
+              empty={!hub.shownFolders.length ? (hub.query ? titleEmpty(true) : 'No published docs here.') : null}
+            />
+            <TextSearchResults
+              search={textSearch}
+              exclude={new Set(hub.shownDocs.map((doc) => doc.slug))}
+              pathFor={textResultPath}
             />
           </section>
         ) : null}
