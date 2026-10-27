@@ -138,6 +138,7 @@ const OFFLINE = [
   'kv-write-budget.test.js', // repeat actions spend no extra KV writes (daily quota)
   'team-billing.test.js', // #48 Team plan: Stripe checkout, portal, signed webhook, seat sync
   'team-scoped-token.test.js', // #65 a token narrowed to one team cannot read, list or write outside it
+  'team-publish-personal-quota.test.js', // --team lands a new doc in the team, so a full My docs does not refuse it
   'workspace-scoped-token.test.js', // agent connections reach only the workspaces ticked for them; change and remove take effect at once
   'appsumo-licensing.test.js', // #61 AppSumo lifetime licenses: signed webhook, OAuth claim, seat cap, refund
   'logout-provider.test.js', // #58 logout also ends the Clerk session
