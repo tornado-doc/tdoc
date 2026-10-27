@@ -130,6 +130,9 @@ ${filler(30)}
       await frame.evaluate(() => window.scrollTo(0, 0));
       await page.locator('.tdoc-fab').tap();
       await page.waitForSelector('#tdoc-comment-layer');
+      // Let the drawer finish sliding in: a card measured mid-slide is not
+      // where the finger lands.
+      await page.waitForFunction(() => { const p = document.querySelector('#tdoc-comment-layer'); return p && !p.hasAttribute('data-starting-style') && !p.getAnimations().length; });
       const card = page.locator('#tdoc-comment-layer [data-comment-id="c_charlie"]');
       await card.scrollIntoViewIfNeeded();
       const box = await card.boundingBox();
