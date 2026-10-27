@@ -1443,7 +1443,7 @@ export function DocumentShell({ boot, config }) {
   // whether the page can honour it, because a row naming a line that is not
   // here is the one thing this row promised never to do.
   const hintStep = docStep(onboardingRecord, config.slug, handoffOnPage);
-  const practiceTutorial = onboardingRecord?.daemon_practice_doc === config.slug;
+  const practiceTutorial = isFeatureOn('aiOnboarding') && onboardingRecord?.daemon_practice_doc === config.slug;
   const [tutorialReopen, setTutorialReopen] = useState(0);
   // What `goToStep` would open, if anything. The comment step opens tdoc's
   // seeded card, and a CLI-first publisher has none -- seeding is reserved for

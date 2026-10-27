@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { isFeatureOn } from '../feature-flags.js';
 import { Check, X } from 'lucide-react';
 import './step-hint.css';
 
@@ -55,7 +56,7 @@ export function docStep(record, slug, canHandoff = true) {
 // version says what to do with a mouse and what will happen when they do.
 const LINES = {
   comment: 'Select a sentence to comment.',
-  handoff: 'Send your comment to your AI.',
+  handoff: 'Ask your agent to fix it.',
   waiting: 'Waiting for your agent…',
   reading: 'Your agent is reading…',
   stuck: 'Check your agent’s window.',
@@ -144,7 +145,7 @@ export function DocStepHint({ step, agentState = 'idle', banner = false, justFin
         ) : (
           <span className="sh-step" aria-hidden="true">{STEP_NO[shown]}</span>
         )}
-        <span className="sh-text">{ticking ? DONE_LINES[finished] : LINES[key]}</span>
+        <span className="sh-text">{ticking ? DONE_LINES[finished] : key === 'handoff' && isFeatureOn('aiOnboarding') ? 'Send your comment to your AI.' : LINES[key]}</span>
         {still ? null : (
           <>
             {/* Only when there is somewhere to go. This row opens the card that

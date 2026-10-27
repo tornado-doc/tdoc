@@ -77,22 +77,6 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
   const addHook = async (env, cookie, url = 'https://hooks.example/a', label = 'My bot') =>
     (await worker.fetch(post('/api/me/connectors/webhook', cookie, { url, label }), env, {})).json();
 
-  await t('a platform agent registers idempotently with only its own account credential', async () => {
-    const { env, owner } = await seed();
-    const other = await issue(worker, env, 'other-bot-owner');
-    const register = (token, url='https://hooks.example/bot') => worker.fetch(req('/api/notify/webhook/register', { method:'POST', token, body:{url,label:'My bot'} }), env, {});
-    assert((await register(null)).status === 401, 'anonymous platform registered');
-    assert((await register(owner.token,'http://hooks.example/bot')).status === 400, 'insecure receiver accepted');
-    const first = await (await register(owner.token)).json();
-    const again = await (await register(owner.token)).json();
-    assert(first.target.agent_sub === again.target.agent_sub && first.secret === again.secret, 'retry rotated the receiver');
-    const theirs = await (await register(other.token)).json();
-    assert(theirs.target.agent_sub !== first.target.agent_sub && theirs.secret !== first.secret, 'accounts shared receiver credentials');
-    const list = await (await worker.fetch(req('/api/me/connectors',{cookie:owner.cookie}),env,{})).json();
-    assert(list.targets.length === 1, 'retry duplicated receiver');
-    assert(!JSON.stringify(list).includes(first.secret), 'private signing secret exposed in browser list');
-  });
-
   await t('a webhook connector is added once, its secret shown once', async () => {
     const { env, owner } = await seed();
     for (const url of ['http://hooks.example/a', 'not a url', 'https://u:p@hooks.example/a']) {

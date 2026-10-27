@@ -121,13 +121,6 @@ async function startServer(worker, env) {
           page.on('pageerror', (e) => errors.push(e.message));
           try {
             await page.goto(base + path);
-            if (name === '/setup') {
-              // The setup dialog traps focus over My docs; dismiss it before
-              // testing the shared header underneath.
-              await page.getByRole('heading', { name: 'Which AI do you use?', exact: true }).waitFor();
-              await page.keyboard.press('Escape');
-              await page.getByRole('dialog').waitFor({ state: 'hidden' });
-            }
             await page.locator('.tdoc-bar').first().waitFor();
             assert.equal(await page.locator('.tdoc-bar').count(), 1, 'one bar');
             const mark = page.locator('.tdoc-bar a.tdoc-bar-mark');

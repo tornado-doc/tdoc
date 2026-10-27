@@ -15522,6 +15522,7 @@ const tdocHandlers = {
           authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
           oidcAuth: !!oidcConfig(env),
           oidcLabel: (oidcConfig(env) || {}).label || '',
+          ...(await devModeBoot(env, session)),
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -15583,7 +15584,6 @@ const tdocHandlers = {
           await stampOnboardingFor(env, who, 'started');
         }
       } catch {}
-      if (sessionPrincipal(session)) return new Response(null, { status: 302, headers: { Location: '/me?setup=1' } });
       const nonce = rand(16);
       return html(SHELL.appHtml({
         // One title for both steps. `?step=doc` is a request, not a fact: the

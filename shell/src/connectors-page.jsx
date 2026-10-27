@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { isFeatureOn } from './feature-flags.js';
 import { AppDialog } from './ui/dialog.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, LOCAL_DAEMON_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, localSeenText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
@@ -194,11 +195,19 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
               ) : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>) : null}
               {conn.id === 'local' ? (
                 <>
+                  {isFeatureOn('aiOnboarding') ? <>
                   <p className="muted tdoc-conn-note">Connect the computer where you use Claude Code or Codex. The installer adds the tdoc skill, checks your AI, and starts the background service.</p>
                   <a className="new-folder-btn" href="/setup">Connect a computer</a>
                   <p className="muted tdoc-conn-note"><a href="/setup">Open guided setup</a>. Runs while your computer is awake and signed in. Pause with <code>~/.local/bin/tdoc stop</code>; reconnect with <code>~/.local/bin/tdoc setup</code>.</p>
+                  </> : <>
+                  <p className="muted tdoc-conn-note">Needs the tdoc skill signed in on that computer (<code>tdoc-publish --signin-only</code>). Then, in a terminal or from the agent itself:</p>
+                  <pre className="tdoc-conn-pre">{`bash "$SKILL_DIR/bin/tdoc-daemon" install          # macOS: runs now and at login
+bash "$SKILL_DIR/bin/tdoc-daemon" uninstall        # turns it off
+bash "$SKILL_DIR/bin/tdoc-daemon" start            # in a terminal (Linux)
+bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # only prints a LaunchAgent plist`}</pre>
+                  </>}
                   <details className="tdoc-conn-alt">
-                    <summary>Setup instruction</summary>
+                    <summary>{isFeatureOn('aiOnboarding') ? 'Setup instruction' : 'Or let the agent set it up'}</summary>
                     <code>{LOCAL_DAEMON_PROMPT}</code>
                     <CopyPromptButton text={LOCAL_DAEMON_PROMPT} />
                   </details>

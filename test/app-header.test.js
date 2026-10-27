@@ -29,7 +29,7 @@ const worker = read(path.join(ROOT, 'worker', 'worker.js'));
 
 // page name -> component, from the router in main.jsx
 const routes = new Map();
-for (const m of main.matchAll(/appBoot\.page === '([a-z-]+)'\) page = (?:<Suspense[^>]*>)?(?:<>)?<([A-Z][A-Za-z]+)/g)) routes.set(m[1], m[2]);
+for (const m of main.matchAll(/appBoot\.page === '([a-z-]+)'\) page = <(?:Suspense[^>]*>)?<?([A-Z][A-Za-z]+)/g)) routes.set(m[1], m[2]);
 // The fall-through is the neutral landing.
 const fallback = /\n  else page = <([A-Z][A-Za-z]+)/.exec(main);
 if (fallback) routes.set('neutral-landing', fallback[1]);

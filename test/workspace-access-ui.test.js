@@ -113,7 +113,7 @@ function terminalHtml(lines) {
       let start = null;
       let token = null;
 
-      await t(`${label}: an agent connects and the Allow page defaults to My docs and requires an explicit team choice`, async () => {
+      await t(`${label}: an agent connects and the Allow page lists every workspace, all ticked`, async () => {
         start = (await call('/api/cli/pair/start', { method: 'POST', body: { label: 'q3-report', device, client: 'Claude Code' } })).body;
         if (DEMO) {
           await page.setContent(terminalHtml([
@@ -130,15 +130,15 @@ function terminalHtml(lines) {
         const names = await page.locator('.tdoc-ws-name').allInnerTexts();
         if (JSON.stringify(names) !== JSON.stringify(['My docs', 'abby', 'BeFreed'])) throw new Error(`workspaces: ${names}`);
         const boxes = page.locator('.tdoc-ws-option input');
-        for (let i = 0; i < 3; i++) if ((await boxes.nth(i).isChecked()) !== (i === 0)) throw new Error(`unexpected default scope at box ${i}`);
+        for (let i = 0; i < 3; i++) if (!(await boxes.nth(i).isChecked())) throw new Error(`box ${i} not ticked by default`);
         const grant = await page.locator('.tdoc-activate-grant').first().innerText();
         if (!grant.includes(`Claude Code on ${device}`)) throw new Error(`the asker is not named: ${grant}`);
         await pause(page, 1800);
-        await shot('allow-my-docs-default');
+        await shot('allow-all-ticked');
       });
 
-      await t(`${label}: explicitly choosing one team grants only that team and My docs`, async () => {
-        await page.locator('.tdoc-ws-option', { hasText: 'BeFreed' }).click();
+      await t(`${label}: unticking a workspace and Allow mints a token that reaches only the rest`, async () => {
+        await page.locator('.tdoc-ws-option', { hasText: 'abby' }).click();
         if (await page.locator('.tdoc-ws-option input').nth(1).isChecked()) throw new Error('abby still ticked');
         await pause(page, 1200);
         await shot('allow-abby-unticked');

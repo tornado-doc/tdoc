@@ -1586,7 +1586,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/setup' && (req.method === 'GET' || req.method === 'HEAD')) {
-    return send(res, 302, '', { Location: '/me?setup=1' });
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const step = url.searchParams.get('step') === 'doc' ? 'doc' : 'connect';
+    return send(res, 200, req.method === 'HEAD' ? '' : localSetupDocument(nonce, step), {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': cspHeader(nonce),
+    });
   }
 
   if ((p === '/' || p === '/me') && (req.method === 'GET' || req.method === 'HEAD')) {

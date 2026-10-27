@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ActivatePage } from './activate-page.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { ComputersBody } from './computers-settings.jsx';
-import { SetupGate } from './setup-gate.jsx';
+import { SetupGate } from './ai-setup-gate.jsx';
 import { DocsHub } from './docs-hub.jsx';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { StatusPage } from './status-page.jsx';

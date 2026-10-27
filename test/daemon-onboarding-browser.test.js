@@ -46,6 +46,11 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await page.route('**/api/me/connectors',route=>route.fulfill({json:{targets:[receiver]}}));
    await page.route('**/api/me/connectors/test',route=>{deliveryTests++;return route.fulfill({json:{delivery:{status:deliveryFails?'failed':'delivered'}}});});
    const shot=async name=>{if(SHOTS){fs.mkdirSync(SHOTS,{recursive:true});await page.screenshot({path:path.join(SHOTS,`${name}-${width}.png`)});}};
+   // An ordinary account (no dev mode) never sees the AI onboarding, even with ?setup=1.
+   await page.goto(base+'?setup=1&classic=1');
+   await page.waitForTimeout(500);
+   assert.equal(await page.getByRole('heading',{name:'Which AI do you use?',exact:true}).count(),0,'AI onboarding stays behind dev mode');
+   assert.equal(await page.locator('#computers').count(),0,'no Computers & AI settings without dev mode');
    await page.goto(base+'?setup=1');
    await page.getByRole('heading',{name:'Which AI do you use?',exact:true}).waitFor();
    assert.equal(await page.locator('.ui-ai-option').count(),8);

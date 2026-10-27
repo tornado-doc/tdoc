@@ -3,7 +3,7 @@ import { Monitor } from 'lucide-react';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
-import { SetupGate, AUTOMATIC_PROMPT } from './setup-gate.jsx';
+import { SetupGate, AUTOMATIC_PROMPT } from './ai-setup-gate.jsx';
 
 const aiName = cli => cli === 'claude' ? 'Claude Code' : cli === 'codex' ? 'Codex' : cli;
 const stateName = state => state === 'ready' ? 'Ready' : state === 'not_installed' ? 'Not installed' : 'Needs a check';

@@ -1,256 +1,551 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Copy, Loader2 } from 'lucide-react';
 import { copyText } from './document/model.js';
-import { getOnboarding, postOnboardingEvent, createOnboardingPractice, startConversationSetup, conversationSetupStatus, updateComputer, getSetupConnectors, testSetupConnector } from './document/api.js';
-import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
-import { AppSelect } from './ui/select.jsx';
-import { AppDialog } from './ui/dialog.jsx';
-import { AIPicker, AI_PRODUCTS } from './ui/ai-picker.jsx';
+import { getOnboarding, postOnboardingEvent } from './document/api.js';
+import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_LINE, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
+import { AgentMarks } from './agent-marks.jsx';
+import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
 import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
+import { TopBar } from './top-bar.jsx';
 
-// Shared with Create a doc: existing interactive-agent authoring remains available.
+// `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
+// to be true before tdoc can do anything, so it gets its own full-screen
+// route rather than a step inside a wizard. It asks for exactly one act
+// (paste a prompt into your agent) and then watches the server until the
+// agent turns up.
+//
+// Layout: the work on the left, the product on the right. The right half is
+// not decoration — it is the thing the left half is asking for, drawn at the
+// product's real pixel sizes, and it changes with the state so that what you
+// are looking at is always what you are being asked to do.
+//
+// Three states, and only the server moves between them:
+//   waiting   nothing has arrived yet
+//   stuck     STUCK_MS of nothing; the doctor line appears
+//   done      the record has `agent_connected`
+//
+// NOT here, and why: a fourth state ("your agent is asking to connect") would
+// need the page to know that a pairing code was just issued *for this
+// account*. It cannot: `/api/cli/pair/start` is unauthenticated — the CLI has
+// no token yet, so the code belongs to nobody until it is approved. Giving the
+// gate that state means handing out a per-account setup link and having the
+// CLI fetch it. That is a real change to the prompt, not a UI tweak.
+
+// The same line /start shows. It used to be a second one -- ONBOARDING.md plus
+// a shell command to pair -- because ONBOARDING.md only connects as a side
+// effect of its first-doc step. FIRST-DOC.md connects first (its Step 1b),
+// before it reads anything, so this page still sees the agent turn up early,
+// and a newcomer is handed one line everywhere instead of two.
+export const SETUP_PROMPT = FIRST_DOC_LINE;
+// The second ask, on the same route, and the one place in the whole journey
+// where there is a choice to make. Everybody being marched through the same
+// "what AI knows about you" is what made the old version feel like a
+// kidnapping to anyone who already knew what they wanted to write.
+//
+// Two live choices, and they differ in what the agent is being asked for, not
+// in how the page behaves: one names a subject the person supplies, the other
+// asks for the portrait FIRST-DOC.md builds out of their own traces. Both end
+// as one line, pasted once.
+//
+// A third -- fork a doc that already exists -- is drawn but not wired. Its
+// whole value was a first doc in ten seconds with no agent, and the seeding
+// now delivers exactly that, earlier and without a click; the only forkable
+// template today IS the one already sitting in their Onboarding folder. It
+// becomes real when there is a second thing to fork.
+// A sentence, not a slash command. `/tdoc new` made a line meant for a chat
+// with an agent look like something typed at a shell, and it was never
+// required: the skill's own front matter says "no need for the word tdoc" and
+// tells the agent to fire on a plain request to write a doc. Naming tdoc is
+// still worth doing -- an agent with many skills should not have to guess --
+// but the rest is how somebody would actually ask.
 export const DOC_SUBJECT_PREFIX = 'Use tdoc to write a doc about ';
 export const DOC_SUBJECT_SUFFIX = ', publish it, and give me the link';
 export const DOC_SUBJECT_PLACEHOLDER = 'what it should be about';
 export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${DOC_SUBJECT_SUFFIX}`;
-export const SETUP_PROMPT = 'curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash';
-const INSTALL_PROMPT = `${SETUP_PROMPT} -s -- --install-only`;
-const CONNECT_PROMPT = '~/.local/bin/tdoc setup';
-export const conversationPrompt = (code, product = 'your AI') => `Set up tdoc for ${product}: follow "Connect a conversation" in https://tdoc.dev/SKILL.md\n~/.local/bin/tdoc connect ${code}`;
-export const AUTOMATIC_PROMPT = `Set up tdoc on this computer for automatic comment updates:\n${SETUP_PROMPT}`;
-export const DOCTOR_PROMPT = '~/.local/bin/tdoc status';
-export const platformPrompt = (code, product) => `${conversationPrompt(code, product)}\nThen connect its task receiver with bin/tdoc-connect-agent (Raft) or bin/tdoc-connect-webhook. Do not install a daemon.`;
-const POLL_MS = 3000;
-const STUCK_MS = 90000;
-export const readyLocalAgents = (agents) => (agents || []).filter((a) => a.ready && a.status === 'active');
-const labelOf = (a) => `${a.cli === 'claude' ? 'Claude Code' : 'Codex'} on ${a.device}`;
-const RUNTIMES = [
-  { value: 'claude', label: 'Claude Code', url: 'https://code.claude.com/docs/en/setup', login: 'claude' },
-  { value: 'codex', label: 'Codex', url: 'https://developers.openai.com/codex/cli/', login: 'codex' },
+// What the replay publishes. The real slug is the agent's to pick, so this is
+// a plausible one rather than a promise -- but it has to follow from the words
+// on this screen, or the recording is of somebody else's doc.
+export const replaySlugFor = (choice, subject) => {
+  if (choice === 'portrait') return 'what-ai-knows-me';
+  const words = String(subject || '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/[\s-]+/).filter(Boolean);
+  return words.slice(0, 4).join('-') || 'my-first-doc';
+};
+// FIRST_DOC_LINE opens with "Set up tdoc and", which is true on the landing
+// page and false here: by the time anyone reads this screen the skill is
+// installed and the account is connected. Same recipe, without the preamble.
+export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;
+// The question on this screen is "what is this doc about", so both labels
+// answer it in the same shape, and the difference between them is the last
+// word. "I know what it's about" described the reader's state of mind rather
+// than the doc, and "the one about me" pointed at something with a pronoun
+// nobody had introduced -- which one? -- so neither could be read at a glance.
+export const DOC_CHOICES = [
+  { id: 'own', label: 'My own topic', sub: 'Choose what to write about.' },
+  { id: 'portrait', label: 'How I use AI', sub: 'Choose which activity to share.' },
 ];
+// Kept as the export it always was: the placeholder line still answers "what
+// do I paste" for anyone who lands here with no choice made.
+export const FIRST_DOC_PROMPT = ANOTHER_DOC_RECIPE;
+// The same names the server's table uses. It builds every record itself, so
+// this list only decides which buttons exist.
+export const DOCTOR_PROMPT = 'Run tdoc doctor and fix what it reports';
+const POLL_MS = 3000;
+const STUCK_MS = 60000;
 
-export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) {
-  const [open, setOpen] = useState(true);
-  const [productId, setProductId] = useState(preview?.product || 'chatgpt');
-  const product = AI_PRODUCTS.find(p => p.value === productId) || AI_PRODUCTS[0];
-  const [platformTargets, setPlatformTargets] = useState([]);
-  const [platformTarget, setPlatformTarget] = useState(null);
-  const [stage, setStage] = useState(preview?.stage || startAt);
-  const [pendingAsk] = useState(() => preview ? null : peekPendingAsk());
+function Mark({ size = 28 }) {
+  return <img src="/tdoc_logo.svg" alt="" width={size} height={size} data-tdoc-dark="invert" />;
+}
+
+// ---------------------------------------------------------------- the scenes
+// Where people actually paste is a conversation with an agent, not a shell —
+// so the window here is a chat with a composer, and the paste happens in the
+// composer. The four agents share that shape; switching only renames the
+// window, because drawing four invented skins would be worse than one honest
+// one.
+
+// The two coding agents this line is written for, as their own marks — taken
+// from each vendor's published favicon, not redrawn. A row of four product
+// names set as text ran as wide as the prompt above it and made the block tall
+// for nothing; two 16px marks say the same thing in the corner of a foot.
+function WorksWith() {
+  return (
+    <p className="sg-works">
+      <span>Works with</span>
+      {/* The same 21px the create menu uses. At 17 the three marks were a
+          smudge -- Claude's line art in particular needs the diameter. */}
+      <AgentMarks size={21} />
+      <span className="sg-sr">Claude Code and Codex</span>
+    </p>
+  );
+}
+
+function ChatWindow({ children }) {
+  return (
+    <div className="sg-chat">
+      <div className="sg-chat-bar">
+        <div className="sg-lights"><i /><i /><i /></div>
+        <div className="sg-chat-name">Your agent</div>
+      </div>
+      <div className="sg-chat-body">{children}</div>
+    </div>
+  );
+}
+
+function Composer({ live = false, children }) {
+  return (
+    <div className={`sg-composer${live ? ' live' : ''}`}>
+      <div className="sg-field">{children || <span className="sg-ph">Reply to your agent…</span>}</div>
+      <div className="sg-tools">
+        <span>＋</span><span>@</span><span className="sg-sp" />
+        {live ? <span className="sg-hint">⏎ to send</span> : null}
+        <span className={`sg-send${live ? '' : ' off'}`}>↑</span>
+      </div>
+    </div>
+  );
+}
+
+function SceneWaiting({ line }) {
+  return (
+    <>
+      <ChatWindow>
+        <div className="sg-msg">
+          <span className="sg-av bot" />
+          <p className="sg-txt">What are we working on?</p>
+        </div>
+        {/* Nothing typed until there is something to type: the composer showing
+            a line the left column has not handed over yet would be the page
+            answering its own question. */}
+        {line ? (
+          <Composer live>
+            <span className="sg-typed">{line.slice(0, 62)}{line.length > 62 ? '…' : ''}</span>
+            <span className="sg-caret" />
+          </Composer>
+        ) : <Composer />}
+      </ChatWindow>
+    </>
+  );
+}
+
+function SceneStuck() {
+  return (
+    <>
+      <ChatWindow>
+        <div className="sg-msg me">
+          <p className="sg-txt">Run tdoc doctor and fix what it reports</p>
+          <span className="sg-av you" />
+        </div>
+        <div className="sg-run f1"><span className="b ok">●</span><span>skill installed <span className="m">v0.9.4</span></span></div>
+        <div className="sg-run f2"><span className="b ok">●</span><span>reaches tdoc.dev</span></div>
+        <div className="sg-run f3"><span className="b bad">●</span><span>no account connected</span></div>
+        <div className="sg-msg f4">
+          <span className="sg-av bot" />
+          <p className="sg-txt">The approval expired before I got there. I’ll ask for a new code — approve it in the tab I open.</p>
+        </div>
+        <Composer />
+      </ChatWindow>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ the gate
+
+export function SetupGate({ boot, preview = null }) {
+  const [record, setRecord] = useState(preview?.record || null);
   const [paired, setPaired] = useState(Boolean(preview?.paired));
-  const [agents, setAgents] = useState(preview?.local_agents || []);
-  const [computers, setComputers] = useState(preview?.local_computers || []);
+  // The choice, and the subject it may carry. Nothing is chosen on arrival:
+  // pre-selecting one would answer the only question this screen asks.
+  const [choice, setChoice] = useState(null);
+  // Nothing in the form column is drawn until the server has answered once.
+  // Before that the record is empty, which reads as "not connected" and paints
+  // the connect step for a beat on a page that was asked for the doc step.
   const [loaded, setLoaded] = useState(Boolean(preview));
-  const [selected, setSelected] = useState('');
-  const [attempt, setAttempt] = useState(preview ? { code: 'a'.repeat(32) } : null);
-  const [retry, setRetry] = useState(0);
-  const [completedPath, setCompletedPath] = useState(preview?.path || 'manual');
-  const instructionRef = useRef(null);
-  const [copied, setCopied] = useState('');
+  const [subject, setSubject] = useState('');
+  const subjectRef = useRef(null);
+  const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const promptRef = useRef(null);
   const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const active = useRef(true);
-  useEffect(() => () => { active.current = false; }, []);
-  const started = useRef(Date.now());
-  const signedIn = Boolean(boot?.identity);
-  const available = readyLocalAgents(agents);
-  // Older helpers expose only agents. Do not infer missing installations from
-  // that incomplete list; the next setup run supplies the full inventory.
-  const detectedComputers = [...computers];
-  for (const agent of agents) {
-    if (!detectedComputers.some((c) => c.device === agent.device)) detectedComputers.push({ device: agent.device, status: agent.status, runtimes: agents.filter((a) => a.device === agent.device).map((a) => ({ cli: a.cli, state: a.ready ? 'ready' : 'needs_check' })) });
-  }
-  const latestComputer = [...detectedComputers].reverse()
-    .sort((a, b) => (Date.parse(b.connected_at || b.last_seen) || 0) - (Date.parse(a.connected_at || a.last_seen) || 0))[0];
-  const computer = latestComputer || detectedComputers[0];
-  const readyOnComputer = available.filter((a) => a.device === computer?.device && computer?.runtimes?.some((r) => r.cli === a.cli && r.state === 'ready'));
-  const runtime = readyOnComputer.some((a) => a.cli === selected) ? selected : readyOnComputer[0]?.cli || selected || 'claude';
-  const observed = computer?.runtimes?.find((r) => r.cli === runtime);
-  const chosen = available.find((a) => a.device === computer?.device && a.cli === runtime && observed?.state === 'ready') || null;
-  const connected = Boolean(computer?.status === 'active');
-  const runtimeReady = Boolean(chosen && computer?.status === 'active');
-  const state = connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
+  const [identity, setIdentity] = useState(boot?.identity || null);
+  const signedIn = Boolean(identity);
+  const waitingSince = useRef(null);
+  const stamped = useRef(false);
 
-  const platformRoute = stage === 'platform';
-  const manual = stage === 'manual' || platformRoute;
-  const intro = stage === 'intro';
-  const done = stage === 'done';
+  // `paired` -- has this account ever connected a terminal -- is precisely the
+  // question this page asks, and it survives the record being cleared. Reading
+  // only the record's own stamps left anyone whose agent was already connected
+  // waiting forever: that agent holds a token, so it does nothing visible, and
+  // nothing re-stamps a connection that already happened.
+  const connected = Boolean(paired || record?.agent_connected || record?.published_first);
+  // Two asks, one route. `?step=doc` is the second, and it is only ever shown
+  // to somebody whose agent is already connected -- you cannot ask an agent
+  // for a doc before it can publish as you. Anyone else gets the first ask,
+  // and the page moves on to the second by itself once the agent turns up, so
+  // the link is safe to hand to anybody.
+  const wantsDoc = boot?.step === 'doc';
+  const step = wantsDoc && connected ? 'doc' : 'connect';
+  const subjectTrimmed = subject.trim();
+  const docPrompt = choice === 'portrait' ? PORTRAIT_PROMPT
+    : choice === 'own' ? docSubjectPrompt(subjectTrimmed || DOC_SUBJECT_PLACEHOLDER)
+      : FIRST_DOC_PROMPT;
+  const prompt = step === 'doc' ? docPrompt : SETUP_PROMPT;
+  const replaySlug = replaySlugFor(choice, subject);
+  // A subject that has not been typed is not a line anybody should be handed.
+  const promptReady = step !== 'doc' || choice === 'portrait' || Boolean(subjectTrimmed);
+  // The doc step has no stuck state of its own: there is nothing to repair.
+  // An agent that has not published yet is usually mid-question, so the wait
+  // just says where to look.
+  // This step is done when the journey has a doc, full stop. It briefly asked a
+  // harder question -- "did a doc appear since this page opened" -- because it
+  // also had to serve somebody making their SECOND one, and a record whose doc
+  // stamps are written once cannot see a second doc. That job moved to Create
+  // a doc, so the hard question went with it. What is left is the one this
+  // page was always for, and it answers on arrival: somebody opening row 2
+  // after finishing it should be told it is finished.
+  const ownDoc = record?.first_doc || null;
+  const state = step === 'doc'
+    ? (ownDoc ? 'done' : 'waiting')
+    : connected ? 'done' : elapsed > STUCK_MS ? 'stuck' : 'waiting';
+  // Read by the poll loop, which is created once and never sees a later
+  // render's `state`. Assigned here rather than in an effect so the tick that
+  // lands on the answer is the one that stops asking.
+  const settled = useRef(false);
+  settled.current = state === 'done';
+  // The connect step ends on the docs page, which is right whether their first
+  // doc exists yet or not. The doc step ends on the doc it just watched
+  // arrive, and it arrives the way row 3 does -- `?step=comment`, so tdoc's
+  // question is open and the corner row is saying what to do with it. Landing
+  // bare here was the coldest arrival in the whole journey: the one moment
+  // somebody has just made a thing and is most ready to be handed the next
+  // move, and the page said nothing.
+  // The clock starts when this page starts waiting, not when somebody presses
+  // a button. It is the same wait either way.
+  if (loaded && signedIn && state !== 'done' && !waitingSince.current) waitingSince.current = Date.now();
+  // A reader who pressed "Connect my agent" on somebody's doc goes back to
+  // that doc, where the question they were asking waits for the new agent
+  // (document/my-agent.js).
+  const [pendingAsk] = useState(() => peekPendingAsk());
+  const onward = step === 'doc' && ownDoc
+    ? `/d/${encodeURIComponent(ownDoc)}?step=comment`
+    : pendingAsk ? `/d/${encodeURIComponent(pendingAsk.slug)}` : '/me';
+  // Both steps are one layout with a status line under it. Swapping the doc
+  // step into a second, emptier face when its doc arrived made a page out of a
+  // sentence: whoever landed on it was told their first tdoc is live and
+  // offered nothing to do, and whoever wanted another one had to find their
+  // way back to the question. The ask stays; the line below it changes.
+  //
+  // The heading is the one thing read once rather than live, so it does not
+  // rename itself from "your first" to "another" in front of somebody who is
+  // watching their first arrive.
+
+  // The record is the only thing that moves this page.
   useEffect(() => {
-    if (!signedIn || preview || manual || done) return undefined;
+    if (!signedIn || preview) return undefined;
     let cancelled = false;
-    let timer;
+    let timer = null;
     const tick = async () => {
       try {
-        const result = await getOnboarding(stage === 'connect' ? { daemon: true } : undefined);
-        if (cancelled) return;
-        if (stage === 'connect') { setAgents(result?.local_agents || []); setComputers(result?.local_computers || []); }
-        setPaired(Boolean(result?.paired)); setError(''); setLoaded(true); setElapsed(Date.now() - started.current);
-      } catch {
-        if (!cancelled && !intro) { setAgents([]); setComputers([]); setError('Could not check the connection. Retrying…'); }
-      }
-      if (!cancelled && !intro) timer = window.setTimeout(tick, POLL_MS);
+        const result = await getOnboarding();
+        if (!cancelled) { setRecord(result?.record || {}); setPaired(Boolean(result?.paired)); }
+      } catch {}
+      if (!cancelled) setLoaded(true);
+      if (cancelled) return;
+      // The wait is timed from when this page started waiting, not from a
+      // click on Copy. Somebody who selects the line and hits cmd-C is waiting
+      // exactly as much as somebody who pressed the button, and used to be
+      // told nothing at all when it went wrong.
+      if (waitingSince.current) setElapsed(Date.now() - waitingSince.current);
+      // Only while there is still an answer to wait for. This asks the server
+      // what the agent has done; once it has done it, the question stops being
+      // a question and the page was still asking it every three seconds for as
+      // long as the tab stayed open.
+      if (!settled.current) timer = window.setTimeout(tick, POLL_MS);
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [signedIn, preview, stage, manual, intro, done]);
+  }, [signedIn]);
 
-  useEffect(() => {
-    if (!manual || !signedIn || preview) return undefined;
-    let cancelled = false; let timer;
-    setAttempt(null); setError('');
-    const poll = async (code) => {
-      try {
-        const result = await conversationSetupStatus(code);
-        if (cancelled) return;
-        if (result.ready) {
-          if (platformRoute) {
-            const connectors = await getSetupConnectors();
-            if (cancelled) return;
-            const targets = (connectors.targets || []).filter(t => t.provider === (productId === 'raft' ? 'raft' : 'webhook'));
-            setPlatformTargets(targets);
-            setPlatformTarget(old => targets.find(t => t.server_id === old?.server_id && t.agent_sub === old?.agent_sub) || targets[0] || null);
-            if (!targets.length) setError('Your account is connected. Ask your agent to finish connecting its task receiver.');
-          } else { setCompletedPath('manual'); setStage('done'); return; }
-        }
-        setError('');
-      } catch (e) {
-        if (cancelled) return;
-        if (e.status === 410) { setError('This instruction expired. Get a new one and paste it into your AI.'); setAttempt(null); return; }
-        setError('Could not check setup. Retrying…');
-      }
-      if (!cancelled) timer = window.setTimeout(() => poll(code), POLL_MS);
-    };
-    startConversationSetup().then(result => {
-      if (!cancelled) { setAttempt(result); poll(result.code); }
-    }).catch(() => { if (!cancelled) setError('Could not prepare setup. Please try again.'); });
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [manual, platformRoute, productId, signedIn, preview, retry]);
-
-  // A paired reader can return and copy a question even while their helper is offline.
-  // This never marks a computer ready or enables Next for a new author.
-  const canReturn = Boolean(pendingAsk && paired);
-  const close = () => {
-    active.current = false;
-    if (pendingAsk) clearPendingAsk();
-    setOpen(false);
-    if (onClose) onClose();
-    else if (!preview) location.assign('/me');
-  };
+  // The site's own sign-in, and only that: a full-page redirect out to the
+  // OIDC provider and back to /setup. Signing in is signing up, so there is no
+  // second door to offer.
   const signIn = () => {
-    if (!preview) location.href = '/api/auth/oidc/login?prompt=login&return=%2Fsetup';
+    if (preview) return;
+    const here = wantsDoc ? '/setup?step=doc' : '/setup';
+    location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(here)}`;
   };
-  const copy = async (command, name, ref) => {
-    const ok = await copyText(command);
-    setCopied(ok === false ? '' : name); setCopyFailed(ok === false);
-    if (ok === false) selectContents(ref.current);
-    if (!preview) postOnboardingEvent('copy_clicked').catch(() => {});
+
+  const copy = async () => {
+    const ok = await copyText(prompt);
+    setCopied(ok !== false);
+    setCopyFailed(ok === false);
+    if (ok === false) selectContents(promptRef.current);
+    if (preview) return;
+    if (!stamped.current) { stamped.current = true; postOnboardingEvent('door_own_agent').catch(() => {}); }
+    postOnboardingEvent('copy_clicked').catch(() => {});
   };
-  const choosePath = (path) => {
-    setStage(path); setError(''); setCopied(''); setCopyFailed(false);
-    if (!preview && path !== 'intro') postOnboardingEvent('door_own_agent').catch(() => {});
-    if (path === 'connect' && !preview) {
-      setLoaded(false); setAgents([]); setComputers([]); started.current = Date.now(); setElapsed(0);
-    }
-    setAttempt(preview ? { code: 'a'.repeat(32) } : null);
-  };
-  const instructionBase = platformRoute ? platformPrompt(attempt?.code || '', product.label) : manual ? conversationPrompt(attempt?.code || '', product.label) : AUTOMATIC_PROMPT;
-  const releaseRef = /^[a-f0-9]{40}$/.test(boot?.setupRef || '') ? boot.setupRef : 'main';
-  const host = typeof location === 'undefined' ? 'https://tdoc.dev' : location.origin;
-  // Off tdoc.dev (a preview) the conversation prompt only swaps the SKILL.md host:
-  // that host's skill carries the pinned install and connect details. The
-  // computer route runs the installer directly, so it pins the revision here.
-  const pinnedSetup = `curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/${releaseRef}/bin/tdoc-install | TDOC_INSTALL_REF=${releaseRef} TDOC_HOSTED_BASE=${host} bash`;
-  const instruction = instructionBase.replaceAll('https://tdoc.dev/SKILL.md', `${host}/SKILL.md`)
-    .replace(SETUP_PROMPT, releaseRef === 'main' ? SETUP_PROMPT : pinnedSetup);
-  const copyInstruction = () => copy(instruction, 'instruction', instructionRef);
-  const chooseProduct = (id) => {
-    setProductId(id); setSelected(id === 'claude' || id === 'codex' ? id : '');
-    setPlatformTargets([]); setPlatformTarget(null); choosePath(AI_PRODUCTS.find(p => p.value === id)?.route || 'manual');
-  };
-  const verifyPlatform = async () => {
-    if (!platformTarget || busy) return;
-    setBusy(true); setError('');
-    try {
-      const result = await testSetupConnector(platformTarget);
-      if (result.delivery?.status !== 'delivered') throw new Error('Your platform did not receive the test. Try again.');
-      if (active.current) { setCompletedPath('platform'); setStage('done'); }
-    } catch (e) { if (active.current) setError(e.message || 'Could not check your platform. Try again.'); }
-    finally { if (active.current) setBusy(false); }
-  };
-  const finishConnection = async () => {
-    if (!runtimeReady || busy) return;
-    setBusy(true); setError('');
-    try {
-      if (!preview) await updateComputer({ device: chosen.device, cli: chosen.cli, action: 'default' });
-      if (active.current) { setCompletedPath('connect'); setStage('done'); }
-    } catch (e) { if (active.current) setError(e.message || 'Could not finish setup. Please try again.'); }
-    finally { if (active.current) setBusy(false); }
-  };
-  const tutorial = async () => {
-    if (busy || preview) return;
-    if (pendingAsk) { location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`); return; }
-    setBusy(true); setError('');
-    try {
-      const target = completedPath === 'connect' ? { device: chosen?.device, cli: chosen?.cli }
-        : completedPath === 'platform' ? { mode: 'platform', recipient: platformTarget } : { mode: 'manual' };
-      const result = await createOnboardingPractice({ ...target, product: completedPath === 'connect' ? chosen.cli : productId });
-      if (active.current) location.assign(result.url);
-    } catch (e) {
-      if (active.current) { setError(e.message === 'computer_not_ready' ? 'Wake your computer, then try again.' : 'Could not open your tutorial. Try again.'); setBusy(false); }
-    }
-  };
+
+  // The scene is the left column's mirror, so it waits for the same answer.
+  // Drawn early it paints the connect step's chat beside a heading that has
+  // not decided which step it is yet.
+  // Nothing typed for somebody who cannot act on it yet: a signed-out visitor
+  // watching the composer spell out a line they have no account to use is the
+  // page rehearsing in front of them.
+  // No separate scene for `done`. It used to swap in a hand-drawn document
+  // window -- a different object, in a different style, at the exact moment
+  // the reader has just succeeded. The desk they have been watching is where
+  // the result of that success lives, so it stays.
+  const scene = signedIn && !loaded ? null
+      : state === 'stuck' ? <SceneStuck />
+        // Waiting is the only state with time to fill, and the only one where
+        // the reader has not done the thing yet -- so it is the one that shows
+        // them doing it, at 1:1, on a loop. But the replay is a recording of
+        // pasting THIS line, so it cannot run before there is a line: not for
+        // a visitor with no account to paste into, and not on the second ask
+        // before they have said what the doc is about.
+        // The second ask, before they have named a subject, is the one place
+        // with no line yet: the desk is there and no app is open, which is
+        // true. A signed-out visitor is NOT that case -- the line they would
+        // paste is fixed and printed beside this, so the replay can show it
+        // being pasted. Holding the desk still for them meant the one person
+        // who has never seen this product got a photograph of a desktop.
+        : step === 'doc' && !choice
+          ? <ConnectReplay prompt={null} />
+          // Two acts, two recordings. The first is a line being pasted; the
+          // second is a line being typed, as the reader types it.
+          : step === 'doc'
+            // `ready`, not just a line. Until a subject is typed the line is
+            // composed from the field's PLACEHOLDER, so it is a complete
+            // sentence that nobody wrote -- and the take played it in full,
+            // publishing a document about "what it should be about" while the
+            // field was still empty. The Copy button already refuses that line
+            // for the same reason.
+            ? <DocReplay prompt={prompt} slug={replaySlug} ready={promptReady} />
+            : <ConnectReplay prompt={prompt} />;
 
   return (
-    <AppDialog open={open} onOpenChange={next => { if (!next) close(); }}
-      title={done ? 'You’re connected' : intro ? 'Which AI do you use?' : `Connect ${product.label}`}
-      eyebrow={done ? null : intro ? 'Set up Tdoc' : 'Connect your AI'}
-      className="ui-setup-modal ui-setup-simple" focusTitle
-      description={intro || done ? null : manual ? `Paste this into a new ${product.label} chat.` : 'Paste this into Claude Code or Codex on this computer.'}
-      actions={<>
-        <button type="button" className="ui-setup-later" disabled={busy} onClick={done ? close : intro ? close : () => choosePath('intro')}>{done || intro ? 'Skip' : 'Back'}</button>
-        {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
-          : done ? <button type="button" className="primary" disabled={busy} onClick={tutorial}>{busy ? 'Opening…' : 'Continue'}</button>
-            : canReturn ? <button type="button" className="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</button>
-              : !intro ? <button type="button" className="primary" disabled={busy || !(platformRoute ? platformTarget : !manual && runtimeReady)}
-                onClick={platformRoute ? verifyPlatform : finishConnection}>
-                {busy ? 'Checking…' : platformRoute && platformTarget ? 'Check connection' : 'Continue'}
-              </button> : null}
-      </>}
-    >
-      {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to connect your AI.' : 'Sign-in is unavailable on this host.'}</p>
-        : intro ? <AIPicker onChoose={chooseProduct} />
-          : done ? <div className="ui-setup-ready"><Check size={44} aria-hidden="true" /><p>Try a comment. Watch your AI make the change.</p></div>
-            : <div className="ui-setup-connection">
-              <div className="ui-setup-prompt">
-                <p className="ui-setup-instruction" ref={instructionRef}>{manual && !attempt ? 'Preparing…' : instruction}</p>
-                <button type="button" className="ui-setup-copy" aria-label="Copy instruction" disabled={manual && !attempt} onClick={copyInstruction}>
-                  {copied === 'instruction' ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}<span>{copied === 'instruction' ? 'Copied' : 'Copy'}</span>
-                </button>
-              </div>
-              <ol className="ui-setup-steps">
-                <li>Paste it into {manual && !platformRoute ? product.label : platformRoute ? `your ${product.label} agent` : 'your AI'}.</li>
-                <li>Approve Tdoc in your browser.</li>
-                <li>This page updates on its own.</li>
-              </ol>
-              {platformRoute && platformTargets.length > 1 ? <label className="ui-setup-ai-select">Agent <AppSelect ariaLabel="Platform agent" value={platformTarget ? `${platformTarget.server_id}:${platformTarget.agent_sub}` : ''} options={platformTargets.map(t => ({ value: `${t.server_id}:${t.agent_sub}`, label: [t.agent_name || t.agent_sub, t.server_slug].filter(Boolean).join(' · ') }))} onChange={id => setPlatformTarget(platformTargets.find(t => `${t.server_id}:${t.agent_sub}` === id))} /></label> : null}
-              <p role="status" className="ui-setup-wait">{copyFailed ? COPY_FALLBACK : platformTarget ? 'Linked. Check that it can receive a task.' : !manual && runtimeReady ? `${labelOf(chosen)} is ready.`
-                : <><Loader2 size={16} aria-hidden="true" className="ui-setup-spin" />Waiting for {product.label}…</>}</p>
-              {!attempt && error && manual ? <button type="button" onClick={() => setRetry(value => value + 1)}>Try again</button> : null}
-              {!manual && connected && !runtimeReady ? <section className="ui-setup-runtime-help" aria-label="Local AI installation">
-                <h3>Finish your AI’s sign-in</h3>
-                {RUNTIMES.map(option => <details className="ui-setup-runtime" key={option.value}>
-                  <summary>{option.label}<ChevronRight size={18} aria-hidden="true" /></summary>
-                  <p>Open <a href={option.url} target="_blank" rel="noreferrer">{option.label}</a> and sign in.</p>
-                  <button type="button" onClick={() => copyText(`${CONNECT_PROMPT} --cli ${option.value}`)}>Copy check instruction</button>
-                </details>)}
-              </section> : null}
-              {!manual && readyOnComputer.length > 1 ? <label className="ui-setup-ai-select">AI <AppSelect ariaLabel="AI for automatic updates" value={runtime} onChange={setSelected} options={RUNTIMES.filter(r => readyOnComputer.some(a => a.cli === r.value))} /></label> : null}
-              {!manual && computer && !connected ? <p role="status">{computer.status === 'paused' ? <>Updates are paused. <a href="/me?view=settings#computers">Resume in Settings</a>.</> : 'Wake your computer to continue.'}</p> : null}
-              {!manual && state === 'stuck' ? <button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy connection check</button> : null}
-            </div>}
-      {error ? <p className="ui-setup-error" role="alert">{error}</p> : null}
-    </AppDialog>
+    <div className={`sg-split${preview ? '' : ' sg-has-bar'}`}>
+      {/* The onboarding focus page keeps its layout, with the shared top bar
+          laid over its top edge: the same mark home and the same account
+          chip as every other page. The design preview has no session, so it
+          keeps the plain mark. */}
+      {preview ? null : <div className="sg-topbar"><TopBar
+        identity={identity}
+        onboardingTest={boot?.debug ? {
+          record,
+          surface: step === 'doc' ? 'doc' : 'connect',
+          onState: async () => {
+            setCopied(false); setCopyFailed(false);
+            waitingSince.current = Date.now(); setElapsed(0);
+            const result = await getOnboarding().catch(() => null);
+            setRecord(result?.record || {});
+          },
+        } : null}
+      /></div>}
+      <section className="sg-pane-form">
+        {preview ? <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a> : null}
+        <div className="sg-mid">
+          <div className="sg-col">
+            {signedIn && !loaded ? null : (
+              <>
+                {/* The same four rows the checklist on My docs counts, and the
+                    same numbers the row above a doc wears. Two screens saying
+                    "step 2" about the same act is the only way a reader can
+                    tell the gate and the list are one journey and not two. */}
+                <p className="sg-eyebrow">
+                  <span className="sg-step-n">{step === 'doc' ? 2 : 1}</span>
+                  Step {step === 'doc' ? 2 : 1} of 4
+                </p>
+                <h1 className="sg-h1">
+                  {step !== 'doc' ? 'Connect your agent' : 'Make your first tdoc'}
+                </h1>
+              </>
+            )}
+
+            {signedIn && !loaded ? null : signedIn ? (
+              <>
+                {step === 'doc' ? (
+                  <div className="sg-choices" role="radiogroup" aria-label="What the doc is about">
+                    {DOC_CHOICES.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={choice === item.id}
+                        className={`sg-choice${choice === item.id ? ' on' : ''}`}
+                        onClick={() => {
+                          setChoice(item.id);
+                          setCopied(false); setCopyFailed(false);
+                          if (item.id === 'own') window.setTimeout(() => subjectRef.current?.focus(), 0);
+                        }}
+                      >
+                        <span className="sg-radio" aria-hidden="true" />
+                        <span className="sg-choice-text">
+                          <b>{item.label}</b>
+                          <span>{item.sub}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {step === 'doc' && choice === 'own' ? (
+                  <label className="sg-subject">
+                    <span className="sg-sr">What the doc is about</span>
+                    <input
+                      ref={subjectRef}
+                      id="sg-subject"
+                      name="subject"
+                      type="text"
+                      autoComplete="off"
+                      value={subject}
+                      placeholder={DOC_SUBJECT_PLACEHOLDER}
+                      onChange={(event) => { setSubject(event.target.value); setCopied(false); }}
+                    />
+                  </label>
+                ) : null}
+
+                {step !== 'doc' || choice ? (
+                  <div className={`sg-prompt${promptReady ? '' : ' pending'}`}>
+                    <p className="sg-prompt-text" ref={promptRef}>{prompt}</p>
+                    <button
+                      type="button"
+                      className={`sg-prompt-copy${copied ? ' copied' : ''}`}
+                      onClick={copy}
+                      disabled={!promptReady}
+                    >
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                ) : null}
+
+                {step === 'doc' ? null : <WorksWith />}
+
+                {step === 'doc' && !choice ? null : (
+                <ol className="sg-steps">
+                  {step === 'doc' ? (
+                    <>
+                      <li>Paste into your agent.</li>
+                      <li>Your agent writes and publishes to your account.</li>
+                      <li>Your doc appears here automatically.</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>Paste into Claude Code or Codex on your computer.</li>
+                      <li>Approve the request in your browser.</li>
+                      <li>Connection status updates automatically.</li>
+                    </>
+                  )}
+                </ol>
+                )}
+
+                <div className="sg-status-slot">
+                  {state === 'waiting' && !(step === 'doc' && !choice) ? (
+                    <div className="sg-status">
+                      <span className="sg-spin" aria-hidden="true" />
+                      {/* Not "waiting for you to paste": the page cannot see a
+                          paste, and it cannot see a selection copied by hand
+                          either. What it can say is what it is doing. */}
+                      {copyFailed ? COPY_FALLBACK
+                        : step === 'doc' && elapsed > STUCK_MS ? NOTHING_YET
+                          : 'Waiting for your agent.'}
+                    </div>
+                  ) : null}
+                  {state === 'stuck' ? (
+                    <div className="sg-status stuck">
+                      <div className="head">Ask your agent to check the connection:</div>
+                      <div className="sg-doctor">
+                        <code>{DOCTOR_PROMPT}</code>
+                        <button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy</button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {state === 'done' ? (
+                    <div className="sg-status done">
+                      <svg className="tick" width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9.2" stroke="currentColor" strokeWidth="2" />
+                        <path d="M8.2 12.3l2.6 2.6 5-5.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      {step === 'doc'
+                        ? <div><b>Published.</b></div>
+                        : <div><b>Connected.</b></div>}
+                    </div>
+                  ) : null}
+
+                </div>
+
+                {/* Optional, after the agent is connected: the agent can
+                    already use tdoc; this is for the other direction — tdoc
+                    pinging the agent when comments come in. */}
+                {state === 'done' && step !== 'doc' ? (
+                  <p className="sg-optional">
+                    <span>Optional</span> Want to send comments to your agent from tdoc (Send to agent, @agent)? <a href="/me?view=settings#agents">Set that up</a>.
+                  </p>
+                ) : null}
+
+                <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
+                  {step === 'doc' ? 'Open doc' : pendingAsk ? 'Back to the doc' : 'Continue'}
+                </a>
+                {/* Later is a way out of the question too: dismissed, the
+                    setup page stops leading back to that doc. */}
+                <p className="sg-account"><a href="/me" onClick={() => { if (pendingAsk) clearPendingAsk(); }}>Later</a></p>
+              </>
+            ) : (
+              <>
+                <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
+                <p className="sg-account">
+                  {boot?.oidcAuth
+                    ? 'New here? Signing in creates your account.'
+                    : 'Sign-in is not configured on this host.'}
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <aside className="sg-pane-art">
+        <div className="sg-stage">
+          <div className="sg-scene run" key={state}>{scene}</div>
+        </div>
+      </aside>
+    </div>
   );
 }
