@@ -574,16 +574,6 @@
           preventDefault: function () { if (e.cancelable) e.preventDefault(); },
           stopPropagation: function () { e.stopPropagation(); } })) return;
     }
-    // Capture an already settled range in this same touchend turn. Waiting
-    // until the next task lets iOS draw its own Copy menu first.
-    if (interactionMode === 'comment' && !shellUiOpen && !visualViewerOpen()) {
-      var released = window.getSelection();
-      if (released && !released.isCollapsed && released.rangeCount) {
-        if (e.cancelable) e.preventDefault();
-        reportSelection();
-        return;
-      }
-    }
     setTimeout(reportSelection, 0);
   }, true);
   window.addEventListener('blur', clearSelectingCursor);
