@@ -386,13 +386,7 @@
            occurrences: placed ? placed.occurrences : null,
            rect: rect });
   }
-  function reportSelection() {
-    if (interactionMode !== 'comment' || visualViewerOpen() || shellUiOpen || selectionActionActivated || capturedTouchSelection) return;
-    var sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideSelectionAction(); return; }
-    var text = sel.toString().trim();
-    if (!text) { hideSelectionAction(); return; }
-    var range = sel.getRangeAt(0);
+  function showSelectionAction(range, text, captureSelection) {
     selectedPassage = { range: range.cloneRange(), text: text };
     if (!selectionAction) {
       selectionAction = document.createElement('div');
@@ -450,17 +444,27 @@
     selectionAction.style.setProperty('left', Math.max(8, Math.min(left, window.innerWidth - width - 8)) + 'px', 'important');
     selectionAction.style.setProperty('top', Math.max(8, top) + 'px', 'important');
     selectionAction.style.setProperty('display', 'inline-flex', 'important');
-    // Use the same pending highlight as the original comment gesture while
-    // releasing iOS's native selection/menu.
-    // Desktop retains the native range so Cmd+C continues to work.
-    if (mobile && HL) {
+    // A point gesture is tdoc's own word selection on either device. A phone
+    // drag also releases the browser selection before its native menu opens.
+    // Desktop drags retain their range so Cmd+C keeps working.
+    if (captureSelection) {
       try {
-        CSS.highlights.delete('tdoc-selecting');
-        CSS.highlights.set('tdoc-pending', new Highlight(selectedPassage.range));
+        if (HL) {
+          CSS.highlights.delete('tdoc-selecting');
+          CSS.highlights.set('tdoc-pending', new Highlight(selectedPassage.range));
+        }
         capturedTouchSelection = true;
-        sel.removeAllRanges();
+        window.getSelection().removeAllRanges();
       } catch (e) { capturedTouchSelection = false; }
     }
+  }
+  function reportSelection() {
+    if (interactionMode !== 'comment' || visualViewerOpen() || shellUiOpen || selectionActionActivated || capturedTouchSelection) return;
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideSelectionAction(); return; }
+    var text = sel.toString().trim();
+    if (!text) { hideSelectionAction(); return; }
+    showSelectionAction(sel.getRangeAt(0), text, window.innerWidth <= 700);
   }
   function scheduleSelectionAction(delay) {
     clearTimeout(selectionTimer);
@@ -517,26 +521,28 @@
     return false;
   }
   function reportPointSelection(event) {
-    if (interactionMode !== 'comment' || event.button !== 0) return;
-    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return;
+    if (interactionMode !== 'comment' || event.button !== 0) return false;
+    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill,.tdoc-selection-action')) return false;
     var current = window.getSelection();
-    if (current && !current.isCollapsed) return; // a drag selection owns this click
+    if (current && !current.isCollapsed) return false; // a drag selection owns this click
     var point = caretAtPoint(event.clientX, event.clientY);
-    if (!point || !point.node || point.node.nodeType !== Node.TEXT_NODE) return;
+    if (!point || !point.node || point.node.nodeType !== Node.TEXT_NODE) return false;
     var bounds = wordBounds(point.node.nodeValue || '', point.offset);
-    if (!bounds || bounds.end - bounds.start < 1) return;
+    if (!bounds || bounds.end - bounds.start < 1) return false;
     try {
       var range = document.createRange();
       range.setStart(point.node, bounds.start); range.setEnd(point.node, bounds.end);
       var text = range.toString().trim();
-      if (!text) return;
+      if (!text) return false;
       // Clicked past the text, not on it: leave the click to the clear path so
       // it dismisses whatever is open instead of commenting on a neighbour.
-      if (!pointOverRange(range, event.clientX, event.clientY)) return;
-      if (current) { current.removeAllRanges(); current.addRange(range); }
+      if (!pointOverRange(range, event.clientX, event.clientY)) return false;
       event.preventDefault(); event.stopPropagation();
-      postTextSelection(range, text);
+      if (reanchorMode) postTextSelection(range, text);
+      else showSelectionAction(range, text, true);
+      return true;
     } catch (e) {}
+    return false;
   }
   // Links: a click inside the sandboxed frame would navigate the FRAME (nested
   // shell / 404), not the page. Intercept and hand navigation to the shell,
@@ -573,7 +579,7 @@
       return;
     }
     var a = e.target && e.target.closest && e.target.closest('a[href]');
-    if (!a) return;
+    if (!a) { reportPointSelection(e); return; }
     if (interactionMode === 'edit') { e.preventDefault(); return; }
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#') return;                    // in-page anchors stay in the frame
@@ -685,6 +691,13 @@
           return;
         }
       }
+      // Safari does not dispatch a click for ordinary text. Reuse the same
+      // point-to-word path as desktop for a light tap, leaving drags alone.
+      if (still && interactionMode === 'comment' && (!sel || sel.isCollapsed)
+        && reportPointSelection({ button: 0, target: e.target,
+          clientX: t.clientX, clientY: t.clientY,
+          preventDefault: function () { if (e.cancelable) e.preventDefault(); },
+          stopPropagation: function () { e.stopPropagation(); } })) return;
     }
     // Match the original comment gesture: capture on release before iOS has
     // time to open its native selection menu.

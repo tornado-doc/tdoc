@@ -165,6 +165,51 @@ async function dragSelect(page, phrase, openComposer = true) {
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
 
   try {
+    await t('Comment point selection uses the tdoc highlight while Read keeps native text behavior', async () => {
+      const { context, page } = await open(julie, 'launch-plan');
+      const frameEl = page.locator('iframe').first();
+      const frame = await (await frameEl.elementHandle()).contentFrame();
+      const point = await frame.evaluate(() => {
+        const node = document.querySelector('p').firstChild;
+        const range = document.createRange();
+        range.setStart(node, 1); range.setEnd(node, 5);
+        const r = range.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      const box = await frameEl.boundingBox();
+      await page.mouse.click(box.x + point.x, box.y + point.y);
+      await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
+      const ownSelection = await frame.evaluate(() => ({
+        text: getSelection().toString(),
+        painted: CSS.highlights.has('tdoc-pending'),
+      }));
+      if (ownSelection.text || !ownSelection.painted) throw new Error(`Comment point used native selection: ${JSON.stringify(ownSelection)}`);
+      await page.locator('.tdoc-mode-trigger').click();
+      await page.getByRole('menuitemradio', { name: /Read/ }).click();
+      await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'read');
+      await page.mouse.click(box.x + point.x, box.y + point.y);
+      if (await frame.locator('.tdoc-selection-action').isVisible()) throw new Error('Read point opened Comment actions');
+      await context.close();
+    });
+
+    await t('phone light tap selects a word in Comment without native handles', async () => {
+      const { context, page } = await open(julie, 'launch-plan', true);
+      const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+      await frame.evaluate(() => {
+        const node = document.querySelector('p').firstChild;
+        const range = document.createRange();
+        range.setStart(node, 1); range.setEnd(node, 5);
+        const r = range.getBoundingClientRect();
+        const touch = new Touch({ identifier: 3, target: node.parentElement, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+        node.parentElement.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [touch] }));
+        node.parentElement.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, changedTouches: [touch] }));
+      });
+      await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
+      const state = await frame.evaluate(() => ({ text: getSelection().toString(), painted: CSS.highlights.has('tdoc-pending') }));
+      if (state.text || !state.painted) throw new Error(`phone tap used native selection: ${JSON.stringify(state)}`);
+      await context.close();
+    });
+
     await t('selection opens a composer; an empty draft copies the quote while a typed draft keeps native copy', async () => {
       const { context, page } = await open(julie, 'launch-plan');
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -281,7 +326,22 @@ async function dragSelect(page, phrase, openComposer = true) {
         await context.addCookies([{ name: 'tdoc_sid', value: julie.cookie.split('=')[1], domain: '127.0.0.1', path: '/' }]);
         const page = await context.newPage();
         await page.goto(`${base}/d/launch-plan`);
-        const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+        let frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+        await frame.locator('h1').waitFor();
+        await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
+        const tapPoint = await frame.evaluate(() => {
+          const node = document.querySelector('p').firstChild;
+          const range = document.createRange();
+          range.setStart(node, 1); range.setEnd(node, 5);
+          const r = range.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        });
+        const frameBox = await page.locator('iframe').first().boundingBox();
+        await page.touchscreen.tap(frameBox.x + tapPoint.x, frameBox.y + tapPoint.y);
+        await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
+        if (await frame.evaluate(() => getSelection().toString() || !CSS.highlights.has('tdoc-pending'))) throw new Error('WebKit tap did not use Comment point selection');
+        await page.reload();
+        frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
         await frame.locator('h1').waitFor();
         await frame.evaluate(() => {
           const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
