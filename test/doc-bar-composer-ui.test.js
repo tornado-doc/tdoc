@@ -245,6 +245,7 @@ async function dragSelect(page, phrase) {
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
       await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
       const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+      await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
       await frame.evaluate(() => {
         const node = document.querySelector('p').firstChild;
         const range = document.createRange();
@@ -269,6 +270,34 @@ async function dragSelect(page, phrase) {
       await page.locator('.tdoc-mode-trigger[data-mode="read"]').waitFor();
       await page.goto(`${base}/d/own-agent-draft`);
       await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+      await context.close();
+    });
+
+    await t('signed-out desktop can select, copy, and draft before sign-in, then resume the draft', async () => {
+      const { context, page } = await open(null, 'launch-plan');
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      await page.locator('.tdoc-mode-trigger').click();
+      await page.getByRole('menuitemradio', { name: 'Read' }).click();
+      await page.locator('.tdoc-mode-trigger[data-mode="read"]').waitFor();
+      await page.locator('.tdoc-mode-trigger').click();
+      await page.getByRole('menuitemradio', { name: 'Comment' }).click();
+      await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+      await dragSelect(page, 'Billing ships first');
+      if (await page.getByRole('dialog', { name: 'Sign in with GitHub' }).count()) throw new Error('desktop selection opened sign-in');
+      const pop = page.locator('.tdoc-popup');
+      await pop.getByRole('button', { name: 'Copy selected text' }).click();
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== 'Billing ships first') throw new Error('anonymous reader could not copy the quote');
+      await pop.locator('textarea').fill('Can we clarify this?');
+      if (await page.getByRole('dialog', { name: 'Sign in with GitHub' }).count()) throw new Error('writing a draft opened sign-in');
+      await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+      await page.getByRole('dialog', { name: 'Sign in with GitHub' }).waitFor();
+      const saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem('tdoc-comment-signin-draft:launch-plan:v1') || 'null'));
+      if (saved?.text !== 'Can we clarify this?' || !saved.selection?.text?.includes('Billing ships')) throw new Error('sign-in discarded the comment draft or quote');
+      await context.addCookies([{ name: 'tdoc_sid', value: reader.cookie.split('=')[1], domain: '127.0.0.1', path: '/' }]);
+      await page.reload();
+      await page.locator('.tdoc-popup textarea').waitFor();
+      if ((await page.locator('.tdoc-popup textarea').inputValue()) !== 'Can we clarify this?') throw new Error('comment draft was not restored after sign-in');
+      if (!(await page.locator('.tdoc-popup .head .h').textContent()).includes('Billing ships')) throw new Error('quote was not restored after sign-in');
       await context.close();
     });
 
@@ -297,6 +326,32 @@ async function dragSelect(page, phrase) {
         await page.keyboard.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
         if ((await page.locator('#paste-check').inputValue()) !== 'Billing ships first') throw new Error('WebKit could not paste the selected text');
         await shot(page, 'selection-composer-webkit-phone-390.png');
+        await context.close();
+      } finally { await browser.close(); }
+    });
+
+    await t('signed-out WebKit phone opens Comment before asking for sign-in on send', async () => {
+      const browser = await webkit.launch({ headless: true });
+      try {
+        const context = await browser.newContext({ ...devices['iPhone 13'], defaultBrowserType: undefined });
+        const page = await context.newPage();
+        await page.goto(`${base}/d/launch-plan`);
+        await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
+        const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+        await frame.evaluate(() => {
+          const node = document.querySelector('p').firstChild;
+          const range = document.createRange();
+          range.setStart(node, 0); range.setEnd(node, 'Billing ships first'.length);
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+          document.dispatchEvent(new Event('touchend', { bubbles: true, cancelable: true }));
+        });
+        const pop = page.locator('.tdoc-popup');
+        await pop.locator('textarea').waitFor();
+        if (!(await pop.locator('textarea').evaluate((el) => document.activeElement === el))) throw new Error('anonymous WebKit composer did not focus');
+        if (await page.getByRole('dialog', { name: 'Sign in with GitHub' }).count()) throw new Error('WebKit selection opened sign-in');
+        await pop.locator('textarea').fill('WebKit question');
+        await pop.getByRole('button', { name: 'Comment', exact: true }).click();
+        await page.getByRole('dialog', { name: 'Sign in with GitHub' }).waitFor();
         await context.close();
       } finally { await browser.close(); }
     });
@@ -627,6 +682,23 @@ async function dragSelect(page, phrase) {
         await shot(page, `unified-entry-${width}.png`);
         await context.close();
       }
+    });
+
+    await t('signed-out phone readers can draft Ask AI, while send or Connect my agent asks for sign-in', async () => {
+      const { context, page } = await open(null, 'launch-plan', true);
+      await page.locator('.tdoc-fab').click();
+      await page.getByRole('radiogroup', { name: 'Comments or Ask AI' }).getByRole('radio', { name: /Ask AI/ }).click();
+      const box = page.locator('#tdoc-comment-layer').getByRole('textbox', { name: 'Ask about this document' });
+      await box.fill('Why billing first?');
+      if (await page.getByRole('dialog', { name: 'Sign in with GitHub' }).count()) throw new Error('drafting an Ask AI question opened sign-in');
+      await page.getByRole('button', { name: 'Who should answer?' }).click();
+      await page.locator('.tdoc-agent-menu').getByRole('menuitem', { name: 'Connect my agent' }).click();
+      await page.getByRole('dialog', { name: 'Sign in with GitHub' }).waitFor();
+      await page.getByRole('dialog', { name: 'Sign in with GitHub' }).getByRole('button', { name: 'Cancel' }).click();
+      if ((await box.inputValue()) !== 'Why billing first?') throw new Error('connecting an agent discarded the question');
+      await page.getByRole('button', { name: 'Send question' }).click();
+      await page.getByRole('dialog', { name: 'Sign in with GitHub' }).waitFor();
+      await context.close();
     });
 
     await t('Ask AI keeps a long agent list behind More agents on a phone', async () => {
