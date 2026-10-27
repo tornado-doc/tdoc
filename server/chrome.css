@@ -198,6 +198,49 @@
      EXPECTED outcome, not an error — don't alarm with the dashed "lost" look or
      push the re-anchor affordance. Keep it solid and quiet. */
   .tdoc-margin-comment.tdoc-resolved.tdoc-unanchored { border-style: solid; }
+  /* Whole-document threads sit in the article flow, directly under its title.
+     The sandboxed frame reserves their measured height; the shell paints the
+     same shared CommentCard and composer controls over that empty slot. */
+  .tdoc-document-comments-layer {
+    position: fixed; left: 0; right: 0; bottom: 0; overflow: hidden;
+    pointer-events: none; z-index: 999995;
+  }
+  .tdoc-document-comments {
+    position: absolute; box-sizing: border-box; padding: 8px 0 12px;
+    display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+    pointer-events: auto; overscroll-behavior: contain;
+    color: var(--td-ink, #1a1a1a); font: 13px/1.4 Inter, system-ui, sans-serif;
+  }
+  .tdoc-document-comments h2 {
+    margin: 0 0 2px; color: var(--td-muted, #73777f);
+    font: 600 12px/1.4 Inter, system-ui, sans-serif;
+  }
+  .tdoc-document-comment-row { width: 100%; }
+  .tdoc-document-comments .tdoc-document-comment-row .tdoc-margin-comment {
+    position: relative; top: auto; left: auto; width: 100%; box-sizing: border-box;
+    max-height: none; margin: 0;
+  }
+  .tdoc-document-comments .tdoc-margin-comment.active:not(.tdoc-current-comment) {
+    border-color: #e8eaed;
+    box-shadow: 0 1px 3px rgba(60,64,67,.15), 0 4px 8px rgba(60,64,67,.08);
+  }
+  .tdoc-document-comment-add {
+    appearance: none; width: 100%; min-height: 36px; padding: 8px 12px;
+    box-sizing: border-box; text-align: left; border: 1px solid var(--td-line, #e8e7e3);
+    border-radius: 8px; background: var(--td-ground, #fff);
+    color: var(--td-muted, #73777f); font: 13px/1.4 Inter, system-ui, sans-serif;
+    cursor: pointer;
+  }
+  .tdoc-document-comment-add:hover, .tdoc-document-comment-add:focus-visible {
+    border-color: var(--td-accent, #1652f0); color: var(--td-accent, #1652f0);
+  }
+  .tdoc-document-comments .tdoc-popup.tdoc-inline-composer {
+    position: relative; top: auto; left: auto; width: 100%; max-width: none;
+    box-sizing: border-box; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  }
+  body.tdoc-narrow .tdoc-document-comments .tdoc-popup.tdoc-inline-composer {
+    left: auto !important; width: 100%; max-width: none;
+  }
   /* Parent-level resolved chip (distinct from the per-reply status chip). */
   .tdoc-resolved-chip {
     display: inline-flex;
@@ -422,7 +465,11 @@
   .tdoc-pin.tdoc-pin-deleted:hover { opacity: 1; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
   .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
+  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster { width: 42px; background: transparent; border: 0; box-shadow: none; }
+  .tdoc-document-pin-faces { display: flex; align-items: center; padding-left: 2px; }
+  .tdoc-document-pin-faces img, .tdoc-document-pin-faces .tdoc-pin-anon { position: relative; flex: 0 0 21px; width: 21px; height: 21px; margin-left: -5px; border: 2px solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 1px 3px rgba(0,0,0,.16); }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
+  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster.tdoc-cluster-allresolved { background: transparent; border: 0; }
   .tdoc-pin.tdoc-pin-cluster::after { content: none; }
 
   /* Floating card: when open via a pin, it sits to the left of the gutter and
@@ -445,6 +492,9 @@
   .tdoc-cluster-pop { position: absolute; pointer-events: auto; width: 260px; max-height: 60vh; overflow-y: auto; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.16); padding: 6px; z-index: 999997; font: 13px system-ui; display: none; }
   .tdoc-cluster-row.tdoc-cluster-current { background: #eef2ff; }
   .tdoc-cluster-pop.open { display: block; }
+  .tdoc-cluster-cards { width: 300px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; }
+  .tdoc-cluster-cards .tdoc-margin-comment { position: relative; top: auto; left: auto; width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+  .tdoc-cluster-cards .tdoc-margin-comment:last-child { margin-bottom: 0; }
   .tdoc-cluster-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
   .tdoc-cluster-row:hover { background: #f5f6f8; }
   .tdoc-cluster-row img { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; }
@@ -630,6 +680,8 @@
   .tdoc-popup .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   .tdoc-popup .head .h { flex: 1; min-width: 0; color: #aaa; }
   .tdoc-popup .head .x { cursor: pointer; color: #888; }
+  .tdoc-popup .head .tdoc-copy-quote { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #aaa; cursor: pointer; }
+  .tdoc-popup .head .tdoc-copy-quote:hover, .tdoc-popup .head .tdoc-copy-quote:focus-visible { background: #292929; color: #fff; }
   .tdoc-popup .tdoc-demo-chip { margin: 0; flex-shrink: 0; background: #3a3424; color: #e8d5a3; }
   .tdoc-popup textarea { width: 100%; min-height: 64px; background: transparent; color: #fff; border: 1px solid var(--td-accent); border-radius: 6px; padding: 8px; font: inherit; resize: vertical; box-sizing: border-box; outline: none; }
   /* iOS Safari zooms the page whenever a focused field's text is smaller than
@@ -814,8 +866,10 @@
 
   /* Narrow mode (drawer + FAB) — still driven by the layout evaluator so
      it can also kick in when the comment column would crowd the article. */
-  body.tdoc-narrow #tdoc-comment-layer { display: block; position: fixed; top: auto; left: 0; right: 0; bottom: 0; max-height: 70vh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(100%); transition: transform .2s; overflow-y: auto; padding: 12px 12px 24px; box-sizing: border-box; z-index: 999998; }
-  body.tdoc-narrow #tdoc-comment-layer.open { transform: translateY(0); }
+  body.tdoc-narrow .tdoc-drawer-viewport { position: fixed; inset: 0; height: 100dvh; z-index: 1000001; }
+  body.tdoc-narrow .tdoc-drawer-backdrop { position: fixed; inset: 0; z-index: 1000000; background: rgba(0,0,0,.28); }
+  body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px max(24px, env(safe-area-inset-bottom)); box-sizing: border-box; z-index: 999998; }
+  body.tdoc-narrow #tdoc-comment-layer[data-starting-style], body.tdoc-narrow #tdoc-comment-layer[data-ending-style] { transform: translateY(100%); }
   /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
      tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
      plain body text, so the document-level "close on outside click" never fires
@@ -832,11 +886,40 @@
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab.is-hidden { display: none; }
   body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
+  body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
+  body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  body.tdoc-narrow .tdoc-comment-filter-row { position: sticky; top: 0; z-index: 1; padding: 4px 0 10px; background: #fff; }
+  body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg { width: 100%; }
+  body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg button { flex: 1; }
+  body.tdoc-narrow .tdoc-tab-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--td-accent, #1652f0); vertical-align: middle; }
+  body.tdoc-narrow .tdoc-drawer-ask { padding-bottom: env(safe-area-inset-bottom); color: var(--td-ink, #1a1a1a); font: 13px/1.4 Inter, system-ui, sans-serif; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-conversation { max-height: none; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-answer-body .text,
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-question .text { font-size: 15px; line-height: 1.55; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-panel > h2 { display: none; }
+  body.tdoc-narrow .tdoc-fab .tdoc-fab-ai { margin-left: -4px; margin-top: -10px; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions button.primary { background: var(--td-accent, #1652f0); color: #fff; border-color: var(--td-accent, #1652f0); }
+  body.tdoc-narrow .tdoc-drawer-empty .tdoc-link-btn { border: 0; background: transparent; color: var(--td-muted); text-decoration: underline; text-underline-offset: 3px; }
+  body.tdoc-narrow .tdoc-howto-dismiss { margin-top: 14px; border: 0; background: transparent; color: var(--td-muted); font: 12px system-ui, sans-serif; cursor: pointer; }
+  body.tdoc-narrow .tdoc-howto-demo { position: relative; width: 220px; height: 74px; margin: 0 auto 14px; padding: 12px 14px; box-sizing: border-box; border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; text-align: left; font: 13px/1.5 system-ui, sans-serif; color: var(--td-ink, #1a1a1a); }
+  body.tdoc-narrow .tdoc-howto-line { display: block; white-space: nowrap; }
+  body.tdoc-narrow .tdoc-howto-line.short { width: 60%; height: 8px; margin-top: 8px; border-radius: 4px; background: var(--td-line, #e8e7e3); }
+  body.tdoc-narrow .tdoc-howto-line mark { background: linear-gradient(var(--td-accent-tint, #e8eefe), var(--td-accent-tint, #e8eefe)) no-repeat left / 0% 100%; color: inherit; animation: tdoc-howto-select 3.2s ease-in-out infinite; }
+  body.tdoc-narrow .tdoc-howto-pill { position: absolute; right: 12px; bottom: 10px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; background: var(--td-accent, #1652f0); color: #fff; font: 600 11px system-ui, sans-serif; opacity: 0; animation: tdoc-howto-pill 3.2s ease-in-out infinite; }
+  @keyframes tdoc-howto-select { 0%, 8% { background-size: 0% 100%; } 35%, 85% { background-size: 100% 100%; } 100% { background-size: 0% 100%; } }
+  @keyframes tdoc-howto-pill { 0%, 35% { opacity: 0; transform: translateY(4px); } 45%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { body.tdoc-narrow .tdoc-howto-line mark { animation: none; background-size: 100% 100%; } body.tdoc-narrow .tdoc-howto-pill { animation: none; opacity: 1; } }
+  .tdoc-bar .tdoc-mode-trigger { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--td-ink, #1a1a1a); font: 500 13.5px/1 system-ui, -apple-system, sans-serif; white-space: nowrap; cursor: pointer; flex-shrink: 0; }
+  .tdoc-bar .tdoc-mode-trigger:hover, .tdoc-bar .tdoc-mode-trigger[data-popup-open] { background: var(--td-surface-2, #f7f7f5); }
+  .tdoc-bar .tdoc-mode-readonly, .tdoc-bar .tdoc-mode-readonly:hover { cursor: default; opacity: .65; background: transparent; }
+  .tdoc-bar .tdoc-mode-chevron { color: var(--td-muted); }
+  @media (max-width: 700px) { .tdoc-bar .tdoc-mode-label { display: none; } .tdoc-bar .tdoc-mode-trigger { padding: 0 6px; gap: 2px; } }
   body.tdoc-narrow .tdoc-drawer-empty { padding: 28px 12px 36px; text-align: center; color: var(--td-muted); font: 14px system-ui, sans-serif; }
   body.tdoc-narrow .tdoc-drawer-empty p { margin: 0 0 14px; }
   body.tdoc-narrow .tdoc-drawer-empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
-  body.tdoc-narrow .tdoc-drawer-empty button { border: 1px solid var(--td-accent); border-radius: 999px; background: #fff; color: var(--td-accent); padding: 10px 16px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
-  body.tdoc-narrow .tdoc-drawer-empty button:last-child { background: var(--td-accent); color: #fff; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions button:not(.tdoc-link-btn) { border: 1px solid var(--td-accent); border-radius: 999px; background: #fff; color: var(--td-accent); padding: 10px 16px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  body.tdoc-narrow .tdoc-drawer-empty-actions button.primary { background: var(--td-accent); color: #fff; }
+  body.tdoc-narrow .tdoc-drawer-empty .tdoc-link-btn { padding: 10px 4px; font: 500 13px system-ui, sans-serif; cursor: pointer; }
   body.tdoc-narrow .tdoc-fab:active { transform: scale(0.96); }
   body.tdoc-narrow .tdoc-popup { width: calc(100vw - 24px); max-width: 320px; left: 12px !important; }
   body.tdoc-narrow .tdoc-modal { padding: 20px; }
@@ -1036,7 +1119,7 @@
   .tdoc-ask-turn-collapse { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--td-accent); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-margin-comment .text .tdoc-md-heading, .tdoc-reply .text .tdoc-md-heading { margin: 6px 0 3px; font-size: 1em; }
   .tdoc-ask-answer-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
-  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { min-height: 40px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 7px; padding: 5px 9px; background: var(--td-ground); color: var(--td-ink, #1a1a1a); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { border: 1px solid var(--td-line, #e8e7e3); border-radius: 6px; padding: 6px 14px; background: var(--td-ground); color: var(--td-ink, #1a1a1a); font: inherit; font-weight: 500; cursor: pointer; }
   .tdoc-ask-answer-actions button.primary, .tdoc-ask-answer.is-error button { border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff; }
   .tdoc-ask-answer-actions button:disabled { opacity: .55; cursor: default; }
   .tdoc-ask-private-note { display: block; margin-top: 8px; color: var(--td-muted, #6b6a66); font-size: 11px; }

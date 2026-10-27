@@ -64,6 +64,10 @@ export function anchorFromSelection(selection) {
   };
 }
 
+export function isDocumentComment(comment) {
+  return !comment?.anchor || comment.anchor.kind === 'document';
+}
+
 export function layoutPins(pins, docHeight) {
   const rows = pins
     .map((pin) => ({ y: pin.docY, comment: pin }))
@@ -91,7 +95,8 @@ export function layoutPins(pins, docHeight) {
 
   for (const row of rows) {
     const previous = clusters.at(-1);
-    if (previous && row.y - previous.maxY <= 12) {
+    if (previous && row.y - previous.maxY <= 12
+      && Boolean(previous.items[0].comment.document) === Boolean(row.comment.document)) {
       previous.items.push(row);
       previous.maxY = row.y;
       previous.y = (previous.items[0].y + row.y) / 2;

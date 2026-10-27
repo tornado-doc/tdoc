@@ -15,13 +15,26 @@ export const FLAGS = Object.freeze({
   // The AI-first onboarding: pick your AI, connect it, then a private comment
   // tutorial. Everybody else keeps the current /setup flow unchanged.
   aiOnboarding: Object.freeze({ label: 'AI onboarding', owner: 'serena', added: '2026-10-26', default: false }),
+  // One entry on phones: the comment button opens a drawer with Comments and
+  // Ask AI tabs instead of a separate Ask AI button in the top bar. On in PR
+  // previews so it can be tried before it ships.
+  unifiedEntry: Object.freeze({ label: 'One comment + Ask AI entry on phones', owner: 'julie', added: '2026-10-26', default: true }),
   teamGuests: Object.freeze({ label: 'Team guests and seats', owner: 'julie', added: '2026-10-26', default: true }),
 });
+
+const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
+
+function isPreviewHost() {
+  return typeof location !== 'undefined' && PREVIEW_HOST.test(location.hostname || '');
+}
 
 export function isFeatureOn(name, devMode = readDevMode()) {
   const flag = Object.prototype.hasOwnProperty.call(FLAGS, name) ? FLAGS[name] : null;
   if (!flag) return false;
-  return flag.default === true || Boolean(devMode && devMode.on);
+  // A page (tests, a support link) may pin a flag either way before boot.
+  const pinned = typeof window !== 'undefined' && window.__TDOC_FLAGS__ ? window.__TDOC_FLAGS__[name] : undefined;
+  if (typeof pinned === 'boolean') return pinned;
+  return flag.default === true || Boolean(devMode && devMode.on) || (flag.preview === true && isPreviewHost());
 }
 
 // The flags dev mode adds over what everybody else sees.
