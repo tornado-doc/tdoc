@@ -132,3 +132,5 @@
   .sh-text { font-size: 13.5px; }
   .sh-go { padding: 0 12px; }
 }
+/* AI onboarding labels the row as a tip instead of a step number. */
+.sh-step.sh-tip { width: auto; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: 0; }

@@ -143,7 +143,9 @@ export function DocStepHint({ step, agentState = 'idle', banner = false, justFin
         ) : watching ? (
           <span className="tdoc-wait-dot" aria-hidden="true" />
         ) : (
-          <span className="sh-step" aria-hidden="true">{STEP_NO[shown]}</span>
+          // AI onboarding: a numbered step on a doc reads like part of the doc; say it is a tip.
+          isFeatureOn('aiOnboarding') ? <span className="sh-step sh-tip">Tip</span>
+            : <span className="sh-step" aria-hidden="true">{STEP_NO[shown]}</span>
         )}
         <span className="sh-text">{ticking ? DONE_LINES[finished] : key === 'handoff' && isFeatureOn('aiOnboarding') ? 'Send your comment to your AI.' : LINES[key]}</span>
         {still ? null : (
