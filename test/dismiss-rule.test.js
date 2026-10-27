@@ -14,6 +14,10 @@ function assert(value, message) { if (!value) throw new Error(message || 'assert
 const root = path.join(__dirname, '..');
 const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
 const probe = fs.readFileSync(path.join(root, 'server/frame-probe.js'), 'utf8');
+function mouseupSource() {
+  const start = probe.indexOf("addEventListener('mouseup'");
+  return probe.slice(start, probe.indexOf("document.addEventListener('touchend'", start));
+}
 
 console.log('the dismiss-first rule keeps its exceptions');
 
@@ -39,7 +43,7 @@ t('mousedown paints before it defers the dismissal', () => {
 t('the dismissal happens on mouseup, not mousedown', () => {
   // Clearing on mousedown unmounts the focused composer in the shell, and
   // losing that focus wipes the selection the user is dragging.
-  const mouseup = probe.slice(probe.indexOf("addEventListener('mouseup'"), probe.indexOf("addEventListener('touchend'"));
+  const mouseup = mouseupSource();
   assert(/swallowClick && !moved/.test(mouseup), 'mouseup no longer distinguishes a dismissing click from a drag');
   assert(/tdoc:cleared/.test(mouseup), 'the dismissal moved back out of mouseup');
 });
@@ -56,7 +60,7 @@ t('the artifact pill is inside the rule, not exempt from it', () => {
 t('a multi-click selection while a card is open is a comment, not only a dismissal', () => {
   // Round-4 tester: a triple-click on a sentence beside an open card only
   // closed the card, and the sentence had to be selected again.
-  const mouseup = probe.slice(probe.indexOf("addEventListener('mouseup'"), probe.indexOf("addEventListener('touchend'"));
+  const mouseup = mouseupSource();
   assert(/var multi = e\.detail >= 2 && interactionMode === 'comment';/.test(mouseup), 'the click count no longer distinguishes a selection from a dismissal');
   assert(/if \(multi && live && !live\.isCollapsed && live\.rangeCount\) \{\s*post\(\{ type: 'tdoc:cleared' \}\);\s*scheduleSelectionAction\(0\);/.test(mouseup), 'the multi-click selection is no longer offered after the card closes');
 });
