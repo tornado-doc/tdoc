@@ -78,6 +78,30 @@ t('resolve sits with the thread actions, behind canMutate', () => {
   assert(card.slice(start - 200, start).includes('canMutate ? ('), 'resolve must be gated like delete');
 });
 
+// Julie, 2026-10-27: no ✓ on Serena's threads. The client gate has to agree
+// with the worker's canMutate(): isDocOwnerSession (sent as isOwner), or the
+// author among actorKeys(session) -- lowercased, linked accounts included.
+t('the resolve gate matches the worker: owner, or the author under any linked key, any case', () => {
+  const start = card.indexOf('export function mayMutate(');
+  const body = card.slice(start, card.indexOf('\n}\n', start) + 2).replace(/^export /, '');
+  const mayMutate = new Function(`${body}; return mayMutate;`)();
+  const serena = { author: { login: 'Serena-Q' } };
+  assert(mayMutate(serena, 'julie', true) === true, 'the doc owner (or team admin) cannot resolve');
+  assert(mayMutate(serena, 'julie', false, ['julie', 'email:julie@x.ai']) === false, 'a stranger can resolve');
+  assert(mayMutate(serena, 'serena-q', false) === true, 'case differs from the stored login');
+  assert(mayMutate(serena, 'email:serena@befreed.ai', false, ['email:serena@befreed.ai', 'serena-q']) === true,
+    'an author signed in through a linked account cannot resolve');
+  assert(mayMutate({ author: { login: 'email:Serena@BeFreed.ai' } }, 'email:serena@befreed.ai', false) === true,
+    'an email-keyed author cannot resolve');
+  assert(mayMutate({ author: {} }, 'anon', false, ['anon']) === false, 'an authorless record is resolvable');
+  assert(mayMutate(serena, 'anon', false, 'anon') === false, 'anon matched');
+  assert(card.includes('const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);'),
+    'the card must pass the viewer\'s linked keys');
+  const fbspace = read('shell/src/feedback-space.jsx');
+  assert(fbspace.includes('identity.linked_actor_keys') && /page: 'feedback-space'[\s\S]{0,1200}linked_actor_keys: actorKeys\(viewer\)/.test(worker),
+    'the feedback space page must send and use the linked keys');
+});
+
 t('resolved visibility governs selection without deleting stored comments', () => {
   const model = read('shell/src/document/comment-area.js');
   assert(model.includes("filterMode === 'resolution' && filter === 'open' && phase(comment) !== 'resolved'"),
