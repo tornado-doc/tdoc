@@ -121,15 +121,16 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    // An old pairing and a live computer without a verified runtime are not ready.
    await page.goto(base+'?setup=1');
    await page.getByRole('button',{name:/^Codex Your computer/}).click();
-   // Raft's two screens: Connect a computer (Install + Setup), then Choose your AI.
+   // Raft's two screens: Connect a computer (one command installs and connects), then Choose your AI.
    await page.getByRole('heading',{name:'Connect a computer',exact:true}).waitFor();
-   assert.match(await page.locator('.ui-setup-instruction').first().innerText(),/tdoc-install/);
-   assert.match(await page.locator('.ui-setup-instruction').nth(1).innerText(),/tdoc setup/);
+   assert.equal(await page.locator('.ui-setup-instruction').count(),1,'one command, one Copy');
+   const oneCommand=await page.locator('.ui-setup-instruction').innerText();
+   assert.match(oneCommand,/tdoc-install \| .*bash$/);assert.doesNotMatch(oneCommand,/install-only/);
    assert.ok(await page.getByRole('button',{name:'Next',exact:true}).isDisabled(),'Next waits for the computer');
    await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:()=>Promise.resolve()}}));
-   const copyBox=await page.getByRole('button',{name:'Copy install',exact:true}).boundingBox();
-   await page.getByRole('button',{name:'Copy install',exact:true}).click();
-   const copiedBox=await page.getByRole('button',{name:'Copy install',exact:true}).boundingBox();
+   const copyBox=await page.getByRole('button',{name:'Copy command',exact:true}).boundingBox();
+   await page.getByRole('button',{name:'Copy command',exact:true}).click();
+   const copiedBox=await page.getByRole('button',{name:'Copy command',exact:true}).boundingBox();
    assert.deepEqual([copiedBox.width,copiedBox.height],[copyBox.width,copyBox.height],'Copy does not change the layout');
    await shot('computer-connect');
    const computer={device:'alex-mac',status:'active',connected_at:'2026-10-25T01:00:00Z',runtimes:[{cli:'codex',state:'needs_check'}]};

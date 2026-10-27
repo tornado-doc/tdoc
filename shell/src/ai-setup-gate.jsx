@@ -14,7 +14,6 @@ export const DOC_SUBJECT_SUFFIX = ', publish it, and give me the link';
 export const DOC_SUBJECT_PLACEHOLDER = 'what it should be about';
 export const docSubjectPrompt = (subject) => `${DOC_SUBJECT_PREFIX}${subject}${DOC_SUBJECT_SUFFIX}`;
 export const SETUP_PROMPT = 'curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash';
-const INSTALL_PROMPT = `${SETUP_PROMPT} -s -- --install-only`;
 const CONNECT_PROMPT = '~/.local/bin/tdoc setup';
 export const conversationPrompt = (code, product = 'your AI') => `Set up tdoc for ${product}: follow "Connect a conversation" in https://tdoc.dev/SKILL.md\n~/.local/bin/tdoc connect ${code}`;
 export const AUTOMATIC_PROMPT = `Set up tdoc on this computer for automatic comment updates:\n${SETUP_PROMPT}`;
@@ -167,9 +166,10 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const instruction = instructionBase.replaceAll('https://tdoc.dev/SKILL.md', `${host}/SKILL.md`)
     .replace(SETUP_PROMPT, releaseRef === 'main' ? SETUP_PROMPT : pinnedSetup);
   const copyInstruction = () => copy(instruction, 'instruction', instructionRef);
-  const installCommand = releaseRef === 'main' ? INSTALL_PROMPT : `${pinnedSetup} -s -- --install-only`;
+  // One command: the installer connects this computer right after installing.
+  const connectCommand = releaseRef === 'main' ? SETUP_PROMPT : pinnedSetup;
   const setupCommand = host === 'https://tdoc.dev' ? CONNECT_PROMPT : `TDOC_HOSTED_BASE=${host} ${CONNECT_PROMPT}`;
-  const installRef = useRef(null); const setupRef = useRef(null);
+  const connectRef = useRef(null); const setupRef = useRef(null);
   const runtimeOptions = RUNTIMES.filter(r => (computer?.runtimes || []).some(x => x.cli === r.value && x.state !== 'not_installed'));
   const chooseProduct = (id) => {
     setProductId(id); setSelected(id === 'claude' || id === 'codex' ? id : '');
@@ -266,13 +266,10 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
             </div>
               : <div className="ui-setup-connection">
                 <p className="ui-setup-label">{computerRoute ? 'Connect command' : 'Instruction'}</p>
-                {computerRoute ? <>
-                  {cmd('1. Install', installCommand, 'install', installRef)}
-                  {cmd('2. Setup', setupCommand, 'setup', setupRef)}
-                </> : cmd(platformRoute ? `Send to your ${product.label} agent` : `Paste into a new ${product.label} chat`, manual && !attempt ? '' : instruction, 'instruction', instructionRef)}
+                {computerRoute ? cmd('Paste into Terminal', connectCommand, 'command', connectRef) : cmd(platformRoute ? `Send to your ${product.label} agent` : `Paste into a new ${product.label} chat`, manual && !attempt ? '' : instruction, 'instruction', instructionRef)}
                 <ol className="ui-setup-steps">
                   {computerRoute ? <>
-                    <li>Paste the commands above into your terminal and press Enter.</li>
+                    <li>Paste the command above into Terminal and press Enter.</li>
                     <li>Approve the request when it opens in your browser.</li>
                     <li>Your computer shows up here on its own. No need to refresh.</li>
                   </> : <>
