@@ -37,6 +37,7 @@ import {
   DocumentOverflowActions,
   DocumentPrimaryAction,
   DocumentSendAgentAction,
+  DocumentSendToAgentButton,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -1613,6 +1614,7 @@ export function DocumentShell({ boot, config }) {
           : { target: comment.handoff_to, askOnly: true }) : null}
     />}</AskAiPanel>
   );
+  const sendToAgentButton = <DocumentSendToAgentButton count={handoffBuckets.ready.length} onClick={() => { setDrawerOpen(false); openDocNotify(); }} />;
   const commentFilterControl = comments.comments.length ? (
     <SegmentedControl
       className="tdoc-comment-filter"
@@ -1919,6 +1921,7 @@ export function DocumentShell({ boot, config }) {
           onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
           hideFab={handoffDetailsOpen || editor.mode === 'read'}
           askAi={unifiedEntry ? askAiPanel(drawerOpen && drawerTab === 'ask') : null}
+          sendAction={unifiedEntry && notifyEnabled ? sendToAgentButton : null}
           tab={drawerTab}
           onTab={setDrawerTab}
           onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
