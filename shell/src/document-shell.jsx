@@ -20,6 +20,7 @@ import {
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
+  CommentListControls,
   DesktopCommentLayer,
   MobileCommentDrawer,
 } from './document/comment-layer.jsx';
@@ -322,10 +323,12 @@ export function DocumentShell({ boot, config }) {
     identity: config.identity,
   });
   const handoffViewer = useMemo(() => [config.identity?.login, ...(config.identity?.linked_actor_keys || [])], [config.identity]);
+  const [autoReadEnabled] = useState(() => isFeatureOn('autoReadComments'));
   const commentArea = useCommentArea({
     comments: comments.comments, slug: config.slug, selectedId: openCommentId,
     filter: commentFilter, filterMode: 'resolution', handoffViewer,
     isOwner: Boolean(config.isOwner),
+    autoMarkSelected: !autoReadEnabled,
   });
 
   const [invited, setInvited] = useState(null);
@@ -1603,6 +1606,7 @@ export function DocumentShell({ boot, config }) {
       onToast={(text, error) => showToast(text, error)}
       onMarkRead={markAgentReplyRead}
       onMarkAllRead={markAllAgentRepliesRead}
+      autoRead={autoReadEnabled}
       onViewChanges={() => { closeAskAi(); changeComparison(true); }}
       onReply={config.canComment ? async (comment, text) => replyTo(comment.id, text,
         canSendToAgent ? { sendToAgent: true, handoffCommentId: comment.id, recipient: comment.handoff_to }
@@ -1868,7 +1872,9 @@ export function DocumentShell({ boot, config }) {
 
       {!narrow && commentFilterControl && !comparing ? (
         <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.min(pinLeft - 4, window.innerWidth - 250) }}>
-          {commentFilterControl}
+          <CommentListControls filter={commentFilterControl}
+            unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
+            onMarkAllRead={autoReadEnabled ? markAllAgentRepliesRead : null} />
         </div>
       ) : null}
       {narrow ? (<>
@@ -1893,6 +1899,7 @@ export function DocumentShell({ boot, config }) {
           open={drawerOpen && !comparing}
           openCount={openCount}
           unread={mobileUnread}
+          unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
           // shownComments, not the raw list: hiding resolved threads took the
           // pins out of the document but left every one of them in the drawer,
           // which on a phone IS the comment list. "Hide resolved" appeared to
@@ -1917,6 +1924,8 @@ export function DocumentShell({ boot, config }) {
           onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
           onAskAi={config.canComment || config.signInToComment ? () => startDocumentComment(true) : null}
           onReply={replyTo}
+          onMarkRead={autoReadEnabled ? markAgentReplyRead : null}
+          onMarkAllRead={autoReadEnabled ? markAllAgentRepliesRead : null}
           onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
@@ -1958,6 +1967,7 @@ export function DocumentShell({ boot, config }) {
             setOpenClusterKey(openClusterKey === key ? null : key);
           }}
           onReply={replyTo}
+          onMarkRead={autoReadEnabled ? markAgentReplyRead : null}
           onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
