@@ -137,6 +137,16 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    computers=[computer];
    // The page moves on by itself once the computer connects; no Next click.
    await page.getByRole('heading',{name:'Choose your AI',exact:true}).waitFor();
+   // Re-entering from the AI picker: the first check already finds this computer,
+   // so it is the baseline, not a new connection. The page waits for Next.
+   await page.getByRole('button',{name:'Not this computer? Start over',exact:true}).click();
+   await page.getByRole('button',{name:'Choose another AI',exact:true}).click();
+   await page.getByRole('button',{name:/^Codex Your computer/}).click();
+   await page.getByText('alex-mac is connected.',{exact:true}).waitFor();
+   await page.waitForTimeout(3500);
+   assert.equal(await page.getByRole('heading',{name:'Connect a computer',exact:true}).count(),1,'an already-connected computer does not skip ahead');
+   await page.getByRole('button',{name:'Next',exact:true}).click();
+   await page.getByRole('heading',{name:'Choose your AI',exact:true}).waitFor();
    assert.ok(await page.locator('.ui-dialog-body').evaluate(el=>el.scrollWidth<=el.clientWidth),'the runtime screen never scrolls sideways');
    assert.ok(await page.getByRole('button',{name:'Continue',exact:true}).isDisabled());
    computer.runtimes[0].state='ready';agents=[{device:'alex-mac',cli:'codex',ready:true,status:'active'}];

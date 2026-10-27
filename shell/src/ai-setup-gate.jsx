@@ -79,11 +79,15 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const intro = stage === 'intro';
   const done = stage === 'done';
   // Like Raft: once the computer shows up, move on to Choose your AI by itself.
-  const wasConnected = useRef(connected);
+  // The first check after opening this step is the baseline: a computer that
+  // was already connected then does not count as newly connected.
+  const wasConnected = useRef(null);
   useEffect(() => {
-    if (connected && !wasConnected.current && stage === 'connect') setPickRuntime(true);
+    if (stage !== 'connect' || !loaded) { wasConnected.current = null; return; }
+    if (error) return;
+    if (connected && wasConnected.current === false) setPickRuntime(true);
     wasConnected.current = connected;
-  }, [connected, stage]);
+  }, [connected, stage, loaded, error]);
   useEffect(() => {
     if (!signedIn || preview || manual || done) return undefined;
     let cancelled = false;
