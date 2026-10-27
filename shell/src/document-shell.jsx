@@ -62,6 +62,7 @@ import { useFrameBridge } from './hooks/use-frame-bridge.js';
 import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
+import { TutorialCoach } from './document/tutorial-coach.jsx';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
@@ -420,6 +421,7 @@ export function DocumentShell({ boot, config }) {
     try { localStorage.setItem(handoffKey, String(copiedAt)); } catch {}
     setHandoff({ state: 'waiting', copiedAt, copyFailed: !ok });
     postOnboardingEvent('fix_copy_clicked', config.slug).catch(() => {});
+    return ok;
   }, [config.slug, handoffText]);
 
   const mentionable = useMentionable(
@@ -1480,6 +1482,8 @@ export function DocumentShell({ boot, config }) {
   // whether the page can honour it, because a row naming a line that is not
   // here is the one thing this row promised never to do.
   const hintStep = docStep(onboardingRecord, config.slug, handoffOnPage);
+  const practiceTutorial = isFeatureOn('aiOnboarding') && onboardingRecord?.daemon_practice_doc === config.slug;
+  const [tutorialReopen, setTutorialReopen] = useState(0);
   // What `goToStep` would open, if anything. The comment step opens tdoc's
   // seeded card, and a CLI-first publisher has none -- seeding is reserved for
   // somebody who came through /setup, on purpose.
@@ -1825,10 +1829,15 @@ export function DocumentShell({ boot, config }) {
           justFinished={arrival === 'revised'}
           // Null when `goToStep` would find nothing to open, so the row does
           // not offer a button that goes nowhere.
-          onGo={stepHasSomewhereToGo ? () => goToStep() : null}
+          onGo={practiceTutorial ? () => setTutorialReopen(value => value + 1) : stepHasSomewhereToGo ? () => goToStep() : null}
           onVisible={setHintBar}
         />
       )}
+
+      {practiceTutorial && editor.mode !== 'edit' ? <TutorialCoach slug={config.slug} step={hintStep}
+        product={onboardingRecord?.tutorial_product} automatic={canSendToAgent}
+        agentState={outstandingHandoffs ? 'waiting' : handoff.state} reopen={tutorialReopen} onComment={() => goToStep('handoff')}
+        onSendAll={() => openDocNotify()} onCopy={handoffCopy} /> : null}
 
       {editor.mode === 'edit' ? (
         <EditorToolbar

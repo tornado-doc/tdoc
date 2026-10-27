@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { isFeatureOn } from './feature-flags.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { TopBar } from './top-bar.jsx';
 import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx';
@@ -9,6 +10,7 @@ import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx'
 // visitor meets them: sign in, allow what is being connected, done.
 //
 // Allow lists the person's workspaces (My docs and each team), all ticked.
+// (AI onboarding, behind its flag, starts with My docs only.)
 // Leaving them all ticked connects the whole account, as it always did;
 // unticking some gives the connection only the rest. Someone with no team
 // has nothing to choose and sees no list.
@@ -40,7 +42,8 @@ export function ActivatePage({ boot, preview = null }) {
   const [identity, setIdentity] = useState(boot.identity);
   // idle → looked-up (terminal named, confirm offered) → approved | error
   const [pending, setPending] = useState(preview?.pending || null);
-  const [picked, setPicked] = useState(() => (preview?.pending?.workspaces || []).map((w) => w.id));
+  const initialPick = (workspaces) => (isFeatureOn('aiOnboarding') ? workspaces.filter(w => w.id === 'me') : workspaces).map(w => w.id);
+  const [picked, setPicked] = useState(() => initialPick(preview?.pending?.workspaces || []));
   const [approved, setApproved] = useState(Boolean(preview?.approved));
   const [error, setError] = useState(preview?.error || '');
   const [busy, setBusy] = useState(Boolean(preview?.busy));
@@ -75,7 +78,7 @@ export function ActivatePage({ boot, preview = null }) {
     if (status === 200 && data && data.ok) {
       const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
       setPending({ label: data.label, device: data.device || '', client: data.client || '', workspaces });
-      setPicked(workspaces.map((w) => w.id));
+      setPicked(initialPick(workspaces));
     } else if (status === 429) {
       setError('Too many tries. Wait a minute, then try again.');
     } else {
@@ -135,6 +138,24 @@ export function ActivatePage({ boot, preview = null }) {
       {main}
     </div>
   ));
+
+  // AI onboarding (dev mode) mirrors Raft's approved page word for word.
+  if (approved && (preview?.ai || isFeatureOn('aiOnboarding'))) {
+    return frame(
+      <main className="tdoc-status-page tdoc-activate-page">
+        <div className="tdoc-activate-stack tdoc-activate-raft">
+        {mark}
+        <h1>Device login approved</h1>
+        <p>Sign-in is complete. You can close this browser page.</p>
+        {partial ? <p className="tdoc-activate-hint">It can reach {workspaceSummary(workspaces, picked)}.</p> : null}
+        <div className="tdoc-status-actions">
+          <button type="button" className="primary" onClick={() => window.close()}>Close this page</button>
+        </div>
+        <p className="tdoc-activate-hint">If this tab stays open, close it manually.</p>
+        </div>
+      </main>
+    );
+  }
 
   if (approved) {
     return frame(

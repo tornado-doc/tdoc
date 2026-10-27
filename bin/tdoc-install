@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Install the managed tdoc runtime, then connect this computer. No sudo or npm install.
+set -euo pipefail
+for tool in curl tar node; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    printf 'tdoc needs %s. Install Node.js from https://nodejs.org if needed, then run this command again.\n' "$tool" >&2
+    exit 1
+  fi
+done
+node -e 'if (Number(process.versions.node.split(".")[0]) < 18) process.exit(1)' || { echo 'tdoc needs a working Node.js 18 or newer.' >&2; exit 1; }
+TDOC_INSTALL_HOME="${TDOC_INSTALL_HOME:-$HOME/.tdoc}"
+mkdir -p "$TDOC_INSTALL_HOME/releases" "$HOME/.local/bin"
+TDOC_STAGE="$(mktemp -d "$TDOC_INSTALL_HOME/releases/runtime.XXXXXX")"
+trap 'rm -rf "$TDOC_STAGE"' EXIT
+# The archive is the official source plus prebuilt reader assets. The user's existing
+# skill checkouts are never updated or overwritten by this installer.
+TDOC_INSTALL_REF="${TDOC_INSTALL_REF:-main}"
+# Only official repository revisions; no user-supplied download host.
+case "$TDOC_INSTALL_REF" in *[!a-zA-Z0-9._/-]*|'') echo 'Invalid tdoc release revision.' >&2; exit 1 ;; esac
+curl -fsSL --connect-timeout 15 --max-time 180 "https://github.com/tornado-doc/tdoc/archive/$TDOC_INSTALL_REF.tar.gz" -o "$TDOC_STAGE/source.tar.gz"
+tar -xzf "$TDOC_STAGE/source.tar.gz" --strip-components=1 -C "$TDOC_STAGE"
+rm "$TDOC_STAGE/source.tar.gz"
+[ -f "$TDOC_STAGE/bin/lib/daemon-setup.js" ] || { echo 'The installer release is incomplete. Please try again later.' >&2; exit 1; }
+# Check before touching the previous background service or launcher.
+node --check "$TDOC_STAGE/bin/lib/daemon-setup.js"
+TDOC_RELEASE="$TDOC_STAGE"
+trap - EXIT
+# Use an explicit runtime root. An interactive skill already installed elsewhere
+# stays intact; the background agent always reads this release's skill.
+printf '#!/usr/bin/env bash\nexport TDOC_SKILL_DIR=%q\nexec %q %q "$@"\n' "$TDOC_RELEASE" "$(command -v node)" "$TDOC_RELEASE/bin/lib/daemon.js" > "$HOME/.local/bin/tdoc"
+chmod +x "$HOME/.local/bin/tdoc"
+for TDOC_AGENT in .claude .agents; do
+  mkdir -p "$HOME/$TDOC_AGENT/skills"
+  if [ ! -e "$HOME/$TDOC_AGENT/skills/tdoc" ] && [ ! -L "$HOME/$TDOC_AGENT/skills/tdoc" ]; then
+    ln -s "$TDOC_RELEASE" "$HOME/$TDOC_AGENT/skills/tdoc"
+  fi
+done
+# The two-command onboarding installs first, then explicitly connects.
+# Keep the default one-command installer for existing entry points.
+if [ "${1:-}" = "--install-only" ]; then
+  printf '\nInstalled. Connect this computer with %s/.local/bin/tdoc setup.\n' "$HOME"
+  exit 0
+fi
+tdoc_finish_setup() {
+  # A curl|bash install must not let an interactive child consume the rest of this script.
+  if ( : </dev/tty ) 2>/dev/null; then
+    TDOC_SKILL_DIR="$TDOC_RELEASE" node "$TDOC_RELEASE/bin/lib/daemon.js" setup "$@" </dev/tty
+  else
+    TDOC_SKILL_DIR="$TDOC_RELEASE" node "$TDOC_RELEASE/bin/lib/daemon.js" setup "$@" </dev/null
+  fi
+}
+if ! tdoc_finish_setup "$@"; then
+  printf '\nSetup is incomplete. After fixing the error, resume with %s/.local/bin/tdoc setup.\n' "$HOME" >&2
+  exit 1
+fi
+printf '\nConnected. Return to your tdoc browser tab.\nManage this computer with %s/.local/bin/tdoc status, stop, setup, or uninstall.\n' "$HOME"

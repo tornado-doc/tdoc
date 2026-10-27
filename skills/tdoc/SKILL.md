@@ -684,6 +684,22 @@ the tdoc app must be installed on your Raft server. `--check` says whether it
 would work without changing anything. Never print or paste the credentials it
 reads.
 
+### `tdoc-connect-webhook` — connect a platform bot without a daemon
+
+For a platform with a documented HTTPS task receiver, use:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-connect-webhook" --url HTTPS_RECEIVER --label PLATFORM_NAME
+```
+
+This uses the existing Tdoc account and keeps the receiver signing secret in a
+private 0600 file. Configure your receiver to verify the exact request body's
+HMAC-SHA256 against `X-Tdoc-Signature` (`sha256=<hex>`), and deduplicate delivery
+IDs in `X-Tdoc-Delivery`. Never print that private file or secret in chat.
+The Tdoc connection page sends an inert delivery test; receiving it is not proof
+that an edit executed. Do not invent a receiver URL. If the host cannot expose a
+supported receiver, explain the limit instead of installing a local daemon.
+
 ### `tdoc-daemon` — let tdoc hand comments to Claude Code / Codex on this computer
 
 Raft agents are pushed to; a laptop cannot be. `bin/tdoc-daemon` is the
@@ -1534,3 +1550,7 @@ line and continue. If it reports `TDOC_UPDATE_AVAILABLE`, tell the user before
 the rest of the work and offer `/tdoc update --yes`. If it reports
 `TDOC_UPDATE_DIVERGED`, tell them to commit/stash or re-clone; do not run
 `--yes`. Quiet dirty-tree skips need no user-facing warning.
+
+### Connect a conversation without a background helper
+
+When a person gives you a tdoc onboarding instruction with a connection code, finish setup before offering to create a document. Reuse tools and a saved sign-in that already work; prepare only what is missing. If tdoc is not yet an account Skill in this host (for example ChatGPT Skills, or Claude Customize → Skills), guide the person through adding it once so future chats find it; a CLI download is not an account Skill. Do not create a document or install or start a background helper. For a platform agent, also connect its existing task receiver: `bin/tdoc-connect-agent` for Raft, or `bin/tdoc-connect-webhook --url RECEIVER_URL --label PLATFORM_NAME` for a documented HTTPS receiver, verifying the signing secret without ever printing it; if there is no supported receiver, say so. Read this skill and prepare its tools. If needed install the official tools and skill with `curl -fsSL https://raw.githubusercontent.com/tornado-doc/tdoc/main/bin/tdoc-install | bash -s -- --install-only`, then run `~/.local/bin/tdoc connect CODE` using the exact code from their instruction. Ask them to approve the tdoc account in their browser when requested. This confirms the tools can reach that same account; it does not start a service, register a local runtime, or create a doc. Do not replace this with `tdoc setup`, which enables automatic background updates. When confirmed, tell the person to return to tdoc. Creating a doc and trying comments are separate, optional tutorial steps. A cloud conversation's files or skills may be temporary: do not promise installation persists beyond that environment.

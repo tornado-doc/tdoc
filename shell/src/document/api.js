@@ -45,7 +45,28 @@ export function getOnboarding(options) {
   // `docs` asks the server to also name the newest doc this account owns. It
   // costs a catalog walk, so only the page that waits for a doc to appear
   // asks for it.
-  return request(options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
+  return request(options?.daemon ? '/api/onboarding?daemon=1' : options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
+}
+
+export function updateComputer(body) {
+  return request('/api/me/computers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+export function getSetupConnectors() {
+  return request('/api/me/connectors');
+}
+export function testSetupConnector(target) {
+  return request('/api/me/connectors/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target) });
+}
+export function startConversationSetup() {
+  return request('/api/onboarding/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+}
+export function conversationSetupStatus(code) {
+  return request(`/api/onboarding/connect?${new URLSearchParams({ code })}`);
+}
+
+export function createOnboardingPractice(target) {
+  return request('/api/onboarding/practice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target) });
 }
 
 export function postOnboardingEvent(action, doc) {

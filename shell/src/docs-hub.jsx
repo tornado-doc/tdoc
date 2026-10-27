@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, LayoutGrid, List, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
+import { SetupGate } from './ai-setup-gate.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
@@ -8,6 +9,7 @@ import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
 import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { ConnectorsBody } from './connectors-page.jsx';
+import { ComputersBody } from './computers-settings.jsx';
 import { DevicesBody } from './tokens-page.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
 import { copyText } from './document/model.js';
@@ -476,6 +478,9 @@ function AccountSettingsPane({ identity, profile }) {
         </a>
       </section>
       <SignInMethodsCard />
+      {isFeatureOn('aiOnboarding') ? <section className="tm-settings-card" id="computers">
+        <ComputersBody identity={identity} />
+      </section> : null}
       <section className="tm-settings-card" id="agents">
         <div className="tm-settings-head"><div><h2>Agents</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
         <ConnectorsBody returnTo="/me?view=settings#agents" />
@@ -563,6 +568,14 @@ function ClaimHandleDialog({ suggested, current, onClose }) {
 // rows and menus are the shared docs-hub/rows.jsx components; every modal is
 // the AppDialog facade. This component only decides what is on screen.
 export function DocsHub({ boot }) {
+  const aiOnboarding = isFeatureOn('aiOnboarding');
+  const [setupOpen, setSetupOpen] = useState(() => aiOnboarding && Boolean(boot.setup || new URLSearchParams(location.search).get('setup') === '1'));
+  const closeSetup = () => {
+    setSetupOpen(false);
+    const url = new URL(location.href);
+    url.searchParams.delete('setup');
+    history.replaceState(null, '', url);
+  };
   const capabilities = { folders: true, delete: true, star: true, create: true, ...(boot.capabilities || {}) };
   const viewer = boot.identity?.login || '';
   const hub = useDocsHub({
@@ -584,7 +597,8 @@ export function DocsHub({ boot }) {
   // ?new_team=1 is the top-bar switcher's "New team" from any page.
   const [modal, setModal] = useState(() => (
     boot.profile && location.hash === '#claim-profile' ? { type: 'claim-handle' }
-      : new URLSearchParams(location.search).get('new_team') === '1' ? { type: 'new-team' } : null
+      : new URLSearchParams(location.search).get('new_team') === '1' ? { type: 'new-team' }
+        : aiOnboarding && new URLSearchParams(location.search).get('tutorial') === '1' ? { type: 'create-agent' } : null
   ));
   const [pins, setPins] = useState(() => new Set(boot.profile?.pins || []));
   const [teams, setTeams] = useState(() => boot.teams || []);
@@ -1391,6 +1405,8 @@ export function DocsHub({ boot }) {
           <p>The folder, its subfolders and the docs in them move to Trash for 30 days, then they are deleted for good. Restore them together from Trash until then.</p>
         </HubDialog>
       ) : null}
+
+      {setupOpen ? <SetupGate boot={boot} onClose={closeSetup} /> : null}
 
       {hub.toast ? (
         <div className={`tdoc-toast${hub.toast.error ? ' error' : ''}`} role="status">

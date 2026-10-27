@@ -17,6 +17,7 @@ const path = require('path');
 const OFFLINE = [
   'version-diff.test.js', // bounded block matching and Unicode edits
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
+  'preview-owner-store.test.js', // PR previews keep doc ownership in their own KV (no Durable Object)
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
@@ -32,6 +33,8 @@ const OFFLINE = [
   'link-sharing.test.js',     // anyone with the link: noindex everywhere, unlisted by default, require sign-in, public->link migration
   'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
+  'computer-settings.test.js', // fresh interactive setup + durable browser computer controls
+  'connect-webhook-cli.test.js', // private receiver configuration and failure handling
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
   'ui-primitives.test.js',    // product UI uses shell/src/ui primitives; no native <select>
   'app-header.test.js',       // every app page renders the shared TopBar; no second account chip, no worker-drawn header
@@ -66,8 +69,9 @@ const OFFLINE = [
   'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
-  'local-agent.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
-  'team-agent.test.js',         // team agents: admin adds, members call, one team's reach, survives the adder, revoke
+  'local-agent.test.js',        // local CLI agents: queued provider, pending index, KV write budget
+  'daemon-onboarding.test.js', // verified installation and private practice
+  'team-agent.test.js',        // team-scoped agent ownership and access
   'daemon-cli.test.js',         // bin/tdoc-daemon once-mode end to end against a stub worker + fake claude
   'handoff-state.test.js',      // handoff classifier: waiting → stale at 5 min, expired past Raft's expiresAt
   'teams.test.js',              // JUL-71 teams: roles, last admin, team-owned docs keep their author
@@ -206,6 +210,7 @@ const BROWSER = [
   'team-backup-ui.test.js', // customer-owned backup setup, health, resync/off, phone layout
   'team-billing-ui.test.js', // #48 Team plan card: free seats, upgrade, paid summary, portal, phone
   'agent-mention-ui.test.js', // @ lists real agents above people; picking one hands the comment to it
+  'daemon-onboarding-browser.test.js',
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
   'dev-mode-ui.test.js', // account menu Dev mode on/off and nested onboarding controls; two-press exit/replay, refused off the list, re-login skips the gate; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy

@@ -89,6 +89,7 @@ const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
 const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, JSON.stringify(previewCoverage)].join('\0')), previewWasm, ...previewFonts]));
 const build = {
+  source_ref: process.env.TDOC_SOURCE_SHA || git('rev-parse', 'HEAD') || null,
   source_sha: sourceSha,
   source_dirty: sourceDirty,
   worker_sha: sha(worker).slice(0, 12),

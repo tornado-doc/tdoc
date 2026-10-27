@@ -1179,6 +1179,75 @@ a.ui-menu-item:visited {
   }
 }
 
+/* The onboarding follows the reference's centered 960 × 720 dialog and fixed footer. */
+.ui-dialog-popup.ui-setup-modal { width: min(960px, calc(100vw - 40px)); height: min(720px, calc(100dvh - 40px)); display: flex; flex-direction: column; padding: 26px 36px 0; border-radius: 0; overflow: hidden; }
+.ui-setup-modal .ui-dialog-eyebrow { margin: 0 0 10px; font: 600 10px/1.4 ui-monospace, monospace; letter-spacing: .05em; color: var(--td-muted, #777); }
+.ui-setup-modal .ui-dialog-title { margin: 0 0 8px; font-size: 20px; line-height: 1.3; }
+.ui-setup-modal .ui-dialog-description { margin: 0 -36px; padding: 0 36px 20px; border-bottom: 1px solid var(--td-line, #e5e5e5); font-size: 12px; line-height: 1.5; }
+.ui-setup-modal .ui-dialog-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 0 24px; }
+.ui-setup-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ui-setup-modal .ui-setup-label { margin: 0; font: 600 12px/1.5 ui-monospace, monospace; letter-spacing: .08em; color: var(--td-muted, #777); }
+.ui-setup-label span { margin-right: 8px; color: var(--td-fg, #111); }
+.ui-setup-modal .ui-setup-intro { margin: 10px 0 8px; font-size: 12px; color: var(--td-muted, #777); }
+.ui-setup-modal .ui-setup-command-label { margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--td-muted, #777); }
+.ui-setup-command { display: flex; align-items: center; gap: 8px; }
+.ui-setup-command code { flex: 1; min-width: 0; background: #101010; color: #c4e88b; padding: 10px 12px; border-radius: 0; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+.ui-setup-command button { flex: none; width: 34px; min-height: 32px; padding: 0; font-size: 20px; border-radius: 0; }
+.ui-setup-modal .ui-setup-steps { padding: 0; margin: 12px 0; list-style: none; counter-reset: setup-step; font-size: 12px; line-height: 1.6; color: var(--td-muted, #777); }
+.ui-setup-steps li { display: flex; align-items: baseline; gap: 8px; margin: 6px 0; counter-increment: setup-step; }
+.ui-setup-steps li::before { content: counter(setup-step); flex: none; width: 14px; text-align: center; border: 1px solid #bbb; font: 10px/14px ui-monospace, monospace; }
+.ui-setup-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 12px/1.6 ui-monospace, monospace; margin: 14px 0; color: var(--td-muted, #777); }
+.ui-setup-modal .ui-setup-connected { color: #137044; }
+.ui-setup-modal .ui-setup-error { color: #a32929; }
+.ui-setup-status .ui-setup-connected { display: inline-flex; align-items: center; gap: 8px; }
+.ui-setup-runtime-help { margin: 14px 0; padding: 14px 16px; border: 1px solid var(--td-line, #ddd); background: var(--td-surface, #fafafa); font-size: 12px; line-height: 1.5; }
+.ui-setup-runtime-help h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.ui-setup-runtime-help > p { margin: 0 0 10px; color: var(--td-muted, #777); }
+.ui-setup-runtime { border-top: 1px solid var(--td-line, #ddd); }
+.ui-setup-runtime summary { min-height: 44px; display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; }
+.ui-setup-runtime summary::-webkit-details-marker { display: none; }
+.ui-setup-runtime summary strong { flex: 1; font-weight: 500; }
+.ui-setup-runtime summary > svg { transition: transform .15s; }
+.ui-setup-runtime[open] summary > svg { transform: rotate(90deg); }
+.ui-setup-runtime-mark { width: 27px; height: 27px; display: grid; place-items: center; background: var(--td-bg, #eee); font: 600 10px ui-monospace, monospace; }
+.ui-setup-runtime-state { color: var(--td-muted, #777); font-size: 11px; }
+.ui-setup-runtime > div { padding: 0 0 12px 37px; overflow-wrap: anywhere; }
+.ui-setup-runtime > div p { margin: 0 0 8px; }
+.ui-setup-runtime > div button { margin-left: 8px; font-size: 11px; }
+.ui-setup-ai-select { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+.ui-choice-links { display: grid; grid-auto-rows: 1fr; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-top: 18px; }
+.ui-setup-modal .ui-choice-link { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; min-height: 252px; padding: 24px; border: 1px solid var(--td-line, #ddd); border-radius: 0; background: var(--td-bg, #fff); color: var(--td-fg, #111); text-align: left; }
+.ui-choice-link:hover { background: var(--td-surface, #fafafa); border-color: var(--td-fg, #111); }
+.ui-choice-link:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: -3px; }
+.ui-setup-modal .ui-dialog-title:focus { outline: none; }
+.ui-choice-link strong { font-size: 18px; line-height: 1.3; font-weight: 500; }
+.ui-choice-link > span:not(.ui-choice-link-icon) { font-size: 14px; line-height: 1.5; }
+.ui-choice-link small { font-size: 12px; line-height: 1.5; color: var(--td-muted, #777); }
+.ui-choice-link > svg { margin-top: auto; }
+.ui-setup-manual { max-width: 660px; font-size: 14px; line-height: 1.6; }
+.ui-setup-subject { display: grid; gap: 10px; margin: 6px 0 20px; font-size: 14px; }
+.ui-setup-subject input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--td-line, #ddd); border-radius: 0; background: var(--td-bg, #fff); color: var(--td-fg, #111); font: inherit; }
+.ui-setup-spin { animation: ui-setup-spin 1s linear infinite; flex: none; }
+@keyframes ui-setup-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ui-setup-spin { animation: none; } }
+@media (max-width: 600px) {
+  .ui-choice-links { grid-template-columns: 1fr; gap: 12px; padding-top: 4px; }
+  .ui-setup-modal .ui-choice-link { min-height: 192px; padding: 18px; gap: 10px; }
+  .ui-choice-link strong { font-size: 16px; }
+  .ui-choice-link > span:not(.ui-choice-link-icon) { font-size: 13px; }
+}
+.ui-setup-details { font-size: 12px; margin-top: 16px; color: var(--td-muted, #777); }
+.ui-setup-details summary { cursor: pointer; width: fit-content; }
+.ui-setup-details p { margin-top: 12px; }
+.ui-setup-modal .actions { flex: none; background: var(--td-bg, #fff); padding: 12px 36px; border-top: 1px solid var(--td-line, #e5e5e5); margin: 0 -36px; }
+.ui-setup-modal .ui-setup-later { margin-right: auto; }
+.ui-setup-modal button:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 600px) {
+  .ui-dialog-popup.ui-setup-modal { width: calc(100vw - 32px); padding: 24px 20px 0; }
+  .ui-setup-modal .ui-dialog-description { margin: 0 -20px; padding: 0 20px 20px; }
+  .ui-setup-modal .actions { padding: 12px 20px; margin: 0 -20px; }
+  .ui-setup-toolbar { align-items: flex-start; flex-direction: column; }
+}
 /* AppCheckbox (ui/checkbox.jsx): a 14px box, the accent when checked. The
    comment composer is dark, so the label takes its colour from the parent. */
 .ui-checkbox { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; min-width: 0; color: inherit; font: 12px system-ui, -apple-system, sans-serif; }
@@ -1190,3 +1259,95 @@ a.ui-menu-item:visited {
 .ui-checkbox-indicator { display: inline-flex; }
 .ui-checkbox-label { white-space: nowrap; }
 .ui-checkbox-hint { color: #8a8a8a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* A single product choice, followed by one instruction and one next action. */
+.ui-setup-simple .ui-dialog-title { font-size: 20px; letter-spacing: -.01em; line-height: 1.3; margin: 0 0 8px; }
+.ui-setup-simple .ui-dialog-description { font-size: 14px; line-height: 1.5; padding-bottom: 20px; color: var(--td-ink, #222); }
+.ui-setup-simple .ui-dialog-body { padding-top: 8px; }
+.ui-setup-simple .actions button { min-height: 44px; font-size: 16px; }
+.ui-ai-groups { display: grid; gap: 20px; }
+.ui-ai-group h3 { margin: 0 0 4px; font: 600 16px/1.4 -apple-system, system-ui, sans-serif; color: var(--td-muted, #666); }
+.ui-ai-label span { color: var(--td-muted, #666); }
+.ui-ai-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 8px 0; }
+.ui-ai-option { display: flex; align-items: center; gap: 16px; min-height: 84px; padding: 16px 20px; text-align: left; border: 1px solid var(--td-line, #ddd); border-radius: 12px; background: var(--td-bg, #fff); color: inherit; cursor: pointer; }
+.ui-ai-option:hover { background: var(--td-surface, #f8f8f8); border-color: var(--td-muted, #777); }
+.ui-ai-option:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
+.ui-ai-mark { display: grid; place-items: center; width: 44px; height: 44px; flex: none; }
+.ui-ai-label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; font: 16px/1.4 -apple-system, system-ui, sans-serif; }
+.ui-ai-label strong { font-weight: 600; }
+.ui-ai-option > svg { flex: none; }
+.ui-setup-connection { margin: 4px 0 0; }
+.ui-setup-simple .ui-setup-details, .ui-setup-simple .ui-setup-ai-select, .ui-setup-simple .ui-setup-runtime-help, .ui-setup-simple .ui-setup-runtime-help h3 { font-size: 16px; }
+.ui-setup-progress { margin: 0 0 40px; padding: 0; list-style: none; counter-reset: connect; display: grid; gap: 22px; }
+.ui-setup-progress li { display: flex; align-items: center; gap: 16px; counter-increment: connect; }
+.ui-setup-progress li::before { content: counter(connect); display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--td-line, #ddd); border-radius: 50%; font-variant-numeric: tabular-nums; }
+.ui-setup-progress .is-complete::before { content: '\2713'; background: var(--td-ink, #222); color: var(--td-bg, #fff); border-color: transparent; }
+.ui-setup-ready { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; min-height: 330px; text-align: center; font-size: 20px; }
+.ui-setup-simple .ui-setup-error { font-size: 16px; }
+@media(max-width: 600px) {
+  .ui-setup-simple .ui-dialog-title { font-size: 20px; }
+  .ui-ai-picker { grid-template-columns: 1fr; gap: 8px; }
+  .ui-ai-option { min-height: 82px; padding: 14px 16px; gap: 12px; }
+  .ui-setup-connection { margin: 20px 0; }
+}
+
+.ui-tutorial-coach .ui-dialog-title { font-size: 24px; letter-spacing: -.025em; }
+.ui-tutorial-coach .ui-dialog-description { font-size: 16px; line-height: 1.6; color: var(--td-ink, #222); }
+.ui-tutorial-coach button { font-size: 16px; min-height: 44px; }
+.ui-tutorial-coach .actions { gap: 12px; }
+.ui-tutorial-single { padding: 12px 16px; border: 1px solid var(--td-line, #ddd); background: var(--td-bg, #fff); color: inherit; border-radius: 8px; cursor: pointer; }
+
+.ui-dialog-popup.ui-setup-simple { border-radius: 16px; }
+
+/* Setup, laid out like Raft's onboarding windows (Desktop 2026-09-09 15:16–15:36):
+   a labelled command row with an icon-only Copy beside it that never resizes,
+   boxed steps, a monospace status line, a text link left and one button right
+   in the footer; Runtime is Raft's two-column "Meet Cindy" screen. Tdoc's own
+   colors and radius. */
+.ui-setup-cmd { margin: 10px 0 0; }
+.ui-setup-cmd-label { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--td-ink, #222); }
+.ui-setup-cmd-row { display: flex; align-items: stretch; gap: 8px; }
+.ui-setup-cmd-row .ui-setup-instruction { flex: 1; min-width: 0; min-height: 38px; box-sizing: border-box; padding: 9px 12px; border-radius: 8px; background: #101010; color: #f5f5f7; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/20px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ui-setup-modal .ui-setup-cmd-copy { flex: none; display: grid; place-items: center; width: 38px; height: 38px; min-height: 38px; padding: 0; border: 1px solid var(--td-line, #ddd); border-radius: 8px; background: var(--td-bg, #fff); color: var(--td-ink, #222); }
+.ui-setup-modal .ui-setup-cmd-copy:hover { background: var(--td-surface, #f5f5f7); }
+.ui-setup-modal .ui-setup-steps { margin: 16px 0 0; }
+.ui-setup-modal .ui-setup-status svg { flex: none; }
+.ui-setup-spin { animation: ui-setup-spin 1s linear infinite; }
+@keyframes ui-setup-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ui-setup-spin { animation: none; } }
+.ui-setup-modal .ui-setup-link { border: 0; background: none; padding: 0; color: var(--td-muted, #666); text-decoration: underline; text-underline-offset: 3px; font-size: 13px; cursor: pointer; }
+.ui-setup-split { display: grid; grid-template-columns: 1fr 1fr; margin: -16px -36px -24px; min-height: 100%; }
+.ui-setup-split-visual { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 32px; border-right: 1px solid var(--td-line, #e5e5e5); text-align: center; }
+.ui-setup-split-visual strong { font-size: 24px; line-height: 1.2; }
+.ui-setup-split-visual span { font-size: 14px; color: var(--td-muted, #666); }
+.ui-setup-split-form { padding: 32px; }
+.ui-setup-field-label { display: block; margin: 0 0 6px; font: 600 13px/1.4 ui-monospace, monospace; letter-spacing: .04em; text-transform: uppercase; }
+.ui-setup-field-label span { color: var(--td-accent, #1652f0); }
+.ui-setup-field-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--td-muted, #666); }
+@media (max-width: 600px) {
+  .ui-setup-split { grid-template-columns: 1fr; margin: -16px -20px -24px; }
+  .ui-setup-split-visual { border-right: 0; border-bottom: 1px solid var(--td-line, #e5e5e5); padding: 20px; }
+  .ui-setup-split-form { padding: 20px; }
+}
+.ui-dialog-popup.ui-setup-modal { border-radius: 16px; }
+/* Raft's stage label and section labels are uppercase, letter-spaced monospace. */
+.ui-setup-modal .ui-dialog-eyebrow, .ui-setup-modal .ui-setup-label { text-transform: uppercase; letter-spacing: .08em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ui-setup-modal .ui-setup-status, .ui-setup-modal .ui-setup-steps li::before, .ui-setup-field-label { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.ui-setup-split-form .ui-select-trigger, .ui-setup-split-form button[role="combobox"] { width: 100%; box-sizing: border-box; }
+.ui-setup-split-form > * { max-width: 100%; }
+/* Raft keeps each command on one 38px line; a long one scrolls sideways. */
+.ui-setup-cmd.is-line .ui-setup-instruction { height: 38px; white-space: nowrap; overflow-x: auto; overflow-y: hidden; overflow-wrap: normal; scrollbar-width: thin; }
+.ui-setup-modal .actions button:not(.ui-setup-link) { min-height: 40px; height: 40px; padding: 0 18px; }
+.ui-setup-modal .actions .ui-setup-link { min-height: 0; height: auto; padding: 0; white-space: nowrap; }
+/* Runtime screen: the two columns span the dialog edge to edge, never wider. */
+.ui-setup-modal .ui-setup-split { width: 100%; margin: 0; box-sizing: border-box; }
+.ui-setup-split > * { min-width: 0; box-sizing: border-box; }
+.ui-setup-modal .ui-setup-split-visual { padding-left: 0; }
+.ui-setup-modal .ui-setup-split-form { padding-right: 0; }
+@media (max-width: 600px) { .ui-setup-modal .ui-setup-split-visual { padding: 16px 0; } .ui-setup-modal .ui-setup-split-form { padding: 16px 0; } }
+/* Raft's approved page: one wide button. */
+.tdoc-activate-page .tdoc-activate-stack.tdoc-activate-raft { width: 448px; max-width: 100%; }
+.tdoc-activate-page .tdoc-activate-raft > h1 { font-size: 20px; line-height: 1.3; letter-spacing: 0; }
+.tdoc-activate-page .tdoc-activate-raft .tdoc-status-actions { width: 100%; }
+.tdoc-activate-page .tdoc-activate-raft .tdoc-status-actions .primary { width: 100%; height: 40px; min-height: 40px; padding: 0 18px; }
+

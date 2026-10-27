@@ -16,6 +16,7 @@ import { NeutralLanding } from './neutral-landing.jsx';
 import { StatusPage } from './status-page.jsx';
 import { ActivatePage } from './activate-page.jsx';
 import { SetupGate } from './setup-gate.jsx';
+import { isFeatureOn } from './feature-flags.js';
 import { TeamJoinPage } from './team-join.jsx';
 
 const OnboardingPreview = lazy(() => import('./onboarding-preview.jsx'));
@@ -51,6 +52,9 @@ if (appRoot && appBoot) {
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;
   else if (appBoot.page === 'activate') page = <ActivatePage boot={appBoot} />;
+  // AI onboarding (dev mode only, so always signed in) runs over My docs;
+  // everybody else keeps the /setup page exactly as it is.
+  else if (appBoot.page === 'setup' && isFeatureOn('aiOnboarding')) { location.replace('/me?setup=1'); page = null; }
   else if (appBoot.page === 'setup') page = <SetupGate boot={appBoot} />;
   else if (appBoot.page === 'team-join') page = <TeamJoinPage boot={appBoot} />;
   else page = <NeutralLanding boot={appBoot} />;

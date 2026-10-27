@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { isFeatureOn } from '../feature-flags.js';
 import { Check, ChevronDown, X } from 'lucide-react';
 import { AgentMarks } from '../agent-marks.jsx';
 import { postOnboardingCheck } from '../document/api.js';
@@ -46,20 +47,24 @@ function rememberOpen(value) {
 // whose turn has not come is shown and not offered, so the shape of the whole
 // thing is visible from the first arrival without inviting a click that would
 // land nowhere.
-export function onboardingSteps(record, firstDocHref) {
+// `ai`: the dev-mode AI onboarding's wording and first-doc route.
+export function onboardingSteps(record, firstDocHref, ai = false) {
   const r = record || {};
   const steps = [
-    { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
+    // A chat app or platform connects without a computer; its setup stamps agent_connected.
+    ai ? { id: 'connect', label: 'Connect your AI', done: Boolean(r.daemon_connected || r.agent_connected), href: '/setup' }
+      : { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
     // Every row opens the page for its own step, finished or not -- the page
     // is where that step's state is written, and a finished one should say so
     // rather than being a dead line or a detour somewhere else.
-    { id: 'create', label: 'Create your first tdoc', done: Boolean(r.first_doc), href: '/setup?step=doc' },
+    ai ? { id: 'create', label: 'Open your first doc', done: Boolean(r.first_doc), href: firstDocHref || '/setup' }
+      : { id: 'create', label: 'Create your first tdoc', done: Boolean(r.first_doc), href: '/setup?step=doc' },
     // Both rows open the same doc, and each says which of its two things it
     // came for: the question already on the page, or the card carrying the
     // line for the agent. Landing on the bare URL left the last two rows
     // pointing at the same wall of text.
     { id: 'comment', label: 'Comment on your doc', done: Boolean(r.commented || r.revised), href: firstDocHref && `${firstDocHref}?step=comment` },
-    { id: 'revise', label: 'Ask your agent to fix comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
+    { id: 'revise', label: ai ? 'Send comments to your AI' : 'Ask your agent to fix comments', done: Boolean(r.revised), href: firstDocHref && `${firstDocHref}?step=fix` },
   ];
   // The stamps above are what the server saw. Detection misses real
   // completions -- a skill set up on another machine, a doc made before the
@@ -157,7 +162,7 @@ export function OnboardingChecklist({ record: initial, docs }) {
   const firstDoc = first ? (docs || []).find((d) => d && d.slug === first) : null;
   const alive = Boolean(firstDoc);
   const href = alive ? `/d/${encodeURIComponent(first)}` : null;
-  const steps = onboardingSteps(record, href);
+  const steps = onboardingSteps(record, href, isFeatureOn('aiOnboarding'));
   const done = steps.filter((s) => s.done).length;
   // Nothing to say before the journey starts, and nothing left to say after it
   // ends: the card is for the middle.
@@ -278,7 +283,7 @@ export function OnboardingChecklist({ record: initial, docs }) {
       {/* Not a step: tdoc already works without it. Shown with the full list
           so the person learns the other direction exists — tdoc pinging their
           agent — without it counting against "done". */}
-      {open ? (
+      {open && !isFeatureOn('aiOnboarding') ? (
         <p className="onb-optional">
           <span>Optional</span> Send comments straight to your agent from tdoc. <a href="/me?view=settings#agents">Set up an agent</a>
         </p>
