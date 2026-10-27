@@ -101,6 +101,9 @@ t('a person can tick a row themselves, beside the stamps and never as one', () =
   assert(!by.comment.done && !by.comment.locked, 'and the next row opens after it');
   assert(by.revise.done && !by.revise.auto, 'a row can be ticked out of order');
   assert(list.includes('disabled={step.auto}'), 'a stamp cannot be unticked from the page');
+  // AI onboarding: a chat app connects with no computer, and still finishes the checklist.
+  const chat = Object.fromEntries(steps({ agent_connected: 'A', first_doc: 'd', commented: 'C', revised: 'R' }, '/d/x', true).map((r) => [r.id, r]));
+  assert(['connect', 'create', 'comment', 'revise'].every((id) => chat[id].done), 'a ChatGPT Work run is 4/4, not 3/4');
 });
 
 t('the seed comment anchors to the first paragraph the reader can see', () => {

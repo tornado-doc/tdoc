@@ -51,7 +51,8 @@ function rememberOpen(value) {
 export function onboardingSteps(record, firstDocHref, ai = false) {
   const r = record || {};
   const steps = [
-    ai ? { id: 'connect', label: 'Connect your computer', done: Boolean(r.daemon_connected), href: '/setup' }
+    // A chat app or platform connects without a computer; its setup stamps agent_connected.
+    ai ? { id: 'connect', label: 'Connect your AI', done: Boolean(r.daemon_connected || r.agent_connected), href: '/setup' }
       : { id: 'connect', label: 'Set up the tdoc skill', done: Boolean(r.agent_connected || r.published_first), href: '/setup' },
     // Every row opens the page for its own step, finished or not -- the page
     // is where that step's state is written, and a finished one should say so
