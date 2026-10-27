@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
-import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
+import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
@@ -324,8 +324,8 @@ function EditForm({ item, onSave, onCancel }) {
         }}
       />
       <div className="tdoc-edit-form-foot">
-        <button className="tdoc-edit-cancel" type="button" onClick={onCancel}>Cancel</button>
-        <button className="tdoc-edit-save" type="button" onClick={submit}>Save</button>
+        <button className="tdoc-edit-cancel ui-btn ui-btn-quiet ui-btn-m" type="button" onClick={onCancel}>Cancel</button>
+        <button className="tdoc-edit-save ui-btn ui-btn-primary ui-btn-m" type="button" onClick={submit}>Save</button>
       </div>
     </div>
   );
@@ -886,7 +886,7 @@ export function CommentCard({
             <AppMenu
               trigger={(
                 <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
-                  <MoreVertical size={16} />
+                  <MoreHorizontal size={16} />
                 </button>
               )}
             >

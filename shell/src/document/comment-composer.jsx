@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Copy } from 'lucide-react';
+import { Copy, X } from 'lucide-react';
 import { AgentButtonsContext, MentionField } from './mention-field.jsx';
 import { joinAiTags, mentionsAi } from './ai-answerer.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
@@ -167,7 +167,7 @@ export function CommentComposer({
       >
         <div className="head">
           <span className="h">{preview}</span>
-          <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
+          <button type="button" className="x" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button>
         </div>
         <PrivateAnswer privateAsk={privateAsk} onMakePublic={onMakePublic} />
       </div>
@@ -185,7 +185,7 @@ export function CommentComposer({
         {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
         <span className="h">{preview}</span>
         {quoted ? <button type="button" className="tdoc-copy-quote" aria-label="Copy selected text" title="Copy selected text" onMouseDown={(event) => event.preventDefault()} onClick={copyQuote}><Copy size={15} aria-hidden="true" /></button> : null}
-        <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
+        <button type="button" className="x" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button>
       </div>
       <div><MentionField
         autoFocus

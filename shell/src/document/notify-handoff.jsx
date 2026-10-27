@@ -7,6 +7,7 @@ import { Terminal, Webhook } from 'lucide-react';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from '../agent-marks.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { AppCombobox } from '../ui/combobox.jsx';
 import {
@@ -287,7 +288,7 @@ export function RaftConnectButton({ label = 'Connect with Raft', onConnected = n
   const waiting = phase === 'waiting';
   return (
     <>
-      <a className="tdoc-raft-btn" href="/api/me/connectors/raft/start" onClick={connect} aria-disabled={waiting || undefined}>
+      <a className="tdoc-raft-btn ui-btn ui-btn-primary ui-btn-m" href="/api/me/connectors/raft/start" onClick={connect} aria-disabled={waiting || undefined}>
         <RaftMark size={18} />
         <span>{waiting ? 'Waiting for Raft…' : phase === 'failed' ? 'Try again' : phase === 'connected' ? 'Connected' : label}</span>
       </a>
@@ -401,7 +402,7 @@ function RaftConnectedNoAgentView({ servers, onClose, onSaved }) {
       onOpenChange={(next) => { if (!next) onClose(); }}
       title="Which agent should get these?"
       description={`Raft is connected (${slugs}), but no agent on it has worked with tdoc yet, so there is nobody to send to. Name the agent that should get comments; agents that publish or reply later take over their own docs automatically.`}
-      actions={<button type="button" onClick={onClose}>Close</button>}
+      actions={<AppButton onClick={onClose}>Close</AppButton>}
     >
       <div className="tdoc-connectors">
         {canEdit
@@ -421,7 +422,7 @@ function ConnectAgentView({ onClose, onConnected, isConnected }) {
       onOpenChange={(next) => { if (!next) onClose(); }}
       title="Connect an agent"
       description="Nothing is connected yet, so there is nowhere to send these. Connect once; after that Send to agent and @agent hand comments straight to it."
-      actions={<button type="button" onClick={onClose}>Close</button>}
+      actions={<AppButton onClick={onClose}>Close</AppButton>}
     >
       <div className="tdoc-connectors">
         {AGENT_CONNECTORS.map((c) => (
@@ -503,7 +504,7 @@ function TeamDaemonView({ reason, onClose }) {
       open
       onOpenChange={(next) => { if (!next) onClose(); }}
       title={admin ? 'Set up an always-on agent' : reason === 'no_team_agent' ? 'No team agent yet' : 'A team admin sends this'}
-      actions={<button type="button" onClick={onClose}>Close</button>}
+      actions={<AppButton onClick={onClose}>Close</AppButton>}
     >
       {admin ? (
         <>
@@ -684,11 +685,11 @@ export function NotifyHandoffPanel({
             : 'No new comments to send.'}
       actions={(
         <>
-          <button type="button" onClick={onClose}>{batch.length > 0 ? 'Cancel' : 'Close'}</button>
+          <AppButton onClick={onClose}>{batch.length > 0 ? 'Cancel' : 'Close'}</AppButton>
           {!unavailable && batch.length > 0 ? (
-            <button type="button" className="primary" disabled={!canSubmit} onClick={submit}>
+            <AppButton variant="primary" className="primary" disabled={!canSubmit} onClick={submit}>
               {busy ? `Sending to ${agentLabel(chosen)}…` : result && !result.ok ? 'Retry' : reassign ? `Send ${lastIds.length === 1 ? 'it' : 'them'} to ${agentLabel(chosen)}` : `Send to ${agentLabel(chosen)}`}
-            </button>
+            </AppButton>
           ) : null}
         </>
       )}

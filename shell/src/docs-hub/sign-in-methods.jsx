@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Mail } from 'lucide-react';
+import { AppButton } from '../ui/button.jsx';
 import './teams.css';
 
 // Settings -> Sign-in methods (#58). What this account can sign in with: the
@@ -97,12 +98,12 @@ export function SignInMethodsCard() {
             </span>
             {gh ? (
               methods.can_disconnect_github ? (
-                <button type="button" className="tm-link-btn" onClick={disconnect} disabled={busy}>Disconnect</button>
+                <AppButton onClick={disconnect} disabled={busy}>Disconnect</AppButton>
               ) : (
                 <span className="tm-sim-muted" title="Add another sign-in method first">Only sign-in method</span>
               )
             ) : methods.connect_available ? (
-              <button type="button" className="tm-link-btn" onClick={connect} disabled={busy}>Connect GitHub</button>
+              <AppButton onClick={connect} disabled={busy}>Connect GitHub</AppButton>
             ) : null}
           </li>
         </ul>

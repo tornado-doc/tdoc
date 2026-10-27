@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AppSwitch } from '../ui/switch.jsx';
 import { deleteDocument, getTeam, getTeamGuests, updateDocumentAccess, updateTeam } from './api.js';
@@ -99,7 +100,7 @@ export function InviteField({ users, onChange }) {
               aria-label={`Remove ${login}`}
               onClick={() => onChange(users.filter((user) => user !== login))}
             >
-              ×
+              <X size={12} aria-hidden="true" />
             </button>
           </span>
         ))}
@@ -233,7 +234,7 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
       open={open}
       onOpenChange={onOpenChange}
       title="Share"
-      actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
+      actions={<AppButton onClick={() => onOpenChange(false)}>Close</AppButton>}
     >
       <div
         className="code url"
@@ -243,9 +244,9 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
         {url}
       </div>
       <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
-        <button type="button" className="primary" onClick={() => copyText(url).then(onCopied)}>
+        <AppButton variant="primary" className="primary" onClick={() => copyText(url).then(onCopied)}>
           Copy link
-        </button>
+        </AppButton>
       </div>
       <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
       {manage.versionCount != null ? (
@@ -293,8 +294,8 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
             {pendingInvite ? <div className="manage-section" role="group" aria-label="Invitation choice">
               <p>{pendingInvite.invitee} shares a team email domain. How should they join?</p>
               <div className="actions">
-                <button type="button" className="primary" onClick={inviteToTeam}>Invite to team (uses a seat)</button>
-                <button type="button" onClick={() => { const users = pendingInvite.allowedUsers; setPendingInvite(null); save({ allowed_users: users }); }}>Only this document (guest)</button>
+                <AppButton variant="primary" className="primary" onClick={inviteToTeam}>Invite to team (uses a seat)</AppButton>
+                <AppButton onClick={() => { const users = pendingInvite.allowedUsers; setPendingInvite(null); save({ allowed_users: users }); }}>Only this document (guest)</AppButton>
               </div>
             </div> : null}
           </>
@@ -358,10 +359,10 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
       description={`${config.slug}, its ${versions} and ${comments} move to ${where} for 30 days, then they are deleted for good.`}
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" className="danger" onClick={remove}>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="danger" className="danger" onClick={remove}>
             <Trash2 size={14} /> Delete
-          </button>
+          </AppButton>
         </>
       )}
     >

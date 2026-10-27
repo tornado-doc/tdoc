@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
+import { AppButton } from './ui/button.jsx';
 import { AppSwitch } from './ui/switch.jsx';
 import { actorName, joiner, notificationAction, notificationLabel, notificationTarget } from './notification-text.js';
 
@@ -43,8 +44,8 @@ export function BrowserAlertsPrompt({ notifications }) {
             : `Get a browser alert when someone comments, mentions you, or replies${pushable ? ', even with tdoc closed.' : '. tdoc needs to stay open in a tab.'}`}</span>
       </div>
       <div className="tdoc-notif-prompt-actions">
-        {!result ? <button type="button" className="primary" onClick={enable}>Turn on</button> : null}
-        <button type="button" onClick={dismiss}>{result ? 'Close' : 'Not now'}</button>
+        {!result ? <AppButton variant="primary" className="primary" onClick={enable}>Turn on</AppButton> : null}
+        <AppButton onClick={dismiss}>{result ? 'Close' : 'Not now'}</AppButton>
       </div>
     </aside>
   );
@@ -109,11 +110,11 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
       actions={(
         <>
           {notifications.hasMore ? (
-            <button type="button" disabled={notifications.loading} onClick={() => notifications.load({ append: true })}>
+            <AppButton disabled={notifications.loading} onClick={() => notifications.load({ append: true })}>
               Load more
-            </button>
+            </AppButton>
           ) : null}
-          <button type="button" onClick={() => changeOpen(false)}>Close</button>
+          <AppButton onClick={() => changeOpen(false)}>Close</AppButton>
         </>
       )}
     >
@@ -155,8 +156,8 @@ export function NotificationsDialog({ open, notifications, onOpenChange, onSelec
               {pending ? (
                 // Answer it here: the request is the whole job, not a link to go find Share.
                 <span className="tdoc-notif-actions">
-                  <button type="button" className="primary" onClick={() => notifications.answerAccessRequest(item, 'approve')}>Approve</button>
-                  <button type="button" onClick={() => notifications.answerAccessRequest(item, 'ignore')}>Ignore</button>
+                  <AppButton variant="primary" size="s" className="primary" onClick={() => notifications.answerAccessRequest(item, 'approve')}>Approve</AppButton>
+                  <AppButton size="s" onClick={() => notifications.answerAccessRequest(item, 'ignore')}>Ignore</AppButton>
                 </span>
               ) : null}
             </div>

@@ -740,7 +740,7 @@ ${uiCss}
           </span>
           <button type="button" className="tdoc-fb-add" onClick={onPick}>+ Comment</button>
           <button type="button" className="tdoc-fb-refresh" aria-label="Refresh feedback" title="Refresh feedback" aria-busy={refreshing ? 'true' : 'false'} onClick={onRefresh}><RefreshCw aria-hidden="true" /></button>
-          <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
+          <button type="button" className="x" aria-label="Close list" onClick={onClose}><X size={14} aria-hidden="true" /></button>
         </header>
         {unreadComments.length ? <div className="tdoc-fb-readbar"><span>{unreadComments.length} new agent {unreadComments.length === 1 ? 'reply' : 'replies'}</span><button type="button" onClick={() => area.markAllRead(unreadComments)}>Mark all as read</button></div> : null}
         <div className="tdoc-fb-scroll">
@@ -1172,9 +1172,9 @@ ${uiCss}
 
         {notice ? (
           <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
-            <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" onClick={() => setNotice(null)}>×</button></div>
+            <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
             <p>{notice.error}</p>
-            <div className="foot"><span /><button className="submit" type="button" onClick={async () => {
+            <div className="foot"><span /><button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={async () => {
               setNotice(null);
               const result = await call({ type: 'tdoc-feedback-signin' });
               // This button is the continuation of "leave a comment", not a

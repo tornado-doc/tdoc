@@ -163,12 +163,11 @@
   .tdoc-connector-title { display: grid; gap: 2px; }
   .tdoc-connector-badge { justify-self: start; margin: 2px 0; padding: 1px 7px; border-radius: 999px; background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); font-size: 11px; font-weight: 600; }
   .tdoc-connector-head .muted { font-size: 12.5px; }
-  .tdoc-connector code { display: block; padding: 8px; border-radius: 6px; background: var(--td-surface, #f7f7f5); font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
+  .tdoc-connector code:not(.tdoc-inline-code) { display: block; padding: 8px; border-radius: 6px; background: var(--td-surface, #f7f7f5); font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
   .tdoc-connector .primary { justify-self: start; }
   /* Agents surfaces share one look: 12px cards, 6px buttons. */
   .tdoc-connector { border-radius: 12px !important; padding: 16px !important; gap: 12px !important; }
-  .tdoc-raft-btn { justify-self: start; display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 10px; border-radius: 6px; background: #141111; color: #fff !important; font: 600 13px/1 -apple-system, system-ui, sans-serif; text-decoration: none; }
-  .tdoc-raft-btn:hover { background: #2a2626; }
+  .tdoc-raft-btn { justify-self: start; }
   .tdoc-connector .tdoc-connector-action { justify-self: start; display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 13px/1.2 system-ui, sans-serif; text-decoration: none; }
   .tdoc-connector details summary { cursor: pointer; }
   .tdoc-connector details[open] { display: grid; gap: 8px; }
@@ -609,10 +608,6 @@
   .tdoc-edit-form { display: none; margin: 2px 0 0; }
   .tdoc-edit-form.open { display: block; }
   .tdoc-edit-form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 6px; }
-  .tdoc-edit-form-foot .tdoc-edit-cancel { background: none; border: none; color: #888; font: 12px system-ui; cursor: pointer; padding: 5px 4px; }
-  .tdoc-edit-form-foot .tdoc-edit-cancel:hover { color: #111; text-decoration: underline; }
-  .tdoc-edit-form-foot .tdoc-edit-save { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
-  .tdoc-edit-form-foot .tdoc-edit-save:hover { background: var(--td-accent-hover); }
 
   /* Anchor highlights (Custom Highlight API + fallback span) */
   ::highlight(tdoc-pending) { background-color: #fff3a8; }
@@ -696,8 +691,8 @@
     .tdoc-reply-form-foot .tdoc-keyboard-shortcut-hint { display: none; }
   }
   /* The composer popover is dark: secondary AppButtons take its colours, not a new size. */
-  .tdoc-popup .ui-btn-secondary { background: #2c2c2c; color: #f0f0f0; border-color: #4a4a4a; }
-  .tdoc-popup .ui-btn-secondary:hover:not(:disabled) { background: #3a3a3a; }
+  .tdoc-popup .ui-btn.ui-btn-secondary { background: #2c2c2c; color: #f0f0f0; border-color: #4a4a4a; }
+  .tdoc-popup .ui-btn.ui-btn-secondary:hover:not(:disabled) { background: #3a3a3a; }
   .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
 
   /* @mention picker + chips. The field wrapper is the positioning context for
@@ -708,8 +703,8 @@
   /* Positioned in viewport coordinates by MentionField and portalled to the
      body, so a scrolling comment card cannot clip it (#363). */
   .tdoc-mention-menu { position: fixed; z-index: 1000002; max-height: 184px; overflow-y: auto; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); padding: 4px; }
-  .tdoc-mention-option { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; appearance: none; border: 0; background: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; font: 13px system-ui, sans-serif; color: var(--td-ink); text-align: left; }
-  .tdoc-mention-option.active { background: var(--td-accent-tint); }
+  .tdoc-mention-option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; box-sizing: border-box; appearance: none; border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font: 13px system-ui, sans-serif; color: var(--td-ink); text-align: left; }
+  .tdoc-mention-option.active { background: #f0f1f4; }
   .tdoc-mention-option img { width: 18px; height: 18px; border-radius: 50%; flex: none; }
   .tdoc-mention-anon { width: 18px; height: 18px; border-radius: 50%; background: var(--td-surface); flex: none; }
   .tdoc-mention-login { font-weight: 600; }
@@ -790,7 +785,7 @@
   .tdoc-token.invalid { background: #fdeceb; border-color: #f1b8b2; color: var(--td-danger); }
   .tdoc-token img, .tdoc-token .mark { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
   .tdoc-token .mark { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; background: #f1b8b2; color: #fff; }
-  .tdoc-token .rm { cursor: pointer; color: #999; font-size: 15px; padding: 0 3px; }
+  .tdoc-token .rm { display: inline-flex; align-items: center; cursor: pointer; color: #999; font-size: 15px; padding: 0 3px; }
   .tdoc-token .rm:hover { color: var(--td-danger); }
   .tdoc-ac { position: relative; }
   .tdoc-ac-list { position: absolute; left: 0; right: 0; top: 2px; z-index: 10; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
@@ -1076,7 +1071,7 @@
   .tdoc-ask-mobile-drawer[data-swiping] { transition: none; }
   .tdoc-ask-drawer-grip { display: flex; align-items: center; justify-content: center; flex: none; align-self: center; width: 64px; height: 24px; margin: -8px auto 4px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
   .tdoc-ask-drawer-grip span { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--td-line); }
-  .tdoc-ask-drawer-close { position: absolute; top: 2px; right: 5px; width: 44px; height: 44px; border: 0; background: transparent; color: var(--td-muted); font: 23px/1 system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-drawer-close { position: absolute; top: 2px; right: 5px; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--td-muted); font: 23px/1 system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-drawer-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
   .tdoc-ask-mobile-drawer .tdoc-ask-conversation { max-height: none; }
   .tdoc-ask-mobile-drawer .tdoc-ask-answer-body .text { font-size: 15px; line-height: 1.55; }
@@ -1392,8 +1387,8 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
    short name, a small grey tag (Mine / Team / "5 free"), a quiet check on
    the agent in the text. Connect my agent is a quiet link row. */
 .ui-menu-popup.tdoc-agent-menu { min-width: 200px; max-width: 320px; padding: 4px; background: #fff; border: 1px solid var(--td-line, #e5e5e7); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); outline: none; }
-.ui-menu-item.tdoc-agent-menu-item { display: flex; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box; padding: 4px 8px; border-radius: 6px; font: 13px system-ui, sans-serif; color: var(--td-ink, #1a1a1a); outline: none; }
-.ui-menu-item.tdoc-agent-menu-item[data-highlighted] { background: var(--td-accent-tint, #e8eeff); }
+.ui-menu-item.tdoc-agent-menu-item { display: flex; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; font: 13px system-ui, sans-serif; color: var(--td-ink, #1a1a1a); outline: none; }
+.ui-menu-item.tdoc-agent-menu-item[data-highlighted] { background: #f0f1f4; }
 .ui-menu-item.tdoc-agent-menu-more { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
 .ui-menu-item.tdoc-agent-menu-more::after { content: '›'; font-size: 18px; color: var(--td-muted); }
 .tdoc-agent-menu-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

@@ -15,6 +15,7 @@ import {
   Star,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import { AppMenu, AppMenuItem, AppMenuSeparator, AppSubmenu } from '../ui/menu.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
@@ -239,7 +240,7 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
               }
               dragStart.current = null;
             }}><span /></button>
-          <Drawer.Close className="tdoc-ask-drawer-close" aria-label="Close Ask AI">×</Drawer.Close>
+          <Drawer.Close className="tdoc-ask-drawer-close" aria-label="Close Ask AI"><X size={20} aria-hidden="true" /></Drawer.Close>
           <Drawer.Content className="tdoc-ask-drawer-content">{children}</Drawer.Content>
         </Drawer.Popup>
       </Drawer.Viewport>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { getPublishSignin, publishDocument, requestQuotaBump } from './api.js';
 import { copyText } from './model.js';
 
@@ -35,8 +36,8 @@ export function ShareDialog({ open, url, versionUrl, version, team, onOpenChange
         : 'Anyone with this link can read. To comment, they sign in.'}
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
-          <button type="button" className="primary" onClick={copy}>Copy link</button>
+          <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
+          <AppButton variant="primary" className="primary" onClick={copy}>Copy link</AppButton>
         </>
       )}
     >
@@ -74,14 +75,13 @@ export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopie
         : 'They are not on this doc yet, but they use tdoc — the mention is in their inbox. Send the link if you want them to see it sooner.'}
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
-          <button
-            type="button"
+          <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
+          <AppButton variant="primary"
             className="primary"
             onClick={async () => { await copyText(url); onCopied(); }}
           >
             Copy link
-          </button>
+          </AppButton>
         </>
       )}
     >
@@ -175,8 +175,8 @@ export function PublishDialog({ open, slug, onOpenChange }) {
       title="Publish this doc"
       actions={url ? null : (
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" id="tdoc-pub-go" className="primary" disabled={busy} onClick={publish}>Publish</button>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="primary" id="tdoc-pub-go" className="primary" disabled={busy} onClick={publish}>Publish</AppButton>
         </>
       )}
     >
@@ -203,7 +203,7 @@ export function MessageDialog({ message, onOpenChange }) {
       open={Boolean(message)}
       onOpenChange={onOpenChange}
       title={message?.title || 'Something went wrong'}
-      actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
+      actions={<AppButton onClick={() => onOpenChange(false)}>Close</AppButton>}
     >
       <p>{message?.message}</p>
     </AppDialog>
@@ -254,15 +254,14 @@ export function QuotaBumpDialog({ open, used, limit, onClose, onBumped }) {
         : 'This account is at its hosted-doc limit. Write why you need more — we raise it (up to 200).'}
       actions={(
         <>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button
-            type="button"
+          <AppButton onClick={onClose}>Cancel</AppButton>
+          <AppButton variant="primary"
             className="primary"
             disabled={busy || !reason.trim()}
             onClick={submit}
           >
             {busy ? 'Requesting…' : 'Raise limit'}
-          </button>
+          </AppButton>
         </>
       )}
     >
