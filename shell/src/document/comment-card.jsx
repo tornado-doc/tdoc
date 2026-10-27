@@ -14,6 +14,7 @@ import { avatarFor, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
 import { productPageUrl } from './product-url.js';
+import { observeVisibleRead } from './visible-read.js';
 
 const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };
 
@@ -675,6 +676,7 @@ export function CommentCard({
   selected = false,
   unread = false,
   onMarkRead = null,
+  onSeen = null,
   productLinkOrigin = null,
   canSendToAgent = false,
   // Owner with no agent connected: @agent stays visible and leads to setup.
@@ -705,6 +707,14 @@ export function CommentCard({
   // under it — the same way one reply form is open at a time.
   const [editTarget, setEditTarget] = useState(null);
   const cardRef = useRef(null);
+  const onSeenRef = useRef(onSeen);
+  const commentRef = useRef(comment);
+  onSeenRef.current = onSeen;
+  commentRef.current = comment;
+  useEffect(() => {
+    if (!unread || !onSeen || !cardRef.current) return undefined;
+    return observeVisibleRead(cardRef.current, () => onSeenRef.current?.(commentRef.current));
+  }, [comment.id, unread, Boolean(onSeen)]);
   const [clampedTop, setClampedTop] = useState(null);
 
   // Legacy positionCard(): keep the whole card on screen, measured after
@@ -846,7 +856,7 @@ export function CommentCard({
         {demo || canSeeHandoff(comment, handoffViewer, isOwner) ? (
           <HandoffStatusChips comment={comment} onResend={comment.handoff_resend_allowed === false ? null : onResendHandoff} />
         ) : null}
-        {unread ? (onMarkRead
+        {unread ? (onMarkRead && !onSeen
           ? <button type="button" className="tdoc-thread-mark-read" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)}><span className="tdoc-thread-unread-dot" aria-hidden="true" /></button>
           : <span className="tdoc-thread-unread-dot" role="status" aria-label="New agent reply" title="New agent reply" />) : null}
       </div>

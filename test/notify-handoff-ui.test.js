@@ -312,6 +312,24 @@ async function t(name, fn) {
       }
     });
 
+    await t('visible activity rows become read without per-row Read buttons', async () => {
+      for (const width of [390, 1440]) {
+        const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 900 } });
+        await page.goto(`${base}/?view=activity&auto-read=1`);
+        await page.locator('#tdoc-send-agent-btn').click();
+        const details = page.getByRole('dialog', { name: 'Ask AI' });
+        await details.getByRole('button', { name: /Agent activity/ }).click();
+        const question = details.locator('.tdoc-handoff-details-row[data-comment-id="question"]');
+        await question.waitFor();
+        assert.equal(await details.getByRole('button', { name: 'Mark as read' }).count(), 0,
+          `${width}px still requires a per-row Read action`);
+        await question.scrollIntoViewIfNeeded();
+        await question.locator('.tdoc-handoff-details-unread-dot').waitFor({ state: 'detached', timeout: 5000 });
+        console.log(`  ✓ ${width}px visible activity row marked read`);
+        await page.close();
+      }
+    });
+
     await t('Ask AI activity uses one round blue dot without a numeral on phone and desktop', async () => {
       for (const width of [390, 1440]) {
         for (const [query, count] of [['unread=0', 0], ['badge=1', 1], ['badge=9', 9], ['badge=10', 10]]) {

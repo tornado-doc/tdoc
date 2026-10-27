@@ -5,6 +5,7 @@ import { compactHandoffText } from './handoff-status-line.jsx';
 import { resendNotifyHandoff } from './api.js';
 import { isThreadUnread } from './thread-seen.js';
 import { handoffActivityAt, handoffWaitState, shortCommentPreview, summarizeHandoffSurfaces } from './handoff-state.js';
+import { observeVisibleRead } from './visible-read.js';
 
 function latestAgentReply(comment) {
   return [...(comment.replies || [])].reverse().find((reply) =>
@@ -28,7 +29,7 @@ function history(comment) {
 }
 
 export function HandoffDetailsPanel({
-  slug, open, onClose, comments, seenMap = {}, handoffViewer = '', showReady = true, onJump, onRefresh, onToast, onSendReady, onSendElsewhere, onMarkRead, onMarkAllRead, onReply, onViewChanges,
+  slug, open, onClose, comments, seenMap = {}, handoffViewer = '', showReady = true, onJump, onRefresh, onToast, onSendReady, onSendElsewhere, onMarkRead, onMarkAllRead, onReply, onViewChanges, autoRead = false,
 }) {
   const buckets = useMemo(() => summarizeHandoffSurfaces(comments), [comments]);
   const sentRows = useMemo(() => {
@@ -48,6 +49,9 @@ export function HandoffDetailsPanel({
   const [selectedIds, setSelectedIds] = useState([]);
   const [now, setNow] = useState(() => Date.now());
   const wasOpen = useRef(false);
+  const panelRef = useRef(null);
+  const readRef = useRef({ seenMap, handoffViewer, onMarkRead });
+  readRef.current = { seenMap, handoffViewer, onMarkRead };
   useEffect(() => {
     if (!open) return undefined;
     setNow(Date.now());
@@ -60,6 +64,20 @@ export function HandoffDetailsPanel({
   }, [open, buckets.ready]);
   const selected = selectedIds.filter((id) => buckets.ready.some((comment) => comment.id === id));
   const hasUnread = (comments || []).some((comment) => isThreadUnread(comment, seenMap, handoffViewer));
+  useEffect(() => {
+    if (!open || !autoRead || !onMarkRead || !panelRef.current) return undefined;
+    const byId = new Map(sentRows.map(({ comment }) => [comment.id, comment]));
+    const stops = [...panelRef.current.querySelectorAll('.tdoc-handoff-details-row[data-comment-id]')]
+      .map((row) => {
+        const comment = byId.get(row.dataset.commentId);
+        if (!comment || !isThreadUnread(comment, readRef.current.seenMap, readRef.current.handoffViewer)) return null;
+        return observeVisibleRead(row, () => {
+          const current = readRef.current;
+          if (isThreadUnread(comment, current.seenMap, current.handoffViewer)) current.onMarkRead?.(comment);
+        });
+      }).filter(Boolean);
+    return () => stops.forEach((stop) => stop());
+  }, [open, autoRead, sentRows]);
 
   const resendOne = async (comment) => {
     if (!comment?.handoff_id || busyId) return;
@@ -76,7 +94,7 @@ export function HandoffDetailsPanel({
   };
 
   return (
-    <div className="tdoc-handoff-details">
+    <div ref={panelRef} className="tdoc-handoff-details">
       {sentRows.length || hasUnread ? <>
         <div className="tdoc-handoff-details-header">
           <h3 className="tdoc-handoff-details-section-title">{sentRows.length ? 'Sent to agent' : 'Agent replies'}</h3>
@@ -91,7 +109,7 @@ export function HandoffDetailsPanel({
             const unread = isThreadUnread(comment, seenMap, handoffViewer);
             const expanded = expandedId === comment.id;
             return (
-              <li key={comment.id} className="tdoc-handoff-details-row">
+              <li key={comment.id} className="tdoc-handoff-details-row" data-comment-id={comment.id}>
                 <div className="tdoc-handoff-details-main">
                   <div className="tdoc-handoff-details-heading">
                     <button type="button" className="tdoc-handoff-details-jump" onClick={() => { onJump?.(comment.id); onClose(); }}>
@@ -104,7 +122,9 @@ export function HandoffDetailsPanel({
                         <button type="button" className="tdoc-handoff-details-resend" disabled={busyId === comment.id} onClick={() => resendOne(comment)}>{busyId === comment.id ? 'Resending…' : 'Resend'}</button>
                       </> : null}
                     </span>
-                    {unread && onMarkRead ? <button type="button" className="tdoc-handoff-details-unread-dot" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)} /> : null}
+                    {unread && onMarkRead ? (autoRead
+                      ? <span className="tdoc-handoff-details-unread-dot" role="status" aria-label="New agent reply" />
+                      : <button type="button" className="tdoc-handoff-details-unread-dot" aria-label="Mark as read" title="Mark as read" onClick={() => onMarkRead(comment)} />) : null}
                   </div>
                   <div className="tdoc-handoff-details-meta">
                     <span className="tdoc-handoff-details-recipient">To {readableHandle(comment.handoff_to) || 'agent'}</span>
