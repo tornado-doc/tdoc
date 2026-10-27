@@ -140,6 +140,8 @@
   // overlay's .tdoc-hover-outline / .tdoc-comment-pill.
   (function () {
     var s = document.createElement('style');
+    var cursorSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="' + COMMENT_ICON_PATH + '" fill="' + COMMENT_ACCENT + '"/></svg>';
+    var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 2 2, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');
     // Author figure rules also match our SVG icons. Protect the provider's
@@ -163,6 +165,8 @@
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:16px!important;min-width:16px!important;max-width:16px!important;height:16px!important;min-height:16px!important;max-height:16px!important;margin:0!important;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
       '@media print{figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:none!important;}}' +
+      'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
+      'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +

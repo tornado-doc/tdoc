@@ -58,6 +58,15 @@ async function dragSelect(page, phrase) {
   const frameEl = await page.locator('iframe').first().elementHandle();
   const frame = await frameEl.contentFrame();
   await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
+  const commentCursor = await frame.locator('body p').first().evaluate((el) => getComputedStyle(el).cursor);
+  if (!commentCursor.includes('data:image/svg+xml') || !commentCursor.includes('crosshair')) throw new Error(`Comment mode lost its blue comment cursor: ${commentCursor}`);
+  const selectingCursor = await frame.locator('body p').first().evaluate((el) => {
+    document.documentElement.setAttribute('data-tdoc-selecting', '');
+    const cursor = getComputedStyle(el).cursor;
+    document.documentElement.removeAttribute('data-tdoc-selecting');
+    return cursor;
+  });
+  if (selectingCursor !== 'text') throw new Error(`Selection state did not switch to text cursor: ${selectingCursor}`);
   const box = await frameEl.boundingBox();
   const r = await frame.evaluate((needle) => {
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
