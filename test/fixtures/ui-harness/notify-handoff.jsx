@@ -7,7 +7,7 @@ import '../../../server/chrome.css';
 import '../../../shell/src/ui/ui.css';
 import { NotifyHandoffPanel } from '../../../shell/src/document/notify-handoff.jsx';
 import { HandoffStatusChips } from '../../../shell/src/document/handoff-status-line.jsx';
-import { DocumentSendAgentAction } from '../../../shell/src/document/document-toolbar.jsx';
+import { DocumentSendAgentAction, DocumentSendToAgentButton } from '../../../shell/src/document/document-toolbar.jsx';
 import { HandoffDetailsPanel } from '../../../shell/src/document/handoff-details.jsx';
 import { AskAiPanel } from '../../../shell/src/document/ask-ai-panel.jsx';
 import { useCommentArea } from '../../../shell/src/document/comment-area.js';
@@ -82,6 +82,8 @@ function ActivityDemo() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [askDraft, setAskDraft] = useState('');
   const [log, setLog] = useState('');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState('comments');
   const phone = window.innerWidth < 700;
   if (phone) document.body.classList.add('tdoc-narrow');
   const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)))
@@ -111,6 +113,7 @@ function ActivityDemo() {
         <button id="activity-refresh" type="button" onClick={() => setLog('refreshed')}>Refresh comments</button>
         </AskAiPanel>
       </DocumentSendAgentAction>
+      {!phone ? <DocumentSendToAgentButton count={counts.ready} onClick={() => setLog(`send-plane:${buckets.ready.map((item) => item.id).join(',')}`)} /> : null}
       {!phone ? <><strong>Share</strong><span>⋯</span><span style={{ color: '#888' }}>Tdoc ▾</span><span style={{ background: '#1652f0', color: '#fff', borderRadius: '50%', width: 26, height: 26, display: 'grid', placeItems: 'center' }}>J</span></> : null}
     </div>
     <main style={{ margin: phone ? '28px 20px' : '70px 0 0 145px', maxWidth: 720, fontSize: phone ? 16 : 20, lineHeight: 2 }}>
@@ -119,8 +122,11 @@ function ActivityDemo() {
       <p>The third section compares three options. The final recommendation is a seat based plan.</p>
     </main>
     {!phone ? <div style={{ position: 'absolute', left: '72%', top: 145 }}><PinDemo seenMap={seenMap} /></div>
-      : <MobileCommentDrawer open={false} onOpenChange={() => {}} comments={activityCards} openCount={activityCards.length}
-          unread={visibleUnread > 0} pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => {}} />}
+      : <MobileCommentDrawer open={drawerOpen} onOpenChange={setDrawerOpen} comments={activityCards} openCount={activityCards.length}
+          unread={visibleUnread > 0} pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => {}}
+          askAi={params.has('unified') ? <div>Ask AI panel</div> : null} tab={drawerTab} onTab={setDrawerTab}
+          sendAction={params.has('unified') ? <DocumentSendToAgentButton count={counts.ready}
+            onClick={() => { setDrawerOpen(false); setLog(`send-plane:${buckets.ready.map((item) => item.id).join(',')}`); }} /> : null} />}
     <output id="activity-log">{log}</output>
   </>;
 }

@@ -241,8 +241,14 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await page.goto(`${base}/d/${slug}`);
         await caption('Bob (member) opens a BeFreed doc');
         await pause(page, 1500);
+        // Send to agent stays its own paper-plane control: beside Ask AI in
+        // the bar, in the drawer header on a phone.
+        if (label === 'phone') await page.locator('.tdoc-fab').click();
+        const plane = page.locator(label === 'phone' ? '#tdoc-comment-layer #tdoc-send-plane-btn' : '.tdoc-bar #tdoc-send-plane-btn');
+        await plane.waitFor();
+        if ((await plane.getAttribute('aria-label')) !== 'Send to agent (1 ready)') throw new Error(`plane: ${await plane.getAttribute('aria-label')}`);
+        if (process.env.TDOC_UI_SHOTS) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, `app-send-plane-${width}.png`) }); }
         if (label === 'phone') {
-          await page.locator('.tdoc-fab').click();
           await page.getByRole('radiogroup', { name: 'Comments or Ask AI' }).getByRole('radio', { name: /Ask AI/ }).click();
         } else {
           await page.locator('#tdoc-send-agent-btn').click();
