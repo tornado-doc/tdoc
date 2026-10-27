@@ -37,7 +37,8 @@ finally { fs.rmSync(config, { force: true }); }
       try {
         const page = await browser.newPage({ viewport: { width, height: 850 } });
         await page.route('**/api/team/guests*', (route) => route.fulfill({ json: { ok: true,
-          guests: [{ invitee: 'marie@befreed.ai', documents: [{ slug: 'roadmap', title: 'Roadmap' }], added_by: 'Julie' }],
+          guests: [{ invitee: 'marie@befreed.ai', documents: [{ slug: 'roadmap', title: 'Roadmap' }], added_by: 'Julie' },
+            { invitee: 'claire', documents: [{ slug: 'brief', title: 'Brief' }], added_by: 'Julie' }],
           limit: 5, invites: ['marie@befreed.ai'],
         } }));
         await page.route('**/api/team?*', (route) => route.fulfill({ json: { ok: true, team: {
@@ -47,8 +48,11 @@ finally { fs.rmSync(config, { force: true }); }
         await page.route('**/api/team/backup*', (route) => route.fulfill({ json: { ok: true, backup: null } }));
         await page.goto(base);
         await page.getByRole('radio', { name: 'Guests' }).click();
-        await page.getByText('1 guest · limit 5').waitFor();
-        assert.match(await page.locator('[aria-label="Guests"]').textContent(), /ma•••@befreed.ai.*Roadmap.*Julie.*Resend invite/s);
+        await page.getByText('2 guests · limit 5').waitFor();
+        const roster = await page.locator('[aria-label="Guests"]').textContent();
+        assert.match(roster, /marie@befreed\.ai.*Roadmap.*Julie.*Resend invite/s, 'admins see the full guest email');
+        assert.match(roster, /GitHub @claire.*Brief.*Invite to team/s, 'bare logins are labeled as GitHub accounts');
+        assert.doesNotMatch(roster, /•••/);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'horizontal overflow');
         if (shots) { fs.mkdirSync(shots, { recursive: true }); await page.screenshot({ path: path.join(shots, `team-guests-${width}.png`), fullPage: true }); }
         console.log(`  ✓ ${width}px: guest settings tab, roster, invite and layout`);

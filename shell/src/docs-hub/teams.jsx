@@ -884,7 +884,7 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
         <p>Manage this workspace in one place.</p>
       </div>
       {team.role === 'admin' ? <TeamBillingCard team={team} /> : null}
-      {guestsEnabled ? <SegmentedControl ariaLabel="Team settings" value={tab} onChange={setTab} options={[
+      {guestsEnabled ? <SegmentedControl ariaLabel="Team settings" className="tm-settings-tabs" value={tab} onChange={setTab} options={[
         { value: 'members', label: 'Members' },
         ...(team.role === 'admin' ? [{ value: 'guests', label: 'Guests' }] : []),
         { value: 'agents', label: 'Agents' },
@@ -906,9 +906,11 @@ export function TeamSettingsPane({ team, onChanged, onLeave }) {
   );
 }
 
-function maskedInvitee(invitee) {
-  const [name, domain] = String(invitee).split('@');
-  return domain ? `${name.slice(0, 2)}${name.length > 2 ? '•••' : ''}@${domain}` : invitee;
+// The guest roster is admin-only, so show the full address. A bare invitee is
+// a GitHub login; say so, or "claire" reads like a typo for an email.
+function inviteeLabel(invitee) {
+  const value = String(invitee);
+  return value.includes('@') ? value : `GitHub @${value}`;
 }
 
 function TeamGuestsSection({ team }) {
@@ -934,7 +936,7 @@ function TeamGuestsSection({ team }) {
       const moreDocuments = guest.documents.length > 3 ? ` +${guest.documents.length - 3} more` : '';
       return <PersonRow key={guest.invitee} className="tm-guest-row"
         member={{ name: guest.invitee, key: guest.invitee }}
-        name={maskedInvitee(guest.invitee)}
+        name={inviteeLabel(guest.invitee)}
         sub={`${guest.documents.length} ${guest.documents.length === 1 ? 'document' : 'documents'}: ${documentNames}${moreDocuments} · Added by ${guest.added_by || 'unknown'}${guest.documents.length >= 40 ? ' · Frequent collaborator — consider a member seat' : ''}`}
         right={team.role === 'admin' ? <>
           <button type="button" className="tm-text-btn" onClick={() => act(guest.invitee, invited ? 'resend' : 'invite_member')}>{invited ? 'Resend invite' : 'Invite to team'}</button>
@@ -943,7 +945,7 @@ function TeamGuestsSection({ team }) {
     })}
     {(data?.invites || []).filter((invitee) => !(data?.guests || []).some((guest) => guest.invitee === invitee))
       .map((invitee) => <PersonRow key={`invite:${invitee}`} className="tm-guest-row"
-        member={{ name: invitee, key: invitee }} name={maskedInvitee(invitee)}
+        member={{ name: invitee, key: invitee }} name={inviteeLabel(invitee)}
         sub="Team invitation pending · no document shared"
         right={team.role === 'admin' ? <button type="button" className="tm-text-btn" onClick={() => act(invitee, 'resend')}>Resend invite</button> : null} />)}
     <p className="status" role="status">{status}</p>

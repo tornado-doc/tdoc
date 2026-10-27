@@ -204,15 +204,12 @@ button.tdoc-pin {
 }
 
 .ui-menu-positioner {
-  /* Menus are portalled to body and may overlap the shell's old-version
-     strip (999998) and top bar (999999). Keep them above reader chrome while
-     leaving dialogs (1000001) as the top interactive layer. */
-  z-index: 1000000;
-}
-
-/* Ask AI's answerer menu opens from inside the desktop popover. It must sit
-   above that popover, whose positioner uses z-index 1000001. */
-.ui-menu-positioner.tdoc-ask-target-menu-positioner {
+  /* Menus are portalled to body, each in its own layer. A menu is opened
+     from something already on screen -- the top bar, a dialog, the Ask AI
+     popover or the phone comment drawer (all up to 1000001) -- so it sits
+     above all of them, as AppSelect's list does. A submenu (More agents)
+     shares this layer and, mounted later, lands on top of its parent; it
+     used to sit at 1000000, behind the very popover it opened from. */
   z-index: 1000002;
 }
 
