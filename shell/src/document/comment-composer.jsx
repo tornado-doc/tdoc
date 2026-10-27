@@ -216,7 +216,7 @@ export function CommentComposer({
         {target && !agentButtons ? (
           <span className="hint">{agentAskHint(ask)}</span>
         ) : (
-          <span className="hint">
+          <span className={demo ? 'hint' : 'hint tdoc-keyboard-shortcut-hint'}>
             {demo
               ? 'Demo — refresh clears it'
               : (canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ask.choices.length ? '⌘+Enter · ⌘⇧+Enter with @agent' : '⌘+Enter to submit')}

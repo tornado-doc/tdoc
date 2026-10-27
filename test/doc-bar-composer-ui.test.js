@@ -168,6 +168,7 @@ async function dragSelect(page, phrase) {
       await dragSelect(page, 'Billing ships first');
       const pop = page.locator('.tdoc-popup');
       await shot(page, 'selection-composer-desktop.png');
+      if (!(await pop.locator('.tdoc-keyboard-shortcut-hint').isVisible())) throw new Error('desktop shortcut hint disappeared');
       const selected = (await pop.locator('.head .h').textContent()).replace(/^"|"$/g, '');
       if (!selected.includes('Billing ships')) throw new Error(`composer lost selected text: ${JSON.stringify(selected)}`);
       const textarea = pop.locator('textarea');
@@ -218,6 +219,7 @@ async function dragSelect(page, phrase) {
       await select();
       const action = frame.getByRole('button', { name: 'Comment', exact: true });
       await action.waitFor();
+      if (await frame.locator('.tdoc-selection-action').count() !== 1) throw new Error('phone selection showed more than one custom action');
       if (await page.locator('.tdoc-popup').count()) throw new Error('selection opened the composer before Comment was clicked');
       const selected = await frame.evaluate(() => getSelection().toString());
       if (selected !== 'Billing ships first') throw new Error(`native selection was lost: ${JSON.stringify(selected)}`);
@@ -235,6 +237,7 @@ async function dragSelect(page, phrase) {
       await action.click();
       const pop = page.locator('.tdoc-popup');
       await pop.waitFor();
+      if (await pop.locator('.tdoc-keyboard-shortcut-hint').isVisible()) throw new Error('desktop keyboard shortcuts appear on phone');
       if (await pop.locator('textarea').evaluate((el) => document.activeElement === el)) throw new Error('phone composer opened the keyboard');
       await shot(page, 'selection-composer-phone.png');
       await frame.evaluate(() => {

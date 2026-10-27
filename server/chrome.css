@@ -695,6 +695,10 @@
   .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
   .tdoc-popup .tdoc-composer-foot-actions { display: flex; align-items: center; gap: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
+  @media (max-width: 700px) {
+    .tdoc-popup .tdoc-keyboard-shortcut-hint,
+    .tdoc-reply-form-foot .tdoc-keyboard-shortcut-hint { display: none; }
+  }
   .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
   .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
   /* Secondary action on the dark composer — same shape as Comment, quieter fill. */
