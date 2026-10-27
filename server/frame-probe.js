@@ -396,12 +396,12 @@
       selectionAction.setAttribute('aria-label', 'Selected text actions');
       selectionAction.innerHTML = '<button type="button" class="tdoc-selection-action-button tdoc-selection-comment">Comment</button><span class="tdoc-selection-divider" aria-hidden="true"></span><button type="button" class="tdoc-selection-action-button tdoc-selection-copy">Copy</button>';
       selectionAction.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); });
-      selectionAction.querySelector('.tdoc-selection-comment').addEventListener('click', function (e) {
+      function activateSelectionComment(e) {
         e.preventDefault(); e.stopPropagation();
         var passage = selectedPassage;
         if (passage) postTextSelection(passage.range, passage.text);
-      });
-      selectionAction.querySelector('.tdoc-selection-copy').addEventListener('click', function (e) {
+      }
+      function activateSelectionCopy(e) {
         e.preventDefault(); e.stopPropagation();
         var passage = selectedPassage;
         if (!passage) return;
@@ -424,7 +424,16 @@
           }
         }
         post({ type: 'tdoc:copySelection', text: passage.text, requestId: ++selectionCopyRequest });
-      });
+      }
+      var commentButton = selectionAction.querySelector('.tdoc-selection-comment');
+      var copyButton = selectionAction.querySelector('.tdoc-selection-copy');
+      commentButton.addEventListener('click', activateSelectionComment);
+      copyButton.addEventListener('click', activateSelectionCopy);
+      // The shell takes focus to dismiss iOS's native selection menu. On a
+      // real phone the first tap back into this frame need not produce click,
+      // so perform toolbar actions during the touch gesture itself.
+      commentButton.addEventListener('touchend', activateSelectionComment, { passive: false });
+      copyButton.addEventListener('touchend', activateSelectionCopy, { passive: false });
       document.documentElement.appendChild(selectionAction);
     }
     selectionAction.querySelector('.tdoc-selection-copy').textContent = 'Copy';
@@ -669,6 +678,9 @@
     touchSelecting = false;
     var start = _tap;
     _tap = null;
+    // A toolbar button may cover an existing highlighted comment. Let the
+    // button handle the gesture before any anchor hit-testing or dismissal.
+    if (e.target && e.target.closest && e.target.closest('.tdoc-selection-action')) return;
     var t = e.changedTouches && e.changedTouches[0];
     var still = start && t && Math.abs(t.clientX - start.x) < 10
       && Math.abs(t.clientY - start.y) < 10 && Date.now() - start.at < 600;

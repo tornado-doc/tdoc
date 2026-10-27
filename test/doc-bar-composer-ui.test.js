@@ -365,11 +365,52 @@ async function dragSelect(page, phrase, openComposer = true) {
         if (await frame.evaluate(() => getSelection().toString() || !CSS.highlights.has('tdoc-pending'))) throw new Error('WebKit kept the native menu or lost the pending highlight');
         await page.waitForFunction(() => document.activeElement?.id === 'tdoc-selection-focus-target');
         await shot(page, 'selection-actions-webkit-phone-390.png');
-        await frame.getByRole('button', { name: 'Copy', exact: true }).click();
+        await frame.waitForFunction(() => CSS.highlights.get('tdoc-anchor')?.size > 0);
+        const overlapAnchor = async (buttonName) => frame.evaluate((name) => {
+          const highlighted = CSS.highlights.get('tdoc-anchor');
+          const anchor = Array.from(highlighted.values()).find((range) => range.toString().includes('Search follows in April'));
+          if (!anchor) throw new Error('existing comment anchor missing');
+          const rect = Array.from(anchor.getClientRects()).find((r) => r.width > 80);
+          const action = document.querySelector('.tdoc-selection-action');
+          const button = action.querySelector(name === 'Copy' ? '.tdoc-selection-copy' : '.tdoc-selection-comment');
+          const actionRect = action.getBoundingClientRect();
+          const buttonRect = button.getBoundingClientRect();
+          action.style.setProperty('left', `${actionRect.left + rect.left + rect.width / 2 - buttonRect.left - buttonRect.width / 2}px`, 'important');
+          action.style.setProperty('top', `${actionRect.top + rect.top + rect.height / 2 - buttonRect.top - buttonRect.height / 2}px`, 'important');
+          const moved = button.getBoundingClientRect();
+          const x = moved.left + moved.width / 2, y = moved.top + moved.height / 2;
+          if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) throw new Error('toolbar did not overlap the existing comment anchor');
+          if (!highlighted || !Array.from(highlighted.values()).some((anchor) => Array.from(anchor.getClientRects()).some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom))) {
+            throw new Error('toolbar did not cover a painted comment anchor');
+          }
+        }, buttonName);
+        await overlapAnchor('Copy');
+        let buttonBox = await frame.getByRole('button', { name: 'Copy', exact: true }).boundingBox();
+        await page.touchscreen.tap(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2);
         await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();
         await page.evaluate(() => { const el = document.createElement('textarea'); el.id = 'paste-check'; document.body.appendChild(el); el.focus(); });
         await page.keyboard.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
         if ((await page.locator('#paste-check').inputValue()) !== 'Billing ships first') throw new Error('WebKit could not paste the copied selection');
+        await page.reload();
+        frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+        await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
+        await frame.waitForFunction(() => CSS.highlights.get('tdoc-anchor')?.size > 0);
+        await frame.evaluate(() => {
+          const node = document.querySelector('p').firstChild;
+          const range = document.createRange();
+          range.setStart(node, 0); range.setEnd(node, 'Billing ships first'.length);
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+          document.dispatchEvent(new Event('touchend', { bubbles: true, cancelable: true }));
+        });
+        await frame.getByRole('button', { name: 'Comment', exact: true }).waitFor();
+        await page.waitForFunction(() => document.activeElement?.id === 'tdoc-selection-focus-target');
+        // Reposition the action over an existing anchored comment. Touchend
+        // must reach the action even when anchor hit-testing matches beneath it.
+        await overlapAnchor('Comment');
+        buttonBox = await frame.getByRole('button', { name: 'Comment', exact: true }).boundingBox();
+        await page.touchscreen.tap(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2);
+        await page.locator('.tdoc-popup textarea').waitFor();
+        await page.locator('.tdoc-popup textarea').fill('A comment from the phone');
         await context.close();
       } finally { await browser.close(); }
     });
