@@ -3566,7 +3566,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // without a second session lookup.
     session,
     response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), folder: docFolder, ...(await devModeBoot(env, session)) }, pageUrl), {
-      headers: { 'Content-Security-Policy': cspHeader(nonce), 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
+      headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'private, no-store', 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
     }),
   };
 }
