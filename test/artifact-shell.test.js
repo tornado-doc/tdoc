@@ -165,6 +165,9 @@ const SLUG = 'hostile-body-css';
       if (!frame) throw new Error('author-content frame not found');
       // Select the first paragraph's text inside the iframe.
       await frame.evaluate(() => {
+        const authorStyle = document.createElement('style');
+        authorStyle.textContent = 'button svg { width:80px!important;height:80px!important } button { padding:20px!important;min-width:80px!important }';
+        document.head.appendChild(authorStyle);
         const p = document.getElementById('para-1');
         const r = document.createRange();
         r.selectNodeContents(p);
@@ -175,6 +178,23 @@ const SLUG = 'hostile-body-css';
         }));
       });
       await frame.waitForSelector('.tdoc-selection-action', { state: 'visible', timeout: 2000 });
+      const actionStyle = await frame.$eval('.tdoc-selection-action', (button) => {
+        const style = getComputedStyle(button);
+        const icon = button.querySelector('svg');
+        const iconStyle = getComputedStyle(icon);
+        return {
+          width: parseFloat(style.width), height: parseFloat(style.height),
+          background: style.backgroundColor, radius: style.borderRadius, border: style.borderWidth,
+          iconWidth: parseFloat(iconStyle.width), iconHeight: parseFloat(iconStyle.height),
+          iconFill: iconStyle.fill, iconViewBox: icon.getAttribute('viewBox'),
+        };
+      });
+      if (actionStyle.width !== 36 || actionStyle.height !== 36 || actionStyle.iconWidth !== 16 || actionStyle.iconHeight !== 16
+        || actionStyle.background !== 'rgb(22, 82, 240)' || actionStyle.radius !== '50%' || actionStyle.border !== '0px'
+        || actionStyle.iconFill !== 'rgb(255, 255, 255)' || actionStyle.iconViewBox !== '0 0 24 24') {
+        throw new Error(`selection action gained an author frame or oversized icon: ${JSON.stringify(actionStyle)}`);
+      }
+      if (process.env.TDOC_UI_SHOTS) await page.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, 'selection-action.png') });
       await frame.click('.tdoc-selection-action');
       await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
     });

@@ -149,8 +149,11 @@
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
-      '.tdoc-selection-action{position:absolute;z-index:2147483645;display:none;width:36px;height:36px;padding:0;align-items:center;justify-content:center;border:1px solid #dedee3;border-radius:10px;background:#fff;color:' + COMMENT_ACCENT + ';box-shadow:0 2px 10px rgba(0,0,0,.16);cursor:pointer;touch-action:manipulation;}' +
-      '.tdoc-selection-action svg{width:16px;height:16px;fill:currentColor;}' +
+      // This button lives in the author's frame. Lock its visual geometry so
+      // document button/SVG rules cannot add a white frame or enlarge the icon.
+      'button.tdoc-comment-pill.tdoc-selection-action[data-tdoc-provider]{position:absolute!important;z-index:2147483645!important;width:36px!important;min-width:36px!important;max-width:36px!important;height:36px!important;min-height:36px!important;max-height:36px!important;box-sizing:border-box!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;border-radius:50%!important;background:' + COMMENT_ACCENT + '!important;color:#fff!important;box-shadow:0 2px 8px rgba(22,82,240,.22)!important;cursor:pointer!important;touch-action:manipulation!important;appearance:none!important;line-height:1!important;}' +
+      'button.tdoc-comment-pill.tdoc-selection-action[data-tdoc-provider]:hover{background:#1244c5!important;color:#fff!important;}' +
+      'button.tdoc-comment-pill.tdoc-selection-action[data-tdoc-provider] svg{display:block!important;flex:0 0 16px!important;width:16px!important;min-width:16px!important;max-width:16px!important;height:16px!important;min-height:16px!important;max-height:16px!important;margin:0!important;padding:0!important;fill:currentColor!important;stroke:none!important;}' +
       'figure[data-tdoc-artifact="Diagram"][aria-label="Diagram"][data-tdoc-excalidraw]{border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;}' +
       'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;box-sizing:border-box;padding-right:52px;margin-bottom:4px;}' +
@@ -387,7 +390,7 @@
       selectionAction.setAttribute('data-tdoc-provider', '');
       selectionAction.setAttribute('aria-label', 'Comment');
       selectionAction.title = 'Comment';
-      selectionAction.innerHTML = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
+      selectionAction.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
       selectionAction.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); });
       selectionAction.addEventListener('click', function (e) {
         e.preventDefault(); e.stopPropagation();

@@ -465,11 +465,7 @@
   .tdoc-pin.tdoc-pin-deleted:hover { opacity: 1; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
   .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
-  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster { width: 42px; background: transparent; border: 0; box-shadow: none; }
-  .tdoc-document-pin-faces { display: flex; align-items: center; padding-left: 2px; }
-  .tdoc-document-pin-faces img, .tdoc-document-pin-faces .tdoc-pin-anon { position: relative; flex: 0 0 21px; width: 21px; height: 21px; margin-left: -5px; border: 2px solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 1px 3px rgba(0,0,0,.16); }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
-  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster.tdoc-cluster-allresolved { background: transparent; border: 0; }
   .tdoc-pin.tdoc-pin-cluster::after { content: none; }
 
   /* Floating card: when open via a pin, it sits to the left of the gutter and

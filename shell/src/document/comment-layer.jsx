@@ -6,9 +6,7 @@ import { Drawer } from '@base-ui/react/drawer';
 import { CommentCard } from './comment-card.jsx';
 import { CommentThreadList } from './comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from './comment-pin.jsx';
-import { avatarFor, isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
-
-const DOCUMENT_PIN_FACE_SIZE = { width: 21, height: 21, maxWidth: 21, maxHeight: 21 };
+import { isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
 
 export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = null }) {
   if (!filter && !(unreadCount && onMarkAllRead)) return null;
@@ -55,14 +53,7 @@ function Pin({
       onPointerDown={(event) => event.stopPropagation()}
       onClick={() => single ? onOpenComment(single.id) : onOpenCluster(cluster.key)}
     >
-      {documentPin && !single ? <span className="tdoc-document-pin-faces" aria-hidden="true">
-        {cluster.items.slice(0, 3).map(({ comment }, index) => {
-          const avatar = avatarFor(comment);
-          return avatar ? <img key={comment.id} src={avatar} alt="" width="21" height="21"
-            style={{ ...DOCUMENT_PIN_FACE_SIZE, zIndex: 3 - index }} />
-            : <span key={comment.id} className="tdoc-pin-anon" style={{ zIndex: 3 - index }} />;
-        })}
-      </span> : <CommentPinFace comment={single} state={state} clusterCount={cluster.items.length} />}
+      <CommentPinFace comment={single} state={state} clusterCount={cluster.items.length} />
     </button>
   );
 }

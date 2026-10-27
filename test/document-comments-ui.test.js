@@ -50,8 +50,9 @@ async function check(name, run) {
               const frameBox = await page.locator('iframe').boundingBox();
               if (Math.abs(pinBox.y - frameBox.y - layout.titleY) > 45) throw new Error('pin is not beside the title');
               if (pinBox.x + pinBox.width > width + 1) throw new Error('pin extends beyond viewport');
-              const avatar = await pin.locator('img').first().boundingBox();
-              if (!avatar || avatar.width > 24 || avatar.height > 24) throw new Error(`document avatar exceeds its pin: ${JSON.stringify(avatar)}`);
+              if ((await pin.textContent()).trim() !== '12') throw new Error('grouped title comments need a count badge');
+              if (pinBox.width !== 28 || pinBox.height !== 28) throw new Error(`grouped title pin differs from other comment clusters: ${JSON.stringify(pinBox)}`);
+              if (await pin.locator('img').count()) throw new Error('grouped title pin still shrinks author avatars');
             });
             if (width === 1400) {
               await check(`${engineName}: one click expands all title comments, with internal scrolling`, async () => {
