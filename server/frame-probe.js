@@ -350,10 +350,16 @@
         CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange()));
       } catch (e) {}
     }
+    var rect = selectionRect(range);
+    // On a phone the shell composer takes over copying. Release Safari's
+    // native selection before its callout can overlap our pending highlight.
+    if (window.innerWidth <= 700) {
+      try { window.getSelection().removeAllRanges(); } catch (e) {}
+    }
     post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after,
            occurrence: placed ? placed.occurrence : null,
            occurrences: placed ? placed.occurrences : null,
-           rect: selectionRect(range) });
+           rect: rect });
   }
   function reportSelection() {
     if (interactionMode !== 'comment' || visualViewerOpen()) return;
@@ -573,6 +579,16 @@
           clientX: t.clientX, clientY: t.clientY,
           preventDefault: function () { if (e.cancelable) e.preventDefault(); },
           stopPropagation: function () { e.stopPropagation(); } })) return;
+    }
+    // Capture an already settled range in this same touchend turn. Waiting
+    // until the next task lets iOS draw its own Copy menu first.
+    if (interactionMode === 'comment' && !shellUiOpen && !visualViewerOpen()) {
+      var released = window.getSelection();
+      if (released && !released.isCollapsed && released.rangeCount) {
+        if (e.cancelable) e.preventDefault();
+        reportSelection();
+        return;
+      }
     }
     setTimeout(reportSelection, 0);
   }, true);

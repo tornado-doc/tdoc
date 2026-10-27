@@ -255,6 +255,7 @@ async function dragSelect(page, phrase) {
       const pop = page.locator('.tdoc-popup');
       await pop.locator('textarea').waitFor();
       if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-pending')))) throw new Error('phone lost the pending highlight');
+      if (await frame.evaluate(() => getSelection().toString())) throw new Error('phone retained native selection after composer opened');
       if (!(await pop.locator('textarea').evaluate((el) => document.activeElement === el))) throw new Error('phone composer did not take focus');
       if (await pop.locator('.tdoc-keyboard-shortcut-hint').isVisible()) throw new Error('desktop keyboard shortcuts appear on phone');
       await pop.getByRole('button', { name: 'Copy selected text' }).click();
@@ -262,7 +263,7 @@ async function dragSelect(page, phrase) {
       await shot(page, 'selection-composer-phone.png');
       await pop.getByRole('button', { name: 'Close' }).click();
       await pop.waitFor({ state: 'detached' });
-      await frame.waitForFunction(() => !getSelection().toString() && !window.CSS?.highlights?.has('tdoc-pending'));
+      await frame.waitForFunction(() => !getSelection().toString() && !window.CSS?.highlights?.has('tdoc-pending') && !window.CSS?.highlights?.has('tdoc-selecting'));
       await page.locator('.tdoc-mode-trigger').click();
       await page.getByRole('menuitemradio', { name: /Read/ }).click();
       await page.reload();
@@ -292,6 +293,7 @@ async function dragSelect(page, phrase) {
         await pop.locator('textarea').waitFor();
         if (!(await pop.locator('textarea').evaluate((el) => document.activeElement === el))) throw new Error('WebKit composer did not focus its textarea');
         if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-pending')))) throw new Error('WebKit pending highlight missing');
+        if (await frame.evaluate(() => getSelection().toString())) throw new Error('WebKit retained native selection after composer opened');
         await pop.getByRole('button', { name: 'Copy selected text' }).click();
         await page.evaluate(() => { const el = document.createElement('textarea'); el.id = 'paste-check'; document.body.appendChild(el); el.focus(); });
         await page.keyboard.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
