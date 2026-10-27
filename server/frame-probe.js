@@ -455,6 +455,13 @@
         }
         capturedTouchSelection = true;
         window.getSelection().removeAllRanges();
+        if (mobile) {
+          // The old mobile flow focused the shell composer immediately. With
+          // the inline toolbar, text focus otherwise stays in the frame and
+          // iOS keeps its own Copy menu above our actions.
+          selectionAction.querySelector('.tdoc-selection-comment').focus({ preventScroll: true });
+          post({ type: 'tdoc:focusSelectionActions' });
+        }
       } catch (e) { capturedTouchSelection = false; }
     }
   }
@@ -699,8 +706,17 @@
           preventDefault: function () { if (e.cancelable) e.preventDefault(); },
           stopPropagation: function () { e.stopPropagation(); } })) return;
     }
-    // Match the original comment gesture: capture on release before iOS has
-    // time to open its native selection menu.
+    // An existing range can be captured in this gesture, before iOS schedules
+    // its own Copy callout. Some engines finish selection after touchend, so
+    // keep the next-task fallback for those cases.
+    if (interactionMode === 'comment' && !visualViewerOpen()) {
+      var released = window.getSelection();
+      if (released && !released.isCollapsed && released.rangeCount) {
+        if (e.cancelable) e.preventDefault();
+        reportSelection();
+        return;
+      }
+    }
     scheduleSelectionAction(0);
   }, true);
   window.addEventListener('blur', function () { clearSelectingCursor(); pointerSelecting = false; touchSelecting = false; });

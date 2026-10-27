@@ -288,6 +288,7 @@ async function dragSelect(page, phrase, openComposer = true) {
       const selected = 'Billing ships first';
       if (await frame.evaluate(() => getSelection().toString())) throw new Error('phone retained the native selection menu');
       if (!(await frame.evaluate(() => CSS.highlights.has('tdoc-pending')))) throw new Error(`phone lost the pending highlight: ${JSON.stringify(await frame.evaluate(() => ({ action: getComputedStyle(document.querySelector('.tdoc-selection-action')).display, native: getSelection().toString(), highlights: [...CSS.highlights.keys()] })))}`);
+      await page.waitForFunction(() => document.activeElement?.id === 'tdoc-selection-focus-target');
       const geometry = await frame.evaluate(() => ({
         selectedBottom: CSS.highlights.get('tdoc-pending').values().next().value.getBoundingClientRect().bottom,
         actionTop: document.querySelector('.tdoc-selection-action').getBoundingClientRect().top,
@@ -343,7 +344,7 @@ async function dragSelect(page, phrase, openComposer = true) {
         await page.reload();
         frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
         await frame.locator('h1').waitFor();
-        await frame.evaluate(() => {
+        const immediate = await frame.evaluate(() => {
           const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
           for (let node = walker.nextNode(); node; node = walker.nextNode()) {
             const index = node.nodeValue.indexOf('Billing ships first');
@@ -352,12 +353,17 @@ async function dragSelect(page, phrase, openComposer = true) {
             range.setStart(node, index); range.setEnd(node, index + 'Billing ships first'.length);
             getSelection().removeAllRanges(); getSelection().addRange(range);
             document.dispatchEvent(new Event('touchend', { bubbles: true, cancelable: true }));
-            return;
+            return {
+              native: getSelection().toString(),
+              toolbar: getComputedStyle(document.querySelector('.tdoc-selection-action')).display,
+            };
           }
           throw new Error('selection fixture missing');
         });
+        if (immediate.native || immediate.toolbar === 'none') throw new Error(`WebKit did not capture selection during touchend: ${JSON.stringify(immediate)}`);
         await frame.getByRole('button', { name: 'Copy', exact: true }).waitFor();
         if (await frame.evaluate(() => getSelection().toString() || !CSS.highlights.has('tdoc-pending'))) throw new Error('WebKit kept the native menu or lost the pending highlight');
+        await page.waitForFunction(() => document.activeElement?.id === 'tdoc-selection-focus-target');
         await shot(page, 'selection-actions-webkit-phone-390.png');
         await frame.getByRole('button', { name: 'Copy', exact: true }).click();
         await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();

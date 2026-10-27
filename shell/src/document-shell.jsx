@@ -494,6 +494,9 @@ export function DocumentShell({ boot, config }) {
     'tdoc:editSnapshot': (message) => editorRef.current?.frameHandlers.editSnapshot(message),
     'tdoc:editDocument': (message) => editorRef.current?.frameHandlers.editDocument(message),
     'tdoc:copyText': (message) => copyText(message.text || ''),
+    'tdoc:focusSelectionActions': () => {
+      document.getElementById('tdoc-selection-focus-target')?.focus({ preventScroll: true });
+    },
     'tdoc:copySelection': (message) => {
       const text = typeof message.text === 'string' ? message.text : '';
       const write = navigator.clipboard?.writeText;
@@ -1690,6 +1693,7 @@ export function DocumentShell({ boot, config }) {
         setOpenCommentId(null);
       }}
     >
+      <span id="tdoc-selection-focus-target" tabIndex={-1} role="presentation" style={{ position: 'fixed', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
       <AgentMentionContext.Provider value={agentMentions}>
       <TopBar
         identity={config.identity}
