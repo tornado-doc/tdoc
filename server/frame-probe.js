@@ -410,7 +410,26 @@
       selectionAction.querySelector('.tdoc-selection-copy').addEventListener('click', function (e) {
         e.preventDefault(); e.stopPropagation();
         var passage = selectedPassage;
-        if (passage) post({ type: 'tdoc:copySelection', text: passage.text, requestId: ++selectionCopyRequest });
+        if (!passage) return;
+        // On iOS the click has a user gesture here, but a postMessage to the
+        // shell may lose it before clipboard.writeText runs. Restore the saved
+        // range only for this synchronous copy, then release it again.
+        if (capturedTouchSelection) {
+          try {
+            var copySelection = window.getSelection();
+            copySelection.removeAllRanges();
+            copySelection.addRange(passage.range.cloneRange());
+            var copied = document.execCommand('copy');
+            copySelection.removeAllRanges();
+            if (copied) {
+              selectionAction.querySelector('.tdoc-selection-copy').textContent = 'Copied';
+              return;
+            }
+          } catch (x) {
+            try { window.getSelection().removeAllRanges(); } catch (ignored) {}
+          }
+        }
+        post({ type: 'tdoc:copySelection', text: passage.text, requestId: ++selectionCopyRequest });
       });
       document.documentElement.appendChild(selectionAction);
     }

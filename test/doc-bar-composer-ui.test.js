@@ -29,7 +29,7 @@ const browserEdit = (env, slug, login) => {
 };
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
-const { chromium, devices } = requirePlaywrightOrSkip('doc-bar-composer-ui.test.js');
+const { chromium, webkit, devices } = requirePlaywrightOrSkip('doc-bar-composer-ui.test.js');
 const SHOTS = process.env.TDOC_UI_SHOTS || '';
 const MODEL = 'https://model.invalid/v1';
 const LONG_ANSWER = 'Billing goes first.\n\n## Why billing leads\n- Invoices block two renewals.\n- Search can follow in April.\n\nCheck **the launch plan** and [details](https://tdoc.dev/docs).\n\n```js\nconst phase = "billing";\nconsole.log(phase);\n```';
@@ -272,6 +272,37 @@ async function dragSelect(page, phrase, openComposer = true) {
       await page.goto(`${base}/d/own-agent-draft`);
       await page.locator('.tdoc-mode-trigger[data-mode="comment"]').waitFor();
       await context.close();
+    });
+
+    await t('WebKit phone Copy writes text the user can paste after native selection is released', async () => {
+      const browser = await webkit.launch({ headless: true });
+      try {
+        const context = await browser.newContext({ ...devices['iPhone 13'], defaultBrowserType: undefined });
+        await context.addCookies([{ name: 'tdoc_sid', value: julie.cookie.split('=')[1], domain: '127.0.0.1', path: '/' }]);
+        const page = await context.newPage();
+        await page.goto(`${base}/d/launch-plan`);
+        const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+        await frame.locator('h1').waitFor();
+        await frame.evaluate(() => {
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const index = node.nodeValue.indexOf('Billing ships first');
+            if (index < 0) continue;
+            const range = document.createRange();
+            range.setStart(node, index); range.setEnd(node, index + 'Billing ships first'.length);
+            getSelection().removeAllRanges(); getSelection().addRange(range);
+            document.dispatchEvent(new Event('touchend', { bubbles: true, cancelable: true }));
+            return;
+          }
+          throw new Error('selection fixture missing');
+        });
+        await frame.getByRole('button', { name: 'Copy', exact: true }).click();
+        await frame.getByRole('button', { name: 'Copied', exact: true }).waitFor();
+        await page.evaluate(() => { const el = document.createElement('textarea'); el.id = 'paste-check'; document.body.appendChild(el); el.focus(); });
+        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
+        if ((await page.locator('#paste-check').inputValue()) !== 'Billing ships first') throw new Error('WebKit could not paste the copied selection');
+        await context.close();
+      } finally { await browser.close(); }
     });
 
     await t('desktop bar: logo · title; Edited · ✈ · Share · ⋯ · space chip · avatar; mode switch in the bar; the filter heads the comments', async () => {
