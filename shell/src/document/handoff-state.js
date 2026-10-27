@@ -1,0 +1,208 @@
+// Handoff-surface classifier for badge / banner / details / pin.
+// Orthogonal to comment.status / resolution — those stay on the card.
+// Spec: design v12 §10 (no msg-axis "done" on this surface).
+
+function isAgentAuthor(author) {
+  return author && (author.kind === 'agent' || author.kind === 'system');
+}
+
+function ts(iso) {
+  const n = Date.parse(iso || '');
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Latest human-authored stamp on the thread (root or reply). */
+export function lastHumanAt(comment) {
+  if (!comment) return 0;
+  let latest = ts(comment.thread_activity?.human_at);
+  if (!isAgentAuthor(comment.author)) latest = Math.max(latest, ts(comment.created));
+  for (const r of comment.replies || []) {
+    if (!r || isAgentAuthor(r.author)) continue;
+    latest = Math.max(latest, ts(r.created));
+  }
+  return latest;
+}
+
+/** Latest agent reply / agent_status stamp on the thread. */
+export function lastAgentAt(comment) {
+  if (!comment) return 0;
+  let latest = ts(comment.thread_activity?.agent_at);
+  for (const r of comment.replies || []) {
+    if (!r || !(isAgentAuthor(r.author) || r.agent_status)) continue;
+    const at = ts(r.created);
+    // Missing created: treat as "now enough" so we do not keep waiting forever.
+    latest = Math.max(latest, at || Number.MAX_SAFE_INTEGER);
+  }
+  return latest === Number.MAX_SAFE_INTEGER ? Date.now() : latest;
+}
+
+/** True if an agent posted (or stamped agent_status) after handoff_at. */
+export function agentRepliedAfterHandoff(comment) {
+  const handoffMs = ts(comment?.handoff_at);
+  const agentMs = lastAgentAt(comment);
+  if (!agentMs) return false;
+  if (!handoffMs) return true;
+  return agentMs >= handoffMs;
+}
+
+/**
+ * Classify one comment for handoff surfaces.
+ * @returns {'ready'|'failed'|'waiting'|'received'|'replied'|null}
+ */
+export function handoffSurfaceState(comment) {
+  if (!comment || comment.deleted) return null;
+  // Msg-axis closed comments leave this surface (details follows showResolved).
+  if (comment.status === 'applied') return null;
+
+  const status = comment.handoff_status || 'note';
+  const delivery = comment.handoff_delivery?.status;
+
+  // Whoever spoke last decides, before any handoff bookkeeping: an agent's
+  // word last means it is the person's turn — never "ready" to send again,
+  // even when it was never formally handed off (an agent that answered from
+  // a pull left handoff_status at note, and those threads were re-sent and
+  // answered twice).
+  const lastHuman = lastHumanAt(comment);
+  const lastAgent = lastAgentAt(comment);
+  if (lastAgent && lastAgent >= lastHuman) return 'replied';
+
+  if (status === 'note' || !comment.handoff_at) return 'ready';
+
+  if (delivery === 'failed') return 'failed';
+
+  const humanMs = lastHumanAt(comment);
+  const handoffMs = ts(comment.handoff_at);
+  const agentMs = lastAgentAt(comment);
+
+  // One agent reply covers the whole thread (root + self-replies). Only go
+  // back to ready if a human wrote again AFTER that reply.
+  if (status === 'resolved' || (agentMs && agentMs >= handoffMs)) {
+    if (humanMs && agentMs && humanMs > agentMs) return 'ready';
+    if (status === 'resolved' || (agentMs && (!humanMs || agentMs >= humanMs))) {
+      return 'replied';
+    }
+  }
+
+  // Newer human input than the last handoff, and agent has not caught up.
+  if (humanMs && handoffMs && humanMs > handoffMs) return 'ready';
+
+  // Ack means the agent inbox accepted it; still waiting for a reply.
+  if (comment.handoff_acked_at) return 'received';
+
+  return 'waiting';
+}
+
+/**
+ * Where a thread stands for the person reading the list:
+ *   open     — waiting on the agent side (a person spoke last)
+ *   replied  — an agent spoke last; the person's turn
+ *   resolved — closed
+ * Who spoke last decides, not the agent's status label.
+ */
+export function threadPhase(comment) {
+  if (!comment || comment.deleted) return null;
+  if (comment.status === 'applied') return 'resolved';
+  const agent = lastAgentAt(comment);
+  return agent && agent >= lastHumanAt(comment) ? 'replied' : 'open';
+}
+
+/** How long a handoff may sit unacknowledged before the card says so. */
+export const HANDOFF_STALE_MS = 5 * 60 * 1000;
+
+/**
+ * The clock for "no response": the last (re)send, falling back to the
+ * handoff itself. A resend restarts it.
+ */
+export function handoffSentAt(comment) {
+  const d = comment?.handoff_delivery;
+  // A resend the provider dropped as a duplicate woke nobody: the clock
+  // keeps running from the original send.
+  return (d && !d.deduped && ts(d.at)) || ts(comment?.handoff_at);
+}
+
+/**
+ * Refines a 'waiting' handoff by how long it has gone unanswered:
+ *   waiting — sent, not acked, under HANDOFF_STALE_MS
+ *   stale   — sent, not acked, for HANDOFF_STALE_MS or more
+ *   expired — the provider's expiresAt passed and nobody acked it
+ * Any other surface state is returned unchanged.
+ */
+export function handoffWaitState(comment, now = Date.now()) {
+  const state = handoffSurfaceState(comment);
+  if (state !== 'waiting') return state;
+  const expires = ts(comment?.handoff_delivery?.expires_at);
+  if (expires && now >= expires) return 'expired';
+  const sent = handoffSentAt(comment);
+  if (sent && now - sent >= HANDOFF_STALE_MS) return 'stale';
+  return 'waiting';
+}
+
+/** Viewer-specific handoff cues are private to the commenter and doc owner. */
+export function canSeeHandoff(comment, viewerLogin, isOwner) {
+  const author = String(comment?.author?.login || '').trim().toLowerCase();
+  const logins = (Array.isArray(viewerLogin) ? viewerLogin : [viewerLogin])
+    .map((login) => String(login || '').trim().toLowerCase())
+    .filter((login) => login && login !== 'anon');
+  return Boolean(isOwner || (author && logins.includes(author)));
+}
+
+/** Compact corner marker for a collapsed comment avatar. */
+export function handoffPinBadge(comment, now = Date.now()) {
+  if (!comment?.handoff_at || comment.deleted) return null;
+  if (comment.status === 'applied') return comment.resolved_by ? null : 'done';
+  const state = handoffWaitState(comment, now);
+  if (state === 'failed' || state === 'stale' || state === 'expired') return 'warning';
+  if (state !== 'replied') return null;
+  let latest = null;
+  let latestAt = 0;
+  for (const reply of comment.replies || []) {
+    if (!reply || reply.deleted || !(reply.author?.kind === 'agent' || reply.agent_status)) continue;
+    const at = ts(reply.created);
+    if (!latest || at >= latestAt) { latest = reply; latestAt = at; }
+  }
+  const verdict = latest?.agent_status;
+  if (verdict === 'question') return 'question';
+  if (verdict === 'partial') return 'partial';
+  if (verdict === 'applied' || verdict === 'answered') return 'done';
+  return null;
+}
+
+/** Whole minutes since the handoff was last sent (0 when unknown). */
+export function handoffWaitMinutes(comment, now = Date.now()) {
+  const sent = handoffSentAt(comment);
+  return sent ? Math.max(0, Math.floor((now - sent) / 60000)) : 0;
+}
+
+/** In-flight = still expecting agent work (includes ack-without-reply). */
+export function isHandoffInFlight(state) {
+  return state === 'waiting' || state === 'received';
+}
+
+export function summarizeHandoffSurfaces(comments) {
+  const buckets = {
+    ready: [], failed: [], waiting: [], received: [], replied: [],
+  };
+  for (const c of comments || []) {
+    const state = handoffSurfaceState(c);
+    if (state) buckets[state].push(c);
+  }
+  return buckets;
+}
+
+/** Sort key for details: newest handoff / human activity first. */
+export function handoffActivityAt(comment) {
+  if (!comment) return 0;
+  return Math.max(
+    ts(comment.handoff_at),
+    ts(comment.handoff_acked_at),
+    lastHumanAt(comment),
+    lastAgentAt(comment),
+  );
+}
+
+export function shortCommentPreview(text, max = 72) {
+  const one = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!one) return '(empty)';
+  if (one.length <= max) return one;
+  return `${one.slice(0, max - 1)}…`;
+}

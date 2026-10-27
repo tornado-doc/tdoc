@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# tdoc-move — move your docs into a team workspace, or back to My docs.
+#
+# Same rules as Move on the web: the doc's author can move a personal doc
+# into a team they belong to; a team doc is moved by the team's admins.
+# Uses the hosted Bearer in ~/.tdoc/published.json.
+#
+# Usage:
+#   tdoc-move --team <name|id> <slug>...   # into a team (no-op if already there)
+#   tdoc-move --personal <slug>...         # back to My docs
+#   tdoc-move --teams                      # list the teams you are in
+#   tdoc-move --create-team <name>         # make a team (you are its admin)
+#   tdoc-move --team <name> --create <slug>  # move, making the team if missing
+#   tdoc-move --team <name> --folder <f> <slug>  # move, then file in that folder (made if missing; tdoc-folder)
+#   tdoc-move --set-default <name|id>      # new docs from this machine go to this team
+#   tdoc-move --set-default personal       # new docs go to My docs (the default)
+#   tdoc-move --default                    # where a new doc would go, and why
+#   (nearest wins: TDOC_TEAM, then a .tdoc.json {"team": "..."} in this
+#    directory or a parent, then --set-default)
+#   (Inviting people stays on the web: it sends email.)
+#   tdoc-move --help
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+
+FOLDER=""; TEAM=""; PERSONAL=0; LIST=0; CREATE=0; NEW_TEAM=""; SET_DEFAULT=""; SHOW_DEFAULT=0; SLUGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --team) TEAM="${2:-}"; [ -n "$TEAM" ] || { echo "--team needs a name or id" >&2; exit 2; }; shift 2 ;;
+    --team=*) TEAM="${1#--team=}"; shift ;;
+    --personal) PERSONAL=1; shift ;;
+    --folder) FOLDER="${2:-}"; [ -n "$FOLDER" ] || { echo "--folder needs a name, path or id" >&2; exit 2; }; shift 2 ;;
+    --folder=*) FOLDER="${1#--folder=}"; shift ;;
+    --teams) LIST=1; shift ;;
+    --create) CREATE=1; shift ;;
+    --set-default) SET_DEFAULT="${2:-}"; [ -n "$SET_DEFAULT" ] || { echo "--set-default needs a team or 'personal'" >&2; exit 2; }; shift 2 ;;
+    --default) SHOW_DEFAULT=1; shift ;;
+    --default-id) SHOW_DEFAULT=2; shift ;;
+    --create-team) NEW_TEAM="${2:-}"; [ -n "$NEW_TEAM" ] || { echo "--create-team needs a name" >&2; exit 2; }; shift 2 ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "unknown arg: $1" >&2; exit 2 ;;
+    *) SLUGS+=("$1"); shift ;;
+  esac
+done
+
+CONFIG_FILE="$HOME/.tdoc/published.json"
+TOKEN="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" upload_token || true)"
+BASE="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" base || true)"
+if [ -z "$TOKEN" ] || [ -z "$BASE" ]; then
+  echo "[tdoc] not signed in to hosted tdoc — run 'tdoc-publish --signin-only' first." >&2
+  exit 1
+fi
+BASE="${BASE%/}"
+
+teams_json() {
+  curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/teams" -H "Authorization: Bearer $TOKEN"
+}
+
+create_team() {
+  local resp
+  resp="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "$BASE/api/teams" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d "{\"name\":$(json_str "$1")}")" || { echo "[tdoc] could not create team: no response" >&2; return 1; }
+  if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
+    echo "[tdoc] could not create team \"$1\": $resp" >&2; return 1
+  fi
+  echo "[tdoc] created team $1 ($(printf '%s' "$resp" | json_get team.id)); invite people from the web." >&2
+  printf '%s' "$resp" | json_get team.id
+}
+
+write_default() {
+  node -e '
+    const fs = require("fs");
+    const [file, id, name] = process.argv.slice(1);
+    const c = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (id) c.default_team = { id, name }; else delete c.default_team;
+    fs.writeFileSync(file, JSON.stringify(c, null, 2) + "\n", { mode: 0o600 });
+  ' "$CONFIG_FILE" "$1" "${2:-}"
+}
+
+# Where a NEW doc goes, nearest first: this agent (TDOC_TEAM), this project
+# (a .tdoc.json {"team": "<name|id>"} in the working directory or a parent),
+# this machine (--set-default). Prints "<team>\t<source>"; empty = My docs.
+effective_default() {
+  if [ -n "${TDOC_TEAM:-}" ]; then printf '%s\tTDOC_TEAM' "$TDOC_TEAM"; return; fi
+  local d="$PWD" t
+  while [ -n "$d" ]; do
+    if [ -f "$d/.tdoc.json" ]; then
+      t="$(json_get team < "$d/.tdoc.json" 2>/dev/null || true)"
+      if [ -n "$t" ]; then printf '%s\t%s' "$t" "$d/.tdoc.json"; return; fi
+    fi
+    [ "$d" = "/" ] && break
+    d="$(dirname "$d")"
+  done
+  t="$(json_get default_team.id < "$CONFIG_FILE")"
+  [ -n "$t" ] && printf '%s\tthis machine (%s)' "$t" "$(json_get default_team.name < "$CONFIG_FILE")"
+  return 0
+}
+
+if [ "$SHOW_DEFAULT" = "1" ]; then
+  e="$(effective_default)"
+  if [ -n "$e" ]; then echo "new docs go to team ${e%%$'\t'*} (from ${e#*$'\t'})"; else echo "new docs go to My docs"; fi
+  exit 0
+fi
+if [ "$SHOW_DEFAULT" = "2" ]; then
+  e="$(effective_default)"; printf '%s' "${e%%$'\t'*}"; exit 0
+fi
+
+if [ -n "$SET_DEFAULT" ]; then
+  case "$(printf '%s' "$SET_DEFAULT" | tr '[:upper:]' '[:lower:]')" in
+    personal|me|mine|none)
+      write_default ""; echo "[tdoc] new docs from this machine go to My docs."; exit 0 ;;
+  esac
+  hit="$(teams_json | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      let teams = []; try { teams = JSON.parse(s).teams || []; } catch {}
+      const want = process.argv[1].trim().toLowerCase();
+      const hit = teams.filter((t) => String(t.id).toLowerCase() === want || String(t.name || "").trim().toLowerCase() === want);
+      if (hit.length === 1) { process.stdout.write(`${hit[0].id}\t${hit[0].name}`); return; }
+      process.stderr.write(`[tdoc] you are not in a single team called "${process.argv[1]}". Your teams: ${teams.map((t) => t.name).join(", ") || "(none)"}\n`);
+      process.exit(1);
+    });' "$SET_DEFAULT")" || exit 1
+  write_default "${hit%%$'\t'*}" "${hit#*$'\t'}"
+  echo "[tdoc] new docs from this machine go to team ${hit#*$'\t'}. Existing docs stay where they are."
+  exit 0
+fi
+
+if [ -n "$NEW_TEAM" ] && [ -z "$TEAM" ] && [ "${#SLUGS[@]}" -eq 0 ]; then
+  create_team "$NEW_TEAM" >/dev/null || exit 1
+  exit 0
+fi
+
+if [ "$LIST" = "1" ]; then
+  teams_json | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      let b = {}; try { b = JSON.parse(s); } catch {}
+      if (!b.ok) { process.stderr.write(`[tdoc] could not list teams: ${s}\n`); process.exit(1); }
+      for (const t of b.teams || []) console.log(`${t.id}\t${t.name}\t${t.role}`);
+    });'
+  exit 0
+fi
+
+if [ "${#SLUGS[@]}" -eq 0 ] || { [ -z "$TEAM" ] && [ "$PERSONAL" != "1" ]; } || { [ -n "$TEAM" ] && [ "$PERSONAL" = "1" ]; }; then
+  sed -n '9,22p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2
+fi
+
+TEAM_ID="null"
+if [ -n "$TEAM" ]; then
+  id="$(teams_json | MISSING_OK="$CREATE" BASE="$BASE" node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      let teams = []; let limited = false;
+      try { const b = JSON.parse(s); teams = b.teams || []; limited = Array.isArray(b.workspaces); } catch {}
+      const want = process.argv[1].trim().toLowerCase();
+      const hit = teams.filter((t) => String(t.id).toLowerCase() === want || String(t.name || "").trim().toLowerCase() === want);
+      if (hit.length === 1) { process.stdout.write(String(hit[0].id)); return; }
+      if (!hit.length && process.env.MISSING_OK === "1") return;
+      process.stderr.write(hit.length
+        ? `[tdoc] more than one team is called "${process.argv[1]}"; pass its id (tdoc-move --teams).\n`
+        : `[tdoc] you are not in a team called "${process.argv[1]}". Your teams: ${teams.map((t) => t.name).join(", ") || "(none)"}\n`
+          + (limited ? `[tdoc] This agent connection reaches only some of your workspaces. Change them in Settings → Agents: ${process.env.BASE}/me?view=settings#agent-access\n` : ""));
+      process.exit(1);
+    });' "$TEAM")" || exit 1
+  if [ -z "$id" ]; then id="$(create_team "$TEAM")" || exit 1; fi
+  TEAM_ID="$(json_str "$id")"
+fi
+
+SLUGS_JSON="$(printf '%s\n' "${SLUGS[@]}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.stringify(s.split("\n").filter(Boolean))))')"
+resp="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "$BASE/api/team/move" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"team\":$TEAM_ID,\"slugs\":$SLUGS_JSON}")" || { echo "[tdoc] move failed: no response" >&2; exit 1; }
+if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
+  case "$(printf '%s' "$resp" | json_get error)" in
+    not_owner) echo "[tdoc] cannot move $(printf '%s' "$resp" | json_get slug): only its author (personal doc) or a team admin (team doc) can move it." >&2 ;;
+    team_not_found) echo "[tdoc] you are not a member of that team." >&2 ;;
+    team_plan_required) echo "[tdoc] $(printf '%s' "$resp" | json_get message)" >&2 ;;
+    token_scope) echo "[tdoc] cannot move there: $(printf '%s' "$resp" | json_get message)" >&2 ;;
+    *) echo "[tdoc] move failed: $resp" >&2 ;;
+  esac
+  exit 1
+fi
+if [ -n "$TEAM" ]; then echo "[tdoc] in team $TEAM: ${SLUGS[*]}"; else echo "[tdoc] back in My docs: ${SLUGS[*]}"; fi
+# Near the free team's doc limit: a warning, never a stop.
+warn="$(printf '%s' "$resp" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const w=JSON.parse(s).plan_warning;if(w&&w.message)process.stdout.write(w.message)}catch{}})')"
+if [ -n "$warn" ]; then echo "[tdoc] warning: $warn" >&2; fi
+if [ -n "$FOLDER" ]; then
+  # Filing is idempotent and makes the folder on first use, so a daily
+  # report can pass the same --folder on every run.
+  if [ -n "$TEAM" ]; then
+    "$TDOC_BIN_DIR/tdoc-folder" add --team "$id" --folder "$FOLDER" --create "${SLUGS[@]}"
+  else
+    "$TDOC_BIN_DIR/tdoc-folder" add --folder "$FOLDER" --create "${SLUGS[@]}"
+  fi
+fi

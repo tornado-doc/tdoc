@@ -18,14 +18,14 @@ const bundler = read('bin/tdoc-bundle');
 (async () => {
   console.log('React worker shell architecture\n');
 
-  await t('bundle embeds only the shell builder, frame probe, reader CSS, and Vite runtime', async () => {
-    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__']) {
+  await t('bundle embeds the shell, runtime and preview renderer assets', async () => {
+    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__', '__TDOC_FEEDBACK_JS__', '__TDOC_PUSH_SW_JS__', '__TDOC_NOTIFICATION_TEXT__', '__TDOC_PREVIEW_RENDERER__', '__TDOC_PREVIEW_WASM__', '__TDOC_PREVIEW_FONTS__', '__TDOC_PREVIEW_FONT_COVERAGE__', '__TDOC_PREVIEW_VALIDATOR__']) {
       if (!bundler.includes(marker)) throw new Error(`missing ${marker}`);
     }
     for (const retired of ['CHROME_MODULE', 'CHROME_JS', 'MANAGE_JS', 'SIGNIN_JS', 'ONBOARD_JS']) {
       if (bundler.includes(retired)) throw new Error(`legacy bundle input remains: ${retired}`);
     }
-    if (!bundler.includes('sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets)]')) {
+    if (!bundler.includes('previewRendererJs, previewValidator, JSON.stringify(previewCoverage)') || !bundler.includes('previewWasm, ...previewFonts')) {
       throw new Error('bundle hash does not cover the complete runtime input set');
     }
   });
@@ -120,6 +120,17 @@ const bundler = read('bin/tdoc-bundle');
     ]) {
       if (!doc.includes(needle)) throw new Error(`SEO shell missing ${needle}`);
     }
+    const large = shell.shellHtml({
+      title: 'Jev brief', nonceAttr: '', cfgJson: '{}', bootJson: '{}',
+      runtimeJsPath: '/shell.abc.js', runtimeCssPath: '/shell.abc.css',
+      seo: {
+        title: 'Jev brief', url: 'https://tdoc.dev/d/jev-model-brief/v/3',
+        image: 'https://tdoc.dev/d/jev-model-brief/preview/v3-abc.png', image_large: true, type: 'article',
+      },
+    });
+    if (!large.includes('name="twitter:card" content="summary_large_image"')) {
+      throw new Error('a 1200x630 preview card must use summary_large_image');
+    }
   });
 
   await t('document entry renders React components and never starts a legacy engine', async () => {
@@ -162,7 +173,7 @@ const bundler = read('bin/tdoc-bundle');
   await t('bundle is importable and registers the shell builder', async () => {
     const out = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-react-shell-'));
     cp.execFileSync(process.execPath, [path.join(ROOT, 'bin/tdoc-bundle')], {
-      env: { ...process.env, OUT_DIR: out },
+      env: { ...process.env, OUT_DIR: out, TDOC_BUNDLE_PLATFORM: 'vercel' },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     const modulePath = path.join(out, '_worker.bundled.mjs');

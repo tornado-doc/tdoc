@@ -52,6 +52,10 @@ const githubOauth = require(path.join(root, 'shared/github-oauth.js'));
 
 console.log('no-drift (duplicated helper guard)');
 
+t('live thread activity agrees across local and published readers', () => {
+  assert(norm(fnBody(worker, 'commentThreadActivity')) === norm(fnBody(server, 'commentThreadActivity')), 'comment activity helpers drifted');
+});
+
 t('GITHUB_CLIENT_ID has a single SoT (shared/github-oauth.js)', () => {
   const id = githubOauth.GITHUB_CLIENT_ID;
   assert(typeof id === 'string' && /^Ov[\w]+$/.test(id), `bad SoT client id: ${id}`);
@@ -100,7 +104,7 @@ t('safeJsonForScript is identical in worker.js and server.js', () => {
 
 // (cyrb53 lives only in worker.js now — its overlay twin died with the monolith.)
 
-for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAgentLogin', 'detectAgentRuntime', 'agentIdentity', 'isValidWidgetName', 'widgetCspHeader', 'isWidgetFrameRequest', 'forceWidgetSandbox', 'blankDocSlug', 'blankDocHtml', 'titleFromDocument', 'syncDocumentTitle', 'stampOnboarding', 'onboardingActionStep', 'seedCommentAnchor', 'duplicateComment', 'hasNoWords', 'debugRecord']) {
+for (const name of ['isAnthropicCompanyMark', 'logoForAgentLogin', 'isGenericAgentLogin', 'detectAgentRuntime', 'agentIdentity', 'isValidWidgetName', 'widgetCspHeader', 'isWidgetFrameRequest', 'forceWidgetSandbox', 'blankDocSlug', 'blankDocHtml', 'titleFromDocument', 'syncDocumentTitle', 'stampOnboarding', 'checkOnboardingStep', 'onboardingActionStep', 'seedCommentAnchor', 'duplicateComment', 'hasNoWords', 'debugRecord']) {
   t(`${name} is identical in worker.js and server.js`, () => {
     const a = norm(fnBody(worker, name));
     const b = norm(fnBody(server, name));

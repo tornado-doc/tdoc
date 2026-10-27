@@ -1,10 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { SignInDialog } from './sign-in-dialog.jsx';
+import { TopBar } from './top-bar.jsx';
+import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx';
 
 // The pairing approval page (/activate). A terminal showed the visitor a
 // short code; this page is where their own browser — their own session —
 // turns that code into an approval. Three states, in the order a first-time
-// visitor meets them: sign in, confirm what is being connected, done.
+// visitor meets them: sign in, allow what is being connected, done.
+//
+// Allow lists the person's workspaces (My docs and each team), all ticked.
+// Leaving them all ticked connects the whole account, as it always did;
+// unticking some gives the connection only the rest. Someone with no team
+// has nothing to choose and sees no list.
 //
 // The confirm step is the anti-phishing seam: before the button, the page
 // names the terminal's label and the signed-in account, so "paste this code
@@ -33,13 +40,21 @@ export function ActivatePage({ boot, preview = null }) {
   const [identity, setIdentity] = useState(boot.identity);
   // idle → looked-up (terminal named, confirm offered) → approved | error
   const [pending, setPending] = useState(preview?.pending || null);
+  const [picked, setPicked] = useState(() => (preview?.pending?.workspaces || []).map((w) => w.id));
   const [approved, setApproved] = useState(Boolean(preview?.approved));
   const [error, setError] = useState(preview?.error || '');
   const [busy, setBusy] = useState(Boolean(preview?.busy));
 
   const signIn = () => {
+    const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
+    // The provider seat first, then tdoc's own GitHub redirect; the
+    // device-code dialog only where neither exists (a seat host answers the
+    // device flow with 410).
+    if (boot.oidcAuth) {
+      location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(back)}`;
+      return;
+    }
     if (boot.webAuth) {
-      const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
       location.href = `/api/auth/web/login?return=${encodeURIComponent(back)}`;
       return;
     }
@@ -52,13 +67,15 @@ export function ActivatePage({ boot, preview = null }) {
   }, []);
 
   const lookup = async () => {
-    if (preview) { setPending({ label: 'Preview terminal' }); setError(''); return; }
+    if (preview) { setPending({ label: 'Preview device' }); setError(''); return; }
     setBusy(true);
     setError('');
     const { status, data } = await post('/api/cli/pair/lookup', { user_code: code });
     setBusy(false);
     if (status === 200 && data && data.ok) {
-      setPending({ label: data.label });
+      const workspaces = Array.isArray(data.workspaces) ? data.workspaces : [];
+      setPending({ label: data.label, device: data.device || '', client: data.client || '', workspaces });
+      setPicked(workspaces.map((w) => w.id));
     } else if (status === 429) {
       setError('Too many tries. Wait a minute, then try again.');
     } else {
@@ -70,10 +87,12 @@ export function ActivatePage({ boot, preview = null }) {
     if (preview) { setApproved(true); return; }
     setBusy(true);
     setError('');
-    const { status, data } = await post('/api/cli/pair/approve', { user_code: code });
+    const { status, data } = await post('/api/cli/pair/approve', { user_code: code, ...(choosing ? { workspaces: picked } : {}) });
     setBusy(false);
     if (status === 200 && data && data.ok) {
       setApproved(true);
+    } else if (status === 400 && data && /workspace/.test(String(data.error || ''))) {
+      setError('Your workspaces changed. Reload this page and try again.');
     } else if (status === 429) {
       setError('Too many tries. Wait a minute, then try again.');
     } else {
@@ -89,12 +108,40 @@ export function ActivatePage({ boot, preview = null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity]);
 
+  const workspaces = pending?.workspaces || [];
+  const choosing = workspaces.length > 1;
+  const partial = choosing && picked.length < workspaces.length;
+  // Who is asking, as the terminal describes itself ("Claude Code on
+  // julies-mac"). Self-reported: a hint for the person, never a grant.
+  const asker = pending
+    ? [pending.client, pending.device].filter(Boolean).join(' on ') || 'This device'
+    : '';
+
+  // A consent page: kept to its one question, under the shared top bar so the
+  // account being connected is the avatar in the corner. The design preview
+  // renders it without the bar (no session there), so it keeps the mark.
+  const mark = preview ? <img src="/tdoc_logo.svg" width="44" height="44" alt="" /> : null;
+  const frame = (main) => (preview ? main : (
+    <div className="tdoc-app tdoc-edge-page">
+      <TopBar
+        identity={identity}
+        authConfigured={Boolean(boot.oidcAuth || boot.authConfigured)}
+        onSignIn={() => {
+          if (!boot.oidcAuth) { signIn(); return; }
+          const back = `/activate${code ? `?code=${encodeURIComponent(code)}` : ''}`;
+          location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(back)}`;
+        }}
+      />
+      {main}
+    </div>
+  ));
+
   if (approved) {
-    return (
+    return frame(
       <main className="tdoc-status-page tdoc-activate-page">
         <div className="tdoc-activate-stack">
-        <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-        <h1>Device login approved</h1>
+        {mark}
+        <h1>Access allowed</h1>
         {/* What happens next, not what this page cannot do. `window.close()`
             is ignored by every browser on a tab the script did not open --
             which is every tab reached from a link in a terminal -- so the
@@ -106,7 +153,8 @@ export function ActivatePage({ boot, preview = null }) {
 
             So: say what the terminal is doing, and offer the one place worth
             going instead. */}
-        <p>Your terminal is finishing sign-in.</p>
+        <p>Your agent is finishing sign-in.</p>
+        {partial ? <p className="tdoc-activate-hint">It can reach {workspaceSummary(workspaces, picked)}.</p> : null}
         <div className="tdoc-status-actions">
           <a className="primary" href="/me">My docs</a>
         </div>
@@ -116,16 +164,16 @@ export function ActivatePage({ boot, preview = null }) {
     );
   }
 
-  return (
+  return frame(
     <main className="tdoc-status-page tdoc-activate-page">
       <div className={`tdoc-activate-stack${!identity ? ' tdoc-activate-signin' : ''}`}>
-      <img src="/tdoc_logo.svg" width="44" height="44" alt="" />
-      <h1>Approve Device Login</h1>
+      {mark}
+      <h1>{pending ? 'Allow access to tdoc' : 'Approve device login'}</h1>
       {!identity ? (
         <>
           <p>{code
-            ? 'Sign in, then approve this terminal to publish to your account.'
-            : 'Sign in to connect your terminal.'}</p>
+            ? 'Sign in, then approve this device or agent to publish to your account.'
+            : 'Sign in to connect your device or agent.'}</p>
           <p className="tdoc-activate-hint">
             New here? Signing in creates your account.
           </p>
@@ -171,22 +219,42 @@ export function ActivatePage({ boot, preview = null }) {
           <button type="button" className="secondary" onClick={() => {
             location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate${code ? `?code=${code}` : ''}`)}`;
           }}>
-            Use Another Account
+            Use another account
           </button>
         </>
       ) : (
         <>
+          {/* Who is asking and as whom. Allowing hands that machine your
+              account in the workspaces below -- if the name is not one you
+              know, or the code is not the one on your screen, stop here. */}
           <p className="tdoc-activate-grant">
-            Signed in as <b>{identity.email || identity.name || identity.login}</b>.
+            <b>{asker}</b> will use tdoc as <b>{identity.email || identity.name || identity.login}</b>.
           </p>
           <div className="tdoc-activate-codeshow">{code}</div>
-          <button type="button" className="primary" disabled={busy} onClick={approve}>
-            Approve Device Login
+          {choosing ? (
+            <div className="tdoc-activate-workspaces">
+              <p className="tdoc-activate-ask">It can open, publish and edit docs in:</p>
+              <WorkspaceChecklist
+                workspaces={workspaces}
+                picked={picked}
+                onChange={setPicked}
+                disabled={busy}
+                label="Workspaces this agent can reach"
+              />
+              <p className="tdoc-activate-hint">
+                {picked.length
+                  ? 'Untick any it should not see. You can change this later in Settings → Agents.'
+                  : 'Tick at least one workspace.'}
+              </p>
+            </div>
+          ) : null}
+          <button type="button" className="primary" disabled={busy || (choosing && !picked.length)} onClick={approve}>
+            Allow
           </button>
           <button type="button" className="secondary" onClick={() => {
             location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(`/activate?code=${code}`)}`;
           }}>
-            Use Another Account
+            Use another account
           </button>
         </>
       )}

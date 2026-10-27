@@ -9,6 +9,16 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const { commentId } = require('./comment-id');
+
+function invalidProductAnchorUrl(anchor) {
+  if (!anchor || anchor.kind !== 'product') return false;
+  if (typeof anchor.url !== 'string') return true;
+  try {
+    const url = new URL(anchor.url);
+    return url.protocol !== 'http:' && url.protocol !== 'https:';
+  } catch { return true; }
+}
 
 
 // The server knows which Node is running it; a spawned child may not. When the
@@ -46,6 +56,20 @@ function stampOnboarding(record, step, at, extra) {
   }
   return out;
 }
+// A person's own word that a checklist row is finished. Detection misses
+// real completions (a skill set up on another machine, a doc made before the
+// journey began), and a row that stays open after the person has done it reads
+// as the product being broken. So the row's tick is theirs to set, kept apart
+// from the step stamps: the funnel is still read off what the server saw, and
+// unticking only takes back the person's word, never a stamp.
+function checkOnboardingStep(record, step, checked, at) {
+  if (!['connect', 'create', 'comment', 'revise'].includes(step)) return null;
+  const out = record && typeof record === 'object' ? { ...record } : {};
+  const marks = out.checked && typeof out.checked === 'object' && !Array.isArray(out.checked) ? { ...out.checked } : {};
+  if (checked) { if (!marks[step]) marks[step] = at; } else delete marks[step];
+  out.checked = marks;
+  return out;
+}
 // Which actions the page may report, and which step (if any) each one stamps.
 // Anything else is rejected: the log is what the funnel is read from, so a
 // page cannot invent a step.
@@ -59,6 +83,10 @@ function onboardingActionStep(action) {
     case 'copy_clicked':
     case 'fix_copy_clicked':
     case 'timeout_shown':
+    // Logged like any other action; the tick itself is written by
+    // checkOnboardingStep, beside the stamps rather than as one.
+    case 'step_checked':
+    case 'step_unchecked':
       return null;
     default:
       return undefined;
@@ -191,7 +219,7 @@ function seedFirstCommentLocal(slug) {
   const file = path.join(ROOT, slug, 'comments.json');
   const comments = readCommentFile(file);
   comments.push({
-    id: `c_${Date.now()}`, version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
+    id: commentId('c'), version: 1, anchor: seedCommentAnchor(html), text: SEED_COMMENT_TEXT,
     mentions: [], author: SEED_COMMENT_AUTHOR, status: 'open', created: new Date().toISOString(),
     replies: [], reactions: {},
   });
@@ -654,6 +682,37 @@ function latestLocalVersion(slug, meta) {
 // (text/plain, no custom headers) without a preflight; requiring JSON
 // content-type defeats that, and rejecting non-local Origins closes the rest.
 // Returns true if the request is allowed to mutate.
+function isLocalOrigin(origin) {
+  try {
+    const h = new URL(origin).hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
+  } catch { return false; }
+}
+
+// A browser origin, exactly — no path, no trailing slash, http(s) only.
+function feedbackOriginLocal(raw) {
+  try {
+    const u = new URL(String(raw || ''));
+    if (!/^https?:$/.test(u.protocol) || u.origin !== String(raw)) return null;
+    return u.origin;
+  } catch { return null; }
+}
+
+function feedbackSessionLocal(slug) {
+  const meta = readJson(path.join(ROOT, slug, 'meta.json'), { title: slug, versions: [] });
+  const version = Math.max(1, ...(Array.isArray(meta.versions) ? meta.versions.map((v) => Number(v && v.n) || 0) : [0]));
+  const identity = e2eIdentity();
+  return {
+    ok: true,
+    slug,
+    version,
+    title: meta.title || slug,
+    doc_url: `http://localhost:${PORT}/d/${encodeURIComponent(slug)}/v/${version}`,
+    identity,
+    is_owner: Boolean(identity && E2E_OWNER && identity.login.toLowerCase() === E2E_OWNER.toLowerCase()),
+  };
+}
+
 function isLocalMutation(req) {
   const ct = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (ct !== 'application/json') return false;
@@ -669,11 +728,9 @@ function isLocalMutation(req) {
 
 // Escape `</script>` and HTML comment terminators so a malicious or stray value
 // inside the JSON payload can't break out of the surrounding <script> block.
-// Replace the acting agent's reaction on a comment with the emoji for the new
-// status. Also removes legacy `tdoc-agent` reactions first so old state
-// can't outlive the new outcome (e.g. an "applied" ✅ after a later
-// "question" outcome on the same comment).
-const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓' };
+// Agent verdicts used to create reactions. Keep their set only to clean old
+// local comment files when a thread is reopened; new verdicts do not react.
+const AGENT_STATUS_EMOJI = { applied: '✅', partial: '🟡', question: '❓', answered: '💬' };
 // The emoji set the agent uses as a verdict marker — used by the per-version
 // fold to strip a stale verdict off snapshots where the comment reads 'open'.
 const AGENT_VERDICT_EMOJI = new Set(Object.values(AGENT_STATUS_EMOJI));
@@ -754,10 +811,10 @@ function agentIdentity(body = {}, env = {}) {
   if (!avatar) avatar = logoForAgentLogin(login);
   return { kind: 'agent', login: clean(login, 'tdoc-agent'), name: clean(name, login), avatar_url: avatar };
 }
-function setAgentReaction(target, status, actor = 'tdoc-agent') {
-  if (!target.reactions) target.reactions = {};
+function clearLegacyAgentReactions(target, actor = 'tdoc-agent') {
+  if (!target.reactions) return;
   const agentUsers = new Set(['tdoc-agent', actor].filter(Boolean));
-  for (const emoji of Object.keys(target.reactions)) {
+  for (const emoji of AGENT_VERDICT_EMOJI) {
     const users = target.reactions[emoji] || [];
     for (let i = users.length - 1; i >= 0; i--) {
       if (agentUsers.has(users[i])) users.splice(i, 1);
@@ -765,11 +822,6 @@ function setAgentReaction(target, status, actor = 'tdoc-agent') {
     if (users.length === 0) delete target.reactions[emoji];
     else target.reactions[emoji] = users;
   }
-  const next = AGENT_STATUS_EMOJI[status];
-  if (!next) return;
-  const u = target.reactions[next] || [];
-  if (!u.includes(actor)) u.push(actor);
-  target.reactions[next] = u;
 }
 
 function safeJsonForScript(obj) {
@@ -860,33 +912,49 @@ function frameCspHeader(nonce) {
 // three — no page overflow, columns at their natural width, header aligned.
 // Kept byte-identical in server.js; test/reader-patch-drift.test.js holds them
 // together.
+//
+// One pass over the bytes. The first version lowercased the WHOLE document
+// for every table tag it looked for, and tested "already wrapped" against
+// everything emitted so far -- O(tables x bytes): 480ms of CPU on a 660KB
+// report with forty tables, against Cloudflare's 10ms, so opening that doc
+// was error 1102 every time. Now the tags are found with one case-insensitive
+// regex walked forward, and only the bytes just before a table decide whether
+// it is already wrapped (the wrapper tag must END there, so a window as long
+// as any sane tag is the same test).
 function wrapBareTables(html) {
   if (typeof html !== 'string' || html.indexOf('<table') === -1) return html;
-  var out = '', i = 0;
+  var tags = /<\/?table/gi;
+  var next = function (from) { tags.lastIndex = from; return tags.exec(html); };
+  var WINDOW = 4096;
+  var out = [], i = 0, tail = '';
   while (i < html.length) {
-    var at = html.toLowerCase().indexOf('<table', i);
-    if (at === -1) { out += html.slice(i); break; }
+    var m = next(i);
+    while (m && m[0].length !== 6) m = next(m.index + 7);
+    if (!m) { out.push(html.slice(i)); break; }
+    var at = m.index;
     var before = html.slice(i, at);
-    var already = /<div[^>]*class="[^"]*tdoc-table-scroll[^"]*"[^>]*>\s*$/i.test(out + before);
+    var context = tail + (before.length > WINDOW ? before.slice(-WINDOW) : before);
+    var already = /<div[^>]*class="[^"]*tdoc-table-scroll[^"]*"[^>]*>\s*$/i.test(context);
     var depth = 0, j = at, end = -1;
     while (j < html.length) {
-      var open = html.toLowerCase().indexOf('<table', j);
-      var close = html.toLowerCase().indexOf('</table', j);
-      if (close === -1) break;
-      if (open !== -1 && open < close) { depth++; j = open + 6; continue; }
+      var t = next(j);
+      if (!t) break;
+      if (t[0].length === 6) { depth++; j = t.index + 6; continue; }
       depth--;
-      if (depth === 0) { end = html.indexOf('>', close); break; }
-      j = close + 7;
+      if (depth === 0) { end = html.indexOf('>', t.index); break; }
+      j = t.index + 7;
     }
-    if (end === -1) { out += html.slice(i); break; }
+    if (end === -1) { out.push(html.slice(i)); break; }
     var table = html.slice(at, end + 1);
-    out += before + (already ? table : '<div class="tdoc-table-scroll">' + table + '</div>');
+    var piece = before + (already ? table : '<div class="tdoc-table-scroll">' + table + '</div>');
+    out.push(piece);
+    tail = piece.length > WINDOW ? piece.slice(-WINDOW) : (tail + piece).slice(-WINDOW);
     i = end + 1;
   }
-  return out;
+  return out.join('');
 }
 
-const READER_PATCH_CSS = ':where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}:where(body>.wrap,body>main,body>article,body>.content,body>.container)[data-tdoc-width="wide"]{max-width:none}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
+const READER_PATCH_CSS = ':where(html){-webkit-text-size-adjust:100%;text-size-adjust:100%}:where(body){overflow-wrap:anywhere}:where(body table){overflow-wrap:normal}.tdoc-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}.tdoc-table-scroll>table{max-width:none}';
 
 const READER_CSS_PATH = path.join(__dirname, 'reader.css');
 function readerCss() {
@@ -1002,7 +1070,11 @@ function localDocsData() {
         .map((item) => Number(item.name.slice(1))).sort((a, b) => b - a)[0] || 1;
     const created = meta.created || versions[0]?.created || '';
     const updated = versions[versions.length - 1]?.created || created;
-    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '' });
+    // The same preview the hosted catalog carries, when a local meta has one.
+    const preview = meta.preview && typeof meta.preview === 'object' ? meta.preview : {};
+    const excerpt = typeof preview.excerpt === 'string' ? preview.excerpt.slice(0, 220) : '';
+    const image = typeof preview.image === 'string' && /^(?:https?:\/\/|\/)/i.test(preview.image) ? preview.image : '';
+    docs.push({ slug, title: meta.title || slug, latest, created, updated, owner: '', starred: false, folder: '', excerpt, image });
   }
   docs.sort((a, b) => String(b.updated).localeCompare(String(a.updated)) || a.title.localeCompare(b.title));
   return { docs, recent: [], starred: [], folders: [] };
@@ -1077,6 +1149,23 @@ function readCommentFile(file) {
   return Array.isArray(v) ? v : [];
 }
 
+// Live reply activity, separate from the document version snapshot.
+function commentThreadActivity(comment) {
+  const activity = { agent_at: null, human_at: null };
+  const replies = [...(Array.isArray(comment.replies) ? comment.replies : []), ...(Array.isArray(comment.events)
+    ? comment.events.filter(e => e && e.kind === 'reply_added' && e.reply).map(e => ({ ...e.reply, created: e.at }))
+    : [])];
+  for (const item of [comment, ...replies]) {
+    if (!item) continue;
+    const agent = item.author?.kind === 'agent' || item.author?.kind === 'system' || (item !== comment && item.agent_status);
+    if (agent && item === comment) continue;
+    const key = agent ? 'agent_at' : 'human_at';
+    const at = Date.parse(item.created || '');
+    if (Number.isFinite(at) && at > (Date.parse(activity[key] || '') || 0)) activity[key] = item.created;
+  }
+  return activity;
+}
+
 // Fold the flat comment list to a per-version SNAPSHOT, matching the worker's
 // event-fold semantics (worker.js snapshotAt): reading a doc "as of version N"
 // shows each comment exactly as it existed then. The local store is a flat
@@ -1098,7 +1187,7 @@ function foldCommentsAtVersion(comments, version) {
     const resolvedByV = c.status === 'applied' && appliedIn != null && appliedIn <= V;
     // Reactions are stored flat (no per-reaction version), so spreading `...c`
     // would carry the CURRENT reactions — including the agent verdict emoji
-    // (✅/🟡/❓ written by setAgentReaction) — onto every past snapshot. On a
+    // (✅/🟡/❓ written by the old agent-reaction path) — onto every past snapshot. On a
     // version where the comment folds to 'open' that's a contradictory
     // "resolved" emoji, so drop the agent verdict there.
     let reactions = c.reactions;
@@ -1241,6 +1330,108 @@ const server = http.createServer(async (req, res) => {
   // process answering 200 on this port must not pass as tdoc (seen in the
   // wild: a daemon from another product bound 7878).
   if (p === '/api/ping') return json(res, 200, { ok: true, service: 'tdoc' });
+
+  // The feedback client (#564) runs inside a localhost app on another port
+  // and fetches us cross-origin. Only a local origin is answered, the same
+  // set isLocalMutation trusts; the worker's door is `*`.
+  const requestOrigin = req.headers['origin'];
+  if (requestOrigin && isLocalOrigin(requestOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+    res.setHeader('Vary', 'Origin');
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+  }
+
+  // ---- product feedback (#564), the local twin: identity is TDOC_E2E_USER,
+  // the "token" just names the space, and a space is a doc dir like any other.
+  // The push service worker (#771). The local server never sends a push, so
+  // /api/push/key is absent and the page keeps its open-tab alerts; the
+  // worker script is still served so the shell's registration path is real.
+  if (p === '/tdoc-sw.js' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const file = path.join(__dirname, 'runtime', 'tdoc-sw.js');
+    if (!fs.existsSync(file)) return send(res, 404, 'push worker is not built: npm run build:sw');
+    return send(res, 200, req.method === 'HEAD' ? '' : fs.readFileSync(file), {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Service-Worker-Allowed': '/',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+  if (p === '/feedback.js' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const file = path.join(__dirname, 'runtime', 'feedback.js');
+    if (!fs.existsSync(file)) return send(res, 404, 'feedback client is not built: npm run build:feedback');
+    return send(res, 200, req.method === 'HEAD' ? '' : fs.readFileSync(file), {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+    });
+  }
+  if (p === '/feedback' && req.method === 'GET') {
+    const base = `http://localhost:${Number(PORT) || 7878}`;
+    const bookmarklet = `javascript:(function(){if(window.tdocFeedback){window.tdocFeedback.toggle();return}var s=document.createElement('script');s.src='${base}/feedback.js?b='+Date.now();s.async=true;s.setAttribute('data-tdoc-open','1');document.documentElement.appendChild(s)})()`;
+    return send(res, 200, `<!doctype html><meta charset="utf-8"><title>tdoc Feedback (local)</title>
+<main style="font:16px/1.6 system-ui;max-width:40rem;margin:3rem auto;padding:0 1.5rem">
+<h1>tdoc Feedback</h1>
+<p>Drag this to your bookmarks bar, then click it on any page of your app:</p>
+<p><a id="bookmarklet" href="${escHtml(bookmarklet)}" style="display:inline-block;background:#2f5bea;color:#fff;text-decoration:none;font-weight:600;padding:.6rem 1.1rem;border-radius:8px">🌪️ tdoc</a></p>
+<p>Or add <code>&lt;script src="${escHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app.</p>
+</main>`, { 'Content-Type': 'text/html; charset=utf-8' });
+  }
+  if (p === '/feedback/connect' && req.method === 'GET') {
+    const origin = feedbackOriginLocal(url.searchParams.get('origin'));
+    if (!origin) return send(res, 400, 'origin required');
+    // No sign-in locally: connect straight away and hand the opener its token.
+    return send(res, 200, `<!doctype html><meta charset="utf-8"><title>Connect tdoc Feedback</title>
+<main style="font:16px/1.6 system-ui;max-width:32rem;margin:3rem auto;padding:0 1.5rem"><h1>tdoc Feedback</h1><p id="status">Connecting…</p></main>
+<script>
+(function () {
+  var origin = ${JSON.stringify(origin)};
+  var status = document.getElementById('status');
+  fetch('/api/feedback/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ origin: origin }) })
+    .then(function (r) { return r.json(); })
+    .then(function (session) {
+      if (!session || !session.token) { status.textContent = (session && session.error) || 'Could not connect'; return; }
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'tdoc-feedback-connected', origin: origin, session: session }, origin);
+        status.textContent = 'Connected. You can close this window.';
+        setTimeout(function () { window.close(); }, 400);
+      } else status.textContent = 'Connected. Go back to your app and click the tdoc button again.';
+    })
+    .catch(function (e) { status.textContent = String(e && e.message || e); });
+})();
+</script>`, { 'Content-Type': 'text/html; charset=utf-8' });
+  }
+  if (p === '/api/feedback/connect' && req.method === 'POST') {
+    if (!isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = await readBody(req);
+    const origin = feedbackOriginLocal(body.origin);
+    if (!origin) return json(res, 400, { error: 'invalid_origin' });
+    const slug = body.slug ? safeSlug(body.slug) : `feedback-${new URL(origin).host.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
+    if (!slug) return json(res, 400, { error: 'invalid_slug' });
+    const docRoot = path.join(ROOT, slug);
+    if (!fs.existsSync(path.join(docRoot, 'meta.json'))) {
+      if (body.slug) return json(res, 404, { error: 'not_found' });
+      const now = new Date().toISOString();
+      fs.mkdirSync(path.join(docRoot, 'v1'), { recursive: true });
+      fs.writeFileSync(path.join(docRoot, 'v1', 'index.html'), `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Feedback · ${escHtml(new URL(origin).host)}</title></head><body><main style="font:17px/1.75 system-ui;max-width:46rem;margin:0 auto;padding:4.5rem 1.5rem"><h1>Feedback · ${escHtml(new URL(origin).host)}</h1><p>Product feedback left on <a href="${escHtml(origin)}">${escHtml(origin)}</a>.</p></main></body></html>\n`);
+      fs.writeFileSync(path.join(docRoot, 'meta.json'), JSON.stringify({
+        title: `Feedback · ${new URL(origin).host}`,
+        created_from: 'feedback',
+        feedback: { origin },
+        slug,
+        created: now,
+        versions: [{ n: 1, created: now, prompt: `Feedback space for ${origin}`, source: 'browser', ...(E2E_USER ? { author: E2E_USER } : {}) }],
+      }, null, 2) + '\n');
+    }
+    return json(res, 200, { ...feedbackSessionLocal(slug), token: `local_${slug}` });
+  }
+  if (p === '/api/feedback/session' && req.method === 'GET') {
+    const m = /^Bearer\s+local_([a-z0-9-]+)$/i.exec(req.headers['authorization'] || '');
+    const slug = m ? safeSlug(m[1]) : null;
+    if (!slug || !fs.existsSync(path.join(ROOT, slug, 'meta.json'))) return json(res, 401, { error: 'sign_in_required' });
+    return json(res, 200, { ...feedbackSessionLocal(slug), can_comment: true });
+  }
 
   if (p === '/api/notifications' && req.method === 'GET') {
     const ident = e2eIdentity();
@@ -1420,6 +1611,16 @@ const server = http.createServer(async (req, res) => {
     const latest = versions.map((item) => Number(item && item.n)).filter(Number.isFinite).sort((a, b) => b - a)[0];
     if (!latest) return send(res, 404, 'Not found: tdoc-start');
     res.writeHead(302, { Location: `/d/tdoc-start/v/${latest}`, 'Cache-Control': 'no-store' });
+    return res.end();
+  }
+
+  // Same alias for `/pricing`, when the pricing doc is on this host.
+  if (p === '/pricing' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const meta = readJson(path.join(ROOT, 'tdoc-pricing', 'meta.json'), {});
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions.map((item) => Number(item && item.n)).filter(Number.isFinite).sort((a, b) => b - a)[0];
+    if (!latest) return send(res, 404, 'Not found: tdoc-pricing');
+    res.writeHead(302, { Location: `/d/tdoc-pricing/v/${latest}`, 'Cache-Control': 'no-store' });
     return res.end();
   }
 
@@ -1725,7 +1926,12 @@ const server = http.createServer(async (req, res) => {
     if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
     const comments = readCommentFile(path.join(ROOT, slug, 'comments.json'));
     const viewer = normalizeGithubLogin(e2eIdentity() && e2eIdentity().login);
-    return json(res, 200, { users: localMentionable(comments).filter((u) => u.login !== viewer) });
+    const identity = e2eIdentity();
+    return json(res, 200, {
+      users: localMentionable(comments).filter((u) => u.login !== viewer),
+      identity,
+      is_owner: Boolean(identity && E2E_OWNER && identity.login.toLowerCase() === E2E_OWNER.toLowerCase()),
+    });
   }
 
   // --- COMMENTS (anonymous) ---
@@ -1749,6 +1955,15 @@ const server = http.createServer(async (req, res) => {
     const action = typeof body.action === 'string' ? body.action : '';
     const step = onboardingActionStep(action);
     if (step === undefined) return json(res, 400, { error: 'unknown_action' });
+    if (action === 'step_checked' || action === 'step_unchecked') {
+      const all = loadOnboardingLocal();
+      const next = checkOnboardingStep(all.record || {}, body.step, action === 'step_checked', new Date().toISOString());
+      if (!next) return json(res, 400, { error: 'unknown_step' });
+      all.record = next;
+      writeJson(ONBOARDING_FILE, all);
+      logOnboardingEventLocal(action, { step: body.step });
+      return json(res, 200, { ok: true, record: next });
+    }
     const doc = safeSlug(body.doc);
     logOnboardingEventLocal(action, doc ? { doc } : null);
     const record = step
@@ -1780,7 +1995,9 @@ const server = http.createServer(async (req, res) => {
     // serving a row nobody can see or remove (#532). readCommentFile parses
     // fresh, so collapsing in place touches nothing on disk.
     const served = all.filter((c) => collapseLocalTombstones(c));
-    return json(res, 200, ver != null ? foldCommentsAtVersion(served, ver) : served);
+    const activity = new Map(served.map(c => [c.id, commentThreadActivity(c)]));
+    const folded = ver != null ? foldCommentsAtVersion(served, ver) : served;
+    return json(res, 200, folded.map(c => ({ ...c, thread_activity: activity.get(c.id) })));
   }
 
   if (p === '/api/comments' && req.method === 'POST') {
@@ -1792,6 +2009,7 @@ const server = http.createServer(async (req, res) => {
     // not a comment, and one that gets in cannot be seen or removed (#532).
     const text = typeof body.text === 'string' ? body.text.trim() : body.text;
     if (!slug || !text) return json(res, 400, { error: 'invalid slug or missing text' });
+    if (invalidProductAnchorUrl(anchor)) return json(res, 400, { error: 'invalid_product_url' });
     const file = path.join(ROOT, slug, 'comments.json');
     const comments = readCommentFile(file);
     const created = new Date().toISOString();
@@ -1812,7 +2030,7 @@ const server = http.createServer(async (req, res) => {
       // `r.version` check falls back to the parent's created_in, so replies were
       // never hidden on older versions (diverging from the worker).
       // parent_id is the immediate parent (top-level or another reply).
-      const reply = { id: `r_${Date.now()}`, parent_id, text, mentions, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
+      const reply = { id: commentId('r'), parent_id, text, mentions, version: Number(version) || 1, author: e2eIdentity(), created, reactions: {} };
       thread.replies.push(reply);
       writeJson(file, comments);
       if (E2E_USER) {
@@ -1830,7 +2048,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ...reply, mention_outcome: localMentionOutcome(comments, mentions) });
     }
     const entry = {
-      id: `c_${Date.now()}`,
+      id: commentId('c'),
       version: version || 1,
       anchor: anchor || null,
       text,
@@ -1895,14 +2113,14 @@ const server = http.createServer(async (req, res) => {
     const agent = agentIdentity(body, process.env);
     parent.agent_actor = agent.login;
     const reply = {
-      id: `r_${Date.now()}`,
+      id: commentId('r'),
       parent_id,
       text,
       // Scope the agent reply to the version it was applied at (falls back to
       // the request version, then 1) so the fold can hide it on earlier ones.
       version: Number(applied_in != null ? applied_in : body.version) || 1,
       author: agent,
-      agent_status: ['applied', 'partial', 'question'].includes(agentStatus) ? agentStatus : null,
+      agent_status: Object.prototype.hasOwnProperty.call(AGENT_STATUS_EMOJI, agentStatus) ? agentStatus : null,
       created: new Date().toISOString(),
       reactions: {},
     };
@@ -1910,10 +2128,9 @@ const server = http.createServer(async (req, res) => {
     if (agentStatus === 'applied') {
       parent.status = 'applied';
       if (applied_in) parent.applied_in = applied_in;
-    } else if (agentStatus === 'question' || agentStatus === 'partial') {
+    } else if (agentStatus === 'question' || agentStatus === 'partial' || agentStatus === 'answered') {
       parent.status = 'open';
     }
-    setAgentReaction(parent, agentStatus, agent.login);
     writeJson(file, all);
     return json(res, 200, reply);
   }
@@ -1981,6 +2198,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 404, { error: 'not_found' });
     }
     if (!slug || !id || !anchor) return json(res, 400, { error: 'invalid slug or missing id/anchor' });
+    if (invalidProductAnchorUrl(anchor)) return json(res, 400, { error: 'invalid_product_url' });
     const file = path.join(ROOT, slug, 'comments.json');
     const all = readCommentFile(file);
     const target = all.find(c => c.id === id);
@@ -1988,7 +2206,7 @@ const server = http.createServer(async (req, res) => {
     target.anchor = anchor;
     target.status = 'open';
     delete target.applied_in;
-    setAgentReaction(target, null, target.agent_actor || 'tdoc-agent');
+    clearLegacyAgentReactions(target, target.agent_actor || 'tdoc-agent');
     delete target.agent_actor;
     writeJson(file, all);
     return json(res, 200, target);

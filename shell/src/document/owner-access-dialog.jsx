@@ -2,7 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
-import { deleteDocument, updateDocumentAccess } from './api.js';
+import { AppSwitch } from '../ui/switch.jsx';
+import { deleteDocument, getTeam, getTeamGuests, updateDocumentAccess, updateTeam } from './api.js';
+import { isFeatureOn } from '../feature-flags.js';
+import { rememberTrashed } from '../recent-trash.js';
+import { VersionLinkChoice } from './document-dialogs.jsx';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
 
 // Mirrors normalizeInvitee in the worker: a handle reading first (so "@Bob"
@@ -24,6 +28,38 @@ const COMMENTING_OPTIONS = [
   { value: 'owner', label: 'Owner only' },
   { value: 'off', label: 'Off' },
 ];
+
+// Who can open the doc, the way Google Docs says it. "Anyone with the link"
+// is stored as `unlisted`. Public is the only one search engines may index.
+export const GENERAL_ACCESS_OPTIONS = [
+  { value: 'private', label: 'Specific people / team', hint: 'Only people you add.' },
+  { value: 'unlisted', label: 'Anyone with the link', hint: 'Not listed or searchable.' },
+  { value: 'public', label: 'Public', hint: 'Listed on the web and searchable by search engines.' },
+];
+
+function GeneralAccessChoice({ value, onChange }) {
+  return (
+    <div className="tdoc-access-options" role="radiogroup" aria-label="Who has access">
+      {GENERAL_ACCESS_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          className={`tdoc-access-option${value === option.value ? ' active' : ''}`}
+          data-access={option.value}
+          onClick={() => { if (value !== option.value) onChange(option.value); }}
+        >
+          <span className="tdoc-access-dot" aria-hidden="true" />
+          <span className="tdoc-access-text">
+            <span className="tdoc-access-label">{option.label}</span>
+            <span className="tdoc-access-hint">{option.hint}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const HISTORY_OPTIONS = [
   { value: 'owner', label: 'Owner only' },
@@ -98,10 +134,15 @@ export function InviteField({ users, onChange }) {
   );
 }
 
-export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied }) {
-  const manage = config.ownerManage;
+export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOpenChange, onCopied }) {
+  const manage = config.ownerManage || (config.teamManage?.canManage ? config.teamManage : null);
+  const team = config.teamManage?.team || null;
   const [access, setAccess] = useState(manage?.access || {});
   const [status, setStatus] = useState('');
+  const [teamGuestsEnabled] = useState(() => isFeatureOn('teamGuests'));
+  const [fullTeam, setFullTeam] = useState(null);
+  const [guestLimit, setGuestLimit] = useState(null);
+  const [pendingInvite, setPendingInvite] = useState(null);
   // The boot config never learns about saves, so resetting from it on reopen
   // silently reverted every change the server had already accepted — add an
   // invitee, close, reopen, and the list looked like the invite never
@@ -111,6 +152,11 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
   useEffect(() => {
     if (open) setAccess(savedRef.current);
   }, [open]);
+  useEffect(() => {
+    if (!open || !team || !teamGuestsEnabled) return;
+    getTeam(team.id).then((res) => setFullTeam(res.team)).catch(() => {});
+    getTeamGuests(team.id).then((res) => setGuestLimit(res.limit)).catch(() => {});
+  }, [open, team?.id, teamGuestsEnabled]);
 
   const normalized = useMemo(() => ({
     visibility: 'unlisted',
@@ -136,19 +182,51 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
       setStatus(emailed.length ? `Saved. Invitation emailed to ${emailed.join(', ')}.` : 'Saved.');
     } catch (error) {
       setAccess(previous);
-      setStatus(`Failed: ${error.message}`);
+      setStatus(error?.body?.error === 'team_guest_limit'
+        ? `Guest limit reached (${error.body.limit}). Upgrade the team or invite someone as a member.`
+        : `Failed: ${error.message}`);
     }
+  };
+
+  const inviteUsers = (allowedUsers) => {
+    const added = allowedUsers.find((user) => !normalized.allowed_users.includes(user));
+    const domain = added?.includes('@') ? added.split('@')[1] : '';
+    const memberDomains = new Set((fullTeam?.members || []).map((member) => String(member.email || member.key || '').split('@')[1]).filter(Boolean));
+    if (teamGuestsEnabled && fullTeam?.role === 'admin' && domain && memberDomains.has(domain)) {
+      setPendingInvite({ invitee: added, allowedUsers });
+    } else {
+      save({ allowed_users: allowedUsers });
+    }
+  };
+  const inviteToTeam = async () => {
+    if (!pendingInvite || !fullTeam) return;
+    const invitee = pendingInvite.invitee;
+    setPendingInvite(null);
+    setStatus('Inviting to team…');
+    try {
+      const res = await updateTeam(fullTeam.id, { invites: [...new Set([...(fullTeam.invites || []), invitee])] });
+      setFullTeam(res.team);
+      setStatus(`${res.emailed?.length ? 'Team invitation emailed' : 'Team invitation saved'}. A seat is used after they join.`);
+    } catch (error) { setStatus(`Failed: ${error.message}`); }
   };
 
   const inviteRelevant = normalized.visibility === 'private'
     || normalized.commenting === 'invited'
     || normalized.history_visibility === 'invited';
   const invitedCount = normalized.allowed_users.length;
-  const accessDescription = normalized.visibility !== 'private'
-    ? 'Anyone with the link can read it.'
-    : invitedCount
-      ? `Only you and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open it.`
-      : 'Only you can open it. Add people below to invite them.';
+  const general = ['private', 'unlisted', 'public'].includes(normalized.visibility) ? normalized.visibility : 'unlisted';
+  const teamWide = general === 'private' && !!team && !!normalized.team;
+  const accessDescription = general === 'public'
+    ? 'Anyone can find and read it, including search engines.'
+    : general === 'unlisted'
+      ? (normalized.signin_required
+        ? 'Anyone signed in to tdoc who has the link can read it. It is not listed anywhere.'
+        : 'Anyone with the link can read it. It is not listed anywhere or shown to search engines.')
+      : teamWide
+        ? `Everyone in ${team.name} can open and comment${invitedCount ? `, plus ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'}` : ''}.`
+        : invitedCount
+          ? `Only you and ${invitedCount} invited ${invitedCount === 1 ? 'person' : 'people'} can open it.`
+          : 'Only you can open it. Add people below to invite them.';
 
   return (
     <AppDialog
@@ -169,30 +247,56 @@ export function OwnerAccessDialog({ open, config, url, onOpenChange, onCopied })
           Copy link
         </button>
       </div>
-      <p className="muted" style={{ margin: '8px 0 0' }}>
-        {config.slug} · {manage.versionCount} versions · {manage.commentCount} comments
-      </p>
+      <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
+      {manage.versionCount != null ? (
+        <p className="muted" style={{ margin: '8px 0 0' }}>
+          {config.slug} · {manage.versionCount} versions · {manage.commentCount} comments
+        </p>
+      ) : null}
 
       <section className="manage-section">
-        <label className="field" htmlFor="tdoc-access-select">Who has access</label>
-        <select
-          id="tdoc-access-select"
-          className="tdoc-select"
-          value={normalized.visibility === 'private' ? 'private' : 'unlisted'}
-          onChange={(event) => save({ visibility: event.target.value })}
-        >
-          <option value="private">Only people I invite</option>
-          <option value="unlisted">Anyone with the link</option>
-        </select>
+        <label className="field" id="tdoc-access-label">Who has access</label>
+        <GeneralAccessChoice
+          value={general}
+          onChange={(value) => save({ visibility: value })}
+        />
+        {general === 'unlisted' ? (
+          <div className="tdoc-access-sub">
+            <AppSwitch
+              id="tdoc-access-signin"
+              checked={!!normalized.signin_required}
+              onCheckedChange={(checked) => save({ signin_required: !!checked })}
+              label="Require sign-in to view"
+            />
+          </div>
+        ) : null}
+        {general === 'private' && team ? (
+          <div className="tdoc-access-sub">
+            <AppSwitch
+              id="tdoc-access-team"
+              checked={!!normalized.team}
+              onCheckedChange={(checked) => save({ team: !!checked })}
+              label={`Everyone in ${team.name}`}
+            />
+          </div>
+        ) : null}
         <p className="manage-hint">{accessDescription}</p>
 
         {inviteRelevant ? (
           <>
-            <label className="field">Invite by GitHub username</label>
+            <label className="field">Invite people</label>
             <InviteField
               users={normalized.allowed_users}
-              onChange={(allowedUsers) => save({ allowed_users: allowedUsers })}
+              onChange={inviteUsers}
             />
+            {teamGuestsEnabled && team && guestLimit != null ? <p className="manage-hint">Guests use no seats · team limit {guestLimit}</p> : null}
+            {pendingInvite ? <div className="manage-section" role="group" aria-label="Invitation choice">
+              <p>{pendingInvite.invitee} shares a team email domain. How should they join?</p>
+              <div className="actions">
+                <button type="button" className="primary" onClick={inviteToTeam}>Invite to team (uses a seat)</button>
+                <button type="button" onClick={() => { const users = pendingInvite.allowedUsers; setPendingInvite(null); save({ allowed_users: users }); }}>Only this document (guest)</button>
+              </div>
+            </div> : null}
           </>
         ) : null}
       </section>
@@ -227,12 +331,20 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
   const [status, setStatus] = useState('');
   const manage = config.ownerManage;
   if (!manage) return null;
+  const team = config.teamManage?.team || null;
+  const where = team ? `${team.name}’s Trash` : 'Trash';
+  const versions = `${manage.versionCount} ${manage.versionCount === 1 ? 'version' : 'versions'}`;
+  const comments = `${manage.commentCount} ${manage.commentCount === 1 ? 'comment' : 'comments'}`;
 
+  // Delete moves the doc to Trash. My docs then says so, with an Undo that
+  // brings the reader straight back here.
   const remove = async () => {
-    setStatus('Deleting…');
+    setStatus('Moving to Trash…');
     try {
       await deleteDocument(config.slug);
-      location.href = '/me';
+      rememberTrashed({ slug: config.slug });
+      const query = new URLSearchParams({ ...(team ? { team: team.id } : {}), trashed: config.slug });
+      location.href = `/me?${query}`;
     } catch (error) {
       setStatus(`Failed: ${error.message}`);
     }
@@ -243,7 +355,7 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
       open={open}
       onOpenChange={onOpenChange}
       title="Delete this doc?"
-      description={`This permanently removes ${config.slug}, all ${manage.versionCount} versions, and all ${manage.commentCount} comments.`}
+      description={`${config.slug}, its ${versions} and ${comments} move to ${where} for 30 days, then they are deleted for good.`}
       actions={(
         <>
           <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
@@ -253,7 +365,7 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
         </>
       )}
     >
-      <p>This cannot be undone.</p>
+      <p>Until then nobody can open it, agents included{team ? ', and a team admin can restore it from Trash' : ', and you can restore it from Trash in My docs'}.</p>
       {status ? <p role="status">{status}</p> : null}
     </AppDialog>
   );

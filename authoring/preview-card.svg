@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f3f8f4"/>
+  <rect x="42" y="42" width="1116" height="546" rx="34" fill="#ffffff"/>
+  <rect x="42" y="42" width="12" height="546" rx="6" fill="#198052"/>
+  <circle cx="1080" cy="132" r="92" fill="#e1f4e8"/>
+  <circle cx="1080" cy="132" r="49" fill="#bce4ca"/>
+  <text x="92" y="129" font-size="26" font-weight="700" fill="#198052">tdoc</text>
+  <text x="92" y="251" font-size="60" font-weight="700" fill="#132b28">Your report title</text>
+  <text x="94" y="422" font-size="28" fill="#42635b">One clear conclusion from the report.</text>
+  <rect x="894" y="312" width="214" height="143" rx="24" fill="#e1f4e8"/>
+  <text x="920" y="390" font-size="58" font-weight="700" fill="#198052">42%</text>
+  <text x="920" y="427" font-size="20" fill="#42635b">Key result</text>
+  <line x1="92" y1="532" x2="1108" y2="532" stroke="#dce9df" stroke-width="2"/>
+  <text x="94" y="569" font-size="20" fill="#729385">tdoc.dev</text>
+</svg>

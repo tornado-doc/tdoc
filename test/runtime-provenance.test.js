@@ -75,6 +75,8 @@ t('publish redeploys by stored content hash, not mtimes', () => {
   assert(publish.includes('vercel_bundle_sha256'), 'vercel publish must persist vercel_bundle_sha256');
   assert(publish.includes('worker_bundle_sha()'), 'cloudflare publish must compute desired content hash');
   assert(publish.includes('vercel_bundle_sha()'), 'vercel publish must compute desired content hash');
+  assert(publish.includes('bundle_worker >/dev/null') && publish.includes('bundle_worker "$VERCEL_APP_DIR" >/dev/null'),
+    'redeploy hashes must cover the actual Cloudflare and Vercel bundles');
   assert(publish.includes('DESIRED_BUNDLE_SHA') && publish.includes('DEPLOYED_BUNDLE_SHA'),
     'publish must compare desired hash to deployed hash');
   assert(!publish.includes('server/overlay.js" -nt "$BUNDLED"'),

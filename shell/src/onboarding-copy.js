@@ -6,6 +6,11 @@
 // in a dialog to get a string.
 
 export const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
+// The one line a newcomer pastes, and the same line on /start and /setup.
+// FIRST-DOC.md installs tdoc (via ONBOARDING.md), signs this machine in before
+// it reads anything (its Step 1b), then makes the first doc -- so one paste
+// does all three. Two different lines on two pages read as two jobs.
+export const FIRST_DOC_LINE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
 // The line for somebody who already has tdoc installed: FIRST-DOC.md would
 // only build the same portrait again. A sentence rather than a slash command,
 // because it is pasted into a conversation with an agent and the skill fires

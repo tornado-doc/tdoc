@@ -170,6 +170,24 @@ standing at the top of every document as a header band.
 **Note** — an aside that qualifies rather than warns. One rule, no fill, no
 icon: `<p class="note">`.
 
+**Slide** — one page of a deck. A doc that has them gets the reader's
+Present control; nothing else changes about how it reads or takes comments.
+
+```html
+<section class="slide" data-tdoc-slide data-tdoc-artifact="Slide 3: the loop">
+  <h2>…</h2> …
+</section>
+```
+
+```css
+.slide { container-type:inline-size; aspect-ratio:16/9; overflow:hidden; }
+.slide h2 { font-size:max(3.6cqw,24px); } .slide p { font-size:max(1.75cqw,15px); }
+```
+
+Keep every slide's content inside its 16:9 box: the presenter scales the box
+to the screen, so anything that spills is cut off. One idea per slide. Design,
+layouts and phone reflow: `$SKILL_DIR/authoring/structure/slides.md`.
+
 ## Figure parts
 
 These are the atoms of a drawn figure. Each style says what they look like.

@@ -16,8 +16,11 @@ const src = [
 
 console.log('React dark mode');
 
-t('TopBar owns a stable theme button and persists the explicit choice', () => {
-  assert(src.includes('id="tdoc-theme-btn"'), 'theme button missing');
+t('TopBar keeps light/dark in the account menu (⋯ when signed out) and persists the explicit choice', () => {
+  // A row, not a bar button: the standalone moon was one button too many.
+  assert(!src.includes('id="tdoc-theme-btn"'), 'the standalone theme button is back');
+  assert((src.match(/data-action="theme"/g) || []).length === 2, 'theme row missing from the account menu or ⋯');
+  assert(src.includes("const themeInMore = supportsTheme && !identity;"), 'signed out, the theme row must be in ⋯ at every width');
   // Through the guarded helper, not raw. A raw read throws -- it does not
   // return null -- in a browser that refuses storage, and this one runs inside
   // a `useState` initialiser, so it throws during the first render and the

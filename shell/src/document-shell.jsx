@@ -1,16 +1,26 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { deliveryErrorText, resendResultText } from './document/notify-handoff.jsx';
 import { TopBar } from './top-bar.jsx';
-import { AppSwitch } from './ui/switch.jsx';
+import { SegmentedControl } from './ui/segmented-control.jsx';
 import {
   duplicateDocument,
   getAgentStatus,
   getOnboarding,
+  listTeams,
+  moveDocsToTeam,
   postOnboardingEvent,
   renameDocument,
+  resendNotifyHandoff,
+  getAskAllowance,
+  handOff,
+  publishAsk,
   setDocumentStar,
+  acceptTeamInvite,
+  requestTeamJoin,
 } from './document/api.js';
 import { CommentComposer } from './document/comment-composer.jsx';
 import {
+  CommentListControls,
   DesktopCommentLayer,
   MobileCommentDrawer,
 } from './document/comment-layer.jsx';
@@ -23,14 +33,16 @@ import {
 } from './document/document-dialogs.jsx';
 import {
   DocumentBreadcrumbs,
+  DocumentEdited,
   DocumentOverflowActions,
   DocumentPrimaryAction,
   DocumentSendAgentAction,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
-  DocumentModeControl,
   EditorToolbar,
+
+  DocumentModeControl,
   LinkDialog,
   SaveConflictDialog,
   SaveNoticeDialog,
@@ -41,8 +53,9 @@ import {
   DeleteDocumentDialog,
   OwnerAccessDialog,
 } from './document/owner-access-dialog.jsx';
-import { copyText, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
+import { copyText, isDocumentComment, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
 import { readStored } from './safe-storage.js';
+import { isFeatureOn } from './feature-flags.js';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
 import { useFrameBridge } from './hooks/use-frame-bridge.js';
@@ -52,9 +65,16 @@ import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
-import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
-import { HandoffBanner } from './document/handoff-banner.jsx';
-import { DebugBar } from './debug-bar.jsx';
+import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
+import { AgentMentionContext } from './document/mention-field.jsx';
+import { HandoffDetailsPanel } from './document/handoff-details.jsx';
+import { AskAiPanel } from './document/ask-ai-panel.jsx';
+import { useCommentArea } from './document/comment-area.js';
+import { VersionDiffView } from './document/version-diff.jsx';
+import { MoveToTeamDialog } from './docs-hub/teams.jsx';
+import { useMyAgent } from './document/my-agent.js';
+import { TDOC_AI, composerAgents, withoutAskTags } from './document/ai-answerer.js';
 
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
@@ -109,10 +129,19 @@ function OldVersionNotice({ value }) {
   return (
     <div className="tdoc-oldver-slot">
       <div className="tdoc-oldver-strip tdoc-oldver-visible">
-        <span>
-          You're viewing v{value.current} - the latest is{' '}
-          <a href={value.latestUrl}>v{value.latest}</a>
-        </span>
+        {value.fresh ? (
+          // Published while this page was open: say so, and let the reader
+          // move when they are ready instead of reloading under them.
+          <span role="status">
+            v{value.latest} was just published.{' '}
+            <a href={value.latestUrl}>Open v{value.latest}</a>
+          </span>
+        ) : (
+          <span>
+            You're viewing v{value.current} - the latest is{' '}
+            <a href={value.latestUrl}>v{value.latest}</a>
+          </span>
+        )}
       </div>
     </div>
   );
@@ -127,6 +156,9 @@ const RESOLVED_KEY = 'tdoc-show-resolved';
 // server — the agent pulling the comments, then publishing — so the card can
 // say "your agent is reading this" because it is, not because a timer ran.
 const HANDOFF_POLL_MS = 3000;
+// Live sync while a doc is open (see the effect in DocumentShell).
+const LIVE_SYNC_MIN_MS = (typeof window !== "undefined" && window.__TDOC_LIVE_SYNC_MS) || 20000;
+const LIVE_SYNC_MAX_MS = 60000;
 // Whether the block is open. The onboarding doc opens it; anywhere else the
 // reader's last choice holds.
 const HANDOFF_OPEN_KEY = 'tdoc-handoff-open';
@@ -145,12 +177,28 @@ const exitLine = (answered, version) => (
 );
 
 export function DocumentShell({ boot, config }) {
+  const [comparing, setComparing] = useState(() => new URLSearchParams(location.search).get('compare') === '1');
+  const changeComparison = (next) => {
+    if (next === comparing) return;
+    const url = new URL(location.href);
+    if (next) url.searchParams.set('compare', '1'); else url.searchParams.delete('compare');
+    history.pushState(null, '', url);
+    setComparing(next);
+  };
+  useEffect(() => {
+    const restore = () => setComparing(new URLSearchParams(location.search).get('compare') === '1');
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
   const narrow = useNarrowViewport();
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
   const editorRef = useRef(null);
   const diagramApplyRef = useRef(null);
   const [diagram, setDiagram] = useState(null);
+  const [visualOpen, setVisualOpen] = useState(false);
+  // Slides presenting: full screen like a visual, but commenting stays on.
+  const [presenting, setPresenting] = useState(false);
   const [composer, setComposer] = useState(null);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
@@ -160,16 +208,45 @@ export function DocumentShell({ boot, config }) {
   // The bar's copy of the name, so a rename shows immediately instead of
   // waiting for a reload. The boot config stays the source it starts from.
   const [title, setTitle] = useState(config.title || '');
-  const [dialog, setDialog] = useState(null);
+  // ?share=1 arrives with Share open (a feedback space's Share button links
+  // here); read once and taken off the URL.
+  const [dialog, setDialog] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('share') !== '1' || config.isLanding) return null;
+    params.delete('share');
+    const rest = params.toString();
+    try { history.replaceState(null, '', location.pathname + (rest ? `?${rest}` : '') + location.hash); } catch {}
+    return { type: 'share' };
+  });
+  const [moveState, setMoveState] = useState({ teams: [], loading: false, error: '', busy: false });
   // Connected-App notify panel (doc-level send). Separate from onboarding
   // copy-paste handoff below.
   const [notifyOpen, setNotifyOpen] = useState(false);
+  // What is left of this account's free tdoc AI answers, once known: the
+  // muted line under a tdoc AI reply says it to the person who asked.
+  const [aiRemaining, setAiRemaining] = useState(null);
+  // The comment tdoc AI is answering right now, for "answering…" in its card.
+  const [aiThinking, setAiThinking] = useState(null);
+  // An "Only me" question from the composer: { kind, askId, question,
+  // selection, answer, error, publishing }. Nothing is posted until Make public.
+  const [privateAsk, setPrivateAsk] = useState(null);
+  const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
+  const [agentActivityOpen, setAgentActivityOpen] = useState(false);
+  const [askAiDraft, setAskAiDraft] = useState('');
+  const [askAiTargetKey, setAskAiTargetKey] = useState('');
+  const [askAiTurns, setAskAiTurns] = useState([]);
+  const [askAiBusy, setAskAiBusy] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
+  // "Send to another agent" from a card: the agent it is stuck on, so the
+  // picker opens on someone else.
+  const [notifyAvoid, setNotifyAvoid] = useState(null);
+  const [hoveredAnchorId, setHoveredAnchorId] = useState(null);
   const [sendToAgentBusy, setSendToAgentBusy] = useState(false);
   const [toast, setToast] = useState(null);
   // setToast('done') for confirmations; setToast('...', true) for failures,
   // which are painted in the danger tone and stay long enough to read.
   const showToast = useCallback((text, error = false) => setToast({ text, error }), []);
+  const [supportsTheme, setSupportsTheme] = useState(false);
   const [theme, setTheme] = useState(() => (
     readStored('tdoc-theme') === 'dark' ? 'dark' : 'light'
   ));
@@ -199,13 +276,19 @@ export function DocumentShell({ boot, config }) {
     }
     return kind;
   });
-  // Resolved threads leave the margin. The choice is the reader's and is
-  // remembered per browser; storage that throws (private mode) simply means
-  // the margin starts quiet again next visit.
-  const [showResolved, setShowResolved] = useState(() => {
-    if (new URLSearchParams(location.search).get('revised')) return true;
-    try { return localStorage.getItem(RESOLVED_KEY) === '1'; } catch { return false; }
+  // Show all comments on first open, including resolved threads. Remember an
+  // explicit choice per browser; unavailable storage keeps the default ON.
+  // The comments filter: All (the default), Open, or Resolved. It lives in
+  // the comments area now, not the bar. Stored per browser; the old
+  // '0' (resolved hidden) reads as Open.
+  const [commentFilter, setCommentFilterState] = useState(() => {
+    if (new URLSearchParams(location.search).get('revised')) return 'all';
+    try {
+      const v = localStorage.getItem(RESOLVED_KEY);
+      return v === '0' ? 'open' : v === 'resolved' ? 'resolved' : 'all';
+    } catch { return 'all'; }
   });
+
 
   // `returnTo` lets a caller land the person somewhere specific after the
   // sign-in — the onboarding door they chose — instead of back where they were.
@@ -239,8 +322,18 @@ export function DocumentShell({ boot, config }) {
     demo: !!config.demoComments,
     identity: config.identity,
   });
+  const handoffViewer = useMemo(() => [config.identity?.login, ...(config.identity?.linked_actor_keys || [])], [config.identity]);
+  const [autoReadEnabled] = useState(() => isFeatureOn('autoReadComments'));
+  const commentArea = useCommentArea({
+    comments: comments.comments, slug: config.slug, selectedId: openCommentId,
+    filter: commentFilter, filterMode: 'resolution', handoffViewer,
+    isOwner: Boolean(config.isOwner),
+    autoMarkSelected: !autoReadEnabled,
+  });
 
   const [invited, setInvited] = useState(null);
+  const [teamGuestsEnabled] = useState(() => isFeatureOn('teamGuests'));
+  const [guestInviteStatus, setGuestInviteStatus] = useState('');
 
   // The journey record, for a signed-in reader on a doc of their own: it says
   // whether the exit line is still owed. Nothing is read for a visitor.
@@ -353,10 +446,17 @@ export function DocumentShell({ boot, config }) {
         .finally(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }));
       return;
     }
+    if (!config.canComment) {
+      bridgeRef.current?.({ type: 'tdoc:clearPending' });
+      if (config.signInToComment) signIn();
+      return;
+    }
     setComposer(selection);
-  }, [comments.moveAnchor]);
+  }, [comments.moveAnchor, config.canComment, config.signInToComment, signIn]);
 
   const bridge = useFrameBridge({
+    'tdoc:visualState': (message) => setVisualOpen(message.open === true),
+    'tdoc:presentState': (message) => setPresenting(message.open === true),
     'tdoc:selection': selectFromFrame,
     'tdoc:diagramApplied': (message) => {
       const pending = diagramApplyRef.current;
@@ -379,10 +479,12 @@ export function DocumentShell({ boot, config }) {
       setOpenClusterKey(null);
     },
     'tdoc:ready': (message) => {
+      setVisualOpen(false);
+      setSupportsTheme(message.supportsTheme === true);
       const storedTheme = readStored('tdoc-theme');
       const nextTheme = storedTheme || (message.defaultTheme === 'dark' ? 'dark' : 'light');
       setTheme(nextTheme);
-      bridge.send({ type: 'tdoc:theme', theme: nextTheme });
+      if (message.supportsTheme === true) bridge.send({ type: 'tdoc:theme', theme: nextTheme });
       bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding });
       comments.refresh();
     },
@@ -403,15 +505,22 @@ export function DocumentShell({ boot, config }) {
       setOpenClusterKey(null);
       if (narrow) setDrawerOpen(true);
     },
+    'tdoc:anchorHover': (message) => {
+      setHoveredAnchorId(message.id && visibleCommentsById.has(message.id) ? message.id : null);
+    },
     'tdoc:navigate': (message) => {
       const href = String(message.href || '');
       if (!/^https?:\/\//i.test(href) && !/^\/(?!\/)/.test(href)) return;
-      if (config.onboarding && href === '/start' && !message.blank) {
+      if (config.onboarding && href === '/start' && !message.blank && config.identity) {
         // Connected already — an agent on this account has a token — means the
-        // gate has nothing to ask, so it is not shown. Everyone else starts
-        // there, signed in or not; /setup handles the sign-in itself.
+        // gate has nothing to ask, so it is not shown. Signed in and not yet
+        // connected starts at the gate. Signed out falls through to /start
+        // itself: sending a first-time visitor to /setup put a sign-in wall
+        // ("Welcome back!") in front of somebody who had not yet seen what to
+        // paste, or where. /start shows the line first; the account is asked
+        // for only when the agent's sign-in link is opened.
         const done = Boolean(onboardingRecord?.agent_connected || onboardingRecord?.published_first);
-        location.href = config.identity && done ? '/me' : '/setup';
+        location.href = done ? '/me' : '/setup';
         return;
       }
       if (message.blank) window.open(href, '_blank', 'noopener');
@@ -421,6 +530,9 @@ export function DocumentShell({ boot, config }) {
 
   const disableCommentSelection = useCallback(() => {
     setComposer(null);
+    setOpenCommentId(null);
+    setOpenClusterKey(null);
+    setDrawerOpen(false);
     bridge.send({ type: 'tdoc:clearPending' });
   }, [bridge.send]);
 
@@ -440,9 +552,15 @@ export function DocumentShell({ boot, config }) {
   useEffect(() => {
     // Re-anchoring is the exception: the card stays open precisely so the author
     // can click the new spot, and treating that click as a dismissal ate it.
-    const open = Boolean((openCommentId || openClusterKey || composer) && !reanchorId);
+    //
+    // On a phone the open card lives in the drawer: once the drawer is shut,
+    // nothing is open on screen, so the next tap on a highlight must open its
+    // comment rather than be spent "closing" a card nobody can see. That was
+    // every other tap failing (Julie, 2026-10-13).
+    const cardOpen = narrow ? (drawerOpen && openCommentId) : (openCommentId || openClusterKey);
+    const open = Boolean((cardOpen || composer) && !reanchorId);
     bridge.send({ type: 'tdoc:uiOpen', open });
-  }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId]);
+  }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId, narrow, drawerOpen]);
 
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
@@ -453,25 +571,17 @@ export function DocumentShell({ boot, config }) {
 
   // Everything, always: an id has to resolve to its comment even when that
   // comment is hidden, or a deep link would open nothing.
-  const commentsById = useMemo(
-    () => new Map(comments.comments.map((comment) => [comment.id, comment])),
-    [comments.comments],
-  );
-  const resolvedCount = useMemo(
-    () => comments.comments.filter((comment) => comment.status === 'applied').length,
-    [comments.comments],
-  );
+  const commentsById = commentArea.byId;
+  const resolvedCount = commentArea.resolvedCount;
   // One visible set drives the margin and the frame. Selection must never
   // override the filter; explicit links enable it before opening a thread.
-  const shownComments = useMemo(() => (
-    showResolved
-      ? comments.comments
-      : comments.comments.filter((comment) => comment.status !== 'applied')
-  ), [comments.comments, showResolved]);
-  const visibleCommentsById = useMemo(
-    () => new Map(shownComments.map((comment) => [comment.id, comment])),
-    [shownComments],
-  );
+  const shownComments = commentArea.shown;
+  const drawerComments = useMemo(() => [
+    ...shownComments.filter(isDocumentComment),
+    ...shownComments.filter((comment) => !isDocumentComment(comment)),
+  ], [shownComments]);
+  const visibleCommentsById = commentArea.shownById;
+  const seenMap = commentArea.seenMap;
   // Lost pins are seats, not anchors: they give the card somewhere to be drawn
   // while it still reads — and styles — as unanchored, with the way back.
   const pinIds = useMemo(
@@ -483,24 +593,25 @@ export function DocumentShell({ boot, config }) {
     [bridge.layout.docHeight, bridge.layout.pins],
   );
 
-  const toggleResolved = useCallback(() => {
-    const next = !showResolved;
-    setShowResolved(next);
-    try { localStorage.setItem(RESOLVED_KEY, next ? '1' : '0'); } catch {}
-    if (!next) {
-      // Cancel any pending reveal as well as an already-open resolved card.
-      setDeepTarget(null);
-      if (commentsById.get(openCommentId)?.status === 'applied') {
-        setOpenCommentId(null);
-        bridge.send({ type: 'tdoc:focusAnchor', id: null });
-      }
-      const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
-      if (openCluster?.items.some(({ comment }) => commentsById.get(comment.id)?.status === 'applied')) {
-        setOpenClusterKey(null);
-      }
-      if (commentsById.get(reanchorId)?.status === 'applied') setReanchorId(null);
+  const setCommentFilter = useCallback((next) => {
+    setCommentFilterState(next);
+    try { localStorage.setItem(RESOLVED_KEY, next === 'open' ? '0' : next === 'resolved' ? 'resolved' : '1'); } catch {}
+    if (next === 'all') return;
+    // Whatever the filter now hides: cancel a pending reveal, and close the
+    // card, cluster or re-anchor that showed it.
+    const hidden = (id) => {
+      const c = commentsById.get(id);
+      return Boolean(c) && (next === 'open' ? c.status === 'applied' : c.status !== 'applied');
+    };
+    setDeepTarget(null);
+    if (hidden(openCommentId)) {
+      setOpenCommentId(null);
+      bridge.send({ type: 'tdoc:focusAnchor', id: null });
     }
-  }, [bridge.send, clusters, commentsById, openClusterKey, openCommentId, reanchorId, showResolved]);
+    const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
+    if (openCluster?.items.some(({ comment }) => hidden(comment.id))) setOpenClusterKey(null);
+    if (hidden(reanchorId)) setReanchorId(null);
+  }, [bridge.send, clusters, commentsById, openClusterKey, openCommentId, reanchorId]);
 
   useEffect(() => {
     bridge.send({ type: 'tdoc:anchors', comments: shownComments });
@@ -514,7 +625,8 @@ export function DocumentShell({ boot, config }) {
   useEffect(() => {
     reanchorRef.current = reanchorId;
     document.body.classList.toggle('tdoc-reanchoring', Boolean(reanchorId));
-  }, [reanchorId]);
+    if (!reanchorId) bridge.send({ type: 'tdoc:reanchorMode', active: false });
+  }, [reanchorId, bridge.send]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -532,10 +644,10 @@ export function DocumentShell({ boot, config }) {
       setDeepTarget(null);
       return;
     }
-    if (root.status === 'applied' && !showResolved) {
+    if ((root.status === 'applied' && commentFilter === 'open') || (root.status !== 'applied' && commentFilter === 'resolved')) {
       // A direct link is an explicit request to reveal this thread. Reflect
-      // that in the switch instead of bypassing its visibility contract.
-      setShowResolved(true);
+      // that in the filter instead of bypassing its visibility contract.
+      setCommentFilterState('all');
       return;
     }
     if (narrow) {
@@ -569,7 +681,7 @@ export function DocumentShell({ boot, config }) {
     }
     setOpenCommentId(root.id);
     setDeepTarget(null);
-  }, [bridge.layout.scrollY, bridge.send, clusters, comments.comments, deepTarget, narrow, showResolved]);
+  }, [bridge.layout.scrollY, bridge.layout.documentComments, bridge.send, clusters, comments.comments, deepTarget, narrow, commentFilter]);
 
   // Save explains itself the first time, then gets out of the way for good if
   // the author asked it to.
@@ -583,6 +695,7 @@ export function DocumentShell({ boot, config }) {
 
   const closeComposer = () => {
     setComposer(null);
+    setPrivateAsk(null);
     bridge.send({ type: 'tdoc:clearPending' });
   };
 
@@ -633,6 +746,10 @@ export function DocumentShell({ boot, config }) {
   };
 
   const postComment = async (text, opts = {}) => {
+    const selection = composer;
+    const target = opts.target || null;
+    // Ask only + Only me: nothing is posted; the answer is the asker's alone.
+    if (target && opts.askOnly && opts.onlyMe) { await askPrivately(text, selection, target); return; }
     const { ok, value } = await attempt(() => comments.addComment(composer, text));
     if (!ok) return;
     markCommented();
@@ -640,27 +757,155 @@ export function DocumentShell({ boot, config }) {
     reportMentions(value);
     // The new card opens: it is where the next instruction lives.
     if (value?.id) setOpenCommentId(value.id);
-    if (opts.sendToAgent && value?.id && canSendToAgent) {
-      setSendToAgentBusy(true);
-      try {
-        const body = await sendOneCommentToAgent(config.slug, value.id);
-        const failed = body?.delivery?.status === 'failed';
-        showToast(failed
-          ? `Sent — not delivered${body.delivery?.error ? `: ${body.delivery.error}` : ''}`
-          : 'Sent to agent');
+    if (value?.id && selection?.kind === 'document') {
+      setCommentFilterState('open');
+      setDrawerOpen(true);
+      bridge.send({ type: 'tdoc:scrollTo', docY: Math.max(0, (bridge.layout.documentComments?.docY || 0) - 60) });
+    }
+    if (!value?.id) return;
+    if (target && opts.askOnly) { await askOn(value.id, text, selection, target); return; }
+    // To edit: the agent named after @, or (⌘⇧Enter) the default one.
+    const editor = target || (opts.sendToAgent && canSendToAgent ? opts.recipient || notifyTargets.default : null);
+    if (editor && canSendToAgent) await editOn(value.id, editor);
+  };
+
+  // tdoc AI: the server's free answers, where it has a model, on a
+  // published doc, for a signed-in person.
+  const askEnabled = Boolean(config.ask?.available) && config.mode === 'published' && !config.isLanding && Boolean(config.identity);
+  // Signed-out readers still see Ask AI; sending asks them to sign in, which
+  // is the point: a question is the reason to make an account.
+  const signedOutAsk = Boolean(config.ask?.available) && config.mode === 'published' && !config.isLanding && !config.identity && !config.demoComments;
+  const recipientFor = (target) => (target.tdoc_ai ? { tdoc_ai: true } : target);
+  // Hand a posted comment to an agent to EDIT the doc (Ask only off). The
+  // server decides whether this agent may (agentEditPolicy).
+  const editOn = async (commentId, target) => {
+    setSendToAgentBusy(true);
+    try {
+      const body = await handOff(config.slug, { ask_only: false, comment_id: commentId, recipient: target });
+      const failed = body?.delivery?.status === 'failed';
+      showToast(failed
+        ? `Sent — not delivered${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}`
+        : `Sent to ${agentDisplayName(target) || readableHandle(target) || 'agent'}`, failed);
+      await comments.refresh();
+    } catch (err) {
+      showToast(err.body?.message || err.message || 'Comment posted — could not send to agent', true);
+    } finally {
+      setSendToAgentBusy(false);
+    }
+  };
+  // The agent's tag as the text holds it (a draft may hold an older, longer
+  // form), else as the picker would put it in.
+  const askTagIn = (text, target) => {
+    const span = taggedAgentSpan(text, agentChoices);
+    return span && sameTarget(span.target, target) ? String(text).slice(span.start, span.end)
+      : `@${AGENT_TAG_JOINER}${agentMentionName(target, agentChoices)}`;
+  };
+  // Ask only, in the thread: the answer is the reply under this comment.
+  const askOn = async (commentId, text, selection, target) => {
+    const question = withoutAskTags(text, askTagIn(text, target));
+    const passage = selection && selection.text ? selection : null;
+    const label = agentDisplayName(target);
+    setAiThinking({ id: commentId, label, agent: !target.tdoc_ai });
+    try {
+      const body = await handOff(config.slug, { ask_only: true, comment_id: commentId, question, passage, version: config.version, recipient: recipientFor(target) });
+      if (target.tdoc_ai) {
+        if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
         await comments.refresh();
-      } catch (err) {
-        showToast(err.message || 'Comment posted — could not send to agent');
-      } finally {
-        setSendToAgentBusy(false);
+        setAiThinking(null);
+      } else if (body?.ask) {
+        // Its agent answers on its own time; the thread is read again then.
+        myAgent.addAsk(body.ask);
       }
+    } catch (error) {
+      setAiThinking(null);
+      if (error.status === 429 && target.tdoc_ai) setAiRemaining(0);
+      showToast(error.status === 429 && target.tdoc_ai ? 'No free tdoc AI answers left — connect your agent at tdoc.dev/start'
+        : error.status === 409 ? `${label} cannot be reached right now` : (error.message || `Could not ask ${label}`), true);
     }
   };
 
-  const replyTo = async (parentId, text) => {
+  // "Only me": the question goes to the agent and nothing is posted; the
+  // composer shows the answer to its asker alone, with Make public.
+  // From a reply box, `parentId` is the reply's parent: the answer shows in
+  // that box, and Make public posts the question as a reply there.
+  const askPrivately = async (text, selection, target, parentId = null) => {
+    const question = withoutAskTags(text, askTagIn(text, target));
+    const passage = selection && selection.text ? selection : null;
+    const kind = target.tdoc_ai ? 'tdoc-ai' : 'agent';
+    setPrivateAsk({ kind, label: agentDisplayName(target), question, selection, parentId, answer: '', error: '' });
+    try {
+      const body = await handOff(config.slug, { ask_only: true, only_me: true, question, passage, version: config.version, recipient: recipientFor(target) });
+      if (body?.ask) {
+        myAgent.addAsk(body.ask);
+        setPrivateAsk((cur) => (cur ? { ...cur, askId: body.ask.ask_id } : cur));
+        return;
+      }
+      if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
+      setPrivateAsk((cur) => (cur ? { ...cur, askId: body.ask_id, answer: body.answer } : cur));
+    } catch (error) {
+      if (error.status === 429 && target.tdoc_ai) setAiRemaining(0);
+      setPrivateAsk((cur) => (cur ? {
+        ...cur,
+        error: error.status === 429 && target.tdoc_ai ? 'No free tdoc AI answers left. Connect your agent at tdoc.dev/start for unlimited ones.'
+          : error.status === 409 ? `${cur.label} cannot be reached right now.` : 'Could not get an answer. Try again.',
+      } : cur));
+    }
+  };
+  // Make public: the question becomes the asker's comment on the passage, and
+  // the answer they were given (as the server kept it) its reply.
+  const makePublic = async () => {
+    const ask = privateAskView;
+    if (!ask?.askId || !ask.answer) return;
+    setPrivateAsk((cur) => ({ ...cur, publishing: true }));
+    const { ok, value } = await attempt(() => (ask.parentId
+      ? comments.addReply(ask.parentId, ask.question)
+      : comments.addComment(ask.selection, ask.question)));
+    if (!ok || !value?.id) { setPrivateAsk((cur) => ({ ...cur, publishing: false })); return; }
+    try {
+      await publishAsk(config.slug, ask.kind === 'tdoc-ai' ? 'ask' : 'my-agent', { askId: ask.askId, commentId: value.id });
+    } catch (error) {
+      showToast(error.message || 'Posted the question; could not post the answer', true);
+    }
+    markCommented();
+    if (ask.parentId) {
+      setPrivateAsk(null);
+      await comments.refresh();
+      return;
+    }
+    closeComposer();
+    await comments.refresh();
+    setOpenCommentId(value.id);
+    if ((!ask.selection || ask.selection.kind === 'document') && bridge.layout.documentComments) {
+      bridge.send({ type: 'tdoc:scrollTo', docY: bridge.layout.documentComments.docY });
+    }
+  };
+
+  const replyTo = async (parentId, text, opts = {}) => {
+    // Signed out, replying is the prompt to sign in (the reply box still shows).
+    if (!config.identity && config.signInToComment) { signIn(); return false; }
+    // Only me from a reply box: nothing is posted; the question goes with the
+    // passage the thread hangs on, and the answer shows in that box.
+    if (opts.target && opts.askOnly && opts.onlyMe) {
+      const root = comments.comments.find((c) => c.id === parentId || (c.replies || []).some((r) => r.id === parentId));
+      const anchorText = root?.anchor?.text || root?.anchor?.fallback?.text || '';
+      await askPrivately(text, anchorText ? { text: anchorText } : null, opts.target, parentId);
+      return false;
+    }
     const { ok, value } = await attempt(() => comments.addReply(parentId, text));
-    if (ok) { markCommented(); reportMentions(value); }
-    return ok;
+    if (!ok) return false;
+    markCommented();
+    reportMentions(value);
+    // An agent named in a reply that may only answer: under this reply.
+    if (opts.target && opts.askOnly && value?.id) {
+      await askOn(value.id, text, null, opts.target);
+      return true;
+    }
+    // @agent on a reply re-hands the thread root (or the new reply if no root).
+    if (opts.sendToAgent && canSendToAgent) {
+      const handoffId = opts.handoffCommentId || value?.id;
+      if (handoffId) await editOn(handoffId, opts.recipient || notifyTargets.default);
+    }
+    return true;
   };
 
   // An edit does not re-resolve @mentions: the notified set is stamped on the
@@ -668,13 +913,14 @@ export function DocumentShell({ boot, config }) {
   // rewrite of words they were already told about.
   const editComment = async (id, text) => (await attempt(() => comments.edit(id, text))).ok;
 
-  const reactTo = (commentId, emoji) => attempt(() => comments.react(commentId, emoji));
+  const reactTo = (commentId, emoji) => (!config.identity && config.signInToComment
+    ? signIn() : attempt(() => comments.react(commentId, emoji)));
   // Resolving takes the thread out of the margin, so the card that owns the
   // button goes with it — close it rather than leaving a card pinned to
   // nothing.
   const resolveComment = async (commentId, resolved) => {
     if (!await attempt(() => comments.setResolved(commentId, resolved))) return;
-    if (resolved && !showResolved) setOpenCommentId(null);
+    if ((resolved && commentFilter === 'open') || (!resolved && commentFilter === 'resolved')) setOpenCommentId(null);
   };
 
   // Closing the card was unconditional, which hid the two cases where there is
@@ -693,26 +939,226 @@ export function DocumentShell({ boot, config }) {
     if (!comments.latest.current.some((c) => c.id === openCommentId)) setOpenCommentId(null);
   };
 
-  const notifyEnabled = Boolean(config.isOwner && !config.isLanding && config.mode !== 'local');
-  const notifyTargets = useNotifyTargets(config.slug, notifyEnabled);
-  const canSendToAgent = Boolean(
-    notifyEnabled
-    && notifyTargets.ready
+  // Team docs: every member may send to the team's agents (and an admin to
+  // their own connections); the server lists only those. Send to agent shows
+  // on a team doc once there is someone to send to.
+  const notifyQuery = Boolean((config.isOwner || config.teamManage) && !config.isLanding && config.mode !== 'local');
+  const notifyTargets = useNotifyTargets(config.slug, notifyQuery);
+  const hasNotifyTargets = Boolean(
+    notifyTargets.ready
     && notifyTargets.available
     && notifyTargets.reason !== 'no_agent_bound'
     && (notifyTargets.default || (notifyTargets.candidates || []).length || notifyTargets.fallback),
   );
-  const openNotifyPanel = (ids) => {
+  const notifyEnabled = notifyQuery && (!config.teamManage || hasNotifyTargets);
+  const canSendToAgent = Boolean(notifyEnabled && hasNotifyTargets);
+  // The commenter's OWN agent (my-agent.js), for Ask AI / @AI where the paper
+  // plane does not reach one: anyone but the owner on their own doc, where
+  // Send to agent and @agent already hand comments to the doc's agent. A
+  // demo has no account to send from.
+  const myAgentEnabled = Boolean(config.mode === 'published' && !config.isLanding && !config.demoComments);
+  const askAiPanelEnabled = notifyEnabled || (myAgentEnabled && Boolean(config.identity));
+  // Phones get one entry: the comment button's drawer carries an Ask AI tab,
+  // and the top bar keeps only Share and ⋯ (flag: unifiedEntry).
+  const [unifiedEntryFlag] = useState(() => isFeatureOn('unifiedEntry'));
+  const unifiedEntry = narrow && (askAiPanelEnabled || signedOutAsk) && unifiedEntryFlag;
+  const [drawerTab, setDrawerTab] = useState('comments');
+  const myAgent = useMyAgent(config.slug, myAgentEnabled && Boolean(config.identity));
+  // The composer's @ list: agents that may edit this doc, then those that
+  // may only answer (own, the team's), else tdoc AI (ai-answerer.js).
+  const agentChoices = useMemo(() => (config.identity && !config.demoComments ? composerAgents({
+    canSendToAgent,
+    notifyTargets,
+    mine: myAgent.state ? { ...myAgent.state, tdoc_ai: Boolean(myAgent.state.tdoc_ai) && askEnabled } : null,
+  }) : []), [config.identity, canSendToAgent, notifyTargets.default, notifyTargets.candidates, notifyTargets.fallback, myAgent.state, askEnabled]);
+  const askAiTargets = useMemo(() => {
+    const recent = [notifyTargets.default, ...(notifyTargets.candidates || [])].find((agent) => agent?.last_writer);
+    const agents = orderedAskAiChoices([...(myAgent.state?.agents || []), ...(myAgent.state?.team_agents || [])], recent);
+    return [
+      ...agents.map((agent) => ({ key: targetKey(agent), label: agentDisplayName(agent, agents), target: agent, tdocAi: false })),
+      ...(askEnabled || signedOutAsk ? [{ key: 'tdoc-ai', label: 'tdoc AI', target: TDOC_AI, tdocAi: true }] : []),
+    ];
+  }, [askEnabled, signedOutAsk, myAgent.state?.agents, myAgent.state?.team_agents, notifyTargets.default, notifyTargets.candidates]);
+  // Relevance controls menu order, not who receives a private question by
+  // default. A team agent (or another person's agent) cannot answer privately
+  // for this viewer, even when it wrote the latest document version.
+  const defaultAskAiTargetKey = useMemo(() => {
+    const recent = [notifyTargets.default, ...(notifyTargets.candidates || [])].find((agent) => agent?.last_writer);
+    const ownRecent = recent && !recent.team_agent
+      ? (myAgent.state?.agents || []).find((agent) => agent.status !== 'stopped' && sameTarget(agent, recent))
+      : null;
+    return (ownRecent && askAiTargets.find((item) => item.key === targetKey(ownRecent))?.key)
+      || askAiTargets.find((item) => item.tdocAi)?.key
+      || askAiTargets.find((item) => !item.target.team_agent)?.key
+      || askAiTargets[0]?.key || '';
+  }, [askAiTargets, myAgent.state?.agents, notifyTargets.default, notifyTargets.candidates]);
+  const selectedAskAiTargetKey = askAiTargets.some((item) => item.key === askAiTargetKey)
+    ? askAiTargetKey : defaultAskAiTargetKey;
+  const askAiSend = async (retryText = null, retryTarget = null) => {
+    const question = String(retryText || askAiDraft).trim();
+    if (signedOutAsk) {
+      if (!question) return;
+      // Keep the question across the sign-in round trip; it opens again here.
+      try { sessionStorage.setItem(`tdoc-ask-draft:${config.slug}`, question); } catch {}
+      signIn();
+      return;
+    }
+    const choice = retryTarget
+      ? askAiTargets.find((item) => sameTarget(item.target, retryTarget))
+      : askAiTargets.find((item) => item.key === selectedAskAiTargetKey);
+    if (!question || !choice || askAiBusy) return;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setAskAiBusy(true);
+    if (!retryText) setAskAiDraft('');
+    setAskAiTurns((turns) => [...turns, { id, question, target: choice.target, label: choice.label,
+      kind: choice.tdocAi ? 'tdoc-ai' : 'agent', status: 'thinking', answer: '', askId: null }]);
+    try {
+      const body = await handOff(config.slug, { ask_only: true, only_me: true, question,
+        version: config.version, recipient: recipientFor(choice.target) });
+      if (body?.ask) myAgent.addAsk(body.ask);
+      if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
+      setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? {
+        ...turn, askId: body?.ask?.ask_id || body?.ask_id || null,
+        answer: body?.answer || body?.ask?.answer?.text || '',
+        status: body?.ask && !body.ask.answer ? 'waiting' : 'answered',
+      } : turn));
+    } catch (error) {
+      if (error.status === 429 && choice.tdocAi) setAiRemaining(0);
+      setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? {
+        ...turn, status: 'failed', error: error.status === 429 ? 'No free tdoc AI answers left.'
+          : error.status === 409 ? 'Your agent could not be reached.' : (error.message || 'Could not get an answer.'),
+      } : turn));
+    } finally {
+      setAskAiBusy(false);
+    }
+  };
+  useEffect(() => {
+    const asks = myAgent.state?.asks || [];
+    if (!asks.length) return;
+    setAskAiTurns((turns) => {
+      let changed = false;
+      const next = turns.map((turn) => {
+        if (turn.kind !== 'agent' || turn.status !== 'waiting' || !turn.askId) return turn;
+        const ask = asks.find((item) => item.ask_id === turn.askId);
+        if (ask?.answer?.text) { changed = true; return { ...turn, status: 'answered', answer: ask.answer.text }; }
+        if (ask?.delivery?.status === 'failed') { changed = true; return { ...turn, status: 'failed', error: 'Not delivered to your agent.' }; }
+        return turn;
+      });
+      return changed ? next : turns;
+    });
+  }, [myAgent.state?.asks]);
+  const keepAskAiAnswer = (id) => setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, kept: true } : turn));
+  const postAskAiAnswer = async (id) => {
+    const turn = askAiTurns.find((item) => item.id === id);
+    if (!turn?.askId || !turn.answer || turn.public || turn.publishing) return;
+    setAskAiTurns((turns) => turns.map((item) => item.id === id ? { ...item, publishing: true } : item));
+    try {
+      let commentId = turn.publicCommentId;
+      if (!commentId) {
+        const comment = await comments.addComment({ kind: 'document' }, turn.question);
+        if (!comment?.id) throw new Error('Could not post the question');
+        commentId = comment.id;
+        setAskAiTurns((turns) => turns.map((item) => item.id === id ? { ...item, publicCommentId: commentId } : item));
+      }
+      await publishAsk(config.slug, turn.kind === 'tdoc-ai' ? 'ask' : 'my-agent', { askId: turn.askId, commentId });
+      await comments.refresh();
+      setAskAiTurns((turns) => turns.map((item) => item.id === id ? { ...item, public: true, publishing: false } : item));
+      setOpenCommentId(commentId);
+    } catch (error) {
+      setAskAiTurns((turns) => turns.map((item) => item.id === id ? { ...item, publishing: false } : item));
+      showToast(error.message || 'Could not post the answer', true);
+    }
+  };
+  // An agent answers in the thread on its own time: once it has, the thread
+  // is read again so the reply shows.
+  const askedInThread = (myAgent.state?.asks || []).filter((a) => a.comment_id);
+  const answeredInThread = askedInThread.filter((a) => a.reply_id).length;
+  const settledInThread = askedInThread.filter((a) => a.reply_id || a.delivery?.status === 'failed').length;
+  useEffect(() => {
+    if (answeredInThread) comments.refresh();
+  }, [answeredInThread]);
+  useEffect(() => {
+    setAiThinking((cur) => (cur && cur.agent ? null : cur));
+  }, [settledInThread]);
+  const offersTdocAi = agentChoices.some((t) => t.tdoc_ai);
+  // The free answers left, for the @ list and the line under a tdoc AI reply.
+  useEffect(() => {
+    if (!askEnabled || aiRemaining !== null) return undefined;
+    let live = true;
+    getAskAllowance(config.slug)
+      .then((body) => { if (live && typeof body?.remaining === 'number') setAiRemaining(body.remaining); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [askEnabled, config.slug]);
+
+  // The "Only me" question as the composer shows it: an agent answers on its
+  // own time, so its answer is read from the asks list.
+  const privateAgentAsk = privateAsk?.kind === 'agent' && privateAsk.askId
+    ? (myAgent.state?.asks || []).find((a) => a.ask_id === privateAsk.askId) : null;
+  const privateAskView = privateAsk ? {
+    ...privateAsk,
+    answer: privateAsk.answer || privateAgentAsk?.answer?.text || '',
+    error: privateAsk.error || (privateAgentAsk?.delivery?.status === 'failed' ? `${privateAsk.label} did not answer.` : ''),
+    status: privateAsk.kind === 'agent' ? (privateAgentAsk?.acked_at ? 'Working on it…' : 'Sent · waiting for the answer…') : 'Thinking…',
+  } : null;
+
+  const makePublicRef = useRef(null);
+  makePublicRef.current = makePublic;
+  const guestAction = teamGuestsEnabled && config.teamManage?.guest ? {
+    label: config.teamManage.invitePending ? 'Accept team invitation' : `Request to join ${config.teamManage.team.name}`,
+    onClick: async () => {
+      setGuestInviteStatus('Sending…');
+      try {
+        if (config.teamManage.invitePending) await acceptTeamInvite(config.teamManage.team.id);
+        else await requestTeamJoin(config.slug);
+        if (config.teamManage.invitePending) location.reload();
+        else setGuestInviteStatus('Request sent to team admins.');
+      } catch (error) { setGuestInviteStatus(error.message || 'Could not send request.'); }
+    },
+  } : null;
+  // What @ offers (agentChoices) and what tdoc AI has left / who is
+  // answering where, for the composers and the cards.
+  const agentMentions = useMemo(() => ({
+    choices: agentChoices,
+    disabledChoices: teamGuestsEnabled && config.teamManage?.guest ? (myAgent.state?.disabled_team_agents || []) : [],
+    guestAction,
+    preselected: agentChoices.find((agent) => notifyTargets.default && sameTarget(agent, notifyTargets.default)) || null,
+    ai: { remaining: aiRemaining, thinking: aiThinking, offered: offersTdocAi },
+    // An Only me question asked from a reply box, which shows its answer.
+    privateReply: privateAskView && privateAskView.parentId ? privateAskView : null,
+    onMakePublic: () => makePublicRef.current(),
+    onClosePrivate: () => setPrivateAsk(null),
+  }), [agentChoices, notifyTargets.default, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
+  const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
+    setNotifyAvoid(avoid);
     setNotifyOpen(true);
   };
-  // Badge + default selection = not yet handed off (handoff_status note).
-  // status≠applied alone is wrong: agent replies leave status open while
-  // handoff is already sent/resolved, so the count stayed inflated (#Send).
-  const pendingHandoff = (c) => c && !c.deleted && c.status !== 'applied' && c.handoff_status === 'note';
-  const openDocNotify = () => {
-    const openIds = shownComments.filter(pendingHandoff).map((c) => c.id);
-    openNotifyPanel(openIds);
+  // A card whose handoff nobody picked up: resend it (same event id, so Raft
+  // drops it if the first did land), or hand it to someone else.
+  const resendHandoff = async (comment) => {
+    if (!comment?.handoff_id) return;
+    try {
+      const body = await resendNotifyHandoff({ slug: config.slug, handoff_id: comment.handoff_id });
+      showToast(resendResultText(body), body?.delivery?.status === 'failed');
+      await comments.refresh();
+    } catch (err) {
+      showToast(err.message || 'Could not resend', true);
+    }
+  };
+  const sendHandoffElsewhere = (comment) => {
+    if (comment?.id) openNotifyPanel([comment.id], comment.handoff_to || null);
+  };
+  // Badge + send panel = comments ready to hand off (never sent, or human
+  // wrote again after the last handoff). Not "open" and not "sent".
+  const visibleHandoffComments = commentArea.visibleHandoffs;
+  const handoffBuckets = commentArea.handoffBuckets;
+  const unreadAgentReplies = commentArea.unreadCount;
+  const markAgentReplyRead = commentArea.markRead;
+  const markAllAgentRepliesRead = commentArea.markAllRead;
+  const openDocNotify = (selectedIds = handoffBuckets.ready.map((c) => c.id)) => {
+    setHandoffDetailsOpen(false);
+    openNotifyPanel(selectedIds);
   };
   const removeAnchor = async () => {
     if (!(await attempt(() => comments.moveAnchor(reanchorId, { kind: 'none' }))).ok) return;
@@ -744,6 +1190,27 @@ export function DocumentShell({ boot, config }) {
       showToast(next ? 'Starred - find it in My docs' : 'Star removed');
     } catch {
       setStarred(!next);
+    }
+  };
+
+  const openMoveDocument = async () => {
+    setDialog({ type: 'move-document' });
+    setMoveState({ teams: [], loading: true, error: '', busy: false });
+    try {
+      const result = await listTeams();
+      setMoveState({ teams: result.teams || [], loading: false, error: '', busy: false });
+    } catch (error) {
+      setMoveState({ teams: [], loading: false, error: error.message || 'Could not load workspaces.', busy: false });
+    }
+  };
+
+  const moveDocument = async (target) => {
+    setMoveState((current) => ({ ...current, busy: true, error: '' }));
+    try {
+      await moveDocsToTeam([config.slug], target.id);
+      location.href = `/d/${encodeURIComponent(config.slug)}`;
+    } catch (error) {
+      setMoveState((current) => ({ ...current, busy: false, error: error.message || 'Could not move this document.' }));
     }
   };
 
@@ -791,9 +1258,13 @@ export function DocumentShell({ boot, config }) {
     document.body.appendChild(frame);
   };
 
+  // What Share copies: the doc's own address, which always opens the newest
+  // version (Julie, 2026-10-13). A link to exactly this version is offered
+  // as the secondary choice in the dialog.
   const shareUrl = config.isLanding
     ? `${location.origin}/`
-    : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
+    : `${location.origin}/d/${encodeURIComponent(config.slug)}`;
+  const versionUrl = config.isLanding ? null : `${location.origin}/d/${encodeURIComponent(config.slug)}/v/${config.version}`;
 
   // While the owner waits on their agent, ask the server every few seconds
   // what it has done: read the comments (the card flips to "reading"), then
@@ -817,7 +1288,11 @@ export function DocumentShell({ boot, config }) {
           // The thing it was waiting for arrived; the wait should not outlive
           // it into the next page.
           try { localStorage.removeItem(handoffKey); } catch {}
-          location.href = `/d/${encodeURIComponent(config.slug)}/v/${latest}?revised=1`;
+          // On the doc's own address the newest version is what it shows; a
+          // reader who chose a version is taken to the new one explicitly.
+          location.href = /\/v\/\d+\/?$/.test(location.pathname)
+            ? `/d/${encodeURIComponent(config.slug)}/v/${latest}?revised=1`
+            : `/d/${encodeURIComponent(config.slug)}?revised=1`;
           return;
         }
         const readAt = status?.read_at ? new Date(status.read_at).getTime() : 0;
@@ -838,6 +1313,48 @@ export function DocumentShell({ boot, config }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [handoff.state, handoff.copiedAt, config.slug, config.version, commentsRefresh]);
 
+  // Live sync for anyone reading: replies (an agent's included) arrive in
+  // their threads, and a version published meanwhile is announced in the
+  // strip above the doc rather than navigated to. Only a visible tab polls;
+  // coming back to the tab checks at once; a quiet doc backs off to a minute.
+  // Before this, polling ran only while a handoff was still `sent`, so a
+  // reply that came after the agent picked the comment up needed a reload
+  // (Julie, 2026-10-15).
+  const [liveLatest, setLiveLatest] = useState(0);
+  useEffect(() => {
+    if (config.isLanding || config.mode === 'local' || !config.slug) return undefined;
+    let cancelled = false;
+    let timer = null;
+    let delay = LIVE_SYNC_MIN_MS;
+    let last = '';
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'hidden') { timer = window.setTimeout(tick, delay); return; }
+      let seen = '';
+      try {
+        const status = await getAgentStatus(config.slug);
+        const latest = Number(status?.latest_version) || 0;
+        if (!cancelled && latest) setLiveLatest(latest);
+        seen = String(latest);
+      } catch { /* next tick */ }
+      try { await commentsRefresh(); } catch { /* next tick */ }
+      if (cancelled) return;
+      const fingerprint = `${seen}|${(commentsRef.current || []).map((c) => `${c && c.id}:${(c && c.replies || []).length}:${c && c.status}`).join(',')}`;
+      delay = fingerprint === last ? Math.min(delay * 2, LIVE_SYNC_MAX_MS) : LIVE_SYNC_MIN_MS;
+      last = fingerprint;
+      timer = window.setTimeout(tick, delay);
+    };
+    timer = window.setTimeout(tick, LIVE_SYNC_MIN_MS);
+    const onVis = () => {
+      if (document.visibilityState !== 'visible' || cancelled) return;
+      delay = LIVE_SYNC_MIN_MS;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(tick, 300);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { cancelled = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
+  }, [config.slug, config.isLanding, config.mode, commentsRefresh]);
+
   // Connected-App handoffs: while any comment is still `sent`, refresh so the
   // waiting tags and banner catch agent replies / resolve without a manual reload.
   // No outstanding sent → no requests. Hidden tab → pause. Back off when quiet.
@@ -856,7 +1373,7 @@ export function DocumentShell({ boot, config }) {
     let lastFingerprint = '';
     const fingerprint = () => (commentsRef.current || [])
       .filter((c) => c && c.handoff_status === 'sent')
-      .map((c) => `${c.id}:${c.handoff_at || ''}:${(c.replies || []).length}`)
+      .map((c) => `${c.id}:${c.handoff_at || ''}:${c.handoff_acked_at || ''}:${c.handoff_delivery?.at || ''}:${(c.replies || []).length}`)
       .sort()
       .join('|');
     const tick = async () => {
@@ -1012,7 +1529,103 @@ export function DocumentShell({ boot, config }) {
     (bridge.layout.articleRight || window.innerWidth - 44) + 14,
     window.innerWidth - 34,
   );
-  const openComment = visibleCommentsById.get(openCommentId);
+  const openComment = commentArea.selected;
+  // Open / Resolved / All, in the comments area (it was a switch in the bar).
+  // Only when there is something to filter.
+  const openCount = commentArea.openCount;
+  const mobileUnread = commentArea.unreadCount > 0;
+  const startDocumentComment = (askAi = false) => {
+    if (!config.canComment) { if (config.signInToComment) signIn(); return; }
+    if (editor.mode === 'edit' && editor.dirty) {
+      showToast('Save or discard the draft before commenting', true);
+      return;
+    }
+    if (askAi && !agentChoices.length) {
+      showToast('Connect an agent to ask AI', true);
+      return;
+    }
+    editor.changeMode('comment');
+    setDrawerOpen(false);
+    const y = window.innerHeight - 80;
+    setComposer({ kind: 'document', intent: askAi ? 'ask-ai' : 'comment', rect: { top: y, bottom: y, left: 16 } });
+  };
+  const closeAskAi = () => { setHandoffDetailsOpen(false); if (unifiedEntry) setDrawerOpen(false); };
+  // A question typed before signing in comes back after it, in the open panel.
+  useEffect(() => {
+    if (!config.identity) return;
+    let saved = null;
+    try { saved = sessionStorage.getItem(`tdoc-ask-draft:${config.slug}`); sessionStorage.removeItem(`tdoc-ask-draft:${config.slug}`); } catch {}
+    if (!saved) return;
+    setAskAiDraft(saved);
+    if (unifiedEntry) { setDrawerTab('ask'); setDrawerOpen(true); } else setHandoffDetailsOpen(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.identity, config.slug]);
+  const askAiPanel = (panelOpen) => (
+    <AskAiPanel
+      open={panelOpen}
+      draft={askAiDraft}
+      onDraft={setAskAiDraft}
+      targetKey={selectedAskAiTargetKey}
+      onTarget={setAskAiTargetKey}
+      targets={askAiTargets}
+      viewer={config.identity}
+      turns={askAiTurns}
+      busy={askAiBusy}
+      remaining={aiRemaining}
+      onAsk={askAiSend}
+      onKeep={keepAskAiAnswer}
+      onPost={postAskAiAnswer}
+      readyCount={canSendToAgent ? handoffBuckets.ready.length : 0}
+      onSendReady={canSendToAgent ? () => openDocNotify() : null}
+      activityOpen={agentActivityOpen}
+      onActivityOpen={setAgentActivityOpen}
+      unreadCount={unreadAgentReplies}
+      disabledChoices={teamGuestsEnabled && config.teamManage?.guest ? (myAgent.state?.disabled_team_agents || []) : []}
+      guestAction={guestAction}
+      signInToAsk={signedOutAsk}
+    >{signedOutAsk ? null : <HandoffDetailsPanel
+      slug={config.slug}
+      open={panelOpen}
+      comments={visibleHandoffComments}
+      handoffViewer={handoffViewer}
+      seenMap={seenMap}
+      showReady={canSendToAgent}
+      onClose={closeAskAi}
+      onSendReady={canSendToAgent ? openDocNotify : null}
+      onSendElsewhere={canSendToAgent ? (comment) => {
+        closeAskAi();
+        sendHandoffElsewhere(comment);
+      } : null}
+      onJump={(id) => {
+        setCommentFilterState('all');
+        setDrawerTab('comments');
+        if (narrow) setDrawerOpen(true);
+        focusComment(id, { scroll: true });
+      }}
+      onRefresh={() => comments.refresh()}
+      onToast={(text, error) => showToast(text, error)}
+      onMarkRead={markAgentReplyRead}
+      onMarkAllRead={markAllAgentRepliesRead}
+      autoRead={autoReadEnabled}
+      onViewChanges={() => { closeAskAi(); changeComparison(true); }}
+      onReply={config.canComment ? async (comment, text) => replyTo(comment.id, text,
+        canSendToAgent ? { sendToAgent: true, handoffCommentId: comment.id, recipient: comment.handoff_to }
+          : { target: comment.handoff_to, askOnly: true }) : null}
+    />}</AskAiPanel>
+  );
+  const commentFilterControl = comments.comments.length ? (
+    <SegmentedControl
+      className="tdoc-comment-filter"
+      ariaLabel="Show comments"
+      value={commentFilter}
+      onChange={setCommentFilter}
+      options={[
+        { value: 'open', label: `Open (${openCount})` },
+        { value: 'resolved', label: `Resolved (${resolvedCount})` },
+        { value: 'all', label: 'All' },
+      ]}
+    />
+  ) : null;
   const openCluster = clusters.find((cluster) => (
     cluster.items.some(({ comment }) => comment.id === openCommentId)
   ));
@@ -1036,10 +1649,33 @@ export function DocumentShell({ boot, config }) {
     && new URLSearchParams(location.search).get('comment')
     && new URLSearchParams(location.search).get('comment') !== openComment.id
   ) || (arrival === 'revised' && Boolean(openComment));
-
+  const composerView = composer ? (
+    <CommentComposer
+      selection={composer}
+      initialText={composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices[0]
+        ? `@${AGENT_TAG_JOINER}${agentMentionName(agentChoices[0], agentChoices)} ` : ''}
+      mentionable={mentionable}
+      demo={!!config.demoComments}
+      canSendToAgent={canSendToAgent}
+      agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
+      sendToAgentDisabledReason={
+        notifyTargets.reason === 'no_agent_bound'
+          ? 'No agent is following this doc yet'
+          : null
+      }
+      connectAgentPrompt={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
+      privateAsk={privateAskView && !privateAskView.parentId ? privateAskView : null}
+      onMakePublic={makePublic}
+      onSubmit={postComment}
+      onClose={closeComposer}
+      onCopyToast={showToast}
+    />
+  ) : null;
   return (
     <div
       className="tdoc-document-app"
+      data-visual-open={visualOpen || undefined}
+      data-presenting={(visualOpen && presenting) || undefined}
       onPointerDown={() => {
         // Legacy behavior: a click anywhere outside a card, pin, or composer
         // closes the open card and cluster popover (they stop propagation).
@@ -1047,38 +1683,43 @@ export function DocumentShell({ boot, config }) {
         setOpenCommentId(null);
       }}
     >
+      <AgentMentionContext.Provider value={agentMentions}>
       <TopBar
         identity={config.identity}
-        theme={theme}
+        onboardingTest={config.debug ? {
+          record: onboardingRecord,
+          surface: config.isLanding ? 'landing' : 'document',
+          onState: async () => {
+            const result = await getOnboarding().catch(() => null);
+            setOnboardingRecord(result?.record || null);
+          },
+        } : null}
+        space={config.teamManage?.team?.id || ''}
+        currentTeam={config.teamManage?.team || null}
+        theme={supportsTheme ? theme : 'light'}
+        supportsTheme={supportsTheme}
         actions={config.isLanding ? <LandingActions stars={config.stars} /> : (
-          <>
-            {/* Resolved threads are out of the margin by default. The switch is
-                the way back, in the bar where it can be seen — it folds into
-                the ⋯ menu with everything else when the bar runs out of room.
-                Absent entirely when nothing is resolved: a control that can
-                only do nothing is worse than no control. */}
-            {resolvedCount ? (
-              <AppSwitch
-                id="tdoc-show-resolved"
-                checked={showResolved}
-                onCheckedChange={toggleResolved}
-                label={`Resolved (${resolvedCount})`}
-              />
+          !comparing && <>
+            <DocumentEdited config={config} onCompare={() => changeComparison(true)} />
+            {(askAiPanelEnabled || signedOutAsk) && !unifiedEntry ? (
+              <DocumentSendAgentAction
+                counts={Object.fromEntries(Object.entries(handoffBuckets).map(([state, list]) => [state, list.length]))}
+                unread={unreadAgentReplies}
+                open={handoffDetailsOpen}
+                onOpenChange={(open) => { setHandoffDetailsOpen(open); if (open) { setAgentActivityOpen(false); setDrawerOpen(false); } }}
+                narrow={narrow}
+              >
+                {askAiPanel(handoffDetailsOpen)}
+              </DocumentSendAgentAction>
             ) : null}
             <DocumentModeControl
               mode={editor.mode}
               canComment={config.canComment}
               canEdit={config.canEdit}
               signInToComment={Boolean(config.signInToComment)}
-              onSignIn={signIn}
-              onChange={editor.changeMode}
+              onSignIn={() => signIn()}
+              onChange={(value) => editor.changeMode(value)}
             />
-            {notifyEnabled ? (
-              <DocumentSendAgentAction
-                count={shownComments.filter(pendingHandoff).length}
-                onClick={openDocNotify}
-              />
-            ) : null}
             <DocumentPrimaryAction
               config={config}
               onPublish={() => setDialog({ type: 'publish' })}
@@ -1097,10 +1738,9 @@ export function DocumentShell({ boot, config }) {
             onDuplicate={duplicate}
             onDownload={download}
             onPrint={printPdf}
+            onMoveDocument={config.mode === 'published' && config.isOwner ? openMoveDocument : null}
             onDelete={() => setDialog({ type: 'delete' })}
-            resolvedCount={resolvedCount}
-            showResolved={showResolved}
-            onToggleResolved={toggleResolved}
+            onCompare={() => changeComparison(true)}
           />
         )}
         onThemeChange={(nextTheme) => {
@@ -1108,34 +1748,41 @@ export function DocumentShell({ boot, config }) {
           bridge.send({ type: 'tdoc:theme', theme: nextTheme });
         }}
         onNotificationNavigate={(item, target) => {
-          const sameDocument = item.slug === config.slug
+          const sameDocument = item.kind !== 'team_join_request' && item.slug === config.slug
             && Number(item.version || 1) === Number(config.version);
           if (!sameDocument) {
             location.href = target;
             return;
           }
+          setComparing(false);
           const commentId = item.comment_id || item.thread_id;
           history.replaceState(null, '', target);
           setDeepTarget(commentId);
         }}
+        notificationPrompt={!config.isLanding}
         authConfigured={config.authConfigured !== false}
         // The top bar's Sign in on the landing returns into the onboarding:
         // a new account lands on the first screen; one that has finished or
         // skipped is let straight through (the wizard closes itself).
-        onSignIn={() => signIn(config.onboarding ? '/setup' : undefined)}
-        onSwitchAccount={config.oidcAuth ? () => {
-          const returnUrl = location.pathname + location.search + location.hash;
-          location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnUrl)}`;
-        } : null}
+        // `via=signin` lets the server send a returning account to My docs
+        // instead: Sign out lands here, so every re-login came back through
+        // this button and was shown "Connect your agent" again.
+        onSignIn={() => signIn(config.onboarding ? '/setup?via=signin' : undefined)}
       >
         <DocumentBreadcrumbs
           config={config}
           title={title}
-          starred={starred}
           onRename={renameDoc}
-          onToggleStar={toggleStar}
         />
       </TopBar>
+      {teamGuestsEnabled && config.teamManage?.guest ? <div className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
+        <span>{config.teamManage.invitePending
+          ? `You have been invited to join ${config.teamManage.team.name}.`
+          : `You are a guest in ${config.teamManage.team.name}. Team agents are for members.`}</span>
+        <button type="button" onClick={guestAction.onClick}>{guestAction.label}</button>
+        {guestInviteStatus ? <span>{guestInviteStatus}</span> : null}
+      </div> : null}
+      {comparing ? <VersionDiffView config={config} theme={theme} narrow={narrow} onClose={() => changeComparison(false)} /> : null}
 
       <DiagramDialog diagram={diagram} canApply={Boolean(config.canEdit)} onClose={() => setDiagram(null)}
         onApply={async (json, svg) => {
@@ -1145,22 +1792,18 @@ export function DocumentShell({ boot, config }) {
             const id = crypto.randomUUID();
             const timer = setTimeout(() => { diagramApplyRef.current = null; reject(new Error('The document did not respond. Try again.')); }, 5000);
             diagramApplyRef.current = { id, timer, resolve, reject };
-            bridge.send({ type: 'tdoc:diagramApply', requestId: id, id: diagram.id, json, svg });
+            bridge.send({ type: diagram.isNew ? 'tdoc:diagramInsert' : 'tdoc:diagramApply', requestId: id, id: diagram.id, json, svg });
           });
           setDiagram(null);
-          showToast('Diagram applied. Save the document to publish a new version.');
+          showToast(`${diagram.isNew ? 'Diagram inserted' : 'Diagram applied'}. Save the document to publish a new version.`);
         }} />
-      <OldVersionNotice value={boot.oldVersion} />
-
-      {notifyEnabled ? (
-        <HandoffBanner
-          slug={config.slug}
-          comments={comments.comments}
-          onOpenPanel={openDocNotify}
-          onRefresh={() => comments.refresh()}
-          onToast={(text, error) => showToast(text, error)}
-        />
-      ) : null}
+      <div className="tdoc-reader-surface" hidden={comparing}>
+      <OldVersionNotice value={boot.oldVersion || (liveLatest > Number(config.version) ? {
+        current: Number(config.version),
+        latest: liveLatest,
+        latestUrl: `/d/${encodeURIComponent(config.slug)}/v/${liveLatest}`,
+        fresh: true,
+      } : null)} />
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>
@@ -1196,6 +1839,12 @@ export function DocumentShell({ boot, config }) {
             if (command === 'createLink') setDialog({ type: 'link' });
             else editor.format(command, value);
           }}
+          onInsertDiagram={() => setDiagram({
+            id: `diagram-${crypto.randomUUID()}`,
+            title: 'Draw a diagram',
+            isNew: true,
+            scene: { type: 'excalidraw', version: 2, elements: [], appState: { viewBackgroundColor: '#ffffff' }, files: {} },
+          })}
           onDiscard={editor.discard}
           onSave={requestSave}
         />
@@ -1214,99 +1863,125 @@ export function DocumentShell({ boot, config }) {
         ref={bridge.frameRef}
         className="tdoc-doc-frame"
         aria-label="Document content"
+        onMouseLeave={() => setHoveredAnchorId(null)}
         sandbox="allow-scripts"
         src={boot.frameSrc}
       />
 
-      {/* The internal bar, for an allow-listed account. It matters most here:
-          a new reader starts at the landing page, and a replay pressed at the
-          gate skips everything between the two -- the call to action, the
-          sign-in, the first sight of the product. */}
-      {config.debug ? (
-        <DebugBar
-          record={onboardingRecord}
-          surface={config.isLanding ? 'landing' : 'document'}
-          onState={async () => {
-            const result = await getOnboarding().catch(() => null);
-            setOnboardingRecord(result?.record || null);
-          }}
-        />
-      ) : null}
-
       <DocumentFooter visible={bridge.layout.footerVisible} />
 
-      {narrow ? (
+      {!narrow && commentFilterControl && !comparing ? (
+        <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.min(pinLeft - 4, window.innerWidth - 250) }}>
+          <CommentListControls filter={commentFilterControl}
+            unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
+            onMarkAllRead={autoReadEnabled ? markAllAgentRepliesRead : null} />
+        </div>
+      ) : null}
+      {narrow ? (<>
+        {editor.mode !== 'read' ? <DesktopCommentLayer
+          clusters={clusters.filter((cluster) => cluster.items.every(({ comment }) => comment.document))}
+          commentsById={commentsById}
+          seenMap={seenMap}
+          frameScrollY={bridge.layout.scrollY}
+          frameTop={frameTop}
+          pinLeft={pinLeft}
+          openComment={null}
+          openClusterKey={null}
+          pinIds={pinIds}
+          currentUser={config.identity?.login || 'anon'}
+          handoffViewer={handoffViewer}
+          isOwner={Boolean(config.isOwner)}
+          onOpenComment={(id) => { setOpenCommentId(id); setDrawerTab('comments'); setDrawerOpen(true); }}
+          onOpenCluster={() => { setOpenCommentId(null); setDrawerTab('comments'); setDrawerOpen(true); }}
+        /> : null}
         <MobileCommentDrawer
-          open={drawerOpen}
+          filter={commentFilterControl}
+          open={drawerOpen && !comparing}
+          openCount={openCount}
+          unread={mobileUnread}
+          unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
           // shownComments, not the raw list: hiding resolved threads took the
           // pins out of the document but left every one of them in the drawer,
           // which on a phone IS the comment list. "Hide resolved" appeared to
           // do nothing at all.
-          comments={shownComments}
+          comments={drawerComments}
           pinIds={pinIds}
+          seenMap={seenMap}
           currentUser={config.identity?.login || 'anon'}
+          handoffViewer={handoffViewer}
           isOwner={Boolean(config.isOwner)}
           mentionable={mentionable}
           demo={!!config.demoComments}
           openCommentId={openCommentId}
           expandReplies={deepReply}
-          onOpenChange={setDrawerOpen}
+          canSendToAgent={canSendToAgent}
+          agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
+          onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
+          hideFab={handoffDetailsOpen || editor.mode === 'read'}
+          askAi={unifiedEntry ? askAiPanel(drawerOpen && drawerTab === 'ask') : null}
+          tab={drawerTab}
+          onTab={setDrawerTab}
+          onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
+          onAskAi={config.canComment || config.signInToComment ? () => startDocumentComment(true) : null}
           onReply={replyTo}
+          onMarkRead={autoReadEnabled ? markAgentReplyRead : null}
+          onMarkAllRead={autoReadEnabled ? markAllAgentRepliesRead : null}
           onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
           onResolve={resolveComment}
-          onReanchor={setReanchorId}
+          onReanchor={(id) => { bridge.send({ type: 'tdoc:reanchorMode', active: true }); setReanchorId(id); }}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
-          onNavigate={(id) => focusComment(id, { scroll: true, closeDrawer: true })}
+          onResendHandoff={canSendToAgent ? resendHandoff : null}
+          onSendHandoffElsewhere={canSendToAgent ? sendHandoffElsewhere : null}
+          onNavigate={(id) => isDocumentComment(commentsById.get(id))
+            ? setOpenCommentId(id)
+            : focusComment(id, { scroll: true, closeDrawer: true })}
         />
-      ) : (
+      </>) : (
         <DesktopCommentLayer
-          clusters={clusters}
+          clusters={editor.mode === 'read' ? [] : clusters}
           commentsById={commentsById}
+          seenMap={seenMap}
+          hoveredAnchorId={hoveredAnchorId}
           frameScrollY={bridge.layout.scrollY}
           frameTop={frameTop}
           pinLeft={pinLeft}
-          openComment={openComment}
+          openComment={editor.mode === 'read' ? null : openComment}
           openClusterKey={openClusterKey}
           pinIds={pinIds}
           currentUser={config.identity?.login || 'anon'}
+          handoffViewer={handoffViewer}
           isOwner={Boolean(config.isOwner)}
           mentionable={mentionable}
           demo={!!config.demoComments}
           cardPosition={cardPosition}
           expandReplies={deepReply}
+          canSendToAgent={canSendToAgent}
+          agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
           onOpenComment={(id) => {
             focusComment(id);
           }}
-          onOpenCluster={(key) => setOpenClusterKey(
-            openClusterKey === key ? null : key
-          )}
+          onOpenCluster={(key) => {
+            setOpenCommentId(null);
+            setOpenClusterKey(openClusterKey === key ? null : key);
+          }}
           onReply={replyTo}
+          onMarkRead={autoReadEnabled ? markAgentReplyRead : null}
           onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}
           onResolve={resolveComment}
-          onReanchor={setReanchorId}
+          onReanchor={(id) => { bridge.send({ type: 'tdoc:reanchorMode', active: true }); setReanchorId(id); }}
           handoff={handoffOnPage ? { threadId: myThread.id, line: handoffText, open: handoffOpen, onToggle: handoffToggle, state: handoff.state, copyFailed: Boolean(handoff.copyFailed), onCopy: handoffCopy } : null}
+          onResendHandoff={canSendToAgent ? resendHandoff : null}
+          onSendHandoffElsewhere={canSendToAgent ? sendHandoffElsewhere : null}
         />
       )}
 
-      {composer ? (
-        <CommentComposer
-          selection={composer}
-          mentionable={mentionable}
-          demo={!!config.demoComments}
-          canSendToAgent={canSendToAgent}
-          sendToAgentDisabledReason={
-            notifyTargets.reason === 'no_agent_bound'
-              ? 'No agent is following this doc yet'
-              : null
-          }
-          onSubmit={postComment}
-          onClose={closeComposer}
-        />
-      ) : null}
+      {composerView}
+
+      </div>
 
       <MentionReachDialog
         open={Boolean(invited?.length)}
@@ -1317,13 +1992,16 @@ export function DocumentShell({ boot, config }) {
       />
 
 
+
       {notifyEnabled ? (
         <NotifyHandoffPanel
           slug={config.slug}
           open={notifyOpen}
           commentIds={notifyCommentIds || []}
+          avoid={notifyAvoid}
           onClose={() => setNotifyOpen(false)}
           onSent={async () => { await comments.refresh(); }}
+          onTargetsChanged={notifyTargets.refresh}
         />
       ) : null}
 
@@ -1332,11 +2010,13 @@ export function DocumentShell({ boot, config }) {
         slug={config.slug}
         onOpenChange={(open) => !open && setDialog(null)}
       />
-      {config.ownerManage ? (
+      {config.ownerManage || config.teamManage?.canManage ? (
         <OwnerAccessDialog
           open={dialog?.type === 'share'}
           config={config}
           url={shareUrl}
+          versionUrl={versionUrl}
+          version={config.version}
           onOpenChange={(open) => !open && setDialog(null)}
           onCopied={() => showToast('Link copied')}
         />
@@ -1344,6 +2024,9 @@ export function DocumentShell({ boot, config }) {
         <ShareDialog
           open={dialog?.type === 'share'}
           url={shareUrl}
+          versionUrl={versionUrl}
+          version={config.version}
+          team={config.teamManage}
           onOpenChange={(open) => !open && setDialog(null)}
           onCopied={() => showToast('Link copied')}
         />
@@ -1353,6 +2036,20 @@ export function DocumentShell({ boot, config }) {
         config={config}
         onOpenChange={(open) => !open && setDialog(null)}
       />
+      {dialog?.type === 'move-document' ? (
+        <MoveToTeamDialog
+          title="Move this document"
+          teams={moveState.teams}
+          count={1}
+          includePersonal={Boolean(config.workspaceId || config.teamManage?.team?.id)}
+          currentTeam={config.workspaceId || config.teamManage?.team?.id || null}
+          loading={moveState.loading}
+          busy={moveState.busy}
+          error={moveState.error}
+          onClose={() => { if (!moveState.busy) setDialog(null); }}
+          onMove={moveDocument}
+        />
+      ) : null}
       <MessageDialog
         message={dialog?.type === 'message' ? dialog : null}
         onOpenChange={(open) => !open && setDialog(null)}
@@ -1391,6 +2088,7 @@ export function DocumentShell({ boot, config }) {
           {toast.text}
         </div>
       ) : null}
+      </AgentMentionContext.Provider>
     </div>
   );
 }

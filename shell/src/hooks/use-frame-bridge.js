@@ -5,6 +5,7 @@ export function useFrameBridge(handlers) {
   const handlersRef = useRef(handlers);
   const [layout, setLayout] = useState({
     pins: [],
+    documentComments: null,
     scrollY: 0,
     articleRight: window.innerWidth - 44,
     docHeight: 1e7,
@@ -30,6 +31,7 @@ export function useFrameBridge(handlers) {
         setLayout((current) => ({
           ...current,
           pins: message.pins || [],
+          documentComments: message.documentComments || null,
           scrollY: message.scrollY || 0,
           articleRight: message.articleRight || window.innerWidth - 44,
           docHeight: message.docHeight || 1e7,

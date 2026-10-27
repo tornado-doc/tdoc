@@ -46,8 +46,9 @@ const box = {};
 vm.createContext(box);
 vm.runInContext([
   'normalizeGithubLogin', 'normalizeEmail', 'sessionLogin', 'sessionPrincipal',
-  'actorKey', 'actorDisplayName', 'normalizeActorKey', 'normalizeInvitee', 'isAllowlisted',
-  'isOwnerSession', 'isDocOwnerSession', 'hostedGithubLogin', 'canCommentOnDoc',
+  'sessionAccountIds', 'sessionOwnsAccount',
+  'actorKey', 'actorKeys', 'actorDisplayName', 'normalizeActorKey', 'normalizeInvitee', 'isAllowlisted',
+  'isOwnerSession', 'tokenScopeAllows', 'isDocOwnerSession', 'hostedGithubLogin', 'canCommentOnDoc',
   'canMutate',
 ].map(sliceFn).join('\n'), box);
 
@@ -110,6 +111,13 @@ const em = { email: 'Alice@Example.com', name: 'Alice A' };
     assert(box.canMutate(mine, {}, {}, {}) === false, 'anonymous edited a comment');
     assert(box.canMutate({ author: { login: null } }, em, {}, {}) === false,
       'a legacy null-author record must stay unowned');
+  });
+
+  await t('a provider-linked identity owns comments written under either verified key', () => {
+    const linked = { login: 'unknowncici', email: 'claire@example.com' };
+    assert(box.canMutate({ author: { login: 'unknowncici' } }, linked, {}, {}) === true);
+    assert(box.canMutate({ author: { login: 'email:claire@example.com' } }, linked, {}, {}) === true);
+    assert(box.canMutate({ author: { login: 'email:other@example.com' } }, linked, {}, {}) === false);
   });
 
   // ---- integration: the real routes, with fake bindings ------------------

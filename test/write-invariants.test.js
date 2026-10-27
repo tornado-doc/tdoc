@@ -122,6 +122,29 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
   const mod = await loadWorker();
   const worker = mod.default;
 
+  await t('/SKILL.md and /SKILLS.md publish the same narrow remote-read contract', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const singular = await worker.fetch(req('/SKILL.md'), env, {});
+    const plural = await worker.fetch(req('/SKILLS.md'), env, {});
+    assert(singular.status === 200 && plural.status === 200, `skill routes: ${singular.status}/${plural.status}`);
+    assert((singular.headers.get('content-type') || '').startsWith('text/markdown'), `skill content-type: ${singular.headers.get('content-type')}`);
+    assert(singular.headers.get('access-control-allow-origin') === '*', 'remote skill must be fetchable cross-origin');
+    const a = await singular.text();
+    const b = await plural.text();
+    assert(a === b, 'singular and plural skill routes drifted');
+    assert(a.includes('/d/<slug>/raw'), 'remote skill does not teach the canonical raw route');
+    assert(a.includes('do not guess slugs, enumerate documents, or crawl links in bulk'), 'remote skill lost its no-crawl boundary');
+    assert(a.includes('do not bypass it'), 'remote skill lost its access-control boundary');
+  });
+
+  await t('/SKILL.md supports HEAD without returning the body', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const r = await worker.fetch(req('/SKILL.md', { method: 'HEAD' }), env, {});
+    assert(r.status === 200, `skill HEAD ${r.status}`);
+    assert((r.headers.get('content-type') || '').startsWith('text/markdown'), 'skill HEAD lost markdown type');
+    assert((await r.text()) === '', 'skill HEAD must not return a body');
+  });
+
   await t('upload: stored bytes carry the baked, generation-stamped template', async () => {
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env);
@@ -280,6 +303,22 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     assert(r.headers.get('etag') === `"${sha}"`, `etag ${r.headers.get('etag')} != version sha ${sha}`);
   });
 
+  await t('bare /d/<slug>/raw returns the latest stored version', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const a = await issue(worker, env);
+    for (const v of [1, 2]) {
+      await worker.fetch(req('/api/upload', {
+        method: 'POST', token: a.token,
+        body: { slug: 'latest-raw', version: v, html: DOC.replace('<p>hi</p>', `<p>v${v}</p>`), meta: { title: 'latest-raw', slug: 'latest-raw', versions: [{ n: 1 }, { n: 2 }].slice(0, v) } },
+      }), env, {});
+    }
+    const r = await worker.fetch(req('/d/latest-raw/raw'), env, {});
+    assert(r.status === 200, `latest raw ${r.status}`);
+    const body = await r.text();
+    assert(body.includes('<p>v2</p>'), 'bare raw did not resolve the latest version');
+    assert(!body.includes('<p>v1</p>'), 'bare raw returned a stale version');
+  });
+
   await t('/raw honors If-None-Match with 304 and no body', async () => {
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env);
@@ -317,6 +356,10 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     assert(anon.status === 401 || anon.status === 403, `anonymous read of a private doc must be denied, got ${anon.status}`);
     const owner = await worker.fetch(req('/d/r4/v/1/raw', { token: a.token }), env, {});
     assert(owner.status === 200, `owner token read failed: ${owner.status}`);
+    const bareAnon = await worker.fetch(req('/d/r4/raw'), env, {});
+    assert(bareAnon.status === 401 || bareAnon.status === 403, `anonymous bare raw of a private doc must be denied, got ${bareAnon.status}`);
+    const bareOwner = await worker.fetch(req('/d/r4/raw', { token: a.token }), env, {});
+    assert(bareOwner.status === 200, `owner bare raw failed: ${bareOwner.status}`);
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

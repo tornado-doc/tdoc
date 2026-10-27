@@ -5,9 +5,12 @@
   "description": "Prompt-native interactive HTML documents \u2014 local server, Cloudflare Worker, React reader shell.",
   "scripts": {
     "build:shell": "vite build --config shell/vite.config.js",
+    "build:feedback": "vite build --config feedback/vite.config.js",
+    "build:sw": "vite build --config shell/sw.vite.config.js",
     "dev:shell": "vite --config shell/vite.config.js",
     "test": "node test/run.js",
     "test:svg": "node test/svg-preview.test.js",
+    "test:workerd": "node test/preview-workerd.test.js && node test/search-workerd.test.js",
     "test:all": "node test/run.js --all",
     "test:browser": "node test/run.js --browser"
   },
@@ -19,9 +22,17 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@headlessui/react": "^2.2.10",
+    "@mui/material": "^7.3.11",
+    "@radix-ui/react-dialog": "^1.3.1",
+    "@radix-ui/react-popover": "^1.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "0.25.12",
+    "playwright": "^1.60.0",
     "vite": "^6.4.3",
-    "playwright": "^1.60.0"
+    "workerd": "1.20261024.1"
   },
   "overrides": {
     "nanoid@3.3.3": "3.3.19",

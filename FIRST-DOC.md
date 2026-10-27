@@ -2,7 +2,8 @@
 
 > **For agents (Claude Code, Codex, Cursor, Gemini, Grok):** read this file
 > end-to-end, then do it. It is written for you, not the human. The human
-> pasted one line to get you here and is not expecting to answer questions.
+> pasted one line to get you here and is not expecting to answer questions —
+> beyond the single yes/no in Step 1c.
 
 ## Step 1 — install tdoc
 
@@ -51,7 +52,44 @@ Why first: the human is watching a page that says "listening for your agent".
 The connection is the first thing it can see happen, and it is the one step
 that needs their hand. Left to the end, it arrives after the longest silence
 of the whole setup. If `published.json` already exists, there is no code and
-nothing to relay — skip to Step 2.
+nothing to relay — go to Step 1c.
+
+## Step 1c — one question: may your agent handle comments on its own?
+
+Right after `Signed in as …` (or straight away, if they were already signed
+in), ask **one** question, in plain words, and wait for the answer. Use
+`AskUserQuestion` where the host offers it; otherwise ask in prose:
+
+> When someone comments on one of your docs and you click "Send to agent",
+> should your agent here (Claude Code / Codex) pick it up and fix the doc by
+> itself, in the background? It uses your own Claude or Codex plan, and you
+> can turn it off any time in Settings → Agents on tdoc.dev, or by asking me.
+>
+> A) Yes, turn it on
+> B) Not now
+
+**Skip the question** if `bin/tdoc-doctor --json` shows `.daemon.running`
+true, or `.daemon.installed` and `.daemon.loaded` both true — it is already
+on — or `.daemon.supported` is false (not macOS: say nothing now; the wrap-up
+in Step 7 covers it).
+
+**On A**, run it, then go on to Step 2 without waiting for anything else:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-daemon" install
+```
+
+It installs a small background helper that starts at login, signs this
+computer's Claude Code / Codex in as agents on their account, and prints its
+status. Turning it off later is `bash "$SKILL_DIR/bin/tdoc-daemon" uninstall`
+(Disconnect in Settings → Agents stops comments from being sent to it; the
+uninstall stops the helper itself). If it fails (for example, no `claude` or
+`codex` on PATH), say so in one line and carry on with the doc — it is not a
+blocker. **On B**, do nothing
+and do not ask again in this run. Never install it without a yes, and never
+start it any other way here.
+
+In what you say to the human, call it the background helper, not a daemon.
 
 ## The clock, and the fast path
 
@@ -68,7 +106,8 @@ The whole to-do list, in order. Nothing else is work:
    layer 3. Budget: fifteen seconds.
 2. Copy **the template below** into `v1/index.html`. Fill its numbers and its
    three lines. Do not restyle it, do not add a figure, do not add a section.
-3. Pick the slug (Step 6d) and publish it open (Step 7). Hand over the link.
+3. Pick the slug (Step 6d) and publish it private (Step 7). Hand over the
+   link, then the two-line wrap-up that ends Step 7.
 
 That is the doc. **Steps 3 to 6 describe the shape the template already has**
 — they are the reasoning behind it, not a checklist to work through. Do not
@@ -690,7 +729,7 @@ Write it with the flag that marks it as this journey's doc, then publish it:
 bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name> \
   --title "What does AI know about <Name>?" --style <style> \
   --prompt "<the line the human pasted>" --html-file /tmp/what-ai-knows-<name>.html
-bash "$SKILL_DIR/bin/tdoc-publish" --visibility public --history public what-ai-knows-<name>
+bash "$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner what-ai-knows-<name>
 ```
 
 `--first-doc` is how tdoc.dev knows this is the doc the onboarding was waiting
@@ -698,14 +737,13 @@ for, whatever slug it ends up on — a second run, or a `-2` after a collision,
 takes over from the earlier one. Without the flag the journey can keep
 watching an older doc and never move.
 
-**Say `public` out loud.** A first doc that arrives locked cannot be shown to
-anybody, and the whole point of the link is that it works when they send it to
-someone. Passing nothing is not the same as passing `public`: access is sticky
-on both sides — the CLI leaves an existing `access` block in `meta.json` alone,
-and the worker carries the stored one forward when an upload names none — so a
-flagless publish over a doc an earlier run locked stays locked. That case is
-not rare; it is every re-run, and every `-2` after a slug collision. Name the
-policy and the doc is open whatever came before it.
+**It goes up private.** The page is about them — their tools, their projects,
+their hours — so it is theirs alone until they decide otherwise: a real
+`tdoc.dev` link on their account that only they can open. Name the policy on
+every publish, not just the first: access is sticky on both sides (the CLI
+leaves an existing `access` block in `meta.json` alone, and the worker carries
+the stored one forward when an upload names none), so stating it is what keeps
+a re-run, or a `-2` after a slug collision, exactly as private as the first.
 
 Never pass `--allow-user` here. An allow-list on a first doc is a restriction
 nobody asked for.
@@ -713,17 +751,44 @@ nobody asked for.
 Then say, in one line each:
 
 - the URL, on its own line
-- that anyone they send it to can read it, and that it is not listed anywhere
-- how to close it if they want to:
-  `tdoc-publish --visibility private <slug>` makes it theirs alone
+- that only they can open it, and that it is not listed anywhere
+- how to share it if they want to:
+  `tdoc-publish --visibility unlisted <slug>` lets anyone with the link read it
 
 **Do not ask first and publish second.** Asking "shall I publish this?" before
 they have seen anything asks them to consent to a page that does not exist yet.
-Publish, show them the page at its real URL, and let closing it be their
-decision, made while looking at it.
+Publish it privately, show them the page at its real URL, and let opening it up
+be their decision, made while looking at it.
 
 The only case that ends locally is the one the human asked for: they said keep
 it local, or they are self-hosting and their own worker is not ready.
+
+### Close the loop: the wrap-up
+
+End with two short plain sentences on how they will use tdoc from now on, then
+one line telling them to try it on this doc. No jargon — no "daemon", "CLI",
+"handoff", "poll". Pick the version that matches Step 1c:
+
+**If they said yes** (the background helper is on):
+
+> You can use tdoc two ways: from here, tell me "read the comments on <link>
+> and fix them" or "comment on this doc"; or from the doc page, click "Send to
+> agent" and I'll pick it up and fix it automatically in the background.
+> Try it now: select a sentence on your doc, leave a comment, and click
+> "Send to agent".
+
+**If they said not now** (or it could not be turned on):
+
+> You can use tdoc two ways: from here, tell me "read the comments on <link>
+> and fix them" or "comment on this doc"; or from the doc page, click "Send to
+> agent" — that one needs the background helper, which you can turn on any
+> time in Settings → Agents on tdoc.dev, or by asking me to run
+> `tdoc-daemon install`. Try it now: select a sentence on your doc, leave a
+> comment, and paste the line the page gives you back here.
+
+Not on a Mac: the background helper cannot start at login there yet, so in the
+second version replace "turn on any time …" with "runs while a terminal is open
+with `tdoc-daemon start`".
 
 ## If there is no history
 
@@ -743,6 +808,8 @@ first doc something a static tutorial never has — a reason to come back.
 - Do not comment on the person's life, mood, or circumstances. The subject is
   the work, not them.
 - Do not end on a `localhost` URL, and do not ask for permission before the
-  page exists. Publish it open and let closing it be their decision.
+  page exists. Publish it private and let opening it up be their decision.
+- Do not turn on the background helper without a yes to the one question in
+  Step 1c, and do not ask that question twice.
 - Do not build a fixture, a template, or a starter repo. This page is written
   fresh each time, by you, from this file.

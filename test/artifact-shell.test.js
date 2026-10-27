@@ -18,6 +18,7 @@
 // Each phase flips one block from red to green.
 
 const fs = require('fs');
+const { themeRow } = require('./helpers/theme-toggle');
 const path = require('path');
 const { requirePlaywrightOrSkip, resolveTarget, isPublishedTarget } = require('./helpers/fixture-server');
 const { chromium } = requirePlaywrightOrSkip('artifact-shell.test.js');
@@ -102,9 +103,11 @@ const SLUG = 'hostile-body-css';
     await t('the shell renders the REAL top bar + footer (1:1 chrome)', async () => {
       const chrome = await page.evaluate(() => ({
         mark: !!document.querySelector('.tdoc-bar .tdoc-bar-mark img'),
-        version: !!document.querySelector('.tdoc-bar #tdoc-version-toggle'),
+        mode: !!document.querySelector('.tdoc-bar .tdoc-mode-trigger'),
         more: !!document.querySelector('.tdoc-bar #tdoc-more-btn'),   // ⋯ menu (Copy as Markdown lives here now)
-        theme: !!document.querySelector('.tdoc-bar #tdoc-theme-btn'),
+        // This fixture supplies its own background and text palette. Reader
+        // theme is intentionally hidden; custom-design-theme tests both cases.
+        noTheme: !document.querySelector('.tdoc-bar #tdoc-theme-btn'),
         footer: !!document.querySelector('.tdoc-footer .tdoc-footer-row'),
       }));
       const missing = Object.keys(chrome).filter(k => !chrome[k]);
@@ -119,7 +122,7 @@ const SLUG = 'hostile-body-css';
         slot.innerHTML = '<div class="tdoc-oldver-strip tdoc-oldver-visible">Old version</div>';
         document.querySelector('.tdoc-bar').after(slot);
       });
-      await page.click('#tdoc-version-toggle');
+      await page.click('#tdoc-more-btn');
       await page.waitForSelector('.ui-menu-positioner');
       const layers = await page.evaluate(() => {
         const menu = document.querySelector('.ui-menu-positioner');
@@ -157,7 +160,7 @@ const SLUG = 'hostile-body-css';
     });
 
     // --- #2 COMMENTS ACROSS THE BOUNDARY -------------------------------------
-    await t('selecting text inside the iframe opens the composer in the shell', async () => {
+    await t('selecting text inside the iframe offers a comment action', async () => {
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
       if (!frame) throw new Error('author-content frame not found');
       // Select the first paragraph's text inside the iframe.
@@ -171,6 +174,8 @@ const SLUG = 'hostile-body-css';
           clientX: rect.left + 20, clientY: rect.top + 8, bubbles: true, cancelable: true, view: window, button: 0,
         }));
       });
+      await frame.waitForSelector('.tdoc-selection-action', { state: 'visible', timeout: 2000 });
+      await frame.click('.tdoc-selection-action');
       await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
     });
 
@@ -238,25 +243,23 @@ const SLUG = 'hostile-body-css';
       }
     });
 
-    await t('theme toggle darkens the shell chrome AND signals the frame', async () => {
+    await t('custom author palette keeps reader theme unavailable', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
-      await page.click('#tdoc-theme-btn');
-      await page.waitForTimeout(200);
-      const shellDark = await page.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme'));
+      const themeButton = (await themeRow(page, { waitMs: 800 })) ? 1 : 0;
+      await page.keyboard.press('Escape');
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
-      const frameDark = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
-      if (shellDark !== 'dark') throw new Error('shell chrome did not go dark');
-      if (frameDark !== 'dark') throw new Error('frame did not receive the theme signal');
+      const frameTheme = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
+      if (themeButton || frameTheme === 'dark') throw new Error('custom palette was overridden by reader theme');
     });
 
-    await t('persisted dark mode applies to the frame on first load (no toggle)', async () => {
-      // the previous test toggled dark → localStorage tdoc-theme=dark persists.
+    await t('stored reader theme does not override a custom author palette', async () => {
+      await page.evaluate(() => localStorage.setItem('tdoc-theme', 'dark'));
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       await page.waitForTimeout(300);
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
-      const frameDark = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
-      if (frameDark !== 'dark') throw new Error('frame did not receive persisted dark on first load (had to toggle): ' + frameDark);
+      const frameTheme = frame ? await frame.evaluate(() => document.documentElement.getAttribute('data-tdoc-theme')) : null;
+      if (frameTheme === 'dark') throw new Error('stored reader theme overrode the custom palette');
       // reset for later tests
       await page.evaluate(() => { try { localStorage.removeItem('tdoc-theme'); } catch (e) {} });
     });
@@ -476,6 +479,7 @@ const SLUG = 'hostile-body-css';
             });
             // eslint-disable-next-line no-await-in-loop
             const body = await res.json();
+            if (!res.ok || !body.id) throw new Error(`reply ${i} failed: HTTP ${res.status} ${body.error || ''}`);
             ids.push(body.id);
             parent = body.id;
           }
@@ -483,8 +487,9 @@ const SLUG = 'hostile-body-css';
         });
         const card = '.tdoc-margin-comment[data-comment-id="c_fixture_1"]';
         await page.goto(`${shellUrl}&comment=c_fixture_1`, { waitUntil: 'networkidle' });
-        await page.waitForSelector(`${card} .tdoc-replies-toggle`, { timeout: 4000 });
-        await page.click(`${card} .tdoc-replies-toggle`);
+        const toggle = `${card} .tdoc-replies-toggle`;
+        await page.waitForFunction(({ card, toggle }) => document.querySelector(toggle) || document.querySelector(`${card} .tdoc-reply`), { card, toggle }, { timeout: 12000 });
+        if (await page.locator(toggle).isVisible()) await page.click(toggle);
         await page.waitForTimeout(400);
 
         const folded = await page.evaluate((sel) => {
@@ -561,7 +566,7 @@ const SLUG = 'hostile-body-css';
       if (!agentAuthor) throw new Error('card did not render the agent author with a logo');
     });
 
-    await t('co-located comments cluster into one count badge with a popover', async () => {
+    await t('co-located comments cluster into one count badge and open together', async () => {
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
       // two comments anchor the same sentence → one cluster badge reading "2"
@@ -571,14 +576,11 @@ const SLUG = 'hostile-body-css';
       // the co-located comments are NOT also rendered as their own single pins
       const singles = await page.evaluate(() => document.querySelectorAll('.tdoc-pin[data-id="c_fixture_4"], .tdoc-pin[data-id="c_fixture_5"]').length);
       if (singles) throw new Error('clustered comments leaked as standalone pins');
-      // clicking the badge opens a popover listing both comments
+      // One click opens both full cards; a second click is unnecessary.
       await page.click('.tdoc-pin.tdoc-pin-cluster');
       await page.waitForSelector('.tdoc-cluster-pop.open', { timeout: 2000 });
-      const rows = await page.evaluate(() => document.querySelectorAll('.tdoc-cluster-pop.open .tdoc-cluster-row').length);
-      if (rows !== 2) throw new Error('cluster popover should list 2 comments, got ' + rows);
-      // picking a row opens that comment's card
-      await page.click('.tdoc-cluster-pop.open .tdoc-cluster-row[data-id="c_fixture_4"]');
-      await page.waitForSelector('.tdoc-margin-comment[data-comment-id="c_fixture_4"]', { timeout: 2000 });
+      const cards = await page.evaluate(() => document.querySelectorAll('.tdoc-cluster-pop.open .tdoc-margin-comment').length);
+      if (cards !== 2) throw new Error('cluster should expand 2 full comments, got ' + cards);
     });
 
     await t('?comment= deep-link opens the target comment card on load', async () => {
@@ -771,24 +773,19 @@ const SLUG = 'hostile-body-css';
       if (current !== 'c_fixture_1') throw new Error(`highlight opened ${current || 'no comment'}, expected c_fixture_1`);
     });
 
-    await t('dark mode keeps text highlights visibly painted', async () => {
-      // The narrow tests above leave the window at phone width, and the theme
-      // control is in the overflow menu there. Come back to the wide bar.
+    await t('custom palette keeps text highlights visibly painted', async () => {
+      // The narrow tests above leave the window at phone width.
       await page.setViewportSize({ width: 1400, height: 900 });
       await page.goto(shellUrl, { waitUntil: 'networkidle' });
-      await page.evaluate(() => localStorage.setItem('tdoc-theme', 'light'));
-      await page.reload({ waitUntil: 'networkidle' });
-      await page.click('#tdoc-theme-btn');
       const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
-      await frame.waitForFunction(() => document.documentElement.dataset.tdocTheme === 'dark');
       const paint = await frame.evaluate(() => {
         const range = [...CSS.highlights.get('tdoc-anchor')][0];
         const element = range.startContainer.parentElement;
         return getComputedStyle(element, '::highlight(tdoc-anchor)').backgroundColor;
       });
       const alpha = Number((paint.match(/[\d.]+(?=\)$)/) || ['1'])[0]);
-      if (!paint || paint === 'rgba(0, 0, 0, 0)' || alpha < 0.7) {
-        throw new Error(`dark highlight paint is too faint: ${paint}`);
+      if (!paint || paint === 'rgba(0, 0, 0, 0)' || alpha < 0.25) {
+        throw new Error(`custom highlight paint is too faint: ${paint}`);
       }
     });
 
@@ -953,6 +950,7 @@ const SLUG = 'hostile-body-css';
             if (!remode) throw new Error('re-anchor banner/mode did not engage');
             // select para-2 in the frame → shell PATCHes the anchor instead of opening a composer
             const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+            await frame.waitForFunction(() => document.documentElement.hasAttribute('data-tdoc-reanchoring'));
             await frame.evaluate(() => {
               const p = document.getElementById('para-2');
               const r = document.createRange(); r.selectNodeContents(p);

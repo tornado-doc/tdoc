@@ -46,9 +46,13 @@ vm.runInContext([
   // email-only identity can own its own words.
   sliceFn(workerSrc, 'normalizeEmail'),
   sliceFn(workerSrc, 'sessionPrincipal'),
+  sliceFn(workerSrc, 'sessionAccountIds'),
+  sliceFn(workerSrc, 'sessionOwnsAccount'),
   sliceFn(workerSrc, 'actorKey'),
+  sliceFn(workerSrc, 'actorKeys'),
   sliceFn(workerSrc, 'hostedGithubLogin'),
   sliceFn(workerSrc, 'isOwnerSession'),
+  sliceFn(workerSrc, 'tokenScopeAllows'),
   sliceFn(workerSrc, 'isDocOwnerSession'),
   sliceFn(workerSrc, 'canMutate'),
   sliceFn(workerSrc, 'isRecordAuthor'),
@@ -260,14 +264,17 @@ const cardSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'docu
 const layerSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'comment-layer.jsx'), 'utf8');
 const shellSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document-shell.jsx'), 'utf8');
 
-// True when `needle` sits inside a `{canMutate ? ... : null}` block.
+// True when `needle` sits inside a conditional whose first gate is canMutate.
+// The condition can impose further restrictions, such as requiring an anchor.
 function gatedByCanMutate(src, needle) {
   const at = src.indexOf(needle);
   if (at === -1) throw new Error(`${needle} not found in comment-card.jsx`);
-  const open = src.lastIndexOf('{canMutate ? (', at);
+  const open = src.lastIndexOf('{canMutate', at);
   if (open === -1) return false;
+  const conditionEnd = src.indexOf('? (', open);
   const close = src.indexOf(') : null}', open);
-  return close !== -1 && close > at;
+  return conditionEnd !== -1 && conditionEnd < at && !src.slice(open, conditionEnd).includes('}')
+    && close !== -1 && close > at;
 }
 
 // The condition guarding EVERY occurrence of `needle`, in source order. A
@@ -290,7 +297,7 @@ t('comment card derives the mutate gate from the author login or doc owner', () 
   assert(decl.includes('isOwner'), 'mayMutate ignores the doc owner');
   assert(decl.includes('item.author?.login') && decl.includes('currentUser'),
     'mayMutate does not compare the author to the signed-in viewer');
-  assert(cardSrc.includes('const canMutate = mayMutate(comment, currentUser, isOwner);'),
+  assert(cardSrc.includes('const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);'),
     'the root comment no longer runs through mayMutate');
 });
 t('comment card renders delete for the author, and for the owner only on an agent record', () => {
@@ -332,14 +339,20 @@ t('the re-anchor gate is the only thing left that the doc owner unlocks', () => 
 });
 t('comment card renders the re-anchor button only for the author or the doc owner', () => {
   assert(gatedByCanMutate(cardSrc, 'tdoc-reanchor-btn'), 're-anchor action is not gated by canMutate');
+  assert(cardSrc.includes("canMutate && comment.anchor && comment.anchor.kind !== 'document'"),
+    'whole-document comments must not offer re-anchor');
 });
 t('both comment layers forward isOwner to the card', () => {
-  assert(layerSrc.split('isOwner={isOwner}').length === 3,
-    'desktop layer and mobile drawer must both pass isOwner to CommentCard');
+  const cards = [...layerSrc.matchAll(/<CommentCard\b([\s\S]*?)\/>/g)];
+  const sharedList = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'comment-thread-list.jsx'), 'utf8');
+  assert(cards.length === 1 && cards[0][1].includes('isOwner={isOwner}')
+    && layerSrc.includes('cardProps={{') && layerSrc.includes('currentUser, handoffViewer, isOwner, mentionable')
+    && sharedList.includes('<CommentCard') && sharedList.includes('{...cardProps}'),
+  'desktop layer and mobile drawer must both pass isOwner to CommentCard');
 });
 t('the document shell sources isOwner from the boot config', () => {
-  assert(shellSrc.split('isOwner={Boolean(config.isOwner)}').length === 3,
-    'both comment layers must receive config.isOwner');
+  assert(shellSrc.split('isOwner={Boolean(config.isOwner)}').length === 4,
+    'desktop pins, mobile drawer and document section must receive config.isOwner');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
