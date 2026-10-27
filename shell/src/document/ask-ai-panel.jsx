@@ -10,7 +10,7 @@ import { Author, CommentMessageText, ReplyMessage } from './comment-card.jsx';
 export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets, viewer,
   disabledChoices = [], guestAction = null,
   turns, busy, remaining, onAsk, onKeep, onPost, readyCount, onSendReady,
-  activityOpen, onActivityOpen, unreadCount, signInToAsk = false, children }) {
+  activityOpen, onActivityOpen, unreadCount, signInToAsk = false, onConnect = null, children }) {
   const input = useRef(null);
   const [expandedTurnId, setExpandedTurnId] = useState(null);
   useEffect(() => {
@@ -39,7 +39,7 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
             {agentMentionName(selected.target, choices)} <ChevronDown size={12} aria-hidden="true" />
           </button>
         )}>
-          <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={false} showRelevance pinTdocAi
+          <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={signInToAsk} onConnect={onConnect} showRelevance pinTdocAi
             onPick={(target) => onTarget(targets.find((item) => sameTarget(item.target, target))?.key || selected.key)} />
         </AppMenu> : null}
         <button type="submit" aria-label="Send question" disabled={!draft.trim() || busy || !selected || noFreeAnswers}>↑</button>

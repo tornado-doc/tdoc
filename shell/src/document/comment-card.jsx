@@ -256,7 +256,7 @@ function ReplyForm({
       />
       {v4 ? <AgentAskRow ask={ask} hint={agentAskHint(ask)} /> : null}
       <div className="tdoc-reply-form-foot">
-        <span className="hint">
+        <span className="hint tdoc-keyboard-shortcut-hint">
           {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
         </span>
         <div className="tdoc-reply-form-actions">

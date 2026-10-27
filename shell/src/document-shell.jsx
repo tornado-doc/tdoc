@@ -93,6 +93,9 @@ function useNarrowViewport() {
   return narrow;
 }
 
+const COMMENT_SIGNIN_DRAFT_MAX_AGE_MS = 60 * 60 * 1000;
+const commentSignInDraftKey = (config) => `tdoc-comment-signin-draft:${config.slug}:v${config.version}`;
+
 function DocumentFooter({ visible }) {
   return (
     <footer className={`tdoc-footer${visible ? ' tdoc-footer-show' : ''}`}>
@@ -201,6 +204,21 @@ export function DocumentShell({ boot, config }) {
   // Slides presenting: full screen like a visual, but commenting stays on.
   const [presenting, setPresenting] = useState(false);
   const [composer, setComposer] = useState(null);
+  // A visitor writes before signing in. Bring that draft and its quote back
+  // after the auth redirect, so sending never discards the work they just did.
+  useEffect(() => {
+    if (!config.identity || !config.canComment) return;
+    let saved;
+    try {
+      const key = commentSignInDraftKey(config);
+      saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+      sessionStorage.removeItem(key);
+    } catch { return; }
+    if (!saved || !Number.isFinite(saved.at) || Date.now() - saved.at > COMMENT_SIGNIN_DRAFT_MAX_AGE_MS
+      || !saved.selection || (saved.selection.kind && !['text', 'element', 'document'].includes(saved.selection.kind))
+      || typeof saved.text !== 'string') return;
+    setComposer({ ...saved.selection, draftText: saved.text });
+  }, [config.identity, config.canComment, config.slug, config.version]);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -447,13 +465,12 @@ export function DocumentShell({ boot, config }) {
         .finally(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }));
       return;
     }
-    if (!config.canComment) {
+    if (!config.canComment && !config.signInToComment) {
       bridgeRef.current?.({ type: 'tdoc:clearPending' });
-      if (config.signInToComment) signIn();
       return;
     }
     setComposer(selection);
-  }, [comments.moveAnchor, config.canComment, config.signInToComment, signIn]);
+  }, [comments.moveAnchor, config.canComment, config.signInToComment]);
 
   const bridge = useFrameBridge({
     'tdoc:visualState': (message) => setVisualOpen(message.open === true),
@@ -747,6 +764,13 @@ export function DocumentShell({ boot, config }) {
   };
 
   const postComment = async (text, opts = {}) => {
+    // A signed-out reader can select, copy, and write first. Asking to sign
+    // in happens on the action that would actually send their words.
+    if (!config.identity && config.signInToComment) {
+      try { sessionStorage.setItem(commentSignInDraftKey(config), JSON.stringify({ text, selection: composer, at: Date.now() })); } catch {}
+      signIn();
+      return;
+    }
     const selection = composer;
     const target = opts.target || null;
     // Ask only + Only me: nothing is posted; the answer is the asker's alone.
@@ -1536,7 +1560,7 @@ export function DocumentShell({ boot, config }) {
   const openCount = commentArea.openCount;
   const mobileUnread = commentArea.unreadCount > 0;
   const startDocumentComment = (askAi = false) => {
-    if (!config.canComment) { if (config.signInToComment) signIn(); return; }
+    if (!config.canComment && !config.signInToComment) return;
     if (editor.mode === 'edit' && editor.dirty) {
       showToast('Save or discard the draft before commenting', true);
       return;
@@ -1584,6 +1608,12 @@ export function DocumentShell({ boot, config }) {
       disabledChoices={teamGuestsEnabled && config.teamManage?.guest ? (myAgent.state?.disabled_team_agents || []) : []}
       guestAction={guestAction}
       signInToAsk={signedOutAsk}
+      onConnect={signedOutAsk ? () => {
+        if (askAiDraft.trim()) {
+          try { sessionStorage.setItem(`tdoc-ask-draft:${config.slug}`, askAiDraft); } catch {}
+        }
+        signIn('/start');
+      } : null}
     >{signedOutAsk ? null : <HandoffDetailsPanel
       slug={config.slug}
       open={panelOpen}
@@ -1654,8 +1684,8 @@ export function DocumentShell({ boot, config }) {
   const composerView = composer ? (
     <CommentComposer
       selection={composer}
-      initialText={composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices[0]
-        ? `@${AGENT_TAG_JOINER}${agentMentionName(agentChoices[0], agentChoices)} ` : ''}
+      initialText={composer.draftText || (composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices[0]
+        ? `@${AGENT_TAG_JOINER}${agentMentionName(agentChoices[0], agentChoices)} ` : '')}
       mentionable={mentionable}
       demo={!!config.demoComments}
       canSendToAgent={canSendToAgent}
@@ -1719,7 +1749,6 @@ export function DocumentShell({ boot, config }) {
               canComment={config.canComment}
               canEdit={config.canEdit}
               signInToComment={Boolean(config.signInToComment)}
-              onSignIn={() => signIn()}
               onChange={(value) => editor.changeMode(value)}
             />
             <DocumentPrimaryAction

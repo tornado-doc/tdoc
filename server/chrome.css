@@ -465,11 +465,7 @@
   .tdoc-pin.tdoc-pin-deleted:hover { opacity: 1; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
   .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
-  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster { width: 42px; background: transparent; border: 0; box-shadow: none; }
-  .tdoc-document-pin-faces { display: flex; align-items: center; padding-left: 2px; }
-  .tdoc-document-pin-faces img, .tdoc-document-pin-faces .tdoc-pin-anon { position: relative; flex: 0 0 21px; width: 21px; height: 21px; margin-left: -5px; border: 2px solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 1px 3px rgba(0,0,0,.16); }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
-  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster.tdoc-cluster-allresolved { background: transparent; border: 0; }
   .tdoc-pin.tdoc-pin-cluster::after { content: none; }
 
   /* Floating card: when open via a pin, it sits to the left of the gutter and
@@ -699,6 +695,10 @@
   .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
   .tdoc-popup .tdoc-composer-foot-actions { display: flex; align-items: center; gap: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
+  @media (max-width: 700px) {
+    .tdoc-popup .tdoc-keyboard-shortcut-hint,
+    .tdoc-reply-form-foot .tdoc-keyboard-shortcut-hint { display: none; }
+  }
   .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
   .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
   /* Secondary action on the dark composer — same shape as Comment, quieter fill. */
@@ -868,7 +868,11 @@
      it can also kick in when the comment column would crowd the article. */
   body.tdoc-narrow .tdoc-drawer-viewport { position: fixed; inset: 0; height: 100dvh; z-index: 1000001; }
   body.tdoc-narrow .tdoc-drawer-backdrop { position: fixed; inset: 0; z-index: 1000000; background: rgba(0,0,0,.28); }
-  body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px max(24px, env(safe-area-inset-bottom)); box-sizing: border-box; z-index: 999998; }
+  body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px calc(max(24px, env(safe-area-inset-bottom)) + var(--drawer-snap-point-offset, 0px)); box-sizing: border-box; z-index: 999998; }
+  /* The popup is 100dvh tall and moved down by the snap offset (30% at the
+     0.7 snap), so without the offset as bottom padding the scroll area ran
+     past the screen and the end of a long Ask AI answer (and its Keep / Post
+     buttons) could never be scrolled into view. */
   body.tdoc-narrow #tdoc-comment-layer[data-starting-style], body.tdoc-narrow #tdoc-comment-layer[data-ending-style] { transform: translateY(100%); }
   /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
      tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on

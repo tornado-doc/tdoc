@@ -188,7 +188,7 @@ export function CommentComposer({
         <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
       </div>
       <div><MentionField
-        autoFocus={viewport.width > 700}
+        autoFocus
         fieldRef={field}
         placeholder={demo
           ? 'What should change? Type a GitHub @ — or @email'
@@ -216,7 +216,7 @@ export function CommentComposer({
         {target && !agentButtons ? (
           <span className="hint">{agentAskHint(ask)}</span>
         ) : (
-          <span className="hint">
+          <span className={demo ? 'hint' : 'hint tdoc-keyboard-shortcut-hint'}>
             {demo
               ? 'Demo — refresh clears it'
               : (canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ask.choices.length ? '⌘+Enter · ⌘⇧+Enter with @agent' : '⌘+Enter to submit')}
