@@ -18,9 +18,12 @@ const STRIPE = { TDOC_TEAM_FREE_DOCS: '2', STRIPE_SECRET_KEY: 'sk_test_x', STRIP
   const worker = mod.default;
   console.log('team publish vs personal doc quota');
   const origin = { Origin: 'https://tdoc.dev' };
-  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  // Index bookkeeping runs in waitUntil; let it finish so counts read it.
+  const pending = [];
+  const ctx = { waitUntil(p) { pending.push(p); }, passThroughOnException() {} };
   async function call(env, path, opts) {
     const r = await worker.fetch(req(path, opts), env, ctx);
+    while (pending.length) await Promise.allSettled(pending.splice(0));
     const text = await r.text();
     let body = null; try { body = JSON.parse(text); } catch {}
     return { status: r.status, body, text };
@@ -56,6 +59,16 @@ const STRIPE = { TDOC_TEAM_FREE_DOCS: '2', STRIPE_SECRET_KEY: 'sk_test_x', STRIP
     }
     // Later versions of the team doc publish as before.
     assert((await upload(env, julie.token, 'for-crew-name', { version: 2, team: crew.name })).status === 200, 'v2 refused');
+  });
+
+  await t('a doc moved into a team no longer counts toward My docs (Julie saw 200/200 with 65 personal docs)', async () => {
+    const { env, julie, crew } = await setup();
+    // At the cap of 1: a second personal doc is refused.
+    assert((await upload(env, julie.token, 'second')).status === 403, 'second personal doc should be refused at the cap');
+    const mv = await call(env, '/api/team/move', { method: 'POST', token: julie.token, body: { team: crew.id, slugs: ['personal-1'] } });
+    assert(mv.status === 200 && metaOf(env, 'personal-1').workspace_id === crew.id, `move ${mv.status} ${mv.text}`);
+    const r = await upload(env, julie.token, 'second');
+    assert(r.status === 200 && !metaOf(env, 'second').workspace_id, `after the move: ${r.status} ${r.text}`);
   });
 
   await t('the default team (team_default) is still the CLI\'s to apply for an account token', async () => {
