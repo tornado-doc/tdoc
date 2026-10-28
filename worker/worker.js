@@ -8320,13 +8320,22 @@ async function countHostedDocs(env, accountId, stopAt) {
   if ((await unbuiltDocIndexes(env, [facet])).length) {
     const rows = await scanDocIndex(env);
     await buildDocIndexes(env, [{ facet, matches: personalDocMatcher({ accountIds: group.ids, actorKeys: group.actor_keys }) }], rows);
-    records = rows.map((r) => r.idx);
+    records = rows.map((r) => ({ slug: r.slug, idx: r.idx }));
   } else {
-    records = (await listDocIndex(env, facet)).map((m) => m.idx);
+    records = await listDocIndex(env, facet);
   }
+  // A team doc is the team's (its plan counts it), even when this account
+  // wrote it. The personal marker of a doc moved into a team can still read
+  // w:"" (a move adds the team marker and leaves the personal one as it was),
+  // so the team markers are the authority: Julie, 2026-10-27, saw 200/200
+  // with 65 docs in My docs and ~140 she had moved into teams.
+  const teamIds = new Set();
+  for (const id of group.ids) for (const t of await loadAccountTeamIds(env, id)) teamIds.add(t);
+  const inTeam = new Set();
+  for (const t of teamIds) for (const m of await listDocIndex(env, `w:${t}`)) inTeam.add(m.slug);
   let n = 0;
-  for (const idx of records) {
-    if (!owned(idx)) continue;
+  for (const { slug, idx } of records) {
+    if (!owned(idx) || idx.w || inTeam.has(slug)) continue;
     n++;
     if (stopAt && n >= stopAt) return n;
   }
