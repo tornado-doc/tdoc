@@ -889,6 +889,25 @@
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-answer-body .text,
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-question .text { font-size: 15px; line-height: 1.55; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-panel > h2 { display: none; }
+  /* Phone Ask AI tab: the Send to agent status lines and Agent activity are
+     read at arm's length, so they get the drawer's reading sizes (13-15px)
+     instead of the desktop popover's 11px. */
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-only-hint { margin-top: 7px; font-size: 13px; line-height: 1.4; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-send-result { font-size: 14px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-activity-toggle { min-height: 44px; align-items: center; margin-top: 12px; padding-top: 0; font-size: 14px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-activity { margin-top: 4px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-section-title { font-size: 14px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-mark-all { font-size: 13px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-list { max-height: none; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-row { padding: 11px 2px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-preview { font-size: 15px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-heading { align-items: flex-start; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-state { font-size: 12px; margin-top: 1px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-meta { gap: 14px; margin-top: 4px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-recipient,
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-expand { font-size: 13px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-history { font-size: 13px; line-height: 1.55; margin-top: 6px; padding-left: 10px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-reply { font-size: 14px; }
   body.tdoc-narrow .tdoc-fab .tdoc-fab-ai { margin-left: -4px; margin-top: -10px; }
   body.tdoc-narrow .tdoc-drawer-empty-actions button.primary { background: var(--td-accent, #1652f0); color: #fff; border-color: var(--td-accent, #1652f0); }
   body.tdoc-narrow .tdoc-drawer-empty .tdoc-link-btn { border: 0; background: transparent; color: var(--td-muted); text-decoration: underline; text-underline-offset: 3px; }
@@ -1115,10 +1134,15 @@
   .tdoc-ask-activity-toggle { display: flex; width: 100%; justify-content: space-between; margin-top: 14px; padding: 10px 0 0; border: 0; border-top: 1px solid var(--td-line, #e8e7e3); background: transparent; color: var(--td-muted, #6b6a66); font: 650 12px Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
   .tdoc-ask-activity-toggle span:last-child { color: var(--td-accent, #1652f0); }
   .tdoc-ask-activity { margin-top: 12px; }
+  /* Send to agent's delivery line inside Ask AI: the Send to agent dialog's
+     own result style (green when sent, danger when not). */
+  .tdoc-ask-panel .tdoc-send-result { margin: 8px 0 0; color: var(--td-muted, #6b6a66); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+  .tdoc-ask-panel .tdoc-send-result.is-ok { color: #1a7340; font-weight: 600; }
+  .tdoc-ask-panel .tdoc-send-result.tdoc-notify-error { color: var(--td-danger); }
   .tdoc-handoff-details-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-  .tdoc-handoff-popover .tdoc-handoff-details-section-title { margin: 0; font-size: 13px; font-weight: 650; }
-  .tdoc-handoff-popover button.tdoc-handoff-details-mark-all { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--td-accent, #1652f0); font: inherit; font-size: 11px; cursor: pointer; }
-  .tdoc-handoff-popover button.tdoc-handoff-details-mark-all:hover { text-decoration: underline; }
+  .tdoc-handoff-details .tdoc-handoff-details-section-title { margin: 0; font-size: 13px; font-weight: 650; }
+  .tdoc-handoff-details button.tdoc-handoff-details-mark-all { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--td-accent, #1652f0); font: inherit; font-size: 11px; cursor: pointer; }
+  .tdoc-handoff-details button.tdoc-handoff-details-mark-all:hover { text-decoration: underline; }
   .tdoc-handoff-details-list {
     list-style: none;
     margin: 0;
@@ -1141,7 +1165,7 @@
   .tdoc-handoff-details-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .tdoc-handoff-details-meta { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
   .tdoc-handoff-details-recipient { color: #888; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tdoc-handoff-popover button.tdoc-handoff-details-jump {
+  .tdoc-handoff-details button.tdoc-handoff-details-jump {
     flex: 1 1 auto;
     min-width: 0;
     appearance: none;
@@ -1230,7 +1254,7 @@
     padding: 0;
   }
   .tdoc-handoff-details-state .tdoc-handoff-details-resend:disabled { opacity: .55; cursor: not-allowed; }
-  .tdoc-handoff-popover button.tdoc-handoff-details-expand { border: 0; background: transparent; color: var(--td-accent, #1652f0); padding: 0; min-height: 0; font: inherit; font-size: 11px; cursor: pointer; }
+  .tdoc-handoff-details button.tdoc-handoff-details-expand { border: 0; background: transparent; color: var(--td-accent, #1652f0); padding: 0; min-height: 0; font: inherit; font-size: 11px; cursor: pointer; }
   .tdoc-handoff-details-history { color: #5f6368; font-size: 11px; line-height: 1.5; padding: 5px 0 0 8px; border-left: 2px solid #e8eeff; }
   .tdoc-handoff-details-reply-form { display: flex; gap: 6px; margin-top: 8px; }
   .tdoc-handoff-details-reply-form input { min-width: 0; flex: 1; border: 1px solid #c9d7f5; border-radius: 7px; padding: 7px; font: 12px Inter, system-ui, sans-serif; }

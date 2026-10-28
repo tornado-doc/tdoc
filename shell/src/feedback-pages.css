@@ -93,6 +93,7 @@
 .tdoc-feedback-page kbd { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; background: #f1f3f4;
   border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem; }
 .tdoc-feedback-page .device-note { margin: 0 0 1rem; font-size: .92rem; }
+.tdoc-feedback-page .chrome-hint { margin: 0 0 1rem; color: var(--fb-muted); font-size: .92rem; }
 .tdoc-feedback-page .phone-only { display: none; margin: 0 0 1.25rem; padding: .85rem 1rem; border-radius: 12px;
   background: var(--fb-tint); border: 1px solid color-mix(in srgb, var(--td-accent) 28%, white);
   font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; }
@@ -101,17 +102,10 @@
   border-radius: 12px; background: #fafafa; }
 .tdoc-feedback-page .script-path h2 { margin-top: 0; }
 /* A code snippet with its Copy button: one grey box, the code scrolls, the
-   button stays put. Same outlined button as the setup gate's prompt copy. */
+   button (the shared CopyPromptButton) stays put. */
 .tdoc-feedback-page .code-copy { display: flex; align-items: center; gap: .5rem; background: #f3f3f6; border-radius: 6px;
   padding-right: .5rem; }
 .tdoc-feedback-page .code-copy pre { flex: 1 1 auto; min-width: 0; margin: 0; background: transparent; }
-.tdoc-feedback-page .code-copy .copy-btn { flex: 0 0 auto; height: 30px; padding: 0 14px; border: 1px solid var(--td-accent);
-  border-radius: 9px; background: #fff; color: var(--td-accent); cursor: pointer;
-  font: 600 13px -apple-system, system-ui, sans-serif; letter-spacing: -0.01em;
-  transition: background .12s, color .12s, border-color .12s; }
-.tdoc-feedback-page .code-copy .copy-btn:hover { background: var(--fb-tint); }
-.tdoc-feedback-page .code-copy .copy-btn.copied { border-color: #1a7340; color: #1a7340; background: #fff; }
-.tdoc-feedback-page .code-copy .copy-btn.failed { border-color: #b3261e; color: #b3261e; background: #fff; }
 @media (max-width: 720px) {
   .tdoc-feedback-page .phone-only { display: block; }
   .tdoc-feedback-page .install-desktop { display: none !important; }

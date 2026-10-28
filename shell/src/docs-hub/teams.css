@@ -105,6 +105,20 @@
 .tm-settings-head h2 { margin: 0; font-size: 16px; }
 .tm-settings-head p { margin: 4px 0 0; color: var(--td-muted); font-size: 13px; }
 .tm-settings-head > span { color: var(--td-muted); font-size: 12px; }
+/* Members, Team agents and Data backup are dialogs drawn inline in a card;
+   chrome.css styles their sections, labels and hints only inside .tdoc-modal,
+   so in a card they fell back to 15px body text. Same scale as the card head:
+   a section label, then muted 12-13px hints and status. */
+.tm-settings-card .manage-section { margin: 18px 0 0; }
+.tm-settings-card .manage-section:first-of-type { margin-top: 0; }
+.tm-settings-card .manage-section > label.field,
+.tm-settings-card .tm-team-agents-head > label.field { display: block; margin: 0 0 6px; color: var(--td-ink); font-size: 14px; font-weight: 650; }
+.tm-settings-card .tm-team-agents-head { margin-bottom: 4px; }
+.tm-settings-card .tm-team-agents-head > label.field { margin: 0; }
+.tm-settings-card .manage-hint { margin: 6px 0 0; color: var(--td-muted); font-size: 12px; line-height: 1.45; }
+.tm-settings-card .manage-hint b { color: var(--td-ink); font-weight: 600; }
+.tm-settings-card .status { margin: 8px 0 0; color: var(--td-muted); font-size: 13px; line-height: 1.45; }
+.tm-settings-card .empty { margin: 6px 0; padding: 14px; font-size: 13px; }
 .tm-settings-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
 .tm-settings-leave { margin-top: 4px; }
 .tm-settings-links { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -141,11 +155,12 @@
 .tm-backup-sync-action > span { color: var(--td-muted); font-size: 11px; }
 .tm-backup-health .ui-btn.tm-backup-off { color: var(--td-danger, #b42318); }
 .tm-backup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.tm-backup-grid .field { display: grid; gap: 5px; min-width: 0; }
+.tm-backup-grid .field { display: grid; gap: 5px; min-width: 0; color: var(--td-muted); font-size: 13px; font-weight: 600; }
 .tm-backup-grid input {
   box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--td-line);
   border-radius: 8px; padding: 8px 10px; background: #fff; color: var(--td-ink); font: inherit;
 }
+.tm-backup-grid .field input { font-size: 14px; font-weight: 400; }
 .tm-backup-grid input:focus { outline: 2px solid var(--td-accent-tint); border-color: var(--td-accent); }
 .tm-backup-wide { grid-column: 1 / -1; }
 @media (max-width: 560px) {
@@ -200,7 +215,7 @@
 /* Phone: the actions go under the name, as on guest rows. */
 @media (max-width: 600px) {
   .tm-agent-row { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; }
-  .tm-agent-row .tm-person-right { grid-column: 2; justify-content: flex-start; }
+  .tm-agent-row .tm-person-right { grid-column: 2; justify-content: flex-start; margin: -6px 0 0 -4px; }
   .tm-agent-row .tm-text-btn { min-height: 44px; }
 }
 
