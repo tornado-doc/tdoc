@@ -64,6 +64,7 @@ import { useDocumentEditor } from './hooks/use-document-editor.js';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
+import { ConnectAiAppsStrip } from './connect-ai-apps.jsx';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
@@ -1835,6 +1836,9 @@ export function DocumentShell({ boot, config }) {
         latestUrl: `/d/${encodeURIComponent(config.slug)}/v/${liveLatest}`,
         fresh: true,
       } : null)} />
+
+      {/* /start: the no-terminal way in (remote MCP), behind remoteMcp. */}
+      {config.onboarding && config.slug === 'tdoc-start' && editor.mode !== 'edit' ? <ConnectAiAppsStrip /> : null}
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>

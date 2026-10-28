@@ -10,6 +10,7 @@ import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { ConnectorsBody } from './connectors-page.jsx';
 import { DevicesBody } from './tokens-page.jsx';
+import { ConnectAiAppsSection } from './connect-ai-apps.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
@@ -470,6 +471,7 @@ function AccountSettingsPane({ identity, profile }) {
         </a>
       </section>
       <SignInMethodsCard />
+      <ConnectAiAppsSection className="tm-settings-card" />
       <section className="tm-settings-card" id="agents">
         <div className="tm-settings-head"><div><h2>Agents</h2><p>Connect Raft, Claude Code, Codex, or a webhook for this workspace.</p></div></div>
         <ConnectorsBody returnTo="/me?view=settings#agents" />
