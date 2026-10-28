@@ -108,7 +108,7 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
 
   return (
     <>
-        <p className="muted" style={{ marginTop: 0 }}>
+        <p className="muted tdoc-conn-intro">
           {team ? `Only workspace admins can send ${team.name}'s comments to the agents connected here.` : "Each doc's comments go to the agent you last picked for it in Send to agent, or else the agent that last worked on it. Docs with neither go to your default agent."}
         </p>
         {notice ? <p className="muted" role="status">{notice}</p> : null}
@@ -217,7 +217,7 @@ bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # only prints a LaunchAgent p
                       <span>Name <em>optional</em></span>
                       <input type="text" placeholder="My bot" value={hookName} onChange={(e) => setHookName(e.target.value)} maxLength={60} />
                     </label>
-                    <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || !hookUrl}>Add webhook</button>
+                    <AppButton type="submit" variant="primary" className="primary" disabled={busy || !hookUrl}>Add webhook</AppButton>
                   </form>
                   <details className="tdoc-conn-alt">
                     <summary>What tdoc sends</summary>

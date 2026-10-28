@@ -223,6 +223,29 @@ async function startServer(worker, env) {
       await panel.locator('.tdoc-ask-ready-count').getByText('No comments ready to send').waitFor({ timeout: 10000 });
       if (!(await panel.getByRole('button', { name: 'Send', exact: true }).isDisabled())) throw new Error('Send is on with nothing ready');
       await shot(page, 'send-mode-sent-390.png');
+      // Readable on a phone: the delivery line is the dialog's green result,
+      // and Agent activity's rows are styled links at reading size, not the
+      // browser's default bordered buttons running off the drawer.
+      const sentLine = await panel.locator('.tdoc-send-result.is-ok').evaluate((el) => ({ color: getComputedStyle(el).color, size: parseFloat(getComputedStyle(el).fontSize) }));
+      if (sentLine.color !== 'rgb(26, 115, 64)' || sentLine.size < 13) throw new Error(`delivery line: ${JSON.stringify(sentLine)}`);
+      await panel.locator('.tdoc-ask-activity-toggle').click();
+      await panel.locator('.tdoc-handoff-details-row').first().waitFor();
+      await panel.locator('.tdoc-handoff-details-expand').first().click();
+      await panel.locator('.tdoc-handoff-details-history').first().waitFor();
+      const activity = await panel.evaluate((root) => {
+        const cs = (sel) => getComputedStyle(root.querySelector(sel));
+        return {
+          jump: [cs('.tdoc-handoff-details-jump').borderTopWidth, cs('.tdoc-handoff-details-jump').backgroundColor],
+          expand: [cs('.tdoc-handoff-details-expand').borderTopWidth, parseFloat(cs('.tdoc-handoff-details-expand').fontSize)],
+          preview: parseFloat(cs('.tdoc-handoff-details-preview').fontSize),
+          history: parseFloat(cs('.tdoc-handoff-details-history').fontSize),
+          overflow: [...root.querySelectorAll('.tdoc-handoff-details-row')].some((row) => row.scrollWidth > row.clientWidth + 1),
+        };
+      });
+      if (activity.jump[0] !== '0px' || activity.jump[1] !== 'rgba(0, 0, 0, 0)' || activity.expand[0] !== '0px') throw new Error(`Agent activity rows are unstyled buttons: ${JSON.stringify(activity)}`);
+      if (activity.preview < 15 || activity.expand[1] < 13 || activity.history < 13 || activity.overflow) throw new Error(`Agent activity is hard to read on a phone: ${JSON.stringify(activity)}`);
+      await shot(page, 'send-agent-activity-390.png');
+      await panel.locator('.tdoc-ask-activity-toggle').click();
       await modes(panel).getByRole('radio', { name: 'Ask', exact: true }).click();
       const { menu, rows } = await menuRows(page, panel.getByRole('button', { name: 'Who should answer?' }));
       if (rows.filter((r) => r.includes('OpenTag')).length !== 1) throw new Error(`phone Ask picker rows: ${JSON.stringify(rows)}`);

@@ -3,7 +3,7 @@
 // the shell had been borrowing its UI font from that sheet. The shell now sets
 // its own (shell.css). This walks the real shell on the doc page (desktop and
 // phone: bar, open card, composer, ⋯ menu, agent picker, drawer, Ask AI tab)
-// and on /me and team settings, and fails if any visible control (button,
+// and on /me, account settings, team settings (each tab) and /feedback, and fails if any visible control (button,
 // tab, radio, menu item, input) computes to a serif face. The author document
 // lives in an iframe and is not checked.
 const fs = require('fs');
@@ -79,6 +79,14 @@ function serifControls(page) {
   const browser = await chromium.launch({ headless: true });
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (e) { failed++; console.log(`  ✗ ${name}\n    ${e.message}`); } };
+  // Settings cards: hints, notes and status lines are the muted card-hint
+  // size, not body text (they fell back to 15px ink outside .tdoc-modal).
+  const hintsAreHints = async (page, where) => {
+    const big = await page.evaluate(() => [...document.querySelectorAll('.tm-settings-card .manage-hint, .tm-settings-card .muted, .tm-settings-card .status')]
+      .filter((el) => el.getBoundingClientRect().height && (parseFloat(getComputedStyle(el).fontSize) > 13.5 || getComputedStyle(el).color === getComputedStyle(document.querySelector('.tm-settings-head h2')).color))
+      .map((el) => `${el.className} "${el.textContent.trim().slice(0, 30)}" ${getComputedStyle(el).fontSize}`));
+    if (big.length) throw new Error(`${where}: hints read as body text: ${big.join('; ')}`);
+  };
   const check = async (page, where) => {
     const bad = await serifControls(page);
     if (bad.length) throw new Error(`${where}: serif controls: ${bad.join('; ')}`);
@@ -110,6 +118,13 @@ function serifControls(page) {
           await page.getByRole('radiogroup', { name: 'Comments or Ask AI' }).getByRole('radio', { name: /Ask AI/ }).click();
           await page.waitForTimeout(300);
           await check(page, 'Ask AI tab');
+          // Agent activity inside the Ask AI tab (rows, Details, Mark all as read).
+          const activity = page.locator('#tdoc-comment-layer .tdoc-ask-activity-toggle');
+          if (await activity.count()) {
+            await activity.click();
+            await page.waitForTimeout(300);
+            await check(page, 'Agent activity');
+          }
           await page.keyboard.press('Escape');
         } else {
           await page.locator('button.tdoc-pin').first().click();
@@ -151,14 +166,33 @@ function serifControls(page) {
         await context.close();
       });
 
-      await t(`${label}: My docs and team settings`, async () => {
+      await t(`${label}: My docs, account and team settings (Members, Guests, Agents), /feedback`, async () => {
         const { context, page } = await open('/me');
         await page.locator('main').waitFor();
         await page.waitForTimeout(500);
         await check(page, '/me');
+        await page.goto(`${base}/me?view=settings`);
+        await page.locator('.tm-settings').waitFor();
+        await page.waitForTimeout(500);
+        await check(page, 'account settings');
+        await hintsAreHints(page, 'account settings');
+        if (phone) {
+          // All six views fit a 390px phone: none cut to "Settir".
+          const tabs = await page.locator('.tabs').first().evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+          if (tabs.scroll > tabs.client + 1) throw new Error(`My docs views are cut off: ${JSON.stringify(tabs)}`);
+        }
         await page.goto(`${base}/me?team=${team.id}&view=settings`);
         await page.locator('.tm-settings').waitFor();
         await check(page, 'team settings');
+        for (const name of ['Guests', 'Agents']) {
+          await page.getByRole('radiogroup', { name: 'Team settings' }).getByRole('radio', { name }).click();
+          await page.waitForTimeout(400);
+          await check(page, `team settings ${name}`);
+          await hintsAreHints(page, `team settings ${name}`);
+        }
+        await page.goto(`${base}/feedback`);
+        await page.locator('main').waitFor();
+        await check(page, '/feedback');
         await context.close();
       });
     }
