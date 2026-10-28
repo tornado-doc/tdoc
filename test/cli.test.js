@@ -1216,6 +1216,29 @@ t('tdoc-agent-reply still exits 0 when the reply is accepted', () => {
   }
 });
 
+t('tdoc-agent-reply says when the server recorded "applied" as an answer', () => {
+  const bin = path.join(BIN, 'tdoc-agent-reply');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-reply-home-'));
+  const stub = startStub(
+    `(q,s)=>{` +
+    `s.writeHead(200,{'content-type':'application/json'});` +
+    `s.end(JSON.stringify({id:'r_1',agent_status:'answered',verdict:'answered',downgraded_from:'applied'}));` +
+    `}`);
+  try {
+    const r = spawnSync(bin, ['--slug', 'tornado-doc', '--parent', 'c_1', '--text', 'It means X.',
+      '--status', 'applied', '--applied-in', '2'], {
+      env: { ...process.env, HOME: home, TDOC_PORT: String(stub.port) },
+      encoding: 'utf8', timeout: 20000,
+    });
+    assert(r.status === 0, `downgraded reply exited ${r.status}; stderr=${r.stderr}`);
+    const notes = r.stderr.split('\n').filter((l) => /recorded as answered, not applied/.test(l));
+    assert(notes.length === 1, `expected one note line: ${r.stderr}`);
+  } finally {
+    stub.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 
 // ---- tdoc-agent-reply must resolve the hosted base from .base (#226) ----
 // Before the fix, `platform: "hosted"` fell into the cloudflare branch and read
