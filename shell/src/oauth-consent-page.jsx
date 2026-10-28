@@ -69,7 +69,7 @@ export function OAuthConsentPage({ boot }) {
       <TopBar identity={identity} authConfigured={Boolean(boot.oidcAuth || boot.authConfigured)} onSignIn={signIn} />
       <main className="tdoc-status-page tdoc-activate-page tdoc-oauth-consent">
         <div className={`tdoc-activate-stack${!identity ? ' tdoc-activate-signin' : ''}`}>
-          <h1>Allow {client.name || 'this app'} to use tdoc</h1>
+          <h1>Allow {client.name || 'this app'}{client.redirect_host ? ` (${client.redirect_host})` : ''} to use tdoc</h1>
           {!identity ? (
             <>
               <p>Sign in to tdoc, then allow the app to work with your documents.</p>

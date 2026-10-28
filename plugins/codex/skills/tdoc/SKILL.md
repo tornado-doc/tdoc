@@ -30,8 +30,8 @@ Short answers and edits to files in a repository do not need tdoc.
 
 ## Tools
 
-- `create_doc`: new doc from `title` plus `html` or `markdown`; optional
-  `team` and `visibility`.
+- `create_doc`: new private doc from `title` plus `html` or `markdown`;
+  optional `team`. tdoc picks the address.
 - `update_doc`: publish a new version of an existing doc.
 - `get_doc`: latest HTML or text, with title, version and link.
 - `list_docs`: My docs and team docs.
@@ -53,7 +53,7 @@ Resources `tdoc://authoring/<path>.md` hold the authoring guides: `voice.md`,
 2. Write one self-contained HTML body. Draw charts and diagrams as inline
    SVG. No `<script>`, no external scripts or stylesheets.
 3. Call `create_doc`. Use `team` only when the user asked for a team doc.
-   Leave `visibility` at its default unless the user chose one.
+   The doc starts private; call `share_doc` only if the user asked to share it.
 4. Give the user the link from the result. Do not paste the document into chat.
 
 ## Edit from comments

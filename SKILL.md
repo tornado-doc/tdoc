@@ -40,7 +40,7 @@ authorship, answer-only locks, workspace scope). The mapping:
 
 | CLI | MCP tool |
 |---|---|
-| `tdoc-new` / `tdoc-write` + `tdoc-publish` (new doc) | `create_doc` (title + html or markdown, optional `team`, `visibility`) |
+| `tdoc-new` / `tdoc-write` + `tdoc-publish` (new doc) | `create_doc` (title + html or markdown, optional `team`; starts private) |
 | `tdoc-write --version next` + `tdoc-publish` | `update_doc` (the whole new document) |
 | `tdoc-pull` | `get_comments`, and `get_doc` (format `html` for the source) |
 | `tdoc-agent-reply --status ...` | `reply_to_comment` (same statuses and `applied_in` rules) |

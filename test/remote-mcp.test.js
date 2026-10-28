@@ -143,10 +143,15 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       const r = await register({ redirect_uris: [uri] });
       assert(r.status === 400 && r.body.error === 'invalid_redirect_uri', `${uri} -> ${r.status} ${r.text}`);
     }
-    for (const uri of ['http://127.0.0.1:33418/callback', 'http://localhost:8787/callback', 'http://[::1]:9000/cb', 'https://www.cursor.com/agents/mcp/oauth/callback']) {
+    for (const uri of ['http://127.0.0.1:33418/callback', 'http://[::1]:9000/cb', 'https://www.cursor.com/agents/mcp/oauth/callback']) {
       const r = await register({ redirect_uris: [uri] });
       assert(r.status === 201 && /^mcpc_/.test(r.body.client_id), `${uri} -> ${r.status} ${r.text}`);
     }
+    // localhost resolves by name: refused alone, dropped beside a usable URI.
+    const alone = await register({ redirect_uris: ['http://localhost:8787/callback'] });
+    assert(alone.status === 400 && alone.body.error === 'invalid_redirect_uri', `localhost alone: ${alone.status}`);
+    const cursor = await register({ redirect_uris: ['http://localhost:8787/callback', 'https://www.cursor.com/agents/mcp/oauth/callback'] });
+    assert(cursor.status === 201 && JSON.stringify(cursor.body.redirect_uris) === '["https://www.cursor.com/agents/mcp/oauth/callback"]', cursor.text);
     const noArr = await register({ redirect_uris: 'https://claude.ai/cb' });
     assert(noArr.status === 400, 'string, not array');
     const implicit = await register({ response_types: ['token'] });
@@ -170,6 +175,23 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       const r = await call(authorizeUrl(client, p, { redirect_uri: redirect }), { cookie: julie.cookie });
       assert(r.status === 400 && !r.headers.get('location'), `${redirect} -> ${r.status} ${r.headers.get('location')}`);
     }
+  });
+
+  await t('loopback redirects match on any port, same path; https stays exact', async () => {
+    const client = (await register({ redirect_uris: ['http://127.0.0.1:33418/callback'] })).body;
+    const p = pkce();
+    const q = (redirect) => `/oauth/authorize?${new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: redirect, code_challenge: p.challenge, code_challenge_method: 'S256', state: 's' })}`;
+    assert((await call(q('http://127.0.0.1:50999/callback'), { cookie: julie.cookie })).status === 200, 'another port');
+    assert((await call(q('http://127.0.0.1:50999/other'), { cookie: julie.cookie })).status === 400, 'another path');
+    assert((await call(q('http://[::1]:50999/callback'), { cookie: julie.cookie })).status === 400, 'another host');
+    const cookie = await putSession(env, 'julie');
+    const page = await call(q('http://127.0.0.1:50999/callback'), { cookie });
+    const boot = bootData(page.text, '__TDOC_APP_BOOT__');
+    const ok = await call('/api/oauth/approve', { method: 'POST', cookie, headers: origin, body: { request_id: boot.request_id, csrf: boot.csrf, decision: 'allow' } });
+    const code = new URL(ok.body.redirect).searchParams.get('code');
+    assert(new URL(ok.body.redirect).port === '50999', ok.body.redirect);
+    const wrongPort = await form('/oauth/token', { grant_type: 'authorization_code', code, code_verifier: p.verifier, redirect_uri: 'http://127.0.0.1:33418/callback', client_id: client.client_id });
+    assert(wrongPort.status === 400, 'the token request must repeat the port it was given');
   });
 
   await t('authorize: PKCE S256 required, scope and resource checked; malformed requests get an error page, not a redirect', async () => {
@@ -200,6 +222,35 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(boot.returnTo.startsWith('/oauth/authorize?'), 'returns here after sign-in');
     assert([...env.META.map.keys()].filter((k) => k.startsWith('oauth-req:')).length === before, 'no request record');
     assert(/frame-ancestors 'none'/.test(r.headers.get('content-security-policy') || '') && r.headers.get('x-frame-options') === 'DENY', 'not frameable');
+  });
+
+  await t('metadata-document clients: redirect hosts must be the client_id host; tdoc.dev and user-content hosts refused', async () => {
+    const docs = {
+      'https://app.example.com/oauth/client.json': { redirect_uris: ['https://app.example.com/cb', 'http://127.0.0.1:9/cb'] },
+      'https://evil.example.com/client.json': { redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] },
+      'https://sub.tdoc.dev/client.json': { redirect_uris: ['https://sub.tdoc.dev/cb'] },
+      'https://someone.github.io/client.json': { redirect_uris: ['https://someone.github.io/cb'] },
+    };
+    const realFetch = globalThis.fetch;
+    let fetched = 0;
+    globalThis.fetch = async (u, init) => {
+      const doc = docs[String(u)];
+      if (!doc) return realFetch(u, init);
+      fetched++;
+      return new Response(JSON.stringify({ client_id: String(u), client_name: 'Example', token_endpoint_auth_method: 'none', ...doc }), { headers: { 'Content-Type': 'application/json' } });
+    };
+    try {
+      const page = (id, redirect) => call(`/oauth/authorize?${new URLSearchParams({ response_type: 'code', client_id: id, redirect_uri: redirect, code_challenge: pkce().challenge, code_challenge_method: 'S256' })}`, { cookie: julie.cookie });
+      const ok = await page('https://app.example.com/oauth/client.json', 'https://app.example.com/cb');
+      assert(ok.status === 200, `same-host client: ${ok.status}`);
+      const boot = bootData(ok.text, '__TDOC_APP_BOOT__');
+      assert(boot.client.verified_host === 'app.example.com' && boot.client.name_verified === true, JSON.stringify(boot.client));
+      assert((await page('https://evil.example.com/client.json', 'https://claude.ai/api/mcp/auth_callback')).status === 400, 'a document naming another host\'s redirect');
+      const before = fetched;
+      assert((await page('https://sub.tdoc.dev/client.json', 'https://sub.tdoc.dev/cb')).status === 400, 'this server\'s registrable domain');
+      assert((await page('https://someone.github.io/client.json', 'https://someone.github.io/cb')).status === 400, 'user-content host');
+      assert(fetched === before, 'refused hosts are never fetched');
+    } finally { globalThis.fetch = realFetch; }
   });
 
   // ------------------------------------------------------------- consent
@@ -400,6 +451,46 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(tok.status === 200 && tok.body.access_token && !tok.body.refresh_token, tok.text);
   });
 
+  await t('a revoked grant stays revoked: an edge-stale refresh record cannot bring it back', async () => {
+    const c = await connect(julie);
+    const hash = crypto.createHash('sha256').update(c.access_token).digest('hex');
+    const grantId = JSON.parse(env.META.map.get(`hosted-token:${hash}`)).oauth.grant_id;
+    const snapshot = new Map(env.META.map);
+    const del = await call('/api/me/tokens/revoke', { method: 'POST', cookie: julie.cookie, headers: origin, body: { id: hash } });
+    assert(del.status === 200 && env.META.map.get(`oauth-grant-revoked:${grantId}`), 'tombstone written');
+    // Another edge still sees the records as they were before the revoke.
+    for (const [k, v] of snapshot) if (/^(hosted-token|oauth-grant|oauth-refresh):/.test(k)) env.META.map.set(k, v);
+    assert((await mcp(c.access_token, 'tools/list')).status === 401, 'stale access record refused');
+    const r = await form('/oauth/token', { grant_type: 'refresh_token', refresh_token: c.refresh_token, client_id: c.client.client_id });
+    assert(r.status === 400 && r.body.error === 'invalid_grant', `stale refresh refused: ${r.text}`);
+  });
+
+  await t('refresh rotation and code exchange are atomic: of two racing uses exactly one wins', async () => {
+    const c = await connect(julie);
+    const [a, b] = await Promise.all([1, 2].map(() => form('/oauth/token', { grant_type: 'refresh_token', refresh_token: c.refresh_token, client_id: c.client.client_id })));
+    assert([a, b].filter((r) => r.status === 200).length <= 1, `both refreshes won: ${a.status} ${b.status}`);
+    const client = (await register()).body;
+    const p = pkce();
+    const code = (await consent(julie, client, p)).searchParams.get('code');
+    const key = `oauth-code:${crypto.createHash('sha256').update(code).digest('hex')}`;
+    const rec = env.META.map.get(key);
+    const first = await exchange(client, code, p.verifier);
+    env.META.map.set(key, rec); // an edge that has not seen the delete
+    const second = await exchange(client, code, p.verifier);
+    assert(first.status === 200 && second.status === 400 && second.body.error === 'invalid_grant', `${first.status} ${second.status}`);
+    // The same for a refresh token read from a stale edge.
+    const f = await form('/oauth/token', { grant_type: 'refresh_token', refresh_token: first.body.refresh_token, client_id: client.client_id });
+    assert(f.status === 200, f.text);
+    const rh = crypto.createHash('sha256').update(first.body.refresh_token).digest('hex');
+    const grantId = JSON.parse(env.META.map.get(`hosted-token:${crypto.createHash('sha256').update(f.body.access_token).digest('hex')}`)).oauth.grant_id;
+    const g = JSON.parse(env.META.map.get(`oauth-grant:${grantId}`));
+    env.META.map.set(`oauth-refresh:${rh}`, JSON.stringify({ grant_id: grantId, client_id: client.client_id }));
+    env.META.map.set(`oauth-grant:${grantId}`, JSON.stringify({ ...g, refresh_hash: rh }));
+    const stale = await form('/oauth/token', { grant_type: 'refresh_token', refresh_token: first.body.refresh_token, client_id: client.client_id });
+    assert(stale.status === 400, `a stale-edge replay must lose: ${stale.text}`);
+    assert((await mcp(f.body.access_token, 'tools/list')).status === 401, 'and it ends the grant');
+  });
+
   // ---------------------------------------------------------------- MCP
   await t('legacy clients: initialize negotiates a supported revision, no session id', async () => {
     const r = await mcp(julieConn.access_token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'Cursor', version: '1' } }, { legacy: true });
@@ -437,6 +528,9 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const create = tools.find((x) => x.name === 'create_doc');
     assert(/Voice:/.test(create.description) && /Visuals:/.test(create.description) && /tdoc:\/\/authoring/.test(create.description), 'authoring essentials');
     assert(tools.find((x) => x.name === 'get_doc').annotations.readOnlyHint === true && create.annotations.readOnlyHint === false, 'annotations');
+    assert(tools.find((x) => x.name === 'share_doc').annotations.destructiveHint === true, 'share_doc is destructive: hosts ask before it runs');
+    assert(!('slug' in create.inputSchema.properties) && !('visibility' in create.inputSchema.properties), 'create_doc takes no address and no visibility');
+    for (const name of ['create_doc', 'update_doc', 'share_doc', 'get_doc', 'get_comments']) assert(/untrusted/.test(tools.find((x) => x.name === name).description), `${name} says content is untrusted`);
     const reply = tools.find((x) => x.name === 'reply_to_comment');
     assert(/"applied" only when/.test(reply.description) && /"question" when/.test(reply.description), 'status rules');
     const res = (await mcp(julieConn.access_token, 'resources/list')).body.result.resources;
@@ -452,34 +546,38 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
   });
 
   let julieSlug = null;
+  let roadmapSlug = null;
   await t('create_doc (markdown) publishes to My docs and returns the link; get_doc reads it back', async () => {
-    const r = await tool(julieConn.access_token, 'create_doc', { title: 'Onboarding plan', markdown: '# Onboarding plan\n\nWe cut setup to **one click**.\n\n| step | time |\n|---|---|\n| sign in | 10s |\n\n<script>alert(1)</script>' });
-    assert(!r.isError && r.structuredContent.url === `${ORIGIN}/d/onboarding-plan`, JSON.stringify(r));
+    const r = await tool(julieConn.access_token, 'create_doc', { title: 'Onboarding plan', slug: 'chosen-by-the-model', visibility: 'public', markdown: '# Onboarding plan\n\nWe cut setup to **one click**.\n\n| step | time |\n|---|---|\n| sign in | 10s |\n\n<script>alert(1)</script>' });
+    assert(!r.isError && /^onboarding-plan-[a-f0-9]{6}$/.test(r.structuredContent.slug) && r.structuredContent.url === `${ORIGIN}/d/${r.structuredContent.slug}`, JSON.stringify(r));
     julieSlug = r.structuredContent.slug;
     const stored = env.DOCS.map.get(`docs/${julieSlug}/v1/index.html`);
     assert(/<table[ >]/.test(stored) && /<strong>one click<\/strong>/.test(stored) && !/<script>alert/.test(stored), 'markdown rendered, html escaped');
     const meta = JSON.parse(env.META.map.get(`meta:${julieSlug}`));
     assert(meta.hosted.account_id === julie.account_id && meta.versions[0].by === julie.account_id, 'owned by the approver, written by their agent');
-    assert(meta.access.visibility === 'unlisted', 'shared by link by default');
+    assert(meta.access.visibility === 'private', 'private by default, whatever visibility the call carried');
+    const shared = await tool(julieConn.access_token, 'share_doc', { slug: julieSlug, visibility: 'unlisted' });
+    assert(!shared.isError && shared.structuredContent.access.visibility === 'unlisted', 'shared on purpose');
     const text = await tool(julieConn.access_token, 'get_doc', { slug: `${ORIGIN}/d/${julieSlug}` });
     assert(!text.isError && /one click/.test(text.content[0].text) && text.structuredContent.version === 1, JSON.stringify(text).slice(0, 300));
     const html = await tool(julieConn.access_token, 'get_doc', { slug: julieSlug, format: 'html' });
     assert(/<main class="wrap">/.test(html.structuredContent.html), 'exact html');
     const again = await tool(julieConn.access_token, 'create_doc', { title: 'Onboarding plan', html: '<p>second</p>' });
-    assert(!again.isError && again.structuredContent.slug !== julieSlug && again.structuredContent.slug.startsWith('onboarding-plan-'), 'a taken slug gets a suffix');
+    assert(!again.isError && again.structuredContent.slug !== julieSlug && again.structuredContent.slug.startsWith('onboarding-plan-'), 'every create gets its own address');
   });
 
   await t('list_docs lists My docs and team docs', async () => {
     const team = (await call('/api/teams', { method: 'POST', cookie: julie.cookie, headers: origin, body: { name: 'Acme' } })).body.team;
     await call('/api/team/join', { method: 'POST', cookie: bob.cookie, body: { token: team.invite_url.split('/').pop() } });
     const td = await tool(julieConn.access_token, 'create_doc', { title: 'Team roadmap', html: '<h1>Roadmap</h1><p>q4</p>', team: 'Acme' });
+    roadmapSlug = td.structuredContent.slug;
     assert(!td.isError && td.structuredContent.team === team.id, JSON.stringify(td));
     const list = await tool(julieConn.access_token, 'list_docs', {});
     const slugs = list.structuredContent.docs.map((d) => d.slug);
-    assert(slugs.includes(julieSlug) && slugs.includes('team-roadmap'), slugs.join(','));
-    assert(list.structuredContent.docs.find((d) => d.slug === 'team-roadmap').team === 'Acme', 'team named');
+    assert(slugs.includes(julieSlug) && slugs.includes(roadmapSlug), slugs.join(','));
+    assert(list.structuredContent.docs.find((d) => d.slug === roadmapSlug).team === 'Acme', 'team named');
     const mineOnly = await tool(julieConn.access_token, 'list_docs', { space: 'me' });
-    assert(!mineOnly.structuredContent.docs.some((d) => d.slug === 'team-roadmap'), 'space=me');
+    assert(!mineOnly.structuredContent.docs.some((d) => d.slug === roadmapSlug), 'space=me');
   });
 
   await t('comments loop: get_comments, update_doc, reply_to_comment applied, resolve_comment, share_doc', async () => {
@@ -496,7 +594,9 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(!reply.isError && reply.structuredContent.status === 'applied', JSON.stringify(reply));
     const thread = (await call(`/api/comments?slug=${julieSlug}&version=all`, { token: julie.token })).body.find((x) => x.id === c.body.id);
     const agentReply = thread.replies[thread.replies.length - 1];
-    assert(agentReply.author.kind === 'agent' && agentReply.author.login === 'claude', JSON.stringify(agentReply.author));
+    // A dynamically registered client names itself: it signs as that name,
+    // marked unverified, never as the product it claims to be.
+    assert(agentReply.author.kind === 'agent' && agentReply.author.login === 'mcp-app' && /Claude \(unverified app\)/.test(agentReply.author.name), JSON.stringify(agentReply.author));
     const res = await tool(julieConn.access_token, 'resolve_comment', { slug: julieSlug, comment_id: c.body.id });
     assert(!res.isError && res.structuredContent.resolved === false && res.structuredContent.reason === 'not_handed_off', JSON.stringify(res));
     const share = await tool(julieConn.access_token, 'share_doc', { slug: julieSlug, visibility: 'private', invite: ['dana@example.com'] });
@@ -508,6 +608,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     bobConn = await connect(bob);
     const theirs = await tool(julieConn.access_token, 'create_doc', { title: 'Julie only', html: '<p>mine</p>' });
     const slug = theirs.structuredContent.slug;
+    await tool(julieConn.access_token, 'share_doc', { slug, visibility: 'unlisted' });
     const up = await tool(bobConn.access_token, 'update_doc', { slug, html: '<p>bob was here</p>' });
     assert(up.isError && up.structuredContent.error === 'not_doc_owner', JSON.stringify(up));
     const share = await tool(bobConn.access_token, 'share_doc', { slug, visibility: 'public' });
@@ -548,18 +649,20 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const hash = crypto.createHash('sha256').update(scoped.access_token).digest('hex');
     assert(JSON.parse(env.META.map.get(`hosted-token:${hash}`)).scope.teams.length === 0, 'token scoped to My docs');
     const list = await tool(scoped.access_token, 'list_docs', {});
-    assert(!list.structuredContent.docs.some((d) => d.slug === 'team-roadmap') && list.structuredContent.docs.some((d) => d.slug === julieSlug), 'only My docs');
+    assert(!list.structuredContent.docs.some((d) => d.slug === roadmapSlug) && list.structuredContent.docs.some((d) => d.slug === julieSlug), 'only My docs');
     const create = await tool(scoped.access_token, 'create_doc', { title: 'Into the team', html: '<p>x</p>', team: 'Acme' });
     assert(create.isError && create.structuredContent.error === 'token_scope', JSON.stringify(create));
-    const up = await tool(scoped.access_token, 'update_doc', { slug: 'team-roadmap', html: '<p>x</p>' });
+    const up = await tool(scoped.access_token, 'update_doc', { slug: roadmapSlug, html: '<p>x</p>' });
     assert(up.isError && ['token_scope', 'access_denied'].includes(up.structuredContent.error), JSON.stringify(up));
     const own = await tool(scoped.access_token, 'update_doc', { slug: julieSlug, html: '<p>v3</p>' });
     assert(!own.isError, 'its own workspace still works');
   });
 
+  let carlSlug = null;
   await t('an existing tdoc_ account token works at /mcp for clients without OAuth', async () => {
     const r = await tool(carl.token, 'create_doc', { title: 'Carl via header', html: '<p>hi</p>' });
-    assert(!r.isError && r.structuredContent.slug === 'carl-via-header', JSON.stringify(r));
+    assert(!r.isError && r.structuredContent.slug.startsWith('carl-via-header-'), JSON.stringify(r));
+    carlSlug = r.structuredContent.slug;
     // ...and keeps working on the HTTP API: only OAuth tokens are /mcp-only.
     assert((await call('/api/me', { token: carl.token })).status === 200, 'account token unchanged');
   });
@@ -582,10 +685,10 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     console.log = (...a) => { logs.push(a.join(' ')); };
     try {
       const c = await connect(carl);
-      await tool(c.access_token, 'get_doc', { slug: 'carl-via-header' });
+      await tool(c.access_token, 'get_doc', { slug: carlSlug });
       const all = logs.join('\n');
       assert(/"type":"tdoc_oauth"/.test(all) && /"type":"tdoc_mcp"/.test(all), all.slice(0, 300));
-      for (const secret of [c.access_token, c.refresh_token, c.client.client_id, carl.account_id, 'carl-via-header']) assert(!all.includes(secret), `leaked ${secret.slice(0, 10)}`);
+      for (const secret of [c.access_token, c.refresh_token, c.client.client_id, carl.account_id, carlSlug]) assert(!all.includes(secret), `leaked ${secret.slice(0, 10)}`);
     } finally { console.log = orig; }
   });
 

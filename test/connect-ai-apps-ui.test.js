@@ -194,7 +194,7 @@ async function startServer(worker, env) {
         let landed = '';
         await context.route('https://claude.ai/**', (route) => { landed = route.request().url(); route.fulfill({ status: 200, body: 'ok' }); });
         await page.goto(`${base}/oauth/authorize?${q}`);
-        await page.getByRole('heading', { name: 'Allow Claude to use tdoc' }).waitFor();
+        await page.getByRole('heading', { name: 'Allow Claude (claude.ai) to use tdoc' }).waitFor();
         assert(/claude\.ai/.test(await page.locator('.tdoc-oauth-return').innerText()), 'return host named');
         await shot(page, `${label}-consent`);
         await page.getByRole('button', { name: 'Allow' }).click();
