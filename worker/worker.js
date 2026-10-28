@@ -14728,7 +14728,9 @@ async function handleAsk(env, req, url, slug) {
     truncated: doc.truncated,
     comments,
     selection: askNoEmails(selection),
-    question,
+    // The question leaves the worker too; an address typed into it is
+    // hidden like one in the doc or a comment.
+    question: askNoEmails(question),
   });
   // Reserve before the call so a burst cannot spend more than the allowance;
   // a failed call gives the question back.
