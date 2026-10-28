@@ -5,6 +5,20 @@ import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { getPublishSignin, publishDocument, requestQuotaBump } from './api.js';
 import { copyText } from './model.js';
 
+// A link to hand out: the URL in a light, readable field and Copy link as
+// the primary button beside it (under it on a phone). Copy link is the main
+// action of every share surface. `onCopy` copies and reports (toast,
+// status); `copyOnFieldClick` keeps the click-the-field-to-copy surfaces.
+export function ShareLinkRow({ url, id, onCopy, copyOnFieldClick = false, disabled = false, children = null }) {
+  return (
+    <div className="tdoc-share-link-row">
+      <div className="tdoc-share-link-field" id={id} onClick={copyOnFieldClick ? onCopy : undefined}>{url}</div>
+      <AppButton variant="primary" className="primary tdoc-share-copy" disabled={disabled} onClick={onCopy}>Copy link</AppButton>
+      {children}
+    </div>
+  );
+}
+
 // The second choice under every Share link: this exact version, for the
 // reader who must see what you saw. Quiet text, not a second button.
 export function VersionLinkChoice({ versionUrl, version, onCopied }) {
@@ -38,11 +52,10 @@ export function ShareDialog({ open, url, versionUrl, version, team, onOpenChange
       actions={(
         <>
           <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
-          <CopyPromptButton label="Copy link" copied={false} onCopy={copy} />
         </>
       )}
     >
-      <div className="code url" id="tdoc-share-url">{url}</div>
+      <ShareLinkRow url={url} id="tdoc-share-url" onCopy={copy} />
       <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
     </AppDialog>
   );
@@ -77,7 +90,6 @@ export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopie
       actions={(
         <>
           <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
-          <CopyPromptButton label="Copy link" copied={false} onCopy={async () => { await copyText(url); onCopied(); }} />
         </>
       )}
     >
@@ -88,7 +100,7 @@ export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopie
           </div>
         ))}
       </div>
-      <div className="code url" style={{ marginTop: 10 }}>{url}</div>
+      <ShareLinkRow url={url} onCopy={async () => { await copyText(url); onCopied(); }} />
     </AppDialog>
   );
 }
@@ -182,9 +194,8 @@ export function PublishDialog({ open, slug, onOpenChange }) {
       {signin ? <PublishSignin signin={signin} /> : null}
       {url ? (
         <div style={{ marginTop: 10 }}>
-          <div className="code url" id="tdoc-pub-url">{url}</div>
+          <ShareLinkRow url={url} id="tdoc-pub-url" onCopy={() => copyText(url)} />
           <div className="actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
-            <CopyPromptButton label="Copy link" copied={false} onCopy={() => copyText(url)} />
             <button type="button" onClick={() => window.open(url, '_blank', 'noopener')}>View live →</button>
           </div>
         </div>

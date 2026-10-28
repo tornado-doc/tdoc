@@ -2,13 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppButton } from '../ui/button.jsx';
-import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AppSwitch } from '../ui/switch.jsx';
 import { deleteDocument, getTeam, getTeamGuests, updateDocumentAccess, updateTeam } from './api.js';
 import { isFeatureOn } from '../feature-flags.js';
 import { rememberTrashed } from '../recent-trash.js';
-import { VersionLinkChoice } from './document-dialogs.jsx';
+import { ShareLinkRow, VersionLinkChoice } from './document-dialogs.jsx';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
 
 // Mirrors normalizeInvitee in the worker: a handle reading first (so "@Bob"
@@ -237,16 +236,7 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
       title="Share"
       actions={<AppButton onClick={() => onOpenChange(false)}>Close</AppButton>}
     >
-      <div
-        className="code url"
-        id="tdoc-share-url"
-        onClick={() => copyText(url).then(onCopied)}
-      >
-        {url}
-      </div>
-      <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
-        <CopyPromptButton label="Copy link" copied={false} onCopy={() => copyText(url).then(onCopied)} />
-      </div>
+      <ShareLinkRow url={url} id="tdoc-share-url" copyOnFieldClick onCopy={() => copyText(url).then(onCopied)} />
       <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
       {manage.versionCount != null ? (
         <p className="muted" style={{ margin: '8px 0 0' }}>

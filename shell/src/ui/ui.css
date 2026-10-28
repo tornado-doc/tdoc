@@ -1252,3 +1252,19 @@ a.ui-menu-item:visited {
    it sits in a strip above the first line instead. */
 .ui-code-block.ui-code-block.no-wrap.has-copy > pre { padding-top: 34px; }
 .ui-code-block.ui-code-block.no-wrap .ui-code-copy { float: none; position: absolute; top: 8px; right: 12px; margin: 0; }
+
+/* ShareLinkRow (document-dialogs.jsx): the link in a light, readable field
+   and Copy link as the primary button on its row; stacked on a phone. */
+.tdoc-share-link-row { display: flex; align-items: stretch; gap: 8px; min-width: 0; margin: 0 0 8px; }
+.tdoc-share-link-row .tdoc-share-link-field {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; box-sizing: border-box;
+  padding: 6px 12px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 6px;
+  background: var(--td-surface-2, #f7f7f5); color: var(--td-ink, #1a1a1a);
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap; overflow-x: auto; user-select: all;
+}
+.tdoc-share-link-row .tdoc-share-link-field[id="tdoc-share-url"] { cursor: copy; }
+@media (max-width: 700px) {
+  .tdoc-share-link-row { flex-direction: column; }
+  .tdoc-share-link-row .tdoc-share-copy { width: 100%; }
+}

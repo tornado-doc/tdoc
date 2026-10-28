@@ -13,7 +13,7 @@ import { DevicesBody } from './tokens-page.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
-import { QuotaBumpDialog } from './document/document-dialogs.jsx';
+import { QuotaBumpDialog, ShareLinkRow } from './document/document-dialogs.jsx';
 import {
   createFolder,
   deleteDocument,
@@ -180,12 +180,7 @@ function FolderShareDialog({ folder, team = '', onClose, onAccess }) {
     >
       {shareUrl ? (
         <>
-          <div className="code url" onClick={() => copyText(shareUrl)}>
-            {shareUrl}
-          </div>
-          <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
-            <CopyPromptButton label="Copy link" copied={false} disabled={busy} onCopy={() => copyText(shareUrl).then(() => setStatus('Copied.'))} />
-          </div>
+          <ShareLinkRow url={shareUrl} disabled={busy} onCopy={() => copyText(shareUrl).then(() => setStatus('Copied.'))} />
         </>
       ) : (
         <p className="muted" style={{ marginTop: 0 }}>
