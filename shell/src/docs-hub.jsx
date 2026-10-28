@@ -466,7 +466,7 @@ function AccountSettingsPane({ identity, profile }) {
       <div className="tm-settings-title"><h2>Workspace settings</h2><p>Settings for your personal workspace.</p></div>
       <section className="tm-settings-card">
         <div className="tm-settings-head"><div><h2>Profile</h2><p>{name}</p></div></div>
-        <a className="new-folder-btn" href={profile?.handle ? `/@${encodeURIComponent(profile.handle)}` : '/me#claim-profile'}>
+        <a className="ui-btn ui-btn-secondary ui-btn-m" href={profile?.handle ? `/@${encodeURIComponent(profile.handle)}` : '/me#claim-profile'}>
           {profile?.handle ? 'Open public profile' : 'Claim public profile'}
         </a>
       </section>

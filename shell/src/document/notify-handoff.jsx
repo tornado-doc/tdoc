@@ -527,13 +527,64 @@ function TeamDaemonView({ reason, onClose }) {
   );
 }
 
-function defaultInstruction(commentIds) {
+export function defaultInstruction(commentIds) {
   const n = Array.isArray(commentIds) ? commentIds.filter(Boolean).length : 0;
   return n === 1 ? 'address this comment' : 'address my new comments';
 }
 
 function isDefaultInstruction(text) {
   return text === 'address this comment' || text === 'address my new comments';
+}
+
+// Handing comments to an agent and saying how it went: the Send to agent
+// dialog and Ask AI's "Send to agent" mode both send through this, so the
+// two never word a delivery differently. `result` is { ok, text }; after a
+// failure the caller's button reads Retry.
+export function useHandoffSend(slug, onSent = null) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const send = async ({ commentIds, recipient, instruction = '' }) => {
+    const batch = (commentIds || []).filter(Boolean);
+    if (busy || !batch.length || !recipient) return null;
+    setBusy(true);
+    setResult(null);
+    const to = agentLabel(recipient);
+    try {
+      const body = await postNotifyHandoff({
+        slug,
+        comment_ids: batch,
+        instruction: String(instruction || '').trim(),
+        recipient,
+      });
+      const failed = body?.delivery?.status === 'failed';
+      if (body?.reason === 'agent_has_last_word') {
+        setResult({ ok: true, text: `Nothing sent: an agent already replied to ${batch.length === 1 ? 'this comment' : 'these comments'}.` });
+      } else if (failed) {
+        setResult({ ok: false, text: `Not delivered to ${to}${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}.` });
+      } else {
+        const n = body.sent || batch.length;
+        setResult({ ok: true, text: `Sent ${n} comment${n === 1 ? '' : 's'} to ${to} ✓` });
+      }
+      if (onSent) await onSent(body);
+      return body;
+    } catch (err) {
+      setResult({ ok: false, text: `Not sent to ${to}: ${err.message || 'something went wrong'}.` });
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, result, setResult, send };
+}
+
+// The line under a send that says how it went (or a resend's toast text).
+export function HandoffSendResult({ result = null, status = '' }) {
+  if (!result && !status) return null;
+  return (
+    <p className={`tdoc-send-result${result && !result.ok ? ' tdoc-notify-error' : result && result.ok ? ' is-ok' : ''}`} role="status">
+      {result ? result.text : status}
+    </p>
+  );
 }
 
 export function NotifyHandoffPanel({
@@ -550,18 +601,26 @@ export function NotifyHandoffPanel({
   const targets = useNotifyTargets(slug, open);
   const [selected, setSelected] = useState(null);
   const [instruction, setInstruction] = useState(() => defaultInstruction(commentIds));
-  const [busy, setBusy] = useState(false);
+  const [resending, setResending] = useState(false);
   const [status, setStatus] = useState('');
   // The outcome of the last Send: { ok, text }. After a failure the primary
   // button reads Retry.
-  const [result, setResult] = useState(null);
+  const sending = useHandoffSend(slug, async (body) => {
+    if (onSent) onSent(body);
+    try {
+      const next = await listNotifyHandoffs(slug, 5);
+      setRecent(Array.isArray(next.handoffs) ? next.handoffs : []);
+    } catch { /* ignore */ }
+  });
+  const { result, setResult } = sending;
+  const busy = sending.busy || resending;
   const [recent, setRecent] = useState([]);
 
   // An unrelated account connection is not this document's default. Let the
   // person choose unless this document's publisher or handoff names one.
   useEffect(() => {
     if (!open) return;
-    const all = [targets.default, ...targets.candidates].filter(Boolean);
+    const all = orderedAgentChoices(targets);
     const skip = (t) => avoid && avoid.agent_name && t.provider === (avoid.provider || t.provider)
       && String(t.agent_name || '').toLowerCase() === String(avoid.agent_name).toLowerCase();
     setSelected(avoid ? all.find((t) => !skip(t)) || null : targets.default || null);
@@ -604,40 +663,12 @@ export function NotifyHandoffPanel({
 
   const submit = async () => {
     if (!canSubmit) return;
-    setBusy(true);
     setStatus('');
-    setResult(null);
-    const to = agentLabel(chosen);
-    try {
-      const body = await postNotifyHandoff({
-        slug,
-        comment_ids: batch,
-        instruction: instruction.trim(),
-        recipient: chosen || undefined,
-      });
-      const failed = body?.delivery?.status === 'failed';
-      if (body?.reason === 'agent_has_last_word') {
-        setResult({ ok: true, text: `Nothing sent: an agent already replied to ${batch.length === 1 ? 'this comment' : 'these comments'}.` });
-      } else if (failed) {
-        setResult({ ok: false, text: `Not delivered to ${to}${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}.` });
-      } else {
-        const n = body.sent || batch.length;
-        setResult({ ok: true, text: `Sent ${n} comment${n === 1 ? '' : 's'} to ${to} ✓` });
-      }
-      if (onSent) onSent(body);
-      try {
-        const next = await listNotifyHandoffs(slug, 5);
-        setRecent(Array.isArray(next.handoffs) ? next.handoffs : []);
-      } catch { /* ignore */ }
-    } catch (err) {
-      setResult({ ok: false, text: `Not sent to ${to}: ${err.message || 'something went wrong'}.` });
-    } finally {
-      setBusy(false);
-    }
+    await sending.send({ commentIds: batch, recipient: chosen, instruction });
   };
 
   const resend = async (handoffId) => {
-    setBusy(true);
+    setResending(true);
     setStatus('');
     try {
       const body = await resendNotifyHandoff({ slug, handoff_id: handoffId });
@@ -646,7 +677,7 @@ export function NotifyHandoffPanel({
     } catch (err) {
       setStatus(err.message || 'Could not resend');
     } finally {
-      setBusy(false);
+      setResending(false);
     }
   };
 
@@ -768,11 +799,7 @@ export function NotifyHandoffPanel({
 
           {/* Said only when there is something to say: an empty line held
               open for it left a hole above the buttons. */}
-          {result || status ? (
-            <p className={`tdoc-send-result${result && !result.ok ? ' tdoc-notify-error' : result && result.ok ? ' is-ok' : ''}`} role="status">
-              {result ? result.text : status}
-            </p>
-          ) : null}
+          <HandoffSendResult result={result} status={status} />
         </div>
       )}
     </AppDialog>

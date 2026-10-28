@@ -14,7 +14,7 @@
 // everyone. There is no mode to pick: the named agent answers or edits from
 // the text, where authorship lets it edit, and answers only elsewhere.
 
-import { AGENT_TAG_JOINER, orderedAgentChoices, sameTarget } from './agent-choices.js';
+import { AGENT_TAG_JOINER, oneRowPerAgent, orderedAgentChoices, sameTarget } from './agent-choices.js';
 
 export const TDOC_AI = Object.freeze({ provider: 'tdoc', server_id: 'tdoc', agent_sub: 'tdoc-ai', agent_name: 'tdoc AI', tdoc_ai: true });
 
@@ -28,13 +28,16 @@ function reachable(t) {
 // agent; tdoc AI last, for everyone.
 export function composerAgents({ canSendToAgent = false, notifyTargets = null, mine = null } = {}) {
   const edit = canSendToAgent ? orderedAgentChoices(notifyTargets) : [];
-  const out = edit.map((t) => ({ ...t, can_edit: true }));
+  let out = edit.map((t) => ({ ...t, can_edit: true }));
   const has = (t) => out.some((x) => sameTarget(x, t));
   const ask = [
     ...((mine && mine.agents) || []).filter(reachable),
     ...((mine && mine.team_agents) || []).filter(reachable),
   ];
   for (const t of ask) if (!has(t)) out.push({ ...t, can_edit: false });
+  // One row per agent: a team agent's claude and codex on one computer are
+  // one agent; a row that may edit wins over one that may only answer.
+  out = oneRowPerAgent(out, out.filter((t) => t.can_edit));
   // tdoc AI for everyone, within their free answers; always last.
   if (mine && mine.tdoc_ai) out.push({ ...TDOC_AI, can_edit: false });
   return out;
