@@ -21,6 +21,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { CommentIcon } from '../ui/comment-icon.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { formatDraftAge } from './draft-store.js';
@@ -147,8 +148,8 @@ export function StaleDraftDialog({ draft, currentVersion, onRestore, onKeep }) {
       description={description}
       actions={(
         <>
-          <button type="button" onClick={onKeep}>Keep this version</button>
-          <button type="button" className="primary" onClick={onRestore}>Restore draft</button>
+          <AppButton onClick={onKeep}>Keep this version</AppButton>
+          <AppButton variant="primary" className="primary" onClick={onRestore}>Restore draft</AppButton>
         </>
       )}
     />
@@ -164,10 +165,10 @@ export function SaveConflictDialog({ conflict, onClose }) {
       description="Your draft is still saved in this browser. Open the latest version to review it before saving again."
       actions={(
         <>
-          <button type="button" onClick={onClose}>Keep editing</button>
-          <button type="button" className="primary" onClick={() => { location.href = conflict.latestUrl; }}>
+          <AppButton onClick={onClose}>Keep editing</AppButton>
+          <AppButton variant="primary" className="primary" onClick={() => { location.href = conflict.latestUrl; }}>
             Open v{conflict?.latestVersion}
-          </button>
+          </AppButton>
         </>
       )}
     />
@@ -216,8 +217,8 @@ export function SaveNoticeDialog({ open, onOpenChange, onConfirm }) {
       description="Your draft becomes the next version of this document. If you have shared the link, that is what people see from now on — earlier versions stay reachable, and comments stay on the text they were left on."
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" className="primary" onClick={confirm}>Save and publish</button>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="primary" className="primary" onClick={confirm}>Save and publish</AppButton>
         </>
       )}
     >
@@ -254,8 +255,8 @@ export function LinkDialog({ open, onOpenChange, onSubmit }) {
       title="Add link"
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" className="primary" onClick={addLink}>Add link</button>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="primary" className="primary" onClick={addLink}>Add link</AppButton>
         </>
       )}
     >

@@ -36,6 +36,16 @@ body,
   flex-direction: column;
 }
 
+/* The shell's own UI type. Every shell page (document, My docs, settings)
+   draws its chrome in the system sans; portalled drawers, dialogs and menus
+   inherit it from body. This used to come by accident from docs-hub.css's
+   bare body rule; without it unstyled controls fell back to the UA serif.
+   The author document is in its own iframe and is not affected. */
+body {
+  font: 15px system-ui, -apple-system, sans-serif;
+  color: var(--td-ink, #1a1a1a);
+}
+
 .tdoc-document-app {
   display: flex;
   min-height: 100vh;

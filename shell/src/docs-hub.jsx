@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Folder, FolderPlus, LayoutGrid, List, Search, UsersRound, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
+import { AppButton } from './ui/button.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
@@ -12,7 +13,7 @@ import { DevicesBody } from './tokens-page.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
-import { QuotaBumpDialog } from './document/document-dialogs.jsx';
+import { QuotaBumpDialog, ShareLinkRow } from './document/document-dialogs.jsx';
 import {
   createFolder,
   deleteDocument,
@@ -59,11 +60,11 @@ function HubDialog({ title, children, confirmLabel, danger, onConfirm, onClose, 
       title={title}
       actions={actions || (
         <>
-          <button type="button" onClick={onClose}>Cancel</button>
+          <AppButton onClick={onClose}>Cancel</AppButton>
           {onConfirm ? (
-            <button type="button" className={danger ? 'danger' : 'primary'} onClick={onConfirm}>
+            <AppButton variant={danger ? 'danger' : 'primary'} className={danger ? 'danger' : 'primary'} onClick={onConfirm}>
               {confirmLabel}
-            </button>
+            </AppButton>
           ) : null}
         </>
       )}
@@ -169,24 +170,17 @@ function FolderShareDialog({ folder, team = '', onClose, onAccess }) {
       actions={(
         <>
           {shareId ? (
-            <button type="button" className="folder-unshare" disabled={busy} onClick={() => save({ share: false, visibility: 'private', allowed_users: [] })}>
+            <AppButton className="folder-unshare" disabled={busy} onClick={() => save({ share: false, visibility: 'private', allowed_users: [] })}>
               Stop sharing
-            </button>
+            </AppButton>
           ) : null}
-          <button type="button" onClick={onClose}>Close</button>
+          <AppButton onClick={onClose}>Close</AppButton>
         </>
       )}
     >
       {shareUrl ? (
         <>
-          <div className="code url" onClick={() => copyText(shareUrl)}>
-            {shareUrl}
-          </div>
-          <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
-            <button type="button" className="primary" disabled={busy} onClick={() => copyText(shareUrl).then(() => setStatus('Copied.'))}>
-              Copy link
-            </button>
-          </div>
+          <ShareLinkRow url={shareUrl} disabled={busy} onCopy={() => copyText(shareUrl).then(() => setStatus('Copied.'))} />
         </>
       ) : (
         <p className="muted" style={{ marginTop: 0 }}>
@@ -302,7 +296,7 @@ function FeedbackList({ spaces: initial }) {
           <li><b>Open your app</b> and click it, then <b>+ Comment</b>.</li>
           <li><b>Share</b> the list with teammates, or <b>Send to agent</b>.</li>
         </ol>
-        <a className="tdoc-fbspace-btn primary" href="/feedback">Get the bookmark</a>
+        <a className="ui-btn ui-btn-primary ui-btn-m" href="/feedback">Get the bookmark</a>
       </div>
     );
   }
@@ -321,9 +315,9 @@ function FeedbackList({ spaces: initial }) {
               </div>
             </a>
             {space.mine ? (
-              <button type="button" className="tdoc-fbspace-btn tdoc-fb-embed-btn" onClick={() => setEmbedding(space)}>
+              <AppButton className="tdoc-fb-embed-btn" onClick={() => setEmbedding(space)}>
                 {space.site ? 'Site settings' : 'Add to your site'}
-              </button>
+              </AppButton>
             ) : null}
           </div>
         );
@@ -377,9 +371,9 @@ function SiteEmbedDialog({ space, onClose, onSaved }) {
       description="Paste one line into your site and the people you share this space with can comment on any page. Every comment lands here."
       actions={(
         <>
-          {space.site ? <button type="button" className="danger" disabled={busy} onClick={() => save(true)}>Turn off</button> : null}
-          <button type="button" onClick={onClose}>Close</button>
-          <button type="button" className="primary" disabled={busy} onClick={() => save(false)}>{busy ? 'Saving…' : 'Save'}</button>
+          {space.site ? <AppButton variant="danger" className="danger" disabled={busy} onClick={() => save(true)}>Turn off</AppButton> : null}
+          <AppButton onClick={onClose}>Close</AppButton>
+          <AppButton variant="primary" className="primary" disabled={busy} onClick={() => save(false)}>{busy ? 'Saving…' : 'Save'}</AppButton>
         </>
       )}
     >
@@ -430,9 +424,9 @@ function TeamInviteBanner({ invites }) {
         <div key={team.id} className="tm-invite">
           <UsersRound size={16} aria-hidden="true" />
           <span className="tm-invite-text"><b>{team.name}</b> invited you to its team{team.member_count ? ` · ${team.member_count} ${team.member_count === 1 ? 'member' : 'members'}` : ''}</span>
-          <button type="button" className="tdoc-fbspace-btn primary" disabled={busy === team.id} onClick={() => join(team)}>
+          <AppButton variant="primary" className="primary" disabled={busy === team.id} onClick={() => join(team)}>
             {busy === team.id ? 'Joining…' : 'Join'}
-          </button>
+          </AppButton>
         </div>
       ))}
       {error ? <p className="tm-invite-error" role="status">{error}</p> : null}
@@ -1259,7 +1253,7 @@ export function DocsHub({ boot }) {
         <HubDialog
           title="Build it with your agent"
           onClose={closeModal}
-          actions={<button type="button" onClick={closeModal}>Close</button>}
+          actions={<AppButton onClick={closeModal}>Close</AppButton>}
         >
           <AgentRecipe />
         </HubDialog>

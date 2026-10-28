@@ -1,11 +1,12 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
-import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
+import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { usePortalContainer } from '../ui/portal.js';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
@@ -261,14 +262,14 @@ function ReplyForm({
         </span>
         <div className="tdoc-reply-form-actions">
           {v4 && agentSetupHref && !canSendToAgent ? (
-            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
-          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent" /> : null}
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref} title="Connect an agent first">@agent</a>
+          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent ui-btn ui-btn-secondary ui-btn-m" /> : null}
           {agentButtons && !canSendToAgent && agentSetupHref ? (
-            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref} title="Connect an agent first">@agent</a>
           ) : null}
           {agentButtons && canSendToAgent ? (
             <button
-              className="tdoc-reply-submit agent"
+              className="tdoc-reply-submit agent ui-btn ui-btn-secondary ui-btn-m"
               type="button"
               onClick={() => submit(true)}
               disabled={busy}
@@ -277,7 +278,7 @@ function ReplyForm({
               {busy ? 'Posting…' : '@agent'}
             </button>
           ) : null}
-          <button className="tdoc-reply-submit" type="button" onClick={() => submit(false)} disabled={busy}>
+          <button className="tdoc-reply-submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Reply'}
           </button>
         </div>
@@ -324,8 +325,8 @@ function EditForm({ item, onSave, onCancel }) {
         }}
       />
       <div className="tdoc-edit-form-foot">
-        <button className="tdoc-edit-cancel" type="button" onClick={onCancel}>Cancel</button>
-        <button className="tdoc-edit-save" type="button" onClick={submit}>Save</button>
+        <button className="tdoc-edit-cancel ui-btn ui-btn-quiet ui-btn-m" type="button" onClick={onCancel}>Cancel</button>
+        <button className="tdoc-edit-save ui-btn ui-btn-primary ui-btn-m" type="button" onClick={submit}>Save</button>
       </div>
     </div>
   );
@@ -886,7 +887,7 @@ export function CommentCard({
             <AppMenu
               trigger={(
                 <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
-                  <MoreVertical size={16} />
+                  <MoreHorizontal size={16} />
                 </button>
               )}
             >
@@ -937,13 +938,14 @@ export function CommentCard({
       {handoff && handoff.threadId === comment.id && comment.status !== 'applied'
         && !replies.some((reply) => reply.author?.kind === 'agent') ? (() => {
           const copyButton = (
-            <button
-              type="button"
+            <CopyPromptButton
               className={handoff.state !== 'idle' ? 'tdoc-handoff-copy done' : 'tdoc-handoff-copy'}
-              onClick={handoff.onCopy}
-            >
-              {handoff.state === 'idle' ? 'Copy' : handoff.copyFailed ? 'Select & copy' : 'Copied'}
-            </button>
+              label="Copy"
+              copied={handoff.state !== 'idle'}
+              copiedLabel={handoff.copyFailed ? 'Select & copy' : 'Copied'}
+              showTick={!handoff.copyFailed}
+              onCopy={handoff.onCopy}
+            />
           );
           return (
           <div className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}>

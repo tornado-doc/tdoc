@@ -79,7 +79,7 @@ export function useAgentAsk(text, setText, fieldRef = null) {
 
 // The @agent button: puts the default agent's pill in. Nothing when there is
 // no agent to offer.
-export function AgentButton({ ask, busy = false, className = 'tdoc-composer-agent' }) {
+export function AgentButton({ ask, busy = false, className = 'tdoc-composer-agent ui-btn ui-btn-secondary ui-btn-m' }) {
   // Once the text names an agent the button has nothing left to do; the tag
   // itself changes or removes it, and Comment sends to it.
   if (!ask.choices.length || ask.target) return null;
@@ -141,8 +141,8 @@ export function PrivateAnswer({ privateAsk, onMakePublic, onClose = null, submit
       <div className="foot tdoc-private-foot">
         <span className="hint"><Lock size={11} aria-hidden="true" /> Only you can see this</span>
         <div className="tdoc-composer-foot-actions">
-          {onClose ? <button className="tdoc-private-dismiss" type="button" onClick={onClose}>Dismiss</button> : null}
-          <button className={submitClassName} type="button" disabled={!privateAsk.answer || privateAsk.publishing} onClick={onMakePublic}>
+          {onClose ? <button className="tdoc-private-dismiss ui-btn ui-btn-secondary ui-btn-m" type="button" onClick={onClose}>Dismiss</button> : null}
+          <button className={`${submitClassName} ui-btn ui-btn-primary ui-btn-m`} type="button" disabled={!privateAsk.answer || privateAsk.publishing} onClick={onMakePublic}>
             {privateAsk.publishing ? 'Posting…' : 'Make public'}
           </button>
         </div>
