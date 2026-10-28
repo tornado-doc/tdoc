@@ -86,6 +86,21 @@ async function t(name, fn) {
   }
 
   try {
+    await t('opening Send to agent shows loading, never "not available", while the agent list is on its way (Julie, 2026-10-28)', async () => {
+      const page = await browser.newPage({ viewport: { width: 900, height: 720 } });
+      await page.route('**/api/notify/targets*', async (r) => { await new Promise((res) => setTimeout(res, 800)); r.fulfill({ json: { default: SMARTER, candidates: [DEVIN], fallback: DEVIN, reason: null } }); });
+      await page.route('**/api/notify/handoffs*', (r) => r.fulfill({ json: { handoffs: [] } }));
+      await page.goto(`${base}/?view=open-later&ids=${encodeURIComponent(JSON.stringify(['c1']))}`);
+      await page.locator('#open-send').click();
+      const desc = page.locator('.ui-dialog-description');
+      await desc.waitFor();
+      const first = await desc.textContent();
+      assert.ok(!/not available/i.test(first), `first render said: ${first}`);
+      assert.match(first, /Finding your agents/);
+      await page.waitForFunction(() => /for your agent/.test(document.querySelector('.ui-dialog-description')?.textContent || ''));
+      await page.close();
+    });
+
     await t('0 new comments, last batch to the same agent: no dead Send button, it says where they went', async () => {
       const { page, dialog, primary, errors, shot } = await open({ ids: [] });
       assert.match(await dialog.locator('.ui-dialog-description').textContent(), /No new comments\. The last one went to smarter-tdoc-claw 20 min ago\./);
