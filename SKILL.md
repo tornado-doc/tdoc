@@ -596,6 +596,15 @@ silently is the #1 source of regression complaints.
      --applied-in <n+1>
    ```
 
+   Pick `--status` by what you did, not by having replied:
+   - changed the doc (published v<n+1>) → `--status applied --applied-in <n+1>`
+   - answered without changing the doc → `--status answered`
+   - need the person's input → `--status question`
+   - did part of it → `--status partial`
+
+   `applied` marks the comment Done. With no version published after the
+   comment, tdoc records it as `answered` and says so.
+
    It posts to the published Worker when `~/.tdoc/published.json` exists,
    otherwise to `http://localhost:${TDOC_PORT:-7878}`. Users can also reply
    to any reply (HN/Reddit-style nesting); `parent` is the comment or reply

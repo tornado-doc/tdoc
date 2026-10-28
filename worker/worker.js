@@ -7898,6 +7898,29 @@ function agentReplyGate(record, agentLogin) {
   return { allowed: false, reason: 'already_answered' };
 }
 
+// The version the person last asked on: the comment's own, or a later human
+// reply's. "Applied" means a version after it exists; without one the agent
+// answered, it did not change the doc.
+function lastHumanTurnVersion(record) {
+  let v = Number(record && record.created_in) || 0;
+  for (const e of (record && record.events) || []) {
+    if (!e) continue;
+    if (e.kind === 'created' || (e.kind === 'reply_added' && e.reply && !(e.reply.author && e.reply.author.kind === 'agent'))) {
+      v = Math.max(v, Number(e.at_version) || 0);
+    }
+  }
+  return v || 1;
+}
+
+// An agent's "applied" with no newer version behind it is an answer. Only a
+// known latest version can say so (0 = no version list, keep the verdict).
+function appliedNeedsNewVersion(record, latest, appliedIn) {
+  const asked = lastHumanTurnVersion(record);
+  if (latest > 0 && latest <= asked) return true;
+  if (appliedIn !== undefined && appliedIn !== null && appliedIn !== '' && coerceBodyVersion(appliedIn, 0) <= asked) return true;
+  return false;
+}
+
 // Helper used by all mutating endpoints: ensure the list is migrated to the
 // event-log shape before we touch it. Returns the (possibly mutated) list.
 function ensureMigrated(list) {
@@ -20410,7 +20433,18 @@ const tdocHandlers = {
       if (!thread) return json({ error: 'parent_not_found' }, { status: 404 });
       const parent = thread.root;
 
-      const verdict = Object.prototype.hasOwnProperty.call(AGENT_STATUS_EMOJI, agentStatus) ? agentStatus : null;
+      let verdict = Object.prototype.hasOwnProperty.call(AGENT_STATUS_EMOJI, agentStatus) ? agentStatus : null;
+      // "Applied" marks the comment done (✅). With no version published
+      // after the person asked, the doc did not change: it was an answer.
+      let downgradedFrom = null;
+      // Feedback spaces are the exception: there the agent fixes the person's
+      // app (a product-anchored comment), and no tdoc version follows.
+      const fixesTheApp = (writeGate.meta && writeGate.meta.created_from === 'feedback')
+        || ((snapshotAt(parent, Infinity) || {}).anchor || parent.anchor || {}).kind === 'product';
+      if (verdict === 'applied' && !fixesTheApp && appliedNeedsNewVersion(parent, latestVersionNumber(writeGate.meta), applied_in)) {
+        verdict = 'answered';
+        downgradedFrom = 'applied';
+      }
       let agent = agentIdentity(body, env);
       // Answering a comment is following the doc. This is the whole of the
       // "who gets the handoff" bookkeeping: nobody maintains a list, an agent
@@ -20488,7 +20522,11 @@ const tdocHandlers = {
           parent_id, thread_id: parent.id,
         });
       }
-      const V = coerceBodyVersion(applied_in, parent.created_in || 1);
+      // A downgraded answer lands on the latest version, where the person
+      // reads it, not on the unpublished version its --applied-in named.
+      const V = downgradedFrom
+        ? (latestVersionNumber(writeGate.meta) || parent.created_in || 1)
+        : coerceBodyVersion(applied_in, parent.created_in || 1);
       const now = new Date().toISOString();
       const replyId = `r_${Date.now()}_${rand(4)}`;
 
@@ -20514,7 +20552,10 @@ const tdocHandlers = {
         kind: 'raw_events', slug, id: parent.id, events,
         responseBody: { id: replyId, parent_id, thread_id: parent.id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
       });
-      return json(res.body, { status: res.status });
+      const out = downgradedFrom && res.body && typeof res.body === 'object'
+        ? { ...res.body, verdict, downgraded_from: downgradedFrom }
+        : res.body;
+      return json(out, { status: res.status });
     }
 
     // ---- explicit browser save (owner/latest only in the shell) ----
