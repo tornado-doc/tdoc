@@ -272,32 +272,33 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await page.goto(`${base}/d/${slug}`);
         await caption('Bob (member) opens a BeFreed doc');
         await pause(page, 1500);
-        // Send to agent is a paper-plane in the phone drawer header only; the
-        // desktop bar stays clean (Julie, 2026-10-27).
+        // Send to agent is the Ask AI panel's second mode, on desktop and in
+        // the phone drawer's Ask AI tab; no paper-plane anywhere.
         if (label === 'phone') {
           await page.locator('.tdoc-fab').click();
-          const plane = page.locator('#tdoc-comment-layer #tdoc-send-plane-btn');
-          await plane.waitFor();
-          if ((await plane.getAttribute('aria-label')) !== 'Send to agent (1 ready)') throw new Error(`plane: ${await plane.getAttribute('aria-label')}`);
-        } else if (await page.locator('.tdoc-bar #tdoc-send-plane-btn').count()) {
-          throw new Error('desktop bar should not carry the paper-plane');
-        }
-        if (process.env.TDOC_UI_SHOTS) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, `app-send-plane-${width}.png`) }); }
-        if (label === 'phone') {
+          await page.locator('#tdoc-comment-layer .tdoc-drawer-tabs').waitFor();
+          if (await page.locator('#tdoc-send-plane-btn').count()) throw new Error('the phone drawer header still has the paper-plane');
           await page.getByRole('radiogroup', { name: 'Comments or Ask AI' }).getByRole('radio', { name: /Ask AI/ }).click();
         } else {
+          if (await page.locator('.tdoc-bar #tdoc-send-plane-btn').count()) throw new Error('desktop bar should not carry the paper-plane');
           await page.locator('#tdoc-send-agent-btn').click();
         }
         const activity = page.locator(label === 'phone' ? '#tdoc-comment-layer' : '.tdoc-handoff-popover');
         await activity.waitFor();
-        const readySummary = activity.locator('.tdoc-ask-ready');
-        if (!(await readySummary.innerText()).includes('1 comment not sent')) throw new Error('the team member has no ready-to-send summary');
+        await activity.getByRole('radiogroup', { name: 'Ask or send to agent' }).getByRole('radio', { name: 'Send to agent' }).click();
+        const readySummary = activity.locator('.tdoc-ask-ready-count');
+        if (!(await readySummary.innerText()).includes('1 comment ready')) throw new Error('the team member has no ready-to-send summary');
+        const pill = await activity.getByRole('button', { name: 'Who should get these?' }).innerText();
+        if (!pill.includes(agentName)) throw new Error(`Send mode recipient: ${pill}`);
+        if (process.env.TDOC_UI_SHOTS) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, `app-ask-send-mode-${width}.png`) }); }
+        // Back to Ask: the per-comment selection lives in Agent activity.
+        await activity.getByRole('radiogroup', { name: 'Ask or send to agent' }).getByRole('radio', { name: 'Ask', exact: true }).click();
         await activity.getByRole('button', { name: /Agent activity/ }).click();
         const ready = activity.locator('.tdoc-handoff-ready');
         if (!(await ready.innerText()).includes('Can you add last week for comparison?')) throw new Error('comment missing from Ready to send');
         if ((await ready.innerText()).includes('Owner-only handoff candidate')) throw new Error('team member can send the owner\'s comment');
         if ((await ready.locator('input[type="checkbox"]').count()) !== 1) throw new Error('team member sees another author\'s Ready to send checkbox');
-        await readySummary.getByRole('button', { name: /Send to agent/ }).click();
+        await ready.getByRole('button', { name: /Send 1 comment/ }).click();
         const dialog = page.getByRole('dialog', { name: 'Send to agent' });
         await dialog.waitFor();
         const recipient = await dialog.locator('#tdoc-notify-recipient').inputValue();

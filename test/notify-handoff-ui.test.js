@@ -293,35 +293,21 @@ async function t(name, fn) {
       await page.close();
     });
 
-    await t('the paper-plane Send to agent lives in the phone drawer header only, with the ready count; the desktop bar stays clean', async () => {
-      {
-        const page = await browser.newPage({ viewport: { width: 1280, height: 844 } });
+    await t('no paper-plane anywhere: Send to agent lives in the Ask AI tab, not the phone drawer header or the desktop bar', async () => {
+      for (const width of [1280, 390]) {
+        const page = await browser.newPage({ viewport: { width, height: 844 } });
+        const errors = [];
+        page.on('pageerror', (e) => errors.push(e.message));
         await page.goto(`${base}/?view=activity&unified=1`);
-        await page.locator('#tdoc-send-agent-btn').waitFor();
-        // Julie, 2026-10-27: the desktop bar is crowded enough; no plane there.
-        assert.equal(await page.locator('#tdoc-send-plane-btn').count(), 0);
-        await page.close();
-      }
-      for (const width of [390]) {
-        for (const noready of [false, true]) {
-          const page = await browser.newPage({ viewport: { width, height: 844 } });
-          const errors = [];
-          page.on('pageerror', (e) => errors.push(e.message));
-          await page.goto(`${base}/?view=activity&unified=1${noready ? '&noready=1' : ''}`);
+        if (width < 700) {
           await page.locator('.tdoc-fab').click();
-          const send = page.locator('#tdoc-send-plane-btn');
-          await send.waitFor();
-          assert.equal(await send.getAttribute('aria-label'), noready ? 'Send to agent' : 'Send to agent (2 ready)');
-          assert.equal(await send.locator('.tdoc-send-plane-badge').count(), noready ? 0 : 1);
-          if (!noready) assert.equal(await send.locator('.tdoc-send-plane-badge').textContent(), '2');
-          assert.equal(await page.locator('#tdoc-comment-layer .tdoc-drawer-tabs #tdoc-send-plane-btn').count(), 1);
-          if (SHOTS && width < 700) await page.waitForTimeout(600); // the drawer slides up
-          if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `send-plane-${noready ? 'none' : 'ready'}-${width}.png`) });
-          await send.click();
-          assert.equal(await page.locator('#activity-log').textContent(), noready ? 'send-plane:' : 'send-plane:human-followup,new-comment');
-          assert.deepEqual(errors, []);
-          await page.close();
+          await page.locator('#tdoc-comment-layer .tdoc-drawer-tabs').waitFor();
+        } else {
+          await page.locator('#tdoc-send-agent-btn').waitFor();
         }
+        assert.equal(await page.locator('#tdoc-send-plane-btn, .tdoc-send-plane-action').count(), 0);
+        assert.deepEqual(errors, []);
+        await page.close();
       }
     });
 

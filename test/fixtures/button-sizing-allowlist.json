@@ -1,7 +1,6 @@
 [
  "server/chrome.css :: .tdoc-ask-form-bottom button.tdoc-ask-target-pill",
  "server/chrome.css :: .tdoc-ask-form-bottom button[type=\"submit\"]",
- "server/chrome.css :: .tdoc-ask-ready button",
  "server/chrome.css :: .tdoc-bar .tdoc-github-btn",
  "server/chrome.css :: .tdoc-bar .tdoc-menu-wrap > button",
  "server/chrome.css :: .tdoc-bar button",

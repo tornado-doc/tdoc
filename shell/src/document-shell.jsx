@@ -37,7 +37,6 @@ import {
   DocumentOverflowActions,
   DocumentPrimaryAction,
   DocumentSendAgentAction,
-  DocumentSendToAgentButton,
   LandingActions,
 } from './document/document-toolbar.jsx';
 import {
@@ -67,7 +66,7 @@ import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAgentChoices, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel } from './document/ask-ai-panel.jsx';
@@ -1033,13 +1032,27 @@ export function DocumentShell({ boot, config }) {
       : askAiTargets.find((item) => item.key === selectedAskAiTargetKey);
     if (!question || !choice || askAiBusy) return;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // A team agent answers for the team, never privately (worker
+    // team_agent_not_private): the question is posted as the asker's comment
+    // and the answer is its reply. The panel said so before Send.
+    const inPublic = Boolean(!choice.tdocAi && choice.target.team_agent);
     setAskAiBusy(true);
     if (!retryText) setAskAiDraft('');
     setAskAiTurns((turns) => [...turns, { id, question, target: choice.target, label: choice.label,
-      kind: choice.tdocAi ? 'tdoc-ai' : 'agent', status: 'thinking', answer: '', askId: null }]);
+      kind: choice.tdocAi ? 'tdoc-ai' : 'agent', status: 'thinking', answer: '', askId: null, public: inPublic }]);
     try {
-      const body = await handOff(config.slug, { ask_only: true, only_me: true, question,
-        version: config.version, recipient: recipientFor(choice.target) });
+      let commentId = null;
+      if (inPublic) {
+        const comment = await comments.addComment({ kind: 'document' }, question);
+        if (!comment?.id) throw new Error('Could not post the question');
+        commentId = comment.id;
+        markCommented();
+        setAiThinking({ id: commentId, label: choice.label, agent: true });
+        setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, publicCommentId: commentId } : turn));
+      }
+      const body = await handOff(config.slug, inPublic
+        ? { ask_only: true, comment_id: commentId, question, version: config.version, recipient: recipientFor(choice.target) }
+        : { ask_only: true, only_me: true, question, version: config.version, recipient: recipientFor(choice.target) });
       if (body?.ask) myAgent.addAsk(body.ask);
       if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
       setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? {
@@ -1049,6 +1062,7 @@ export function DocumentShell({ boot, config }) {
       } : turn));
     } catch (error) {
       if (error.status === 429 && choice.tdocAi) setAiRemaining(0);
+      if (inPublic) setAiThinking(null);
       setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? {
         ...turn, status: 'failed', error: error.status === 429 ? 'No free tdoc AI answers left.'
           : error.status === 409 ? 'Your agent could not be reached.' : (error.message || 'Could not get an answer.'),
@@ -1600,8 +1614,13 @@ export function DocumentShell({ boot, config }) {
       onAsk={askAiSend}
       onKeep={keepAskAiAnswer}
       onPost={postAskAiAnswer}
-      readyCount={canSendToAgent ? handoffBuckets.ready.length : 0}
-      onSendReady={canSendToAgent ? () => openDocNotify() : null}
+      send={canSendToAgent ? {
+        slug: config.slug,
+        choices: orderedAgentChoices(notifyTargets),
+        preselected: notifyTargets.default,
+        readyIds: handoffBuckets.ready.map((c) => c.id),
+        onSent: () => comments.refresh(),
+      } : null}
       activityOpen={agentActivityOpen}
       onActivityOpen={setAgentActivityOpen}
       unreadCount={unreadAgentReplies}
@@ -1644,7 +1663,6 @@ export function DocumentShell({ boot, config }) {
           : { target: comment.handoff_to, askOnly: true }) : null}
     />}</AskAiPanel>
   );
-  const sendToAgentButton = <DocumentSendToAgentButton count={handoffBuckets.ready.length} onClick={() => { setDrawerOpen(false); openDocNotify(); }} />;
   const commentFilterControl = comments.comments.length ? (
     <SegmentedControl
       className="tdoc-comment-filter"
@@ -1950,7 +1968,6 @@ export function DocumentShell({ boot, config }) {
           onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
           hideFab={handoffDetailsOpen || editor.mode === 'read'}
           askAi={unifiedEntry ? askAiPanel(drawerOpen && drawerTab === 'ask') : null}
-          sendAction={unifiedEntry && notifyEnabled ? sendToAgentButton : null}
           tab={drawerTab}
           onTab={setDrawerTab}
           onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
