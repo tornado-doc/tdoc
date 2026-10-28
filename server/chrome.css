@@ -881,8 +881,7 @@
   body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
   body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   body.tdoc-narrow .tdoc-comment-filter-row { position: sticky; top: 0; z-index: 1; padding: 4px 0 10px; background: #fff; }
-  body.tdoc-narrow .tdoc-drawer-tabs { align-items: center; gap: 8px; }
-  body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg { flex: 1; width: 100%; }
+  body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg { width: 100%; }
   body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg button { flex: 1; }
   body.tdoc-narrow .tdoc-tab-dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--td-accent, #1652f0); vertical-align: middle; }
   body.tdoc-narrow .tdoc-drawer-ask { padding-bottom: env(safe-area-inset-bottom); color: var(--td-ink, #1a1a1a); font: 13px/1.4 Inter, system-ui, sans-serif; }
@@ -1089,8 +1088,8 @@
   .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }
   .tdoc-ask-notice { margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
   .tdoc-ask-notice a { color: var(--td-accent, #1652f0); font-weight: 650; }
-  .tdoc-ask-ready { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
-  .tdoc-ask-ready button { border: 0; padding: 0; background: transparent; color: var(--td-accent, #1652f0); font: 650 12px Inter, system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
+  .tdoc-ask-mode-switch.tdoc-seg { display: inline-flex; margin: 0 0 10px; }
+  .tdoc-ask-public-notice { color: var(--td-ink, #1a1a1a); }
   .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
   .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }
   .tdoc-ask-turn { display: grid; min-width: 0; gap: 8px; }
@@ -1306,44 +1305,6 @@
   }
   @media (max-width: 700px) {
     .tdoc-bar .tdoc-send-agent-badge { position: absolute; top: 8px; right: 6px; margin: 0; }
-  }
-  /* Send to agent: the paper plane beside Ask AI, with the ready count. */
-  .tdoc-send-plane-action {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--td-ink, #1a1a1a);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .tdoc-send-plane-action:hover {
-    background: var(--td-accent-tint, #e8eeff);
-    color: var(--td-accent, #1652f0);
-  }
-  .tdoc-send-plane-action:focus-visible {
-    outline: 2px solid var(--td-accent, #1652f0);
-    outline-offset: 2px;
-  }
-  .tdoc-send-plane-badge {
-    position: absolute;
-    top: 2px;
-    right: 0;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 999px;
-    background: var(--td-accent, #1652f0);
-    color: #fff;
-    font: 650 10px/16px Inter, system-ui, sans-serif;
-    text-align: center;
-    box-sizing: border-box;
   }
 
 /* A navigation is under way (shell/src/nav-progress.js): a thin bar along the

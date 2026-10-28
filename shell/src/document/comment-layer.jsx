@@ -259,8 +259,6 @@ export function MobileCommentDrawer({
   askAi = null,
   tab = 'comments',
   onTab = null,
-  // The Send to agent button, beside the tabs (the top bar has no room).
-  sendAction = null,
 }) {
   const drawerRef = useRef(null);
   const showAsk = Boolean(askAi) && tab === 'ask';
@@ -308,7 +306,6 @@ export function MobileCommentDrawer({
                   { value: 'ask', label: <>Ask AI{unread ? <span className="tdoc-tab-dot" aria-label="new agent reply" /> : null}</> },
                 ]}
               />
-              {sendAction}
             </div> : null}
             {showAsk ? <div className="tdoc-drawer-ask">{askAi}</div> : (
             <Drawer.Content className="tdoc-drawer-list">

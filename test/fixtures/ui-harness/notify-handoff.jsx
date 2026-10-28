@@ -7,7 +7,7 @@ import '../../../server/chrome.css';
 import '../../../shell/src/ui/ui.css';
 import { NotifyHandoffPanel } from '../../../shell/src/document/notify-handoff.jsx';
 import { HandoffStatusChips } from '../../../shell/src/document/handoff-status-line.jsx';
-import { DocumentSendAgentAction, DocumentSendToAgentButton } from '../../../shell/src/document/document-toolbar.jsx';
+import { DocumentSendAgentAction } from '../../../shell/src/document/document-toolbar.jsx';
 import { HandoffDetailsPanel } from '../../../shell/src/document/handoff-details.jsx';
 import { AskAiPanel } from '../../../shell/src/document/ask-ai-panel.jsx';
 import { useCommentArea } from '../../../shell/src/document/comment-area.js';
@@ -103,8 +103,7 @@ function ActivityDemo() {
       <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen}>
         <AskAiPanel open={open} draft={askDraft} onDraft={setAskDraft} targetKey="tdoc-ai" onTarget={() => {}}
           targets={[{ key: 'tdoc-ai', label: 'tdoc AI', tdocAi: true }]} turns={[]} busy={false} remaining={5}
-          onAsk={() => {}} onKeep={() => {}} onPost={() => {}} readyCount={counts.ready}
-          onSendReady={() => setLog(`send-ready:${buckets.ready.map((item) => item.id).join(',')}`)}
+          onAsk={() => {}} onKeep={() => {}} onPost={() => {}}
           activityOpen={activityOpen} onActivityOpen={setActivityOpen} unreadCount={visibleUnread}>
         <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} handoffViewer="julie" onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
@@ -123,9 +122,7 @@ function ActivityDemo() {
     {!phone ? <div style={{ position: 'absolute', left: '72%', top: 145 }}><PinDemo seenMap={seenMap} /></div>
       : <MobileCommentDrawer open={drawerOpen} onOpenChange={setDrawerOpen} comments={activityCards} openCount={activityCards.length}
           unread={visibleUnread > 0} pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => {}}
-          askAi={params.has('unified') ? <div>Ask AI panel</div> : null} tab={drawerTab} onTab={setDrawerTab}
-          sendAction={params.has('unified') ? <DocumentSendToAgentButton count={counts.ready}
-            onClick={() => { setDrawerOpen(false); setLog(`send-plane:${buckets.ready.map((item) => item.id).join(',')}`); }} /> : null} />}
+          askAi={params.has('unified') ? <div>Ask AI panel</div> : null} tab={drawerTab} onTab={setDrawerTab} />}
     <output id="activity-log">{log}</output>
   </>;
 }
