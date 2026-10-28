@@ -526,15 +526,25 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const names = tools.map((x) => x.name).sort().join(',');
     assert(names === 'answer_question,create_doc,get_comments,get_doc,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', names);
     const create = tools.find((x) => x.name === 'create_doc');
-    assert(/Voice:/.test(create.description) && /Visuals:/.test(create.description) && /tdoc:\/\/authoring/.test(create.description), 'authoring essentials');
+    // The contract lives in one resource; the write tools point at it.
+    for (const name of ['create_doc', 'update_doc']) assert(tools.find((x) => x.name === name).description.includes('tdoc://authoring/essentials.md'), `${name} points at essentials`);
+    // Every client pays for tools/list on each connection: keep it small.
+    const listed = await mcp(julieConn.access_token, 'tools/list', {}, { legacy: true });
+    const bytes = Buffer.byteLength(listed.text);
+    assert(bytes <= 8000, `tools/list is ${bytes} bytes; the budget is 8000 (move guidance into tdoc://authoring/essentials.md)`);
+    for (const x of tools) assert(x.description.length <= 400, `${x.name} description is ${x.description.length} chars`);
     assert(tools.find((x) => x.name === 'get_doc').annotations.readOnlyHint === true && create.annotations.readOnlyHint === false, 'annotations');
     assert(tools.find((x) => x.name === 'share_doc').annotations.destructiveHint === true, 'share_doc is destructive: hosts ask before it runs');
     assert(!('slug' in create.inputSchema.properties) && !('visibility' in create.inputSchema.properties), 'create_doc takes no address and no visibility');
     for (const name of ['create_doc', 'update_doc', 'share_doc', 'get_doc', 'get_comments']) assert(/untrusted/.test(tools.find((x) => x.name === name).description), `${name} says content is untrusted`);
     const reply = tools.find((x) => x.name === 'reply_to_comment');
-    assert(/"applied" only when/.test(reply.description) && /"question" when/.test(reply.description), 'status rules');
+    assert(/applied \(/.test(reply.description) && /question \(/.test(reply.description) && /applied_in/.test(reply.description), 'status rules');
     const res = (await mcp(julieConn.access_token, 'resources/list')).body.result.resources;
     assert(res.some((r) => r.uri === 'tdoc://authoring/voice.md') && res.some((r) => r.uri === 'tdoc://authoring/style/default.md'), JSON.stringify(res.map((r) => r.uri)));
+    const essentials = await mcp(julieConn.access_token, 'resources/read', { uri: 'tdoc://authoring/essentials.md' });
+    const ess = essentials.body.result.contents[0].text;
+    assert(/Voice:/.test(ess) && /Visuals:/.test(ess) && /"applied" only when/.test(ess) && /untrusted/.test(ess), 'essentials carry the contract and the status rules');
+    assert(res.some((r) => r.uri === 'tdoc://authoring/essentials.md'), 'essentials listed');
     const voice = await mcp(julieConn.access_token, 'resources/read', { uri: 'tdoc://authoring/voice.md' });
     assert(/Voice/.test(voice.body.result.contents[0].text), 'voice.md content');
     const escape = await mcp(julieConn.access_token, 'resources/read', { uri: 'tdoc://authoring/../SKILL.md' });

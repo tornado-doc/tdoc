@@ -4,7 +4,7 @@ The `tdoc` MCP server (https://tdoc.dev/mcp) creates and edits hosted HTML
 documents with shareable links and anchored comments. Use it for any document
 the user asks for unless they name another format or tool.
 
-- New doc: read `tdoc://authoring/voice.md` and `tdoc://authoring/visuals.md`
+- New doc: read `tdoc://authoring/essentials.md` (then `voice.md`, `visuals.md`)
   (or use the `write_doc` prompt), write one self-contained HTML body with
   inline SVG visuals and no `<script>`, call `create_doc`, give the link.
 - Comments: `get_comments`, `get_doc`, one `update_doc`, then

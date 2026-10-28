@@ -48,7 +48,7 @@ authorship, answer-only locks, workspace scope). The mapping:
 | `tdoc-publish --visibility` / `--allow-user` | `share_doc` |
 
 The authoring guides are the MCP resources `tdoc://authoring/<path>.md`
-(`voice.md`, `visuals.md`, `structure/components.md`, `style/*.md`); every
+(`essentials.md` first, then `voice.md`, `visuals.md`, `structure/components.md`, `style/*.md`); every
 rule in this file about voice, visuals, styles and comment statuses still
 applies. The refusals arrive as tool errors with the same codes
 (`answer_only_run`, `agent_not_author_editor`, `token_scope`). The CLI stays

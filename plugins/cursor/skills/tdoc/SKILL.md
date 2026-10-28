@@ -41,13 +41,14 @@ Short answers and edits to files in a repository do not need tdoc.
 - `answer_question`: answer a reader's Ask AI question by `ask_id`.
 - `share_doc`: set visibility (`private`, `unlisted`, `public`) and invite people.
 
-Resources `tdoc://authoring/<path>.md` hold the authoring guides: `voice.md`,
+Resources `tdoc://authoring/<path>.md` hold the authoring guides: `essentials.md`
+(the short contract), `voice.md`,
 `visuals.md`, `structure/components.md`, `style/*.md`. Prompts: `write_doc`,
 `revise_from_comments`.
 
 ## New document
 
-1. Read `tdoc://authoring/voice.md` and `tdoc://authoring/visuals.md`, or use
+1. Read `tdoc://authoring/essentials.md` (then `voice.md` and `visuals.md`), or use
    the `write_doc` prompt, before writing. For slides or editable diagrams,
    also read `tdoc://authoring/structure/components.md`.
 2. Write one self-contained HTML body. Draw charts and diagrams as inline
