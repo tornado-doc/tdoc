@@ -49,6 +49,20 @@ body { background:#fff; }
 .wrap a  { color:rgba(10,10,10,.6); text-decoration:none; border-bottom:1px solid rgba(10,10,10,.2); }
 /* a hairline-ruled note — no fill, just a rule */
 .note { border-top:1px solid #e5e5e5; padding-top:12px; margin:20px 0; color:#555; font-size:15px; }
+
+/* Reading column: the same rules server/reader.css bakes into a published doc,
+   so a page carrying only this CSS (unbaked, or written in another app) reads
+   like a published tdoc. :where() keeps them at zero specificity, so any rule
+   of your own wins. Keep values as-is; test/style-reader-column.test.js holds
+   them equal to reader.css. */
+:where(body) { overflow-wrap: anywhere; }
+:where(body > .wrap, body > main, body > article, body > .content, body > .container) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
+:where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
+:where(body img, body video, body iframe, body svg, body canvas) { max-width: 100% !important; height: auto; box-sizing: border-box; }
+:where(body table) { max-width: 100%; overflow-wrap: normal; }
+.tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tdoc-table-scroll > table { max-width: none; }
+:where(body pre) { max-width: 100%; overflow-x: auto; }
 ```
 
 ## Tokens
