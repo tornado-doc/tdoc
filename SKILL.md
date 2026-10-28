@@ -28,6 +28,34 @@ artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
 sharing, with a one-time sign-in (email, Google, or GitHub) gating comments.
 
+## When the tdoc MCP tools are available, use them
+
+If your tools include tdoc's MCP server (`create_doc`, `update_doc`,
+`get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
+`resolve_comment`, `answer_question`, `share_doc`, from
+`https://tdoc.dev/mcp`, connected as a Claude/ChatGPT/Cursor connector or
+plugin), prefer them to the CLI below: they need no terminal, no local files
+and no sign-in step, and the server applies the same rules (write access,
+authorship, answer-only locks, workspace scope). The mapping:
+
+| CLI | MCP tool |
+|---|---|
+| `tdoc-new` / `tdoc-write` + `tdoc-publish` (new doc) | `create_doc` (title + html or markdown, optional `team`, `visibility`) |
+| `tdoc-write --version next` + `tdoc-publish` | `update_doc` (the whole new document) |
+| `tdoc-pull` | `get_comments`, and `get_doc` (format `html` for the source) |
+| `tdoc-agent-reply --status ...` | `reply_to_comment` (same statuses and `applied_in` rules) |
+| `tdoc-agent-reply --ask <ask_id>` | `answer_question` |
+| `tdoc-publish --visibility` / `--allow-user` | `share_doc` |
+
+The authoring guides are the MCP resources `tdoc://authoring/<path>.md`
+(`voice.md`, `visuals.md`, `structure/components.md`, `style/*.md`); every
+rule in this file about voice, visuals, styles and comment statuses still
+applies. The refusals arrive as tool errors with the same codes
+(`answer_only_run`, `agent_not_author_editor`, `token_scope`). The CLI stays
+the fallback: use it when the MCP tools are not connected, and for what has
+no tool yet (local preview, folders, Trash, widgets, preview cards, the
+local agent daemon).
+
 ## Document routing
 
 Invoke tdoc for any document, even when the user does not name it.
