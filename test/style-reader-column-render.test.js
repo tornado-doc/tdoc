@@ -38,7 +38,7 @@ async function measure(page) {
     const scroll = document.querySelector('.tdoc-table-scroll');
     return { page: document.documentElement.scrollWidth, wrap: r(document.querySelector('.wrap')),
       h1: r(document.querySelector('h1')), svg: r(document.querySelector('svg')), pre: r(document.querySelector('pre')),
-      table: r(scroll), tableScrolls: scroll.scrollWidth > scroll.clientWidth,
+      table: r(scroll), tableContent: scroll.scrollWidth, tableScrolls: scroll.scrollWidth > scroll.clientWidth,
       pad: getComputedStyle(document.querySelector('.wrap')).padding };
   });
 }

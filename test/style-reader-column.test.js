@@ -37,7 +37,7 @@ const COLUMN = [
   ':where(body:not(:has(>.wrap,>main,>article,>.content,>.container)))',
 ];
 const REQUIRED = [...COLUMN, ':where(body img,body video,body iframe,body svg,body canvas)',
-  ':where(body table)', '.tdoc-table-scroll', '.tdoc-table-scroll>table', ':where(body pre)'];
+  ':where(body table)', ':where(body th,body td)', ':where(body th)', '.tdoc-table-scroll', '.tdoc-table-scroll>table', ':where(body pre)'];
 
 function styleCss(name) {
   const md = fs.readFileSync(path.join(ROOT, `authoring/style/${name}.md`), 'utf8');
@@ -64,6 +64,15 @@ for (const name of STYLES) {
   });
   t(`${name}: column values equal reader.css (width, padding, margins)`, () => {
     for (const s of COLUMN) assert.deepEqual(col[s], reader[s], `${s} drifted from reader.css`);
+  });
+  // Table geometry, not just the scroller: cell padding, spacing and size set
+  // how wide a table is, so they decide whether it scrolls at phone width.
+  // Colours (cell chips) stay the style's own.
+  t(`${name}: table geometry equals reader.css (spacing, cell padding, size)`, () => {
+    for (const [sel, props] of [[':where(body table)', ['border-collapse', 'border-spacing', 'font-size']],
+      [':where(body th,body td)', ['padding', 'border']], [':where(body th)', ['font-weight']]]) {
+      for (const p of props) assert.equal(col[sel] && col[sel][p], reader[sel][p], `${sel} { ${p} } missing or drifted`);
+    }
   });
   t(`${name}: every copied declaration exists in reader.css with the same value`, () => {
     for (const [sel, decls] of Object.entries(col)) {

@@ -63,7 +63,9 @@ body { background:#faf9f5; }
 :where(body > .wrap, body > main, body > article, body > .content, body > .container) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
 :where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
 :where(body img, body video, body iframe, body svg, body canvas) { max-width: 100% !important; height: auto; box-sizing: border-box; }
-:where(body table) { max-width: 100%; overflow-wrap: normal; }
+:where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; max-width: 100%; overflow-wrap: normal; }
+:where(body th, body td) { padding: 10px 14px; border: 0; text-align: left; }
+:where(body th) { font-weight: 600; }
 .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .tdoc-table-scroll > table { max-width: none; }
 :where(body pre) { max-width: 100%; overflow-x: auto; }
