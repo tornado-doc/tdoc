@@ -1,0 +1,15 @@
+{
+  "name": "tdoc",
+  "displayName": "tdoc",
+  "version": "0.9.0",
+  "description": "Create, edit, and share hosted HTML documents with anchored comments on tdoc.dev, through the tdoc remote MCP server.",
+  "author": {
+    "name": "Tornado",
+    "url": "https://github.com/tornado-doc"
+  },
+  "homepage": "https://tdoc.dev",
+  "repository": "https://github.com/tornado-doc/tdoc",
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["docs", "documents", "html", "comments", "mcp"],
+  "icon": "./assets/logo.png"
+}
