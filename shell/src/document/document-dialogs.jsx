@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppButton } from '../ui/button.jsx';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { getPublishSignin, publishDocument, requestQuotaBump } from './api.js';
 import { copyText } from './model.js';
 
@@ -37,7 +38,7 @@ export function ShareDialog({ open, url, versionUrl, version, team, onOpenChange
       actions={(
         <>
           <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
-          <AppButton variant="primary" className="primary" onClick={copy}>Copy link</AppButton>
+          <CopyPromptButton label="Copy link" copied={false} onCopy={copy} />
         </>
       )}
     >
@@ -76,12 +77,7 @@ export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopie
       actions={(
         <>
           <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
-          <AppButton variant="primary"
-            className="primary"
-            onClick={async () => { await copyText(url); onCopied(); }}
-          >
-            Copy link
-          </AppButton>
+          <CopyPromptButton label="Copy link" copied={false} onCopy={async () => { await copyText(url); onCopied(); }} />
         </>
       )}
     >
@@ -117,7 +113,7 @@ function PublishSignin({ signin }) {
       </div>
       <div className="code" style={{ marginTop: 8 }}>{signin.user_code}</div>
       <div className="actions" style={{ justifyContent: 'flex-start', gap: 8, marginTop: 8 }}>
-        <button type="button" onClick={() => copyText(signin.user_code)}>Copy code</button>
+        <CopyPromptButton label="Copy code" copied={false} onCopy={() => copyText(signin.user_code)} />
         <button
           type="button"
           onClick={() => window.open(signin.verification_uri, '_blank', 'noopener')}
@@ -188,7 +184,7 @@ export function PublishDialog({ open, slug, onOpenChange }) {
         <div style={{ marginTop: 10 }}>
           <div className="code url" id="tdoc-pub-url">{url}</div>
           <div className="actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
-            <button type="button" className="primary" onClick={() => copyText(url)}>Copy link</button>
+            <CopyPromptButton label="Copy link" copied={false} onCopy={() => copyText(url)} />
             <button type="button" onClick={() => window.open(url, '_blank', 'noopener')}>View live →</button>
           </div>
         </div>

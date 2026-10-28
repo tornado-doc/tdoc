@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, DatabaseBackup, Link2, MessageSquareText, RefreshCw, ServerCog, SlidersHorizontal, UsersRound } from 'lucide-react';
+import { Bot, DatabaseBackup, MessageSquareText, RefreshCw, ServerCog, SlidersHorizontal, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppButton } from '../ui/button.jsx';
 import { AppSelect } from '../ui/select.jsx';
@@ -424,12 +424,13 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, inline = fa
                 onChange={(added) => apply(() => updateTeam(team.id, { invites: [...team.invites, ...added.filter((x) => !team.invites.includes(x))] }))}
               />
               {team.invite_url ? (
-                <AppButton
+                <CopyPromptButton
                   className="tm-copy-invite"
-                  onClick={() => copyText(team.invite_url).then(() => setCopied('invite'))}
-                >
-                  <Link2 size={14} /> {copied === 'invite' ? 'Invite link copied' : 'Copy invite link'}
-                </AppButton>
+                  label="Copy invite link"
+                  copiedLabel="Invite link copied"
+                  copied={copied === 'invite'}
+                  onCopy={() => copyText(team.invite_url).then(() => setCopied('invite'))}
+                />
               ) : null}
             </section>
           ) : null}
@@ -438,9 +439,7 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, inline = fa
               <label className="field">Team link</label>
               <div className="tm-team-link">
                 <code>{team.team_url.replace(/^https?:\/\//, '')}</code>
-                <AppButton variant="quiet" onClick={() => copyText(team.team_url).then(() => setCopied('team'))}>
-                  {copied === 'team' ? 'Copied' : 'Copy'}
-                </AppButton>
+                <CopyPromptButton label="Copy" copied={copied === 'team'} onCopy={() => copyText(team.team_url).then(() => setCopied('team'))} />
               </div>
               <p className="manage-hint">Opens the team for members and for people on the invite list. Anyone else is told whom to ask.</p>
             </section>

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
 import { AppButton } from '../ui/button.jsx';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AppSwitch } from '../ui/switch.jsx';
 import { deleteDocument, getTeam, getTeamGuests, updateDocumentAccess, updateTeam } from './api.js';
@@ -244,9 +245,7 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
         {url}
       </div>
       <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
-        <AppButton variant="primary" className="primary" onClick={() => copyText(url).then(onCopied)}>
-          Copy link
-        </AppButton>
+        <CopyPromptButton label="Copy link" copied={false} onCopy={() => copyText(url).then(onCopied)} />
       </div>
       <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
       {manage.versionCount != null ? (

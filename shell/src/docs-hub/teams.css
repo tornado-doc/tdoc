@@ -17,7 +17,7 @@
 .tm-role:hover { background-color: var(--td-surface); color: var(--td-ink); }
 .tm-role-label { color: var(--td-muted); font-size: 13px; }
 .tm-copy-invite { margin: 8px 0 12px; }
-/* Team agent row Remove: kept until the team-agent PR (#871) moves that row. */
+/* Team agent row actions (Show setup command, Remove) from #871 keep this text-button look. */
 .tm-text-btn { border: 0 !important; background: none !important; color: var(--td-muted); font-size: 13px; padding: 4px !important; }
 /* The team link, shown like the profile's share link: a chip and Copy. */
 .tm-team-link { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 4px 0 6px; }
@@ -156,7 +156,6 @@
   .tm-backup-grid input { min-height: 44px; }
   .tm-backup-health-actions { align-items: stretch; flex-direction: column; gap: 8px; }
   .tm-daemon-command { flex-direction: column; }
-  .tm-daemon-command .tdoc-copy-prompt { align-self: flex-start; min-height: 44px; }
 }
 
 /* Pending team invitations on My docs. */

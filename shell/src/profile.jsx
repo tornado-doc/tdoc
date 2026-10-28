@@ -3,6 +3,7 @@ import { LayoutGrid, Rows3, Share2, UserRoundPen, PencilLine, X } from 'lucide-r
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
+import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import {
   DEFAULT_ANNOTATION_LINES,
   POSTER_KINDS,
@@ -530,7 +531,7 @@ export function Profile({ boot }) {
           </p>
           <div className="profile-share-link">
             <code>{profileUrl(login)}</code>
-            <button type="button" className="text-btn" onClick={copyProfileLink}>Copy link</button>
+            <CopyPromptButton label="Copy link" copied={false} onCopy={copyProfileLink} />
           </div>
           {shareStatus ? <p className="manage-hint">{shareStatus}</p> : null}
           <label className="profile-poster-field">

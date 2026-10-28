@@ -55,23 +55,9 @@
   margin-top: 10px;
 }
 
-.tdoc-copy-prompt {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 6px 10px;
-  border: 1px solid var(--td-line, #d9d8d4);
-  border-radius: 7px;
-  background: var(--td-bg, #fff);
-  color: var(--td-ink, #1a1a1a);
-  font: 600 13px/1.2 system-ui, -apple-system, sans-serif;
-  cursor: pointer;
-}
-
-.tdoc-copy-prompt:hover { border-color: var(--td-accent, #1652f0); color: var(--td-accent, #1652f0); }
-.tdoc-copy-prompt.is-copied { color: #137044; border-color: #9bc9b3; background: #f2faf6; }
+/* CopyPromptButton is a quiet small AppButton (sizes in .ui-btn below); the
+   copied state keeps its green word and tick. */
+.ui-btn.tdoc-copy-prompt.is-copied, .ui-btn.tdoc-copy-prompt.is-copied:hover:not(:disabled) { color: #137044; }
 
 /* Buttons inside the reader chrome that read as text (the legacy markup used
    spans): keep the semantics, drop the UA button box. */
@@ -1261,9 +1247,8 @@ a.ui-menu-item:visited {
 }
 .ui-code-block.ui-code-block.no-wrap > pre { white-space: pre; }
 .ui-code-block.ui-code-block code { display: inline; padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; white-space: inherit; }
-.ui-code-block.ui-code-block .ui-code-copy { float: right; position: sticky; right: 0; margin: -4px -6px 4px 10px; font: 600 13px/1.2 system-ui, -apple-system, sans-serif; white-space: nowrap; user-select: none; }
-.ui-code-block.ui-code-block .ui-code-copy:not(.is-copied) { background: var(--td-ground, #fff); }
+.ui-code-block.ui-code-block .ui-code-copy { float: right; position: sticky; right: 0; margin: 0 0 4px 12px; white-space: nowrap; user-select: none; }
 /* A no-wrap script scrolls sideways, so nothing can flow around the button:
    it sits in a strip above the first line instead. */
-.ui-code-block.ui-code-block.no-wrap.has-copy > pre { padding-top: 50px; }
-.ui-code-block.ui-code-block.no-wrap .ui-code-copy { float: none; position: absolute; top: 6px; right: 6px; margin: 0; }
+.ui-code-block.ui-code-block.no-wrap.has-copy > pre { padding-top: 34px; }
+.ui-code-block.ui-code-block.no-wrap .ui-code-copy { float: none; position: absolute; top: 8px; right: 12px; margin: 0; }

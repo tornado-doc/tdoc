@@ -42,6 +42,7 @@
  "shell/src/docs-hub.css :: .tdoc-link-btn",
  "shell/src/docs-hub.css :: .text-btn",
  "shell/src/docs-hub.css :: button",
+ "shell/src/docs-hub/teams.css :: .tm-agent-row .tm-text-btn",
  "shell/src/docs-hub/teams.css :: .tm-comment-filter-button",
  "shell/src/docs-hub/teams.css :: .tm-comment-filter-dialog button",
  "shell/src/docs-hub/teams.css :: .tm-comment-toolbar button",

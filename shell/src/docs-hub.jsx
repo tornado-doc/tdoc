@@ -184,9 +184,7 @@ function FolderShareDialog({ folder, team = '', onClose, onAccess }) {
             {shareUrl}
           </div>
           <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
-            <button type="button" className="primary" disabled={busy} onClick={() => copyText(shareUrl).then(() => setStatus('Copied.'))}>
-              Copy link
-            </button>
+            <CopyPromptButton label="Copy link" copied={false} disabled={busy} onCopy={() => copyText(shareUrl).then(() => setStatus('Copied.'))} />
           </div>
         </>
       ) : (

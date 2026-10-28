@@ -223,5 +223,17 @@ t('docs-hub.css keeps its tokens and base type inside the docs-hub root', () => 
   assert(!/(^|\})\s*(body|h1|a|a:hover)\s*\{/.test(css), 'docs-hub.css styles body / h1 / a for every page');
 });
 
+t('one Copy control: CopyPromptButton (quiet small AppButton) on every product copy action', () => {
+  const files = ['shell/src/docs-hub/teams.jsx', 'shell/src/document/owner-access-dialog.jsx', 'shell/src/document/document-dialogs.jsx',
+    'shell/src/docs-hub.jsx', 'shell/src/profile.jsx', 'shell/src/connectors-page.jsx', 'shell/src/document/comment-card.jsx', 'shell/src/ui/code-block.jsx'];
+  for (const file of files) {
+    const src = read(file);
+    assert(!/<(button|AppButton)\b[^>]*>\s*(\{[^}]*\}\s*)?(Copy|\{copied)/.test(src), `${file}: a Copy button that is not CopyPromptButton`);
+    assert(/<CopyPromptButton\b/.test(src), `${file}: no CopyPromptButton`);
+  }
+  const button = read('shell/src/ui/copy-prompt-button.jsx');
+  assert(/<AppButton\s+variant="quiet"\s+size="s"/.test(button), 'CopyPromptButton is not the quiet small AppButton');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

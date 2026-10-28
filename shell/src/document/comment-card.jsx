@@ -6,6 +6,7 @@ import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { usePortalContainer } from '../ui/portal.js';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
@@ -937,13 +938,14 @@ export function CommentCard({
       {handoff && handoff.threadId === comment.id && comment.status !== 'applied'
         && !replies.some((reply) => reply.author?.kind === 'agent') ? (() => {
           const copyButton = (
-            <button
-              type="button"
+            <CopyPromptButton
               className={handoff.state !== 'idle' ? 'tdoc-handoff-copy done' : 'tdoc-handoff-copy'}
-              onClick={handoff.onCopy}
-            >
-              {handoff.state === 'idle' ? 'Copy' : handoff.copyFailed ? 'Select & copy' : 'Copied'}
-            </button>
+              label="Copy"
+              copied={handoff.state !== 'idle'}
+              copiedLabel={handoff.copyFailed ? 'Select & copy' : 'Copied'}
+              showTick={!handoff.copyFailed}
+              onCopy={handoff.onCopy}
+            />
           );
           return (
           <div className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}>

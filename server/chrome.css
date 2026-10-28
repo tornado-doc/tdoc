@@ -565,8 +565,7 @@
   .tdoc-handoff-toggle { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 4px; min-width: 0; appearance: none; border: 0; padding: 0; background: none; font: 600 12px system-ui, -apple-system, sans-serif; color: #111; cursor: pointer; text-align: left; }
   .tdoc-handoff-toggle .chev { flex: 0 0 auto; color: #888; transition: transform .12s; }
   .tdoc-handoff.open .tdoc-handoff-toggle .chev { transform: rotate(90deg); }
-  .tdoc-handoff-copy { flex: 0 0 auto; appearance: none; border: 1px solid #d0d0d6; border-radius: 6px; padding: 3px 9px; background: #fff; font: 600 12px system-ui, -apple-system, sans-serif; color: #111; cursor: pointer; }
-  .tdoc-handoff-copy.done { border-color: #1a7340; background: #1a7340; color: #fff; }
+  .tdoc-handoff-copy { flex: 0 0 auto; }
   /* The prompt is its own box, white on the block's grey, with Copy on it —
      what the button copies is exactly what the box holds. */
   .tdoc-handoff-line { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid #d0d0d6; border-radius: 6px; background: #fff; }

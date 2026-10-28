@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppDialog } from './ui/dialog.jsx';
 import { AppButton } from './ui/button.jsx';
+import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { CodeBlock } from './ui/code-block.jsx';
 import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, LOCAL_DAEMON_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, localSeenText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
@@ -278,7 +279,7 @@ X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
         >
           <div className="tdoc-connector">
             <code className="tdoc-conn-secret">{made.secret}</code>
-            <AppButton onClick={() => doCopy('secret', made.secret)}>{copied === 'secret' ? 'Copied' : 'Copy secret'}</AppButton>
+            <CopyPromptButton label="Copy secret" copied={copied === 'secret'} onCopy={() => doCopy('secret', made.secret)} />
             <p className="manage-hint">Use Send test on the row above to check it arrives.</p>
           </div>
         </AppDialog>
