@@ -20,6 +20,8 @@ const OFFLINE = [
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
+  'plugins.test.js',          // plugins/: Claude, Codex/ChatGPT, Cursor, Gemini, VS Code packages for the remote MCP server
+  'remote-mcp.test.js',       // /mcp + OAuth 2.1: PKCE, redirect URIs, consent CSRF, token mapping, refresh/revoke, tools and refusals, rate limit
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
@@ -193,6 +195,7 @@ const BROWSER = [
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
   'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
+  'connect-ai-apps-ui.test.js', // remoteMcp flag: Connect in one click on /start, /setup, Settings (Claude/ChatGPT/Cursor links) + OAuth consent page, desktop + phone
   'team-agent-ui.test.js',     // team settings add/remove, member Send to team agent, the real daemon replying, desktop + phone
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
