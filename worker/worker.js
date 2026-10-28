@@ -18633,6 +18633,30 @@ const tdocHandlers = {
         await forgetTeamAgent(env, agent);
         return json({ ok: true, agents: await teamAgentRows(env, team) });
       }
+      // A new setup code for an agent no machine has connected yet: the old
+      // code stops working (its KV entry goes and the team keeps only the new
+      // hash, which /connect checks), and the hour starts again. A connected
+      // agent already has its token; a fresh code would be a second way in.
+      if (body.action === 'reissue') {
+        const agent = teamAgent(team, String(body.agent || ''));
+        if (!agent) return json({ error: 'agent_not_found' }, { status: 404 });
+        if (agent.token_hash) return json({ error: 'already_connected' }, { status: 409 });
+        const code = `tdts_${rand(24)}`;
+        const setupHash = await sha256Hex(code);
+        const setupExpires = new Date(Date.now() + TEAM_AGENT_SETUP_TTL_SECONDS * 1000).toISOString();
+        team.agents = teamAgents(team).map((a) => (a.id === agent.id ? { ...a, setup_hash: setupHash, setup_expires: setupExpires } : a));
+        await saveTeam(env, team);
+        if (agent.setup_hash) await env.META.delete(`team-agent-setup:${agent.setup_hash}`).catch(() => {});
+        await env.META.put(`team-agent-setup:${setupHash}`, JSON.stringify({ team: team.id, agent: agent.id }), { expirationTtl: TEAM_AGENT_SETUP_TTL_SECONDS });
+        return json({
+          ok: true,
+          agent: publicTeamAgent(teamAgent(team, agent.id)),
+          setup_code: code,
+          expires_in: TEAM_AGENT_SETUP_TTL_SECONDS,
+          command: teamAgentSetupCommand(url.origin, code),
+          agents: await teamAgentRows(env, team),
+        });
+      }
       const name = String(body.name == null ? '' : body.name).replace(/[\x00-\x1f\x7f]/g, '').trim();
       if (!name || name.length > TEAM_AGENT_NAME_MAX) return json({ error: 'invalid_name', limit: TEAM_AGENT_NAME_MAX }, { status: 400 });
       if (teamAgents(team).length >= TEAM_AGENTS_MAX) return json({ error: 'team_agent_limit', limit: TEAM_AGENTS_MAX }, { status: 400 });
@@ -18673,7 +18697,7 @@ const tdocHandlers = {
       let pending = null;
       try { pending = JSON.parse(await env.META.get(`team-agent-setup:${setupHash}`)); } catch {}
       await env.META.delete(`team-agent-setup:${setupHash}`);
-      const gone = () => json({ error: 'unknown_code', message: 'This setup command has expired or was already used. A team admin can remove the agent and add it again for a new one.' }, { status: 404 });
+      const gone = () => json({ error: 'unknown_code', message: 'This setup command has expired or was already used. A team admin can show a new setup command in Team settings → Agents.' }, { status: 404 });
       if (!pending || !validTeamId(pending.team) || !validTeamAgentId(pending.agent)) return gone();
       const token = `tdoc_${rand(24)}`;
       const tokenHash = await sha256Hex(token);

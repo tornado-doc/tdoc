@@ -190,9 +190,20 @@
 .tm-agent-add { display: grid; gap: 12px; min-width: 0; }
 .tm-agent-warn { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 10px; background: #fff7e6; color: #5c3d00; font-size: 13px; line-height: 1.45; }
 .tm-agent-warn svg { flex: none; margin-top: 1px; }
-.tm-agent-command { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
-.tm-agent-command code { flex: 1; min-width: 0; padding: 10px; border-radius: 8px; background: #1e1e1e; color: #e6e6e6; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+/* The setup command: one box, Copy in its top-right corner above the
+   command, one step per line, wrapped only at spaces (a word longer than
+   the box scrolls instead of breaking). */
+.tm-agent-command { display: grid; gap: 6px; min-width: 0; padding: 6px 6px 10px 12px; border: 1px solid var(--td-line); border-radius: 8px; background: var(--td-surface-2); }
+.tm-agent-command .tdoc-copy-prompt { order: -1; justify-self: end; }
+.tm-agent-command code { display: block; min-width: 0; overflow-x: auto; padding: 0 6px 4px 0; background: none; color: var(--td-ink); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; }
 .tm-agent-row .tm-person-text > span { white-space: normal; overflow-wrap: anywhere; }
+.tm-agent-row .tm-person-right { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Phone: the actions go under the name, as on guest rows. */
+@media (max-width: 600px) {
+  .tm-agent-row { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; }
+  .tm-agent-row .tm-person-right { grid-column: 2; justify-content: flex-start; }
+  .tm-agent-row .tm-text-btn { min-height: 44px; }
+}
 
 /* Settings -> Sign-in methods (#58). */
 .tm-sim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

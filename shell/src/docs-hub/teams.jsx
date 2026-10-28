@@ -21,6 +21,7 @@ import {
   openTeamBilling,
   removeTeamAgent,
   removeTeamBackup,
+  reissueTeamAgentSetup,
   removeTeamMember,
   saveTeamBackup,
   setTeamRole,
@@ -736,7 +737,7 @@ function seenText(iso) {
 // can send them comments on team docs; admins add and remove them. Adding
 // gives one command for a dedicated machine; nothing personal should be on
 // it, because every member's comments drive it.
-function TeamAgentRow({ agent, team, canManage, onRemove }) {
+function TeamAgentRow({ agent, team, canManage, onRemove, onShowSetup }) {
   const devices = agent.devices || [];
   const sub = !agent.connected
     ? 'Waiting for its machine to run the setup command'
@@ -751,17 +752,20 @@ function TeamAgentRow({ agent, team, canManage, onRemove }) {
         <span className="tm-person-sub">{sub}</span>
       </div>
       <div className="tm-person-right">
+        {canManage && !agent.connected ? <button type="button" className="tm-text-btn" onClick={() => onShowSetup(agent)}>Show setup command</button> : null}
         {canManage ? <button type="button" className="tm-text-btn" onClick={() => onRemove(agent)}>Remove</button> : null}
       </div>
     </div>
   );
 }
 
-function AddTeamAgentDialog({ team, onClose, onAdded }) {
+// `issued` opens it straight on the Connect step, with a setup command just
+// reissued for an agent that has not connected yet.
+function AddTeamAgentDialog({ team, issued = null, onClose, onAdded }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
-  const [added, setAdded] = useState(null);
+  const [added, setAdded] = useState(issued);
   const add = async () => {
     setBusy(true);
     setStatus('');
@@ -793,7 +797,8 @@ function AddTeamAgentDialog({ team, onClose, onAdded }) {
           <>
             <p>Run this once on that machine. It installs tdoc if needed, connects as <b>{added.agent.name} · {team.name} team agent</b>, and starts picking up comments. It works once, within the hour.</p>
             <div className="tm-agent-command">
-              <code>{added.command}</code>
+              {/* One step per line to read; Copy takes the exact one-line command. */}
+              <code>{added.command.split('; ').join(';\n')}</code>
               <CopyPromptButton text={added.command} />
             </div>
             <p className="manage-hint">It reaches {team.name}&apos;s docs and nothing else: no one&apos;s personal docs, no other team. It cannot share, delete, invite or change billing. It belongs to the team, so it keeps working if you leave; remove it here to stop it.</p>
@@ -815,6 +820,7 @@ export function TeamAgentsSection({ team }) {
   const [canManage, setCanManage] = useState(false);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState(null);
+  const [issued, setIssued] = useState(null);
   const [status, setStatus] = useState('');
   useEffect(() => {
     let cancelled = false;
@@ -835,6 +841,15 @@ export function TeamAgentsSection({ team }) {
     } catch (error) { setStatus(message(error)); }
     setRemoving(null);
   };
+  // The first command is shown once; a new one replaces it (the old one stops working).
+  const showSetup = async (agent) => {
+    setStatus('');
+    try {
+      const result = await reissueTeamAgentSetup(team.id, agent.id);
+      setAgents(result.agents || []);
+      setIssued(result);
+    } catch (error) { setStatus(message(error)); }
+  };
   return (
     <section className="manage-section tm-team-agents" aria-labelledby="tm-team-agents-heading">
       <div className="tm-team-agents-head">
@@ -842,11 +857,12 @@ export function TeamAgentsSection({ team }) {
         {canManage ? <AppButton onClick={() => setAdding(true)}><Bot size={14} /> Add team agent</AppButton> : null}
       </div>
       {agents === null ? <p className="muted">Loading…</p> : agents.length ? agents.map((agent) => (
-        <TeamAgentRow key={agent.id} agent={agent} team={team} canManage={canManage} onRemove={setRemoving} />
+        <TeamAgentRow key={agent.id} agent={agent} team={team} canManage={canManage} onRemove={setRemoving} onShowSetup={showSetup} />
       )) : <p className="empty">No team agent yet.{canManage ? '' : ' A team admin can add one.'}</p>}
       <p className="manage-hint">Every member can send a comment on a {team.name} doc to a team agent; its replies are visible to everyone who can see the doc. It belongs to the team, not to whoever added it.</p>
       {status ? <p className="status" role="status">{status}</p> : null}
       {adding ? <AddTeamAgentDialog team={team} onClose={() => setAdding(false)} onAdded={setAgents} /> : null}
+      {issued ? <AddTeamAgentDialog team={team} issued={issued} onClose={() => setIssued(null)} onAdded={setAgents} /> : null}
       {removing ? (
         <AppDialog
           open

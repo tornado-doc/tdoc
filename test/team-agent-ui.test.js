@@ -186,6 +186,10 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await dialog.getByRole('button', { name: 'Add', exact: true }).click();
         const connect = page.getByRole('dialog', { name: `Connect ${agentName}` });
         await connect.waitFor();
+        await shot('connect-dialog');
+        // The command reads as text, not as a disabled field.
+        const ink = await connect.locator('.tm-agent-command code').evaluate((el) => getComputedStyle(el).color);
+        if (ink === 'rgb(230, 230, 230)') throw new Error(`setup command text is faded: ${ink}`);
         const command = await connect.locator('.tm-agent-command code').innerText();
         const code = (command.match(/tdts_[a-f0-9]{48}/) || [])[0];
         if (!code || !command.includes('connect-team')) throw new Error(`command: ${command}`);
@@ -197,6 +201,33 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         await shot('setup-command');
         await connect.getByRole('button', { name: 'Done' }).click();
         await section.locator('.tm-agent-row', { hasText: agentName }).waitFor();
+      });
+
+      await t(`${label}: closed too soon? the admin shows a new setup command from the row; the old one stops working`, async () => {
+        const row = page.locator('.tm-agent-row', { hasText: agentName });
+        await row.scrollIntoViewIfNeeded();
+        await shot('agent-waiting');
+        await row.getByRole('button', { name: 'Show setup command' }).click();
+        const connect = page.getByRole('dialog', { name: `Connect ${agentName}` });
+        await connect.waitFor();
+        const command = await connect.locator('.tm-agent-command code').innerText();
+        const code = (command.match(/tdts_[a-f0-9]{48}/) || [])[0];
+        if (!code || code === setup.code || !command.includes('connect-team')) throw new Error(`reissued command: ${command}`);
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        if (overflow > 1) throw new Error(`page overflows by ${overflow}px`);
+        await shot('setup-command-again');
+        await connect.getByRole('button', { name: 'Done' }).click();
+        await connect.waitFor({ state: 'detached' });
+        const old = await call('/api/team/agents/connect', { method: 'POST', body: { code: setup.code } });
+        if (old.status !== 404) throw new Error(`old code: ${old.status}`);
+        setup = { command, code };
+        // A member sees the row but not the button.
+        await as(bob);
+        await page.goto(`${base}/me?team=${team.id}&view=settings&r=${Date.now()}#agents`);
+        const memberRow = page.locator('.tm-agent-row', { hasText: agentName });
+        await memberRow.waitFor();
+        if (await memberRow.getByRole('button', { name: 'Show setup command' }).count()) throw new Error('member sees Show setup command');
+        await as(julie);
       });
 
       await t(`${label}: the machine runs it: the real daemon connects as the team agent and checks in`, async () => {

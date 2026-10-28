@@ -494,6 +494,12 @@ export function addTeamAgent(id, name) {
   return teamRequest('/api/team/agents', 'POST', { id, name });
 }
 
+// A new one-time setup command for an agent not connected yet; the previous
+// one stops working.
+export function reissueTeamAgentSetup(id, agent) {
+  return teamRequest('/api/team/agents', 'POST', { id, agent, action: 'reissue' });
+}
+
 export function removeTeamAgent(id, agent) {
   return teamRequest('/api/team/agents', 'DELETE', { id, agent });
 }
