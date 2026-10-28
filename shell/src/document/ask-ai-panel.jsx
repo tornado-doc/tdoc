@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
-import { AppMenu } from '../ui/menu.jsx';
+import { Check, ChevronDown } from 'lucide-react';
+import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { AppButton } from '../ui/button.jsx';
-import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { readStored, writeStored } from '../safe-storage.js';
 import { agentMentionName, sameTarget } from './agent-choices.js';
 import { AgentMenuItems } from './agent-menu.jsx';
@@ -22,10 +21,31 @@ function AgentPill({ label, ariaLabel, children }) {
   )}>{children}</AppMenu>;
 }
 
+const commentCount = (n) => `${n} ${n === 1 ? 'comment' : 'comments'}`;
+
+// Ask or Send to agent: a quiet setting in the input's bottom row, beside
+// the agent pill and in its style and menu rows -- not a filled switch above
+// the input. Only where the viewer may send (`send`).
+function ModePicker({ mode, onPick, ready }) {
+  const row = (value, name, desc, disabled = false) => <AppMenuItem className="tdoc-agent-menu-item tdoc-ask-mode-item"
+    disabled={disabled} onClick={() => onPick(value)}>
+    <span className="tdoc-ask-mode-item-text"><b>{name}</b> — {desc}</span>
+    <span className="tdoc-agent-menu-check">{mode === value ? <Check size={13} aria-label="Picked" /> : null}</span>
+  </AppMenuItem>;
+  return <AppMenu align="start" popupClassName="tdoc-agent-menu tdoc-ask-mode-menu" trigger={(
+    <button type="button" className="tdoc-ask-target-pill tdoc-ask-mode-pill" aria-label={`Mode: ${mode === 'send' ? 'Send to agent' : 'Ask'}`}>
+      {mode === 'send' ? 'Send to agent' : 'Ask'} <ChevronDown size={12} aria-hidden="true" />
+    </button>
+  )}>
+    {row('ask', 'Ask', 'the agent answers')}
+    {row('send', 'Send to agent', ready ? `hand over ${commentCount(ready)} to fix` : 'No comments ready', !ready)}
+  </AppMenu>;
+}
+
 // Send to agent, inside Ask AI: the doc's comments ready to hand off, to
 // the agent picked here, through the Send to agent dialog's own send
 // (useHandoffSend) and its delivery line.
-function SendToAgentForm({ open, send }) {
+function SendToAgentForm({ open, send, modePicker }) {
   const { slug, choices, preselected, readyIds, onSent } = send;
   const [picked, setPicked] = useState(null);
   const [note, setNote] = useState('');
@@ -48,20 +68,20 @@ function SendToAgentForm({ open, send }) {
       <textarea ref={input} aria-label="Note for the agent" placeholder="Note for the agent (optional)…"
         rows={2} maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} />
       <div className="tdoc-ask-form-bottom">
-        {choices.length ? <AgentPill ariaLabel="Who should get these?" label={recipient ? agentMentionName(recipient, choices) : 'Choose an agent'}>
-          <AgentMenuItems choices={choices} current={recipient} preserveOrder maxVisible={4} showConnect={false} showRelevance
-            onPick={(target) => { setPicked(target); sending.setResult(null); }} />
-        </AgentPill> : <span />}
+        <div className="tdoc-ask-form-pills">
+          {modePicker}
+          {choices.length ? <AgentPill ariaLabel="Who should get these?" label={recipient ? agentMentionName(recipient, choices) : 'Choose an agent'}>
+            <AgentMenuItems choices={choices} current={recipient} preserveOrder maxVisible={4} showConnect={false} showRelevance
+              onPick={(target) => { setPicked(target); sending.setResult(null); }} />
+          </AgentPill> : null}
+        </div>
+        <span className="tdoc-ask-ready-count" title={n ? `${commentCount(n)} ready to send` : 'No comments ready to send'}>{commentCount(n)}</span>
         {/* type="button": the Ask form's round ↑ styles every submit button in this row. */}
         <AppButton variant="primary" size="s" className="tdoc-ask-send-btn" disabled={!canSend} onClick={submit}>
           {sending.busy ? 'Sending…' : sending.result && !sending.result.ok ? 'Retry' : 'Send'}
         </AppButton>
       </div>
     </form>
-    <div className="tdoc-ask-only-hint tdoc-ask-ready-count">
-      {n ? `${n} ${n === 1 ? 'comment' : 'comments'} ready` : 'No comments ready to send'}
-      {n > 0 && !recipient ? ' · choose who gets them' : ''}
-    </div>
     <HandoffSendResult result={sending.result} />
   </>;
 }
@@ -97,20 +117,22 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   const latest = turns.at(-1);
   useEffect(() => { setExpandedTurnId(null); }, [latest?.id]);
   const activeTurnId = expandedTurnId || latest?.id;
+  const modePicker = send ? <ModePicker mode={mode} onPick={pickMode} ready={send.readyIds.length} /> : null;
   return <div className="tdoc-ask-panel">
     <h2>Ask AI</h2>
-    {send ? <SegmentedControl className="tdoc-ask-mode-switch" ariaLabel="Ask or send to agent" value={mode} onChange={pickMode}
-      options={[{ value: 'ask', label: 'Ask' }, { value: 'send', label: 'Send to agent' }]} /> : null}
-    {mode === 'send' ? <SendToAgentForm open={open} send={send} /> : <>
+    {mode === 'send' ? <SendToAgentForm open={open} send={send} modePicker={modePicker} /> : <>
     <form className="tdoc-ask-form" onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
       <textarea ref={input} aria-label="Ask about this document" placeholder={latest ? 'Ask a follow-up…' : 'Ask about this document…'}
         rows={2} value={draft} onChange={(event) => onDraft(event.target.value)}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); onAsk(); } }} />
       <div className="tdoc-ask-form-bottom">
-        {selected ? <AgentPill ariaLabel="Who should answer?" label={agentMentionName(selected.target, choices)}>
-          <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={signInToAsk} onConnect={onConnect} showRelevance pinTdocAi
-            onPick={(target) => onTarget(targets.find((item) => sameTarget(item.target, target))?.key || selected.key)} />
-        </AgentPill> : null}
+        <div className="tdoc-ask-form-pills">
+          {modePicker}
+          {selected ? <AgentPill ariaLabel="Who should answer?" label={agentMentionName(selected.target, choices)}>
+            <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={signInToAsk} onConnect={onConnect} showRelevance pinTdocAi
+              onPick={(target) => onTarget(targets.find((item) => sameTarget(item.target, target))?.key || selected.key)} />
+          </AgentPill> : null}
+        </div>
         <button type="submit" aria-label="Send question" disabled={!draft.trim() || busy || !selected || noFreeAnswers}>↑</button>
       </div>
     </form>

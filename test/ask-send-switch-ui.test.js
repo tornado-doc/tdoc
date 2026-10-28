@@ -1,10 +1,12 @@
 // Ask AI's two modes, in the real shell against the real worker, desktop and
 // phone:
-//   Ask | Send to agent  a small switch above the input, only for a viewer
-//                 who can send. Send to agent hands the doc's ready comments
+//   Ask ▾ / Send to agent ▾  a quiet mode picker in the input's bottom row,
+//                 beside the agent pill, only for a viewer who can send (no
+//                 picker otherwise). Send to agent hands the doc's ready comments
 //                 to the agent picked in the same pill, through the Send to
-//                 agent dialog's own send, and shows its delivery line. With
-//                 nothing ready it says so and the button is off. The mode
+//                 agent dialog's own send, and shows its delivery line; the
+//                 count sits beside Send. With nothing ready it says so, the
+//                 menu's Send to agent row is off and so is the button. The mode
 //                 is remembered per doc. No paper-plane in the phone drawer.
 //   one row       a team agent whose daemon registered claude and codex on
 //                 one computer is one row in both pickers.
@@ -117,8 +119,21 @@ async function startServer(worker, env) {
     await panel.waitFor();
     return panel;
   };
-  const modes = (panel) => panel.getByRole('radiogroup', { name: 'Ask or send to agent' });
-  const modeIs = async (panel, name) => (await modes(panel).getByRole('radio', { name, exact: true }).getAttribute('aria-checked')) === 'true';
+  // The mode picker: a quiet "Ask ▾" / "Send to agent ▾" in the input's row.
+  const modePill = (panel) => panel.locator('.tdoc-ask-form-bottom').getByRole('button', { name: /^Mode:/ });
+  const modeIs = async (panel, name) => (await modePill(panel).innerText()).trim() === name;
+  const modeMenu = async (page, panel) => {
+    await modePill(panel).click();
+    const menu = page.locator('.tdoc-ask-mode-menu');
+    await menu.waitFor();
+    return menu;
+  };
+  const pickMode = async (page, panel, name) => {
+    const menu = await modeMenu(page, panel);
+    await menu.getByRole('menuitem', { name: new RegExp(`^${name} —`) }).click();
+    await menu.waitFor({ state: 'detached' });
+    if (!(await modeIs(panel, name))) throw new Error(`mode did not switch to ${name}`);
+  };
   const menuRows = async (page, pill) => {
     await pill.click();
     const menu = page.locator('.tdoc-agent-menu');
@@ -137,8 +152,17 @@ async function startServer(worker, env) {
       const { page } = desktop;
       const panel = await askAi(page, false);
       if (!(await modeIs(panel, 'Ask'))) throw new Error('Ask is not the first mode');
-      await modes(panel).getByRole('radio', { name: 'Send to agent' }).click();
-      await panel.locator('.tdoc-ask-ready-count').getByText('2 comments ready').waitFor();
+      if (await panel.locator('.tdoc-seg, [role="radiogroup"]').count()) throw new Error('the segmented switch is back above the input');
+      const modes = await modeMenu(page, panel);
+      const items = (await modes.getByRole('menuitem').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim());
+      if (JSON.stringify(items) !== JSON.stringify(['Ask — the agent answers', 'Send to agent — hand over 2 comments to fix'])) throw new Error(`mode menu: ${JSON.stringify(items)}`);
+      await shot(page, 'mode-menu-1280.png');
+      await modes.getByRole('menuitem', { name: /^Send to agent —/ }).click();
+      await modes.waitFor({ state: 'detached' });
+      if (!(await modeIs(panel, 'Send to agent'))) throw new Error('mode did not switch to Send to agent');
+      if ((await panel.getByRole('textbox', { name: 'Note for the agent' }).getAttribute('placeholder')) !== 'Note for the agent (optional)…') throw new Error('Send mode placeholder');
+      // The count is inline, beside Send, in the input's bottom row.
+      await panel.locator('.tdoc-ask-form-bottom .tdoc-ask-ready-count').filter({ hasText: /^2 comments$/ }).waitFor();
       const pill = panel.getByRole('button', { name: 'Who should get these?' });
       if (!(await pill.innerText()).includes('OpenTag')) throw new Error(`recipient: ${await pill.innerText()}`);
       const { menu, rows } = await menuRows(page, pill);
@@ -152,7 +176,7 @@ async function startServer(worker, env) {
       const ids = queued.flatMap((h) => h.comment_ids || []);
       if (!ids.includes(first) || !ids.includes(second)) throw new Error(`not queued: ${JSON.stringify(queued)}`);
       // Sent: nothing is ready now, and the button says so by being off.
-      await panel.locator('.tdoc-ask-ready-count').getByText('No comments ready to send').waitFor({ timeout: 10000 });
+      await panel.locator('.tdoc-ask-form-bottom .tdoc-ask-ready-count[title="No comments ready to send"]').filter({ hasText: /^0 comments$/ }).waitFor({ timeout: 10000 });
       if (!(await panel.getByRole('button', { name: 'Send', exact: true }).isDisabled())) throw new Error('Send is on with nothing ready');
       await shot(page, 'send-mode-sent-1280.png');
       if (desktop.errors.length) throw new Error(desktop.errors.join('\n'));
@@ -164,10 +188,16 @@ async function startServer(worker, env) {
       await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
       const panel = await askAi(page, false);
       if (!(await modeIs(panel, 'Send to agent'))) throw new Error('Send to agent was not remembered');
-      await panel.locator('.tdoc-ask-ready-count').getByText('No comments ready to send').waitFor();
+      await panel.locator('.tdoc-ask-form-bottom .tdoc-ask-ready-count[title="No comments ready to send"]').filter({ hasText: /^0 comments$/ }).waitFor();
       if (!(await panel.getByRole('button', { name: 'Send', exact: true }).isDisabled())) throw new Error('Send is on with 0 ready');
+      const menu = await modeMenu(page, panel);
+      const off = menu.getByRole('menuitem', { name: /^Send to agent —/ });
+      if ((await off.innerText()).replace(/\s+/g, ' ').trim() !== 'Send to agent — No comments ready') throw new Error(`0-ready row: ${await off.innerText()}`);
+      if ((await off.getAttribute('aria-disabled')) !== 'true') throw new Error('the Send to agent row is on with 0 ready');
+      await page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'detached' });
       await shot(page, 'send-mode-none-1280.png');
-      await modes(panel).getByRole('radio', { name: 'Ask', exact: true }).click();
+      await pickMode(page, panel, 'Ask');
       await page.reload();
       await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
       const again = await askAi(page, false);
@@ -211,16 +241,28 @@ async function startServer(worker, env) {
       await context.close();
     });
 
-    await t('phone: no paper-plane in the drawer header; the Ask AI tab carries the switch, 0 ready is disabled, and the team agent notice', async () => {
+    await t('desktop: a viewer who cannot send gets no mode picker, only Ask', async () => {
+      const context = await browser.newContext(DESKTOP);
+      const { page, errors } = await open(null, DESKTOP, context);
+      const panel = await askAi(page, false);
+      await panel.locator('.tdoc-ask-form-bottom').waitFor();
+      if (await modePill(panel).count()) throw new Error('a viewer who cannot send sees the mode picker');
+      if (await panel.getByRole('textbox', { name: 'Note for the agent' }).count()) throw new Error('Send mode shows without send');
+      await shot(page, 'ask-no-send-1280.png');
+      if (errors.length) throw new Error(errors.join('\n'));
+      await context.close();
+    });
+
+    await t('phone: no paper-plane in the drawer header; the Ask AI tab carries the mode picker, 0 ready is disabled, and the team agent notice', async () => {
       await post('Phone: tighten the intro');
       const { page, context, errors } = await open(bob, PHONE);
       const panel = await askAi(page, true);
-      await modes(panel).getByRole('radio', { name: 'Send to agent' }).click();
-      await panel.locator('.tdoc-ask-ready-count').getByText('1 comment ready').waitFor();
+      await pickMode(page, panel, 'Send to agent');
+      await panel.locator('.tdoc-ask-form-bottom .tdoc-ask-ready-count').filter({ hasText: /^1 comment$/ }).waitFor();
       await shot(page, 'send-mode-ready-390.png');
       await panel.getByRole('button', { name: 'Send', exact: true }).click();
       await panel.locator('.tdoc-send-result.is-ok').getByText('Sent 1 comment to OpenTag ✓').waitFor({ timeout: 10000 });
-      await panel.locator('.tdoc-ask-ready-count').getByText('No comments ready to send').waitFor({ timeout: 10000 });
+      await panel.locator('.tdoc-ask-form-bottom .tdoc-ask-ready-count[title="No comments ready to send"]').filter({ hasText: /^0 comments$/ }).waitFor({ timeout: 10000 });
       if (!(await panel.getByRole('button', { name: 'Send', exact: true }).isDisabled())) throw new Error('Send is on with nothing ready');
       await shot(page, 'send-mode-sent-390.png');
       // Readable on a phone: the delivery line is the dialog's green result,
@@ -246,7 +288,7 @@ async function startServer(worker, env) {
       if (activity.preview < 15 || activity.expand[1] < 13 || activity.history < 13 || activity.overflow) throw new Error(`Agent activity is hard to read on a phone: ${JSON.stringify(activity)}`);
       await shot(page, 'send-agent-activity-390.png');
       await panel.locator('.tdoc-ask-activity-toggle').click();
-      await modes(panel).getByRole('radio', { name: 'Ask', exact: true }).click();
+      await pickMode(page, panel, 'Ask');
       const { menu, rows } = await menuRows(page, panel.getByRole('button', { name: 'Who should answer?' }));
       if (rows.filter((r) => r.includes('OpenTag')).length !== 1) throw new Error(`phone Ask picker rows: ${JSON.stringify(rows)}`);
       await menu.getByRole('menuitem', { name: /OpenTag/ }).click();
