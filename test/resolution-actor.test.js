@@ -147,6 +147,30 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(c.replies.some((x) => x.text === 'Because Y.' && x.agent_status === 'answered'), `replies: ${JSON.stringify(c.replies)}`);
   });
 
+  // In a feedback space the agent fixes the person's app, not the tdoc doc:
+  // its "applied" comes with no new version and stays applied.
+  await t('"applied" in a feedback space stays applied with no new version', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const meta = JSON.parse(await env.META.get(`meta:${slug}`));
+    await env.META.put(`meta:${slug}`, JSON.stringify({ ...meta, created_from: 'feedback', feedback: { origin: 'https://app.example' } }));
+    const r = await agentReply(env, token, { slug, parent_id: commentId, text: 'Fixed the button.', status: 'applied' });
+    assert(r.agent_status === 'applied' && !('downgraded_from' in r), `response: ${JSON.stringify(r)}`);
+    const [c] = await list(env, slug);
+    assert(c.status === 'applied', `status: ${c.status}`);
+  });
+
+  await t('"applied" on a product-anchored comment stays applied with no new version', async () => {
+    const { env, token, slug } = await seed();
+    const reader = await putSession(env, 'reader');
+    const c0 = await (await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: reader,
+      body: { slug, version: 1, text: 'Button does nothing', anchor: { kind: 'product', url: 'https://app.example/dashboard', selector: '#invite' } },
+    }), env, {})).json();
+    assert(c0.id, `comment: ${JSON.stringify(c0)}`);
+    const r = await agentReply(env, token, { slug, parent_id: c0.id, text: 'Fixed the button.', status: 'applied' });
+    assert(r.agent_status === 'applied' && !('downgraded_from' in r), `response: ${JSON.stringify(r)}`);
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

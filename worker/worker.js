@@ -20437,7 +20437,11 @@ const tdocHandlers = {
       // "Applied" marks the comment done (✅). With no version published
       // after the person asked, the doc did not change: it was an answer.
       let downgradedFrom = null;
-      if (verdict === 'applied' && appliedNeedsNewVersion(parent, latestVersionNumber(writeGate.meta), applied_in)) {
+      // Feedback spaces are the exception: there the agent fixes the person's
+      // app (a product-anchored comment), and no tdoc version follows.
+      const fixesTheApp = (writeGate.meta && writeGate.meta.created_from === 'feedback')
+        || ((snapshotAt(parent, Infinity) || {}).anchor || parent.anchor || {}).kind === 'product';
+      if (verdict === 'applied' && !fixesTheApp && appliedNeedsNewVersion(parent, latestVersionNumber(writeGate.meta), applied_in)) {
         verdict = 'answered';
         downgradedFrom = 'applied';
       }
