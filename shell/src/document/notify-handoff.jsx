@@ -457,10 +457,14 @@ export function useNotifyTargets(slug, enabled) {
   });
 
   const refresh = useCallback(async () => {
+    // Not asked yet (a closed dialog) is not "unavailable": that state used
+    // to carry over into the first render after opening and showed "Notify
+    // is not available on this host yet" until the list arrived.
     if (!enabled || !slug) {
-      setState((s) => ({ ...s, ready: true, available: false, reason: null }));
+      setState((s) => ({ ...s, ready: false, available: false, reason: null }));
       return;
     }
+    setState((s) => ({ ...s, ready: false }));
     try {
       const body = await listNotifyTargets(slug);
       setState({
@@ -675,7 +679,9 @@ export function NotifyHandoffPanel({
       open={open}
       onOpenChange={(next) => { if (!next) onClose(); }}
       title="Send to agent"
-      description={unavailable
+      description={!targets.ready
+        ? 'Finding your agents…'
+        : unavailable
         ? 'Notify is not available on this host yet.'
         : ids.length
           ? `${ids.length === 1 ? '1 comment' : `${ids.length} comments`} for ${chosen && chosen.team_agent ? 'the team agent' : 'your agent'} to fix. It replies on each one here.`

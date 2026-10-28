@@ -177,8 +177,22 @@ function MobileFabDemo() {
   </>;
 }
 
+// Mounted closed, then opened: the document page keeps the panel mounted
+// and flips `open`, so the first open render must not read as unavailable.
+function OpenLaterDemo() {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button type="button" id="open-send" onClick={() => setOpen(true)}>Open</button>
+      <NotifyHandoffPanel slug="doc" open={open} commentIds={ids} avoid={avoid} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
 createRoot(document.getElementById('root')).render(
-  params.get('view') === 'status'
+  params.get('view') === 'open-later'
+    ? <OpenLaterDemo />
+    : params.get('view') === 'status'
     ? <StatusCards />
     : params.get('view') === 'activity'
       ? <ActivityDemo />
