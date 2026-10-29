@@ -26,6 +26,9 @@ export const FLAGS = Object.freeze({
   // the worker serves /mcp); prod stays CLI-only until the owner flips it and
   // sets TDOC_REMOTE_MCP=1 on the worker.
   remoteMcp: Object.freeze({ label: 'Connect AI apps (remote MCP)', owner: 'julie', added: '2026-10-28', default: false, preview: true }),
+  // Settings -> Delete account (self-serve). Owner-approved; the flag is the
+  // off switch while it settles.
+  deleteAccount: Object.freeze({ label: 'Delete account in Settings', owner: 'julie', added: '2026-10-28', default: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
