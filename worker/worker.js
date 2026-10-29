@@ -18511,7 +18511,16 @@ async function mcpUploadManifest(env, id) {
 // If-None-Match: *; put answers null when the precondition fails). true when
 // this call wrote it.
 async function mcpPutOnce(env, key, value, opts = {}) {
-  const out = await env.DOCS.put(key, value, { ...opts, onlyIf: { etagDoesNotMatch: '*' } });
+  let out;
+  try {
+    // The Headers form is the documented create-once write.
+    out = await env.DOCS.put(key, value, { ...opts, onlyIf: new Headers({ 'If-None-Match': '*' }) });
+  } catch {
+    // A binding that refuses the condition: check, then write (racy, but
+    // uploads keep working).
+    if (await env.DOCS.head(key)) return false;
+    out = await env.DOCS.put(key, value, opts);
+  }
   return out != null;
 }
 async function mcpUploadDelete(env, id, count) {

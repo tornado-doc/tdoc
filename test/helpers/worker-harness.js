@@ -61,11 +61,13 @@ class FakeR2 {
     this.throwList = false;
     this.putCalls = 0;
   }
-  // As R2: an object, or null when `onlyIf` fails (only the If-None-Match: *
-  // form, etagDoesNotMatch '*', is modelled: "write only if absent").
+  // As R2: an object, or null when `onlyIf` fails (only If-None-Match: *,
+  // as Headers or etagDoesNotMatch '*', is modelled: "write only if absent").
   async put(k, v, opts) {
     this.putCalls++;
-    if (opts && opts.onlyIf && opts.onlyIf.etagDoesNotMatch === '*' && this.map.has(k)) return null;
+    const cond = opts && opts.onlyIf;
+    const ifNoneMatch = cond && (typeof cond.get === 'function' ? cond.get('If-None-Match') : cond.etagDoesNotMatch);
+    if (ifNoneMatch === '*' && this.map.has(k)) return null;
     this.map.set(k, v instanceof Uint8Array ? new Uint8Array(v) : String(v));
     return { key: k };
   }
