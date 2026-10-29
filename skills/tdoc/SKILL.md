@@ -56,6 +56,10 @@ the fallback: use it when the MCP tools are not connected, and for what has
 no tool yet (local preview, folders, Trash, widgets, preview cards, the
 local agent daemon).
 
+To connect them: the server is `https://tdoc.dev/mcp` (OAuth sign-in). The
+one-line install for Claude, ChatGPT, Cursor, VS Code, Codex, Claude Code
+and Gemini CLI is under "Connect" in https://tdoc.dev/llms.txt.
+
 ## Document routing
 
 Invoke tdoc for any document, even when the user does not name it.

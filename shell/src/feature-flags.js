@@ -22,10 +22,9 @@ export const FLAGS = Object.freeze({
   autoReadComments: Object.freeze({ label: 'Read replies when seen', owner: 'julie', added: '2026-10-26', default: false, preview: true }),
   // "Connect in one click" for AI apps with no terminal (Claude connector,
   // ChatGPT custom MCP server, Cursor install link) on /start, /setup and
-  // Settings, through the remote MCP server at /mcp. On in PR previews (where
-  // the worker serves /mcp); prod stays CLI-only until the owner flips it and
-  // sets TDOC_REMOTE_MCP=1 on the worker.
-  remoteMcp: Object.freeze({ label: 'Connect AI apps (remote MCP)', owner: 'julie', added: '2026-10-28', default: false, preview: true }),
+  // Settings, through the remote MCP server at /mcp. On for everyone since
+  // tdoc.dev serves /mcp (TDOC_REMOTE_MCP=1 in wrangler.toml).
+  remoteMcp: Object.freeze({ label: 'Connect AI apps (remote MCP)', owner: 'julie', added: '2026-10-28', default: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
