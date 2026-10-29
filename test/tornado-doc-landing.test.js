@@ -373,8 +373,13 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage bar must draw the GitHub mark itself');
   assert(/className="tdoc-gh-stars"/.test(toolbar) && /function starCount/.test(toolbar),
     'homepage bar must show the star count beside the mark');
-  assert(/config\.isLanding \? <LandingActions stars=\{config\.stars\} \/> : \(/.test(documentShell),
+  // The homepage bar: the demo's Ask AI (simulated, demo-agent.js) and
+  // GitHub; never the document's Share/Copy/Download actions.
+  const landingBar = documentShell.match(/actions=\{config\.isLanding \? <>([\s\S]*?)<\/> : \(/);
+  assert(landingBar && /<LandingActions stars=\{config\.stars\} \/>/.test(landingBar[1]),
     'homepage must not receive the document Share/Copy/Download actions');
+  assert(landingBar[1].replace(/\s+/g, ' ').trim() === '{askAiAction} <LandingActions stars={config.stars} />',
+    `homepage bar carries more than Ask AI + GitHub: ${landingBar[1]}`);
   assert(/demo: !!config\.demoComments/.test(documentShell),
     'homepage shell must wire demoComments into useComments');
   assert(/Type a GitHub @/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
