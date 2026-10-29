@@ -175,6 +175,15 @@ async function startServer(worker, env) {
         await page.goto(`${base}/start`);
         await page.locator('.tdoc-connect-strip').waitFor();
         assert(await page.getByRole('dialog').count() === 0, 'dialog open without ?connect');
+        // The tutorial's Before you start box sends the chat apps to the same panel.
+        const before = page.frameLocator('iframe.tdoc-doc-frame').locator('.before');
+        assert(!/ChatGPT chat/.test(await before.innerText()), 'Before you start still says the chats are unsupported');
+        await before.scrollIntoViewIfNeeded();
+        await shot(page, `${label}-start-before`);
+        await before.getByRole('link', { name: 'Connect in one click' }).click();
+        await page.getByRole('dialog', { name: 'Connect in one click' }).waitFor();
+        await page.goto(`${base}/start`);
+        await page.locator('.tdoc-connect-strip').waitFor();
         await page.goto(`${base}/start?connect=vscode`);
         const dialog = page.getByRole('dialog', { name: 'Connect in one click' });
         await dialog.waitFor();

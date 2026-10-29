@@ -142,7 +142,7 @@ function llmsFullTxt() {
 - Personal: free for your own docs.
 - Team: free for any number of members, up to ${TEAM_FREE_DOCS} team docs.
 - Team plan: $${TEAM_SEAT_PRICE_USD.month} per member a month or $${TEAM_SEAT_PRICE_USD.year} per member a year. Unlimited team docs and backup to storage the team owns. Agents never take a seat.
-- tdoc sends no AI bill: the writing runs on the Claude Code or Codex plan you already have.
+- tdoc sends no AI bill: the writing runs on the Claude, ChatGPT, Claude Code or Codex plan you already have.
 - Details: https://tdoc.dev/pricing
 `;
 }
@@ -220,7 +220,7 @@ function docAgentView({ origin, slug, version, head, title, author, rawHtml, acc
       intro: [
         'This is the home page of tdoc (https://tdoc.dev). tdoc publishes HTML documents at shareable links. People comment on any part of a document in the browser; their own AI agent (Claude Code or Codex) reads the comments and publishes the next version.',
         `How to start: open ${origin}/start in a browser${mcp ? `, connect Claude, ChatGPT, Cursor or VS Code to the MCP server ${origin}/mcp (steps per app: ${origin}/llms.txt)` : ''}, or ask your agent to install tdoc and make a first document. In Claude Code: /plugin marketplace add tornado-doc/tdoc, then /plugin install tdoc@tornado-tdoc. Any other agent: follow ${TDOC_ONBOARDING_URL}.`,
-        `Pricing: free for your own docs, and for a team up to ${TEAM_FREE_DOCS} team docs with any number of members. The Team plan is $${TEAM_SEAT_PRICE_USD.month} per member a month or $${TEAM_SEAT_PRICE_USD.year} a year, for unlimited team docs and backup to storage the team owns. Agents never take a seat, and tdoc sends no AI bill: the writing runs on the Claude Code or Codex plan you already have. Details: ${origin}/pricing.`,
+        `Pricing: free for your own docs, and for a team up to ${TEAM_FREE_DOCS} team docs with any number of members. The Team plan is $${TEAM_SEAT_PRICE_USD.month} per member a month or $${TEAM_SEAT_PRICE_USD.year} a year, for unlimited team docs and backup to storage the team owns. Agents never take a seat, and tdoc sends no AI bill: the writing runs on the Claude, ChatGPT, Claude Code or Codex plan you already have. Details: ${origin}/pricing.`,
         `For agents: ${origin}/llms.txt (short), ${origin}/llms-full.txt (everything), ${origin}/SKILL.md (how to read, comment and publish). Any tdoc document URL also answers Accept: text/markdown with its text and comments.`,
       ],
       blocks: extracted.blocks,
