@@ -61,9 +61,13 @@ class FakeR2 {
     this.throwList = false;
     this.putCalls = 0;
   }
-  async put(k, v) {
+  // As R2: an object, or null when `onlyIf` fails (only the If-None-Match: *
+  // form, etagDoesNotMatch '*', is modelled: "write only if absent").
+  async put(k, v, opts) {
     this.putCalls++;
+    if (opts && opts.onlyIf && opts.onlyIf.etagDoesNotMatch === '*' && this.map.has(k)) return null;
     this.map.set(k, v instanceof Uint8Array ? new Uint8Array(v) : String(v));
+    return { key: k };
   }
   // `range` as R2 takes it: the shell page reads only the head of a doc.
   async get(k, opts) {
