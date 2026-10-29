@@ -84,15 +84,18 @@ Use these everywhere so listings match.
   | Tool | Title | Read-only | Destructive |
   | --- | --- | --- | --- |
   | `get_writing_guide` | How to write a tdoc | yes | no |
-  | `create_doc` | Create a tdoc document | no | no |
+  | `create_doc` | Create a doc | no | no |
   | `update_doc` | Publish a new version | no | no |
-  | `get_doc` | Read a tdoc document | yes | no |
-  | `list_docs` | List my tdoc documents | yes | no |
+  | `edit_doc` | Edit a doc in place | no | no |
+  | `create_upload` | Upload a doc and images | no | no |
+  | `commit_upload` | Publish an upload | no | no |
+  | `get_doc` | Read a doc | yes | no |
+  | `list_docs` | List my docs | yes | no |
   | `get_comments` | Read comments on a doc | yes | no |
   | `reply_to_comment` | Reply to a comment | no | no |
-  | `resolve_comment` | Mark a handed-over comment handled | no | no |
+  | `resolve_comment` | Mark a comment handled | no | no |
   | `answer_question` | Answer a reader's question | no | no |
-  | `share_doc` | Change who can open a doc | no | yes |
+  | `share_doc` | Share a doc | no | yes |
 
 - **Starter prompts**: `Use tdoc to write a one-page summary of this discussion.` /
   `Read all comments on my tdoc and fix them.` / `List my tdoc documents.`
