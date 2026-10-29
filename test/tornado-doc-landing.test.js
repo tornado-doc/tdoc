@@ -306,8 +306,12 @@ t('names the apps it runs in, each linked to its connect step', () => {
   assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(pick), 'the picker shows company logos');
   assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
   const setup = html.slice(html.indexOf('<!-- ══ ONE PASTE ══'), html.indexOf('<!-- ══ FEATURES'));
-  assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-terminal/.test(setup), 'Claude Code is not drawn as a terminal');
-  assert(!/#i-claude"|#i-grok"|#i-cursor"/.test(setup), 'setup shows apps tdoc does not install into');
+  // Setup shows every app the picker offers, each with its own mark: Claude
+  // Code is Claude's, not a generic terminal (ST1125, 2026-10-29).
+  const tiles = [...setup.matchAll(/class="apptile[^"]*" role="img" aria-label="([^"]+)"/g)].map((m) => m[1]);
+  assert(tiles.join('|') === 'Claude|ChatGPT|Grok|Cursor|VS Code|Claude Code|Codex|Gemini CLI|Grok Bot', `setup tiles: ${tiles.join('|')}`);
+  assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-claude"/.test(setup), 'Claude Code does not show the Claude mark');
+  assert(!/#i-terminal"|#i-code"/.test(setup + pick), 'a generic terminal or code icon stands in for an app');
   assert(/sign in once/.test(setup), 'setup does not say you sign in once');
 });
 
