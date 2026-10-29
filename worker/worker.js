@@ -3501,6 +3501,8 @@ const TEMPLATES_SLUG = 'tdoc-templates';
 const PRICING_SLUG = 'tdoc-pricing';
 // `/privacy` — the privacy policy. Same landing-doc mechanism.
 const PRIVACY_SLUG = 'tdoc-privacy';
+// `/terms` — the terms of service. Same landing-doc mechanism.
+const TERMS_SLUG = 'tdoc-terms';
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -19685,6 +19687,10 @@ const tdocHandlers = {
 
     if (p === '/privacy' && (method === 'GET' || method === 'HEAD')) {
       return landingResponse(env, req, PRIVACY_SLUG);
+    }
+
+    if (p === '/terms' && (method === 'GET' || method === 'HEAD')) {
+      return landingResponse(env, req, TERMS_SLUG);
     }
 
     // Web OAuth callback. With a `code` this is the redirect flow: exchange it

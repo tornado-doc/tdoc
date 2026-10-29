@@ -115,7 +115,7 @@ export function OAuthConsentPage({ boot }) {
             </>
           )}
           {error ? <p role="alert" className="tdoc-activate-error">{error}</p> : null}
-          <p className="tdoc-activate-hint"><a href="/privacy">Privacy policy</a></p>
+          <p className="tdoc-activate-hint"><a href="/privacy">Privacy policy</a> · <a href="/terms">Terms of service</a></p>
         </div>
         <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={() => { setSignInOpen(false); location.reload(); }} />
       </main>

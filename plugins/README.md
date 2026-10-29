@@ -53,8 +53,10 @@ folder (no `..`), so each plugin carries a copy of `assets/icon-512-v3.png` as
 `assets/logo.png`. The Gemini and VS Code configs have no logo field.
 
 Privacy policy: `https://tdoc.dev/privacy`, set as `privacyPolicyUrl` (Claude)
-and `interface.privacyPolicyURL` (Codex). The Cursor, Gemini and VS Code
-manifests document no privacy field.
+and `interface.privacyPolicyURL` (Codex). Terms of service:
+`https://tdoc.dev/terms`, set as `termsOfServiceUrl` (Claude) and
+`interface.termsOfServiceURL` (Codex). The Cursor, Gemini and VS Code
+manifests document no privacy or terms field.
 
 Docs were read on 2026-10-28. "Verified" means the field or step appears in
 the cited official page. "UNVERIFIED" means it does not, or the pages disagree.
@@ -98,7 +100,8 @@ Install:
   paths resolve against the repo.
 
 `claude plugin validate plugins/claude` passes. `privacyPolicyUrl` is
-`https://tdoc.dev/privacy`.
+`https://tdoc.dev/privacy`; `termsOfServiceUrl` is `https://tdoc.dev/terms`
+(a field the validator recognizes, not listed in the plugins reference).
 
 Verified:
 
@@ -211,6 +214,7 @@ https://learn.chatgpt.com/docs/plugins):
 - `interface` keys used: `displayName`, `shortDescription`,
   `longDescription`, `developerName`, `category`, `capabilities`,
   `websiteURL`, `privacyPolicyURL` (`https://tdoc.dev/privacy`),
+  `termsOfServiceURL` (`https://tdoc.dev/terms`),
   `defaultPrompt` (array), `composerIcon`, `logo`.
 - Marketplace locations, entry shape, `codex plugin marketplace add`.
 
@@ -225,9 +229,8 @@ UNVERIFIED or omitted:
   that key. It is left out, so the file stays schema-valid. The Codex binary
   contains MCP OAuth metadata discovery, but whether ChatGPT discovers OAuth
   without the block is not confirmed. If sign-in does not start, add the block.
-- `termsOfServiceURL`, `brandColor`, `screenshots`, `apps` (`.app.json`) are
-  omitted: no tdoc terms page exists yet, and `.app.json` has no documented
-  schema.
+- `brandColor`, `screenshots`, `apps` (`.app.json`) are omitted: `.app.json`
+  has no documented schema.
 - `policy.authentication`: only `ON_INSTALL` appears in the docs.
 
 ### ChatGPT custom MCP server (no plugin)
