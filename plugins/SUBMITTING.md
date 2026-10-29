@@ -15,7 +15,7 @@ cited official page, or was tested as described. "UNKNOWN" means it is not.
 | --- | --- | --- |
 | 1 | Remote MCP server `https://tdoc.dev/mcp` live | Live: unauthenticated `initialize` returns 401; `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` are served (DCR, CIMD, PKCE S256, scope `mcp`) |
 | 2 | Privacy policy `https://tdoc.dev/privacy` | **Not live** (302 to `/?notice=notfound`). Being added in PR #880. Every directory below needs it |
-| 3 | Terms of service URL | **None exists.** Required by OpenAI (`termsOfServiceURL`) |
+| 3 | Terms of service `https://tdoc.dev/terms` | Added in the terms PR, in both manifests (`termsOfServiceUrl` Claude, `termsOfServiceURL` OpenAI). Live once merged and deployed |
 | 4 | Support email `hello@tdoc.dev` | **Inbound mail not set up.** Set up forwarding before using it anywhere: Anthropic and OpenAI send review results to the contact address. Until then, use `https://github.com/tornado-doc/tdoc/issues` where a URL is accepted |
 | 5 | Logo | `plugins/claude/assets/logo.png`, 512x512 PNG (same file in `codex/` and `cursor/`). `pack.sh` also writes a 400x400 copy |
 | 6 | Reviewer test account | **To create**: a tdoc account with a few sample documents and comments. OpenAI requires one that needs no MFA, email/SMS codes or magic links. tdoc sign-in goes through GitHub OAuth in the code; a GitHub account with 2FA would break that rule. UNKNOWN which sign-in reviewers can use; decide before submitting to OpenAI |
@@ -27,8 +27,8 @@ After PR #880 is deployed, add the privacy URL to the manifests (one commit):
   (`claude plugin validate --profile directory plugins/claude` now reads it
   from `plugins/claude/README.md` and passes with a note)
 - `plugins/codex/plugin.json`, in `extensions["com.openai"].interface`:
-  `"privacyPolicyURL": "https://tdoc.dev/privacy"` and, once a terms page
-  exists, `"termsOfServiceURL": "https://tdoc.dev/terms"`
+  `"privacyPolicyURL": "https://tdoc.dev/privacy"` and
+  `"termsOfServiceURL": "https://tdoc.dev/terms"` (both now set)
 
 Build the upload files:
 
@@ -315,7 +315,7 @@ extensions was not checked.
 ## Order of work for the owner
 
 1. Merge PR #880 (privacy page) and deploy; confirm `https://tdoc.dev/privacy` opens.
-2. Set up inbound mail for `hello@tdoc.dev`; publish a terms page.
+2. Set up inbound mail for `hello@tdoc.dev`; merge and deploy the terms page.
 3. Merge this PR. Add `privacyPolicyUrl` / `privacyPolicyURL` /
    `termsOfServiceURL` to the manifests (section 0). Run `sh plugins/pack.sh`.
 4. Create the reviewer test account with sample documents and comments.

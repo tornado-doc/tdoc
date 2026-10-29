@@ -173,6 +173,7 @@ jobs:
           upload tdoc-templates landing/tdoc-templates 1
           upload tdoc-pricing landing/tdoc-pricing 1
           upload tdoc-privacy landing/tdoc-privacy 1
+          upload tdoc-terms landing/tdoc-terms 1
 
       - name: Verify tdoc.dev serves the doc, not the fallback
         run: |

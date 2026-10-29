@@ -121,6 +121,7 @@ const OFFLINE = [
   'browser-bundles-parse.test.js', // syntax-check what we inject into pages
   'tdoc-start.test.js',
   'tdoc-privacy.test.js', // public /privacy page is served from its landing doc
+  'tdoc-terms.test.js', // public /terms page is served from its landing doc
   'tdoc-pricing.test.js', // public /pricing page matches the limits the worker enforces
   'landing-demo-tabs.test.js', // the homepage demo: four stages, one reader
   'signin-github-tab.test.js', // #179: GitHub opens in a new tab, never this one // #142 onboarding: /start page + the modal served with it

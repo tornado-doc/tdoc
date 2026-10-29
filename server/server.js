@@ -1633,6 +1633,15 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
+  if (p === '/terms' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const meta = readJson(path.join(ROOT, 'tdoc-terms', 'meta.json'), {});
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions.map((item) => Number(item && item.n)).filter(Number.isFinite).sort((a, b) => b - a)[0];
+    if (!latest) return send(res, 404, 'Not found: tdoc-terms');
+    res.writeHead(302, { Location: `/d/tdoc-terms/v/${latest}`, 'Cache-Control': 'no-store' });
+    return res.end();
+  }
+
   const widgetMatch = p.match(/^\/d\/([^/]+)\/v\/(\d+)\/widget\/([^/]+)\/?$/);
   if (widgetMatch) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
