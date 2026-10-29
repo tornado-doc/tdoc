@@ -54,7 +54,8 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [mcpApp, setMcpApp] = useState('claude');
-  const mcpProduct = CONNECT_AI_APPS.find(app => app.id === mcpApp)?.product || 'claude_web';
+  const mcpChoice = CONNECT_AI_APPS.find(app => app.id === mcpApp);
+  const mcpProduct = mcpChoice?.product || 'claude_web';
   // The computer route is two screens, as in Raft: connect the computer, then pick its runtime.
   const [pickRuntime, setPickRuntime] = useState(Boolean(preview?.pickRuntime));
   const active = useRef(true);
@@ -100,18 +101,19 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     let timer;
     const tick = async () => {
       try {
-        const result = await getOnboarding(stage === 'connect' ? { daemon: true } : undefined);
+        const result = await getOnboarding(mcpIntro ? { mcp: mcpProduct } : stage === 'connect' ? { daemon: true } : undefined);
         if (cancelled) return;
+        if (mcpIntro && result?.mcp_connected) { setCompletedPath('mcp'); setStage('done'); }
         if (stage === 'connect') { setAgents(result?.local_agents || []); setComputers(result?.local_computers || []); }
         setPaired(Boolean(result?.paired)); setError(''); setLoaded(true); setElapsed(Date.now() - started.current);
       } catch {
-        if (!cancelled && !intro) { setAgents([]); setComputers([]); setError('Could not check the connection. Retrying…'); }
+        if (!cancelled && (!intro || mcpIntro)) { setAgents([]); setComputers([]); setError('Could not check the connection. Retrying…'); }
       }
-      if (!cancelled && !intro) timer = window.setTimeout(tick, POLL_MS);
+      if (!cancelled && (!intro || mcpIntro)) timer = window.setTimeout(tick, POLL_MS);
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [signedIn, preview, stage, manual, intro, done]);
+  }, [signedIn, preview, stage, manual, intro, done, mcpIntro, mcpProduct]);
 
   useEffect(() => {
     if (!manual || !signedIn || preview) return undefined;
@@ -212,6 +214,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   };
   const tutorial = async (manualProduct) => {
     if (busy || preview) return;
+    if (completedPath === 'mcp') manualProduct = mcpProduct;
     if (pendingAsk) { location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`); return; }
     setBusy(true); setError('');
     try {
@@ -227,7 +230,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const computerRoute = stage === 'connect';
   const head = !signedIn ? { eyebrow: 'Set up Tdoc', title: 'Sign in', description: 'Sign in to connect your AI.' }
     : intro ? { eyebrow: 'Set up Tdoc', title: 'Which AI do you use?', description: 'Tdoc sends your comments to this AI, and it edits your doc.' }
-      : done ? { eyebrow: 'Set up Tdoc', title: 'You’re connected', description: `${completedPath === 'connect' && chosen ? labelOf(chosen) : product.label} is ready for your comments.` }
+      : done ? { eyebrow: 'Set up Tdoc', title: 'You’re connected', description: completedPath === 'mcp' ? `${mcpChoice.label} is connected to Tdoc.` : `${completedPath === 'connect' && chosen ? labelOf(chosen) : product.label} is ready for your comments.` }
         : computerRoute && pickRuntime ? { eyebrow: 'Set up Tdoc', title: 'Choose your AI', description: `The AI on ${computer?.device || 'this computer'} that edits your docs.` }
           : computerRoute ? { eyebrow: 'Set up Tdoc', title: 'Connect a computer', description: 'A computer is where your AI runs. Tdoc sends it your comments, even when the AI is closed.' }
             : { eyebrow: 'Set up Tdoc', title: `Connect ${product.label}`, description: platformRoute ? `Your ${product.label} agent connects Tdoc to your account and receives your comments.` : `${product.label} connects to your Tdoc account and edits your docs when you ask.` };
@@ -254,7 +257,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
         {!signedIn ? <AppButton type="button" variant="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</AppButton>
           : done ? <AppButton type="button" variant="primary" disabled={busy} onClick={() => tutorial()}>{busy ? 'Opening…' : 'Continue'}</AppButton>
             : canReturn ? <AppButton type="button" variant="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</AppButton>
-              : mcpIntro ? <AppButton disabled={busy || Boolean(preview)} onClick={() => tutorial(mcpProduct)}>{busy ? 'Opening…' : 'Try a comment'}</AppButton>
+              : mcpIntro ? null
                 : intro ? null
                 : computerRoute && !pickRuntime ? <AppButton type="button" variant="primary" disabled={!connected} onClick={() => setPickRuntime(true)}>Next</AppButton>
                   : computerRoute ? <AppButton type="button" variant="primary" disabled={busy || !runtimeReady} onClick={finishConnection}>{busy ? 'Checking…' : 'Continue'}</AppButton>
@@ -263,10 +266,11 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     >
       {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to connect your AI.' : 'Sign-in is unavailable on this host.'}</p>
         : mcpIntro ? <>
-          <ConnectAiApps compact showCli={false} selectedApp={mcpApp} onAppChange={app => setMcpApp(app.id)} />
+          <ConnectAiApps compact showCli={false} selectedApp={mcpApp} onAppChange={app => { setMcpApp(app.id); setError(''); }} />
+          {status(`Waiting for ${mcpChoice.label}…`)}
           <AppButton variant="quiet" className="ui-setup-computer-fallback" onClick={() => chooseProduct(mcpProduct === 'codex' ? 'codex' : 'claude')}>Connect a computer instead</AppButton>
         </> : intro ? <AIPicker onChoose={chooseProduct} />
-          : done ? <div className="ui-setup-ready"><Check size={36} aria-hidden="true" /><p>Try a comment. Watch your AI make the change.</p></div>
+          : done ? <div className="ui-setup-ready"><Check size={36} aria-hidden="true" /><p>{completedPath === 'mcp' ? 'Try a comment with your AI.' : 'Try a comment. Watch your AI make the change.'}</p></div>
             : computerRoute && pickRuntime ? <div className="ui-setup-split">
               <div className="ui-setup-split-visual">
                 <Monitor size={64} strokeWidth={1.5} aria-hidden="true" />

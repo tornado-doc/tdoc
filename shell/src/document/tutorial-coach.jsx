@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AppButton } from '../ui/button.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
 
-const PRODUCTS = { chatgpt: 'ChatGPT Work', cowork: 'Claude Cowork', claude: 'Claude Code', codex: 'Codex', grok: 'Grok Bot', raft: 'Raft', cursor: 'Cursor', other: 'your AI', claude_web: 'Claude', vscode: 'VS Code', gemini: 'Gemini' };
+const PRODUCTS = { chatgpt: 'ChatGPT Work', cowork: 'Claude Cowork', claude: 'Claude Code', codex: 'Codex', grok: 'Grok Bot', raft: 'Raft', cursor: 'Cursor', other: 'your AI', claude_web: 'Claude', chatgpt_web: 'ChatGPT', vscode: 'VS Code', gemini: 'Gemini' };
 // Only the private practice document gets these prompts. Dismissal is scoped
 // to one document and step, so the next real action can teach the next gesture.
 export function TutorialCoach({ slug, step, product, automatic, agentState, onComment, onSendAll, onCopy, reopen = 0 }) {

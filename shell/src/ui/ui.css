@@ -1491,6 +1491,7 @@ a.ui-menu-item:visited {
 .tdoc-connect-app-panel > .ui-btn { justify-self: start; }
 .ui-setup-entry .ui-setup-computer-fallback { display: flex; margin: 20px auto 0; color: var(--td-muted); }
 .ui-setup-entry-mcp .actions { justify-content: space-between; }
+.ui-setup-entry-mcp .ui-setup-status { margin: 16px 0; font: 16px/1.5 var(--td-font-sans, system-ui, sans-serif); }
 @media (max-width: 600px) {
   .tdoc-connect-app-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .tdoc-connect-app-panel { padding: 20px; }

@@ -353,6 +353,26 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(!JSON.stringify([...env.META.map.values()]).includes(julieConn.refresh_token), 'no plaintext refresh token stored');
   });
 
+  await t('MCP onboarding waits for the selected app, follows the account, and refuses revoked or team-only grants', async () => {
+    const poll = (who, product) => call(`/api/onboarding?mcp=${product}`, { cookie: who.cookie });
+    assert((await poll(julie, 'claude_web')).body.mcp_connected === true, 'code exchange connects Claude');
+    assert((await poll(julie, 'chatgpt_web')).body.mcp_connected === false, 'Claude is not ChatGPT');
+    assert((await poll(bob, 'claude_web')).body.mcp_connected === false, 'another account cannot inherit the connection');
+    const hash = crypto.createHash('sha256').update(julieConn.access_token).digest('hex');
+    const rec = JSON.parse(env.META.map.get(`hosted-token:${hash}`));
+    env.META.map.set(`hosted-token:${hash}`, JSON.stringify({ ...rec, scope: { me: false, teams: ['test-team'] } }));
+    assert((await poll(julie, 'claude_web')).body.mcp_connected === false, 'team-only grant cannot edit a private practice doc');
+    env.META.map.set(`hosted-token:${hash}`, JSON.stringify(rec));
+    env.META.map.set(`oauth-grant-revoked:${rec.oauth.grant_id}`, '1');
+    assert((await poll(julie, 'claude_web')).body.mcp_connected === false, 'revoked is not connected');
+    env.META.map.delete(`oauth-grant-revoked:${rec.oauth.grant_id}`);
+    env.META.map.set(`oauth-revoked-before:${rec.account_id}`, new Date(Date.now() + 1000).toISOString());
+    assert((await poll(julie, 'claude_web')).body.mcp_connected === false, 'remove all ends onboarding readiness too');
+    env.META.map.delete(`oauth-revoked-before:${rec.account_id}`);
+    const record = (await poll(julie, 'claude_web')).body.record;
+    assert(record.agent_connected && record.mcp_connections.claude_web, 'successful exchange stamps onboarding');
+  });
+
   await t('the OAuth token works at /mcp only: the HTTP API refuses it directly', async () => {
     const who = await call('/api/me', { token: julieConn.access_token });
     assert(who.status === 403 && who.body.error === 'token_scope', `${who.status} ${who.text}`);

@@ -16067,6 +16067,33 @@ async function mintOAuthTokenPair(env, { base, client, grantId, resource, grante
 
 // ---- endpoints --------------------------------------------------------------
 
+// Product labels only guide onboarding; they never establish app identity or
+// permissions (mcpAgentIdentity still requires verified client metadata).
+function onboardingMcpProduct(client) {
+  const name = String(client.client_name || '').toLowerCase();
+  if (/codex/.test(name)) return 'codex';
+  if (/claude/.test(name)) return 'claude_web';
+  if (/chatgpt|openai/.test(name)) return 'chatgpt_web';
+  if (/cursor/.test(name)) return 'cursor';
+  if (/vs[ -]?code|visual studio|copilot/.test(name)) return 'vscode';
+  if (/gemini/.test(name)) return 'gemini';
+  return null;
+}
+
+async function onboardingMcpConnected(env, accountId, product, origin, record) {
+  const id = record?.mcp_connections?.[product];
+  if (!id || await oauthGrantRevoked(env, id)) return false;
+  const grant = await loadOAuthGrant(env, id);
+  if (!grant || grant.resource !== `${origin}/mcp` || await oauthRevokedForAccount(env, grant.account_id, grant.created)) return false;
+  const group = await accountGroup(env, accountId);
+  if (![group.canonical, ...group.ids].includes(grant.account_id)) return false;
+  let token;
+  try { token = JSON.parse(await env.META.get(`hosted-token:${grant.access_hash}`)); } catch {}
+  // Team-only access cannot edit the private practice document in My docs.
+  return !!(token?.oauth?.grant_id === id && tokenScopeOf(token)?.me !== false
+    && (Date.parse(token.oauth.expires_at || '') > Date.now() || grant.refresh_hash));
+}
+
 async function handleOAuthRegister(env, req, url) {
   // Generous per IP: AI apps register from their own servers, so one IP
   // speaks for many people. A zone rate-limit rule is the real brake.
@@ -16359,6 +16386,16 @@ async function handleOAuthToken(env, req, url) {
     const grantId = rand(16);
     const pair = await mintOAuthTokenPair(env, { base: issued.record, client, grantId, resource: rec.resource });
     if (!pair) return oauthError('invalid_grant', 'This connection was revoked.');
+    // Only a successful code exchange completes this app's onboarding.
+    // A refresh or an abandoned/rejected consent cannot mark it connected.
+    try {
+      const product = onboardingMcpProduct(client);
+      const previous = await stampOnboardingFor(env, issued.record.account_id, 'agent_connected');
+      if (product) await saveOnboarding(env, issued.record.account_id, {
+        ...previous,
+        mcp_connections: { ...previous.mcp_connections, [product]: grantId },
+      });
+    } catch {}
     productEvent(env, 'token_minted', { auth_path: 'oauth' });
     oauthAudit('token_issued', { cimd: !!client.cimd });
     return oauthJson(pair.body);
@@ -21169,6 +21206,10 @@ const tdocHandlers = {
       // agent never shows a code again, so the page must not wait for one.
       const paired = await accountPaired(env, accountId);
       const record = await loadOnboarding(env, accountId);
+      if (url.searchParams.has('mcp')) {
+        const connected = await onboardingMcpConnected(env, accountId, url.searchParams.get('mcp'), url.origin, record);
+        return json({ paired, record, mcp_connected: connected }, { headers: { 'Cache-Control': 'no-store' } });
+      }
       let local_agents;
       let local_computers;
       if (url.searchParams.get('daemon') === '1') {
@@ -21245,7 +21286,7 @@ const tdocHandlers = {
         if (practiceMeta) await putDocMetaJson(env, slug, JSON.stringify({ ...practiceMeta, tutorial_agent: notifyTargetIdentity(target) }));
       }
       const tutorialRecord = await loadOnboarding(env, accountId);
-      const product = ['chatgpt', 'cowork', 'claude', 'codex', 'grok', 'raft', 'cursor', 'other', 'claude_web', 'vscode', 'gemini'].includes(body.product) ? body.product : null;
+      const product = ['chatgpt', 'cowork', 'claude', 'codex', 'grok', 'raft', 'cursor', 'other', 'claude_web', 'chatgpt_web', 'vscode', 'gemini'].includes(body.product) ? body.product : null;
       await env.META.put(`account-onboarding:${accountId}`, JSON.stringify({ ...tutorialRecord, tutorial_mode: body.mode === 'platform' ? 'platform' : body.mode === 'manual' ? 'manual' : 'computer', tutorial_product: product }));
       return json({ ok: true, slug, url: `/d/${slug}?step=comment` });
     }

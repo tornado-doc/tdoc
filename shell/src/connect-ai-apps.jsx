@@ -42,7 +42,7 @@ export const CHATGPT_PLUGINS_URL = 'https://chatgpt.com/plugins';
 
 export const CONNECT_AI_APPS = Object.freeze([
   { id: 'claude', label: 'Claude', product: 'claude_web' },
-  { id: 'chatgpt', label: 'ChatGPT', product: 'chatgpt' },
+  { id: 'chatgpt', label: 'ChatGPT', product: 'chatgpt_web' },
   { id: 'cursor', label: 'Cursor', product: 'cursor' },
   { id: 'vscode', label: 'VS Code', product: 'vscode' },
   { id: 'codex', label: 'Codex', product: 'codex' },
