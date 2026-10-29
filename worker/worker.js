@@ -19835,12 +19835,17 @@ const tdocHandlers = {
           body = head + frameSuffix(tag, tail);
         }
       }
+      // A site page (home, pricing...) is one page to a search engine, at its
+      // own URL. Google's indexifembedded counts the framed text as part of
+      // the page that frames it; noindex keeps the frame URL out of results.
+      const siteFrame = url.searchParams.get('tdoc_site') === '1';
       return html(body, {
         headers: {
           'Content-Security-Policy': frameCspHeader(nonce),
           'X-Content-Type-Options': 'nosniff',
           'Cache-Control': 'no-store',
           'Vary': 'Sec-Fetch-Dest',
+          ...(siteFrame ? { 'X-Robots-Tag': 'noindex, indexifembedded' } : {}),
         },
       });
     }
