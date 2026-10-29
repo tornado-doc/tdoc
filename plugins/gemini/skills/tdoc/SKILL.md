@@ -36,6 +36,14 @@ Short answers and edits to files in a repository do not need tdoc.
   optional `team` and `style`. A fragment is wrapped in the house style.
   tdoc picks the address.
 - `update_doc`: publish a new version of an existing doc.
+- `create_upload` / `commit_upload`: publish from files instead of tool text.
+  `create_upload` takes the file list (one `.html`, plus png/jpeg/gif/webp/svg
+  images; `slug` to version an existing doc) and returns one signed PUT URL
+  per file (15 minutes, single use) with the exact `curl -T` command;
+  `commit_upload` publishes once every file arrived. Images the HTML names by
+  relative path (`<img src="chart.png">`) are embedded in the doc.
+- `edit_doc`: a small change without re-sending the doc: exact find/replace
+  edits on the latest version's HTML; each `find` must match exactly once.
 - `get_doc`: latest HTML or text, with title, version and link.
 - `list_docs`: My docs and team docs.
 - `get_comments`: comments on a doc, with anchors and status.
@@ -49,6 +57,16 @@ Resources `tdoc://authoring/<path>.md` hold the authoring guides: `essentials.md
 `visuals.md`, `structure/components.md`, `style/*.md`. Prompts: `write_doc`,
 `revise_from_comments`.
 
+## How to publish
+
+- You can run shell commands (Claude Code, Codex, Cursor, a sandbox): write
+  the HTML to a file, keep local images next to it and refer to them by
+  relative path, call `create_upload` with each file's name, type and byte
+  size, run the `curl -T` commands it returns, then `commit_upload`. The
+  document never passes through a tool argument, so length costs nothing.
+- No shell: `create_doc` / `update_doc` with the HTML inline.
+- A small change to an existing doc: `edit_doc`.
+
 ## New document
 
 1. Call `get_writing_guide` before writing (`kind: "slides"` for a deck,
@@ -56,7 +74,8 @@ Resources `tdoc://authoring/<path>.md` hold the authoring guides: `essentials.md
    `tdoc://authoring/structure/components.md`.
 2. Write one self-contained HTML body. Draw charts and diagrams as inline
    SVG. No `<script>`, no external scripts or stylesheets.
-3. Call `create_doc`. Use `team` only when the user asked for a team doc.
+3. Publish (see above): `create_upload` + `curl` + `commit_upload`, or
+   `create_doc`. Use `team` only when the user asked for a team doc.
    The doc starts private; call `share_doc` only if the user asked to share it.
 4. Give the user the link from the result. Do not paste the document into chat.
 
@@ -74,8 +93,10 @@ is this flow. The slug is the part after `/d/`, also when the URL ends in
    - `question`: you need the person's input. Your reply ends in a question.
    - `answered`: the comment was a question; you answered it without
      changing the doc.
-4. Call `get_writing_guide` again (or use the `revise_from_comments` prompt),
-   write the full new HTML, and call `update_doc` once.
+4. Call `get_writing_guide` again (or use the `revise_from_comments` prompt).
+   For small changes, call `edit_doc` once with all the find/replace edits.
+   For a rewrite, write the full new HTML and publish it once: `create_upload`
+   with the `slug` + `curl` + `commit_upload`, or `update_doc`.
 5. `reply_to_comment` on EVERY open comment. Use `applied` only when the new
    version changed the doc, and pass `applied_in` = the new version number.
    Never mark `applied` for a comment the new version did not address.

@@ -6,8 +6,12 @@ the user asks for unless they name another format or tool.
 
 - New doc: read `tdoc://authoring/essentials.md` (then `voice.md`, `visuals.md`)
   (or use the `write_doc` prompt), write one self-contained HTML body with
-  inline SVG visuals and no `<script>`, call `create_doc`, give the link.
-- Comments: `get_comments`, `get_doc`, one `update_doc`, then
+  inline SVG visuals and no `<script>`, publish it, give the link. Publish
+  from a file: `create_upload`, run the `curl -T` commands it returns,
+  `commit_upload` (local images by relative path are embedded); `create_doc`
+  takes the HTML inline instead.
+- Comments: `get_comments`, `get_doc`, one `edit_doc` (small find/replace
+  changes) or one new version (`create_upload` with `slug`, or `update_doc`), then
   `reply_to_comment` on every open comment (`applied` with `applied_in` = new
   version only when the doc changed; else `answered`, `question`, or
   `partial`). `resolve_comment` for comments handed to you.
