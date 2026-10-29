@@ -414,7 +414,7 @@
   }
   function reportPointSelection(event) {
     if (interactionMode !== 'comment' || event.button !== 0) return false;
-    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
+    if (event.target && event.target.closest && event.target.closest('a,button,input,label,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
     var current = window.getSelection();
     if (current && !current.isCollapsed) return false; // a drag selection owns this click
     var point = caretAtPoint(event.clientX, event.clientY);
@@ -543,7 +543,7 @@
       && Math.abs(t.clientY - start.y) < 10 && Date.now() - start.at < 600;
     if (still && shellUiOpen && interactionMode === 'comment' && !start.inSelection
       && !visualViewerOpen() && !(e.target && e.target.closest
-        && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
+        && e.target.closest('a,button,input,label,textarea,select,summary,[contenteditable]'))) {
       // The pending CSS highlight outlives the browser selection. Clear both
       // before closing the composer so no yellow passage remains on the page.
       if (e.cancelable) e.preventDefault();
@@ -615,7 +615,7 @@
 
     if (!shellUiOpen && interactionMode === 'comment' && anchorIdAtPoint(e.clientX, e.clientY)) return;
     if (interactionMode === 'comment' && e.button === 0
-      && !(e.target && e.target.closest && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
+      && !(e.target && e.target.closest && e.target.closest('a,button,input,label,textarea,select,summary,[contenteditable]'))) {
       var point = caretAtPoint(e.clientX, e.clientY);
       if (point && point.node && point.node.nodeType === Node.TEXT_NODE) {
         document.documentElement.setAttribute('data-tdoc-selecting', '');

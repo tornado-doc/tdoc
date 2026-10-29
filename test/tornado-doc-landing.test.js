@@ -273,7 +273,7 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Use tdoc in your AI app/.test(visible), 'the apps row should be "Use tdoc in your AI app", not a borrowed user list');
+  assert(/Use tdoc in/.test(visible), 'the hero app picker should be "Use tdoc in", not a borrowed user list');
 });
 
 t('names the apps it runs in, each linked to its connect step', () => {
@@ -285,17 +285,25 @@ t('names the apps it runs in, each linked to its connect step', () => {
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
-  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Use tdoc in your AI app'));
-  assert(/Claude[\s\S]*ChatGPT[\s\S]*Cursor[\s\S]*VS Code/.test(hero), 'the hero does not name the connector apps');
-  assert(/Claude Code\s+or\s+Codex\s+on your computer/.test(hero), 'the hero does not name Claude Code and Codex');
+  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('One paste, and it'));
+  assert(/Claude[\s\S]*ChatGPT[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI/.test(hero), 'the hero picker does not name every app');
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
   assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
-  const strip = html.slice(html.indexOf('<p class="trust-label">Use tdoc in your AI app</p>'), html.indexOf('<!-- ══ THE LOOP ══ -->'));
-  const apps = [...strip.matchAll(/<a class="aiapp" href="([^"]+)">[\s\S]*?<\/svg>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
-  assert(apps.join(' ') === 'Claude=/start?connect=claude ChatGPT=/start?connect=chatgpt Cursor=/start?connect=cursor VS Code=/start?connect=vscode Codex=/start?connect=codex Gemini CLI=/start?connect=gemini', `apps row: ${apps.join(' ')}`);
-  assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(strip), 'the apps row shows company logos');
+  // The hero picker: one radio per app, the first checked, and each panel's way
+  // in works from the sandboxed frame (an https link or a line to copy).
+  const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
+  const radios = [...pick.matchAll(/<input type="radio" name="pick" id="pick-r-([a-z]+)"/g)].map((m) => m[1]);
+  assert(radios.join(' ') === 'claude chatgpt cursor vscode claudecode codex gemini', `picker radios: ${radios.join(' ')}`);
+  assert(/id="pick-r-claude" class="pick-radio" checked/.test(pick), 'Claude is not picked first');
+  for (const app of radios) {
+    const panel = pick.slice(pick.indexOf(`class="pick-panel pick-p-${app}"`));
+    const body = panel.slice(0, panel.indexOf('</div>', panel.indexOf('</p>')) + 6);
+    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} panel has no way in`);
+    assert(!/href="(cursor|vscode):/.test(body), `${app} panel links a custom scheme the frame cannot open`);
+  }
+  assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(pick), 'the picker shows company logos');
   assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
   const setup = html.slice(html.indexOf('<!-- ══ ONE PASTE ══'), html.indexOf('<!-- ══ FEATURES'));
   assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-terminal/.test(setup), 'Claude Code is not drawn as a terminal');
