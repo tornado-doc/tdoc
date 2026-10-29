@@ -289,9 +289,18 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     assert(!(await env.META.get(`tinv:alice:${inviting.id}`)), 'invite marker left');
   });
 
-  await t('the deletion record keeps no identity in plain sight in its tombstones', async () => {
+  await t('tombstones are keyed by an HMAC, not a guessable hash; the finished record keeps no identity in plain text', async () => {
     assert(!(await env.META.get('account-deleted-identity:alice')), 'plaintext tombstone key');
-    assert([...env.META.map.keys()].some((k) => /^account-deleted-identity:[0-9a-f]{64}$/.test(k)), 'hashed tombstone written');
+    const keys = [...env.META.map.keys()].filter((k) => /^account-deleted-identity:[0-9a-f]{64}$/.test(k));
+    assert(keys.length, 'hashed tombstone written');
+    const hex = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    for (const guess of ['alice', 'tdoc-deleted-identity\0alice', 'tdoc-deleted-identity-v1\0alice']) {
+      assert(!keys.includes(`account-deleted-identity:${await hex(guess)}`), `guessable: ${guess}`);
+    }
+    const rec = JSON.parse(await env.META.get(`account-deleted:${alice.account_id}`));
+    assert(rec.state === 'deleted' && !rec.login && !rec.emails.length && !rec.actor_keys.length && !rec.handles.length, JSON.stringify(rec));
+    assert(rec.actor_hashes.length && rec.invitee_hashes.length, 'hashes kept');
+    assert(!JSON.stringify(rec).includes('"alice"'), 'plaintext login on the record');
   });
 
   await t('profile page and handle are gone; login and handle no longer resolve', async () => {
@@ -391,13 +400,29 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     assert(rec && Array.isArray(rec.reborn) && rec.reborn.includes('alice'), JSON.stringify(rec));
   });
 
-  await t('the sweep (day 1) takes the identity out of invite lists; then a new invite works again', async () => {
+  await t('the sweep takes out only invites made before the deletion; one made after (to the new holder) stays and works', async () => {
+    assert((await publish(zed, 'zed-later', { visibility: 'private', allowed_users: [] })).status === 200, 'publish zed-later');
+    const re = await call('/api/doc/access', { method: 'PATCH', cookie: zed.cookie, headers: SAME, body: { slug: 'zed-later', access: { allowed_users: ['alice'] } } });
+    assert(re.status === 200, `share after deletion ${re.status} ${re.text}`);
+    assert((await call('/d/zed-later', { cookie: reborn })).status === 200, 'a new invite works before the sweep');
     await cron(Date.parse(deleted.deleted_at) + 1 * DAY);
-    const meta = JSON.parse(await env.META.get('meta:bob-private'));
-    assert(!meta.access.allowed_users.includes('alice'), JSON.stringify(meta.access));
-    const re = await call('/api/doc/access', { method: 'PATCH', cookie: bob.cookie, headers: SAME, body: { slug: 'bob-private', access: { allowed_users: ['alice'] } } });
-    assert(re.status === 200, `re-share ${re.status} ${re.text}`);
-    assert((await call('/d/bob-private', { cookie: reborn })).status === 200, 'a fresh invite after the sweep is honoured');
+    const old = JSON.parse(await env.META.get('meta:bob-private'));
+    assert(!old.access.allowed_users.includes('alice'), `old invite kept: ${JSON.stringify(old.access)}`);
+    const later = JSON.parse(await env.META.get('meta:zed-later'));
+    assert(later.access.allowed_users.includes('alice'), `new invite stripped: ${JSON.stringify(later.access)}`);
+    assert((await call('/d/zed-later', { cookie: reborn })).status === 200, 'the new invite still works after the sweep');
+    assert((await call('/d/bob-private', { cookie: reborn })).status !== 200, 'the old invite is gone');
+  });
+
+  await t('a new account that links the old login (not signed in with it) is held to the same rules', async () => {
+    const linkedId = 'acct_linkedx';
+    await env.META.put(`account-group:${linkedId}`, JSON.stringify({ canonical: linkedId, ids: [linkedId], actor_keys: ['alice'] }));
+    const linked = await session({ login: 'someone-else', account_id: linkedId });
+    const raw = env.COMMENTS.stateFor('bob-doc').storage.map.get('list') || [];
+    const old = raw.find((c) => c.events && c.events[0] && c.events[0].text === 'Alice was here.');
+    const edit = await call('/api/comments', { method: 'PATCH', cookie: linked, body: { slug: 'bob-doc', id: old.id, text: 'rewritten via link' } });
+    assert(edit.status === 403, `edit via a linked key: ${edit.status} ${edit.text}`);
+    await env.META.delete(`account-group:${linkedId}`);
   });
 
   console.log('account delete: the purge, 30 days later');
@@ -426,7 +451,9 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     assert(after && after.author.login === 'alice', `the new account's comment was anonymized: ${JSON.stringify(after)}`);
     const reb = out.find((c) => c.text === 'Reborn alice edits.');
     assert(reb && reb.author.login === 'alice', 'the re-registered account\'s comment kept');
-    for (const k of [`team-billing:${solo.id}`, `team-lifetime:${solo.id}`, `team-folders:${solo.id}`]) assert(!(await env.META.get(k)), `${k} left`);
+    assert(!(await env.META.get(`team-folders:${solo.id}`)), 'team folders left');
+    const bill = JSON.parse(await env.META.get(`team-billing:${solo.id}`));
+    assert(bill && bill.customer === 'cus_solo' && bill.team_deleted_at === deleted.deleted_at, `billing should stay for invoices, detached: ${JSON.stringify(bill)}`);
   });
 
   await t('restore after the purge is refused', async () => {
@@ -509,6 +536,73 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     assert(JSON.parse(await env.META.get('meta:fay-doc')).trashed_at, 'doc trashed');
   });
 
+  const lockStore = () => env.COMMENTS.get(env.COMMENTS.idFromName('__tdoc-search__:account-delete'));
+  const lockOp = async (op) => (await lockStore().fetch('https://do/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: '__tdoc-search__:account-delete', op }) })).json();
+
+  await t('the cron works on an account only under its lock, and never brings back one restored meanwhile', async () => {
+    const gil = await issue(worker, env, 'gil');
+    assert((await call('/api/me/handle', { method: 'POST', cookie: gil.cookie, headers: SAME, body: { handle: 'gil' } })).status === 200, 'handle');
+    assert((await del(gil.cookie, 'gil')).status === 200, 'delete gil');
+    const before = await env.META.get(`account-deleted:${gil.account_id}`);
+    // Somebody else (a restore in flight) holds the lock.
+    const held = await lockOp({ kind: 'claim', key: `run:${gil.account_id}`, keep_ms: 120000, owner: 'other' });
+    assert(held.claimed === true, JSON.stringify(held));
+    const r1 = await call('/api/admin/account/restore', { method: 'POST', token: 'admin-secret', body: { account_id: gil.account_id } });
+    assert(r1.status === 409, `restore while locked: ${r1.status}`);
+    await cron(Date.parse(JSON.parse(before).purge_at) + DAY);
+    assert((await env.META.get(`account-deleted:${gil.account_id}`)) === before, 'the cron touched a locked account');
+    assert(await env.META.get(`account-deleted-stash:${gil.account_id}:account-profile:${gil.account_id}`), 'the day-30 drop ran under somebody else\'s lock');
+    // A release by anyone but the holder does nothing.
+    await lockOp({ kind: 'release', key: `run:${gil.account_id}`, owner: 'not-the-owner' });
+    assert((await call('/api/admin/account/restore', { method: 'POST', token: 'admin-secret', body: { account_id: gil.account_id } })).status === 409, 'a stranger released the lock');
+    await lockOp({ kind: 'release', key: `run:${gil.account_id}`, owner: 'other' });
+    const r2 = await call('/api/admin/account/restore', { method: 'POST', token: 'admin-secret', body: { account_id: gil.account_id } });
+    assert(r2.status === 200, `restore: ${r2.status} ${r2.text}`);
+    await cron(Date.parse(JSON.parse(before).purge_at) + DAY);
+    assert(!(await env.META.get(`account-deleted:${gil.account_id}`)), 'the cron recreated the record');
+    assert(!(await env.META.get(`account-deleted-comments:${gil.account_id}`)), 'the cron recreated sweep state');
+    assert(!JSON.parse(await env.META.get(`account-group:${gil.account_id}`) || '{}').deleted_at, 'the cron re-killed the restored account');
+    assert(await env.META.get(`account-profile:${gil.account_id}`), 'profile not restored');
+  });
+
+  await t('a run that died before saving which docs it trashed: the rerun finds them, and restore brings back every one (team docs too)', async () => {
+    const hob = await issue(worker, env, 'hob');
+    const team = (await call('/api/teams', { method: 'POST', cookie: hob.cookie, headers: SAME, body: { name: 'Hob alone' } })).body.team;
+    for (const slug of ['hob-a', 'hob-t']) assert((await publish(hob, slug)).status === 200, `publish ${slug}`);
+    assert((await call('/api/team/move', { method: 'POST', token: hob.token, body: { team: team.id, slugs: ['hob-t'] } })).status === 200, 'move');
+    assert((await del(hob.cookie, 'hob')).status === 200, 'delete hob');
+    // Simulate the crash: the record forgets the docs and the steps.
+    const rec = JSON.parse(await env.META.get(`account-deleted:${hob.account_id}`));
+    assert(rec.docs.includes('hob-a') && rec.docs.includes('hob-t'), JSON.stringify(rec.docs));
+    Object.assign(rec, { state: 'deleting', docs: [], steps: { kill: true, identity: true, invites: true }, teams_done: [], teams_deleted: [] });
+    await env.META.put(`account-deleted:${hob.account_id}`, JSON.stringify(rec));
+    await cron(Date.now());
+    const again = JSON.parse(await env.META.get(`account-deleted:${hob.account_id}`));
+    assert(again.state === 'deleted' && again.docs.includes('hob-a') && again.docs.includes('hob-t'), JSON.stringify(again));
+    assert(again.teams_deleted.some((t) => t.id === team.id), 'the deleted team was forgotten');
+    const back = await call('/api/admin/account/restore', { method: 'POST', token: 'admin-secret', body: { account_id: hob.account_id } });
+    assert(back.status === 200 && back.body.docs.includes('hob-t') && back.body.docs.includes('hob-a'), back.text);
+    for (const slug of ['hob-a', 'hob-t']) {
+      const m = JSON.parse(await env.META.get(`meta:${slug}`));
+      assert(!m.trashed_at && !m.account_deleted_at, `${slug} still stamped`);
+    }
+    assert(await env.META.get(`team:${team.id}`), 'team not restored');
+  });
+
+  await t('an address another live account holds is not tombstoned: that account is not signed out, blocked or anonymized', async () => {
+    const ivyCookie = await session({ email: 'ivy@example.com', name: 'Ivy', oidc: true });
+    assert((await call('/api/me/handle', { method: 'POST', cookie: ivyCookie, headers: SAME, body: { handle: 'ivy-i' } })).status === 200, 'ivy account');
+    const ivyComment = await comment(ivyCookie, 'bob-doc', 'Ivy here.');
+    const jay = await issue(worker, env, 'jay');
+    // Jay's session carries Ivy's address (a stale or shared mailbox).
+    const jayCookie = await session({ login: 'jay', email: 'ivy@example.com', account_id: jay.account_id });
+    assert((await del(jayCookie, 'jay')).status === 200, 'delete jay');
+    assert((await call('/api/me/sign-in-methods', { cookie: ivyCookie })).status === 200, 'ivy was signed out');
+    const edit = await call('/api/comments', { method: 'PATCH', cookie: ivyCookie, body: { slug: 'bob-doc', id: ivyComment.id, text: 'Ivy edits.' } });
+    assert(edit.status === 200, `ivy blocked from her own comment: ${edit.status} ${edit.text}`);
+    assert(await env.META.get('account-email:ivy@example.com'), 'ivy lost her address');
+  });
+
   console.log('account delete: many docs, several accounts, a slow sweep');
 
   await t('with a sweep far slower than the catalog, day 30 still drops the stash and docs; every comment is anonymized as the sweep reaches it', async () => {
@@ -531,24 +625,41 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
       if (i % 3 === 0) assert((await call2('/api/comments', { method: 'POST', cookie: gus.cookie, body: { slug, version: 1, text: `gus on ${slug}`, anchor: null } })).status === 200, 'gus comment');
       if (i % 5 === 0) assert((await call2('/api/comments', { method: 'POST', cookie: hal.cookie, body: { slug, version: 1, text: `hal on ${slug}`, anchor: null } })).status === 200, 'hal comment');
     }
+    assert((await call2('/api/upload', { method: 'POST', token: owner.token, body: { slug: 'zzz-private', version: 1, html: '<h1>z</h1>', meta: { title: 'z', access: { visibility: 'private', allowed_users: ['gus', 'kim'] } } } })).status === 200, 'zzz-private');
     assert((await call2('/api/upload', { method: 'POST', token: gus.token, body: { slug: 'gus-own', version: 1, html: '<h1>g</h1>', meta: { title: 'g', access: { visibility: 'public' } } } })).status === 200, 'gus own');
     const delGus = await call2('/api/me/account/delete', { method: 'POST', cookie: gus.cookie, headers: SAME, body: { confirm: 'gus' } });
     const delHal = await call2('/api/me/account/delete', { method: 'POST', cookie: hal.cookie, headers: SAME, body: { confirm: 'hal' } });
     assert(delGus.status === 200 && delHal.status === 200, `${delGus.text} ${delHal.text}`);
     const t0 = Date.parse(delGus.body.deleted_at);
-    // Two runs during the window: 14 of 46 docs read. Both accounts share them.
+    // Two runs during the window: 14 of 47 docs read. Both accounts share them.
     await cron2(t0 + 1 * DAY);
     await cron2(t0 + 2 * DAY);
     const state = JSON.parse(await env2.META.get('account-sweep:state'));
     assert(state.scanned === 14, `one shared sweep for both accounts: ${JSON.stringify(state)}`);
+    // Kim deletes mid-lap: her sweep is done only after a full lap that
+    // started after she joined, not when the current lap wraps.
+    const kim = await issue(worker, env2, 'kim');
+    assert((await call2('/api/comments', { method: 'POST', cookie: kim.cookie, body: { slug: 'doc-000', version: 1, text: 'kim on doc-000', anchor: null } })).status === 200, 'kim comment');
+    assert((await call2('/api/me/account/delete', { method: 'POST', cookie: kim.cookie, headers: SAME, body: { confirm: 'kim' } })).status === 200, 'delete kim');
+    for (let i = 0; i < 6; i++) await cron2(t0 + 3 * DAY + i * 3600e3);
+    const gusMid = JSON.parse(await env2.META.get(`account-deleted:${gus.account_id}`));
+    const kimMid = JSON.parse(await env2.META.get(`account-deleted:${kim.account_id}`));
+    assert(gusMid.sweep_done_at && !kimMid.sweep_done_at, `lap counting: gus ${gusMid.sweep_done_at} kim ${kimMid.sweep_done_at}`);
     // Day 30: stash and docs go at once, though the sweep is far from done.
     await cron2(t0 + 30 * DAY + 1000);
     assert(![...env2.META.map.keys()].some((k) => k.startsWith('account-deleted-stash:')), 'stash outlived day 30');
     assert(!(await env2.META.get('meta:gus-own')), 'personal doc outlived day 30');
-    const gusRec = JSON.parse(await env2.META.get(`account-deleted:${gus.account_id}`));
-    assert(gusRec.state === 'purging' && !gusRec.login && !gusRec.emails.length, JSON.stringify(gusRec));
-    for (let i = 0; i < 12; i++) await cron2(t0 + (31 + i) * DAY);
-    assert(!(await env2.META.get(`account-deleted:${gus.account_id}`)) && !(await env2.META.get(`account-deleted:${hal.account_id}`)), 'records left');
+    // Gus's lap was done, so he finished in that run; Kim's is not, so she
+    // is purged (no stash, no plaintext) and still sweeping.
+    assert(!(await env2.META.get(`account-deleted:${gus.account_id}`)), 'gus not finished');
+    const kimRec = JSON.parse(await env2.META.get(`account-deleted:${kim.account_id}`));
+    assert(kimRec.state === 'purging' && !kimRec.sweep_done_at && !kimRec.login && !kimRec.emails.length && kimRec.invitee_hashes.length, JSON.stringify(kimRec));
+    for (let i = 0; i < 24; i++) await cron2(t0 + (31 + i) * DAY);
+    assert(!(await env2.META.get(`account-deleted:${gus.account_id}`)) && !(await env2.META.get(`account-deleted:${hal.account_id}`)) && !(await env2.META.get(`account-deleted:${kim.account_id}`)), 'records left');
+    const z = JSON.parse(await env2.META.get('meta:zzz-private'));
+    assert(!z.access.allowed_users.includes('gus') && !z.access.allowed_users.includes('kim'), `invites reached after day 30 not stripped: ${JSON.stringify(z.access)}`);
+    const k0 = (env2.COMMENTS.stateFor('doc-000').storage.map.get('list') || []).find((c) => c.events[0].text === 'kim on doc-000');
+    assert(k0 && k0.author.name === 'Deleted user', 'kim anonymized');
     for (let i = 0; i < N; i++) {
       const slug = `doc-${String(i).padStart(3, '0')}`;
       const list = env2.COMMENTS.stateFor(slug).storage.map.get('list') || [];

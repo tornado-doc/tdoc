@@ -391,6 +391,7 @@ async function getSession(env, req) {
       await env.META.delete(`session:${sid}`).catch(() => {});
       return null;
     }
+    if (!group || group.unavailable) return null;
     try {
       session.account_id = group.canonical;
       session.linked_account_ids = group.ids.filter((id) => id !== group.canonical);
@@ -401,7 +402,7 @@ async function getSession(env, req) {
   if (session.account_id) session.team_admin_ids = await loadAdminTeamIds(env, session.account_id, session.team_ids);
   // Signed in with an identity a deleted account had (stamped at sign-in):
   // that account's comments and invites are not this session's.
-  session.reborn = await loadReborn(env, session.reborn);
+  session.reborn = await loadReborn(env, [...(Array.isArray(session.reborn) ? session.reborn : []), ...actorKeys(session)]);
   if (feedback) session.feedback = feedback;
   return session;
 }
@@ -449,7 +450,7 @@ async function sessionFromHostedBearer(env, req) {
     team_ids: teamIds,
     team_admin_ids: await loadAdminTeamIds(env, actor.account_id, teamIds),
     bearer: true,
-    reborn: await loadReborn(env, actor.reborn),
+    reborn: await loadReborn(env, [...(Array.isArray(actor.reborn) ? actor.reborn : []), actor.github_login, normalizeEmail(actor.email) ? `email:${normalizeEmail(actor.email)}` : '', ...group.actor_keys]),
     ...(actor.scope ? { scope: actor.scope } : {}),
   };
 }
@@ -588,15 +589,21 @@ function normalizeAccountIds(ids) {
 async function accountGroup(env, accountId) {
   const fallback = normalizeAccountIds([accountId]);
   if (!fallback.length || !env || !env.META) return { canonical: fallback[0] || null, ids: fallback, actor_keys: [] };
+  let raw;
+  try { raw = await env.META.get(`account-group:${accountId}`); } catch {
+    // Unreadable is not "not deleted": the callers that decide whether a
+    // session or token still stands refuse on this (fail closed).
+    return { canonical: accountId, ids: [accountId], actor_keys: [], unavailable: true };
+  }
   try {
-    const rec = JSON.parse(await env.META.get(`account-group:${accountId}`));
+    const rec = JSON.parse(raw);
     const ids = normalizeAccountIds([...(rec && rec.ids || []), accountId]);
     const canonical = ids.includes(rec && rec.canonical) ? rec.canonical : accountId;
     const actor_keys = [...new Set((Array.isArray(rec && rec.actor_keys) ? rec.actor_keys : [])
       .map(normalizeActorKey).filter(Boolean))].slice(0, 8);
     // Settings -> Delete account replaces the record with a marker; every
     // session and token resolves its account through here, so this one read
-    // is what ends them all (see deleteAccount).
+    // is what ends them all (see the account deletion job).
     if (rec && rec.deleted_at) return { canonical, ids, actor_keys: [], deleted_at: String(rec.deleted_at) };
     return { canonical, ids, actor_keys };
   } catch {
@@ -871,11 +878,17 @@ function isAllowlisted(access, session, env, meta) {
   if (isDocOwnerSession(env, session, meta)) return true;
   if (access.team && meta && sessionInTeam(session, meta.workspace_id)) return true;
   let allowed = access.allowed_users || [];
-  // An invite to an identity whose account was deleted is that account's:
-  // until the sweep has taken it out of every doc, a new account with the
-  // same login or address does not use it.
-  const pending = (session && Array.isArray(session.reborn) ? session.reborn : []).filter((r) => r && !r.swept).map((r) => (r.k.startsWith('email:') ? r.k.slice(6) : r.k));
-  if (pending.length) allowed = allowed.filter((x) => !pending.includes(String(x).toLowerCase()));
+  // An invite to an identity whose account was deleted, made before the
+  // deletion (or of unknown age), was that account's: a new account with the
+  // same login or address does not use it. One made after is theirs.
+  const reborn = session && Array.isArray(session.reborn) ? session.reborn : [];
+  if (reborn.length) {
+    const invitedAt = (meta && meta.invited_at) || {};
+    allowed = allowed.filter((x) => {
+      const r = reborn.find((y) => y && (y.k.startsWith('email:') ? y.k.slice(6) : y.k) === String(x).toLowerCase());
+      return !r || Date.parse(invitedAt[x] || '') > Date.parse(r.at);
+    });
+  }
   // Two shapes match, because two shapes get invited: legacy entries are
   // GitHub handles, new ones are email addresses (D2). A session offers
   // whichever of the two it has — and an email-keyed session matches a bare
@@ -6841,7 +6854,31 @@ async function putDocMetaJson(env, slug, json, { restore = false } = {}) {
   let parsed = null;
   try { parsed = JSON.parse(json); } catch {}
   const idx = parsed ? docMetaIndex(parsed) : null;
-  const priorIdx = idx ? await priorDocMetaIndex(env, slug) : null;
+  const prior = idx ? await priorDocMeta(env, slug) : { idx: null, raw: null };
+  const priorIdx = prior.idx;
+  // When each invite was added, kept beside the list on every write: an
+  // invite made before an identity's account was deleted is that account's,
+  // one made after is the new holder's (isAllowlisted, the account sweep).
+  // Read from the same KV read as the prior index; entries that predate
+  // this stamp stay unknown, which counts as "before".
+  if (parsed && parsed.access && Array.isArray(parsed.access.allowed_users)) {
+    let priorMeta = null;
+    try { priorMeta = prior.raw ? JSON.parse(prior.raw) : null; } catch {}
+    const before = new Set(priorMeta && priorMeta.access && Array.isArray(priorMeta.access.allowed_users) ? priorMeta.access.allowed_users : []);
+    const prevAt = { ...((priorMeta && priorMeta.invited_at) || {}), ...(parsed.invited_at || {}) };
+    const now = new Date().toISOString();
+    const at = {};
+    for (const x of parsed.access.allowed_users) {
+      if (prevAt[x]) at[x] = prevAt[x];
+      else if (!before.has(x) && priorMeta) at[x] = now;
+      else if (!priorMeta) at[x] = now;
+    }
+    if (JSON.stringify(at) !== JSON.stringify(parsed.invited_at || {})) {
+      if (Object.keys(at).length) parsed.invited_at = at;
+      else delete parsed.invited_at;
+      json = JSON.stringify(parsed);
+    }
+  }
   if (priorIdx && priorIdx.x && !idx.x && !restore) throw new DocInTrashError(slug);
   // The record is the write that matters; a marker is a shortcut to it. So a
   // marker that cannot be written (the day's KV writes spent, a transient
@@ -6917,6 +6954,15 @@ const DOC_INDEX_SWEEP_WRITES = 3;
 
 function docIndexMarkerKey(facet, slug) { return `docidx:${facet}:${slug}`; }
 function docIndexBuiltKey(facet) { return `docidx:built:${facet}`; }
+
+async function priorDocMeta(env, slug) {
+  if (!env.META || typeof env.META.getWithMetadata !== 'function') return { idx: null, raw: null };
+  try {
+    const r = await env.META.getWithMetadata(`meta:${slug}`);
+    const md = r && r.metadata;
+    return { idx: md && md.v === META_INDEX_VERSION ? md : null, raw: r ? r.value : null };
+  } catch { return { idx: null, raw: null }; }
+}
 
 async function priorDocMetaIndex(env, slug) {
   if (!env.META || typeof env.META.getWithMetadata !== 'function') return null;
@@ -9167,47 +9213,48 @@ async function signInMethodsSession(env, req, url) {
 //
 // Settings -> Delete account. Deletion is a resumable job, not one request:
 //
-//   1. mark      The record (account-deleted:<id>, state "deleting") is
-//                written FIRST, with everything a rerun needs. Then the
-//                account's group record is replaced by a deleted marker
-//                (its original copied to the stash before), which every
-//                session and token resolves through -- so they all end at
-//                once -- and a per-identity tombstone ends the sessions that
-//                predate the account. AI-app grants are cut off.
-//   2. identity  The identity indexes (login, address, provider ids,
-//                @handle) and per-person state move to the stash: each key
-//                is COPIED into its own stash entry before it is deleted, and
-//                an entry is never overwritten, so a crash or a rerun loses
-//                nothing. A new sign-in with the same identity is a fresh,
-//                empty account.
-//   3. invites   Pending team invites addressed to the identity go.
-//   4. teams     The person leaves every team; a team they were alone in
-//                goes with the account (its record stashed, its docs to Trash).
-//   5. docs      Every personal doc goes to Trash, stamped account_deleted_at.
-//                A doc that fails to move fails the step: it is retried.
-//   6. tokens    Token records are erased (the marker already refuses them).
+//   kill      The record (account-deleted:<id>, state "deleting") is written
+//             FIRST, with everything a rerun needs. Then the account's group
+//             record is replaced by a deleted marker (its original copied to
+//             the stash before), which every session and token resolves
+//             through -- so they all end at once -- and a tombstone per
+//             identity (keyed by an HMAC of it, never the identity) ends the
+//             sessions that predate the account. AI-app grants are cut off.
+//   identity  The identity indexes and per-person state move to the stash:
+//             each key is COPIED into its own stash entry before it is
+//             deleted, and an entry is never overwritten, so a crash or a
+//             rerun loses nothing. A new sign-in with the same identity is a
+//             fresh, empty account.
+//   invites   Pending team invites addressed to the identity go.
+//   teams     The person leaves every team; a team they were alone in goes
+//             with the account (its record stashed, its docs to Trash).
+//   docs      Every personal doc goes to Trash, stamped account_deleted_at.
+//             The record is saved after every doc, and a rerun picks up the
+//             docs it stamped from the Trash index, so none is forgotten.
+//   tokens    Token records are erased (the marker already refuses them).
 //
-// The request runs the steps it can; whatever is left (a failure, a time
-// out) the scheduled handler resumes. A run holds a short lock, so a second
-// tab or a cron run never works on the same account at the same time.
+// The request runs the steps it can; whatever is left the scheduled handler
+// resumes. Every run -- request, cron, operator restore -- holds the
+// account's lock and re-reads the record under it.
 //
 // During the window a single sweep walks every doc in turn (one shared ring,
 // whatever the number of deleted accounts), noting which docs hold comments
-// a deleted account wrote and taking the identity out of doc invite lists.
-// At purge_at the stash and the personal docs go, whatever the sweep's
-// progress; the noted docs' comments keep their words with a "Deleted user"
-// author, and docs the sweep reaches later are anonymized as it reaches
-// them. Identity tombstones are keyed by a hash of the identity, never the
-// identity itself, and stay: they keep a deleted address hidden in comments
-// and keep a re-registered identity from editing the old account's comments
-// or using its invites.
+// a deleted account wrote and taking it out of the invite lists it was on
+// at deletion. At purge_at the stash goes, whatever the sweep's progress
+// (the personal docs go with Trash, on the same clock); the noted docs'
+// comments keep their words with a "Deleted user" author, and docs the
+// sweep reaches later are anonymized as it reaches them. Once the steps are
+// done the record keeps only HMACs of the identities, never the identities.
 const ACCOUNT_DELETE_DAYS = 30;
 const ACCOUNT_DELETE_MS = ACCOUNT_DELETE_DAYS * 24 * 60 * 60 * 1000;
-// Docs the sweep reads per scheduled run (one Durable Object read and one KV
-// read each). 200 an hour is about 10 days for 50,000 docs.
-const ACCOUNT_SWEEP_BATCH = 200;
-// Comment rewrites per scheduled run, across every account being purged.
-const ACCOUNT_ANONYMIZE_BATCH = 100;
+// Work units one scheduled run spends on deleted accounts, ~ subrequests:
+// a doc swept costs 2 (its comments, its record), a comment rewrite ~6. The
+// Trash purge in the same run spends ~480 of its own (TRASH_PURGE_BATCH).
+// 150 docs an hour is a lap of 50,000 docs in ~14 days, so an account that
+// joins mid-lap is fully swept within two laps, inside its 30 days.
+const ACCOUNT_CRON_BUDGET = 400;
+const ACCOUNT_SWEEP_BATCH = 150;
+const ACCOUNT_ANONYMIZE_COST = 6;
 const ACCOUNT_DELETE_LOCK_MS = 2 * 60 * 1000;
 const ACCOUNT_SWEEP_STATE = 'account-sweep:state';
 const ACCOUNT_DELETE_STEPS = ['kill', 'identity', 'invites', 'teams', 'docs', 'tokens'];
@@ -9216,12 +9263,27 @@ const DELETED_USER_AUTHOR = Object.freeze({ login: '', name: 'Deleted user', ava
 function accountDeletedKey(accountId) { return `account-deleted:${accountId}`; }
 function accountStashPrefix(accountId) { return `account-deleted-stash:${accountId}:`; }
 function accountCommentsKey(accountId) { return `account-deleted-comments:${accountId}`; }
-async function accountDeletedIdentityKey(actor) { return `account-deleted-identity:${await sha256Hex(`tdoc-deleted-identity\0${actor}`)}`; }
 
 function accountSweepBudget(env) {
   const n = Number(env && env.TDOC_ACCOUNT_SWEEP_BATCH);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : ACCOUNT_SWEEP_BATCH;
 }
+
+// An identity's tombstone key: an HMAC under a secret the worker already has
+// (the same chain that keys comment email aliases), so the key names nobody
+// to whoever can list KV. Rotating that secret orphans existing tombstones.
+async function identityHash(env, actor) {
+  const key = normalizeActorKey(actor) || String(actor || '').trim().toLowerCase();
+  const secret = String((env && (env.TDOC_EMAIL_ALIAS_SECRET || env.TDOC_DATA_MIRROR_KEY || env.TDOC_UPLOAD_TOKEN || env.GITHUB_CLIENT_SECRET)) || 'tdoc-deleted-identity');
+  const mac = await hmacBytes(`tdoc-deleted-identity-v1\0${secret}`, key);
+  return [...mac].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function identityTombKey(hash) { return `account-deleted-identity:${hash}`; }
+
+// Tombstones are read on hot paths (every session, comment payloads), so an
+// isolate keeps what it read for a minute.
+const IDENTITY_TOMB_CACHE = new Map();
+const IDENTITY_TOMB_TTL_MS = 60 * 1000;
 
 async function loadDeletedAccount(env, accountId) {
   if (typeof accountId !== 'string' || !accountId) return null;
@@ -9234,27 +9296,32 @@ async function saveDeletedAccount(env, rec) {
   await env.META.put(accountDeletedKey(rec.account_id), JSON.stringify(rec), { metadata: { state: rec.state, purge_at: rec.purge_at } });
 }
 
+async function deletedIdentityByHash(env, hash) {
+  const hit = IDENTITY_TOMB_CACHE.get(hash);
+  if (hit && Date.now() - hit.t < IDENTITY_TOMB_TTL_MS) return hit.v;
+  let rec = null;
+  try { rec = JSON.parse(await env.META.get(identityTombKey(hash))); } catch {}
+  const v = rec && rec.at ? rec : null;
+  IDENTITY_TOMB_CACHE.set(hash, { v, t: Date.now() });
+  if (IDENTITY_TOMB_CACHE.size > 1000) IDENTITY_TOMB_CACHE.delete(IDENTITY_TOMB_CACHE.keys().next().value);
+  return v;
+}
 async function deletedIdentity(env, actor) {
   const key = normalizeActorKey(actor);
   if (!key || !env || !env.META) return null;
-  try {
-    const rec = JSON.parse(await env.META.get(await accountDeletedIdentityKey(key)));
-    return rec && rec.at ? rec : null;
-  } catch { return null; }
+  return deletedIdentityByHash(env, await identityHash(env, key));
 }
-async function setDeletedIdentity(env, actor, patch) {
-  const key = normalizeActorKey(actor);
-  if (!key) return;
-  const k = await accountDeletedIdentityKey(key);
+async function setDeletedIdentityByHash(env, hash, patch) {
   let prev = null;
-  try { prev = JSON.parse(await env.META.get(k)); } catch {}
-  await env.META.put(k, JSON.stringify({ ...(prev || {}), ...patch }));
+  try { prev = JSON.parse(await env.META.get(identityTombKey(hash))); } catch {}
+  const next = { ...(prev || {}), ...patch };
+  await env.META.put(identityTombKey(hash), JSON.stringify(next));
+  IDENTITY_TOMB_CACHE.set(hash, { v: next, t: Date.now() });
 }
 
 // The identities a sign-in or a token mint is about to act as that belonged
-// to a deleted account: stamped on the new session / token, so the old
-// account's comments and invites never rebind to it (canMutate,
-// isAllowlisted). One read per identity, at sign-in only.
+// to a deleted account: stamped on the new session / token. getSession also
+// checks every actor key the session carries (a linked login included).
 async function rebornKeys(env, keys) {
   const out = [];
   for (const k of [...new Set(keys.map(normalizeActorKey).filter(Boolean))]) {
@@ -9262,17 +9329,19 @@ async function rebornKeys(env, keys) {
   }
   return out;
 }
-// The live state of those identities: when each was deleted, and whether
-// the sweep has taken it out of every doc's invite list yet.
+// For each identity that a deleted account had: when it was deleted. A
+// comment or invite from before then was that account's, not this one's
+// (canMutate, isRecordAuthor, isAllowlisted, isDocOwnerSession).
 async function loadReborn(env, keys) {
-  if (!Array.isArray(keys) || !keys.length) return [];
+  const list = [...new Set((Array.isArray(keys) ? keys : []).map(normalizeActorKey).filter(Boolean))].slice(0, 8);
   const out = [];
-  for (const k of keys.slice(0, 8)) {
+  for (const k of list) {
     const rec = await deletedIdentity(env, k);
-    if (rec) out.push({ k: normalizeActorKey(k), at: rec.at, swept: !!rec.swept_at });
+    if (rec) out.push({ k, at: rec.at });
   }
   return out;
 }
+
 // What the person types to confirm: their GitHub login, or their address
 // when the account has no login.
 function accountDeleteConfirmPhrase(session) {
@@ -9363,19 +9432,38 @@ async function keyNamesAccount(env, key, ids) {
 }
 
 // One run at a time per account: the search store's atomic claim, held for
-// ACCOUNT_DELETE_LOCK_MS at most (a run that dies frees it by then). Where
-// that store is unavailable, the record's own run stamp stands in.
+// ACCOUNT_DELETE_LOCK_MS at most (a run that dies frees it by then), and
+// released only by the run that holds it. Where that store is unavailable,
+// the record's own run stamp stands in (best effort: KV has no
+// compare-and-set). Returns the owner token, or null when busy.
 async function takeDeletionLock(env, accountId, record) {
-  const out = await searchStoreOp(env, 'account-delete', { kind: 'claim', key: `run:${accountId}`, keep_ms: ACCOUNT_DELETE_LOCK_MS });
-  if (out) return !!out.claimed;
-  return !(record && record.run_at && Date.now() - Date.parse(record.run_at) < ACCOUNT_DELETE_LOCK_MS);
+  const owner = rand(8);
+  const out = await searchStoreOp(env, 'account-delete', { kind: 'claim', key: `run:${accountId}`, keep_ms: ACCOUNT_DELETE_LOCK_MS, owner });
+  if (out) return out.claimed ? owner : null;
+  return record && record.run_at && Date.now() - Date.parse(record.run_at) < ACCOUNT_DELETE_LOCK_MS ? null : owner;
 }
-async function releaseDeletionLock(env, accountId) {
-  await searchStoreOp(env, 'account-delete', { kind: 'release', key: `run:${accountId}` });
+async function releaseDeletionLock(env, accountId, owner) {
+  if (!owner) return;
+  await searchStoreOp(env, 'account-delete', { kind: 'release', key: `run:${accountId}`, owner });
+}
+// Run `fn(record)` under the account's lock, on the record as it is now
+// (re-read after the lock is taken). Skips an account that is busy, gone or
+// restored meanwhile.
+async function withDeletionLock(env, accountId, fn) {
+  const owner = await takeDeletionLock(env, accountId, await loadDeletedAccount(env, accountId));
+  if (!owner) return { busy: true };
+  try {
+    const record = await loadDeletedAccount(env, accountId);
+    if (!record) return { gone: true };
+    return { result: await fn(record) };
+  } finally {
+    await releaseDeletionLock(env, accountId, owner);
+  }
 }
 
-// Step 1, in the request. Everything later steps need is on the record
-// before anything is touched.
+// Step 0, in the request. Everything later steps need is on the record
+// before anything is touched. An address another account holds now is not
+// this account's to tombstone.
 async function markAccountDeleted(env, session, plan) {
   const group = await accountGroup(env, session.account_id);
   const canonical = group.canonical;
@@ -9402,6 +9490,10 @@ async function markAccountDeleted(env, session, plan) {
       } catch {}
     }
   }
+  for (const e of [...emails]) {
+    const owner = await accountIdByEmail(env, e);
+    if (owner && !ids.includes(owner)) emails.delete(e);
+  }
   for (const id of ids) {
     const link = await accountGithubLink(env, id);
     if (link) idps.push(['github', String(link.sub)]);
@@ -9411,7 +9503,12 @@ async function markAccountDeleted(env, session, plan) {
     const h = await accountClaimedHandle(env, id);
     if (h) handles.add(h);
   }
-  const actors = [...new Set([...actorKeys(session), ...group.actor_keys, ...[...emails].map((e) => `email:${e}`)].map(normalizeActorKey).filter(Boolean))];
+  const actors = [...new Set([
+    ...actorKeys(session).filter((k) => !k.startsWith('email:') || emails.has(k.slice(6))),
+    ...group.actor_keys.filter((k) => !k.startsWith('email:') || emails.has(k.slice(6))),
+    ...[...emails].map((e) => `email:${e}`),
+  ].map(normalizeActorKey).filter(Boolean))];
+  const invitees = [...new Set([login, ...emails].filter(Boolean))];
   const record = {
     account_id: canonical,
     ids,
@@ -9419,11 +9516,14 @@ async function markAccountDeleted(env, session, plan) {
     deleted_at: at,
     purge_at: new Date(now + ACCOUNT_DELETE_MS).toISOString(),
     run_at: at,
+    // Plaintext the steps need; cleared once they are done (hashes stay).
     login: login || '',
     emails: [...emails],
     idps,
     handles: [...handles],
     actor_keys: actors,
+    actor_hashes: await Promise.all(actors.map((k) => identityHash(env, k))),
+    invitee_hashes: await Promise.all(invitees.map((k) => identityHash(env, k))),
     team_ids: plan.teamIds,
     steps: {},
     teams_done: [],
@@ -9454,6 +9554,25 @@ async function personalDocsOf(env, record) {
   return out;
 }
 
+// Docs this deletion already took to Trash under one facet (a run that died
+// before saving the record still stamped them): back onto record.docs, so a
+// restore brings them back and nothing else purges them early.
+async function adoptStampedTrash(env, record, facet) {
+  const prefix = `trashidx:${facet}:`;
+  for (const key of await listKeyNames(env, prefix)) {
+    const slug = key.slice(prefix.length);
+    if (record.docs.includes(slug)) continue;
+    const rec = await loadDocRecord(env, slug);
+    if (isTrashedMeta(rec) && rec.account_deleted_at === record.deleted_at) record.docs.push(slug);
+  }
+}
+
+async function trashForDeletion(env, record, slug, meta) {
+  await trashDoc(env, slug, { ...meta, account_deleted_at: record.deleted_at }, { actor: { account_id: record.account_id } });
+  if (!record.docs.includes(slug)) record.docs.push(slug);
+  await saveDeletedAccount(env, record);
+}
+
 const ACCOUNT_DELETE_STEP_FNS = {
   // Every session and token ends: the group marker (its original copied to
   // the stash first), the identity tombstones, the AI-app cut-off.
@@ -9462,7 +9581,7 @@ const ACCOUNT_DELETE_STEP_FNS = {
     for (const id of ids) await stashMove(env, canonical, [`account-group:${id}`], { keep: true });
     const marker = JSON.stringify({ canonical, ids, actor_keys: [], deleted_at: at });
     for (const id of ids) await env.META.put(`account-group:${id}`, marker);
-    for (const k of record.actor_keys) await setDeletedIdentity(env, k, { account_id: canonical, at, swept_at: null });
+    for (const h of [...new Set([...record.actor_hashes, ...record.invitee_hashes])]) await setDeletedIdentityByHash(env, h, { account_id: canonical, at });
     for (const id of ids) await markOAuthRevokedForAccount(env, id);
   },
   async identity(env, record) {
@@ -9511,23 +9630,23 @@ const ACCOUNT_DELETE_STEP_FNS = {
     for (const id of record.team_ids || []) {
       if (record.teams_done.includes(id)) continue;
       const team = await loadTeam(env, id);
+      const stashed = `${accountStashPrefix(record.account_id)}team:${id}`;
       if (team && team.members.some((m) => ids.includes(m.account_id))) {
         const others = team.members.filter((m) => !ids.includes(m.account_id));
         if (others.length) {
           team.members = others;
           await saveTeam(env, team);
           try { await syncTeamSeats(env, team); } catch {}
-          record.teams_left.push({ id: team.id, name: team.name });
+          if (!record.teams_left.some((t) => t.id === id)) record.teams_left.push({ id: team.id, name: team.name });
         } else {
           for (const slug of await docIndexSlugs(env, `w:${team.id}`, teamDocMatcher(team.id))) {
             const meta = await loadDocMeta(env, slug);
             if (!meta || meta.workspace_id !== team.id) continue;
-            await trashDoc(env, slug, { ...meta, account_deleted_at: record.deleted_at }, { actor: { account_id: record.account_id } });
-            if (!record.docs.includes(slug)) record.docs.push(slug);
+            await trashForDeletion(env, record, slug, meta);
           }
+          await adoptStampedTrash(env, record, `w:${team.id}`);
           const kept = { ...team, agents: teamAgents(team).map(({ token_hash: _t, setup_hash: _s, ...a }) => a) };
-          const entry = `${accountStashPrefix(record.account_id)}team:${team.id}`;
-          if ((await env.META.get(entry)) == null) await env.META.put(entry, JSON.stringify({ v: JSON.stringify(kept), m: teamIndex(kept) }));
+          if ((await env.META.get(stashed)) == null) await env.META.put(stashed, JSON.stringify({ v: JSON.stringify(kept), m: teamIndex(kept) }));
           const extra = [];
           if (team.handle && (await env.META.get(`team-handle:${team.handle}`)) === team.id) extra.push(`team-handle:${team.handle}`);
           if (team.invite_token) extra.push(`team-invite:${team.invite_token}`);
@@ -9535,20 +9654,25 @@ const ACCOUNT_DELETE_STEP_FNS = {
           await stashMove(env, record.account_id, extra);
           await env.META.delete(`team:${team.id}`);
           for (const agent of teamAgents(team)) await forgetTeamAgent(env, agent);
-          record.teams_deleted.push({ id: team.id, name: team.name });
+          if (!record.teams_deleted.some((t) => t.id === id)) record.teams_deleted.push({ id: team.id, name: team.name });
         }
+      } else if (!team && (await env.META.get(stashed)) != null) {
+        // A run that died after deleting the team: what it trashed is ours.
+        await adoptStampedTrash(env, record, `w:${id}`);
+        let name = id;
+        try { name = JSON.parse(JSON.parse(await env.META.get(stashed)).v).name || id; } catch {}
+        if (!record.teams_deleted.some((t) => t.id === id)) record.teams_deleted.push({ id, name });
       }
       record.teams_done.push(id);
       await saveDeletedAccount(env, record);
     }
   },
   async docs(env, record) {
-    for (const { slug, meta } of await personalDocsOf(env, record)) {
-      // A failure throws: the step stays undone and the next run retries it
-      // (a doc already in Trash is skipped), so no doc is left behind.
-      await trashDoc(env, slug, { ...meta, account_deleted_at: record.deleted_at }, { actor: { account_id: record.account_id } });
-      if (!record.docs.includes(slug)) record.docs.push(slug);
-    }
+    // A failure throws: the step stays undone and the next run retries it.
+    // Each doc is saved on the record as it goes, and docs a run that died
+    // already stamped are picked up from the Trash index.
+    await adoptStampedTrash(env, record, `p:${record.account_id}`);
+    for (const { slug, meta } of await personalDocsOf(env, record)) await trashForDeletion(env, record, slug, meta);
     for (const key of await listKeyNames(env, `trashidx:p:${record.account_id}:`)) {
       const slug = key.slice(`trashidx:p:${record.account_id}:`.length);
       const rec = await loadDocRecord(env, slug);
@@ -9568,35 +9692,35 @@ const ACCOUNT_DELETE_STEP_FNS = {
   },
 };
 
-// Run what is left of a deletion. Returns the record; record.state is
-// 'deleted' once every step is done, else still 'deleting' with the error.
-async function runAccountDeletion(env, record, { locked = false } = {}) {
-  if (!locked && !(await takeDeletionLock(env, record.account_id, record))) return { busy: true, record };
-  try {
-    record.run_at = new Date().toISOString();
-    await saveDeletedAccount(env, record);
-    for (const step of ACCOUNT_DELETE_STEPS) {
-      if (record.steps[step]) continue;
-      try {
-        await ACCOUNT_DELETE_STEP_FNS[step](env, record);
-      } catch (e) {
-        record.error = { step, message: String((e && e.message) || e).slice(0, 200), at: new Date().toISOString() };
-        await saveDeletedAccount(env, record);
-        console.error('[account-delete] step failed, will retry:', step, record.error.message);
-        return { record };
-      }
-      record.steps[step] = true;
+// Run what is left of a deletion, the caller holding the lock. record.state
+// is 'deleted' once every step is done, else still 'deleting' with the error.
+async function runAccountDeletion(env, record) {
+  record.run_at = new Date().toISOString();
+  await saveDeletedAccount(env, record);
+  for (const step of ACCOUNT_DELETE_STEPS) {
+    if (record.steps[step]) continue;
+    try {
+      await ACCOUNT_DELETE_STEP_FNS[step](env, record);
+    } catch (e) {
+      record.error = { step, message: String((e && e.message) || e).slice(0, 200), at: new Date().toISOString() };
       await saveDeletedAccount(env, record);
+      console.error('[account-delete] step failed, will retry:', step, record.error.message);
+      return record;
     }
-    delete record.error;
-    record.state = 'deleted';
-    const sweep = await loadAccountSweep(env);
-    record.sweep_join = sweep.scanned;
+    record.steps[step] = true;
     await saveDeletedAccount(env, record);
-    return { record };
-  } finally {
-    await releaseDeletionLock(env, record.account_id);
   }
+  delete record.error;
+  record.state = 'deleted';
+  record.sweep_join = (await loadAccountSweep(env)).scanned;
+  // The identities in plain text were for the steps; the hashes do the rest.
+  record.login = '';
+  record.emails = [];
+  record.idps = [];
+  record.handles = [];
+  record.actor_keys = [];
+  await saveDeletedAccount(env, record);
+  return record;
 }
 
 // Operator only (the upload token): put a deleted account back within its
@@ -9604,11 +9728,8 @@ async function runAccountDeletion(env, record, { locked = false } = {}) {
 // signs in again. Teams it left are not rejoined (the team may have moved
 // on); a key a new account has claimed since is left with it and reported.
 async function restoreDeletedAccount(env, accountId) {
-  const record = await loadDeletedAccount(env, accountId);
-  if (!record) return { status: 404, body: { error: 'not_deleted' } };
-  if (record.state === 'purging') return { status: 410, body: { error: 'purged' } };
-  if (!(await takeDeletionLock(env, accountId, null))) return { status: 409, body: { error: 'deletion_in_progress' } };
-  try {
+  const out = await withDeletionLock(env, accountId, async (record) => {
+    if (record.state === 'purging') return { status: 410, body: { error: 'purged' } };
     const conflicts = [];
     for (const id of record.ids) await env.META.delete(`account-group:${id}`);
     const prefix = accountStashPrefix(accountId);
@@ -9622,6 +9743,8 @@ async function restoreDeletedAccount(env, accountId) {
       }
       await env.META.delete(name);
     }
+    await adoptStampedTrash(env, record, `p:${accountId}`);
+    for (const t of record.teams_deleted || []) await adoptStampedTrash(env, record, `w:${t.id}`);
     const docs = [];
     for (const slug of record.docs || []) {
       const rec = await loadDocRecord(env, slug);
@@ -9637,49 +9760,65 @@ async function restoreDeletedAccount(env, accountId) {
         await putDocMetaJson(env, slug, JSON.stringify(clean));
       }
     }
-    let found = {};
-    try { found = JSON.parse(await env.META.get(accountCommentsKey(accountId))) || {}; } catch {}
-    for (const { slug, entry } of Array.isArray(found.stripped) ? found.stripped : []) {
+    const found = await loadFound(env, accountId);
+    for (const { slug, entry, at } of found.stripped) {
       const rec = await loadDocRecord(env, slug);
       const access = rec && rec.access && typeof rec.access === 'object' ? rec.access : null;
       if (!access) continue;
       const allowed = Array.isArray(access.allowed_users) ? access.allowed_users : [];
-      if (!allowed.includes(entry)) await putDocMetaJson(env, slug, JSON.stringify({ ...rec, access: { ...access, allowed_users: [...allowed, entry] } }), { restore: isTrashedMeta(rec) ? false : true });
+      if (!allowed.includes(entry)) {
+        await putDocMetaJson(env, slug, JSON.stringify({
+          ...rec, access: { ...access, allowed_users: [...allowed, entry] },
+          ...(at ? { invited_at: { ...(rec.invited_at || {}), [entry]: at } } : {}),
+        }));
+      }
     }
-    for (const k of record.actor_keys || []) await env.META.delete(await accountDeletedIdentityKey(normalizeActorKey(k)));
+    for (const h of [...new Set([...(record.actor_hashes || []), ...(record.invitee_hashes || [])])]) {
+      await env.META.delete(identityTombKey(h));
+      IDENTITY_TOMB_CACHE.delete(h);
+    }
     await env.META.delete(accountCommentsKey(accountId));
     await env.META.delete(accountDeletedKey(accountId));
     return { status: 200, body: { ok: true, account_id: accountId, docs, teams_restored: record.teams_deleted || [], teams_left: record.teams_left || [], conflicts } };
-  } finally {
-    await releaseDeletionLock(env, accountId);
-  }
+  });
+  if (out.busy) return { status: 409, body: { error: 'deletion_in_progress' } };
+  if (out.gone) return { status: 404, body: { error: 'not_deleted' } };
+  return out.result;
 }
 
-// Is there anything of these actors to anonymize in this list (written
-// before `before`)? Read-only twin of the anonymize_author op, so a doc with
-// nothing to change costs no write.
-function commentsNeedAnonymizing(list, keys, before) {
-  const set = new Set(keys.map((k) => String(k).toLowerCase()));
+// The comment authors (and event actors) in a doc's list written before
+// `before` whose hashed key is one of `hashes`: the plaintext keys to hand
+// the anonymize op, read from the doc itself.
+async function deletedAuthorsIn(env, list, hashes, before, cache) {
+  const set = new Set(hashes);
   const cut = Date.parse(before || '') || Infinity;
-  const hit = (who, at) => typeof who === 'string' && who && set.has(who.toLowerCase()) && !((Date.parse(at || '') || 0) > cut);
+  const seen = new Set();
+  const add = (who, at) => {
+    if (typeof who === 'string' && who && !((Date.parse(at || '') || 0) > cut)) seen.add(who.toLowerCase());
+  };
   for (const c of Array.isArray(list) ? list : []) {
     if (!c) continue;
-    if (c.author && hit(c.author.login, c.created)) return true;
+    if (c.author) add(c.author.login, c.created);
     for (const e of Array.isArray(c.events) ? c.events : []) {
       if (!e) continue;
-      if (e.reply && e.reply.author && hit(e.reply.author.login, e.at)) return true;
-      if (hit(e.by, e.at)) return true;
+      if (e.reply && e.reply.author) add(e.reply.author.login, e.at);
+      add(e.by, e.at);
     }
   }
-  return false;
+  const out = [];
+  for (const who of seen) {
+    if (!cache.has(who)) cache.set(who, await identityHash(env, who));
+    if (set.has(cache.get(who))) out.push(who);
+  }
+  return out;
 }
 
 async function loadAccountSweep(env) {
   try {
     const s = JSON.parse(await env.META.get(ACCOUNT_SWEEP_STATE));
-    if (s && typeof s === 'object') return { cursor: null, offset: 0, scanned: 0, lap_start: 0, lap_size: null, ...s };
+    if (s && typeof s === 'object') return { cursor: null, offset: 0, scanned: 0, lap_start: 0, ...s };
   } catch {}
-  return { cursor: null, offset: 0, scanned: 0, lap_start: 0, lap_size: null };
+  return { cursor: null, offset: 0, scanned: 0, lap_start: 0 };
 }
 
 async function loadFound(env, accountId) {
@@ -9690,31 +9829,36 @@ async function loadFound(env, accountId) {
   return { found: [], pending: [], stripped: [] };
 }
 
-async function anonymizeDoc(env, slug, record) {
+async function anonymizeDoc(env, slug, record, cache) {
   try {
-    const res = await mutateComments(env, slug, { kind: 'anonymize_author', keys: record.actor_keys, before: record.deleted_at, author: DELETED_USER_AUTHOR });
+    const list = await readComments(env, slug);
+    const keys = await deletedAuthorsIn(env, list, record.actor_hashes || [], record.deleted_at, cache);
+    if (!keys.length) return true;
+    const res = await mutateComments(env, slug, { kind: 'anonymize_author', keys, before: record.deleted_at, author: DELETED_USER_AUTHOR });
     return !!(res && res.status === 200);
   } catch { return false; }
 }
 
 // One batch of the shared sweep: each doc is read once for every account it
-// is looking for. Returns the accounts whose lap finished.
-async function accountSweepBatch(env, accounts, now) {
+// is looking for. An account is done after one full lap that started after
+// it joined (it joined at or before that lap's start), however the catalog
+// grew meanwhile. Returns the units spent.
+async function accountSweepBatch(env, accounts, now, budget) {
   const state = await loadAccountSweep(env);
-  const budget = accountSweepBudget(env);
   const founds = new Map();
   for (const a of accounts) founds.set(a.account_id, await loadFound(env, a.account_id));
-  const invitees = accounts.map((a) => ({ a, who: new Set([a.login, ...a.emails].filter(Boolean)) }));
+  const cache = new Map();
   let scanned = 0;
-  let wrapped = false;
-  while (scanned < budget) {
+  let spent = 0;
+  while (scanned < Math.min(accountSweepBudget(env), Math.floor(budget / 2))) {
     const page = await env.META.list({ prefix: 'meta:', ...(state.cursor ? { cursor: state.cursor } : {}) });
     const names = page.keys.slice(state.offset || 0);
     let used = 0;
     for (const k of names) {
-      if (scanned >= budget) break;
+      if (scanned >= Math.min(accountSweepBudget(env), Math.floor(budget / 2))) break;
       used += 1;
       scanned += 1;
+      spent += 2;
       const slug = k.name.slice('meta:'.length);
       if (!isValidSlug(slug)) continue;
       let list = null;
@@ -9722,30 +9866,38 @@ async function accountSweepBatch(env, accounts, now) {
       for (const a of accounts) {
         const f = founds.get(a.account_id);
         // Unreadable now: noted, so the anonymize pass tries it again.
-        if (list == null || commentsNeedAnonymizing(list, a.actor_keys, a.deleted_at)) {
-          if (list == null) { if (!f.found.includes(slug)) f.found.push(slug); continue; }
-          if (a.state === 'purging') {
-            if (!(await anonymizeDoc(env, slug, a)) && !f.pending.includes(slug)) f.pending.push(slug);
-          } else if (!f.found.includes(slug)) f.found.push(slug);
-        }
+        if (list == null) { if (!f.found.includes(slug)) f.found.push(slug); continue; }
+        if (!(await deletedAuthorsIn(env, list, a.actor_hashes || [], a.deleted_at, cache)).length) continue;
+        if (a.state === 'purging') {
+          spent += ACCOUNT_ANONYMIZE_COST;
+          if (!(await anonymizeDoc(env, slug, a, cache)) && !f.pending.includes(slug)) f.pending.push(slug);
+        } else if (!f.found.includes(slug)) f.found.push(slug);
       }
-      // The identity leaves the doc's invite list: a later account with the
-      // same login or address does not inherit the old one's access.
+      // The identity leaves the invite lists it was on when its account was
+      // deleted. An invite made after (to the new holder) stays.
       const rec = await loadDocRecord(env, slug);
       const access = rec && rec.access && typeof rec.access === 'object' ? rec.access : null;
       const allowed = access && Array.isArray(access.allowed_users) ? access.allowed_users : [];
       if (allowed.length) {
+        const invitedAt = rec.invited_at || {};
         const drop = [];
-        for (const { a, who } of invitees) for (const x of allowed) if (who.has(String(x).toLowerCase())) drop.push({ a, x });
+        for (const x of allowed) {
+          const h = await identityHash(env, String(x).toLowerCase());
+          for (const a of accounts) {
+            if ((a.invitee_hashes || []).includes(h) && !(Date.parse(invitedAt[x] || '') > Date.parse(a.deleted_at))) drop.push({ a, x });
+          }
+        }
         if (drop.length) {
           const gone = new Set(drop.map((d) => d.x));
           try {
             await putDocMetaJson(env, slug, JSON.stringify({ ...rec, access: { ...access, allowed_users: allowed.filter((x) => !gone.has(x)) } }));
-            for (const { a, x } of drop) founds.get(a.account_id).stripped.push({ slug, entry: x });
+            spent += 2;
+            for (const { a, x } of drop) founds.get(a.account_id).stripped.push({ slug, entry: x, ...(invitedAt[x] ? { at: invitedAt[x] } : {}) });
           } catch {}
         }
       }
     }
+    let wrapped = false;
     if ((state.offset || 0) + used < page.keys.length) {
       state.offset = (state.offset || 0) + used;
     } else if (page.list_complete || !page.cursor) {
@@ -9758,98 +9910,111 @@ async function accountSweepBatch(env, accounts, now) {
     }
     state.scanned += used;
     if (wrapped) {
-      // A full lap ended: every account that joined at or before its start
-      // has now had every doc read.
-      state.lap_size = state.scanned - state.lap_start;
       const lapStart = state.lap_start;
       state.lap_start = state.scanned;
       for (const a of accounts) if (!a.sweep_done_at && (a.sweep_join || 0) <= lapStart) a.sweep_done_at = new Date(now).toISOString();
       // At most one lap end per run: a small catalog is not read twice.
       break;
     }
-  }
-  for (const a of accounts) {
-    if (!a.sweep_done_at && state.lap_size != null && state.scanned - (a.sweep_join || 0) >= state.lap_size) a.sweep_done_at = new Date(now).toISOString();
+    if (!used) break;
   }
   await env.META.put(ACCOUNT_SWEEP_STATE, JSON.stringify(state));
   for (const a of accounts) await env.META.put(accountCommentsKey(a.account_id), JSON.stringify(founds.get(a.account_id)));
-  return state;
+  return spent;
 }
 
-// The scheduled half, every run: resume deletions that did not finish,
-// sweep for every account in its window at once, and purge the ones whose
-// window is over.
+// The scheduled half, every run, within ACCOUNT_CRON_BUDGET: resume
+// deletions that did not finish, purge the ones whose window is over, sweep
+// for every account still looking at once, and anonymize. Each account's
+// work happens under its lock, on its record as re-read under the lock: an
+// account restored meanwhile is left alone.
 async function purgeDeletedAccounts(env, now = Date.now()) {
   const out = { resumed: [], purged: [], anonymized: [], finished: [] };
   if (!env || !env.META) return out;
-  const records = [];
-  for (const name of await listKeyNames(env, 'account-deleted:')) {
-    const rec = await loadDeletedAccount(env, name.slice('account-deleted:'.length));
-    if (rec) records.push(rec);
+  const ids = (await listKeyNames(env, 'account-deleted:')).map((name) => name.slice('account-deleted:'.length));
+  let budget = Number(env.TDOC_ACCOUNT_CRON_BUDGET) > 0 ? Number(env.TDOC_ACCOUNT_CRON_BUDGET) : ACCOUNT_CRON_BUDGET;
+
+  for (const id of ids) {
+    await withDeletionLock(env, id, async (rec) => {
+      if (rec.state === 'deleting') {
+        await runAccountDeletion(env, rec);
+        if (rec.state === 'deleted') out.resumed.push(id);
+      }
+      // The window is over: the stash goes now, whatever the sweep. The
+      // personal docs go with Trash, on the same clock.
+      if (rec.state === 'deleted' && Date.parse(rec.purge_at || '') <= now) {
+        for (const name of await listKeyNames(env, accountStashPrefix(id))) await env.META.delete(name);
+        for (const team of rec.teams_deleted || []) {
+          for (const key of [teamFoldersKey(team.id), teamCheckoutKey(team.id)]) await env.META.delete(key).catch(() => {});
+          // Billing records stay for invoices and support, detached from
+          // the team that no longer exists.
+          for (const key of [teamBillingKey(team.id), teamLifetimeKey(team.id)]) {
+            try {
+              const b = JSON.parse(await env.META.get(key));
+              if (b && typeof b === 'object' && !b.team_deleted_at) await env.META.put(key, JSON.stringify({ ...b, team_deleted_at: rec.deleted_at }));
+            } catch {}
+          }
+        }
+        const f = await loadFound(env, id);
+        f.pending = [...new Set([...f.pending, ...f.found])];
+        f.found = [];
+        f.stripped = [];
+        await env.META.put(accountCommentsKey(id), JSON.stringify(f));
+        rec.state = 'purging';
+        rec.purged_at = new Date(now).toISOString();
+        await saveDeletedAccount(env, rec);
+        out.purged.push(id);
+      }
+    });
   }
-  for (const rec of records.filter((r) => r.state === 'deleting')) {
-    const res = await runAccountDeletion(env, rec);
-    if (res.record.state === 'deleted') out.resumed.push(rec.account_id);
+
+  // The shared sweep, for every account still looking, all locked for it.
+  const held = [];
+  try {
+    for (const id of ids) {
+      const owner = await takeDeletionLock(env, id, await loadDeletedAccount(env, id));
+      if (!owner) continue;
+      const rec = await loadDeletedAccount(env, id);
+      if (rec && (rec.state === 'deleted' || rec.state === 'purging') && !rec.sweep_done_at) held.push({ id, owner, rec });
+      else await releaseDeletionLock(env, id, owner);
+    }
+    if (held.length && budget > 0) {
+      budget -= await accountSweepBatch(env, held.map((h) => h.rec), now, budget);
+      for (const h of held) await saveDeletedAccount(env, h.rec);
+    }
+  } finally {
+    for (const h of held) await releaseDeletionLock(env, h.id, h.owner);
   }
-  const live = records.filter((r) => r.state === 'deleted' || r.state === 'purging');
-  // The window is over: the stash and the docs go now, whatever the sweep.
-  for (const rec of live) {
-    if (rec.state !== 'deleted' || Date.parse(rec.purge_at || '') > now) continue;
-    for (const name of await listKeyNames(env, accountStashPrefix(rec.account_id))) await env.META.delete(name);
-    for (const slug of rec.docs || []) {
-      const doc = await loadDocRecord(env, slug);
-      if (isTrashedMeta(doc) && doc.account_deleted_at === rec.deleted_at) await purgeTrashedDoc(env, slug);
-    }
-    for (const team of rec.teams_deleted || []) {
-      for (const key of [teamFoldersKey(team.id), teamBillingKey(team.id), teamLifetimeKey(team.id), teamCheckoutKey(team.id)]) await env.META.delete(key).catch(() => {});
-    }
-    const f = await loadFound(env, rec.account_id);
-    f.pending = [...new Set([...f.pending, ...f.found])];
-    f.found = [];
-    f.stripped = [];
-    await env.META.put(accountCommentsKey(rec.account_id), JSON.stringify(f));
-    rec.state = 'purging';
-    rec.purged_at = new Date(now).toISOString();
-    // Nothing personal stays on the record past this point.
-    rec.emails = [];
-    rec.idps = [];
-    rec.handles = [];
-    rec.login = '';
-    await saveDeletedAccount(env, rec);
-    out.purged.push(rec.account_id);
-  }
-  const collecting = live.filter((r) => !r.sweep_done_at);
-  if (collecting.length) {
-    await accountSweepBatch(env, collecting, now);
-    for (const rec of collecting) {
-      if (rec.sweep_done_at) for (const k of rec.actor_keys || []) await setDeletedIdentity(env, k, { swept_at: rec.sweep_done_at });
-      await saveDeletedAccount(env, rec);
-    }
-  }
-  let budget = ACCOUNT_ANONYMIZE_BATCH;
-  for (const rec of live.filter((r) => r.state === 'purging')) {
-    const f = await loadFound(env, rec.account_id);
-    const left = [];
-    for (const slug of f.pending) {
-      if (budget <= 0) { left.push(slug); continue; }
-      budget -= 1;
-      // A doc erased since has nothing left to anonymize.
-      if (!(await loadDocRecord(env, slug))) continue;
-      if (await anonymizeDoc(env, slug, rec)) out.anonymized.push(slug);
-      else left.push(slug);
-    }
-    f.pending = left;
-    await env.META.put(accountCommentsKey(rec.account_id), JSON.stringify(f));
-    if (!left.length && rec.sweep_done_at) {
-      // Done. The id stays marked so no forgotten credential can open it;
-      // the hashed identity tombstones stay to keep addresses hidden.
-      const marker = JSON.stringify({ canonical: rec.account_id, ids: rec.ids, actor_keys: [], deleted_at: rec.deleted_at, purged_at: rec.purged_at });
-      for (const id of rec.ids || []) await env.META.put(`account-group:${id}`, marker);
-      for (const k of rec.actor_keys || []) await setDeletedIdentity(env, k, { account_id: null, purged_at: rec.purged_at });
-      await env.META.delete(accountCommentsKey(rec.account_id));
-      await env.META.delete(accountDeletedKey(rec.account_id));
-      out.finished.push(rec.account_id);
-    }
+
+  for (const id of ids) {
+    if (budget <= 0) break;
+    await withDeletionLock(env, id, async (rec) => {
+      if (rec.state !== 'purging') return;
+      const f = await loadFound(env, id);
+      const left = [];
+      const cache = new Map();
+      for (const slug of f.pending) {
+        if (budget <= 0) { left.push(slug); continue; }
+        budget -= ACCOUNT_ANONYMIZE_COST;
+        // A doc erased since has nothing left to anonymize.
+        if (!(await loadDocRecord(env, slug))) continue;
+        if (await anonymizeDoc(env, slug, rec, cache)) out.anonymized.push(slug);
+        else left.push(slug);
+      }
+      f.pending = left;
+      await env.META.put(accountCommentsKey(id), JSON.stringify(f));
+      if (!left.length && rec.sweep_done_at) {
+        // Done. The id stays marked so no forgotten credential can open it;
+        // the (hashed) identity tombstones stay to keep addresses hidden and
+        // the old comments the old account's.
+        const marker = JSON.stringify({ canonical: id, ids: rec.ids, actor_keys: [], deleted_at: rec.deleted_at, purged_at: rec.purged_at });
+        for (const x of rec.ids || []) await env.META.put(`account-group:${x}`, marker);
+        for (const h of [...new Set([...(rec.actor_hashes || []), ...(rec.invitee_hashes || [])])]) await setDeletedIdentityByHash(env, h, { account_id: null, purged_at: rec.purged_at });
+        await env.META.delete(accountCommentsKey(id));
+        await env.META.delete(accountDeletedKey(id));
+        out.finished.push(id);
+      }
+    });
   }
   return out;
 }
@@ -10876,12 +11041,15 @@ async function searchStoreHandle(store, name, op) {
     const keep = Math.max(60000, Number(op.keep_ms) || 24 * 60 * 60 * 1000);
     sql.exec("DELETE FROM search_store WHERE k LIKE 'claim:%' AND CAST(v AS INTEGER) < ?", Date.now() - keep);
     if (searchRows(sql, 'SELECT k FROM search_store WHERE k = ?', key).length) return { ok: true, claimed: false };
-    sql.exec('INSERT INTO search_store (k, v) VALUES (?, ?)', key, String(Date.now()));
+    // `<ms>:<owner>`: the leading number is what the expiry above reads.
+    sql.exec('INSERT INTO search_store (k, v) VALUES (?, ?)', key, `${Date.now()}${op.owner ? `:${String(op.owner).slice(0, 40)}` : ''}`);
     return { ok: true, claimed: true };
   }
+  // Only the holder releases a claim (its owner token must match).
   if (kind === 'release') {
     const key = `claim:${String(op.key || '').slice(0, 200)}`;
-    if (key !== 'claim:') sql.exec('DELETE FROM search_store WHERE k = ?', key);
+    const owner = String(op.owner || '').slice(0, 40);
+    if (key !== 'claim:' && owner) sql.exec('DELETE FROM search_store WHERE k = ? AND v LIKE ?', key, `%:${owner}`);
     return { ok: true };
   }
   if (kind === 'rate') {
@@ -11318,8 +11486,14 @@ async function redactCommentEmails(value, privacy) {
   // gone with the account, so `mine` never names it).
   const gone = new Set();
   if (privacy.env && privacy.env.META) {
-    const revealed = present.filter((e) => !privacy.mine.has(`email:${e}`)).slice(0, 50);
-    await Promise.all(revealed.map(async (e) => { if (await deletedIdentity(privacy.env, `email:${e}`)) gone.add(e); }));
+    // Tombstone reads are cached per isolate (deletedIdentity), and per
+    // response here; a payload naming many addresses checks the first 20.
+    privacy.goneCache = privacy.goneCache || new Map();
+    const revealed = present.filter((e) => !privacy.mine.has(`email:${e}`)).slice(0, 20);
+    await Promise.all(revealed.map(async (e) => {
+      if (!privacy.goneCache.has(e)) privacy.goneCache.set(e, !!(await deletedIdentity(privacy.env, `email:${e}`)));
+      if (privacy.goneCache.get(e)) gone.add(e);
+    }));
   }
   const hidden = present.filter((e) => !privacy.reveal.has(e) || gone.has(e));
   if (!hidden.length) return value;
@@ -11906,7 +12080,7 @@ async function hostedTokenActor(env, token) {
   const group = await accountGroup(env, record.account_id);
   // A deleted account's tokens were revoked when it was deleted; one the
   // sweep could not see (an AI app's token minted mid-deletion) is nothing.
-  if (group.deleted_at) return null;
+  if (group.deleted_at || group.unavailable) return null;
   return {
     kind: 'hosted',
     account_id: group.canonical,
@@ -20376,25 +20550,28 @@ const tdocHandlers = {
       const canonical = (await accountGroup(env, s.account_id)).canonical;
       const busy = () => json({ error: 'deletion_in_progress', message: 'This account is already being deleted.' }, { status: 409 });
       if (await loadDeletedAccount(env, canonical)) return busy();
-      if (!(await takeDeletionLock(env, canonical, null))) return busy();
-      let out;
+      const owner = await takeDeletionLock(env, canonical, null);
+      if (!owner) return busy();
+      let record;
       try {
-        const record = await markAccountDeleted(env, s, plan);
-        out = await runAccountDeletion(env, record, { locked: true });
+        // Re-checked under the lock: another tab may have started meanwhile.
+        if (await loadDeletedAccount(env, canonical)) return busy();
+        record = await markAccountDeleted(env, s, plan);
+        await runAccountDeletion(env, record);
         await env.META.delete(`session:${s.id}`).catch(() => {});
       } finally {
-        await releaseDeletionLock(env, canonical);
+        await releaseDeletionLock(env, canonical, owner);
       }
       const r = json({
         ok: true,
-        deleted_at: out.record.deleted_at,
-        purge_at: out.record.purge_at,
-        docs: out.record.docs.length,
-        teams_deleted: out.record.teams_deleted,
-        teams_left: out.record.teams_left,
+        deleted_at: record.deleted_at,
+        purge_at: record.purge_at,
+        docs: record.docs.length,
+        teams_deleted: record.teams_deleted,
+        teams_left: record.teams_left,
         // Signed out and revoked already; anything left (a failed step) the
         // scheduled run finishes.
-        ...(out.record.state !== 'deleted' ? { finishing: true } : {}),
+        ...(record.state !== 'deleted' ? { finishing: true } : {}),
       });
       r.headers.append('Set-Cookie', 'tdoc_sid=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
       return r;
