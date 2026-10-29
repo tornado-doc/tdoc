@@ -1485,12 +1485,13 @@ a.ui-menu-item:visited {
 
 /* The same app connections as /start, with one compact choice at a time. */
 .tdoc-connect-app-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-.tdoc-connect-app-buttons .ui-btn[aria-pressed="true"] { background: var(--td-surface); border-color: var(--td-line); color: var(--td-ink); }
+.tdoc-connect-app-buttons .ui-btn[aria-pressed="true"] { background: var(--td-accent-tint); border-color: var(--td-accent); color: var(--td-accent); }
 .tdoc-connect-app-panel { display: grid; gap: 16px; margin-top: 24px; padding: 24px; border: 1px solid var(--td-line); border-radius: 12px; background: var(--td-bg); }
 .tdoc-connect-app-panel > p { margin: 0; font-size: 16px; line-height: 1.6; color: var(--td-ink); }
 .tdoc-connect-app-panel > .ui-btn { justify-self: start; }
 .ui-setup-entry .ui-setup-computer-fallback { display: flex; margin: 20px auto 0; color: var(--td-muted); }
 .ui-setup-entry-mcp .actions { justify-content: space-between; }
 @media (max-width: 600px) {
+  .tdoc-connect-app-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .tdoc-connect-app-panel { padding: 20px; }
 }

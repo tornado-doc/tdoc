@@ -11234,7 +11234,6 @@ async function previewOwnerOp(env, slug, op) {
 async function hostedOwnerOp(env, slug, op) {
   if (!env.COMMENTS && env.TDOC_PREVIEW === '1' && env.META) return previewOwnerOp(env, slug, op);
   if (!env.COMMENTS) {
-    if (env.TDOC_PREVIEW === '1' && env.META) return previewOwnerOp(env, slug, op);
     return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
   }
   try {

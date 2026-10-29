@@ -72,7 +72,7 @@ export function ConnectAiApps({ showCli = true, compact = false, onAppChange }) 
     return <div className="tdoc-connect-apps tdoc-connect-apps-compact" data-testid="connect-ai-apps">
       <div className="tdoc-connect-app-buttons" role="group" aria-label="Choose your AI app">
         {CONNECT_AI_APPS.map(a => <AppButton key={a.id} aria-pressed={selected === a.id}
-          variant={selected === a.id ? 'secondary' : 'quiet'}
+          variant="secondary"
           onClick={() => { setSelected(a.id); onAppChange?.(a); }}>{a.label}</AppButton>)}
       </div>
       <section className="tdoc-connect-app-panel" aria-label={`Connect ${app.label}`}>
