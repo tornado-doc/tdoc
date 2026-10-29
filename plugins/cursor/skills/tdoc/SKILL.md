@@ -30,8 +30,11 @@ Short answers and edits to files in a repository do not need tdoc.
 
 ## Tools
 
+- `get_writing_guide`: how a tdoc reads and looks (voice, visuals,
+  components, the house style CSS); optional `style`, `kind: "slides"`.
 - `create_doc`: new private doc from `title` plus `html` or `markdown`;
-  optional `team`. tdoc picks the address.
+  optional `team` and `style`. A fragment is wrapped in the house style.
+  tdoc picks the address.
 - `update_doc`: publish a new version of an existing doc.
 - `get_doc`: latest HTML or text, with title, version and link.
 - `list_docs`: My docs and team docs.
@@ -48,9 +51,9 @@ Resources `tdoc://authoring/<path>.md` hold the authoring guides: `essentials.md
 
 ## New document
 
-1. Read `tdoc://authoring/essentials.md` (then `voice.md` and `visuals.md`), or use
-   the `write_doc` prompt, before writing. For slides or editable diagrams,
-   also read `tdoc://authoring/structure/components.md`.
+1. Call `get_writing_guide` before writing (`kind: "slides"` for a deck,
+   `style` if the user named one). For editable diagrams, also read
+   `tdoc://authoring/structure/components.md`.
 2. Write one self-contained HTML body. Draw charts and diagrams as inline
    SVG. No `<script>`, no external scripts or stylesheets.
 3. Call `create_doc`. Use `team` only when the user asked for a team doc.
@@ -71,7 +74,7 @@ is this flow. The slug is the part after `/d/`, also when the URL ends in
    - `question`: you need the person's input. Your reply ends in a question.
    - `answered`: the comment was a question; you answered it without
      changing the doc.
-4. Re-read the authoring guides (or use the `revise_from_comments` prompt),
+4. Call `get_writing_guide` again (or use the `revise_from_comments` prompt),
    write the full new HTML, and call `update_doc` once.
 5. `reply_to_comment` on EVERY open comment. Use `applied` only when the new
    version changed the doc, and pass `applied_in` = the new version number.

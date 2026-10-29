@@ -359,7 +359,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const up = await call('/api/upload', { method: 'POST', token: julieConn.access_token, body: { slug: 'direct', version: 1, html: '<p>x</p>' } });
     assert(up.status === 403, `upload ${up.status}`);
     const ok = await mcp(julieConn.access_token, 'tools/list');
-    assert(ok.status === 200 && ok.body.result.tools.length === 9, ok.text.slice(0, 200));
+    assert(ok.status === 200 && ok.body.result.tools.length === 10, ok.text.slice(0, 200));
   });
 
   await t('expired or wrong-audience OAuth tokens get 401', async () => {
@@ -524,10 +524,14 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
   await t('tools/list carries annotations and the authoring contract; resources and prompts serve the guides', async () => {
     const tools = (await mcp(julieConn.access_token, 'tools/list')).body.result.tools;
     const names = tools.map((x) => x.name).sort().join(',');
-    assert(names === 'answer_question,create_doc,get_comments,get_doc,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', names);
+    assert(names === 'answer_question,create_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', names);
     const create = tools.find((x) => x.name === 'create_doc');
     // The contract lives in one resource; the write tools point at it.
-    for (const name of ['create_doc', 'update_doc']) assert(tools.find((x) => x.name === name).description.includes('tdoc://authoring/essentials.md'), `${name} points at essentials`);
+    for (const name of ['create_doc', 'update_doc']) assert(tools.find((x) => x.name === name).description.includes('Call get_writing_guide first, then write.'), `${name} points at get_writing_guide`);
+    const guideTool = tools.find((x) => x.name === 'get_writing_guide');
+    assert(JSON.stringify(guideTool.annotations) === JSON.stringify({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }), JSON.stringify(guideTool.annotations));
+    assert(tools.find((x) => x.name === 'update_doc').annotations.openWorldHint === false, 'update_doc writes only this doc');
+    assert(JSON.stringify(create.inputSchema.properties.style.enum) === '["default","technical","paper","editorial"]', 'create_doc takes a style');
     // Every client pays for tools/list on each connection: keep it small.
     const listed = await mcp(julieConn.access_token, 'tools/list', {}, { legacy: true });
     const bytes = Buffer.byteLength(listed.text);
@@ -574,6 +578,87 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(/<main class="wrap">/.test(html.structuredContent.html), 'exact html');
     const again = await tool(julieConn.access_token, 'create_doc', { title: 'Onboarding plan', html: '<p>second</p>' });
     assert(!again.isError && again.structuredContent.slug !== julieSlug && again.structuredContent.slug.startsWith('onboarding-plan-'), 'every create gets its own address');
+  });
+
+  await t('get_writing_guide: voice, visuals, components and the chosen style CSS, under 8 KB', async () => {
+    const fs = require('fs');
+    const path = require('path');
+    for (const style of ['default', 'technical', 'paper', 'editorial']) {
+      const md = fs.readFileSync(path.join(__dirname, '..', 'authoring', 'style', `${style}.md`), 'utf8');
+      const css = [...md.matchAll(/```css\n([\s\S]*?)```/g)].map((m) => m[1]).find((c) => /Reading column/.test(c)).trim();
+      for (const kind of ['doc', 'slides']) {
+        const g = await tool(julieConn.access_token, 'get_writing_guide', { style, kind });
+        const text = g.content[0].text;
+        const bytes = Buffer.byteLength(text);
+        assert(!g.isError && g.structuredContent.style === style, JSON.stringify(g.structuredContent));
+        assert(bytes <= 8192, `${style}/${kind} guide is ${bytes} bytes; the cap is 8 KB`);
+        assert(text.includes(css), `${style}: carries the style's CSS block verbatim`);
+        assert(/## Voice/.test(text) && /## Visuals/.test(text) && /diagram-box/.test(text), `${style}/${kind}: voice, visuals, components`);
+        assert(/data-tdoc-slide/.test(text) === (kind === 'slides') && /Design rules/.test(text) === (kind === 'slides'), `${style}/${kind}: slide rules only for slides`);
+      }
+    }
+    const fallback = await tool(julieConn.access_token, 'get_writing_guide', {});
+    assert(fallback.structuredContent.style === 'default' && fallback.structuredContent.kind === 'doc', 'defaults');
+  });
+
+  await t('create_doc wraps a bare fragment in the house style + reader column; style is honored and recorded', async () => {
+    const fragment = '<h1>Q3 churn</h1><p>Churn fell to <b>2.1%</b> after the onboarding change.</p>';
+    const r = await tool(julieConn.access_token, 'create_doc', { title: 'Q3 churn', html: fragment });
+    const slug = r.structuredContent.slug;
+    const stored = env.DOCS.map.get(`docs/${slug}/v1/index.html`);
+    assert(/<html[^>]*data-tdoc-design="tdoc"[^>]*data-tdoc-style="default"/.test(stored), 'root marked as the tdoc design');
+    assert(/<style id="tdoc-style" data-tdoc-style="default">/.test(stored) && /family=Inter/.test(stored), 'default house style + its fonts');
+    assert(/<style[^>]*id="tdoc-reader"/.test(stored), 'reader column baked');
+    assert(/<main class="wrap">\s*<h1>Q3 churn<\/h1>/.test(stored), 'content in the styled root');
+    const meta = JSON.parse(env.META.map.get(`meta:${slug}`));
+    assert(meta.style === 'default' && meta.versions[0].style === 'default', `style recorded: ${meta.style}`);
+    require('fs').mkdirSync('/tmp/mcp-guide', { recursive: true });
+    require('fs').writeFileSync('/tmp/mcp-guide/fragment-in.html', fragment);
+    require('fs').writeFileSync('/tmp/mcp-guide/fragment-out-default.html', stored);
+
+    const paper = await tool(julieConn.access_token, 'create_doc', { title: 'Q3 churn paper', html: fragment, style: 'paper' });
+    const pStored = env.DOCS.map.get(`docs/${paper.structuredContent.slug}/v1/index.html`);
+    assert(/data-tdoc-style="paper"/.test(pStored) && !/data-tdoc-style="default"/.test(pStored), 'style param honored');
+    assert(JSON.parse(env.META.map.get(`meta:${paper.structuredContent.slug}`)).style === 'paper', 'paper recorded');
+    require('fs').writeFileSync('/tmp/mcp-guide/fragment-out-paper.html', pStored);
+
+    const md = await tool(julieConn.access_token, 'create_doc', { title: 'MD', markdown: '# Hi\n\nA *line*.', style: 'technical' });
+    const mStored = env.DOCS.map.get(`docs/${md.structuredContent.slug}/v1/index.html`);
+    assert(/data-tdoc-style="technical"/.test(mStored) && /<h1>Hi<\/h1>/.test(mStored), 'markdown rendered, then wrapped');
+
+    // A plain page with only widget CSS gets the style; its own CSS stays and follows it.
+    const plain = '<!doctype html><html><head><title>t</title><style>.chart rect{fill:#ccc}</style></head><body><h1>Plain</h1></body></html>';
+    const pl = await tool(julieConn.access_token, 'create_doc', { title: 'Plain page', html: plain });
+    const plStored = env.DOCS.map.get(`docs/${pl.structuredContent.slug}/v1/index.html`);
+    assert(/data-tdoc-design="tdoc"/.test(plStored) && plStored.indexOf('id="tdoc-style"') < plStored.indexOf('.chart rect') && /<main class="wrap">\s*<h1>Plain/.test(plStored), 'plain page styled');
+
+    // update_doc keeps the doc's style when none is named, and re-dresses on request.
+    const up = await tool(julieConn.access_token, 'update_doc', { slug: paper.structuredContent.slug, html: '<p>v2 body</p>' });
+    assert(!up.isError, JSON.stringify(up));
+    const v2 = env.DOCS.map.get(`docs/${paper.structuredContent.slug}/v2/index.html`);
+    assert(/data-tdoc-style="paper"/.test(v2), 'update keeps the doc style');
+    const got = await tool(julieConn.access_token, 'get_doc', { slug: paper.structuredContent.slug, format: 'html' });
+    await tool(julieConn.access_token, 'update_doc', { slug: paper.structuredContent.slug, html: got.structuredContent.html, style: 'editorial' });
+    const v3 = env.DOCS.map.get(`docs/${paper.structuredContent.slug}/v3/index.html`);
+    assert(/<style id="tdoc-style" data-tdoc-style="editorial">/.test(v3) && (v3.match(/id="tdoc-style"/g) || []).length === 1 && !/family=Fraunces/.test(v3), 'our block swapped, not stacked');
+    const m3 = JSON.parse(env.META.map.get(`meta:${paper.structuredContent.slug}`));
+    assert(m3.style === 'editorial' && m3.versions.find((v) => v.n === 2).style === 'paper', 'per-version style');
+  });
+
+  await t('create_doc leaves a page with its own full-page CSS alone', async () => {
+    const custom = '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><title>Mine</title><style>body{background:#111;color:#eee;font-family:Georgia}h1{font-size:64px}</style></head><body><h1>My design</h1></body></html>\n';
+    const r = await tool(julieConn.access_token, 'create_doc', { title: 'Mine', html: custom, style: 'paper' });
+    const stored = env.DOCS.map.get(`docs/${r.structuredContent.slug}/v1/index.html`);
+    const unbaked = stored.replace(/<style id="tdoc-reader"[^>]*>[\s\S]*?<\/style>\n?/, '');
+    assert(unbaked === custom, 'bytes kept (only the reader block, which every upload gets)');
+    assert(!/tdoc-style|data-tdoc-design/.test(stored), 'no house style added');
+    assert(JSON.parse(env.META.map.get(`meta:${r.structuredContent.slug}`)).style === 'custom', 'recorded as custom');
+    // A fragment that carries a pasted house style is kept and named.
+    const g = (await tool(julieConn.access_token, 'get_writing_guide', { style: 'technical' })).content[0].text;
+    const css = g.match(/```css\n([\s\S]*?)```/)[1];
+    const pasted = await tool(julieConn.access_token, 'create_doc', { title: 'Pasted', html: `<style>${css}</style><h1>T</h1>` });
+    const ps = env.DOCS.map.get(`docs/${pasted.structuredContent.slug}/v1/index.html`);
+    assert(!/id="tdoc-style"/.test(ps) && JSON.parse(env.META.map.get(`meta:${pasted.structuredContent.slug}`)).style === 'technical', 'pasted style recognized, not doubled');
   });
 
   await t('list_docs lists My docs and team docs', async () => {
