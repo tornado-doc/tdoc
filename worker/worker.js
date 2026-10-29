@@ -16080,11 +16080,12 @@ function onboardingMcpProduct(client) {
   return null;
 }
 
-async function onboardingMcpConnected(env, accountId, product, origin, record) {
-  const id = record?.mcp_connections?.[product];
+async function onboardingMcpConnected(env, accountId, product, origin, record, unknownAfter = null) {
+  const id = unknownAfter ? record?.mcp_unrecognized : record?.mcp_connections?.[product];
   if (!id || await oauthGrantRevoked(env, id)) return false;
   const grant = await loadOAuthGrant(env, id);
   if (!grant || grant.resource !== `${origin}/mcp` || await oauthRevokedForAccount(env, grant.account_id, grant.created)) return false;
+  if (unknownAfter && !(Date.parse(grant.created) > Date.parse(unknownAfter))) return false;
   const group = await accountGroup(env, accountId);
   if (![group.canonical, ...group.ids].includes(grant.account_id)) return false;
   let token;
@@ -16391,9 +16392,9 @@ async function handleOAuthToken(env, req, url) {
     try {
       const product = onboardingMcpProduct(client);
       const previous = await stampOnboardingFor(env, issued.record.account_id, 'agent_connected');
-      if (product) await saveOnboarding(env, issued.record.account_id, {
+      await saveOnboarding(env, issued.record.account_id, {
         ...previous,
-        mcp_connections: { ...previous.mcp_connections, [product]: grantId },
+        ...(product ? { mcp_connections: { ...previous.mcp_connections, [product]: grantId } } : { mcp_unrecognized: grantId }),
       });
     } catch {}
     productEvent(env, 'token_minted', { auth_path: 'oauth' });
@@ -21199,6 +21200,7 @@ const tdocHandlers = {
 
     // ---- onboarding ----
     if (p === '/api/onboarding' && method === 'GET') {
+      const observedAt = new Date().toISOString();
       const session = await getSession(env, req);
       const accountId = await sessionAccountId(env, session);
       if (!accountId) return json({ anonymous: true, record: null });
@@ -21207,8 +21209,11 @@ const tdocHandlers = {
       const paired = await accountPaired(env, accountId);
       const record = await loadOnboarding(env, accountId);
       if (url.searchParams.has('mcp')) {
-        const connected = await onboardingMcpConnected(env, accountId, url.searchParams.get('mcp'), url.origin, record);
-        return json({ paired, record, mcp_connected: connected }, { headers: { 'Cache-Control': 'no-store' } });
+        const observed_at = observedAt;
+        const after = url.searchParams.get('mcp_after');
+        const connected = await onboardingMcpConnected(env, accountId, url.searchParams.get('mcp'), url.origin, record)
+          || !!(after && await onboardingMcpConnected(env, accountId, null, url.origin, record, after));
+        return json({ paired, record, mcp_connected: connected, observed_at }, { headers: { 'Cache-Control': 'no-store' } });
       }
       let local_agents;
       let local_computers;

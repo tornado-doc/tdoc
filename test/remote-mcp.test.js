@@ -373,6 +373,24 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(record.agent_connected && record.mcp_connections.claude_web, 'successful exchange stamps onboarding');
   });
 
+  await t('unknown MCP registration names can complete only after this app selection began', async () => {
+    const before = (await call('/api/onboarding?mcp=gemini', { cookie: bob.cookie })).body;
+    const client = (await register({ client_name: 'Unusual desktop assistant' })).body;
+    const p = pkce();
+    const back = await consent(bob, client, p);
+    const tok = await exchange(client, back.searchParams.get('code'), p.verifier);
+    assert(tok.status === 200, tok.text);
+    const poll = (after) => call(`/api/onboarding?mcp=gemini${after ? `&mcp_after=${encodeURIComponent(after)}` : ''}`, { cookie: bob.cookie });
+    assert((await poll()).body.mcp_connected === false, 'an existing unknown app is not the selected app');
+    assert((await poll(before.observed_at)).body.mcp_connected === true, 'a new unknown app can complete the current selection');
+    const after = new Date(Date.now() + 1000).toISOString();
+    assert((await poll(after)).body.mcp_connected === false, 'reopening cannot reuse an older unknown grant');
+    const hash = crypto.createHash('sha256').update(tok.body.access_token).digest('hex');
+    const rec = JSON.parse(env.META.map.get(`hosted-token:${hash}`));
+    env.META.map.set(`oauth-grant-revoked:${rec.oauth.grant_id}`, '1');
+    assert((await poll(before.observed_at)).body.mcp_connected === false, 'unknown fallback still respects revocation');
+  });
+
   await t('the OAuth token works at /mcp only: the HTTP API refuses it directly', async () => {
     const who = await call('/api/me', { token: julieConn.access_token });
     assert(who.status === 403 && who.body.error === 'token_scope', `${who.status} ${who.text}`);

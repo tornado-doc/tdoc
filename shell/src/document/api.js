@@ -45,7 +45,7 @@ export function getOnboarding(options) {
   // `docs` asks the server to also name the newest doc this account owns. It
   // costs a catalog walk, so only the page that waits for a doc to appear
   // asks for it.
-  return request(options?.mcp ? `/api/onboarding?mcp=${encodeURIComponent(options.mcp)}` : options?.daemon ? '/api/onboarding?daemon=1' : options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
+  return request(options?.mcp ? `/api/onboarding?mcp=${encodeURIComponent(options.mcp)}${options.mcpAfter ? `&mcp_after=${encodeURIComponent(options.mcpAfter)}` : ''}` : options?.daemon ? '/api/onboarding?daemon=1' : options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
 }
 
 export function updateComputer(body) {

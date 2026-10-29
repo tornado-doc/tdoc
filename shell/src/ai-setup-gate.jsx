@@ -99,10 +99,12 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     if (!signedIn || preview || manual || done) return undefined;
     let cancelled = false;
     let timer;
+    let mcpObservedAfter = null;
     const tick = async () => {
       try {
-        const result = await getOnboarding(mcpIntro ? { mcp: mcpProduct } : stage === 'connect' ? { daemon: true } : undefined);
+        const result = await getOnboarding(mcpIntro ? { mcp: mcpProduct, mcpAfter: mcpObservedAfter } : stage === 'connect' ? { daemon: true } : undefined);
         if (cancelled) return;
+        if (mcpIntro && !mcpObservedAfter) mcpObservedAfter = result?.observed_at || null;
         if (mcpIntro && result?.mcp_connected) { setCompletedPath('mcp'); setStage('done'); }
         if (stage === 'connect') { setAgents(result?.local_agents || []); setComputers(result?.local_computers || []); }
         setPaired(Boolean(result?.paired)); setError(''); setLoaded(true); setElapsed(Date.now() - started.current);
@@ -230,7 +232,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const computerRoute = stage === 'connect';
   const head = !signedIn ? { eyebrow: 'Set up Tdoc', title: 'Sign in', description: 'Sign in to connect your AI.' }
     : intro ? { eyebrow: 'Set up Tdoc', title: 'Which AI do you use?', description: 'Tdoc sends your comments to this AI, and it edits your doc.' }
-      : done ? { eyebrow: 'Set up Tdoc', title: 'You’re connected', description: completedPath === 'mcp' ? `${mcpChoice.label} is connected to Tdoc.` : `${completedPath === 'connect' && chosen ? labelOf(chosen) : product.label} is ready for your comments.` }
+      : done ? { eyebrow: 'Set up Tdoc', title: 'You’re connected', description: completedPath === 'mcp' ? 'Your AI is connected to Tdoc.' : `${completedPath === 'connect' && chosen ? labelOf(chosen) : product.label} is ready for your comments.` }
         : computerRoute && pickRuntime ? { eyebrow: 'Set up Tdoc', title: 'Choose your AI', description: `The AI on ${computer?.device || 'this computer'} that edits your docs.` }
           : computerRoute ? { eyebrow: 'Set up Tdoc', title: 'Connect a computer', description: 'A computer is where your AI runs. Tdoc sends it your comments, even when the AI is closed.' }
             : { eyebrow: 'Set up Tdoc', title: `Connect ${product.label}`, description: platformRoute ? `Your ${product.label} agent connects Tdoc to your account and receives your comments.` : `${product.label} connects to your Tdoc account and edits your docs when you ask.` };
