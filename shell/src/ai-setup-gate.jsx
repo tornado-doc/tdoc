@@ -240,8 +240,8 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
 
   return (
     <AppDialog open={open} onOpenChange={next => { if (!next) close(); }}
-      eyebrow={head.eyebrow} title={head.title} description={head.description}
-      className="ui-setup-modal" focusTitle
+      eyebrow={intro ? undefined : head.eyebrow} title={head.title} description={intro ? 'Choose the app you work in.' : head.description}
+      className={`ui-setup-modal${intro ? ' ui-setup-entry' : ''}`} focusTitle
       actions={<>
         {back ? <button type="button" className="ui-setup-later ui-setup-link" disabled={busy} onClick={back.go}>{back.label}</button>
           : <button type="button" className="ui-setup-later ui-setup-link" disabled={busy} onClick={close}>Skip</button>}
