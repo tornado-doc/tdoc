@@ -55,9 +55,10 @@ function openOut(href) {
   else window.location.href = href;
 }
 
-export function ConnectAiApps({ showCli = true, compact = false, onAppChange }) {
+export function ConnectAiApps({ showCli = true, compact = false, selectedApp, onAppChange }) {
   const url = remoteMcpUrl();
-  const [selected, setSelected] = useState('claude');
+  const [localSelected, setSelected] = useState('claude');
+  const selected = CONNECT_AI_APPS.some(a => a.id === selectedApp) ? selectedApp : localSelected;
   const app = CONNECT_AI_APPS.find(a => a.id === selected);
   if (compact) {
     const href = selected === 'claude' ? claudeConnectorLink(url)

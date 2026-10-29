@@ -5,6 +5,9 @@ on:
     paths-ignore: ['server/runtime/**']
 permissions:
   contents: read
+concurrency:
+  group: onboarding-review-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: ubuntu-latest

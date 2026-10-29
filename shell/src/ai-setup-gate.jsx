@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppButton } from './ui/button.jsx';
-import { ConnectAiApps } from './connect-ai-apps.jsx';
+import { ConnectAiApps, CONNECT_AI_APPS } from './connect-ai-apps.jsx';
 import { isFeatureOn } from './feature-flags.js';
 import { Check, Copy, Loader2, Monitor } from 'lucide-react';
 import { copyText } from './document/model.js';
@@ -53,7 +53,8 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [mcpProduct, setMcpProduct] = useState('claude_web');
+  const [mcpApp, setMcpApp] = useState('claude');
+  const mcpProduct = CONNECT_AI_APPS.find(app => app.id === mcpApp)?.product || 'claude_web';
   // The computer route is two screens, as in Raft: connect the computer, then pick its runtime.
   const [pickRuntime, setPickRuntime] = useState(Boolean(preview?.pickRuntime));
   const active = useRef(true);
@@ -262,7 +263,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     >
       {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to connect your AI.' : 'Sign-in is unavailable on this host.'}</p>
         : mcpIntro ? <>
-          <ConnectAiApps compact showCli={false} onAppChange={app => setMcpProduct(app.product)} />
+          <ConnectAiApps compact showCli={false} selectedApp={mcpApp} onAppChange={app => setMcpApp(app.id)} />
           <AppButton variant="quiet" className="ui-setup-computer-fallback" onClick={() => chooseProduct(mcpProduct === 'codex' ? 'codex' : 'claude')}>Connect a computer instead</AppButton>
         </> : intro ? <AIPicker onChoose={chooseProduct} />
           : done ? <div className="ui-setup-ready"><Check size={36} aria-hidden="true" /><p>Try a comment. Watch your AI make the change.</p></div>

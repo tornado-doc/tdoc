@@ -58,6 +58,11 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    }
    assert.ok(await page.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth),'MCP choices fit phone and desktop');
    await shot('mcp-products');
+   await page.getByRole('button',{name:'Connect a computer instead',exact:true}).click();
+   await page.getByRole('heading',{name:'Connect a computer',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Choose another AI',exact:true}).click();
+   await page.getByRole('heading',{name:'Connect your AI',exact:true}).waitFor();
+   assert.equal(await page.getByRole('group',{name:'Choose your AI app'}).getByRole('button',{name:'Gemini',exact:true}).getAttribute('aria-pressed'),'true','returning keeps the app that the tutorial will use');
    failPractice=false;
    await page.getByRole('button',{name:'Try a comment',exact:true}).click();
    await page.waitForURL('**/d/practice?step=comment');
