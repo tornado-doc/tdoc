@@ -2,7 +2,7 @@
 // Doc-level "send to agent" panel. Uses /api/notify/* (Raft is the first
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Terminal, Webhook } from 'lucide-react';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from '../agent-marks.jsx';
@@ -543,7 +543,13 @@ function isDefaultInstruction(text) {
 // dialog and Ask AI's "Send to agent" mode both send through this, so the
 // two never word a delivery differently. `result` is { ok, text }; after a
 // failure the caller's button reads Retry.
+// Where a send goes: POST /api/notify/handoff, unless the page provides
+// another (the homepage demo's simulated agent, demo-agent.js).
+export const HandoffSendTransport = createContext(null);
+
 export function useHandoffSend(slug, onSent = null) {
+  const transport = useContext(HandoffSendTransport);
+  const post = transport || postNotifyHandoff;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const send = async ({ commentIds, recipient, instruction = '' }) => {
@@ -553,7 +559,7 @@ export function useHandoffSend(slug, onSent = null) {
     setResult(null);
     const to = agentLabel(recipient);
     try {
-      const body = await postNotifyHandoff({
+      const body = await post({
         slug,
         comment_ids: batch,
         instruction: String(instruction || '').trim(),
