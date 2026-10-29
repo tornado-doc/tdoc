@@ -1,5 +1,42 @@
 # tdoc plugins for the remote MCP server
 
+## Install tdoc in your AI app
+
+MCP server URL: **`https://tdoc.dev/mcp`** (Streamable HTTP, OAuth sign-in on
+first use; no API key to paste).
+
+| App | One line |
+| --- | --- |
+| Claude Code | `claude plugin install tdoc-cloud --marketplace tornado-doc/tdoc` (in a session: `/plugin install tdoc-cloud --marketplace tornado-doc/tdoc`) |
+| Claude Code, MCP only | `claude mcp add --transport http tdoc https://tdoc.dev/mcp` |
+| claude.ai / Claude Desktop | **Customize > Connectors > Add custom connector**, URL `https://tdoc.dev/mcp` |
+| Codex CLI | `codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc` |
+| Codex CLI, MCP only | `codex mcp add tdoc --url https://tdoc.dev/mcp` |
+| ChatGPT | **Plugins > + > Add custom MCP server**, URL `https://tdoc.dev/mcp` |
+| Cursor | [`cursor://anysphere.cursor-deeplink/mcp/install?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9`](https://cursor.com/install-mcp?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9) |
+| VS Code (Copilot) | `code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'` |
+| Gemini CLI | `git clone --depth 1 https://github.com/tornado-doc/tdoc && gemini extensions install ./tdoc/plugins/gemini` |
+
+The older two-step Claude Code form also works:
+`claude plugin marketplace add tornado-doc/tdoc`, then
+`claude plugin install tdoc-cloud@tornado-tdoc`. The same marketplace also
+lists `tdoc@tornado-tdoc`, the local CLI plugin (needs Bash and the `tdoc`
+CLI). Install one of the two, not both: both carry a skill named `tdoc`.
+
+Gemini CLI has no option to install from a folder inside a repo:
+`gemini extensions install https://github.com/tornado-doc/tdoc` fails with
+"Configuration file not found ... gemini-extension.json" (tested with
+gemini-cli 0.66.0). It will work once the latest GitHub release carries
+`tdoc-gemini.tar.gz` as its only asset; see `SUBMITTING.md`.
+
+Directory listings (Claude, ChatGPT/Codex, Cursor, Cline, Gemini gallery) are
+not live yet. `SUBMITTING.md` is the kit for submitting them, and
+`sh plugins/pack.sh` builds the upload files into `dist/plugins/`.
+
+---
+
+## About these packages
+
 Each folder here installs the tdoc remote MCP server, `https://tdoc.dev/mcp`
 (Streamable HTTP, OAuth 2.1 with dynamic client registration and PKCE). Hosts
 that cannot do OAuth can send an existing tdoc account token as
@@ -41,10 +78,24 @@ Install:
   `/reload-plugins`). Then open the plugin's **Connectors** tab and connect
   `tdoc`.
 - Claude Code, local test: `claude --plugin-dir plugins/claude`.
-- Marketplace: the repo's `.claude-plugin/marketplace.json` lists the local
-  (Bash) plugin, also named `tdoc`. A second entry for this folder needs a
-  different `name` in the marketplace entry (for example `tdoc-cloud`). That
-  file is outside `plugins/` and is not changed here.
+- Marketplace: the repo's `.claude-plugin/marketplace.json` (marketplace
+  `tornado-tdoc`) lists this folder as `tdoc-cloud` and the repo root, the
+  local CLI plugin, as `tdoc`. An entry's name must equal the `name` in the
+  plugin's `plugin.json`, so this plugin's manifest name is `tdoc-cloud` and
+  its skill shows as `/tdoc-cloud:tdoc`. Relative sources must start with
+  `./`; the old `"github:tornado-doc/tdoc"` source of the `tdoc` entry failed
+  `claude plugin validate` and made `claude plugin install tdoc@tornado-tdoc`
+  fail with `Invalid string: must start with "./"`, so it is now `"./"`.
+  Tested with Claude Code 2.1.310 in a throwaway `CLAUDE_CONFIG_DIR`:
+  `claude plugin validate .` passes, both plugins install, and
+  `claude plugin details tdoc-cloud` lists the `tdoc` skill and the `tdoc` MCP
+  server. Sources: https://code.claude.com/docs/en/plugins/marketplace-reference.md
+  ("Relative path ... Must start with `./`"; "`marketplace add` input:
+  `owner/repo`"), https://code.claude.com/docs/en/plugin-marketplaces ("Keep
+  the entry name and the manifest name the same"),
+  https://code.claude.com/docs/en/plugins/publish.md (`--marketplace` one-step
+  install, Claude Code 2.1.292+). A GitHub marketplace is cloned, so relative
+  paths resolve against the repo.
 
 `claude plugin validate plugins/claude` passes. `privacyPolicyUrl` is
 `https://tdoc.dev/privacy`.
@@ -121,11 +172,17 @@ when root `extensions.com.openai` is absent.
 
 Install:
 
-- Repo marketplace: add `.agents/plugins/marketplace.json` at the repo root
-  (outside `plugins/`, not created here), with an entry like
-  `{"name": "tdoc", "source": {"source": "local", "path": "./plugins/codex"}, "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}, "category": "Productivity"}`.
-- Codex CLI: `codex plugin marketplace add <marketplace root>`, then
-  `codex plugin add tdoc@<marketplace>` or `/plugins` in a session. Start a new
+- Repo marketplace: `.agents/plugins/marketplace.json` at the repo root
+  (marketplace `tornado-tdoc`, one entry `tdoc` with source
+  `./plugins/codex`, `policy.installation: AVAILABLE`,
+  `policy.authentication: ON_INSTALL`, `category: Productivity`). Codex also
+  reads `.claude-plugin/marketplace.json` as a legacy marketplace; with both
+  present it used `.agents/plugins/marketplace.json` (codex-cli 0.160.1,
+  throwaway `CODEX_HOME`: `codex plugin marketplace add ./`, then
+  `codex plugin add tdoc@tornado-tdoc` installed 0.9.0 and `codex mcp list`
+  showed `tdoc  https://tdoc.dev/mcp  Not logged in`).
+- Codex CLI: `codex plugin marketplace add tornado-doc/tdoc`, then
+  `codex plugin add tdoc@tornado-tdoc` or `/plugins` in a session. Start a new
   session to load it.
 - ChatGPT: open the **Plugins** tab, find the plugin, select the plus button.
   For a personal marketplace (`~/.agents/plugins/marketplace.json`), restart
@@ -133,9 +190,11 @@ Install:
 
 Tested with codex-cli 0.160.1 in a throwaway `CODEX_HOME`: the marketplace
 was added, the plugin installed as version 0.9.0, and `tdoc:tdoc` appeared in
-the session's skill list with the full description. MCP connection was not
-tested, because `https://tdoc.dev/mcp` is not live yet. Both JSON files pass
-the Agent Plugins 1.0.0 JSON schemas.
+the session's skill list with the full description. Sign-in through Codex was
+not tested (it needs a browser). `https://tdoc.dev/mcp` answers an
+unauthenticated `initialize` with 401 and serves RFC 9728 metadata at
+`/.well-known/oauth-protected-resource`. Both JSON files pass the Agent
+Plugins 1.0.0 JSON schemas.
 
 Verified (https://developers.openai.com/plugins/build/plugins, reached from
 https://developers.openai.com/codex/plugins, which now redirects to
@@ -218,7 +277,10 @@ Install:
 - Plugin, local test: copy `cursor/` to `~/.cursor/plugins/local/tdoc`, then
   restart Cursor or run **Developer: Reload Window**. Marketplace: push to a
   public repo and submit at https://cursor.com/marketplace/publish (manual
-  review). After listing: **Customize**, find the plugin, **Install**.
+  review).
+  The repo root's `.cursor-plugin/marketplace.json` lists this folder as
+  `tdoc`, which is how Cursor finds a plugin in a subfolder of a multi-plugin
+  repo (https://cursor.com/docs/reference/plugins). Not tested in Cursor. After listing: **Customize**, find the plugin, **Install**.
 - MCP server only, deeplink:
 
   ```
@@ -279,9 +341,22 @@ Files:
 Install: `gemini extensions install` takes a GitHub repo URL or a local path,
 with the manifest at the root. There is no documented subdirectory flag, so
 install from a checkout, `gemini extensions install ./plugins/gemini`, or link
-it for development with `gemini extensions link ./plugins/gemini`. A
-`gemini-extension.json` at a repo root, or a separate repo, is needed for
-install by URL.
+it for development with `gemini extensions link ./plugins/gemini`. Tested
+with gemini-cli 0.66.0 in a throwaway `HOME`: the local install asks to trust
+the folder, then `gemini extensions list` shows `tdoc (0.9.0)` with the `tdoc`
+MCP server, `GEMINI.md` and the `tdoc` skill. Install by URL
+(`https://github.com/tornado-doc/tdoc`) fails today: no `gemini-extension.json`
+at the repo root.
+
+Install by URL can work without moving files: gemini-cli first downloads the
+repo's **Latest** GitHub release and, when that release has exactly one asset
+whose name has no `darwin`/`linux`/`win32`, installs that archive (the
+manifest at its root, or inside one folder). Read in the gemini-cli 0.66.0
+bundle (`findReleaseAsset`, `downloadFromGitHubRelease`) and in
+https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/releasing.md;
+not tested end to end. So attaching `dist/plugins/tdoc-gemini.tar.gz` (from
+`plugins/pack.sh`) as the only asset of each release makes
+`gemini extensions install https://github.com/tornado-doc/tdoc` work.
 
 Verified:
 

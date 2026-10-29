@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppButton } from './ui/button.jsx';
 import { AppDialog } from './ui/dialog.jsx';
 import { CodeBlock } from './ui/code-block.jsx';
@@ -12,9 +12,11 @@ import { isFeatureOn } from './feature-flags.js';
 //   Claude   a prefilled "Add custom connector" link
 //   ChatGPT  Plugins -> + -> Add custom MCP server, with the URL to paste
 //   Cursor   its MCP install deeplink
-//   others   the server URL (VS Code, Gemini CLI, Codex)
+//   VS Code  its MCP install link
+//   others   the server URL (Codex, Gemini CLI)
 // The CLI line stays at the bottom as the fallback. Behind the remoteMcp
-// flag: on in PR previews, off in prod until the worker serves /mcp there.
+// flag (on by default). /start?connect=<app> opens the panel with that app's
+// button focused: the homepage's "Use tdoc in your AI app" row links there.
 
 export function remoteMcpUrl(origin = typeof location !== 'undefined' ? location.origin : 'https://tdoc.dev') {
   return `${origin}/mcp`;
@@ -28,6 +30,12 @@ export function claudeConnectorLink(url) {
 export function cursorInstallLink(url) {
   const config = btoa(JSON.stringify({ url }));
   return `cursor://anysphere.cursor-deeplink/mcp/install?name=tdoc&config=${encodeURIComponent(config)}`;
+}
+
+// VS Code: `vscode:mcp/install?` + the JSON config with its name, URL-encoded
+// (https://code.visualstudio.com/api/extension-guides/ai/mcp).
+export function vscodeInstallLink(url) {
+  return `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: 'tdoc', type: 'http', url }))}`;
 }
 
 export const CHATGPT_PLUGINS_URL = 'https://chatgpt.com/plugins';
@@ -64,9 +72,16 @@ export function ConnectAiApps({ showCli = true }) {
           </div>
           <AppButton data-app="cursor" onClick={() => openOut(cursorInstallLink(url))}>Add to Cursor</AppButton>
         </li>
+        <li className="tdoc-connect-app">
+          <div className="tdoc-connect-app-text">
+            <b>VS Code</b>
+            <span>Opens VS Code and adds the tdoc server for Copilot; VS Code asks you to sign in.</span>
+          </div>
+          <AppButton data-app="vscode" onClick={() => openOut(vscodeInstallLink(url))}>Add to VS Code</AppButton>
+        </li>
       </ul>
-      <div className="tdoc-connect-apps-url">
-        <span>Any other app that takes an MCP server URL (VS Code, Gemini CLI, Codex):</span>
+      <div className="tdoc-connect-apps-url" data-app="other">
+        <span>Codex, Gemini CLI or any other app that takes an MCP server URL:</span>
         <CodeBlock text={url} />
       </div>
       {showCli ? (
@@ -81,7 +96,7 @@ export function ConnectAiApps({ showCli = true }) {
 
 // Settings and the setup gate: a section with a heading. Renders nothing
 // with the flag off.
-export function ConnectAiAppsSection({ title = 'Connect an AI app', blurb = 'Use tdoc from Claude, ChatGPT or Cursor. Nothing to install.', className = '' }) {
+export function ConnectAiAppsSection({ title = 'Connect an AI app', blurb = 'Use tdoc from Claude, ChatGPT, Cursor or VS Code. Nothing to install.', className = '' }) {
   if (!isFeatureOn('remoteMcp')) return null;
   return (
     <section className={`tdoc-connect-apps-section${className ? ` ${className}` : ''}`} aria-label={title}>
@@ -94,13 +109,36 @@ export function ConnectAiAppsSection({ title = 'Connect an AI app', blurb = 'Use
 
 // /start: a strip under the top bar and the panel in a dialog, so the
 // tutorial document itself stays author HTML with no script.
+// The app a /start?connect=<app> link asks for, or null. Any value opens the
+// panel; one with no button of its own (codex, gemini) lands on the URL.
+export function requestedConnectApp(search = typeof location !== 'undefined' ? location.search : '') {
+  const v = new URLSearchParams(search).get('connect');
+  if (v === null) return null;
+  const app = v.toLowerCase();
+  return ['claude', 'chatgpt', 'cursor', 'vscode'].includes(app) ? app : 'other';
+}
+
 export function ConnectAiAppsStrip() {
-  const [open, setOpen] = useState(false);
-  if (!isFeatureOn('remoteMcp')) return null;
+  const on = isFeatureOn('remoteMcp');
+  const [asked] = useState(() => (on ? requestedConnectApp() : null));
+  const [open, setOpen] = useState(asked !== null);
+  useEffect(() => {
+    if (!open || !asked) return undefined;
+    // After the dialog mounts: focus the app's button, or bring the URL into view.
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`.tdoc-connect-dialog [data-app="${asked}"]`);
+      if (!el) return;
+      el.scrollIntoView({ block: 'nearest' });
+      const target = el.matches('button') ? el : el.querySelector('button');
+      if (target) target.focus({ preventScroll: true });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [open, asked]);
+  if (!on) return null;
   return (
     <>
       <div className="tdoc-connect-strip" role="region" aria-label="Connect an AI app">
-        <span>No terminal? Use tdoc from Claude, ChatGPT or Cursor.</span>
+        <span>No terminal? Use tdoc from Claude, ChatGPT, Cursor or VS Code.</span>
         <AppButton variant="primary" size="s" onClick={() => setOpen(true)}>Connect in one click</AppButton>
       </div>
       <AppDialog

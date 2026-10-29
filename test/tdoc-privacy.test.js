@@ -75,9 +75,10 @@ const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'publis
     assert(codex.extensions['com.openai'].interface.privacyPolicyURL === 'https://tdoc.dev/privacy', 'codex plugin privacyPolicyURL');
   });
 
-  await t('only the legal-entity note is left for the owner', () => {
-    const notes = html.match(/<!--[\s\S]*?-->/g) || [];
-    assert(notes.length === 1 && /OWNER: legal entity/.test(notes[0]), `unexpected comments: ${notes.join(' | ')}`);
+  await t('no owner notes are left, and the operator is named', () => {
+    const notes = (html.match(/<!--[\s\S]*?-->/g) || []).filter((n) => /OWNER/.test(n));
+    assert(notes.length === 0, `unexpected owner notes: ${notes.join(' | ')}`);
+    assert(/run by Tornado Doc/.test(html), 'operator named');
   });
 
   await t('navigation and SEO', () => {

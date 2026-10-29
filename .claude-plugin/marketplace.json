@@ -3,13 +3,20 @@
   "owner": {
     "name": "Tornado"
   },
-  "description": "Single-plugin marketplace hosting tdoc.",
+  "description": "tdoc plugins: the local CLI plugin and the cloud plugin for the remote MCP server.",
   "plugins": [
     {
       "name": "tdoc",
-      "source": "github:tornado-doc/tdoc",
-      "description": "Prompt-native interactive HTML docs.",
+      "source": "./",
+      "description": "Prompt-native interactive HTML docs, through the local tdoc CLI (Bash).",
       "homepage": "https://github.com/tornado-doc/tdoc"
+    },
+    {
+      "name": "tdoc-cloud",
+      "source": "./plugins/claude",
+      "displayName": "tdoc Cloud",
+      "description": "tdoc through the remote MCP server at https://tdoc.dev/mcp (OAuth sign-in, no CLI needed), plus the tdoc skill.",
+      "homepage": "https://tdoc.dev"
     }
   ]
 }

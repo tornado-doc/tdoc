@@ -463,7 +463,7 @@ export function SetupGate({ boot, preview = null }) {
                     itself (remote MCP). The page moves on the same way when
                     that connection is approved. */}
                 {step === 'doc' || state === 'done' ? null : (
-                  <ConnectAiAppsSection className="sg-connect-apps" title="No terminal? Connect in one click" blurb="Use tdoc from Claude, ChatGPT or Cursor instead." />
+                  <ConnectAiAppsSection className="sg-connect-apps" title="No terminal? Connect in one click" blurb="Use tdoc from Claude, ChatGPT, Cursor or VS Code instead." />
                 )}
 
                 {step === 'doc' && !choice ? null : (

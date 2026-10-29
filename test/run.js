@@ -20,6 +20,7 @@ const OFFLINE = [
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
+  'marketplaces.test.js',     // repo marketplaces (.claude-plugin, .agents/plugins) parse and point at real plugin folders
   'plugins.test.js',          // plugins/: Claude, Codex/ChatGPT, Cursor, Gemini, VS Code packages for the remote MCP server
   'remote-mcp.test.js',       // /mcp + OAuth 2.1: PKCE, redirect URIs, consent CSRF, token mapping, refresh/revoke, tools and refusals, rate limit
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
@@ -53,6 +54,7 @@ const OFFLINE = [
   'agent-authorship.test.js',  // authorship at write time (upload, agent replies that mark applied) and answer-only locks from send to answer, per question, failing closed
   'comment-wipe-authorship.test.js', // the comment wipe and team move follow agent authorship; a successful wipe answers 200
   'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
+  'mcp-discovery.test.js',     // MCP findable: llms.txt Connect, markdown connect line, raw Link rel=mcp (bytes unchanged), server card + AI catalog, remoteMcp default on
   'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
