@@ -15,6 +15,7 @@ import { DocumentShell } from './document-shell.jsx';
 import { NeutralLanding } from './neutral-landing.jsx';
 import { StatusPage } from './status-page.jsx';
 import { ActivatePage } from './activate-page.jsx';
+import { OAuthConsentPage } from './oauth-consent-page.jsx';
 import { SetupGate } from './setup-gate.jsx';
 import { TeamJoinPage } from './team-join.jsx';
 
@@ -51,6 +52,7 @@ if (appRoot && appBoot) {
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;
   else if (appBoot.page === 'activate') page = <ActivatePage boot={appBoot} />;
+  else if (appBoot.page === 'oauth-consent') page = <OAuthConsentPage boot={appBoot} />;
   else if (appBoot.page === 'setup') page = <SetupGate boot={appBoot} />;
   else if (appBoot.page === 'team-join') page = <TeamJoinPage boot={appBoot} />;
   else page = <NeutralLanding boot={appBoot} />;
