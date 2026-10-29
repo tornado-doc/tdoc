@@ -21,6 +21,7 @@
         "category": "Productivity",
         "capabilities": ["Read", "Write"],
         "websiteURL": "https://tdoc.dev",
+        "privacyPolicyURL": "https://tdoc.dev/privacy",
         "supportURL": "https://github.com/tornado-doc/tdoc/issues",
         "defaultPrompt": [
           "Use tdoc to write a one-page summary of this discussion.",

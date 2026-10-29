@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tdoc — privacy policy</title>
+<meta name="description" content="What tdoc.dev stores, who it shares it with, how long it keeps it, and how to get it removed.">
+<link rel="canonical" href="https://tdoc.dev/privacy">
+<meta property="og:title" content="tdoc privacy policy">
+<meta property="og:description" content="What tdoc.dev stores, who it shares it with, how long it keeps it, and how to get it removed.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+body { background:#fff; }
+  .wrap { font-family:"Inter",system-ui,-apple-system,sans-serif; color:#0a0a0a; font-size:17px; line-height:1.65; }
+  .wrap h1 { font-weight:600; font-size:clamp(34px,5vw,48px); letter-spacing:-.03em; line-height:1.08; margin:0 0 10px; }
+  .wrap h2 { font-weight:600; letter-spacing:-.015em; font-size:24px; margin:44px 0 10px; }
+  .wrap h3 { font-weight:600; font-size:17px; margin:24px 0 4px; }
+  .wrap ul { padding-left:22px; }
+  .wrap li { margin:4px 0; }
+  .sub { color:#555; font-size:19px; margin:0 0 26px; }
+  .note { border-top:1px solid #e5e5e5; padding-top:12px; margin:22px 0; color:#555; font-size:15px; }
+  .wrap a { color:rgba(10,10,10,.6); text-decoration:none; border-bottom:1px solid rgba(10,10,10,.2); }
+.wrap a.back { display:inline-flex; align-items:center; gap:6px; margin:0 0 26px; font-size:13.5px; font-weight:600; color:#555; text-decoration:none; border-bottom:none; }
+.wrap a.back:hover { color:#0a0a0a; }
+.back svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+</style>
+</head><body>
+<div class="wrap">
+<a class="back" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tdoc</a>
+<h1>Privacy policy</h1>
+<p class="sub">Effective October 29, 2026. This page covers the hosted service at tdoc.dev, run by Tornado Doc, "we" below. It says what we store, who else sees it, how long we keep it, and how to get it removed.</p>
+<p class="note">tdoc is open source (AGPL). If you run your own copy, your server holds your data and this policy does not apply to it.</p>
+
+<h2>The short version</h2>
+<ul>
+  <li>We store your account, your documents, their versions and the comments on them, so the service can work.</li>
+  <li>We do not sell personal data, we do not show ads, and we do not use your documents to train AI models.</li>
+  <li>Your AI agent runs on your own computer or in your own AI app. tdoc does not run it and does not see its other work.</li>
+  <li>A small number of services help us run tdoc, listed below with exactly what each one gets.</li>
+</ul>
+
+<h2>What we store</h2>
+
+<h3>Your account</h3>
+<ul>
+  <li>When you sign in (by email or with GitHub, through our sign-in provider Clerk, or directly with GitHub): your email address, your name, your profile picture link, and, if you connected GitHub, your GitHub username and numeric id.</li>
+  <li>If you sign in more than one way, we keep the link between those identities so they open the same account. You can disconnect GitHub in Settings.</li>
+  <li>Your settings: profile pins, notification choices, email opt-outs, docs quota, the teams you belong to.</li>
+  <li>Teams: the team name and handle, its members and their roles, pending invitations, and its plan.</li>
+</ul>
+
+<h3>Your documents</h3>
+<ul>
+  <li>Every version of every document you publish (the HTML, any embedded widgets, a preview image), its title, folder and sharing settings, and who published each version.</li>
+  <li>Comments, replies, reactions and resolved state, with the name, username and picture of whoever wrote them, and which agent wrote an agent reply.</li>
+  <li>Handoffs: which comments were sent to which agent, the instruction, and whether delivery worked.</li>
+  <li>Feedback spaces: if a site uses the tdoc feedback layer, comments left on that site are stored as a tdoc document, along with the site's address and the page they were left on.</li>
+</ul>
+
+<h3>Who can read a document</h3>
+<ul>
+  <li><b>Public</b>: anyone, and search engines may index it. Only public docs appear on your profile page.</li>
+  <li><b>Anyone with the link</b>: anyone who has the address. Never indexed or listed. This is the default for a new doc published from the tdoc skill.</li>
+  <li><b>Private</b>: you, the people you invite, and, for a team doc, the team.</li>
+</ul>
+<p>Email addresses are hidden from other readers. Others see a short name instead; you see your own address, a doc's owner sees the addresses they invited, and a team sees its members'.</p>
+
+<h3>Agents and sign-in tokens</h3>
+<ul>
+  <li>When you connect a terminal or agent, we issue it a token and keep only a hash of it, with the hostname and agent type it reported, and when it was last used.</li>
+  <li>A local agent that checks in tells us its device name, so Settings can show which machines are online.</li>
+  <li>AI apps you connect through the tdoc connector (for example Claude or ChatGPT) get a token that works only for the tdoc connector (tdoc.dev/mcp). It lasts one hour and is renewed with a refresh token that expires after 60 days unused. In the workspaces you allow, the app can create, read, edit and share your documents, and read, reply to and resolve their comments. A doc it creates is private until you ask it to share.</li>
+  <li>You can see and revoke every connected terminal, agent and AI app in Settings → Agents.</li>
+</ul>
+
+<h3>Sign-in cookies</h3>
+<p>We use cookies only to keep you signed in and to make sign-in safe: a session cookie (30 days), a short-lived sign-in state cookie (10 minutes), and one for switching accounts (30 minutes). No advertising or tracking cookies. The web app also keeps a few display preferences in your browser's local storage.</p>
+
+<h3>Service logs and counts</h3>
+<ul>
+  <li>Our host, Cloudflare, logs requests to tdoc.dev (address, time, status, errors) so we can find and fix problems.</li>
+  <li>We count a few onboarding steps (sign-in started, approved, token issued, doc published) with the tdoc version and sign-in method. These counts carry no account, username, email, IP address, document or token.</li>
+  <li>To stop abuse, a few routes count requests per IP address for a few minutes.</li>
+  <li>Ask this doc keeps only how many questions your account has used.</li>
+</ul>
+
+<h2>Who else sees your data</h2>
+<ul>
+  <li><b>Cloudflare</b> hosts tdoc and stores everything above (Workers, KV, R2, Durable Objects, Queues).</li>
+  <li><b>Clerk</b> handles email and GitHub sign-in. It holds your email, name, picture and connected GitHub account, and tells us which GitHub account you linked.</li>
+  <li><b>GitHub</b>, if you sign in with it: we read your username, id, name, picture and primary verified email.</li>
+  <li><b>Stripe</b> handles payment for the Team plan. We send it the team's id and the paying admin's email; card details go to Stripe, never to us.</li>
+  <li><b>AppSumo</b>, if you redeem an AppSumo code: we check the license with AppSumo and keep its status.</li>
+  <li><b>Email</b>: invitations and notification emails (mentions, replies, comments on your doc, access requests) go out through Cloudflare Email or Resend. A notification email includes a short preview of the comment. Every email has a link to turn them off for good.</li>
+  <li><b>Browser push</b>: if you turn alerts on, they travel through your browser's push service (Google, Mozilla, Apple or Microsoft) encrypted so that service cannot read them.</li>
+  <li><b>Ask this doc</b>: when you ask a question, we send that version's text, its open comments with commenters' names, any passage you highlighted, and your question to an AI model provider through OpenRouter. Email addresses in the document, comments, passage and question are replaced with "[email hidden]" first; no account data is sent. We keep neither question nor answer unless you post it as a comment.</li>
+  <li><b>Raft</b>, if you connect an agent through Raft: we send it the handoff (doc title and link, comment ids, your instruction). For a question to an agent we also send the question and the passage. Comment text is not sent; the agent reads it from tdoc with its own access.</li>
+  <li><b>Webhooks you set up</b>: the same handoff, signed, to the address you entered.</li>
+  <li><b>Data backup</b>: a team on the Team plan can copy its docs to a bucket it owns (S3 or R2). We keep the bucket keys encrypted and use them only to write the backup. A doc deleted for good is marked deleted in the backup too; what stays in your bucket is yours.</li>
+  <li><b>Other websites</b>: our pages load fonts from Google Fonts and some agent icons from Simple Icons, so your browser contacts them. A document is written by its author and may load images or other content from anywhere.</li>
+</ul>
+<p>We do not otherwise share your data, except where the law requires it.</p>
+
+<h2>How long we keep it</h2>
+<ul>
+  <li>Documents stay until you delete them. Every version stays with the doc.</li>
+  <li>A deleted doc goes to Trash. After 30 days it is erased for good, with its versions, comments and handoffs. You can also delete it forever from Trash at any time.</li>
+  <li>Sessions end after 30 days. Pairing codes and sign-in links expire within minutes.</li>
+  <li>Your account stays until you ask us to delete it. Email us and we delete the account and its documents within 30 days.</li>
+</ul>
+
+<h2>Your rights</h2>
+<p>You can ask us for a copy of your data, to correct it, to delete it, or to export it, by writing to the address below. If you live in the EU, the UK or California, you may have more rights under the GDPR or the CCPA, and you can use them the same way.</p>
+
+<h2>Your choices</h2>
+<ul>
+  <li>Download any doc as HTML, delete it, or change who can read it, at any time.</li>
+  <li>Turn off notification emails in Notifications, or stop all tdoc email with the link in any email.</li>
+  <li>Revoke any agent, terminal or AI app in Settings → Agents.</li>
+</ul>
+
+<h2>Children</h2>
+<p>tdoc is not meant for children under 13 (under 16 in the EU and the UK), and we do not knowingly keep data about them. If you think a child has an account, write to us and we will delete it.</p>
+
+<h2>Changes</h2>
+<p>When this policy changes, we post the change here and update the date at the top. A material change is also announced on the site.</p>
+
+<h2>Contact</h2>
+<p>Questions or requests: <a href="mailto:hello@tdoc.dev">hello@tdoc.dev</a>.</p>
+
+</div>
+</body></html>
