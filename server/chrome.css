@@ -1102,13 +1102,15 @@
      question is the focus. */
   .tdoc-ask-form-bottom button.tdoc-ask-target-pill { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; max-width: calc(100% - 42px); padding: 0 6px; margin-left: -6px; border: 0; border-radius: 6px; background: transparent; box-shadow: none; color: var(--td-muted); font: 500 13px Inter, system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
   .tdoc-ask-form-bottom button.tdoc-ask-target-pill:hover, .tdoc-ask-form-bottom button.tdoc-ask-target-pill[data-popup-open] { background: var(--td-surface-2, #f4f4f2); color: var(--td-ink); box-shadow: none; }
-  /* Mode (Ask / Send to agent) and agent, side by side in the same quiet
-     style; Send mode's Send button counts the comments. */
+  /* Mode (Ask / Edit) and agent, side by side in the same quiet style,
+     never wrapping the row: a long agent name ends in an ellipsis. */
+  .tdoc-ask-form-bottom { flex-wrap: nowrap; min-width: 0; }
   .tdoc-ask-form-pills { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; margin-left: -6px; }
   .tdoc-ask-form-pills button.tdoc-ask-target-pill { flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: 0; }
   .tdoc-ask-form-pills button.tdoc-ask-mode-pill { flex: none; }
-  /* Send to agent's payload, above its input row: "N comments will be sent
-     · Choose"; Choose lists each pending comment (who + first line) as a
+  .tdoc-ask-pill-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Edit's optional attachments, above its input: "N comments included ·
+     Choose"; Choose lists each pending comment (who + first line) as a
      checkbox. */
   .tdoc-ask-send-summary { display: flex; align-items: baseline; flex-wrap: wrap; margin: 0 0 6px; color: var(--td-muted, #6b6a66); font-size: 13px; }
   .tdoc-ask-send-summary > span[aria-hidden] { white-space: pre; }
@@ -1118,12 +1120,17 @@
   .tdoc-ask-send-item .ui-checkbox-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .tdoc-ask-send-item b { font-weight: 600; }
   .tdoc-ask-send-item .ui-checkbox-label span { opacity: .86; }
-  .tdoc-ask-note-add { margin: 0 0 6px; }
+  /* "Send to <agent>" on a wide screen; on a phone, the Ask form's round ↑
+     (same name to a screen reader), so the row fits one line. */
   .tdoc-ask-send-form .tdoc-ask-send-btn { flex: none; margin-left: auto; }
-  .tdoc-ask-send-none { margin: 0 0 4px; color: var(--td-muted, #6b6a66); font-size: 13px; }
-  .tdoc-ask-send-empty .tdoc-ask-form-pills { margin-left: 0; }
+  .tdoc-ask-send-form .tdoc-ask-send-icon { display: none; flex: none; }
   .tdoc-ask-mode-item-text { flex: 1 1 auto; min-width: 0; color: var(--td-muted, #6b6a66); }
   .tdoc-ask-mode-item-text b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
+  @media (max-width: 480px) {
+    .tdoc-ask-send-form .ui-btn.tdoc-ask-send-btn { display: none; }
+    .tdoc-ask-send-form .tdoc-ask-send-icon { display: inline-block; }
+    .tdoc-ask-form-pills .tdoc-ask-pill-label { max-width: 12ch; }
+  }
   .tdoc-ask-only-hint { margin-top: 5px; color: var(--td-muted, #6b6a66); font-size: 11px; }
   .tdoc-ask-form-bottom button[type="submit"] { width: 28px; height: 28px; border: 0; border-radius: 8px; background: var(--td-accent, #1652f0); color: #fff; font: 700 19px/1 Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }

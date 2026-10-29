@@ -290,15 +290,16 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
           await page.locator('.tdoc-ask-mode-menu').getByRole('menuitem', { name: new RegExp(`^${name} —`) }).click();
           await page.locator('.tdoc-ask-mode-menu').waitFor({ state: 'detached' });
         };
-        await pickMode('Send to agent');
-        // The payload is counted above the input (Choose lists it) and on the button.
-        await activity.locator('.tdoc-ask-send-summary').filter({ hasText: '1 comment will be sent · Choose' }).waitFor();
+        await pickMode('Edit');
+        // Edit: the pending comment is an optional attachment, counted above
+        // the input (Choose lists it); the button names the agent.
+        await activity.locator('.tdoc-ask-send-summary').filter({ hasText: '1 comment included · Choose' }).waitFor();
         await activity.locator('.tdoc-ask-send-summary').getByRole('button', { name: 'Choose' }).click();
         const listed = await activity.locator('.tdoc-ask-send-list .tdoc-ask-send-item').allInnerTexts();
         if (listed.length !== 1 || !listed[0].includes('Can you add last week for comparison?')) throw new Error(`the team member's pending list: ${JSON.stringify(listed)}`);
         await activity.locator('.tdoc-ask-send-summary').getByRole('button', { name: 'Done' }).click();
-        await activity.locator('.tdoc-ask-send-form').getByRole('button', { name: 'Send 1 comment', exact: true }).waitFor();
-        const pill = await activity.getByRole('button', { name: 'Who should get these?' }).innerText();
+        await activity.locator('.tdoc-ask-send-form').getByRole('button', { name: /^Send to / }).waitFor();
+        const pill = await activity.getByRole('button', { name: 'Who should change it?' }).innerText();
         if (!pill.includes(agentName)) throw new Error(`Send mode recipient: ${pill}`);
         if (process.env.TDOC_UI_SHOTS) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, `app-ask-send-mode-${width}.png`) }); }
         // Back to Ask: the per-comment selection lives in Agent activity.

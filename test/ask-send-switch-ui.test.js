@@ -1,18 +1,20 @@
 // Ask AI's two modes, in the real shell against the real worker, desktop and
 // phone:
-//   Ask ▾ / Send to agent ▾  a quiet mode picker in the input's bottom row,
-//                 beside the agent pill, only for a viewer who can send (no
-//                 picker otherwise). Send to agent hands the doc's ready comments
-//                 to the agent picked in the same pill, through the Send to
-//                 agent dialog's own send, and shows its delivery line. The
-//                 payload is explicit: "N comments will be sent · Choose" above
-//                 the input; Choose lists every one (author + first line) as a
-//                 checkbox, all checked; closing keeps the choice ("3 of 4");
-//                 "Send N comments" counts the checked ones and an unchecked
-//                 one stays pending; the note is optional, behind "+ Add a note", and
-//                 still sent. With nothing ready: no input, a muted line and the
-//                 mode picker; the menu's Send to agent row is off. The mode is
-//                 remembered per doc. No paper-plane in the phone drawer.
+//   Ask ▾ / Edit ▾  a quiet mode picker in the input's bottom row, beside the
+//                 agent pill, only for a viewer who can send (no picker
+//                 otherwise). Edit asks the agent picked in the pill to change
+//                 the doc: the input is the instruction (always shown, "What
+//                 should the agent change?"); pending comments are optional
+//                 attachments ("4 comments included · Choose", "2 of 4",
+//                 "No comments included"; none pending: no line). The button
+//                 is "Send to <agent>", off with no instruction and no checked
+//                 comment. Sending: instruction + comments hands the comments
+//                 off with the instruction as the note; comments only hands
+//                 them off; instruction only posts it as the viewer's
+//                 whole-document comment and hands that comment off. The mode
+//                 is remembered per doc. No paper-plane in the phone drawer.
+//   phone         at 390 and 320, with a long agent name, the input row stays
+//                 one line: the name ends in an ellipsis and Send is the ↑.
 //   one row       a team agent whose daemon registered claude and codex on
 //                 one computer is one row in both pickers.
 //   team agent    asking it in Ask shows, before Send, that its answer is a
@@ -154,7 +156,9 @@ async function startServer(worker, env) {
 
   try {
     let desktop = null;
-    await t('desktop: Send to agent lists the pending comments, counts them on the button, sends them with the optional note to the agent in the pill and shows the dialog\'s delivery line; the agent is one row', async () => {
+    const sendBtn = (panel, name) => panel.locator('.tdoc-ask-send-form').getByRole('button', { name, exact: true });
+    const handoffs = async () => (await pending()).filter((h) => h.kind !== 'ask');
+    await t('desktop: Edit — labels, the instruction input, comments included / Choose, Send to OpenTag; instruction + checked comments sends the comments with the instruction as the note', async () => {
       desktop = await open(bob, DESKTOP);
       const { page } = desktop;
       const panel = await askAi(page, false);
@@ -162,103 +166,114 @@ async function startServer(worker, env) {
       if (await panel.locator('.tdoc-seg, [role="radiogroup"]').count()) throw new Error('the segmented switch is back above the input');
       const modes = await modeMenu(page, panel);
       const items = (await modes.getByRole('menuitem').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim());
-      if (JSON.stringify(items) !== JSON.stringify(['Ask — the agent answers', 'Send to agent — hand over 4 comments to fix'])) throw new Error(`mode menu: ${JSON.stringify(items)}`);
+      if (JSON.stringify(items) !== JSON.stringify(['Ask — the agent answers', 'Edit — the agent changes this doc'])) throw new Error(`mode menu: ${JSON.stringify(items)}`);
       await shot(page, 'mode-menu-1280.png');
-      await modes.getByRole('menuitem', { name: /^Send to agent —/ }).click();
+      await modes.getByRole('menuitem', { name: /^Edit —/ }).click();
       await modes.waitFor({ state: 'detached' });
-      if (!(await modeIs(panel, 'Send to agent'))) throw new Error('mode did not switch to Send to agent');
-      // The payload: one quiet line, "4 comments will be sent · Choose"; no
-      // list until Choose. The button counts them.
+      if (!(await modeIs(panel, 'Edit'))) throw new Error('mode did not switch to Edit');
+      // The instruction is the input: always there, focused, no "+ Add a note".
+      const box = panel.getByRole('textbox', { name: 'What should the agent change?' });
+      await box.waitFor();
+      if ((await box.getAttribute('placeholder')) !== 'What should the agent change?') throw new Error('instruction placeholder');
+      if (!(await box.evaluate((el) => el === document.activeElement))) throw new Error('the instruction is not focused');
+      if (await panel.getByRole('button', { name: /Add a note/ }).count()) throw new Error('"+ Add a note" is back');
       const summary = panel.locator('.tdoc-ask-send-summary');
       const summaryIs = async (text) => { await summary.filter({ hasText: text }).waitFor({ timeout: 10000 }); };
-      await summaryIs('4 comments will be sent · Choose');
-      const list = panel.getByRole('group', { name: 'Comments to send' });
+      await summaryIs('4 comments included · Choose');
+      const list = panel.getByRole('group', { name: 'Comments to include' });
       if (await list.count()) throw new Error('the comment list is open by default');
-      if (await panel.locator('.tdoc-ask-ready-count').count()) throw new Error('the separate count is back');
-      await panel.locator('.tdoc-ask-send-form').getByRole('button', { name: 'Send 4 comments', exact: true }).waitFor();
-      // The note is collapsed behind "+ Add a note"; it opens a textarea.
-      if (await panel.getByRole('textbox', { name: 'Note for the agent' }).count()) throw new Error('the note is open by default');
-      await shot(page, 'send-mode-ready-1280.png');
-      await panel.getByRole('button', { name: '+ Add a note' }).click();
-      const note = panel.getByRole('textbox', { name: 'Note for the agent' });
-      if ((await note.getAttribute('placeholder')) !== 'Note for the agent…') throw new Error('note placeholder');
-      if (!(await note.evaluate((el) => el === document.activeElement))) throw new Error('the note is not focused when opened');
-      if (await panel.getByRole('button', { name: '+ Add a note' }).count()) throw new Error('"+ Add a note" stays after opening');
-      await note.fill('Keep the March date');
-      // Choose opens every pending comment, one line each (author + first
-      // line), all checked; uncheck one: the button counts only the checked.
+      const send = sendBtn(panel, 'Send to OpenTag');
+      await send.waitFor();
+      if (await send.isDisabled()) throw new Error('Send is off with 4 comments checked');
+      if (await panel.locator('.tdoc-ask-send-icon').isVisible()) throw new Error('desktop shows the ↑ too');
+      await shot(page, 'edit-mode-ready-1280.png');
+      // Choose: every pending comment, author + first line, all checked.
       const choose = summary.getByRole('button', { name: 'Choose' });
       await choose.click();
       await list.waitFor();
       const listed = (await list.locator('.tdoc-ask-send-item').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim());
       const want = ['Can search move to March?', 'Add the April date to the summary', 'Billing date: say "March 14"', 'Cut the mobile paragraph'];
       if (listed.length !== 4 || listed.some((row, i) => !row.includes('bob') || !row.endsWith(want[i]))) throw new Error(`listed: ${JSON.stringify(listed)}`);
-      if (listed.some((row) => row.includes('invoice thread'))) throw new Error('more than the first line is listed');
       if (await list.getByRole('checkbox', { checked: false }).count()) throw new Error('a listed comment starts unchecked');
-      const oneLine = await list.locator('.tdoc-ask-send-item').evaluateAll((rows) => rows.every((r) => r.getBoundingClientRect().height < 26));
-      if (!oneLine) throw new Error('a listed comment wraps');
-      await list.getByRole('checkbox', { name: /Add the April date/ }).click();
-      await panel.locator('.tdoc-ask-send-form').getByRole('button', { name: 'Send 3 comments', exact: true }).waitFor();
-      await summaryIs('3 of 4 comments will be sent · Done');
-      await shot(page, 'send-mode-choose-1280.png');
-      // Closing keeps the selection.
+      // All unchecked and no instruction: "No comments included", Send off.
+      for (const box of await list.getByRole('checkbox').all()) await box.click();
+      await summaryIs('No comments included · Done');
+      if (!(await send.isDisabled())) throw new Error('Send is on with no instruction and no comment');
+      await shot(page, 'edit-mode-none-checked-1280.png');
+      for (const name of [/Can search move/, /Billing date/, /Cut the mobile/]) await list.getByRole('checkbox', { name }).click();
+      await summaryIs('3 of 4 comments included · Done');
       await summary.getByRole('button', { name: 'Done' }).click();
       await list.waitFor({ state: 'detached' });
-      await summaryIs('3 of 4 comments will be sent · Choose');
-      await choose.click();
-      if (await list.getByRole('checkbox', { name: /Add the April date/ }).isChecked()) throw new Error('closing the list lost the selection');
-      await summary.getByRole('button', { name: 'Done' }).click();
-      const pill = panel.getByRole('button', { name: 'Who should get these?' });
+      await summaryIs('3 of 4 comments included · Choose');
+      const pill = panel.getByRole('button', { name: 'Who should change it?' });
       if (!(await pill.innerText()).includes('OpenTag')) throw new Error(`recipient: ${await pill.innerText()}`);
       const { menu, rows } = await menuRows(page, pill);
-      if (rows.filter((r) => r.includes('OpenTag')).length !== 1) throw new Error(`Send picker rows: ${JSON.stringify(rows)}`);
+      if (rows.filter((r) => r.includes('OpenTag')).length !== 1) throw new Error(`Edit picker rows: ${JSON.stringify(rows)}`);
       await page.keyboard.press('Escape');
       await menu.waitFor({ state: 'detached' });
-      await shot(page, 'send-mode-note-1280.png');
-      await panel.locator('.tdoc-ask-send-form').getByRole('button', { name: 'Send 3 comments', exact: true }).click();
+      await box.fill('Keep the March date');
+      await shot(page, 'edit-mode-instruction-comments-1280.png');
+      await send.click();
       await panel.locator('.tdoc-send-result.is-ok').getByText('Sent 3 comments to OpenTag ✓').waitFor({ timeout: 10000 });
-      let queued = (await pending()).filter((h) => h.kind !== 'ask');
-      let ids = queued.flatMap((h) => h.comment_ids || []);
+      const queued = await handoffs();
+      const ids = queued.flatMap((h) => h.comment_ids || []);
       if (![first, third, fourth].every((id) => ids.includes(id)) || ids.includes(second)) throw new Error(`queued: ${JSON.stringify(queued)}`);
-      if (!queued.some((h) => h.instruction === 'Keep the March date')) throw new Error(`note not sent: ${JSON.stringify(queued.map((h) => h.instruction))}`);
-      // The unchecked one stays pending, counted and checked; note closed.
-      await panel.locator('.tdoc-ask-send-form').getByRole('button', { name: 'Send 1 comment', exact: true }).waitFor({ timeout: 10000 });
-      await summaryIs('1 comment will be sent · Choose');
-      await choose.click();
-      const left = await list.locator('.tdoc-ask-send-item').allInnerTexts();
-      if (left.length !== 1 || !left[0].includes('Add the April date')) throw new Error(`still pending: ${JSON.stringify(left)}`);
-      await summary.getByRole('button', { name: 'Done' }).click();
-      if (await panel.getByRole('textbox', { name: 'Note for the agent' }).count()) throw new Error('the note stays open after sending');
-      await shot(page, 'send-mode-partial-1280.png');
-      await panel.locator('.tdoc-ask-send-form').getByRole('button', { name: 'Send 1 comment', exact: true }).click();
-      await panel.locator('.tdoc-send-result.is-ok').getByText('Sent 1 comment to OpenTag ✓').waitFor({ timeout: 10000 });
-      queued = (await pending()).filter((h) => h.kind !== 'ask');
-      ids = queued.flatMap((h) => h.comment_ids || []);
-      if (!ids.includes(second)) throw new Error(`the second send: ${JSON.stringify(queued)}`);
-      // Sent: nothing is pending, so no input row -- a muted line and the
-      // mode picker; the delivery line stays.
-      await panel.locator('.tdoc-ask-send-none').getByText('No comments to send to an agent right now.').waitFor({ timeout: 10000 });
-      if (await panel.locator('.tdoc-ask-send-form, .tdoc-ask-send-summary').count()) throw new Error('the input row shows with nothing pending');
-      await modePill(panel).waitFor();
-      await shot(page, 'send-mode-sent-1280.png');
+      if (!queued.some((h) => h.instruction === 'Keep the March date')) throw new Error(`instruction not the note: ${JSON.stringify(queued.map((h) => h.instruction))}`);
+      if ((await comments()).some((c) => c.text === 'Keep the March date')) throw new Error('an instruction with comments became a comment');
+      // The unchecked one stays pending, checked; the input clears.
+      await summaryIs('1 comment included · Choose');
+      if (await box.inputValue()) throw new Error('the instruction stays after sending');
       if (desktop.errors.length) throw new Error(desktop.errors.join('\n'));
     });
 
-    await t('desktop: the mode is remembered per doc; 0 pending shows a muted line and the picker, no input', async () => {
+    await t('desktop: Edit with comments only hands them off as today', async () => {
+      const { page } = desktop;
+      const panel = page.getByRole('dialog', { name: 'Ask AI' });
+      const send = sendBtn(panel, 'Send to OpenTag');
+      await send.click();
+      await panel.locator('.tdoc-send-result.is-ok').getByText('Sent 1 comment to OpenTag ✓').waitFor({ timeout: 10000 });
+      const h = (await handoffs()).find((x) => (x.comment_ids || []).includes(second));
+      if (!h || h.instruction !== 'address this comment') throw new Error(`comments-only handoff: ${JSON.stringify(h)}`);
+      // Nothing pending: no line, the input stays, Send is off until typed.
+      await panel.locator('.tdoc-ask-send-summary').waitFor({ state: 'detached', timeout: 10000 });
+      await panel.getByRole('textbox', { name: 'What should the agent change?' }).waitFor();
+      if (!(await send.isDisabled())) throw new Error('Send is on with nothing to send');
+      await shot(page, 'edit-mode-empty-1280.png');
+    });
+
+    await t('desktop: Edit with only an instruction posts a whole-document comment by the viewer and hands that comment to the chosen agent', async () => {
+      const { page } = desktop;
+      const panel = page.getByRole('dialog', { name: 'Ask AI' });
+      const box = panel.getByRole('textbox', { name: 'What should the agent change?' });
+      const send = sendBtn(panel, 'Send to OpenTag');
+      const before = new Set((await handoffs()).map((h) => h.id || h.handoff_id || JSON.stringify(h.comment_ids)));
+      await box.fill('Tighten the summary to two lines');
+      if (await send.isDisabled()) throw new Error('Send is off with an instruction');
+      await shot(page, 'edit-mode-instruction-1280.png');
+      await send.click();
+      await panel.locator('.tdoc-send-result.is-ok').getByText('Sent to OpenTag ✓').waitFor({ timeout: 10000 });
+      const posted = (await comments()).filter((c) => c.text === 'Tighten the summary to two lines');
+      if (posted.length !== 1) throw new Error(`document comments: ${JSON.stringify(posted)}`);
+      const doc = posted[0];
+      if (doc.anchor && doc.anchor.kind !== 'document') throw new Error(`not a whole-document comment: ${JSON.stringify(doc.anchor)}`);
+      if (!JSON.stringify(doc.author || {}).includes('bob')) throw new Error(`author: ${JSON.stringify(doc.author)}`);
+      const h = (await handoffs()).find((x) => (x.comment_ids || []).includes(doc.id));
+      if (!h) throw new Error('the document comment was not handed off');
+      if (before.has(h.id || h.handoff_id || JSON.stringify(h.comment_ids))) throw new Error('reused an old handoff');
+      if (JSON.stringify(h.comment_ids) !== JSON.stringify([doc.id])) throw new Error(`handoff carries more: ${JSON.stringify(h.comment_ids)}`);
+      if (await box.inputValue()) throw new Error('the instruction stays after sending');
+      await panel.locator('.tdoc-ask-send-summary').waitFor({ state: 'detached', timeout: 10000 });
+      await shot(page, 'edit-mode-instruction-sent-1280.png');
+      if (desktop.errors.length) throw new Error(desktop.errors.join('\n'));
+    });
+
+    await t('desktop: the mode is remembered per doc', async () => {
       const { page, context } = desktop;
       await page.reload();
       await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
       const panel = await askAi(page, false);
-      if (!(await modeIs(panel, 'Send to agent'))) throw new Error('Send to agent was not remembered');
-      await panel.locator('.tdoc-ask-send-none').getByText('No comments to send to an agent right now.').waitFor();
-      if (await panel.locator('.tdoc-ask-send-form, textarea').count()) throw new Error('an input shows with 0 pending');
-      const menu = await modeMenu(page, panel);
-      const off = menu.getByRole('menuitem', { name: /^Send to agent —/ });
-      if ((await off.innerText()).replace(/\s+/g, ' ').trim() !== 'Send to agent — No comments ready') throw new Error(`0-ready row: ${await off.innerText()}`);
-      if ((await off.getAttribute('aria-disabled')) !== 'true') throw new Error('the Send to agent row is on with 0 ready');
-      await page.keyboard.press('Escape');
-      await menu.waitFor({ state: 'detached' });
-      await shot(page, 'send-mode-none-1280.png');
+      if (!(await modeIs(panel, 'Edit'))) throw new Error('Edit was not remembered');
+      await panel.getByRole('textbox', { name: 'What should the agent change?' }).waitFor();
       await pickMode(page, panel, 'Ask');
       await page.reload();
       await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
@@ -309,42 +324,42 @@ async function startServer(worker, env) {
       const panel = await askAi(page, false);
       await panel.locator('.tdoc-ask-form-bottom').waitFor();
       if (await modePill(panel).count()) throw new Error('a viewer who cannot send sees the mode picker');
-      if (await panel.getByRole('textbox', { name: 'Note for the agent' }).count()) throw new Error('Send mode shows without send');
+      if (await panel.getByRole('textbox', { name: 'What should the agent change?' }).count()) throw new Error('Edit shows without send');
       await shot(page, 'ask-no-send-1280.png');
       if (errors.length) throw new Error(errors.join('\n'));
       await context.close();
     });
 
-    await t('phone: no paper-plane in the drawer header; the Ask AI tab carries the mode picker, 0 ready is disabled, and the team agent notice', async () => {
+    await t('phone 390: no paper-plane in the drawer header; Edit with the instruction, the comments line and the ↑ in one row; sends; Agent activity readable; Ask keeps the team agent notice', async () => {
       await post('Phone: tighten the intro');
       const { page, context, errors } = await open(bob, PHONE);
       const panel = await askAi(page, true);
-      await pickMode(page, panel, 'Send to agent');
-      await panel.locator('.tdoc-ask-send-summary').filter({ hasText: '1 comment will be sent · Choose' }).waitFor();
+      await pickMode(page, panel, 'Edit');
+      await panel.locator('.tdoc-ask-send-summary').filter({ hasText: '1 comment included · Choose' }).waitFor();
       if (await panel.locator('.tdoc-ask-send-list').count()) throw new Error('phone: the list is open by default');
-      const phoneSend = panel.locator('.tdoc-ask-send-form').getByRole('button', { name: 'Send 1 comment', exact: true });
+      await panel.getByRole('textbox', { name: 'What should the agent change?' }).waitFor();
+      // A phone's Send is the ↑, named for the agent; no wide button.
+      const phoneSend = panel.locator('.tdoc-ask-send-form').getByRole('button', { name: 'Send to OpenTag', exact: true });
       await phoneSend.waitFor();
+      if ((await phoneSend.innerText()).trim() !== '↑') throw new Error(`phone send: ${await phoneSend.innerText()}`);
+      if (await panel.locator('.tdoc-ask-send-btn').isVisible()) throw new Error('phone shows the wide Send button');
       const row = await panel.locator('.tdoc-ask-send-form .tdoc-ask-form-bottom').evaluate((el) => {
         const r = el.getBoundingClientRect();
-        return { overflow: el.scrollWidth > el.clientWidth + 1, kids: [...el.querySelectorAll('button')].every((b) => { const k = b.getBoundingClientRect(); return k.right <= r.right + 1 && k.top >= r.top - 1 && k.bottom <= r.bottom + 1; }) };
+        return { overflow: el.scrollWidth > el.clientWidth + 1, kids: [...el.querySelectorAll('button')].filter((b) => b.offsetParent).every((b) => { const k = b.getBoundingClientRect(); return k.right <= r.right + 1 && k.top >= r.top - 1 && k.bottom <= r.bottom + 1; }) };
       });
       if (row.overflow || !row.kids) throw new Error(`phone input row overflows: ${JSON.stringify(row)}`);
-      await shot(page, 'send-mode-ready-390.png');
+      await shot(page, 'edit-mode-ready-390.png');
       await panel.locator('.tdoc-ask-send-summary').getByRole('button', { name: 'Choose' }).click();
       if (!(await panel.getByRole('checkbox', { name: /Phone: tighten the intro/ }).isChecked())) throw new Error('phone: the comment starts unchecked');
-      await shot(page, 'send-mode-choose-390.png');
+      await shot(page, 'edit-mode-choose-390.png');
       await panel.locator('.tdoc-ask-send-summary').getByRole('button', { name: 'Done' }).click();
-      await panel.getByRole('button', { name: '+ Add a note' }).click();
-      await panel.getByRole('textbox', { name: 'Note for the agent' }).waitFor();
-      await shot(page, 'send-mode-note-390.png');
+      await panel.getByRole('textbox', { name: 'What should the agent change?' }).fill('Keep it short');
+      await shot(page, 'edit-mode-instruction-390.png');
       await phoneSend.click();
       await panel.locator('.tdoc-send-result.is-ok').getByText('Sent 1 comment to OpenTag ✓').waitFor({ timeout: 10000 });
-      await panel.locator('.tdoc-ask-send-none').getByText('No comments to send to an agent right now.').waitFor({ timeout: 10000 });
-      if (await panel.locator('.tdoc-ask-send-form').count()) throw new Error('the input row shows with nothing pending');
-      await shot(page, 'send-mode-sent-390.png');
-      // Readable on a phone: the delivery line is the dialog's green result,
-      // and Agent activity's rows are styled links at reading size, not the
-      // browser's default bordered buttons running off the drawer.
+      await panel.locator('.tdoc-ask-send-summary').waitFor({ state: 'detached', timeout: 10000 });
+      if (!(await phoneSend.isDisabled())) throw new Error('phone: Send is on with nothing to send');
+      await shot(page, 'edit-mode-sent-390.png');
       const sentLine = await panel.locator('.tdoc-send-result.is-ok').evaluate((el) => ({ color: getComputedStyle(el).color, size: parseFloat(getComputedStyle(el).fontSize) }));
       if (sentLine.color !== 'rgb(26, 115, 64)' || sentLine.size < 13) throw new Error(`delivery line: ${JSON.stringify(sentLine)}`);
       await panel.locator('.tdoc-ask-activity-toggle').click();
@@ -376,6 +391,54 @@ async function startServer(worker, env) {
       if (errors.length) throw new Error(errors.join('\n'));
       await context.close();
     });
+
+    // A team agent with a long name: on a phone the Edit row must stay one
+    // line -- mode, agent (ellipsized), ↑ -- with no sideways scroll.
+    const LONG = 'Quarterly Planner · befreed team · mac'; // 38 of the 40 a team agent name may have
+    const longAgent = (await api('/api/team/agents', { method: 'POST', cookie: julie.cookie, body: { id: team.id, name: LONG } })).body;
+    const longToken = (await api('/api/team/agents/connect', { method: 'POST', body: { code: longAgent.setup_code, device: 'mac' } })).body.token;
+    await api('/api/notify/local/register', { method: 'POST', token: longToken, body: { device: 'mac', clis: ['claude'] } });
+    await post('Phone: one more for the long name');
+    for (const width of [390, 320]) {
+      await t(`phone ${width}: a long agent name ends in an ellipsis; the Edit row stays one line with the ↑, no horizontal overflow`, async () => {
+        const { page, context, errors } = await open(bob, { ...PHONE, viewport: { width, height: 760 } });
+        const panel = await askAi(page, true);
+        if (!(await modeIs(panel, 'Edit'))) await pickMode(page, panel, 'Edit');
+        const pill = panel.getByRole('button', { name: 'Who should change it?' });
+        await pill.click();
+        const menu = page.locator('.tdoc-agent-menu');
+        await menu.waitFor();
+        const longRow = menu.getByRole('menuitem', { name: /Quarterly Planner/ });
+        if (!(await longRow.count())) throw new Error(`picker rows: ${JSON.stringify(await menu.innerText())} ${JSON.stringify(longAgent)} ${longToken}`);
+        await longRow.click();
+        await menu.waitFor({ state: 'detached' });
+        await panel.getByRole('textbox', { name: 'What should the agent change?' }).fill('Shorten the intro');
+        const label = (await pill.innerText()).trim();
+        if (!label.startsWith('Quarterly Planner')) throw new Error(`pill: ${label}`);
+        const icon = panel.locator('.tdoc-ask-send-form').getByRole('button', { name: `Send to ${label}`, exact: true });
+        await icon.waitFor();
+        if ((await icon.innerText()).trim() !== '↑') throw new Error('the phone send is not the ↑');
+        const row = await panel.locator('.tdoc-ask-send-form .tdoc-ask-form-bottom').evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const shown = [...el.querySelectorAll('button')].filter((b) => b.offsetParent);
+          const tops = shown.map((b) => Math.round(b.getBoundingClientRect().top + b.getBoundingClientRect().height / 2));
+          const name = el.querySelector('.tdoc-agent-pill .tdoc-ask-pill-label');
+          return {
+            overflow: el.scrollWidth > el.clientWidth + 1,
+            inside: shown.every((b) => { const k = b.getBoundingClientRect(); return k.left >= r.left - 7 && k.right <= r.right + 1; }), // the pills sit 6px out, aligned with the text
+            oneLine: Math.max(...tops) - Math.min(...tops) <= 2 && r.height < 40,
+            ellipsis: name.scrollWidth > name.clientWidth && getComputedStyle(name).textOverflow === 'ellipsis',
+            count: shown.length,
+          };
+        });
+        if (row.overflow || !row.inside || !row.oneLine || !row.ellipsis || row.count !== 3) throw new Error(`${width}: ${JSON.stringify(row)}`);
+        const layout = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
+        if (layout.scrollWidth > layout.width + 1) throw new Error(JSON.stringify(layout));
+        await shot(page, `edit-mode-long-name-${width}.png`);
+        if (errors.length) throw new Error(errors.join('\n'));
+        await context.close();
+      });
+    }
   } finally {
     await browser.close();
     server.close();
