@@ -1619,7 +1619,15 @@ export function DocumentShell({ boot, config }) {
         slug: config.slug,
         choices: orderedAgentChoices(notifyTargets),
         preselected: notifyTargets.default,
+        ready: handoffBuckets.ready,
         readyIds: handoffBuckets.ready.map((c) => c.id),
+        // Edit with only an instruction: it becomes the viewer's
+        // whole-document comment, then is handed off like any other.
+        createDocumentComment: async (text) => {
+          const comment = await comments.addComment({ kind: 'document' }, text);
+          if (comment?.id) markCommented();
+          return comment;
+        },
         onSent: () => comments.refresh(),
       } : null}
       activityOpen={agentActivityOpen}
