@@ -285,7 +285,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
-  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('One paste, and it'));
+  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Set up in a minute'));
   assert(/Claude[\s\S]*ChatGPT[\s\S]*Grok[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI[\s\S]*Grok Bot/.test(hero), 'the hero picker does not name every app');
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
