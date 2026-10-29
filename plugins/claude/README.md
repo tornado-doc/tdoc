@@ -11,6 +11,7 @@ plugin.
 
 ## What Claude can do with it
 
+- Read tdoc's writing guide and house style (`get_writing_guide`)
 - Create a document and return its link (`create_doc`)
 - Publish a new version of a document (`update_doc`)
 - Read a document, or list yours (`get_doc`, `list_docs`)

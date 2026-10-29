@@ -30,7 +30,7 @@ sharing, with a one-time sign-in (email, Google, or GitHub) gating comments.
 
 ## When the tdoc MCP tools are available, use them
 
-If your tools include tdoc's MCP server (`create_doc`, `update_doc`,
+If your tools include tdoc's MCP server (`get_writing_guide`, `create_doc`, `update_doc`,
 `get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
 `resolve_comment`, `answer_question`, `share_doc`, from
 `https://tdoc.dev/mcp`, connected as a Claude/ChatGPT/Cursor connector or
@@ -40,7 +40,8 @@ authorship, answer-only locks, workspace scope). The mapping:
 
 | CLI | MCP tool |
 |---|---|
-| `tdoc-new` / `tdoc-write` + `tdoc-publish` (new doc) | `create_doc` (title + html or markdown, optional `team`; starts private) |
+| reading `authoring/` (voice, visuals, components, style CSS) | `get_writing_guide` (optional `style`, `kind: "slides"`) |
+| `tdoc-new` / `tdoc-write --style <s>` + `tdoc-publish` (new doc) | `create_doc` (title + html or markdown, optional `team` and `style`; a fragment is wrapped in the house style; starts private) |
 | `tdoc-write --version next` + `tdoc-publish` | `update_doc` (the whole new document) |
 | `tdoc-pull` | `get_comments`, and `get_doc` (format `html` for the source) |
 | `tdoc-agent-reply --status ...` | `reply_to_comment` (same statuses and `applied_in` rules) |
