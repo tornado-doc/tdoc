@@ -18524,7 +18524,22 @@ function mcpUploadContentOk(type, bytes) {
   if (text.includes('\u0000')) return false;
   if (type === 'text/html') return true;
   if (type === 'image/svg+xml') {
-    return /^﻿?\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*<svg[\s>]/i.test(text);
+    // Skip the prolog (BOM, <?xml?>, comments, doctype) step by step, no
+    // backtracking regex over uploaded bytes; then it must open <svg.
+    let i = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+    for (let guard = 0; guard < 64; guard++) {
+      while (i < text.length && /\s/.test(text[i])) i++;
+      const rest = text.slice(i, i + 9);
+      let close = null;
+      if (rest.startsWith('<?')) close = '?>';
+      else if (rest.startsWith('<!--')) close = '-->';
+      else if (/^<!doctype/i.test(rest)) close = '>';
+      if (!close) break;
+      const end = text.indexOf(close, i + 2);
+      if (end === -1) return false;
+      i = end + close.length;
+    }
+    return /^<svg[\s>]/i.test(text.slice(i, i + 5));
   }
   return false;
 }
@@ -18658,7 +18673,10 @@ function mcpTitleFromHtml(htmlText) {
   const pick = (re) => {
     const m = htmlText.match(re);
     if (!m) return '';
-    return m[1].replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+    // Plain text only: tags dropped, the common entities decoded (&amp;
+    // last, so nothing is decoded twice), and no angle bracket survives.
+    return m[1].replace(/<[^>]*>/g, ' ').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;|&gt;/g, '').replace(/&amp;/g, '&')
+      .replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
   };
   return (pick(/<title[^>]*>([\s\S]*?)<\/title>/i) || pick(/<h1[^>]*>([\s\S]*?)<\/h1>/i)).slice(0, 120);
 }

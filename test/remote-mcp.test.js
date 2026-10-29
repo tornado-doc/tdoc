@@ -883,6 +883,16 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     // Content-type spoofing: the bytes decide, not the declared type or header.
     r = await putBytes(a.toString(), Buffer.concat([Buffer.from('<svg onload=alert(1)>'), Buffer.alloc(PNG.length - 21, 32)]), { 'Content-Type': 'image/png' });
     assert(r.status === 415 && r.body.error === 'type_mismatch', `not a png: ${r.status} ${r.text}`);
+    // An SVG must be an <svg> document (a prolog of comments is fine; a
+    // pathological one is not slow).
+    const commented = Buffer.concat([Buffer.from('\uFEFF<!-- made by hand -->\n'), SVG]);
+    const pathological = Buffer.from('<!--' + '--><!--'.repeat(4285) + 'x');
+    const svgUp = await tool(J, 'create_upload', { files: [{ name: 'i.html', type: 'text/html', size: 3 }, { name: 'c.svg', type: 'image/svg+xml', size: commented.length }, { name: 'd.svg', type: 'image/svg+xml', size: pathological.length }] });
+    r = await putBytes(urlOf(svgUp, 'c.svg'), commented);
+    assert(r.status === 200, `BOM + comment before the SVG: ${r.status} ${r.text}`);
+    const t0 = Date.now();
+    r = await putBytes(urlOf(svgUp, 'd.svg'), pathological);
+    assert(r.status === 415 && Date.now() - t0 < 2000, `pathological prolog ${r.status} in ${Date.now() - t0}ms`);
     r = await putBytes(a.toString(), Buffer.concat([PNG, Buffer.from('x')]));
     assert(r.status === 400 && r.body.error === 'size_mismatch', `too long: ${r.status}`);
     r = await putBytes(a.toString(), PNG.subarray(0, PNG.length - 1));
