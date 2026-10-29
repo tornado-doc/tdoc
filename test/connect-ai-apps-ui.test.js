@@ -1,6 +1,6 @@
 // "Connect in one click" in a real browser: tdoc in Claude, ChatGPT or
 // Cursor through the remote MCP server, with no terminal. Behind the
-// remoteMcp flag (on in PR previews only), so:
+// remoteMcp flag (on by default; a page can still pin it off), so:
 //   - flag off: /start, /setup and Settings look exactly as before
 //   - flag on: /start shows a strip that opens the panel; /setup and
 //     Settings -> Agents show it inline. Claude opens the prefilled custom
@@ -86,6 +86,13 @@ async function startServer(worker, env) {
   const startHtml = fs.readFileSync(path.join(startDir, `v${latest}`, 'index.html'), 'utf8');
   const shipped = await call('/api/upload', { method: 'POST', token: 'admin-secret', body: { slug: 'tdoc-start', version: 1, html: startHtml, meta: { title: startMeta.title || 'Start', versions: [{ n: 1, created: new Date().toISOString() }], access: { visibility: 'public' } } } });
   assert(shipped.status === 200, `ship /start: ${shipped.status} ${shipped.text}`);
+  // The homepage too: its "Use tdoc in your AI app" row links into /start.
+  const homeDir = path.join(__dirname, '..', 'landing', 'tornado-doc');
+  const homeMeta = JSON.parse(fs.readFileSync(path.join(homeDir, 'meta.json'), 'utf8'));
+  const homeLatest = homeMeta.versions[homeMeta.versions.length - 1].n;
+  const homeHtml = fs.readFileSync(path.join(homeDir, `v${homeLatest}`, 'index.html'), 'utf8').replace(new RegExp(`/d/tornado-doc/v/${homeLatest}/widget/`, 'g'), '/d/tornado-doc/v/1/widget/');
+  const home = await call('/api/upload', { method: 'POST', token: 'admin-secret', body: { slug: 'tornado-doc', version: 1, html: homeHtml, meta: { title: homeMeta.title, versions: [{ n: 1, created: new Date().toISOString() }], access: { visibility: 'public' } } } });
+  assert(home.status === 200, `ship homepage: ${home.status} ${home.text}`);
   const cookie = await putSession(env, 'julie');
   await call('/api/hosted/token', { method: 'POST', cookie, body: { label: 'setup' } });
 
@@ -163,6 +170,62 @@ async function startServer(worker, env) {
         await context.close();
       });
 
+      await t(`${label}: flag at its default, signed out: /start shows the strip, ?connect=<app> opens the panel on that app`, async () => {
+        const { context, page } = await open(width, height, { signedIn: false });
+        await page.goto(`${base}/start`);
+        await page.locator('.tdoc-connect-strip').waitFor();
+        assert(await page.getByRole('dialog').count() === 0, 'dialog open without ?connect');
+        await page.goto(`${base}/start?connect=vscode`);
+        const dialog = page.getByRole('dialog', { name: 'Connect in one click' });
+        await dialog.waitFor();
+        await page.waitForFunction(() => document.activeElement && document.activeElement.getAttribute('data-app') === 'vscode');
+        await shot(page, `${label}-start-connect-vscode`);
+        const vscodeHref = await page.evaluate(() => {
+          let seen = '';
+          const desc = Object.getOwnPropertyDescriptor(window.Location.prototype, 'href');
+          try {
+            Object.defineProperty(window.location, 'href', { configurable: true, set(v) { seen = String(v); }, get() { return desc.get.call(window.location); } });
+          } catch { return 'unpatchable'; }
+          document.querySelector('.tdoc-connect-dialog [data-app="vscode"]').click();
+          return seen;
+        });
+        if (vscodeHref !== 'unpatchable') {
+          assert(vscodeHref.startsWith('vscode:mcp/install?'), vscodeHref);
+          const cfg = JSON.parse(decodeURIComponent(vscodeHref.slice('vscode:mcp/install?'.length)));
+          assert(cfg.name === 'tdoc' && cfg.type === 'http' && cfg.url === `${base}/mcp`, JSON.stringify(cfg));
+        }
+        // An app with no button of its own lands on the server URL.
+        await page.goto(`${base}/start?connect=codex`);
+        await page.getByRole('dialog', { name: 'Connect in one click' }).waitFor();
+        assert(/Codex, Gemini CLI/.test(await page.locator('.tdoc-connect-dialog [data-app="other"]').innerText()), 'codex lands on the URL block');
+        await context.close();
+      });
+
+      await t(`${label}: homepage row "Use tdoc in your AI app" links each app to its connect step`, async () => {
+        const { context, page } = await open(width, height, { signedIn: false });
+        await page.goto(`${base}/`);
+        const frame = page.frameLocator('iframe.tdoc-doc-frame');
+        const row = frame.locator('#ai-apps');
+        await row.locator('.aiapp').first().waitFor();
+        const links = await row.locator('.aiapp').evaluateAll((els) => els.map((a) => [a.textContent.trim(), a.getAttribute('href')]));
+        assert(JSON.stringify(links) === JSON.stringify([
+          ['Claude', '/start?connect=claude'], ['ChatGPT', '/start?connect=chatgpt'], ['Cursor', '/start?connect=cursor'],
+          ['VS Code', '/start?connect=vscode'], ['Codex', '/start?connect=codex'], ['Gemini CLI', '/start?connect=gemini'],
+        ]), JSON.stringify(links));
+        await row.scrollIntoViewIfNeeded();
+        for (const a of await row.locator('.aiapp').all()) {
+          const b = await a.boundingBox();
+          assert(b && b.x >= 0 && b.x + b.width <= width + 1, `pill inside the page at ${label}: ${JSON.stringify(b)}`);
+        }
+        if (SHOTS) await row.screenshot({ path: path.join(SHOTS, `${label}-home-ai-apps.png`) });
+        await shot(page, `${label}-home`);
+        await row.getByRole('link', { name: 'Claude' }).click();
+        await page.waitForURL((u) => u.pathname === '/start' && u.searchParams.get('connect') === 'claude');
+        await page.getByRole('dialog', { name: 'Connect in one click' }).waitFor();
+        await page.waitForFunction(() => document.activeElement && document.activeElement.getAttribute('data-app') === 'claude');
+        await context.close();
+      });
+
       await t(`${label}: flag on, /setup and Settings -> Agents show the panel inline`, async () => {
         const { context, page } = await open(width, height, { flag: true, as: newcomer });
         await page.goto(`${base}/setup`);
@@ -177,7 +240,7 @@ async function startServer(worker, env) {
         await settings.scrollIntoViewIfNeeded();
         await shot(page, `${label}-settings`);
         const rows = await settings.locator('.tdoc-connect-app').count();
-        assert(rows === 3, `three app rows, got ${rows}`);
+        assert(rows === 4, `four app rows (Claude, ChatGPT, Cursor, VS Code), got ${rows}`);
         for (const btn of await settings.locator('.tdoc-connect-app .ui-btn').all()) {
           const b = await btn.boundingBox();
           assert(b && b.x + b.width <= width + 1, `button inside the page at ${label}`);
