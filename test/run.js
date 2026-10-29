@@ -20,6 +20,9 @@ const OFFLINE = [
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
+  'marketplaces.test.js',     // repo marketplaces (.claude-plugin, .agents/plugins) parse and point at real plugin folders
+  'plugins.test.js',          // plugins/: Claude, Codex/ChatGPT, Cursor, Gemini, VS Code packages for the remote MCP server
+  'remote-mcp.test.js',       // /mcp + OAuth 2.1: PKCE, redirect URIs, consent CSRF, token mapping, refresh/revoke, tools and refusals, rate limit
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
@@ -130,6 +133,7 @@ const OFFLINE = [
   'worker-shell.test.js',     // step7 worker shell parity: /frame route, CSP, bundled builders
   'upload-linear-time.test.js', // malformed 1.5 MB HTML must stay fast through the real upload route
   'bake-reader.test.js',      // tdoc-new bakes the reader template → self-contained docs (shell)
+  'style-reader-column.test.js', // house styles carry reader.css's column values; baking them stays idempotent
   'dark-invert-parity.test.js', // the shell's dark invert and the frame's copy must not drift
   'write-invariants.test.js',  // every server write path bakes, stamps aids, records sha
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
@@ -191,8 +195,10 @@ const BROWSER = [
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
+  'style-reader-column-render.test.js', // a house style alone yields the same reading column as a baked doc
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
   'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
+  'connect-ai-apps-ui.test.js', // remoteMcp flag: Connect in one click on /start, /setup, Settings (Claude/ChatGPT/Cursor links) + OAuth consent page, desktop + phone
   'team-agent-ui.test.js',     // team settings add/remove, member Send to team agent, the real daemon replying, desktop + phone
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
