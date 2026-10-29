@@ -83,6 +83,7 @@ Use these everywhere so listings match.
 
   | Tool | Title | Read-only | Destructive |
   | --- | --- | --- | --- |
+  | `get_writing_guide` | How to write a tdoc | yes | no |
   | `create_doc` | Create a tdoc document | no | no |
   | `update_doc` | Publish a new version | no | no |
   | `get_doc` | Read a tdoc document | yes | no |
