@@ -9266,6 +9266,7 @@ const ACCOUNT_TRASH_COST = 12;
 // Held for at most this long; every save renews it and checks it is still
 // this run's, and a run that lost it stops.
 const ACCOUNT_DELETE_LOCK_MS = 15 * 60 * 1000;
+const ACCOUNT_FALLBACK_LOCK_MS = 2 * 60 * 1000;
 
 // Why a deletion run stopped early: its budget is spent (the next run goes
 // on), or it lost its lock (another run or a restore owns the account now).
@@ -9316,8 +9317,12 @@ async function identityKeyId(secret) {
 // `pin` false: lookups never write). Throws IdentityKeyChanged.
 async function identityKey(env, { pin = false } = {}) {
   const cached = env && env.META && IDENTITY_KEY_CACHE.get(env.META);
+  const fresh = cached && Date.now() - cached.t < 60 * 1000;
+  // A mismatch is remembered a minute too (same secret value): one read and
+  // one alert a minute, not one per lookup.
+  if (fresh && cached.err && String(env[cached.err.name] || '') === cached.err.value) throw new IdentityKeyChanged('identity_key_changed');
   // Cached a minute -- unless the pinned secret's value is not what it was.
-  if (cached && Date.now() - cached.t < 60 * 1000 && (cached.v || !pin)
+  if (fresh && !cached.err && (cached.v || !pin)
       && (!cached.v || (cached.v.name ? String(env[cached.v.name] || '') : IDENTITY_FALLBACK_SECRET) === cached.v.secret)) return cached.v;
   let rec = null;
   try { rec = JSON.parse(await env.META.get(IDENTITY_KEY_PIN)); } catch {}
@@ -9326,6 +9331,7 @@ async function identityKey(env, { pin = false } = {}) {
     const secret = rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET;
     if (!secret || await identityKeyId(secret) !== rec.kid) {
       console.error(`[account-delete] ALERT: the identity key changed (pinned ${rec.name || 'fallback'}, kid ${rec.kid}); deleted-identity checks are refusing until it is restored.`);
+      if (env && env.META) IDENTITY_KEY_CACHE.set(env.META, { err: { name: rec.name || '', value: rec.name ? String(env[rec.name] || '') : IDENTITY_FALLBACK_SECRET }, t: Date.now() });
       throw new IdentityKeyChanged('identity_key_changed');
     }
     v = { secret, kid: rec.kid, name: rec.name || '' };
@@ -9360,7 +9366,7 @@ async function loadDeletedAccount(env, accountId) {
   } catch { return null; }
 }
 async function saveDeletedAccount(env, rec) {
-  await env.META.put(accountDeletedKey(rec.account_id), JSON.stringify(rec), { metadata: { state: rec.state, purge_at: rec.purge_at } });
+  await env.META.put(accountDeletedKey(rec.account_id), JSON.stringify(rec), { metadata: { state: rec.state, purge_at: rec.purge_at, swept: !!rec.sweep_done_at, run_at: rec.run_at || '' } });
 }
 
 async function deletedIdentityByHash(env, hash) {
@@ -9479,10 +9485,12 @@ async function listKeyNames(env, prefix) {
 // crash finds the original there and never overwrites it with nothing.
 async function stashMove(env, accountId, keys, { keep = false, budget = null } = {}) {
   for (const key of [...new Set(keys.filter(Boolean))]) {
-    if (budget) budget.need(4);
+    // A key already moved (an earlier run) costs only the look.
+    if (budget) budget.need(1);
     let r = null;
     try { r = await env.META.getWithMetadata(key); } catch {}
     if (!r || r.value == null) continue;
+    if (budget) budget.need(3);
     const entry = `${accountStashPrefix(accountId)}${key}`;
     if ((await env.META.get(entry)) == null) {
       await env.META.put(entry, JSON.stringify({ v: r.value, ...(r.metadata ? { m: r.metadata } : {}) }));
@@ -9512,7 +9520,9 @@ async function takeDeletionLock(env, accountId, record) {
   const owner = rand(8);
   const out = await searchStoreOp(env, 'account-delete', { kind: 'claim', key: `run:${accountId}`, keep_ms: ACCOUNT_DELETE_LOCK_MS, owner });
   if (out) return out.claimed ? owner : null;
-  return record && record.run_at && Date.now() - Date.parse(record.run_at) < ACCOUNT_DELETE_LOCK_MS ? null : owner;
+  // Fallback (no store): the record's run stamp, for a short while only, so
+  // the account's own next run is never shut out for long.
+  return record && record.run_at && Date.now() - Date.parse(record.run_at) < ACCOUNT_FALLBACK_LOCK_MS ? null : owner;
 }
 async function releaseDeletionLock(env, accountId, owner) {
   if (!owner) return;
@@ -9625,6 +9635,22 @@ async function markAccountDeleted(env, session, plan) {
   return record;
 }
 
+// Walk names in order, resuming after the last one a previous run handled:
+// record.cursors[name] is that name, and `${name}:done` marks a finished
+// walk, which is never walked again. A run that stops for its budget saves
+// the cursor with the record, so every run makes progress.
+async function walkResumable(record, name, items, budget, fn) {
+  record.cursors = record.cursors || {};
+  if (record.cursors[`${name}:done`]) return;
+  const after = record.cursors[name] || '';
+  for (const item of [...items].sort()) {
+    if (after && item <= after) continue;
+    await fn(item);
+    record.cursors[name] = item;
+  }
+  record.cursors[`${name}:done`] = true;
+}
+
 // Take the personal docs to Trash one by one as they are found, each paid
 // from the run's budget: a large account takes several runs, never one that
 // loads every doc first.
@@ -9634,18 +9660,19 @@ async function trashPersonalDocs(job, record) {
   const login = record.login || null;
   const keys = record.actor_keys || [];
   const matcher = personalDocMatcher({ accountIds: ids, login, actorKeys: keys });
+  if (record.cursors && record.cursors['trash:done']) return;
   budget.need(5);
   const slugs = new Set(await docIndexSlugs(env, `p:${record.account_id}`, matcher));
   if (login) for (const s of await listDocIndex(env, `l:${login}`)) slugs.add(s.slug);
-  for (const slug of slugs) {
+  await walkResumable(record, 'trash', slugs, budget, async (slug) => {
     budget.need(1);
     const meta = await loadDocMeta(env, slug);
-    if (!meta || meta.workspace_id) continue;
+    if (!meta || meta.workspace_id) return;
     const acct = meta.hosted && meta.hosted.account_id;
     const mine = acct ? ids.includes(acct)
       : !!((login && hostedGithubLogin(meta) === login) || (meta.hosted && meta.hosted.owner_key && keys.includes(String(meta.hosted.owner_key))));
     if (mine) await trashForDeletion(job, record, slug, meta);
-  }
+  });
 }
 
 // Docs this deletion already took to Trash under one facet (a run that died
@@ -9653,14 +9680,19 @@ async function trashPersonalDocs(job, record) {
 // restore brings them back and nothing else purges them early.
 async function adoptStampedTrash(env, record, facet, budget = null) {
   const prefix = `trashidx:${facet}:`;
-  if (budget) budget.need(1);
-  for (const key of await listKeyNames(env, prefix)) {
+  if (budget && record.cursors && record.cursors[`adopt:${facet}:done`]) return;
+  const names = await listKeyNames(env, prefix);
+  if (budget) budget.need(1 + Math.floor(names.length / 1000));
+  const visit = async (key) => {
     const slug = key.slice(prefix.length);
-    if (record.docs.includes(slug)) continue;
+    if (record.docs.includes(slug)) return;
     if (budget) budget.need(1);
     const rec = await loadDocRecord(env, slug);
     if (isTrashedMeta(rec) && rec.account_deleted_at === record.deleted_at) record.docs.push(slug);
-  }
+  };
+  // In a run: resumable. In a restore (no budget): the whole list, always.
+  if (budget) await walkResumable(record, `adopt:${facet}`, names, budget, visit);
+  else for (const key of names) await visit(key);
 }
 
 async function trashForDeletion(job, record, slug, meta) {
@@ -9685,7 +9717,7 @@ const ACCOUNT_DELETE_STEP_FNS = {
   },
   async identity(job, record) {
     const { env, budget } = job;
-    budget.need(20);
+    budget.need(5);
     const ids = record.ids;
     const keys = [];
     for (const key of [`hosted-account:${record.login}`, `hosted-github:${record.login}`]) {
@@ -9710,7 +9742,8 @@ const ACCOUNT_DELETE_STEP_FNS = {
       keys.push(...await listKeyNames(env, `feedback:space:${k}:`));
       keys.push(...await listKeyNames(env, `trashfolder:u:${k}:`));
     }
-    await stashMove(env, record.account_id, keys, { budget });
+    // Resumable: a run that stops part way goes on after the last key.
+    await walkResumable(record, 'identity', keys.filter(Boolean), budget, (key) => stashMove(env, record.account_id, [key], { budget }));
   },
   // Invites addressed to the identity, by the invite index (tinv:<who>:<team>).
   async invites(job, record) {
@@ -9780,16 +9813,25 @@ const ACCOUNT_DELETE_STEP_FNS = {
     // Each doc is saved on the record as it goes, and docs a run that died
     // already stamped are picked up from the Trash index.
     const { env, budget } = job;
-    await adoptStampedTrash(env, record, `p:${record.account_id}`, budget);
     await trashPersonalDocs(job, record);
-    for (const key of await listKeyNames(env, `trashidx:p:${record.account_id}:`)) {
-      const slug = key.slice(`trashidx:p:${record.account_id}:`.length);
-      budget.need(1);
-      const rec = await loadDocRecord(env, slug);
-      if (isTrashedMeta(rec) && !rec.account_deleted_at) {
-        budget.need(6);
-        await putDocMetaJson(env, slug, JSON.stringify({ ...rec, account_deleted_at: record.deleted_at }));
-      }
+    // Then one walk over this account's Trash, once each: a doc this
+    // deletion stamped but a run that died never noted goes onto
+    // record.docs; a doc that was in Trash already is stamped too.
+    const prefix = `trashidx:p:${record.account_id}:`;
+    if (!(record.cursors && record.cursors['stamp:done'])) {
+      const names = await listKeyNames(env, prefix);
+      budget.need(1 + Math.floor(names.length / 1000));
+      await walkResumable(record, 'stamp', names, budget, async (key) => {
+        const slug = key.slice(prefix.length);
+        if (record.docs.includes(slug)) return;
+        budget.need(1);
+        const rec = await loadDocRecord(env, slug);
+        if (isTrashedMeta(rec) && rec.account_deleted_at === record.deleted_at) { record.docs.push(slug); return; }
+        if (isTrashedMeta(rec) && !rec.account_deleted_at) {
+          budget.need(6);
+          await putDocMetaJson(env, slug, JSON.stringify({ ...rec, account_deleted_at: record.deleted_at }));
+        }
+      });
     }
   },
   async tokens(job, record) {
@@ -9965,16 +10007,17 @@ async function anonymizeDoc(env, slug, record, cache) {
   } catch { return false; }
 }
 
-// One batch of the shared sweep: each doc is read once for every account it
-// is looking for. An account is done after one full lap that started after
-// it joined (it joined at or before that lap's start), however the catalog
-// grew meanwhile. `held` is [{ rec, job }]: an account whose lock was lost
-// mid-batch is not saved.
-async function accountSweepBatch(env, held, now, budget) {
-  const accounts = held.map((h) => h.rec);
+// One batch of the shared sweep, under the sweep's own lock: each doc is
+// read once for every account it is looking for. Per-account progress lives
+// in that account's found key (account-deleted-comments:<id>), never on its
+// record, so the sweep needs no account's lock; an account is done after
+// one full lap that started after it joined (it joined at or before that
+// lap's start), however the catalog grew. Returns the accounts it finished.
+async function accountSweepBatch(env, accounts, now, budget) {
   const state = await loadAccountSweep(env);
   const founds = new Map();
-  for (const a of accounts) founds.set(a.account_id, await loadFound(env, a.account_id));
+  const dirty = new Set();
+  for (const a of accounts) { budget.spend(1); founds.set(a.account_id, await loadFound(env, a.account_id)); }
   const cache = new Map();
   const cap = accountSweepBudget(env);
   let scanned = 0;
@@ -9995,8 +10038,9 @@ async function accountSweepBatch(env, held, now, budget) {
       for (const a of accounts) {
         const f = founds.get(a.account_id);
         // Unreadable now: noted, so the anonymize pass tries it again.
-        if (list == null) { if (!f.found.includes(slug)) f.found.push(slug); continue; }
+        if (list == null) { if (!f.found.includes(slug)) { f.found.push(slug); dirty.add(a.account_id); } continue; }
         if (!(await deletedAuthorsIn(env, list, a.actor_hashes || [], a.deleted_at, cache)).length) continue;
+        dirty.add(a.account_id);
         if (a.state === 'purging') {
           budget.spend(ACCOUNT_ANONYMIZE_COST);
           if (!(await anonymizeDoc(env, slug, a, cache)) && !f.pending.includes(slug)) f.pending.push(slug);
@@ -10037,7 +10081,7 @@ async function accountSweepBatch(env, held, now, budget) {
           access: { ...freshAccess, allowed_users: freshAccess.allowed_users.filter((x) => !gone.has(x)) },
           invited_at: invitedAt,
         }));
-        for (const { a, x, at } of drop) founds.get(a.account_id).stripped.push({ slug, entry: x, ...(at ? { at } : {}) });
+        for (const { a, x, at } of drop) { founds.get(a.account_id).stripped.push({ slug, entry: x, ...(at ? { at } : {}) }); dirty.add(a.account_id); }
       } catch {}
     }
     let wrapped = false;
@@ -10055,7 +10099,10 @@ async function accountSweepBatch(env, held, now, budget) {
     if (wrapped) {
       const lapStart = state.lap_start;
       state.lap_start = state.scanned;
-      for (const a of accounts) if (!a.sweep_done_at && (a.sweep_join || 0) <= lapStart) a.sweep_done_at = new Date(now).toISOString();
+      for (const a of accounts) {
+        const f = founds.get(a.account_id);
+        if (!f.sweep_done_at && (a.sweep_join || 0) <= lapStart) { f.sweep_done_at = new Date(now).toISOString(); dirty.add(a.account_id); }
+      }
       // At most one lap end per run: a small catalog is not read twice.
       break;
     }
@@ -10063,43 +10110,84 @@ async function accountSweepBatch(env, held, now, budget) {
   }
   budget.spend(1);
   await env.META.put(ACCOUNT_SWEEP_STATE, JSON.stringify(state));
-  for (const { rec, job } of held) {
-    try {
-      await saveJobRecord(job, rec);
-      await env.META.put(accountCommentsKey(rec.account_id), JSON.stringify(founds.get(rec.account_id)));
-    } catch (e) {
-      if (!(e instanceof AccountJobStop)) console.error('[account-delete] sweep save failed:', rec.account_id, e && e.message);
-    }
+  const finished = [];
+  for (const a of accounts) {
+    if (!dirty.has(a.account_id)) continue;
+    budget.spend(2);
+    // Restored meanwhile: its found key went with it; do not recreate it.
+    if (!(await env.META.get(accountDeletedKey(a.account_id)))) continue;
+    await env.META.put(accountCommentsKey(a.account_id), JSON.stringify(founds.get(a.account_id)));
+    if (founds.get(a.account_id).sweep_done_at) finished.push(a.account_id);
   }
+  return finished;
+}
+
+// The deleted accounts, from the list's own metadata (state, purge_at,
+// swept): which ones need which kind of work costs no reads.
+async function listDeletedAccounts(env) {
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.META.list({ prefix: 'account-deleted:', cursor });
+    for (const k of page.keys) {
+      const id = k.name.slice('account-deleted:'.length);
+      if (k.metadata && k.metadata.state) { out.push({ id, ...k.metadata }); continue; }
+      // No metadata (written some other way): read the record once.
+      const rec = await loadDeletedAccount(env, id);
+      if (rec) out.push({ id, state: rec.state, purge_at: rec.purge_at, swept: !!rec.sweep_done_at, run_at: rec.run_at || '' });
+    }
+    cursor = page.cursor;
+    if (page.list_complete) break;
+  } while (cursor);
+  return out;
+}
+
+// Least recently worked on first (every save stamps run_at, and the list
+// metadata carries it), so a bounded run reaches every account in turn.
+function rotate(list) {
+  return [...list].sort((a, b) => String(a.run_at || '').localeCompare(String(b.run_at || '')));
 }
 
 // The scheduled half, every run, within one budget (ACCOUNT_CRON_BUDGET,
-// ~subrequests): drop the stash of accounts whose window is over, sweep for
-// every account still looking at once, anonymize, then resume deletions
-// that did not finish with what is left. Each account's work happens under
-// its lock, on its record as re-read under the lock, and fails alone: an
-// account restored meanwhile is left alone, and one account's error never
-// stops the others.
+// ~KV/DO ops): drop the stash of accounts whose window is over, sweep for
+// every account still looking at once, anonymize, and finish deletions that
+// did not -- with a share of the budget reserved for that last part while
+// any is waiting. Which accounts need what comes from the list's metadata,
+// so an account with nothing to do this run costs nothing; the per-account
+// loops take the least recently worked-on accounts first. Each account's work runs
+// under its lock, on its record as re-read under the lock, and fails alone.
 async function purgeDeletedAccounts(env, now = Date.now()) {
   const out = { resumed: [], purged: [], anonymized: [], finished: [], skipped: [] };
   if (!env || !env.META) return out;
-  const budget = makeAccountBudget(Number(env.TDOC_ACCOUNT_CRON_BUDGET) > 0 ? Number(env.TDOC_ACCOUNT_CRON_BUDGET) : ACCOUNT_CRON_BUDGET);
+  const total = Number(env.TDOC_ACCOUNT_CRON_BUDGET) > 0 ? Number(env.TDOC_ACCOUNT_CRON_BUDGET) : ACCOUNT_CRON_BUDGET;
+  const budget = makeAccountBudget(total);
   budget.spend(1);
-  const ids = (await listKeyNames(env, 'account-deleted:')).map((name) => name.slice('account-deleted:'.length));
-  if (!ids.length) return out;
+  const all = await listDeletedAccounts(env);
+  if (!all.length) return out;
+  const waiting = rotate(all.filter((a) => a.state === 'deleting'));
+  // Kept back for finishing deletions; the other parts stop short of it.
+  const reserve = waiting.length ? Math.floor(total * 0.4) : 0;
+  const room = (k = 10) => budget.left > reserve + k;
   // The identity key every hashed record was made with. Changed: nothing
   // identity-bound runs (a sweep would match nothing and strip nothing).
   let kid = null;
-  try { kid = (await identityKey(env)) ? (await identityKey(env)).kid : null; } catch { kid = false; }
+  try { const key = await identityKey(env); kid = key ? key.kid : null; } catch { kid = false; }
   const keyOk = (rec) => kid !== false && (!rec.kid || rec.kid === kid);
 
-  for (const id of ids) {
-    if (budget.left <= 10) break;
-    await withDeletionLock(env, id, budget, async (rec, job) => {
+  // Found keys whose account is gone (restored while a sweep ran).
+  budget.spend(1);
+  const live = new Set(all.map((a) => a.id));
+  for (const name of await listKeyNames(env, 'account-deleted-comments:')) {
+    if (!live.has(name.slice('account-deleted-comments:'.length)) && room(1)) { budget.spend(1); await env.META.delete(name); }
+  }
+
+  for (const a of rotate(all.filter((x) => x.state === 'deleted' && Date.parse(x.purge_at || '') <= now))) {
+    if (!room()) break;
+    await withDeletionLock(env, a.id, budget, async (rec, job) => {
       // The window is over: the stash goes now, whatever the sweep. The
       // personal docs go with Trash, on the same clock.
       if (rec.state !== 'deleted' || Date.parse(rec.purge_at || '') > now) return;
-      for (const name of await listKeyNames(env, accountStashPrefix(id))) { budget.spend(1); await env.META.delete(name); }
+      for (const name of await listKeyNames(env, accountStashPrefix(a.id))) { budget.spend(1); await env.META.delete(name); }
       for (const team of rec.teams_deleted || []) {
         budget.spend(6);
         for (const key of [teamFoldersKey(team.id), teamCheckoutKey(team.id)]) await env.META.delete(key).catch(() => {});
@@ -10112,61 +10200,70 @@ async function purgeDeletedAccounts(env, now = Date.now()) {
           } catch {}
         }
       }
-      const f = await loadFound(env, id);
+      const f = await loadFound(env, a.id);
       f.pending = [...new Set([...f.pending, ...f.found])];
       f.found = [];
       f.stripped = [];
       rec.state = 'purging';
       rec.purged_at = new Date(now).toISOString();
       await saveJobRecord(job, rec);
-      await env.META.put(accountCommentsKey(id), JSON.stringify(f));
-      out.purged.push(id);
+      await env.META.put(accountCommentsKey(a.id), JSON.stringify(f));
+      out.purged.push(a.id);
     });
   }
 
-  // The shared sweep, for every account still looking, all locked for it.
-  // While a deletion is waiting to be finished, the sweep takes at most half
-  // of what is left, so finishing it is never starved.
-  const waiting = [];
-  for (const id of ids) {
-    try { const r = JSON.parse(await env.META.get(accountDeletedKey(id))); if (r && r.state === 'deleting') waiting.push(id); } catch {}
-  }
-  const sweepBudget = makeAccountBudget(waiting.length ? Math.floor(budget.left / 2) : budget.left);
-  const sweepStart = sweepBudget.left;
-  const held = [];
-  try {
-    for (const id of ids) {
-      if (budget.left <= 10) break;
-      budget.spend(3);
-      const owner = await takeDeletionLock(env, id, await loadDeletedAccount(env, id));
-      if (!owner) continue;
-      const rec = await loadDeletedAccount(env, id);
-      if (rec && (rec.state === 'deleted' || rec.state === 'purging') && !rec.sweep_done_at && keyOk(rec)) {
-        held.push({ id, owner, rec, job: { env, owner, budget: sweepBudget } });
-      } else {
-        if (rec && !keyOk(rec)) out.skipped.push(id);
-        await releaseDeletionLock(env, id, owner);
+  // The shared sweep, under its own lock, for every account still looking.
+  for (const a of all) if (out.purged.includes(a.id)) a.state = 'purging';
+  const sweepers = all.filter((x) => (x.state === 'deleted' || x.state === 'purging') && !x.swept);
+  if (sweepers.length && room(20)) {
+    const sweepOwner = rand(8);
+    const claim = await searchStoreOp(env, 'account-delete', { kind: 'claim', key: 'sweep', keep_ms: ACCOUNT_DELETE_LOCK_MS, owner: sweepOwner });
+    if (!claim || claim.claimed) {
+      try {
+        const recs = [];
+        for (const a of sweepers) {
+          if (!room(20)) break;
+          budget.spend(1);
+          const rec = await loadDeletedAccount(env, a.id);
+          if (!rec || !(rec.state === 'deleted' || rec.state === 'purging')) continue;
+          if (!keyOk(rec)) { out.skipped.push(a.id); continue; }
+          recs.push(rec);
+        }
+        const share = makeAccountBudget(Math.max(0, budget.left - reserve));
+        const start = share.left;
+        let finished = [];
+        if (recs.length && share.left > 10) {
+          try { finished = await accountSweepBatch(env, recs, now, share); }
+          catch (e) { console.error('[account-delete] sweep failed:', e && e.message ? e.message : String(e)); }
+        }
+        budget.spend(start - share.left);
+        // A finished sweep is noted on the record (and its metadata), under
+        // that account's lock: the next runs no longer read it for the sweep.
+        for (const id of finished) {
+          await withDeletionLock(env, id, budget, async (rec, job) => {
+            const f = await loadFound(env, id);
+            if (!f.sweep_done_at || rec.sweep_done_at) return;
+            rec.sweep_done_at = f.sweep_done_at;
+            await saveJobRecord(job, rec);
+            for (const h of [...new Set([...(rec.actor_hashes || []), ...(rec.invitee_hashes || [])])]) await setDeletedIdentityByHash(env, h, { swept_at: rec.sweep_done_at });
+          });
+        }
+      } finally {
+        await searchStoreOp(env, 'account-delete', { kind: 'release', key: 'sweep', owner: sweepOwner });
       }
     }
-    if (held.length && sweepBudget.left > 10) {
-      try { await accountSweepBatch(env, held, now, sweepBudget); }
-      catch (e) { console.error('[account-delete] sweep failed:', e && e.message ? e.message : String(e)); }
-    }
-  } finally {
-    for (const h of held) await releaseDeletionLock(env, h.id, h.owner);
-    budget.spend(sweepStart - sweepBudget.left);
   }
 
-  for (const id of ids) {
-    if (budget.left <= 10) break;
-    await withDeletionLock(env, id, budget, async (rec, job) => {
+  for (const a of rotate(all.filter((x) => x.state === 'purging'))) {
+    if (!room()) break;
+    await withDeletionLock(env, a.id, budget, async (rec, job) => {
       if (rec.state !== 'purging') return;
-      if (!keyOk(rec)) { out.skipped.push(id); return; }
-      const f = await loadFound(env, id);
+      if (!keyOk(rec)) { out.skipped.push(a.id); return; }
+      const f = await loadFound(env, a.id);
       const left = [];
       const cache = new Map();
       for (const slug of f.pending) {
-        if (budget.left < ACCOUNT_ANONYMIZE_COST + 5) { left.push(slug); continue; }
+        if (!room(ACCOUNT_ANONYMIZE_COST + 5)) { left.push(slug); continue; }
         budget.spend(ACCOUNT_ANONYMIZE_COST);
         // A doc erased since has nothing left to anonymize.
         if (!(await loadDocRecord(env, slug))) continue;
@@ -10178,28 +10275,33 @@ async function purgeDeletedAccounts(env, now = Date.now()) {
         // Done. The id stays marked so no forgotten credential can open it;
         // the (hashed) identity tombstones stay to keep addresses hidden and
         // the old comments the old account's.
-        if (job.owner && !(await renewDeletionLock(env, id, job.owner))) return;
-        const marker = JSON.stringify({ canonical: id, ids: rec.ids, actor_keys: [], deleted_at: rec.deleted_at, purged_at: rec.purged_at });
+        if (job.owner && !(await renewDeletionLock(env, a.id, job.owner))) return;
+        const marker = JSON.stringify({ canonical: a.id, ids: rec.ids, actor_keys: [], deleted_at: rec.deleted_at, purged_at: rec.purged_at });
         for (const x of rec.ids || []) await env.META.put(`account-group:${x}`, marker);
         for (const h of [...new Set([...(rec.actor_hashes || []), ...(rec.invitee_hashes || [])])]) await setDeletedIdentityByHash(env, h, { account_id: null, purged_at: rec.purged_at });
-        await env.META.delete(accountCommentsKey(id));
-        await env.META.delete(accountDeletedKey(id));
-        out.finished.push(id);
+        await env.META.delete(accountCommentsKey(a.id));
+        await env.META.delete(accountDeletedKey(a.id));
+        out.finished.push(a.id);
         return;
       }
       await saveJobRecord(job, rec);
-      await env.META.put(accountCommentsKey(id), JSON.stringify(f));
+      await env.META.put(accountCommentsKey(a.id), JSON.stringify(f));
     });
   }
 
-  // Deletions that did not finish, with what is left of the budget.
-  for (const id of ids) {
-    if (budget.left <= 30) break;
-    await withDeletionLock(env, id, budget, async (rec, job) => {
+  // Deletions that did not finish, with the reserve and whatever is left,
+  // shared out so one large account does not hold up the others.
+  for (let i = 0; i < waiting.length; i++) {
+    if (budget.left <= 20) break;
+    const a = waiting[i];
+    const share = makeAccountBudget(Math.max(60, Math.floor(budget.left / (waiting.length - i))));
+    const start = share.left;
+    await withDeletionLock(env, a.id, share, async (rec, job) => {
       if (rec.state !== 'deleting') return;
       await runAccountDeletion(job, rec);
-      if (rec.state === 'deleted') out.resumed.push(id);
+      if (rec.state === 'deleted') out.resumed.push(a.id);
     });
+    budget.spend(start - share.left);
   }
   return out;
 }

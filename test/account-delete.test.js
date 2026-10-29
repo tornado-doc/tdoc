@@ -638,7 +638,7 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     // Simulate the crash: the record forgets the docs and the steps.
     const rec = JSON.parse(await env.META.get(`account-deleted:${hob.account_id}`));
     assert(rec.docs.includes('hob-a') && rec.docs.includes('hob-t'), JSON.stringify(rec.docs));
-    Object.assign(rec, { state: 'deleting', docs: [], steps: { kill: true, identity: true, invites: true }, teams_done: [], teams_deleted: [] });
+    Object.assign(rec, { state: 'deleting', docs: [], steps: { kill: true, identity: true, invites: true }, teams_done: [], teams_deleted: [], cursors: {} });
     await env.META.put(`account-deleted:${hob.account_id}`, JSON.stringify(rec));
     await cron(Date.now());
     const again = JSON.parse(await env.META.get(`account-deleted:${hob.account_id}`));
@@ -670,7 +670,7 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
   console.log('account delete: budgets, lost locks, the identity key');
 
   await t('a large account is deleted across runs within the budget; the sweep for others runs every run; a broken record fails alone', async () => {
-    const env3 = makeEnv(mod.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-secret', TDOC_ACCOUNT_REQUEST_BUDGET: '120', TDOC_ACCOUNT_CRON_BUDGET: '200' });
+    const env3 = makeEnv(mod.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-secret', TDOC_ACCOUNT_REQUEST_BUDGET: '120', TDOC_ACCOUNT_CRON_BUDGET: '200', TDOC_ACCOUNT_SWEEP_BATCH: '5' });
     const call3 = async (path, opts = {}) => {
       const r = await worker.fetch(req(path, opts), env3, ctx);
       const text = await r.clone().text();
@@ -694,23 +694,77 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     await env3.META.put('account-deleted:acct_broken', JSON.stringify({ account_id: 'acct_broken', ids: ['acct_broken'], state: 'deleted', purge_at: '2000-01-01T00:00:00Z', teams_deleted: 5 }));
     let scannedBefore = 0;
     let sweeping = 0;
+    let small2 = null;
     for (let run = 0; run < 15; run++) {
-      const smBefore = JSON.parse(await env3.META.get(`account-deleted:${small.account_id}`));
       await cron3(Date.now());
       const st = JSON.parse(await env3.META.get('account-sweep:state') || '{"scanned":0}');
       rec = JSON.parse(await env3.META.get(`account-deleted:${big.account_id}`));
-      // While small waits on the sweep, every run sweeps for it, though big
-      // is still being worked through.
-      if (smBefore.state === 'deleted' && !smBefore.sweep_done_at && rec.state === 'deleting') {
+      small2 = JSON.parse(await env3.META.get(`account-deleted:${small.account_id}`));
+      // The sweep runs every run (for small, and the broken record), though
+      // big is still being worked through and the broken record throws.
+      // (Until the lap that finishes everyone's sweep.)
+      if (rec.state === 'deleting' && scannedBefore < 45) {
         assert(st.scanned > scannedBefore, `run ${run}: the sweep was starved ${JSON.stringify(st)}`);
         sweeping += 1;
       }
       scannedBefore = st.scanned;
-      if (rec.state === 'deleted') break;
+      if (rec.state === 'deleted' && small2.state === 'deleted') break;
     }
-    assert(sweeping >= 1, 'never saw the sweep run beside the unfinished deletion');
+    assert(sweeping >= 2, `never saw the sweep run beside the unfinished deletion (${sweeping})`);
+    assert(small2.state === "deleted", `small was held up by big: ${JSON.stringify(small2)}`);
     assert(rec.state === 'deleted' && rec.docs.length === N, `big: ${rec.state} ${rec.docs.length} docs ${JSON.stringify(rec.error)}`);
     for (let i = 0; i < N; i++) assert(JSON.parse(await env3.META.get(`meta:big-${i}`)).trashed_at, `big-${i} not in Trash`);
+  });
+
+  await t('a 45-doc account finishes with a cron budget of 120 (each run goes on where the last stopped)', async () => {
+    const env6 = makeEnv(mod.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-secret', TDOC_ACCOUNT_REQUEST_BUDGET: '40', TDOC_ACCOUNT_CRON_BUDGET: '120' });
+    const call6 = async (path, opts = {}) => { const r = await worker.fetch(req(path, opts), env6, ctx); const text = await r.clone().text(); let body = null; try { body = JSON.parse(text); } catch {} return { status: r.status, body, text }; };
+    const pat = await issue(worker, env6, 'pat');
+    for (let i = 0; i < 45; i++) assert((await call6('/api/upload', { method: 'POST', token: pat.token, body: { slug: `pat-${String(i).padStart(2, '0')}`, version: 1, html: '<h1>x</h1>', meta: { title: 'x', access: { visibility: 'public' } } } })).status === 200, 'publish');
+    // Ten of them were already in Trash: the stamp walk has work too.
+    for (let i = 0; i < 10; i++) assert((await call6(`/api/doc?slug=pat-${String(i).padStart(2, '0')}`, { method: 'DELETE', token: pat.token })).status === 200, 'trash');
+    assert((await call6('/api/me/account/delete', { method: 'POST', cookie: pat.cookie, headers: SAME, body: { confirm: 'pat' } })).status === 200, 'delete');
+    let rec;
+    let runs = 0;
+    let last = -1;
+    for (; runs < 60; runs++) {
+      await worker.scheduled({ scheduledTime: Date.now(), cron: '23 * * * *' }, env6, ctx);
+      rec = JSON.parse(await env6.META.get(`account-deleted:${pat.account_id}`));
+      if (rec.state === 'deleted') break;
+      const progress = rec.docs.length + Object.keys(rec.cursors || {}).length + Object.keys(rec.steps).length;
+      assert(progress >= last, `run ${runs} went backwards`);
+      last = progress;
+    }
+    assert(rec.state === 'deleted', `not finished after ${runs} runs: ${JSON.stringify({ steps: rec.steps, docs: rec.docs.length, cursors: rec.cursors, error: rec.error })}`);
+    assert(rec.docs.length === 35, `docs ${rec.docs.length}`);
+    for (let i = 0; i < 45; i++) {
+      const m = JSON.parse(await env6.META.get(`meta:pat-${String(i).padStart(2, '0')}`));
+      assert(m.trashed_at && m.account_deleted_at, `pat-${i} ${JSON.stringify({ t: m.trashed_at, a: m.account_deleted_at })}`);
+    }
+  });
+
+  await t('with 40 accounts in their window, a waiting deletion still makes progress every run', async () => {
+    const env7 = makeEnv(mod.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-secret', TDOC_ACCOUNT_REQUEST_BUDGET: '40' });
+    const call7 = async (path, opts = {}) => { const r = await worker.fetch(req(path, opts), env7, ctx); const text = await r.clone().text(); let body = null; try { body = JSON.parse(text); } catch {} return { status: r.status, body, text }; };
+    const many = [];
+    for (let i = 0; i < 40; i++) many.push(await issue(worker, env7, `p${i}`));
+    const rex = await issue(worker, env7, 'rex');
+    for (let i = 0; i < 30; i++) assert((await call7('/api/upload', { method: 'POST', token: rex.token, body: { slug: `rex-${i}`, version: 1, html: '<h1>x</h1>', meta: { title: 'x', access: { visibility: 'public' } } } })).status === 200, 'publish');
+    // The 40 are deleted and done (their requests finished in the cron).
+    for (const p of many) assert((await call7('/api/me/account/delete', { method: 'POST', cookie: p.cookie, headers: SAME, body: { confirm: p.login } })).status === 200, 'delete');
+    for (let i = 0; i < 40; i++) await worker.scheduled({ scheduledTime: Date.now(), cron: '23 * * * *' }, env7, ctx);
+    const states = await Promise.all(many.map(async (p) => JSON.parse(await env7.META.get(`account-deleted:${p.account_id}`)).state));
+    assert(states.every((x) => x === 'deleted'), `the 40 are not all waiting in their window: ${states.join(',')}`);
+    assert((await call7('/api/me/account/delete', { method: 'POST', cookie: rex.cookie, headers: SAME, body: { confirm: 'rex' } })).status === 200, 'delete rex');
+    let prev = JSON.parse(await env7.META.get(`account-deleted:${rex.account_id}`)).docs.length;
+    for (let run = 0; run < 3; run++) {
+      await worker.scheduled({ scheduledTime: Date.now(), cron: '23 * * * *' }, env7, ctx);
+      const r = JSON.parse(await env7.META.get(`account-deleted:${rex.account_id}`));
+      if (r.state === 'deleted') break;
+      assert(r.docs.length > prev || Object.keys(r.steps).length > 0, `run ${run}: no progress (${r.docs.length})`);
+      assert(r.docs.length > prev || !r.steps.teams, `run ${run}: docs stalled at ${r.docs.length}`);
+      prev = r.docs.length;
+    }
   });
 
   await t('a run that loses its lock mid-way stops and writes nothing more', async () => {
@@ -775,8 +829,13 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     const origErr = console.error;
     console.error = (...a) => { errors.push(a.join(' ')); };
     let res;
-    try { res = await mod.default.scheduled({ scheduledTime: Date.parse(rec.purge_at) + DAY, cron: '23 * * * *' }, env5, ctx); } finally { console.error = origErr; }
-    assert(errors.some((m) => /identity key changed/.test(m)), `no alert: ${errors.join('|')}`);
+    try {
+      res = await mod.default.scheduled({ scheduledTime: Date.parse(rec.purge_at) + DAY, cron: '23 * * * *' }, env5, ctx);
+      // Lookups on hot paths right after: no alert storm, no failure.
+      for (let i = 0; i < 3; i++) assert((await call5('/api/comments?slug=own5-doc', { cookie: owner5.cookie })).status === 200, 'comments read failed');
+    } finally { console.error = origErr; }
+    const alerts = errors.filter((m) => /identity key changed/.test(m));
+    assert(alerts.length === 1, `expected one alert a minute, got ${alerts.length}`);
     const after = JSON.parse(await env5.META.get(`account-deleted:${max.account_id}`));
     assert(after && !after.sweep_done_at, 'the sweep ran with the wrong key');
     assert(env5.COMMENTS.stateFor('own5-doc').storage.map.get('list')[0].author.login === 'max', 'anonymized with the wrong key');
