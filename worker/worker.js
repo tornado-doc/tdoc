@@ -213,6 +213,19 @@ function docAgentHints(origin, slug, version, head) {
 // page: built only for a response that already serves the doc.
 function docAgentView({ origin, slug, version, head, title, author, rawHtml, access, isLanding, mcp = false }) {
   const extracted = SHELL && SHELL.agentBlocksFromHtml ? SHELL.agentBlocksFromHtml(rawHtml) : { blocks: [], truncated: false };
+  // Site pages are crawled as a website: their links go in the page too, so a
+  // search engine finds /pricing, /start and the rest from the home page.
+  const links = isLanding && SHELL && SHELL.linksFromHtml ? SHELL.linksFromHtml(rawHtml) : null;
+  if (isLanding && slug !== LANDING_SLUG) {
+    return {
+      title,
+      contentHeading: 'Page text',
+      intro: [`This is the ${title} page of tdoc (https://tdoc.dev): documents your AI agent writes and your readers comment on.`],
+      blocks: extracted.blocks,
+      links,
+      truncated: false,
+    };
+  }
   if (isLanding) {
     return {
       title: 'tdoc — documents your AI agent writes and your readers comment on',
@@ -226,6 +239,7 @@ function docAgentView({ origin, slug, version, head, title, author, rawHtml, acc
         `For agents: ${origin}/llms.txt (short), ${origin}/llms-full.txt (everything), ${origin}/SKILL.md (how to read, comment and publish). Any tdoc document URL also answers Accept: text/markdown with its text and comments.`,
       ],
       blocks: extracted.blocks,
+      links,
       truncated: false,
     };
   }
@@ -3061,9 +3075,14 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // what they chose to share. Only robots (noindex) depends on Public.
   let seoTitle = title;
   let seoDescription = description || `A tdoc by ${author || 'tdoc'}.`;
-  if (isLanding) {
+  // Only the home page takes the product title; /pricing, /start and the
+  // other site pages keep their own title and excerpt, or every one of them
+  // would show up in search as a copy of the home page.
+  if (isLanding && slug === LANDING_SLUG) {
     seoTitle = 'Tornado: AI Native Docs';
     seoDescription = 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.';
+  }
+  if (isLanding) {
     shareImage = origin ? `${origin}/tdoc_logo-v2.png` : '/tdoc_logo-v2.png';
     shareImageLarge = false;
   }
@@ -3081,7 +3100,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     nonceAttr,
     cfgJson: safeJsonForScript(cfg),
     bootJson: safeJsonForScript({
-      frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame`,
+      frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame${isLanding ? '?tdoc_site=1' : ''}`,
       oldVersion,
     }),
     runtimeJsPath: SHELL_RUNTIME_JS_PATH,
@@ -3501,6 +3520,15 @@ const TEMPLATES_SLUG = 'tdoc-templates';
 const PRICING_SLUG = 'tdoc-pricing';
 // `/privacy` — the privacy policy. Same landing-doc mechanism.
 const PRIVACY_SLUG = 'tdoc-privacy';
+// Where each site page lives, for its canonical URL: /pricing, not
+// /d/tdoc-pricing/v/3.
+const SITE_PATHS = {
+  [LANDING_SLUG]: '/',
+  [START_SLUG]: '/start',
+  [TEMPLATES_SLUG]: '/templates',
+  [PRICING_SLUG]: '/pricing',
+  [PRIVACY_SLUG]: '/privacy',
+};
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -3616,8 +3644,8 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
   const reqUrl = new URL(req.url);
   // The bare /d/<slug> address is the doc's canonical page: it always
   // shows the newest version.
-  const pageUrl = isLanding && (reqUrl.pathname === '/' || reqUrl.pathname === '')
-    ? `${reqUrl.origin}/`
+  const pageUrl = isLanding && SITE_PATHS[slug]
+    ? `${reqUrl.origin}${SITE_PATHS[slug]}`
     : head
       ? `${reqUrl.origin}/d/${encodeURIComponent(slug)}`
       : `${reqUrl.origin}/d/${encodeURIComponent(slug)}/v/${version}`;

@@ -1,90 +1,1200 @@
 {
-  "_arc-7sw5rP1n.js": {
-    "file": "assets/arc-7sw5rP1n.js",
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Bold.woff2": {
+    "file": "shell.gm-uSS1B.woff2",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Bold.woff2"
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Medium.woff2": {
+    "file": "shell.DrcxCXg3.woff2",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Medium.woff2"
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Regular.woff2": {
+    "file": "shell.DVxZuzxb.woff2",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Regular.woff2"
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-SemiBold.woff2": {
+    "file": "shell.SCI4bEL9.woff2",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-SemiBold.woff2"
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js": {
+    "file": "assets/ar-SA-G6X2FPQ2-4a6522fy.js",
+    "name": "ar-SA-G6X2FPQ2",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js": {
+    "file": "assets/az-AZ-76LH7QW2-Dml5zhoR.js",
+    "name": "az-AZ-76LH7QW2",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js": {
+    "file": "assets/bg-BG-XCXSNQG7-2ozUXVPV.js",
+    "name": "bg-BG-XCXSNQG7",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/bn-BD-2XOGV67Q.js": {
+    "file": "assets/bn-BD-2XOGV67Q-BLE67WaE.js",
+    "name": "bn-BD-2XOGV67Q",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/bn-BD-2XOGV67Q.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ca-ES-6MX7JW3Y.js": {
+    "file": "assets/ca-ES-6MX7JW3Y-BGA5ZuBA.js",
+    "name": "ca-ES-6MX7JW3Y",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ca-ES-6MX7JW3Y.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/cs-CZ-2BRQDIVT.js": {
+    "file": "assets/cs-CZ-2BRQDIVT-CWt-t-Nr.js",
+    "name": "cs-CZ-2BRQDIVT",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/cs-CZ-2BRQDIVT.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/da-DK-5WZEPLOC.js": {
+    "file": "assets/da-DK-5WZEPLOC-fqdd9VwO.js",
+    "name": "da-DK-5WZEPLOC",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/da-DK-5WZEPLOC.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/de-DE-XR44H4JA.js": {
+    "file": "assets/de-DE-XR44H4JA-Bo-5GmNP.js",
+    "name": "de-DE-XR44H4JA",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/de-DE-XR44H4JA.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/el-GR-BZB4AONW.js": {
+    "file": "assets/el-GR-BZB4AONW-wz_8ZioA.js",
+    "name": "el-GR-BZB4AONW",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/el-GR-BZB4AONW.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/es-ES-U4NZUMDT.js": {
+    "file": "assets/es-ES-U4NZUMDT-CQHJN_Nw.js",
+    "name": "es-ES-U4NZUMDT",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/es-ES-U4NZUMDT.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/eu-ES-A7QVB2H4.js": {
+    "file": "assets/eu-ES-A7QVB2H4-CazElX5x.js",
+    "name": "eu-ES-A7QVB2H4",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/eu-ES-A7QVB2H4.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fa-IR-HGAKTJCU.js": {
+    "file": "assets/fa-IR-HGAKTJCU-Dr8ZBMje.js",
+    "name": "fa-IR-HGAKTJCU",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fa-IR-HGAKTJCU.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fi-FI-Z5N7JZ37.js": {
+    "file": "assets/fi-FI-Z5N7JZ37-Dn_70gzw.js",
+    "name": "fi-FI-Z5N7JZ37",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fi-FI-Z5N7JZ37.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fr-FR-RHASNOE6.js": {
+    "file": "assets/fr-FR-RHASNOE6-Th_ea2uI.js",
+    "name": "fr-FR-RHASNOE6",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fr-FR-RHASNOE6.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/gl-ES-HMX3MZ6V.js": {
+    "file": "assets/gl-ES-HMX3MZ6V-CZrefMh1.js",
+    "name": "gl-ES-HMX3MZ6V",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/gl-ES-HMX3MZ6V.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/he-IL-6SHJWFNN.js": {
+    "file": "assets/he-IL-6SHJWFNN-DS7pTHd4.js",
+    "name": "he-IL-6SHJWFNN",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/he-IL-6SHJWFNN.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/hi-IN-IWLTKZ5I.js": {
+    "file": "assets/hi-IN-IWLTKZ5I-BkUVlWD4.js",
+    "name": "hi-IN-IWLTKZ5I",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/hi-IN-IWLTKZ5I.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/hu-HU-A5ZG7DT2.js": {
+    "file": "assets/hu-HU-A5ZG7DT2-Ck5QmGMJ.js",
+    "name": "hu-HU-A5ZG7DT2",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/hu-HU-A5ZG7DT2.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/id-ID-SAP4L64H.js": {
+    "file": "assets/id-ID-SAP4L64H-WasQ9GH-.js",
+    "name": "id-ID-SAP4L64H",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/id-ID-SAP4L64H.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/it-IT-JPQ66NNP.js": {
+    "file": "assets/it-IT-JPQ66NNP-CisOl4rm.js",
+    "name": "it-IT-JPQ66NNP",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/it-IT-JPQ66NNP.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ja-JP-DBVTYXUO.js": {
+    "file": "assets/ja-JP-DBVTYXUO-COLoWmNA.js",
+    "name": "ja-JP-DBVTYXUO",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ja-JP-DBVTYXUO.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kaa-6HZHGXH3.js": {
+    "file": "assets/kaa-6HZHGXH3-CCyWhFQs.js",
+    "name": "kaa-6HZHGXH3",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kaa-6HZHGXH3.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kab-KAB-ZGHBKWFO.js": {
+    "file": "assets/kab-KAB-ZGHBKWFO-D4ojvo5E.js",
+    "name": "kab-KAB-ZGHBKWFO",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kab-KAB-ZGHBKWFO.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kk-KZ-P5N5QNE5.js": {
+    "file": "assets/kk-KZ-P5N5QNE5-DCvy-pIz.js",
+    "name": "kk-KZ-P5N5QNE5",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kk-KZ-P5N5QNE5.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/km-KH-HSX4SM5Z.js": {
+    "file": "assets/km-KH-HSX4SM5Z-B3ozpBGn.js",
+    "name": "km-KH-HSX4SM5Z",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/km-KH-HSX4SM5Z.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ko-KR-MTYHY66A.js": {
+    "file": "assets/ko-KR-MTYHY66A-COCjSaQ5.js",
+    "name": "ko-KR-MTYHY66A",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ko-KR-MTYHY66A.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ku-TR-6OUDTVRD.js": {
+    "file": "assets/ku-TR-6OUDTVRD-CEwSc2VY.js",
+    "name": "ku-TR-6OUDTVRD",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ku-TR-6OUDTVRD.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/lt-LT-XHIRWOB4.js": {
+    "file": "assets/lt-LT-XHIRWOB4-Drb9EyCy.js",
+    "name": "lt-LT-XHIRWOB4",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/lt-LT-XHIRWOB4.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/lv-LV-5QDEKY6T.js": {
+    "file": "assets/lv-LV-5QDEKY6T-C4g4y2FL.js",
+    "name": "lv-LV-5QDEKY6T",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/lv-LV-5QDEKY6T.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/mr-IN-CRQNXWMA.js": {
+    "file": "assets/mr-IN-CRQNXWMA-7AzNZ9JH.js",
+    "name": "mr-IN-CRQNXWMA",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/mr-IN-CRQNXWMA.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/my-MM-5M5IBNSE.js": {
+    "file": "assets/my-MM-5M5IBNSE-YmvWvWrk.js",
+    "name": "my-MM-5M5IBNSE",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/my-MM-5M5IBNSE.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nb-NO-T6EIAALU.js": {
+    "file": "assets/nb-NO-T6EIAALU-DSH3PpTu.js",
+    "name": "nb-NO-T6EIAALU",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nb-NO-T6EIAALU.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nl-NL-IS3SIHDZ.js": {
+    "file": "assets/nl-NL-IS3SIHDZ-CMfyGZPy.js",
+    "name": "nl-NL-IS3SIHDZ",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nl-NL-IS3SIHDZ.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nn-NO-6E72VCQL.js": {
+    "file": "assets/nn-NO-6E72VCQL-BhuRDIiK.js",
+    "name": "nn-NO-6E72VCQL",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nn-NO-6E72VCQL.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/oc-FR-POXYY2M6.js": {
+    "file": "assets/oc-FR-POXYY2M6-CwkjQqxS.js",
+    "name": "oc-FR-POXYY2M6",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/oc-FR-POXYY2M6.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pa-IN-N4M65BXN.js": {
+    "file": "assets/pa-IN-N4M65BXN-CFefjug3.js",
+    "name": "pa-IN-N4M65BXN",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pa-IN-N4M65BXN.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pl-PL-T2D74RX3.js": {
+    "file": "assets/pl-PL-T2D74RX3-Dy9e-ybq.js",
+    "name": "pl-PL-T2D74RX3",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pl-PL-T2D74RX3.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-BR-5N22H2LF.js": {
+    "file": "assets/pt-BR-5N22H2LF-DzhzJB_k.js",
+    "name": "pt-BR-5N22H2LF",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-BR-5N22H2LF.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-PT-UZXXM6DQ.js": {
+    "file": "assets/pt-PT-UZXXM6DQ-Bq_JmRWf.js",
+    "name": "pt-PT-UZXXM6DQ",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-PT-UZXXM6DQ.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ro-RO-JPDTUUEW.js": {
+    "file": "assets/ro-RO-JPDTUUEW-D5W1Ygq5.js",
+    "name": "ro-RO-JPDTUUEW",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ro-RO-JPDTUUEW.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ru-RU-B4JR7IUQ.js": {
+    "file": "assets/ru-RU-B4JR7IUQ-GYiUltGJ.js",
+    "name": "ru-RU-B4JR7IUQ",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ru-RU-B4JR7IUQ.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/si-LK-N5RQ5JYF.js": {
+    "file": "assets/si-LK-N5RQ5JYF-BV15bl9o.js",
+    "name": "si-LK-N5RQ5JYF",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/si-LK-N5RQ5JYF.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sk-SK-C5VTKIMK.js": {
+    "file": "assets/sk-SK-C5VTKIMK-BXHzJ65m.js",
+    "name": "sk-SK-C5VTKIMK",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sk-SK-C5VTKIMK.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sl-SI-NN7IZMDC.js": {
+    "file": "assets/sl-SI-NN7IZMDC-HPy5wFvI.js",
+    "name": "sl-SI-NN7IZMDC",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sl-SI-NN7IZMDC.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sv-SE-XGPEYMSR.js": {
+    "file": "assets/sv-SE-XGPEYMSR-c-qQKfH1.js",
+    "name": "sv-SE-XGPEYMSR",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sv-SE-XGPEYMSR.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ta-IN-2NMHFXQM.js": {
+    "file": "assets/ta-IN-2NMHFXQM-MJkQAM1F.js",
+    "name": "ta-IN-2NMHFXQM",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ta-IN-2NMHFXQM.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/th-TH-HPSO5L25.js": {
+    "file": "assets/th-TH-HPSO5L25-BSP9X8TN.js",
+    "name": "th-TH-HPSO5L25",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/th-TH-HPSO5L25.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/tr-TR-DEFEU3FU.js": {
+    "file": "assets/tr-TR-DEFEU3FU-CyfwFLU3.js",
+    "name": "tr-TR-DEFEU3FU",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/tr-TR-DEFEU3FU.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/uk-UA-QMV73CPH.js": {
+    "file": "assets/uk-UA-QMV73CPH-CoPvCHRY.js",
+    "name": "uk-UA-QMV73CPH",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/uk-UA-QMV73CPH.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/vi-VN-M7AON7JQ.js": {
+    "file": "assets/vi-VN-M7AON7JQ-DuSwZyUR.js",
+    "name": "vi-VN-M7AON7JQ",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/vi-VN-M7AON7JQ.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-CN-LNUGB5OW.js": {
+    "file": "assets/zh-CN-LNUGB5OW-Bn4Z06-B.js",
+    "name": "zh-CN-LNUGB5OW",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-CN-LNUGB5OW.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js": {
+    "file": "assets/zh-HK-E62DVLB3-CsFBHWLK.js",
+    "name": "zh-HK-E62DVLB3",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js": {
+    "file": "assets/zh-TW-RAJ6MFWO-B5APcoHG.js",
+    "name": "zh-TW-RAJ6MFWO",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js": {
+    "file": "assets/subset-shared.chunk-CoJApONH.js",
+    "name": "subset-shared.chunk",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js": {
+    "file": "assets/subset-worker.chunk-nq6wd-MB.js",
+    "name": "subset-worker.chunk",
+    "src": "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
+      "_percentages-BXMCSKIN-CN3ztda_.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/browser-fs-access/dist/directory-open-01563666.js": {
+    "file": "assets/directory-open-01563666-DWU9wJ6I.js",
+    "name": "directory-open-01563666",
+    "src": "../tdoc/node_modules/browser-fs-access/dist/directory-open-01563666.js",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/browser-fs-access/dist/directory-open-4ed118d0.js": {
+    "file": "assets/directory-open-4ed118d0-CunoC1EB.js",
+    "name": "directory-open-4ed118d0",
+    "src": "../tdoc/node_modules/browser-fs-access/dist/directory-open-4ed118d0.js",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/browser-fs-access/dist/file-open-002ab408.js": {
+    "file": "assets/file-open-002ab408-DIuFHtCF.js",
+    "name": "file-open-002ab408",
+    "src": "../tdoc/node_modules/browser-fs-access/dist/file-open-002ab408.js",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/browser-fs-access/dist/file-open-7c801643.js": {
+    "file": "assets/file-open-7c801643-684qeFg4.js",
+    "name": "file-open-7c801643",
+    "src": "../tdoc/node_modules/browser-fs-access/dist/file-open-7c801643.js",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/browser-fs-access/dist/file-save-3189631c.js": {
+    "file": "assets/file-save-3189631c-C1wFhQhH.js",
+    "name": "file-save-3189631c",
+    "src": "../tdoc/node_modules/browser-fs-access/dist/file-save-3189631c.js",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/browser-fs-access/dist/file-save-745eba88.js": {
+    "file": "assets/file-save-745eba88-Bb9F9Kg7.js",
+    "name": "file-save-745eba88",
+    "src": "../tdoc/node_modules/browser-fs-access/dist/file-save-745eba88.js",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/canvas-roundrect-polyfill/roundRect.js": {
+    "file": "assets/roundRect-0PYZxl1G.js",
+    "name": "roundRect",
+    "src": "../tdoc/node_modules/canvas-roundrect-polyfill/roundRect.js",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs": {
+    "file": "assets/image-blob-reduce.esm-HwCm7IZ0.js",
+    "name": "image-blob-reduce.esm",
+    "src": "../tdoc/node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/katex/dist/katex.mjs": {
+    "file": "assets/katex-C5jXJg4s.js",
+    "name": "katex",
+    "src": "../tdoc/node_modules/katex/dist/katex.mjs",
+    "isDynamicEntry": true
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs": {
+    "file": "assets/abnfDiagram-VCTEODGH-BOdDW8Dn.js",
+    "name": "abnfDiagram-VCTEODGH",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-SVP7TREG-CuNG89MF.js",
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs": {
+    "file": "assets/architectureDiagram-5GKGNRK7-B6-O5dTT.js",
+    "name": "architectureDiagram-5GKGNRK7",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "_cytoscape.esm-Ix0LnXOy.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs": {
+    "file": "assets/blockDiagram-I7D4REHJ-DRypkdHa.js",
+    "name": "blockDiagram-I7D4REHJ",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-5VM5RSS4-BudW-JN6.js",
+      "_index-D354-7y-.js",
+      "_channel-mD0GV9Kf.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs": {
+    "file": "assets/c4Diagram-7LVT6UL2-CGXJQKtz.js",
+    "name": "c4Diagram-7LVT6UL2",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "_index-D354-7y-.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs": {
+    "file": "assets/classDiagram-ZZMXUADV-CT2Hc12X.js",
+    "name": "classDiagram-ZZMXUADV",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-TICWLB2K-JOKL_vZw.js",
+      "_index-D354-7y-.js",
+      "_chunk-5VM5RSS4-BudW-JN6.js",
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs": {
+    "file": "assets/classDiagram-v2-VYDZK3BY-CT2Hc12X.js",
+    "name": "classDiagram-v2-VYDZK3BY",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-TICWLB2K-JOKL_vZw.js",
+      "_index-D354-7y-.js",
+      "_chunk-5VM5RSS4-BudW-JN6.js",
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs": {
+    "file": "assets/cose-bilkent-JH36ORCC-Dr4t_9Ql.js",
+    "name": "cose-bilkent-JH36ORCC",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "_cytoscape.esm-Ix0LnXOy.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs": {
+    "file": "assets/cynefinDiagram-5FMLGOSQ-BSefoF6T.js",
+    "name": "cynefinDiagram-5FMLGOSQ",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs": {
+    "file": "assets/dagre-GXQ25YYZ-BIWUlTmi.js",
+    "name": "dagre-GXQ25YYZ",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "_layout-Dpt-7gs6.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs": {
+    "file": "assets/diagram-S7CK7UJ4-8Pkc0KAE.js",
+    "name": "diagram-S7CK7UJ4",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-2Q5K7J3B-BSzllhrL.js",
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs": {
+    "file": "assets/diagram-UQ7AKVKN-DMnyxRux.js",
+    "name": "diagram-UQ7AKVKN",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs": {
+    "file": "assets/diagram-VSXAHHWV-6NajavFZ.js",
+    "name": "diagram-VSXAHHWV",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs": {
+    "file": "assets/diagram-VX7I27RA-DDnODebg.js",
+    "name": "diagram-VX7I27RA",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "_defaultLocale-DX6XiGOO.js",
+      "_ordinal-Cboi1Yqb.js",
+      "shell/src/main.jsx",
+      "_init-Gi6I4Gst.js"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs": {
+    "file": "assets/diagram-Z3DM3KII-D1i8FIvx.js",
+    "name": "diagram-Z3DM3KII",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs": {
+    "file": "assets/ebnfDiagram-PWID7BFC-DMIMlebh.js",
+    "name": "ebnfDiagram-PWID7BFC",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-SVP7TREG-CuNG89MF.js",
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs": {
+    "file": "assets/erDiagram-RLTQ6QDP-Dyp_TeB4.js",
+    "name": "erDiagram-RLTQ6QDP",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_index-D354-7y-.js",
+      "_channel-mD0GV9Kf.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs": {
+    "file": "assets/ganttDiagram-EL5Y4UJY-DSGEqqPl.js",
+    "name": "ganttDiagram-EL5Y4UJY",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "shell/src/main.jsx",
+      "_linear-DD-jmzek.js",
+      "_init-Gi6I4Gst.js",
+      "_defaultLocale-DX6XiGOO.js"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs": {
+    "file": "assets/gitGraphDiagram-WWUBYQGX-BWK2bV0h.js",
+    "name": "gitGraphDiagram-WWUBYQGX",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-2Q5K7J3B-BSzllhrL.js",
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs": {
+    "file": "assets/infoDiagram-27XIBGKW-BiOEe-JN.js",
+    "name": "infoDiagram-27XIBGKW",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs": {
+    "file": "assets/ishikawaDiagram-5VMMS53U-elZQe1AM.js",
+    "name": "ishikawaDiagram-5VMMS53U",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs": {
+    "file": "assets/journeyDiagram-3NMN7TZE-Ces8shBS.js",
+    "name": "journeyDiagram-3NMN7TZE",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-5VM5RSS4-BudW-JN6.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "_index-D354-7y-.js",
+      "_arc-QiFIV_dL.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs": {
+    "file": "assets/kanban-definition-UXKFOSKX-OI_HN70S.js",
+    "name": "kanban-definition-UXKFOSKX",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "_chunk-5VM5RSS4-BudW-JN6.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs": {
+    "file": "assets/mindmap-definition-YA3MSWOX-CdPy17Wv.js",
+    "name": "mindmap-definition-YA3MSWOX",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_index-D354-7y-.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs": {
+    "file": "assets/pegDiagram-XKGWAZYB-CDDdVikC.js",
+    "name": "pegDiagram-XKGWAZYB",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-SVP7TREG-CuNG89MF.js",
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs": {
+    "file": "assets/pieDiagram-E7YTZNPT-CTJ3xInO.js",
+    "name": "pieDiagram-E7YTZNPT",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "_arc-QiFIV_dL.js",
+      "_ordinal-Cboi1Yqb.js",
+      "shell/src/main.jsx",
+      "_init-Gi6I4Gst.js"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs": {
+    "file": "assets/quadrantDiagram-AXDQQJYC-DenQrV3E.js",
+    "name": "quadrantDiagram-AXDQQJYC",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "_linear-DD-jmzek.js",
+      "shell/src/main.jsx",
+      "_init-Gi6I4Gst.js",
+      "_defaultLocale-DX6XiGOO.js"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs": {
+    "file": "assets/railroadDiagram-O6MQD6OU-cMYAZ2yD.js",
+    "name": "railroadDiagram-O6MQD6OU",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-SVP7TREG-CuNG89MF.js",
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs": {
+    "file": "assets/requirementDiagram-BXWQKSXE-DMUP8W-z.js",
+    "name": "requirementDiagram-BXWQKSXE",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_index-D354-7y-.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs": {
+    "file": "assets/sankeyDiagram-P5KCCOFB-u2yTX9BA.js",
+    "name": "sankeyDiagram-P5KCCOFB",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "_ordinal-Cboi1Yqb.js",
+      "shell/src/main.jsx",
+      "_init-Gi6I4Gst.js"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs": {
+    "file": "assets/sequenceDiagram-WJ2MYXX4-Bk6Vcptq.js",
+    "name": "sequenceDiagram-WJ2MYXX4",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-2Q5K7J3B-BSzllhrL.js",
+      "_index-D354-7y-.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs": {
+    "file": "assets/sizeCapture-INFHLROL-DsUjnqFp.js",
+    "name": "sizeCapture-INFHLROL",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs": {
+    "file": "assets/stateDiagram-D77RDMKH-DfCjJyq1.js",
+    "name": "stateDiagram-D77RDMKH",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-IMKFNOWR-CwRpurwY.js",
+      "_index-D354-7y-.js",
+      "_layout-Dpt-7gs6.js",
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs": {
+    "file": "assets/stateDiagram-v2-MP3YSRHH-CGRizVq1.js",
+    "name": "stateDiagram-v2-MP3YSRHH",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-IMKFNOWR-CwRpurwY.js",
+      "_index-D354-7y-.js",
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs": {
+    "file": "assets/swimlanes-42K2YHIH-Ds4h9wF4.js",
+    "name": "swimlanes-42K2YHIH",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs": {
+    "file": "assets/swimlanesDiagram-VR7AAH4N-Dz0piU20.js",
+    "name": "swimlanesDiagram-VR7AAH4N",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_flowDiagram-HODETNUW-Cqohdep6.js",
+      "_index-D354-7y-.js",
+      "_chunk-5VM5RSS4-BudW-JN6.js",
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "_channel-mD0GV9Kf.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs": {
+    "file": "assets/timeline-definition-24CTP7MA-Cp-9Qm_f.js",
+    "name": "timeline-definition-24CTP7MA",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "_arc-QiFIV_dL.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs": {
+    "file": "assets/vennDiagram-4TSXK5OY-Ce6xsJQg.js",
+    "name": "vennDiagram-4TSXK5OY",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs": {
+    "file": "assets/wardleyDiagram-VM6X3IG4-Cgjs-OCv.js",
+    "name": "wardleyDiagram-VM6X3IG4",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_chunk-JWPE2WC7-DmpE1Rp3.js",
+      "_index-D354-7y-.js",
+      "_cynefin-OW5HDTMX-DDSkVShi.js",
+      "shell/src/main.jsx"
+    ]
+  },
+  "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs": {
+    "file": "assets/xychartDiagram-S5SC5T6Z-Crvti-YO.js",
+    "name": "xychartDiagram-S5SC5T6Z",
+    "src": "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
+    "isDynamicEntry": true,
+    "imports": [
+      "_index-D354-7y-.js",
+      "_init-Gi6I4Gst.js",
+      "_ordinal-Cboi1Yqb.js",
+      "_linear-DD-jmzek.js",
+      "shell/src/main.jsx",
+      "_defaultLocale-DX6XiGOO.js"
+    ]
+  },
+  "_arc-QiFIV_dL.js": {
+    "file": "assets/arc-QiFIV_dL.js",
     "name": "arc",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_channel-CHF3kQ7B.js": {
-    "file": "assets/channel-CHF3kQ7B.js",
+  "_channel-mD0GV9Kf.js": {
+    "file": "assets/channel-mD0GV9Kf.js",
     "name": "channel",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_chunk-2Q5K7J3B-DmGiMcbX.js": {
-    "file": "assets/chunk-2Q5K7J3B-DmGiMcbX.js",
+  "_chunk-2Q5K7J3B-BSzllhrL.js": {
+    "file": "assets/chunk-2Q5K7J3B-BSzllhrL.js",
     "name": "chunk-2Q5K7J3B",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_chunk-5VM5RSS4-CNfYqtWb.js": {
-    "file": "assets/chunk-5VM5RSS4-CNfYqtWb.js",
+  "_chunk-5VM5RSS4-BudW-JN6.js": {
+    "file": "assets/chunk-5VM5RSS4-BudW-JN6.js",
     "name": "chunk-5VM5RSS4",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_chunk-F27PBJKO-CVX_qom6.js": {
-    "file": "assets/chunk-F27PBJKO-CVX_qom6.js",
+  "_chunk-F27PBJKO-DAgFlnb2.js": {
+    "file": "assets/chunk-F27PBJKO-DAgFlnb2.js",
     "name": "chunk-F27PBJKO",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_chunk-IMKFNOWR-C7SqnAes.js": {
-    "file": "assets/chunk-IMKFNOWR-C7SqnAes.js",
+  "_chunk-IMKFNOWR-CwRpurwY.js": {
+    "file": "assets/chunk-IMKFNOWR-CwRpurwY.js",
     "name": "chunk-IMKFNOWR",
     "imports": [
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_index-CljuI9j2.js",
-      "_chunk-F27PBJKO-CVX_qom6.js"
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_index-D354-7y-.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js"
     ]
   },
-  "_chunk-JWPE2WC7-CgAgseXP.js": {
-    "file": "assets/chunk-JWPE2WC7-CgAgseXP.js",
+  "_chunk-JWPE2WC7-DmpE1Rp3.js": {
+    "file": "assets/chunk-JWPE2WC7-DmpE1Rp3.js",
     "name": "chunk-JWPE2WC7",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_chunk-POPQ4Y6H-DtnwT0lH.js": {
-    "file": "assets/chunk-POPQ4Y6H-DtnwT0lH.js",
+  "_chunk-POPQ4Y6H-v0_I9As2.js": {
+    "file": "assets/chunk-POPQ4Y6H-v0_I9As2.js",
     "name": "chunk-POPQ4Y6H",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_chunk-SVP7TREG-Bs3SCLtE.js": {
-    "file": "assets/chunk-SVP7TREG-Bs3SCLtE.js",
+  "_chunk-SVP7TREG-CuNG89MF.js": {
+    "file": "assets/chunk-SVP7TREG-CuNG89MF.js",
     "name": "chunk-SVP7TREG",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_chunk-TICWLB2K-CzC5NmnX.js": {
-    "file": "assets/chunk-TICWLB2K-CzC5NmnX.js",
+  "_chunk-TICWLB2K-JOKL_vZw.js": {
+    "file": "assets/chunk-TICWLB2K-JOKL_vZw.js",
     "name": "chunk-TICWLB2K",
     "imports": [
-      "_chunk-5VM5RSS4-CNfYqtWb.js",
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_index-CljuI9j2.js",
-      "_chunk-F27PBJKO-CVX_qom6.js"
+      "_chunk-5VM5RSS4-BudW-JN6.js",
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_index-D354-7y-.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js"
     ]
   },
-  "_chunk-XXDRQBXY-jH1Qxwsl.js": {
-    "file": "assets/chunk-XXDRQBXY-jH1Qxwsl.js",
+  "_chunk-XXDRQBXY-BMWA9LaH.js": {
+    "file": "assets/chunk-XXDRQBXY-BMWA9LaH.js",
     "name": "chunk-XXDRQBXY",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_cynefin-OW5HDTMX-DY8dNdbf.js": {
-    "file": "assets/cynefin-OW5HDTMX-DY8dNdbf.js",
+  "_cynefin-OW5HDTMX-DDSkVShi.js": {
+    "file": "assets/cynefin-OW5HDTMX-DDSkVShi.js",
     "name": "cynefin-OW5HDTMX",
     "imports": [
       "shell/src/main.jsx"
@@ -98,88 +1208,88 @@
     "file": "assets/defaultLocale-DX6XiGOO.js",
     "name": "defaultLocale"
   },
-  "_flowDiagram-HODETNUW-B0N0aCrd.js": {
-    "file": "assets/flowDiagram-HODETNUW-B0N0aCrd.js",
+  "_flowDiagram-HODETNUW-Cqohdep6.js": {
+    "file": "assets/flowDiagram-HODETNUW-Cqohdep6.js",
     "name": "flowDiagram-HODETNUW",
     "isDynamicEntry": true,
     "imports": [
-      "_chunk-5VM5RSS4-CNfYqtWb.js",
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_index-CljuI9j2.js",
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "_channel-CHF3kQ7B.js"
+      "_chunk-5VM5RSS4-BudW-JN6.js",
+      "_chunk-XXDRQBXY-BMWA9LaH.js",
+      "_chunk-POPQ4Y6H-v0_I9As2.js",
+      "_index-D354-7y-.js",
+      "_chunk-F27PBJKO-DAgFlnb2.js",
+      "_channel-mD0GV9Kf.js"
     ]
   },
-  "_index-CljuI9j2.js": {
-    "file": "assets/index-CljuI9j2.js",
+  "_index-D354-7y-.js": {
+    "file": "assets/index-D354-7y-.js",
     "name": "index",
     "isDynamicEntry": true,
     "imports": [
       "shell/src/main.jsx"
     ],
     "dynamicImports": [
-      "node_modules/katex/dist/katex.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
-      "_flowDiagram-HODETNUW-B0N0aCrd.js",
-      "_flowDiagram-HODETNUW-B0N0aCrd.js",
-      "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
-      "_flowDiagram-HODETNUW-B0N0aCrd.js",
-      "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
-      "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs"
+      "../tdoc/node_modules/katex/dist/katex.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
+      "_flowDiagram-HODETNUW-Cqohdep6.js",
+      "_flowDiagram-HODETNUW-Cqohdep6.js",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
+      "_flowDiagram-HODETNUW-Cqohdep6.js",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
+      "../tdoc/node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs"
     ]
   },
   "_init-Gi6I4Gst.js": {
     "file": "assets/init-Gi6I4Gst.js",
     "name": "init"
   },
-  "_layout-CM6sjz6Q.js": {
-    "file": "assets/layout-CM6sjz6Q.js",
+  "_layout-Dpt-7gs6.js": {
+    "file": "assets/layout-Dpt-7gs6.js",
     "name": "layout",
     "imports": [
-      "_index-CljuI9j2.js"
+      "_index-D354-7y-.js"
     ]
   },
-  "_linear-DPDdZEkk.js": {
-    "file": "assets/linear-DPDdZEkk.js",
+  "_linear-DD-jmzek.js": {
+    "file": "assets/linear-DD-jmzek.js",
     "name": "linear",
     "imports": [
-      "_index-CljuI9j2.js",
+      "_index-D354-7y-.js",
       "_init-Gi6I4Gst.js",
       "_defaultLocale-DX6XiGOO.js"
     ]
@@ -191,80 +1301,80 @@
       "_init-Gi6I4Gst.js"
     ]
   },
-  "_percentages-BXMCSKIN-BuF15geY.js": {
-    "file": "assets/percentages-BXMCSKIN-BuF15geY.js",
+  "_percentages-BXMCSKIN-CN3ztda_.js": {
+    "file": "assets/percentages-BXMCSKIN-CN3ztda_.js",
     "name": "percentages-BXMCSKIN",
     "isDynamicEntry": true,
     "imports": [
       "shell/src/main.jsx"
     ],
     "dynamicImports": [
-      "node_modules/browser-fs-access/dist/file-open-002ab408.js",
-      "node_modules/browser-fs-access/dist/file-open-7c801643.js",
-      "node_modules/browser-fs-access/dist/directory-open-4ed118d0.js",
-      "node_modules/browser-fs-access/dist/directory-open-01563666.js",
-      "node_modules/browser-fs-access/dist/file-save-745eba88.js",
-      "node_modules/browser-fs-access/dist/file-save-3189631c.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
-      "_pica-DoD9CtRW.js",
-      "node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/bn-BD-2XOGV67Q.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/ca-ES-6MX7JW3Y.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/cs-CZ-2BRQDIVT.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/da-DK-5WZEPLOC.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/de-DE-XR44H4JA.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/el-GR-BZB4AONW.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/es-ES-U4NZUMDT.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/eu-ES-A7QVB2H4.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/fa-IR-HGAKTJCU.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/fi-FI-Z5N7JZ37.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/fr-FR-RHASNOE6.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/gl-ES-HMX3MZ6V.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/he-IL-6SHJWFNN.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/hi-IN-IWLTKZ5I.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/hu-HU-A5ZG7DT2.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/id-ID-SAP4L64H.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/it-IT-JPQ66NNP.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/ja-JP-DBVTYXUO.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/kaa-6HZHGXH3.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/kab-KAB-ZGHBKWFO.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/kk-KZ-P5N5QNE5.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/km-KH-HSX4SM5Z.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/ko-KR-MTYHY66A.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/ku-TR-6OUDTVRD.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/lt-LT-XHIRWOB4.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/lv-LV-5QDEKY6T.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/mr-IN-CRQNXWMA.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/my-MM-5M5IBNSE.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/nb-NO-T6EIAALU.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/nl-NL-IS3SIHDZ.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/nn-NO-6E72VCQL.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/oc-FR-POXYY2M6.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/pa-IN-N4M65BXN.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/pl-PL-T2D74RX3.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-BR-5N22H2LF.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-PT-UZXXM6DQ.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/ro-RO-JPDTUUEW.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/ru-RU-B4JR7IUQ.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/si-LK-N5RQ5JYF.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/sk-SK-C5VTKIMK.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/sl-SI-NN7IZMDC.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/sv-SE-XGPEYMSR.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/ta-IN-2NMHFXQM.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/th-TH-HPSO5L25.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/tr-TR-DEFEU3FU.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/uk-UA-QMV73CPH.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/vi-VN-M7AON7JQ.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-CN-LNUGB5OW.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js",
-      "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js",
-      "_index-CljuI9j2.js",
-      "_index-CljuI9j2.js",
-      "node_modules/canvas-roundrect-polyfill/roundRect.js"
+      "../tdoc/node_modules/browser-fs-access/dist/file-open-002ab408.js",
+      "../tdoc/node_modules/browser-fs-access/dist/file-open-7c801643.js",
+      "../tdoc/node_modules/browser-fs-access/dist/directory-open-4ed118d0.js",
+      "../tdoc/node_modules/browser-fs-access/dist/directory-open-01563666.js",
+      "../tdoc/node_modules/browser-fs-access/dist/file-save-745eba88.js",
+      "../tdoc/node_modules/browser-fs-access/dist/file-save-3189631c.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
+      "_pica-BqkKdDEk.js",
+      "../tdoc/node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/bn-BD-2XOGV67Q.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ca-ES-6MX7JW3Y.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/cs-CZ-2BRQDIVT.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/da-DK-5WZEPLOC.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/de-DE-XR44H4JA.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/el-GR-BZB4AONW.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/es-ES-U4NZUMDT.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/eu-ES-A7QVB2H4.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fa-IR-HGAKTJCU.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fi-FI-Z5N7JZ37.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/fr-FR-RHASNOE6.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/gl-ES-HMX3MZ6V.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/he-IL-6SHJWFNN.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/hi-IN-IWLTKZ5I.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/hu-HU-A5ZG7DT2.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/id-ID-SAP4L64H.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/it-IT-JPQ66NNP.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ja-JP-DBVTYXUO.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kaa-6HZHGXH3.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kab-KAB-ZGHBKWFO.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/kk-KZ-P5N5QNE5.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/km-KH-HSX4SM5Z.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ko-KR-MTYHY66A.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ku-TR-6OUDTVRD.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/lt-LT-XHIRWOB4.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/lv-LV-5QDEKY6T.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/mr-IN-CRQNXWMA.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/my-MM-5M5IBNSE.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nb-NO-T6EIAALU.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nl-NL-IS3SIHDZ.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/nn-NO-6E72VCQL.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/oc-FR-POXYY2M6.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pa-IN-N4M65BXN.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pl-PL-T2D74RX3.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-BR-5N22H2LF.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-PT-UZXXM6DQ.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ro-RO-JPDTUUEW.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ru-RU-B4JR7IUQ.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/si-LK-N5RQ5JYF.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sk-SK-C5VTKIMK.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sl-SI-NN7IZMDC.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/sv-SE-XGPEYMSR.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/ta-IN-2NMHFXQM.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/th-TH-HPSO5L25.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/tr-TR-DEFEU3FU.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/uk-UA-QMV73CPH.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/vi-VN-M7AON7JQ.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-CN-LNUGB5OW.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js",
+      "../tdoc/node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js",
+      "_index-D354-7y-.js",
+      "_index-D354-7y-.js",
+      "../tdoc/node_modules/canvas-roundrect-polyfill/roundRect.js"
     ],
     "css": [
       "shell.CfLx8Klp.css"
@@ -276,8 +1386,8 @@
       "shell.gm-uSS1B.woff2"
     ]
   },
-  "_pica-DoD9CtRW.js": {
-    "file": "assets/pica-DoD9CtRW.js",
+  "_pica-BqkKdDEk.js": {
+    "file": "assets/pica-BqkKdDEk.js",
     "name": "pica",
     "isDynamicEntry": true,
     "imports": [
@@ -288,1123 +1398,13 @@
     "file": "shell.CfLx8Klp.css",
     "src": "_shell.CfLx8Klp.css"
   },
-  "node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Bold.woff2": {
-    "file": "shell.gm-uSS1B.woff2",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Bold.woff2"
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Medium.woff2": {
-    "file": "shell.DrcxCXg3.woff2",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Medium.woff2"
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Regular.woff2": {
-    "file": "shell.DVxZuzxb.woff2",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-Regular.woff2"
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-SemiBold.woff2": {
-    "file": "shell.SCI4bEL9.woff2",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/fonts/Assistant/Assistant-SemiBold.woff2"
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js": {
-    "file": "assets/ar-SA-G6X2FPQ2-BfW1Rkrw.js",
-    "name": "ar-SA-G6X2FPQ2",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ar-SA-G6X2FPQ2.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js": {
-    "file": "assets/az-AZ-76LH7QW2-CC9QsCvo.js",
-    "name": "az-AZ-76LH7QW2",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/az-AZ-76LH7QW2.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js": {
-    "file": "assets/bg-BG-XCXSNQG7-BWLeyFcV.js",
-    "name": "bg-BG-XCXSNQG7",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/bg-BG-XCXSNQG7.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/bn-BD-2XOGV67Q.js": {
-    "file": "assets/bn-BD-2XOGV67Q-CHSwFqM6.js",
-    "name": "bn-BD-2XOGV67Q",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/bn-BD-2XOGV67Q.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/ca-ES-6MX7JW3Y.js": {
-    "file": "assets/ca-ES-6MX7JW3Y-DIn_Hm6h.js",
-    "name": "ca-ES-6MX7JW3Y",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ca-ES-6MX7JW3Y.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/cs-CZ-2BRQDIVT.js": {
-    "file": "assets/cs-CZ-2BRQDIVT-9EZKVdzU.js",
-    "name": "cs-CZ-2BRQDIVT",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/cs-CZ-2BRQDIVT.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/da-DK-5WZEPLOC.js": {
-    "file": "assets/da-DK-5WZEPLOC-tDgP5fkT.js",
-    "name": "da-DK-5WZEPLOC",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/da-DK-5WZEPLOC.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/de-DE-XR44H4JA.js": {
-    "file": "assets/de-DE-XR44H4JA-DcZVWSqA.js",
-    "name": "de-DE-XR44H4JA",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/de-DE-XR44H4JA.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/el-GR-BZB4AONW.js": {
-    "file": "assets/el-GR-BZB4AONW-qLoTPd4q.js",
-    "name": "el-GR-BZB4AONW",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/el-GR-BZB4AONW.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/es-ES-U4NZUMDT.js": {
-    "file": "assets/es-ES-U4NZUMDT-2-JFq6Ex.js",
-    "name": "es-ES-U4NZUMDT",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/es-ES-U4NZUMDT.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/eu-ES-A7QVB2H4.js": {
-    "file": "assets/eu-ES-A7QVB2H4-BNJMP7U2.js",
-    "name": "eu-ES-A7QVB2H4",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/eu-ES-A7QVB2H4.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/fa-IR-HGAKTJCU.js": {
-    "file": "assets/fa-IR-HGAKTJCU-MtmAz5uy.js",
-    "name": "fa-IR-HGAKTJCU",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/fa-IR-HGAKTJCU.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/fi-FI-Z5N7JZ37.js": {
-    "file": "assets/fi-FI-Z5N7JZ37-Cazjphat.js",
-    "name": "fi-FI-Z5N7JZ37",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/fi-FI-Z5N7JZ37.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/fr-FR-RHASNOE6.js": {
-    "file": "assets/fr-FR-RHASNOE6-B8n4yzJx.js",
-    "name": "fr-FR-RHASNOE6",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/fr-FR-RHASNOE6.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/gl-ES-HMX3MZ6V.js": {
-    "file": "assets/gl-ES-HMX3MZ6V-5dcBt4nq.js",
-    "name": "gl-ES-HMX3MZ6V",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/gl-ES-HMX3MZ6V.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/he-IL-6SHJWFNN.js": {
-    "file": "assets/he-IL-6SHJWFNN-B056oJ7m.js",
-    "name": "he-IL-6SHJWFNN",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/he-IL-6SHJWFNN.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/hi-IN-IWLTKZ5I.js": {
-    "file": "assets/hi-IN-IWLTKZ5I-Q23BgT7u.js",
-    "name": "hi-IN-IWLTKZ5I",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/hi-IN-IWLTKZ5I.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/hu-HU-A5ZG7DT2.js": {
-    "file": "assets/hu-HU-A5ZG7DT2-Cfaek33I.js",
-    "name": "hu-HU-A5ZG7DT2",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/hu-HU-A5ZG7DT2.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/id-ID-SAP4L64H.js": {
-    "file": "assets/id-ID-SAP4L64H-CTiJE8ii.js",
-    "name": "id-ID-SAP4L64H",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/id-ID-SAP4L64H.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/it-IT-JPQ66NNP.js": {
-    "file": "assets/it-IT-JPQ66NNP-DhssFq94.js",
-    "name": "it-IT-JPQ66NNP",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/it-IT-JPQ66NNP.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/ja-JP-DBVTYXUO.js": {
-    "file": "assets/ja-JP-DBVTYXUO-Cw7xiu-n.js",
-    "name": "ja-JP-DBVTYXUO",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ja-JP-DBVTYXUO.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/kaa-6HZHGXH3.js": {
-    "file": "assets/kaa-6HZHGXH3-CE9LQ-wG.js",
-    "name": "kaa-6HZHGXH3",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/kaa-6HZHGXH3.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/kab-KAB-ZGHBKWFO.js": {
-    "file": "assets/kab-KAB-ZGHBKWFO-Wyqp9KBV.js",
-    "name": "kab-KAB-ZGHBKWFO",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/kab-KAB-ZGHBKWFO.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/kk-KZ-P5N5QNE5.js": {
-    "file": "assets/kk-KZ-P5N5QNE5-xRcirskD.js",
-    "name": "kk-KZ-P5N5QNE5",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/kk-KZ-P5N5QNE5.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/km-KH-HSX4SM5Z.js": {
-    "file": "assets/km-KH-HSX4SM5Z-CRAvfkJ1.js",
-    "name": "km-KH-HSX4SM5Z",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/km-KH-HSX4SM5Z.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/ko-KR-MTYHY66A.js": {
-    "file": "assets/ko-KR-MTYHY66A-COJhMtHT.js",
-    "name": "ko-KR-MTYHY66A",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ko-KR-MTYHY66A.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/ku-TR-6OUDTVRD.js": {
-    "file": "assets/ku-TR-6OUDTVRD-QnDwBK9X.js",
-    "name": "ku-TR-6OUDTVRD",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ku-TR-6OUDTVRD.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/lt-LT-XHIRWOB4.js": {
-    "file": "assets/lt-LT-XHIRWOB4-VbqcS16V.js",
-    "name": "lt-LT-XHIRWOB4",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/lt-LT-XHIRWOB4.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/lv-LV-5QDEKY6T.js": {
-    "file": "assets/lv-LV-5QDEKY6T-Di7X9-nr.js",
-    "name": "lv-LV-5QDEKY6T",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/lv-LV-5QDEKY6T.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/mr-IN-CRQNXWMA.js": {
-    "file": "assets/mr-IN-CRQNXWMA-8hjiVOZt.js",
-    "name": "mr-IN-CRQNXWMA",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/mr-IN-CRQNXWMA.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/my-MM-5M5IBNSE.js": {
-    "file": "assets/my-MM-5M5IBNSE-DjWc_Ir5.js",
-    "name": "my-MM-5M5IBNSE",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/my-MM-5M5IBNSE.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/nb-NO-T6EIAALU.js": {
-    "file": "assets/nb-NO-T6EIAALU-ICScM5Ft.js",
-    "name": "nb-NO-T6EIAALU",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/nb-NO-T6EIAALU.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/nl-NL-IS3SIHDZ.js": {
-    "file": "assets/nl-NL-IS3SIHDZ-rrtfXpWc.js",
-    "name": "nl-NL-IS3SIHDZ",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/nl-NL-IS3SIHDZ.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/nn-NO-6E72VCQL.js": {
-    "file": "assets/nn-NO-6E72VCQL-DsSxtnWa.js",
-    "name": "nn-NO-6E72VCQL",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/nn-NO-6E72VCQL.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/oc-FR-POXYY2M6.js": {
-    "file": "assets/oc-FR-POXYY2M6-BrXBB8bW.js",
-    "name": "oc-FR-POXYY2M6",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/oc-FR-POXYY2M6.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/pa-IN-N4M65BXN.js": {
-    "file": "assets/pa-IN-N4M65BXN-B9ftXLi-.js",
-    "name": "pa-IN-N4M65BXN",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/pa-IN-N4M65BXN.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/pl-PL-T2D74RX3.js": {
-    "file": "assets/pl-PL-T2D74RX3-DFnt2kDK.js",
-    "name": "pl-PL-T2D74RX3",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/pl-PL-T2D74RX3.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-BR-5N22H2LF.js": {
-    "file": "assets/pt-BR-5N22H2LF-WYBi_29V.js",
-    "name": "pt-BR-5N22H2LF",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-BR-5N22H2LF.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-PT-UZXXM6DQ.js": {
-    "file": "assets/pt-PT-UZXXM6DQ-BJv3k4p6.js",
-    "name": "pt-PT-UZXXM6DQ",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/pt-PT-UZXXM6DQ.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/ro-RO-JPDTUUEW.js": {
-    "file": "assets/ro-RO-JPDTUUEW-BtRMbDvP.js",
-    "name": "ro-RO-JPDTUUEW",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ro-RO-JPDTUUEW.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/ru-RU-B4JR7IUQ.js": {
-    "file": "assets/ru-RU-B4JR7IUQ-BTnOLoex.js",
-    "name": "ru-RU-B4JR7IUQ",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ru-RU-B4JR7IUQ.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/si-LK-N5RQ5JYF.js": {
-    "file": "assets/si-LK-N5RQ5JYF-D034llvR.js",
-    "name": "si-LK-N5RQ5JYF",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/si-LK-N5RQ5JYF.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/sk-SK-C5VTKIMK.js": {
-    "file": "assets/sk-SK-C5VTKIMK-DQWEw0pf.js",
-    "name": "sk-SK-C5VTKIMK",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/sk-SK-C5VTKIMK.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/sl-SI-NN7IZMDC.js": {
-    "file": "assets/sl-SI-NN7IZMDC-DyZRADj8.js",
-    "name": "sl-SI-NN7IZMDC",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/sl-SI-NN7IZMDC.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/sv-SE-XGPEYMSR.js": {
-    "file": "assets/sv-SE-XGPEYMSR-DKqifHgw.js",
-    "name": "sv-SE-XGPEYMSR",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/sv-SE-XGPEYMSR.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/ta-IN-2NMHFXQM.js": {
-    "file": "assets/ta-IN-2NMHFXQM-CCXb2M6L.js",
-    "name": "ta-IN-2NMHFXQM",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/ta-IN-2NMHFXQM.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/th-TH-HPSO5L25.js": {
-    "file": "assets/th-TH-HPSO5L25-Ctm65aEB.js",
-    "name": "th-TH-HPSO5L25",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/th-TH-HPSO5L25.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/tr-TR-DEFEU3FU.js": {
-    "file": "assets/tr-TR-DEFEU3FU-D5GXwwjr.js",
-    "name": "tr-TR-DEFEU3FU",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/tr-TR-DEFEU3FU.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/uk-UA-QMV73CPH.js": {
-    "file": "assets/uk-UA-QMV73CPH-B0v4_5za.js",
-    "name": "uk-UA-QMV73CPH",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/uk-UA-QMV73CPH.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/vi-VN-M7AON7JQ.js": {
-    "file": "assets/vi-VN-M7AON7JQ-CzvY8cMY.js",
-    "name": "vi-VN-M7AON7JQ",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/vi-VN-M7AON7JQ.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-CN-LNUGB5OW.js": {
-    "file": "assets/zh-CN-LNUGB5OW-B_6NkY35.js",
-    "name": "zh-CN-LNUGB5OW",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-CN-LNUGB5OW.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js": {
-    "file": "assets/zh-HK-E62DVLB3-D44MZo9a.js",
-    "name": "zh-HK-E62DVLB3",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-HK-E62DVLB3.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js": {
-    "file": "assets/zh-TW-RAJ6MFWO-Cnbn3U0k.js",
-    "name": "zh-TW-RAJ6MFWO",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/locales/zh-TW-RAJ6MFWO.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js": {
-    "file": "assets/subset-shared.chunk-oKFmN0_h.js",
-    "name": "subset-shared.chunk",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js": {
-    "file": "assets/subset-worker.chunk-CRzb7q5l.js",
-    "name": "subset-worker.chunk",
-    "src": "node_modules/@excalidraw/excalidraw/dist/prod/subset-worker.chunk.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "node_modules/@excalidraw/excalidraw/dist/prod/subset-shared.chunk.js",
-      "_percentages-BXMCSKIN-BuF15geY.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/browser-fs-access/dist/directory-open-01563666.js": {
-    "file": "assets/directory-open-01563666-DWU9wJ6I.js",
-    "name": "directory-open-01563666",
-    "src": "node_modules/browser-fs-access/dist/directory-open-01563666.js",
-    "isDynamicEntry": true
-  },
-  "node_modules/browser-fs-access/dist/directory-open-4ed118d0.js": {
-    "file": "assets/directory-open-4ed118d0-CunoC1EB.js",
-    "name": "directory-open-4ed118d0",
-    "src": "node_modules/browser-fs-access/dist/directory-open-4ed118d0.js",
-    "isDynamicEntry": true
-  },
-  "node_modules/browser-fs-access/dist/file-open-002ab408.js": {
-    "file": "assets/file-open-002ab408-DIuFHtCF.js",
-    "name": "file-open-002ab408",
-    "src": "node_modules/browser-fs-access/dist/file-open-002ab408.js",
-    "isDynamicEntry": true
-  },
-  "node_modules/browser-fs-access/dist/file-open-7c801643.js": {
-    "file": "assets/file-open-7c801643-684qeFg4.js",
-    "name": "file-open-7c801643",
-    "src": "node_modules/browser-fs-access/dist/file-open-7c801643.js",
-    "isDynamicEntry": true
-  },
-  "node_modules/browser-fs-access/dist/file-save-3189631c.js": {
-    "file": "assets/file-save-3189631c-C1wFhQhH.js",
-    "name": "file-save-3189631c",
-    "src": "node_modules/browser-fs-access/dist/file-save-3189631c.js",
-    "isDynamicEntry": true
-  },
-  "node_modules/browser-fs-access/dist/file-save-745eba88.js": {
-    "file": "assets/file-save-745eba88-Bb9F9Kg7.js",
-    "name": "file-save-745eba88",
-    "src": "node_modules/browser-fs-access/dist/file-save-745eba88.js",
-    "isDynamicEntry": true
-  },
-  "node_modules/canvas-roundrect-polyfill/roundRect.js": {
-    "file": "assets/roundRect-0PYZxl1G.js",
-    "name": "roundRect",
-    "src": "node_modules/canvas-roundrect-polyfill/roundRect.js",
-    "isDynamicEntry": true
-  },
-  "node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs": {
-    "file": "assets/image-blob-reduce.esm-HwCm7IZ0.js",
-    "name": "image-blob-reduce.esm",
-    "src": "node_modules/image-blob-reduce/dist/image-blob-reduce.esm.mjs",
-    "isDynamicEntry": true
-  },
-  "node_modules/katex/dist/katex.mjs": {
-    "file": "assets/katex-C5jXJg4s.js",
-    "name": "katex",
-    "src": "node_modules/katex/dist/katex.mjs",
-    "isDynamicEntry": true
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs": {
-    "file": "assets/abnfDiagram-VCTEODGH-DTw-qdnp.js",
-    "name": "abnfDiagram-VCTEODGH",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/abnfDiagram-VCTEODGH.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-SVP7TREG-Bs3SCLtE.js",
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs": {
-    "file": "assets/architectureDiagram-5GKGNRK7-CLVZlUng.js",
-    "name": "architectureDiagram-5GKGNRK7",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/architectureDiagram-5GKGNRK7.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "_cytoscape.esm-Ix0LnXOy.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs": {
-    "file": "assets/blockDiagram-I7D4REHJ-C-RUE0CF.js",
-    "name": "blockDiagram-I7D4REHJ",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/blockDiagram-I7D4REHJ.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-5VM5RSS4-CNfYqtWb.js",
-      "_index-CljuI9j2.js",
-      "_channel-CHF3kQ7B.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs": {
-    "file": "assets/c4Diagram-7LVT6UL2-8Obg47XX.js",
-    "name": "c4Diagram-7LVT6UL2",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/c4Diagram-7LVT6UL2.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "_index-CljuI9j2.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs": {
-    "file": "assets/classDiagram-ZZMXUADV-DwtvhtaG.js",
-    "name": "classDiagram-ZZMXUADV",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-ZZMXUADV.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-TICWLB2K-CzC5NmnX.js",
-      "_index-CljuI9j2.js",
-      "_chunk-5VM5RSS4-CNfYqtWb.js",
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs": {
-    "file": "assets/classDiagram-v2-VYDZK3BY-DwtvhtaG.js",
-    "name": "classDiagram-v2-VYDZK3BY",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/classDiagram-v2-VYDZK3BY.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-TICWLB2K-CzC5NmnX.js",
-      "_index-CljuI9j2.js",
-      "_chunk-5VM5RSS4-CNfYqtWb.js",
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs": {
-    "file": "assets/cose-bilkent-JH36ORCC-CQ5nuHEv.js",
-    "name": "cose-bilkent-JH36ORCC",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/cose-bilkent-JH36ORCC.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "_cytoscape.esm-Ix0LnXOy.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs": {
-    "file": "assets/cynefinDiagram-5FMLGOSQ-CGutOfiT.js",
-    "name": "cynefinDiagram-5FMLGOSQ",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/cynefinDiagram-5FMLGOSQ.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs": {
-    "file": "assets/dagre-GXQ25YYZ-BbkJIMml.js",
-    "name": "dagre-GXQ25YYZ",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/dagre-GXQ25YYZ.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "_layout-CM6sjz6Q.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs": {
-    "file": "assets/diagram-S7CK7UJ4-CJgr8CLc.js",
-    "name": "diagram-S7CK7UJ4",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-S7CK7UJ4.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-2Q5K7J3B-DmGiMcbX.js",
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs": {
-    "file": "assets/diagram-UQ7AKVKN-BoFayV6M.js",
-    "name": "diagram-UQ7AKVKN",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-UQ7AKVKN.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs": {
-    "file": "assets/diagram-VSXAHHWV-DjlYM_n4.js",
-    "name": "diagram-VSXAHHWV",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VSXAHHWV.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs": {
-    "file": "assets/diagram-VX7I27RA-CDML2qrz.js",
-    "name": "diagram-VX7I27RA",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-VX7I27RA.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "_defaultLocale-DX6XiGOO.js",
-      "_ordinal-Cboi1Yqb.js",
-      "shell/src/main.jsx",
-      "_init-Gi6I4Gst.js"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs": {
-    "file": "assets/diagram-Z3DM3KII-CH8j2V6j.js",
-    "name": "diagram-Z3DM3KII",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/diagram-Z3DM3KII.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs": {
-    "file": "assets/ebnfDiagram-PWID7BFC-BCa9Dtie.js",
-    "name": "ebnfDiagram-PWID7BFC",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/ebnfDiagram-PWID7BFC.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-SVP7TREG-Bs3SCLtE.js",
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs": {
-    "file": "assets/erDiagram-RLTQ6QDP-4sIHZ8fn.js",
-    "name": "erDiagram-RLTQ6QDP",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/erDiagram-RLTQ6QDP.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_index-CljuI9j2.js",
-      "_channel-CHF3kQ7B.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs": {
-    "file": "assets/ganttDiagram-EL5Y4UJY-D68DRvCv.js",
-    "name": "ganttDiagram-EL5Y4UJY",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/ganttDiagram-EL5Y4UJY.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "shell/src/main.jsx",
-      "_linear-DPDdZEkk.js",
-      "_init-Gi6I4Gst.js",
-      "_defaultLocale-DX6XiGOO.js"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs": {
-    "file": "assets/gitGraphDiagram-WWUBYQGX-PUM93Zvc.js",
-    "name": "gitGraphDiagram-WWUBYQGX",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/gitGraphDiagram-WWUBYQGX.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-2Q5K7J3B-DmGiMcbX.js",
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs": {
-    "file": "assets/infoDiagram-27XIBGKW-RqLqHuRP.js",
-    "name": "infoDiagram-27XIBGKW",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/infoDiagram-27XIBGKW.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs": {
-    "file": "assets/ishikawaDiagram-5VMMS53U-Dg9eEojJ.js",
-    "name": "ishikawaDiagram-5VMMS53U",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/ishikawaDiagram-5VMMS53U.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs": {
-    "file": "assets/journeyDiagram-3NMN7TZE-CNQAZ1bd.js",
-    "name": "journeyDiagram-3NMN7TZE",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/journeyDiagram-3NMN7TZE.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-5VM5RSS4-CNfYqtWb.js",
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "_index-CljuI9j2.js",
-      "_arc-7sw5rP1n.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs": {
-    "file": "assets/kanban-definition-UXKFOSKX-BZ8w0ocw.js",
-    "name": "kanban-definition-UXKFOSKX",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/kanban-definition-UXKFOSKX.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "_chunk-5VM5RSS4-CNfYqtWb.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs": {
-    "file": "assets/mindmap-definition-YA3MSWOX-lfjgnKFL.js",
-    "name": "mindmap-definition-YA3MSWOX",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/mindmap-definition-YA3MSWOX.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_index-CljuI9j2.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs": {
-    "file": "assets/pegDiagram-XKGWAZYB-CA7-V-Xn.js",
-    "name": "pegDiagram-XKGWAZYB",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/pegDiagram-XKGWAZYB.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-SVP7TREG-Bs3SCLtE.js",
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs": {
-    "file": "assets/pieDiagram-E7YTZNPT-CAr-xjOx.js",
-    "name": "pieDiagram-E7YTZNPT",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/pieDiagram-E7YTZNPT.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "_arc-7sw5rP1n.js",
-      "_ordinal-Cboi1Yqb.js",
-      "shell/src/main.jsx",
-      "_init-Gi6I4Gst.js"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs": {
-    "file": "assets/quadrantDiagram-AXDQQJYC-DvPQKtss.js",
-    "name": "quadrantDiagram-AXDQQJYC",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/quadrantDiagram-AXDQQJYC.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "_linear-DPDdZEkk.js",
-      "shell/src/main.jsx",
-      "_init-Gi6I4Gst.js",
-      "_defaultLocale-DX6XiGOO.js"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs": {
-    "file": "assets/railroadDiagram-O6MQD6OU-C8sEZDAD.js",
-    "name": "railroadDiagram-O6MQD6OU",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/railroadDiagram-O6MQD6OU.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-SVP7TREG-Bs3SCLtE.js",
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs": {
-    "file": "assets/requirementDiagram-BXWQKSXE-DfjB0ji0.js",
-    "name": "requirementDiagram-BXWQKSXE",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/requirementDiagram-BXWQKSXE.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_index-CljuI9j2.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs": {
-    "file": "assets/sankeyDiagram-P5KCCOFB-Re7JdMkN.js",
-    "name": "sankeyDiagram-P5KCCOFB",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/sankeyDiagram-P5KCCOFB.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "_ordinal-Cboi1Yqb.js",
-      "shell/src/main.jsx",
-      "_init-Gi6I4Gst.js"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs": {
-    "file": "assets/sequenceDiagram-WJ2MYXX4-IZ_Xh8wS.js",
-    "name": "sequenceDiagram-WJ2MYXX4",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/sequenceDiagram-WJ2MYXX4.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-2Q5K7J3B-DmGiMcbX.js",
-      "_index-CljuI9j2.js",
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs": {
-    "file": "assets/sizeCapture-INFHLROL-C8XTn49d.js",
-    "name": "sizeCapture-INFHLROL",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/sizeCapture-INFHLROL.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs": {
-    "file": "assets/stateDiagram-D77RDMKH-BGLf8wYS.js",
-    "name": "stateDiagram-D77RDMKH",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-D77RDMKH.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-IMKFNOWR-C7SqnAes.js",
-      "_index-CljuI9j2.js",
-      "_layout-CM6sjz6Q.js",
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs": {
-    "file": "assets/stateDiagram-v2-MP3YSRHH-Dq_RVtD-.js",
-    "name": "stateDiagram-v2-MP3YSRHH",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/stateDiagram-v2-MP3YSRHH.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-IMKFNOWR-C7SqnAes.js",
-      "_index-CljuI9j2.js",
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs": {
-    "file": "assets/swimlanes-42K2YHIH-D--HTHAT.js",
-    "name": "swimlanes-42K2YHIH",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/swimlanes-42K2YHIH.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs": {
-    "file": "assets/swimlanesDiagram-VR7AAH4N-A_cp6aby.js",
-    "name": "swimlanesDiagram-VR7AAH4N",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/swimlanesDiagram-VR7AAH4N.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_flowDiagram-HODETNUW-B0N0aCrd.js",
-      "_index-CljuI9j2.js",
-      "_chunk-5VM5RSS4-CNfYqtWb.js",
-      "_chunk-XXDRQBXY-jH1Qxwsl.js",
-      "_chunk-POPQ4Y6H-DtnwT0lH.js",
-      "_chunk-F27PBJKO-CVX_qom6.js",
-      "_channel-CHF3kQ7B.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs": {
-    "file": "assets/timeline-definition-24CTP7MA-B2TJ49ua.js",
-    "name": "timeline-definition-24CTP7MA",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/timeline-definition-24CTP7MA.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "_arc-7sw5rP1n.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs": {
-    "file": "assets/vennDiagram-4TSXK5OY-C1K6gGp8.js",
-    "name": "vennDiagram-4TSXK5OY",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/vennDiagram-4TSXK5OY.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs": {
-    "file": "assets/wardleyDiagram-VM6X3IG4-UbK4qmwi.js",
-    "name": "wardleyDiagram-VM6X3IG4",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/wardleyDiagram-VM6X3IG4.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_chunk-JWPE2WC7-CgAgseXP.js",
-      "_index-CljuI9j2.js",
-      "_cynefin-OW5HDTMX-DY8dNdbf.js",
-      "shell/src/main.jsx"
-    ]
-  },
-  "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs": {
-    "file": "assets/xychartDiagram-S5SC5T6Z-Cld-AQ1H.js",
-    "name": "xychartDiagram-S5SC5T6Z",
-    "src": "node_modules/mermaid/dist/chunks/mermaid.core/xychartDiagram-S5SC5T6Z.mjs",
-    "isDynamicEntry": true,
-    "imports": [
-      "_index-CljuI9j2.js",
-      "_init-Gi6I4Gst.js",
-      "_ordinal-Cboi1Yqb.js",
-      "_linear-DPDdZEkk.js",
-      "shell/src/main.jsx",
-      "_defaultLocale-DX6XiGOO.js"
-    ]
-  },
   "shell/src/main.jsx": {
-    "file": "shell.BzdiGgqZ.js",
+    "file": "shell.Dc0zr3wl.js",
     "name": "main",
     "src": "shell/src/main.jsx",
     "isEntry": true,
     "dynamicImports": [
-      "_percentages-BXMCSKIN-BuF15geY.js",
+      "_percentages-BXMCSKIN-CN3ztda_.js",
       "shell/src/onboarding-preview.jsx"
     ],
     "css": [
@@ -1412,7 +1412,7 @@
     ]
   },
   "shell/src/onboarding-preview.jsx": {
-    "file": "assets/onboarding-preview-CVAGQgt8.js",
+    "file": "assets/onboarding-preview-upK2AAqY.js",
     "name": "onboarding-preview",
     "src": "shell/src/onboarding-preview.jsx",
     "isDynamicEntry": true,
