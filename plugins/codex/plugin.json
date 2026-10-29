@@ -15,12 +15,14 @@
     "com.openai": {
       "interface": {
         "displayName": "tdoc",
-        "shortDescription": "Hosted HTML docs with shareable links and anchored comments",
+        "shortDescription": "Docs your readers comment on",
         "longDescription": "Write documents as HTML on tdoc.dev, share a link, and revise them from the comments readers leave on text and visuals.",
         "developerName": "Tornado",
         "category": "Productivity",
         "capabilities": ["Read", "Write"],
         "websiteURL": "https://tdoc.dev",
+        "privacyPolicyURL": "https://tdoc.dev/privacy",
+        "supportURL": "https://github.com/tornado-doc/tdoc/issues",
         "defaultPrompt": [
           "Use tdoc to write a one-page summary of this discussion.",
           "Read all comments on my tdoc and fix them."
