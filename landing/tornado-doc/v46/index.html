@@ -456,7 +456,8 @@
     .pick-panel p { margin:0 0 10px; font-size:14px; line-height:1.55; color:var(--muted); }
     .pick-panel p code { font-size:13px; }
     .pick-cmd { display:flex; align-items:center; gap:10px; min-width:0; padding:10px 10px 10px 14px; border-radius:10px; background:#10121a; }
-    .pick-cmd code { flex:1; min-width:0; overflow-x:auto; white-space:nowrap; background:none; padding:0; color:#e9ebf1; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    /* Wrap, never scroll: a sideways scrollbar under one line covered half the box. */
+    .pick-cmd code { flex:1; min-width:0; white-space:normal; overflow-wrap:anywhere; background:none; padding:0; color:#e9ebf1; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
     .pick-copy { flex:none; height:28px; padding:0 11px; border:1px solid #3a3e4b; border-radius:7px; background:transparent; color:#e9ebf1; font:600 12.5px system-ui,sans-serif; cursor:pointer; }
     .pick-copy:hover { border-color:#6b7080; }
     .pick-form { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px 14px; align-items:center; margin:0 0 12px; font-size:14px; }
