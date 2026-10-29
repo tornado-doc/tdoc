@@ -25,6 +25,9 @@ export const FLAGS = Object.freeze({
   // Settings, through the remote MCP server at /mcp. On for everyone since
   // tdoc.dev serves /mcp (TDOC_REMOTE_MCP=1 in wrangler.toml).
   remoteMcp: Object.freeze({ label: 'Connect AI apps (remote MCP)', owner: 'julie', added: '2026-10-28', default: true }),
+  // Settings -> Delete account (self-serve). Owner-approved; the flag is the
+  // off switch while it settles.
+  deleteAccount: Object.freeze({ label: 'Delete account in Settings', owner: 'julie', added: '2026-10-28', default: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

@@ -12,6 +12,7 @@ import { ConnectorsBody } from './connectors-page.jsx';
 import { DevicesBody } from './tokens-page.jsx';
 import { ConnectAiAppsSection } from './connect-ai-apps.jsx';
 import { SignInMethodsCard } from './docs-hub/sign-in-methods.jsx';
+import { DeleteAccountCard } from './docs-hub/delete-account.jsx';
 import { copyText } from './document/model.js';
 import { InviteField } from './document/owner-access-dialog.jsx';
 import { QuotaBumpDialog, ShareLinkRow } from './document/document-dialogs.jsx';
@@ -480,6 +481,7 @@ function AccountSettingsPane({ identity, profile }) {
         <div className="tm-settings-head"><div><h2>Agent access</h2><p>Computers and agents that can act as you, and which workspaces each one can reach.</p></div></div>
         <DevicesBody />
       </section>
+      {isFeatureOn('deleteAccount') ? <DeleteAccountCard /> : null}
     </section>
   );
 }
