@@ -17028,8 +17028,14 @@ async function loadCimdClient(env, clientId, origin = '') {
   // The document speaks for its own host: an https redirect elsewhere is not
   // that host's to name. Loopback (a native app) is allowed.
   if (!redirects.every((uri) => { const r = new URL(uri); return r.protocol === 'http:' ? LOOPBACK_HOSTS.has(r.hostname) : r.hostname.toLowerCase() === host; })) return failed();
-  const method = doc.token_endpoint_auth_method || 'none';
-  if (method !== 'none') return failed();
+  // A public client here: tdoc accepts only `none` for metadata-document
+  // clients. A document may prefer another method in the singular field
+  // while listing several it can use (ChatGPT: private_key_jwt preferred,
+  // none supported); use the intersection, as the client expects.
+  const offered = Array.isArray(doc.token_endpoint_auth_methods_supported)
+    ? doc.token_endpoint_auth_methods_supported
+    : [doc.token_endpoint_auth_method || 'none'];
+  if (!offered.includes('none')) return failed();
   const rec = {
     client_id: clientId,
     client_name: cleanClientText(doc.client_name, 80) || host,
