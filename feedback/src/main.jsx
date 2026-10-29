@@ -596,6 +596,9 @@ ${uiCss}
       currentUser: (mentions && mentions.identity && mentions.identity.login) || (session.identity && session.identity.login) || 'anon',
       handoffViewer: [mentions?.identity?.login || session.identity?.login, ...(mentions?.identity?.linked_actor_keys || session.identity?.linked_actor_keys || [])],
       isOwner: Boolean(mentions && mentions.is_owner),
+      // A member of the team that owns the space: the doc page offers them
+      // Send to agent once the team has an agent to send to.
+      teamMember: Boolean(mentions && mentions.team_member),
     };
   }
 
@@ -871,9 +874,16 @@ ${uiCss}
     const unreadComments = area.unread.filter((comment) => commentPinState(comment, {
       seenMap: area.seenMap, handoffViewer, isOwner: owner,
     }).unread);
-    const agent = useNotifyTargets(slug, Boolean(owner && slug && session?.notify));
+    const teamMember = Boolean(surface?.teamMember);
+    const agent = useNotifyTargets(slug, Boolean((owner || teamMember) && slug && session?.notify));
     const canSendToAgent = Boolean(agent.ready && agent.available && agent.reason !== 'no_agent_bound'
       && (agent.default || agent.candidates.length || agent.fallback));
+    // Send to agent in the dock, as on the doc page. The owner always has it:
+    // with no agent connected (or a host that cannot notify) it opens the
+    // same panel, which says so and shows how to connect one, instead of the
+    // button silently not being there. A team member gets it once the team
+    // has an agent to send to; anyone else never does.
+    const showSend = Boolean(slug && (owner || (teamMember && session?.notify && canSendToAgent)));
     const agentChoices = useMemo(() => composerAgents({ canSendToAgent, notifyTargets: agent }), [canSendToAgent, agent]);
     const agentMentions = useMemo(() => ({
       choices: agentChoices, preselected: agentChoices[0] || null,
@@ -1047,14 +1057,14 @@ ${uiCss}
       onEdit: (id, text) => mutate({ type: 'tdoc-feedback-edit', id, text }),
       onReanchor: (id) => { setOpenId(null); setPanelOpen(false); setReanchorId(id); },
       onMarkRead: area.markRead,
-      onResendHandoff: owner && session?.notify ? async (c) => {
+      onResendHandoff: canSendToAgent ? async (c) => {
         try {
-          const body = await resendNotifyHandoff({ slug: session.slug, handoff_id: c.handoff_id });
+          const body = await resendNotifyHandoff({ slug, handoff_id: c.handoff_id });
           say(resendResultText(body), body?.delivery?.status === 'failed');
           await load();
         } catch (err) { say(err.message || 'Could not resend', true); }
       } : null,
-      onSendHandoffElsewhere: owner && session?.notify
+      onSendHandoffElsewhere: canSendToAgent
         ? (c) => { setNotifyAvoid(c.handoff_to || null); setNotifyIds([c.id]); }
         : null,
     };
@@ -1207,16 +1217,18 @@ ${uiCss}
           onPick={() => { setOpenId(null); setSelected(null); setPanelOpen(false); setPicking((v) => !v); }}
           onHide={hide}
           sendCount={ready.length}
-          onSend={owner && session && session.notify ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
+          onSend={showSend ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
         />
         {notifyIds ? (
           <NotifyHandoffPanel
-            slug={session.slug}
+            slug={slug}
             open
             commentIds={notifyIds}
             avoid={notifyAvoid}
             onClose={() => setNotifyIds(null)}
             onSent={() => load()}
+            onTargetsChanged={agent.refresh}
+            hostNotify={Boolean(session?.notify)}
           />
         ) : null}
       </AgentButtonsContext.Provider>

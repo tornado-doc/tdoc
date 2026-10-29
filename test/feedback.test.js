@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { loadWorker, makeEnv, req, putSession, bootData } = require('./helpers/worker-harness');
+const { loadWorker, makeEnv, req, putSession, bootData, issue } = require('./helpers/worker-harness');
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -267,6 +267,31 @@ const APP = 'http://localhost:3000';
     const { body: theirs } = await connect(env, can);
     const notOwner = await worker.fetch(req(`/api/notify/targets?slug=${space.slug}`, { token: theirs.token }), env, {});
     assert(notOwner.status === 401 || notOwner.status === 403, `a joiner drives the owner's agent: ${notOwner.status}`);
+  });
+
+  // The widget shows Send to agent from these two answers: the owner always,
+  // a member of the space's team once the team has an agent (as the doc page).
+  await t('Send to agent: the session says the host can notify; mentions names the owner and the team members', async () => {
+    const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev' });
+    const origin = { Origin: 'https://tdoc.dev' };
+    const julie = await issue(worker, env, 'julie');
+    const bob = await issue(worker, env, 'bob');
+    const { body: space } = await connect(env, julie.cookie);
+    assert(space.notify === true && space.is_owner === true, `connect: ${JSON.stringify({ notify: space.notify, is_owner: space.is_owner })}`);
+    const session = await (await worker.fetch(req('/api/feedback/session', { token: space.token }), env, {})).json();
+    assert(session.notify === true, 'the refreshed session dropped notify');
+    const mentions = async (opts) => (await worker.fetch(req(`/api/mentions?slug=${space.slug}`, opts), env, {})).json();
+    const own = await mentions({ token: space.token });
+    assert(own.is_owner === true && own.team_member === false, `personal space owner: ${JSON.stringify(own)}`);
+
+    const team = (await (await worker.fetch(req('/api/teams', { method: 'POST', cookie: julie.cookie, headers: origin, body: { name: 'Acme' } }), env, {})).json()).team;
+    await worker.fetch(req('/api/team/join', { method: 'POST', cookie: bob.cookie, body: { token: team.invite_url.split('/').pop() } }), env, {});
+    const moved = await worker.fetch(req('/api/team/move', { method: 'POST', cookie: julie.cookie, headers: origin, body: { team: team.id, slugs: [space.slug] } }), env, {});
+    assert(moved.status === 200, `move into team: ${moved.status} ${await moved.text()}`);
+    const admin = await mentions({ cookie: julie.cookie });
+    assert(admin.is_owner === true && admin.team_member === true, `team admin: ${JSON.stringify({ is_owner: admin.is_owner, team_member: admin.team_member })}`);
+    const member = await mentions({ cookie: bob.cookie });
+    assert(member.is_owner === false && member.team_member === true, `team member: ${JSON.stringify(member)}`);
   });
 
   await t('My docs lists feedback spaces you own or joined, with open/replied counts', async () => {

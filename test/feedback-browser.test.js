@@ -179,6 +179,60 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       assert((await context.pages()).length === 1, 'a second popup opened');
     });
 
+    // This local twin cannot notify (its session has no `notify`), which used
+    // to hide the dock's Send to agent from the owner with no word why.
+    await test('the owner keeps Send to agent with no notify: it opens the panel that says why and how to connect', async () => {
+      const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), `tdoc-feedback:${tdocBase}`);
+      assert(!stored.notify, 'fixture: the local session is expected to lack notify');
+      const send = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.tdoc-fb-send');
+      await send.waitFor({ timeout: 5000 });
+      assert((await send.getAttribute('aria-label')) === 'Send to agent', 'dock Send button is not named');
+      await send.click();
+      const dialog = page.getByRole('dialog', { name: 'Send to agent' });
+      try {
+        await dialog.getByText('Notify is not available on this host yet.').waitFor({ timeout: 5000 })
+          .catch(async () => { throw new Error(`no explanation: ${await dialog.innerText().catch(() => '(no dialog)')}`); });
+        await dialog.getByRole('button', { name: 'Close' }).click();
+        await dialog.waitFor({ state: 'detached', timeout: 5000 });
+      } finally {
+        if (await dialog.count()) await page.keyboard.press('Escape');
+      }
+
+      // A host that can notify but has no agent: the connect path, with
+      // links to tdoc (not to a path on the app).
+      const host = await context.newPage();
+      try {
+        const cors = { 'access-control-allow-origin': appBase, 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, OPTIONS' };
+        await host.goto(`${appBase}/dashboard`);
+        await host.evaluate((key) => {
+          const session = JSON.parse(localStorage.getItem(key));
+          localStorage.setItem(key, JSON.stringify({ ...session, notify: true }));
+        }, `tdoc-feedback:${tdocBase}`);
+        await host.route('**/api/feedback/session', async (route) => {
+          const response = await route.fetch();
+          await route.fulfill({ response, contentType: 'application/json', body: JSON.stringify({ ...(await response.json()), notify: true }) });
+        });
+        await host.route('**/api/notify/**', (route) => route.fulfill({ status: 200, headers: cors, contentType: 'application/json',
+          body: JSON.stringify(route.request().url().includes('/targets') ? { default: null, candidates: [], fallback: null, reason: null } : { handoffs: [] }) }));
+        await host.addScriptTag({ url: `${tdocBase}/feedback.js` });
+        await host.waitForFunction(() => Boolean(window.tdocFeedback));
+        await host.evaluate(() => window.tdocFeedback.open());
+        await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button.tdoc-fb-send').click();
+        const connectView = host.getByRole('dialog', { name: 'Connect an agent' });
+        await connectView.getByText('bin/tdoc-connect-agent').first().waitFor({ timeout: 5000 })
+          .catch(async () => { throw new Error(`no connect view: ${await host.getByRole('dialog').first().innerText().catch(() => '(no dialog)')}`); });
+        const settings = await connectView.getByRole('link', { name: 'workspace settings' }).getAttribute('href');
+        assert(settings === `${tdocBase}/me?view=settings#agents`, `settings link points at ${settings}`);
+      } finally {
+        // The stored session is shared with the main page: put it back.
+        await host.evaluate((key) => {
+          const { notify, ...session } = JSON.parse(localStorage.getItem(key));
+          localStorage.setItem(key, JSON.stringify(session));
+        }, `tdoc-feedback:${tdocBase}`).catch(() => {});
+        await host.close();
+      }
+    });
+
     await test('browsing leaves the app clickable; only + Comment takes over clicks', async () => {
       await page.evaluate(() => { window.__clicked = 0; document.getElementById('invite').addEventListener('click', () => { window.__clicked += 1; }); });
       await page.locator('#invite').click();

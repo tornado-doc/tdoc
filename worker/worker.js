@@ -22678,6 +22678,9 @@ const tdocHandlers = {
         users,
         identity: { login: me, linked_actor_keys: actorKeys(s), name: actorDisplayName(s), avatar_url: s.avatar_url || '' },
         is_owner: isDocOwnerSession(env, s, meta),
+        // A member of the team that owns this doc: the feedback widget offers
+        // them Send to agent once the team has an agent, as the doc page does.
+        team_member: Boolean(meta && meta.workspace_id && Array.isArray(s.team_ids) && s.team_ids.includes(meta.workspace_id)),
       });
     }
 
