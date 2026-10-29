@@ -400,6 +400,70 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     assert(rec && Array.isArray(rec.reborn) && rec.reborn.includes('alice'), JSON.stringify(rec));
   });
 
+  await t('an explicit re-invite of the old login is dated now and works at once, before the sweep', async () => {
+    assert((await publish(bob, 'bob-reinvite', { visibility: 'private', allowed_users: [] })).status === 200, 'publish');
+    // An invite from before the deletion (written as a legacy one would be).
+    const m = JSON.parse(await env.META.get('meta:bob-reinvite'));
+    m.access.allowed_users = ['alice'];
+    delete m.invited_at;
+    await env.META.put('meta:bob-reinvite', JSON.stringify(m), { metadata: env.META.metadata.get('meta:bob-reinvite') });
+    assert((await call('/d/bob-reinvite', { cookie: reborn })).status !== 200, 'the old invite works for the new holder');
+    const r = await call('/api/doc/access', { method: 'PATCH', cookie: bob.cookie, headers: SAME, body: { slug: 'bob-reinvite', access: { allowed_users_add: ['alice'] } } });
+    assert(r.status === 200, `re-invite ${r.status} ${r.text}`);
+    const after = JSON.parse(await env.META.get('meta:bob-reinvite'));
+    assert(after.access.allowed_users.filter((x) => x === 'alice').length === 1 && Date.parse(after.invited_at.alice) > Date.parse(deleted.deleted_at), JSON.stringify(after));
+    assert((await call('/d/bob-reinvite', { cookie: reborn })).status === 200, 'the re-invite is honoured');
+  });
+
+  await t('a legacy doc naming no account is not owned by its byline for the re-registered login', async () => {
+    await env.META.put('meta:alice-legacy', JSON.stringify({ title: 'legacy', slug: 'alice-legacy', created: '2025-01-01T00:00:00Z', versions: [{ n: 1, created: '2025-01-01T00:00:00Z' }], hosted: { github_login: 'alice' }, access: { visibility: 'private', allowed_users: [] } }));
+    await env.DOCS.put('docs/alice-legacy/v1/index.html', '<h1>legacy</h1>');
+    const read = await call('/d/alice-legacy', { cookie: reborn });
+    assert(read.status !== 200, `reborn owns a legacy doc by byline: ${read.status}`);
+    await env.META.delete('meta:alice-legacy');
+  });
+
+  await t('a write whose prior record cannot be read does not date legacy invites as new', async () => {
+    assert((await publish(zed, 'zed-legacy', { visibility: 'private', allowed_users: [] })).status === 200, 'publish');
+    const m = JSON.parse(await env.META.get('meta:zed-legacy'));
+    m.access.allowed_users = ['alice'];
+    delete m.invited_at;
+    await env.META.put('meta:zed-legacy', JSON.stringify(m), { metadata: env.META.metadata.get('meta:zed-legacy') });
+    const orig = env.META.getWithMetadata.bind(env.META);
+    let failed = 0;
+    env.META.getWithMetadata = async (k) => { if (k === 'meta:zed-legacy' && !failed) { failed += 1; throw new Error('kv down'); } return orig(k); };
+    try {
+      const r = await call('/api/doc/access', { method: 'PATCH', cookie: zed.cookie, headers: SAME, body: { slug: 'zed-legacy', access: { visibility: 'private' } } });
+      assert(r.status === 200, `${r.status} ${r.text}`);
+    } finally { env.META.getWithMetadata = orig; }
+    assert(failed === 1, 'the prior read was not the one that failed');
+    const after = JSON.parse(await env.META.get('meta:zed-legacy'));
+    assert(!(after.invited_at && after.invited_at.alice), `legacy invite dated now: ${JSON.stringify(after.invited_at)}`);
+    assert((await call('/d/zed-legacy', { cookie: reborn })).status !== 200, 'the legacy invite works for the new holder');
+  });
+
+  await t('the sweep writes a doc from a fresh read and changes only who is invited', async () => {
+    assert((await publish(zed, 'zed-stale', { visibility: 'private', allowed_users: [] })).status === 200, 'publish');
+    const m = JSON.parse(await env.META.get('meta:zed-stale'));
+    m.access.allowed_users = ['alice', 'bob'];
+    delete m.invited_at;
+    await env.META.put('meta:zed-stale', JSON.stringify(m), { metadata: env.META.metadata.get('meta:zed-stale') });
+    const staleCopy = await env.META.get('meta:zed-stale');
+    // The owner renames it; the sweep's first read is an edge-cached copy
+    // from before the rename.
+    const cur = JSON.parse(staleCopy);
+    cur.title = 'Renamed meanwhile';
+    await env.META.put('meta:zed-stale', JSON.stringify(cur), { metadata: env.META.metadata.get('meta:zed-stale') });
+    const orig = env.META.get.bind(env.META);
+    let served = 0;
+    env.META.get = async (k) => { if (k === 'meta:zed-stale' && !served) { served += 1; return staleCopy; } return orig(k); };
+    try { await cron(Date.parse(deleted.deleted_at) + 1 * DAY - 3600e3); } finally { env.META.get = orig; }
+    assert(served === 1, 'the stale copy was never read');
+    const after = JSON.parse(await env.META.get('meta:zed-stale'));
+    assert(after.title === 'Renamed meanwhile', `a stale copy was written back: ${after.title}`);
+    assert(!after.access.allowed_users.includes('alice') && after.access.allowed_users.includes('bob'), JSON.stringify(after.access));
+  });
+
   await t('the sweep takes out only invites made before the deletion; one made after (to the new holder) stays and works', async () => {
     assert((await publish(zed, 'zed-later', { visibility: 'private', allowed_users: [] })).status === 200, 'publish zed-later');
     const re = await call('/api/doc/access', { method: 'PATCH', cookie: zed.cookie, headers: SAME, body: { slug: 'zed-later', access: { allowed_users: ['alice'] } } });
@@ -601,6 +665,125 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     const edit = await call('/api/comments', { method: 'PATCH', cookie: ivyCookie, body: { slug: 'bob-doc', id: ivyComment.id, text: 'Ivy edits.' } });
     assert(edit.status === 200, `ivy blocked from her own comment: ${edit.status} ${edit.text}`);
     assert(await env.META.get('account-email:ivy@example.com'), 'ivy lost her address');
+  });
+
+  console.log('account delete: budgets, lost locks, the identity key');
+
+  await t('a large account is deleted across runs within the budget; the sweep for others runs every run; a broken record fails alone', async () => {
+    const env3 = makeEnv(mod.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-secret', TDOC_ACCOUNT_REQUEST_BUDGET: '120', TDOC_ACCOUNT_CRON_BUDGET: '200' });
+    const call3 = async (path, opts = {}) => {
+      const r = await worker.fetch(req(path, opts), env3, ctx);
+      const text = await r.clone().text();
+      let body = null; try { body = JSON.parse(text); } catch {}
+      return { status: r.status, body, text };
+    };
+    const cron3 = (at) => worker.scheduled({ scheduledTime: at, cron: '23 * * * *' }, env3, ctx);
+    const big = await issue(worker, env3, 'big');
+    const small = await issue(worker, env3, 'small');
+    const N = 45;
+    for (let i = 0; i < N; i++) {
+      assert((await call3('/api/upload', { method: 'POST', token: big.token, body: { slug: `big-${i}`, version: 1, html: `<h1>${i}</h1>`, meta: { title: `b${i}`, access: { visibility: 'public' } } } })).status === 200, `publish ${i}`);
+    }
+    assert((await call3('/api/me/account/delete', { method: 'POST', cookie: small.cookie, headers: SAME, body: { confirm: 'small' } })).status === 200, 'delete small');
+    const r = await call3('/api/me/account/delete', { method: 'POST', cookie: big.cookie, headers: SAME, body: { confirm: 'big' } });
+    assert(r.status === 200 && r.body.finishing === true, `big: ${r.status} ${r.text}`);
+    assert((await call3('/api/hosted/whoami', { token: big.token })).status === 401, 'big still signed in');
+    let rec = JSON.parse(await env3.META.get(`account-deleted:${big.account_id}`));
+    assert(rec.state === 'deleting' && !rec.error && rec.docs.length < N, `request did ${rec.docs.length} docs, state ${rec.state}`);
+    // A record that breaks whatever touches it.
+    await env3.META.put('account-deleted:acct_broken', JSON.stringify({ account_id: 'acct_broken', ids: ['acct_broken'], state: 'deleted', purge_at: '2000-01-01T00:00:00Z', teams_deleted: 5 }));
+    let scannedBefore = 0;
+    let sweeping = 0;
+    for (let run = 0; run < 15; run++) {
+      const smBefore = JSON.parse(await env3.META.get(`account-deleted:${small.account_id}`));
+      await cron3(Date.now());
+      const st = JSON.parse(await env3.META.get('account-sweep:state') || '{"scanned":0}');
+      rec = JSON.parse(await env3.META.get(`account-deleted:${big.account_id}`));
+      // While small waits on the sweep, every run sweeps for it, though big
+      // is still being worked through.
+      if (smBefore.state === 'deleted' && !smBefore.sweep_done_at && rec.state === 'deleting') {
+        assert(st.scanned > scannedBefore, `run ${run}: the sweep was starved ${JSON.stringify(st)}`);
+        sweeping += 1;
+      }
+      scannedBefore = st.scanned;
+      if (rec.state === 'deleted') break;
+    }
+    assert(sweeping >= 1, 'never saw the sweep run beside the unfinished deletion');
+    assert(rec.state === 'deleted' && rec.docs.length === N, `big: ${rec.state} ${rec.docs.length} docs ${JSON.stringify(rec.error)}`);
+    for (let i = 0; i < N; i++) assert(JSON.parse(await env3.META.get(`meta:big-${i}`)).trashed_at, `big-${i} not in Trash`);
+  });
+
+  await t('a run that loses its lock mid-way stops and writes nothing more', async () => {
+    const env4 = makeEnv(mod.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-secret', TDOC_ACCOUNT_REQUEST_BUDGET: '60' });
+    const call4 = async (path, opts = {}) => { const r = await worker.fetch(req(path, opts), env4, ctx); const text = await r.clone().text(); let body = null; try { body = JSON.parse(text); } catch {} return { status: r.status, body, text }; };
+    const lee = await issue(worker, env4, 'lee');
+    for (let i = 0; i < 12; i++) assert((await call4('/api/upload', { method: 'POST', token: lee.token, body: { slug: `lee-${i}`, version: 1, html: '<h1>x</h1>', meta: { title: 'x', access: { visibility: 'public' } } } })).status === 200, 'publish');
+    assert((await call4('/api/me/account/delete', { method: 'POST', cookie: lee.cookie, headers: SAME, body: { confirm: 'lee' } })).status === 200, 'delete');
+    // The lock store answers "not yours any more" from the 3rd renewal on
+    // (it expired and a restore took it).
+    const ns = env4.COMMENTS;
+    const origGet = ns.get.bind(ns);
+    let renewals = 0;
+    ns.get = (id) => {
+      const stub = origGet(id);
+      if (id !== '__tdoc-search__:account-delete') return stub;
+      return { fetch: async (url, init) => {
+        const op = JSON.parse(init.body).op;
+        if (op.kind === 'renew' && ++renewals >= 3) return new Response(JSON.stringify({ ok: true, held: false }));
+        return stub.fetch(url, init);
+      } };
+    };
+    const before = JSON.parse(await env4.META.get(`account-deleted:${lee.account_id}`));
+    try { await worker.scheduled({ scheduledTime: Date.now(), cron: '23 * * * *' }, env4, ctx); } finally { ns.get = origGet; }
+    const after = JSON.parse(await env4.META.get(`account-deleted:${lee.account_id}`));
+    assert(renewals >= 3, `renewals ${renewals}`);
+    assert(after.state === 'deleting', `a run without its lock finished: ${after.state}`);
+    const trashed = [];
+    for (let i = 0; i < 12; i++) if (JSON.parse(await env4.META.get(`meta:lee-${i}`)).trashed_at) trashed.push(i);
+    // At most the doc in flight when the lock was found gone is beyond what the record says.
+    assert(trashed.length <= after.docs.length + 1 && after.docs.length < 12, `kept going: ${trashed.length} trashed, record ${after.docs.length} (before ${before.docs.length})`);
+  });
+
+  await t('the identity key is pinned: a new higher-priority secret changes nothing; a changed pinned secret stops identity work (and says so) until restored', async () => {
+    const env5 = makeEnv(mod.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-secret-5' });
+    const call5 = async (path, opts = {}) => { const r = await worker.fetch(req(path, opts), env5, ctx); const text = await r.clone().text(); let body = null; try { body = JSON.parse(text); } catch {} return { status: r.status, body, text }; };
+    const owner5 = await issue(worker, env5, 'own5');
+    const max = await issue(worker, env5, 'max');
+    assert((await call5('/api/upload', { method: 'POST', token: owner5.token, body: { slug: 'own5-doc', version: 1, html: '<h1>x</h1>', meta: { title: 'x', access: { visibility: 'public' } } } })).status === 200, 'publish');
+    assert((await call5('/api/comments', { method: 'POST', cookie: max.cookie, body: { slug: 'own5-doc', version: 1, text: 'max says', anchor: null } })).status === 200, 'comment');
+    assert((await call5('/api/me/account/delete', { method: 'POST', cookie: max.cookie, headers: SAME, body: { confirm: 'max' } })).status === 200, 'delete max');
+    const pin = JSON.parse(await env5.META.get('account-identity-key'));
+    assert(pin.name === 'TDOC_UPLOAD_TOKEN' && /^[0-9a-f]{16}$/.test(pin.kid), JSON.stringify(pin));
+    const rec = JSON.parse(await env5.META.get(`account-deleted:${max.account_id}`));
+    assert(rec.kid === pin.kid, 'record keeps its key id');
+    const maxSession = () => session5({ login: 'max', reborn: ['max'] });
+    async function session5(fields) {
+      const id = hex();
+      await env5.META.put(`session:${id}`, JSON.stringify({ name: 'max', avatar_url: '', created: new Date().toISOString(), ...fields }));
+      return `tdoc_sid=${id}`;
+    }
+    const list = env5.COMMENTS.stateFor('own5-doc').storage.map.get('list');
+    const cid = list[0].id;
+    env5.TDOC_EMAIL_ALIAS_SECRET = 'configured-later';
+    await new Promise((r) => setTimeout(r, 5));
+    const ms = await maxSession();
+    const e1 = await call5('/api/comments', { method: 'PATCH', cookie: ms, body: { slug: 'own5-doc', id: cid, text: 'hijack' } });
+    assert(e1.status === 403, `a later secret broke the tombstones: ${e1.status} ${e1.text}`);
+    // The pinned secret changes value.
+    env5.TDOC_UPLOAD_TOKEN = 'rotated';
+    const errors = [];
+    const origErr = console.error;
+    console.error = (...a) => { errors.push(a.join(' ')); };
+    let res;
+    try { res = await mod.default.scheduled({ scheduledTime: Date.parse(rec.purge_at) + DAY, cron: '23 * * * *' }, env5, ctx); } finally { console.error = origErr; }
+    assert(errors.some((m) => /identity key changed/.test(m)), `no alert: ${errors.join('|')}`);
+    const after = JSON.parse(await env5.META.get(`account-deleted:${max.account_id}`));
+    assert(after && !after.sweep_done_at, 'the sweep ran with the wrong key');
+    assert(env5.COMMENTS.stateFor('own5-doc').storage.map.get('list')[0].author.login === 'max', 'anonymized with the wrong key');
+    env5.TDOC_UPLOAD_TOKEN = 'admin-secret-5';
+    for (let i = 0; i < 3; i++) await mod.default.scheduled({ scheduledTime: Date.parse(rec.purge_at) + (i + 1) * DAY, cron: '23 * * * *' }, env5, ctx);
+    assert(!(await env5.META.get(`account-deleted:${max.account_id}`)), 'not finished once the key was restored');
+    assert(env5.COMMENTS.stateFor('own5-doc').storage.map.get('list')[0].author.name === 'Deleted user', 'not anonymized');
   });
 
   console.log('account delete: many docs, several accounts, a slow sweep');
