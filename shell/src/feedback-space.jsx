@@ -3,6 +3,7 @@ import { ExternalLink, Link2, Send } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { Bookmarklet } from './feedback-install.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
+import { AppButton } from './ui/button.jsx';
 import { CommentCard } from './document/comment-card.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { orderedAgentChoices } from './document/agent-choices.js';
@@ -106,12 +107,12 @@ export function FeedbackSpace({ boot }) {
           Comments left on <a href={origin} target="_blank" rel="noopener noreferrer">{host}</a> · {openCount} open · {repliedCount} replied
         </p>
         <div className="tdoc-fbspace-actions">
-          <a className="tdoc-fbspace-btn" href={origin} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open the app</a>
-          <a className="tdoc-fbspace-btn" href={shareUrl}><Link2 size={14} /> Share</a>
+          <a className="ui-btn ui-btn-secondary ui-btn-m" href={origin} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open the app</a>
+          <a className="ui-btn ui-btn-secondary ui-btn-m" href={shareUrl}><Link2 size={14} /> Share</a>
           {isOwner && notify.ready && notify.available ? (
-            <button type="button" className="tdoc-fbspace-btn primary" onClick={() => setNotifyIds(ready.map((c) => c.id))}>
+            <AppButton variant="primary" className="primary" onClick={() => setNotifyIds(ready.map((c) => c.id))}>
               <Send size={14} /> Send to agent{ready.length ? ` (${ready.length})` : ''}
-            </button>
+            </AppButton>
           ) : null}
         </div>
 
@@ -119,12 +120,12 @@ export function FeedbackSpace({ boot }) {
         {!identity ? (
           <section className="tdoc-fbspace-card">
             <p><strong>Sign in to join.</strong> You're invited to leave feedback on {host}; your comments land here, next to everyone else's.</p>
-            <a className="tdoc-fbspace-btn primary" href={signinUrl}>Sign in</a>
+            <a className="ui-btn ui-btn-primary ui-btn-m" href={signinUrl}>Sign in</a>
           </section>
         ) : !joined ? (
           <section className="tdoc-fbspace-card">
             <p><strong>Join to comment on {host}.</strong> Your comments on the app will land in this list.</p>
-            <button type="button" className="tdoc-fbspace-btn primary" disabled={joinBusy} onClick={join}>{joinBusy ? 'Joining…' : 'Join'}</button>
+            <AppButton variant="primary" className="primary" disabled={joinBusy} onClick={join}>{joinBusy ? 'Joining…' : 'Join'}</AppButton>
           </section>
         ) : null}
 

@@ -45,7 +45,7 @@ export function getOnboarding(options) {
   // `docs` asks the server to also name the newest doc this account owns. It
   // costs a catalog walk, so only the page that waits for a doc to appear
   // asks for it.
-  return request(options?.daemon ? '/api/onboarding?daemon=1' : options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
+  return request(options?.mcp ? `/api/onboarding?mcp=${encodeURIComponent(options.mcp)}${options.mcpAfter ? `&mcp_after=${encodeURIComponent(options.mcpAfter)}` : ''}` : options?.daemon ? '/api/onboarding?daemon=1' : options && options.docs ? '/api/onboarding?docs=1' : '/api/onboarding');
 }
 
 export function updateComputer(body) {
@@ -513,6 +513,12 @@ export function listTeamAgents(id) {
 
 export function addTeamAgent(id, name) {
   return teamRequest('/api/team/agents', 'POST', { id, name });
+}
+
+// A new one-time setup command for an agent not connected yet; the previous
+// one stops working.
+export function reissueTeamAgentSetup(id, agent) {
+  return teamRequest('/api/team/agents', 'POST', { id, agent, action: 'reissue' });
 }
 
 export function removeTeamAgent(id, agent) {

@@ -29,6 +29,46 @@ function sources(dir) {
 // Internal tooling that is not product UI.
 const NATIVE_SELECT_ALLOWED = new Set(['shell/src/onboarding-preview.jsx']);
 
+
+// Buttons (Julie, 2026-10-26): ~45 hand-sized button styles drifted apart; the
+// Ask AI actions were taller than Comment. AppButton (ui/button.jsx) owns the
+// sizes; other stylesheets may recolour .ui-btn on a surface, never size it.
+// Older hand-sized button rules are grandfathered in an allowlist that may
+// only shrink: migrate one to AppButton, then delete its line.
+const CSS_FILES = (() => {
+  const out = [];
+  for (const dir of ['server', 'shell/src', 'feedback/src']) {
+    const walk = (rel) => {
+      if (!fs.existsSync(path.join(ROOT, rel))) return;
+      for (const entry of fs.readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
+        const child = path.join(rel, entry.name);
+        if (entry.isDirectory() && entry.name !== 'runtime' && entry.name !== 'node_modules') walk(child);
+        else if (entry.name.endsWith('.css')) out.push(child);
+      }
+    };
+    walk(dir);
+  }
+  return out;
+})();
+const SIZING = /(^|;|\{)\s*(height|min-height|padding|border-radius|font-size|font)\s*:/;
+function buttonSizingRules() {
+  const found = [];
+  for (const file of CSS_FILES) {
+    const css = fs.readFileSync(path.join(ROOT, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const re = /([^{};]+)\{([^{}]*)\}/g;
+    let m;
+    while ((m = re.exec(css))) {
+      const selector = m[1].trim().replace(/\s+/g, ' ');
+      if (selector.startsWith('@') || !SIZING.test(`{${m[2]}`)) continue;
+      for (const one of selector.split(',')) {
+        const s = one.trim();
+        if (/\bbutton\b|btn|\.submit\b/i.test(s)) found.push(`${file} :: ${s}`);
+      }
+    }
+  }
+  return found;
+}
+
 console.log('UI primitives');
 
 t('no native <select> in product UI (use AppSelect from shell/src/ui/select.jsx)', () => {
@@ -118,6 +158,85 @@ t('document owners can move the open doc between workspaces', () => {
   assert(/workspaceId: \(docMeta && docMeta\.workspace_id\) \|\| null/.test(worker), 'document boot config omits its metadata-owned workspace');
   const teams = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub/teams.jsx'), 'utf8');
   assert(/team\.id !== currentTeam/.test(teams), 'move dialog does not hide the current workspace');
+});
+
+
+t('AppButton owns button sizes: only ui.css sizes .ui-btn', () => {
+  const offenders = buttonSizingRules()
+    .filter((rule) => /ui-btn/.test(rule) && !rule.startsWith('shell/src/ui/ui.css :: '));
+  assert(!offenders.length, `resize AppButton only in ui.css (recolour elsewhere): ${offenders.join('; ')}`);
+});
+
+t('no new hand-sized button styles (allowlist only shrinks; use AppButton)', () => {
+  const allowed = new Set(JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/button-sizing-allowlist.json'), 'utf8')));
+  // ui.css owns every .ui-btn size, including its phone touch heights.
+  const current = buttonSizingRules().filter((rule) => !(rule.startsWith('shell/src/ui/ui.css :: ') && /\.ui-btn/.test(rule)));
+  const added = current.filter((rule) => !allowed.has(rule));
+  assert(!added.length, `new button sizing outside AppButton: ${added.join('; ')}`);
+  const gone = [...allowed].filter((rule) => !current.includes(rule));
+  assert(!gone.length, `remove migrated rules from test/fixtures/button-sizing-allowlist.json: ${gone.join('; ')}`);
+});
+
+t('comment surfaces use AppButton sizes (composer, reply, private answer, Ask AI, handoff reply)', () => {
+  const files = {
+    'shell/src/document/comment-composer.jsx': 3,
+    'shell/src/document/comment-card.jsx': 4,
+    'shell/src/document/agent-ask.jsx': 3,
+    'shell/src/document/ask-ai-panel.jsx': 3,
+    'shell/src/document/handoff-details.jsx': 1,
+  };
+  for (const [file, min] of Object.entries(files)) {
+    const n = (fs.readFileSync(path.join(ROOT, file), 'utf8').match(/ui-btn ui-btn-(primary|secondary|quiet) ui-btn-[ms]/g) || []).length;
+    assert(n >= min, `${file}: ${n} AppButton-sized buttons, expected at least ${min}`);
+  }
+});
+
+t('team settings, Share, notifications, the Agents page and dialogs use AppButton', () => {
+  const files = {
+    'shell/src/docs-hub/teams.jsx': 20,
+    'shell/src/document/owner-access-dialog.jsx': 5,
+    'shell/src/notifications-dialog.jsx': 5,
+    'shell/src/connectors-page.jsx': 5,
+    'shell/src/document/document-dialogs.jsx': 5,
+  };
+  for (const [file, min] of Object.entries(files)) {
+    const n = (fs.readFileSync(path.join(ROOT, file), 'utf8').match(/<AppButton\b/g) || []).length;
+    assert(n >= min, `${file}: ${n} AppButtons, expected at least ${min}`);
+  }
+});
+
+const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
+
+t('command blocks are CodeBlock: readable, no mid-word breaks, Copy inside', () => {
+  const connectors = read('shell/src/connectors-page.jsx');
+  assert(!/tdoc-conn-pre/.test(connectors), 'Agents page still has a bare <pre> command block');
+  assert((connectors.match(/<CodeBlock\b/g) || []).length >= 4, 'Agents page command/prompt blocks are not CodeBlocks');
+  const ui = read('shell/src/ui/ui.css');
+  const block = ui.slice(ui.indexOf('/* CodeBlock'));
+  assert(/word-break: normal; overflow-wrap: normal; overflow-x: auto/.test(block), 'CodeBlock may break mid-word');
+  assert(!/break-all/.test(block), 'CodeBlock breaks mid-word');
+});
+
+t('docs-hub.css keeps its tokens and base type inside the docs-hub root', () => {
+  const css = read('shell/src/docs-hub.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert(!/(^|\})\s*:root\s*\{/.test(css), 'docs-hub.css redefines tokens on :root');
+  assert(!/(^|\})\s*(body|h1|a|a:hover)\s*\{/.test(css), 'docs-hub.css styles body / h1 / a for every page');
+});
+
+t('one Copy control: CopyPromptButton (quiet small AppButton) on every copy action; share links keep a primary Copy link', () => {
+  const files = ['shell/src/docs-hub/teams.jsx', 'shell/src/document/owner-access-dialog.jsx', 'shell/src/document/document-dialogs.jsx',
+    'shell/src/docs-hub.jsx', 'shell/src/profile.jsx', 'shell/src/connectors-page.jsx', 'shell/src/document/comment-card.jsx', 'shell/src/ui/code-block.jsx'];
+  for (const file of files) {
+    const src = read(file);
+    // ShareLinkRow's Copy link is the one exception: a share surface's primary action.
+    const others = src.replace(/<AppButton variant="primary" className="primary tdoc-share-copy"[^>]*>Copy link<\/AppButton>/g, '');
+    assert(!/<(button|AppButton)\b[^>]*>\s*(\{[^}]*\}\s*)?(Copy|\{copied)/.test(others), `${file}: a Copy button that is not CopyPromptButton`);
+    assert(/<CopyPromptButton\b|<ShareLinkRow\b/.test(src), `${file}: no CopyPromptButton / ShareLinkRow`);
+  }
+  const share = read('shell/src/document/owner-access-dialog.jsx');
+  assert(/<ShareLinkRow url=\{url\} id="tdoc-share-url"/.test(share), 'Share dialog Copy link is not the primary ShareLinkRow');
+  const button = read('shell/src/ui/copy-prompt-button.jsx');
+  assert(/<AppButton\s+variant="quiet"\s+size="s"/.test(button), 'CopyPromptButton is not the quiet small AppButton');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

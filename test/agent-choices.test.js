@@ -54,6 +54,24 @@ t('Ask AI ranks the last editor first and keeps the server recency order, exclud
   assert(JSON.stringify(list.map((agent) => agent.agent_name)) === JSON.stringify(['bob', 'charlie', 'alice']), names(list));
 });
 
+t('one row per agent: a team agent\'s claude and codex on one computer read once; claude by default, the doc\'s pick kept', () => {
+  const team = (device, cli, id = 'ta_1', name = 'OpenTag') => ({ ...local(device, cli), team_agent: { id, name }, owner: { key: 'team-agent:ta_1', display: 'befreed team agent' } });
+  const both = [team('mac', 'codex'), team('mac', 'claude'), local('juliesmac', 'claude'), local('juliesmac', 'codex')];
+  const rows = box.oneRowPerAgent(both);
+  assert(rows.length === 3, names(rows));
+  assert(rows[0].cli === 'claude' && rows[0].team_agent.id === 'ta_1', 'the team agent row is not its Claude Code row');
+  // The person's own Claude Code and Codex are two agents with two names.
+  assert(rows.filter((t) => !t.team_agent).length === 2, 'own local agents were merged');
+  assert(box.oneRowPerAgent(both, [team('mac', 'codex')])[0].cli === 'codex', 'the doc\'s own pick was replaced');
+  // Two team agents on one computer stay two; one agent on two computers too.
+  assert(box.oneRowPerAgent([team('mac', 'claude'), team('mac', 'claude', 'ta_2', 'Other')]).length === 2);
+  assert(box.oneRowPerAgent([team('mac', 'claude'), team('box', 'claude')]).length === 2);
+  const offered = box.orderedAgentChoices({ default: team('mac', 'codex'), candidates: [team('mac', 'claude'), raft('b', 'devin')] });
+  assert(offered.length === 2 && offered[0].cli === 'codex', names(offered));
+  const asked = box.orderedAskAiChoices([team('mac', 'codex'), team('mac', 'claude')]);
+  assert(asked.length === 1 && asked[0].cli === 'claude', names(asked));
+});
+
 t('the dropdown and the picker read the same helper', () => {
   const panel = read('shell/src/document/notify-handoff.jsx');
   const field = read('shell/src/document/mention-field.jsx');

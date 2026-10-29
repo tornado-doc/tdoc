@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Folder, Trash2 } from 'lucide-react';
 import { RowMenu, day } from './rows.jsx';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { deleteForever, listTrash, restoreFromTrash } from '../document/api.js';
 import { recentTrash } from '../recent-trash.js';
 
@@ -140,10 +141,10 @@ export function TrashPane({ team, notify, onChanged, onFailed }) {
           title={`Delete “${confirm.title}” forever?`}
           actions={(
             <>
-              <button type="button" onClick={() => setConfirm(null)}>Cancel</button>
-              <button type="button" className="danger trash-purge-confirm" disabled={busy === keyOf(confirm)} onClick={() => purge(confirm)}>
+              <AppButton onClick={() => setConfirm(null)}>Cancel</AppButton>
+              <AppButton variant="danger" className="danger trash-purge-confirm" disabled={busy === keyOf(confirm)} onClick={() => purge(confirm)}>
                 Delete forever
-              </button>
+              </AppButton>
             </>
           )}
         >

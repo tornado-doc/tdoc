@@ -64,10 +64,11 @@ import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
 import { TutorialCoach } from './document/tutorial-coach.jsx';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
+import { ConnectAiAppsStrip } from './connect-ai-apps.jsx';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAgentChoices, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel } from './document/ask-ai-panel.jsx';
@@ -92,6 +93,9 @@ function useNarrowViewport() {
 
   return narrow;
 }
+
+const COMMENT_SIGNIN_DRAFT_MAX_AGE_MS = 60 * 60 * 1000;
+const commentSignInDraftKey = (config) => `tdoc-comment-signin-draft:${config.slug}:v${config.version}`;
 
 function DocumentFooter({ visible }) {
   return (
@@ -201,6 +205,21 @@ export function DocumentShell({ boot, config }) {
   // Slides presenting: full screen like a visual, but commenting stays on.
   const [presenting, setPresenting] = useState(false);
   const [composer, setComposer] = useState(null);
+  // A visitor writes before signing in. Bring that draft and its quote back
+  // after the auth redirect, so sending never discards the work they just did.
+  useEffect(() => {
+    if (!config.identity || !config.canComment) return;
+    let saved;
+    try {
+      const key = commentSignInDraftKey(config);
+      saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+      sessionStorage.removeItem(key);
+    } catch { return; }
+    if (!saved || !Number.isFinite(saved.at) || Date.now() - saved.at > COMMENT_SIGNIN_DRAFT_MAX_AGE_MS
+      || !saved.selection || (saved.selection.kind && !['text', 'element', 'document'].includes(saved.selection.kind))
+      || typeof saved.text !== 'string') return;
+    setComposer({ ...saved.selection, draftText: saved.text });
+  }, [config.identity, config.canComment, config.slug, config.version]);
   const [openCommentId, setOpenCommentId] = useState(null);
   const [openClusterKey, setOpenClusterKey] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -448,13 +467,12 @@ export function DocumentShell({ boot, config }) {
         .finally(() => bridgeRef.current?.({ type: 'tdoc:clearPending' }));
       return;
     }
-    if (!config.canComment) {
+    if (!config.canComment && !config.signInToComment) {
       bridgeRef.current?.({ type: 'tdoc:clearPending' });
-      if (config.signInToComment) signIn();
       return;
     }
     setComposer(selection);
-  }, [comments.moveAnchor, config.canComment, config.signInToComment, signIn]);
+  }, [comments.moveAnchor, config.canComment, config.signInToComment]);
 
   const bridge = useFrameBridge({
     'tdoc:visualState': (message) => setVisualOpen(message.open === true),
@@ -748,6 +766,13 @@ export function DocumentShell({ boot, config }) {
   };
 
   const postComment = async (text, opts = {}) => {
+    // A signed-out reader can select, copy, and write first. Asking to sign
+    // in happens on the action that would actually send their words.
+    if (!config.identity && config.signInToComment) {
+      try { sessionStorage.setItem(commentSignInDraftKey(config), JSON.stringify({ text, selection: composer, at: Date.now() })); } catch {}
+      signIn();
+      return;
+    }
     const selection = composer;
     const target = opts.target || null;
     // Ask only + Only me: nothing is posted; the answer is the asker's alone.
@@ -1010,13 +1035,27 @@ export function DocumentShell({ boot, config }) {
       : askAiTargets.find((item) => item.key === selectedAskAiTargetKey);
     if (!question || !choice || askAiBusy) return;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // A team agent answers for the team, never privately (worker
+    // team_agent_not_private): the question is posted as the asker's comment
+    // and the answer is its reply. The panel said so before Send.
+    const inPublic = Boolean(!choice.tdocAi && choice.target.team_agent);
     setAskAiBusy(true);
     if (!retryText) setAskAiDraft('');
     setAskAiTurns((turns) => [...turns, { id, question, target: choice.target, label: choice.label,
-      kind: choice.tdocAi ? 'tdoc-ai' : 'agent', status: 'thinking', answer: '', askId: null }]);
+      kind: choice.tdocAi ? 'tdoc-ai' : 'agent', status: 'thinking', answer: '', askId: null, public: inPublic }]);
     try {
-      const body = await handOff(config.slug, { ask_only: true, only_me: true, question,
-        version: config.version, recipient: recipientFor(choice.target) });
+      let commentId = null;
+      if (inPublic) {
+        const comment = await comments.addComment({ kind: 'document' }, question);
+        if (!comment?.id) throw new Error('Could not post the question');
+        commentId = comment.id;
+        markCommented();
+        setAiThinking({ id: commentId, label: choice.label, agent: true });
+        setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, publicCommentId: commentId } : turn));
+      }
+      const body = await handOff(config.slug, inPublic
+        ? { ask_only: true, comment_id: commentId, question, version: config.version, recipient: recipientFor(choice.target) }
+        : { ask_only: true, only_me: true, question, version: config.version, recipient: recipientFor(choice.target) });
       if (body?.ask) myAgent.addAsk(body.ask);
       if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
       setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? {
@@ -1026,6 +1065,7 @@ export function DocumentShell({ boot, config }) {
       } : turn));
     } catch (error) {
       if (error.status === 429 && choice.tdocAi) setAiRemaining(0);
+      if (inPublic) setAiThinking(null);
       setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? {
         ...turn, status: 'failed', error: error.status === 429 ? 'No free tdoc AI answers left.'
           : error.status === 409 ? 'Your agent could not be reached.' : (error.message || 'Could not get an answer.'),
@@ -1539,7 +1579,7 @@ export function DocumentShell({ boot, config }) {
   const openCount = commentArea.openCount;
   const mobileUnread = commentArea.unreadCount > 0;
   const startDocumentComment = (askAi = false) => {
-    if (!config.canComment) { if (config.signInToComment) signIn(); return; }
+    if (!config.canComment && !config.signInToComment) return;
     if (editor.mode === 'edit' && editor.dirty) {
       showToast('Save or discard the draft before commenting', true);
       return;
@@ -1579,14 +1619,25 @@ export function DocumentShell({ boot, config }) {
       onAsk={askAiSend}
       onKeep={keepAskAiAnswer}
       onPost={postAskAiAnswer}
-      readyCount={canSendToAgent ? handoffBuckets.ready.length : 0}
-      onSendReady={canSendToAgent ? () => openDocNotify() : null}
+      send={canSendToAgent ? {
+        slug: config.slug,
+        choices: orderedAgentChoices(notifyTargets),
+        preselected: notifyTargets.default,
+        readyIds: handoffBuckets.ready.map((c) => c.id),
+        onSent: () => comments.refresh(),
+      } : null}
       activityOpen={agentActivityOpen}
       onActivityOpen={setAgentActivityOpen}
       unreadCount={unreadAgentReplies}
       disabledChoices={teamGuestsEnabled && config.teamManage?.guest ? (myAgent.state?.disabled_team_agents || []) : []}
       guestAction={guestAction}
       signInToAsk={signedOutAsk}
+      onConnect={signedOutAsk ? () => {
+        if (askAiDraft.trim()) {
+          try { sessionStorage.setItem(`tdoc-ask-draft:${config.slug}`, askAiDraft); } catch {}
+        }
+        signIn('/start');
+      } : null}
     >{signedOutAsk ? null : <HandoffDetailsPanel
       slug={config.slug}
       open={panelOpen}
@@ -1656,8 +1707,8 @@ export function DocumentShell({ boot, config }) {
   const composerView = composer ? (
     <CommentComposer
       selection={composer}
-      initialText={composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices[0]
-        ? `@${AGENT_TAG_JOINER}${agentMentionName(agentChoices[0], agentChoices)} ` : ''}
+      initialText={composer.draftText || (composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices[0]
+        ? `@${AGENT_TAG_JOINER}${agentMentionName(agentChoices[0], agentChoices)} ` : '')}
       mentionable={mentionable}
       demo={!!config.demoComments}
       canSendToAgent={canSendToAgent}
@@ -1721,7 +1772,6 @@ export function DocumentShell({ boot, config }) {
               canComment={config.canComment}
               canEdit={config.canEdit}
               signInToComment={Boolean(config.signInToComment)}
-              onSignIn={() => signIn()}
               onChange={(value) => editor.changeMode(value)}
             />
             <DocumentPrimaryAction
@@ -1808,6 +1858,9 @@ export function DocumentShell({ boot, config }) {
         latestUrl: `/d/${encodeURIComponent(config.slug)}/v/${liveLatest}`,
         fresh: true,
       } : null)} />
+
+      {/* /start: the no-terminal way in (remote MCP), behind remoteMcp. */}
+      {config.onboarding && config.slug === 'tdoc-start' && editor.mode !== 'edit' ? <ConnectAiAppsStrip /> : null}
 
       {showExitBanner ? (
         <div ref={exitBannerRef} className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}>

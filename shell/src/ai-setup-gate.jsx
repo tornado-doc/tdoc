@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { AppButton } from './ui/button.jsx';
+import { ConnectAiApps, CONNECT_AI_APPS } from './connect-ai-apps.jsx';
+import { isFeatureOn } from './feature-flags.js';
 import { Check, Copy, Loader2, Monitor } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent, createOnboardingPractice, startConversationSetup, conversationSetupStatus, updateComputer, getSetupConnectors, testSetupConnector } from './document/api.js';
@@ -50,6 +53,9 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [mcpApp, setMcpApp] = useState('claude');
+  const mcpChoice = CONNECT_AI_APPS.find(app => app.id === mcpApp);
+  const mcpProduct = mcpChoice?.product || 'claude_web';
   // The computer route is two screens, as in Raft: connect the computer, then pick its runtime.
   const [pickRuntime, setPickRuntime] = useState(Boolean(preview?.pickRuntime));
   const active = useRef(true);
@@ -77,6 +83,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const platformRoute = stage === 'platform';
   const manual = stage === 'manual' || platformRoute;
   const intro = stage === 'intro';
+  const mcpIntro = intro && isFeatureOn('remoteMcp');
   const done = stage === 'done';
   // Like Raft: once the computer shows up, move on to Choose your AI by itself.
   // The first check after opening this step is the baseline: a computer that
@@ -92,20 +99,23 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     if (!signedIn || preview || manual || done) return undefined;
     let cancelled = false;
     let timer;
+    let mcpObservedAfter = null;
     const tick = async () => {
       try {
-        const result = await getOnboarding(stage === 'connect' ? { daemon: true } : undefined);
+        const result = await getOnboarding(mcpIntro ? { mcp: mcpProduct, mcpAfter: mcpObservedAfter } : stage === 'connect' ? { daemon: true } : undefined);
         if (cancelled) return;
+        if (mcpIntro && !mcpObservedAfter) mcpObservedAfter = result?.observed_at || null;
+        if (mcpIntro && result?.mcp_connected) { setCompletedPath('mcp'); setStage('done'); }
         if (stage === 'connect') { setAgents(result?.local_agents || []); setComputers(result?.local_computers || []); }
         setPaired(Boolean(result?.paired)); setError(''); setLoaded(true); setElapsed(Date.now() - started.current);
       } catch {
-        if (!cancelled && !intro) { setAgents([]); setComputers([]); setError('Could not check the connection. Retrying…'); }
+        if (!cancelled && (!intro || mcpIntro)) { setAgents([]); setComputers([]); setError('Could not check the connection. Retrying…'); }
       }
-      if (!cancelled && !intro) timer = window.setTimeout(tick, POLL_MS);
+      if (!cancelled && (!intro || mcpIntro)) timer = window.setTimeout(tick, POLL_MS);
     };
     tick();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [signedIn, preview, stage, manual, intro, done]);
+  }, [signedIn, preview, stage, manual, intro, done, mcpIntro, mcpProduct]);
 
   useEffect(() => {
     if (!manual || !signedIn || preview) return undefined;
@@ -204,14 +214,15 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     } catch (e) { if (active.current) setError(e.message || 'Could not finish setup. Please try again.'); }
     finally { if (active.current) setBusy(false); }
   };
-  const tutorial = async () => {
+  const tutorial = async (manualProduct) => {
     if (busy || preview) return;
+    if (completedPath === 'mcp') manualProduct = mcpProduct;
     if (pendingAsk) { location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`); return; }
     setBusy(true); setError('');
     try {
-      const target = completedPath === 'connect' ? { device: chosen?.device, cli: chosen?.cli }
+      const target = manualProduct ? { mode: 'manual' } : completedPath === 'connect' ? { device: chosen?.device, cli: chosen?.cli }
         : completedPath === 'platform' ? { mode: 'platform', recipient: platformTarget } : { mode: 'manual' };
-      const result = await createOnboardingPractice({ ...target, product: completedPath === 'connect' ? chosen.cli : productId });
+      const result = await createOnboardingPractice({ ...target, product: manualProduct || (completedPath === 'connect' ? chosen.cli : productId) });
       if (active.current) location.assign(result.url);
     } catch (e) {
       if (active.current) { setError(e.message === 'computer_not_ready' ? 'Wake your computer, then try again.' : 'Could not open your tutorial. Try again.'); setBusy(false); }
@@ -221,7 +232,7 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
   const computerRoute = stage === 'connect';
   const head = !signedIn ? { eyebrow: 'Set up Tdoc', title: 'Sign in', description: 'Sign in to connect your AI.' }
     : intro ? { eyebrow: 'Set up Tdoc', title: 'Which AI do you use?', description: 'Tdoc sends your comments to this AI, and it edits your doc.' }
-      : done ? { eyebrow: 'Set up Tdoc', title: 'You’re connected', description: `${completedPath === 'connect' && chosen ? labelOf(chosen) : product.label} is ready for your comments.` }
+      : done ? { eyebrow: 'Set up Tdoc', title: 'You’re connected', description: completedPath === 'mcp' ? 'Your AI is connected to Tdoc.' : `${completedPath === 'connect' && chosen ? labelOf(chosen) : product.label} is ready for your comments.` }
         : computerRoute && pickRuntime ? { eyebrow: 'Set up Tdoc', title: 'Choose your AI', description: `The AI on ${computer?.device || 'this computer'} that edits your docs.` }
           : computerRoute ? { eyebrow: 'Set up Tdoc', title: 'Connect a computer', description: 'A computer is where your AI runs. Tdoc sends it your comments, even when the AI is closed.' }
             : { eyebrow: 'Set up Tdoc', title: `Connect ${product.label}`, description: platformRoute ? `Your ${product.label} agent connects Tdoc to your account and receives your comments.` : `${product.label} connects to your Tdoc account and edits your docs when you ask.` };
@@ -231,32 +242,37 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
     <p className="ui-setup-cmd-label">{label}</p>
     <div className="ui-setup-cmd-row">
       <code ref={ref} className="ui-setup-instruction">{text || 'Preparing…'}</code>
-      <button type="button" className="ui-setup-cmd-copy" aria-label={`Copy ${name}`} title={copied === name ? 'Copied' : 'Copy'} disabled={!text} onClick={() => copy(text, name, ref)}>
+      <AppButton type="button" className="ui-setup-cmd-copy" aria-label={`Copy ${name}`} title={copied === name ? 'Copied' : 'Copy'} disabled={!text} onClick={() => copy(text, name, ref)}>
         {copied === name ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
-      </button>
+      </AppButton>
     </div>
   </div>;
   const status = (text, ready = false) => <p role="status" className="ui-setup-status">{ready ? <Check size={14} aria-hidden="true" /> : <Loader2 size={14} aria-hidden="true" className="ui-setup-spin" />}{text}</p>;
 
   return (
     <AppDialog open={open} onOpenChange={next => { if (!next) close(); }}
-      eyebrow={head.eyebrow} title={head.title} description={head.description}
-      className="ui-setup-modal" focusTitle
+      eyebrow={intro ? undefined : head.eyebrow} title={mcpIntro ? 'Connect your AI' : head.title} description={intro ? 'Choose the app you work in.' : head.description}
+      className={`ui-setup-modal${intro ? ' ui-setup-entry' : ''}${mcpIntro ? ' ui-setup-entry-mcp' : ''}`} focusTitle
       actions={<>
-        {back ? <button type="button" className="ui-setup-later ui-setup-link" disabled={busy} onClick={back.go}>{back.label}</button>
-          : <button type="button" className="ui-setup-later ui-setup-link" disabled={busy} onClick={close}>Skip</button>}
-        {!signedIn ? <button type="button" className="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
-          : done ? <button type="button" className="primary" disabled={busy} onClick={tutorial}>{busy ? 'Opening…' : 'Continue'}</button>
-            : canReturn ? <button type="button" className="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</button>
-              : intro ? null
-                : computerRoute && !pickRuntime ? <button type="button" className="primary" disabled={!connected} onClick={() => setPickRuntime(true)}>Next</button>
-                  : computerRoute ? <button type="button" className="primary" disabled={busy || !runtimeReady} onClick={finishConnection}>{busy ? 'Checking…' : 'Continue'}</button>
-                    : <button type="button" className="primary" disabled={busy || !(platformRoute && platformTarget)} onClick={verifyPlatform}>{busy ? 'Checking…' : platformRoute && platformTarget ? 'Check connection' : 'Next'}</button>}
+        {back ? <AppButton type="button" variant="quiet" className="ui-setup-later ui-setup-link" disabled={busy} onClick={back.go}>{back.label}</AppButton>
+          : <AppButton type="button" variant="quiet" className="ui-setup-later ui-setup-link" disabled={busy} onClick={close}>Skip</AppButton>}
+        {!signedIn ? <AppButton type="button" variant="primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</AppButton>
+          : done ? <AppButton type="button" variant="primary" disabled={busy} onClick={() => tutorial()}>{busy ? 'Opening…' : 'Continue'}</AppButton>
+            : canReturn ? <AppButton type="button" variant="primary" onClick={() => location.assign(`/d/${encodeURIComponent(pendingAsk.slug)}`)}>Back to the doc</AppButton>
+              : mcpIntro ? null
+                : intro ? null
+                : computerRoute && !pickRuntime ? <AppButton type="button" variant="primary" disabled={!connected} onClick={() => setPickRuntime(true)}>Next</AppButton>
+                  : computerRoute ? <AppButton type="button" variant="primary" disabled={busy || !runtimeReady} onClick={finishConnection}>{busy ? 'Checking…' : 'Continue'}</AppButton>
+                    : <AppButton type="button" variant="primary" disabled={busy || !(platformRoute && platformTarget)} onClick={verifyPlatform}>{busy ? 'Checking…' : platformRoute && platformTarget ? 'Check connection' : 'Next'}</AppButton>}
       </>}
     >
       {!signedIn ? <p>{boot?.oidcAuth ? 'Sign in to connect your AI.' : 'Sign-in is unavailable on this host.'}</p>
-        : intro ? <AIPicker onChoose={chooseProduct} />
-          : done ? <div className="ui-setup-ready"><Check size={36} aria-hidden="true" /><p>Try a comment. Watch your AI make the change.</p></div>
+        : mcpIntro ? <>
+          <ConnectAiApps compact showCli={false} selectedApp={mcpApp} onAppChange={app => { setMcpApp(app.id); setError(''); }} />
+          {status(`Waiting for ${mcpChoice.label}…`)}
+          <AppButton variant="quiet" className="ui-setup-computer-fallback" onClick={() => chooseProduct(mcpProduct === 'codex' ? 'codex' : 'claude')}>Connect a computer instead</AppButton>
+        </> : intro ? <AIPicker onChoose={chooseProduct} />
+          : done ? <div className="ui-setup-ready"><Check size={36} aria-hidden="true" /><p>{completedPath === 'mcp' ? 'Try a comment with your AI.' : 'Try a comment. Watch your AI make the change.'}</p></div>
             : computerRoute && pickRuntime ? <div className="ui-setup-split">
               <div className="ui-setup-split-visual">
                 <Monitor size={64} strokeWidth={1.5} aria-hidden="true" />
@@ -292,8 +308,8 @@ export function SetupGate({ boot, preview = null, startAt = 'intro', onClose }) 
                 {copyFailed ? <p role="status" className="ui-setup-status">{COPY_FALLBACK}</p>
                   : computerRoute ? status(connected ? `${computer.device} is connected.` : computer?.status === 'paused' ? 'Updates are paused. Resume them in Settings.' : 'Waiting for you to run the command and approve it in your browser…', connected)
                     : status(platformTarget ? 'Linked. Check that it can receive a task.' : manual && !attempt ? 'Preparing your instruction…' : 'Waiting for you to paste the instruction and approve it in your browser…', Boolean(platformTarget))}
-                {!attempt && error && manual ? <button type="button" onClick={() => setRetry(value => value + 1)}>Try again</button> : null}
-                {computerRoute && state === 'stuck' ? <button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy connection check</button> : null}
+                {!attempt && error && manual ? <AppButton type="button" onClick={() => setRetry(value => value + 1)}>Try again</AppButton> : null}
+                {computerRoute && state === 'stuck' ? <AppButton type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy connection check</AppButton> : null}
               </div>}
       {error ? <p className="ui-setup-error" role="alert">{error}</p> : null}
     </AppDialog>

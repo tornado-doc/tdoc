@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, DatabaseBackup, Link2, MessageSquareText, RefreshCw, ServerCog, SlidersHorizontal, UsersRound } from 'lucide-react';
+import { Bot, DatabaseBackup, MessageSquareText, RefreshCw, ServerCog, SlidersHorizontal, UsersRound } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { AppSelect } from '../ui/select.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { InviteField } from '../document/owner-access-dialog.jsx';
@@ -20,6 +21,7 @@ import {
   openTeamBilling,
   removeTeamAgent,
   removeTeamBackup,
+  reissueTeamAgentSetup,
   removeTeamMember,
   saveTeamBackup,
   setTeamRole,
@@ -218,7 +220,7 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
         actions={(
           <>
             {advancedCount ? <button type="button" className="tdoc-quiet-link tm-push-left" onClick={clearAdvanced}>Clear filters</button> : null}
-            <button type="button" onClick={() => setFiltersOpen(false)}>Done</button>
+            <AppButton onClick={() => setFiltersOpen(false)}>Done</AppButton>
           </>
         )}
       >
@@ -310,9 +312,9 @@ export function TeamCommentsPane({ team, pageSize = 25 }) {
         <nav className="tm-comment-pagination" aria-label="Comment pages">
           <span>{pageStart + 1}–{Math.min(pageStart + safePageSize, shown.length)} of {shown.length}</span>
           <div>
-            <button type="button" disabled={visiblePage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>
+            <AppButton disabled={visiblePage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</AppButton>
             <span>Page {visiblePage} of {pageCount}</span>
-            <button type="button" disabled={visiblePage === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</button>
+            <AppButton disabled={visiblePage === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</AppButton>
           </div>
         </nav>
       ) : null}
@@ -340,8 +342,8 @@ export function NewTeamDialog({ onClose, onCreated }) {
       title="New team"
       actions={(
         <>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" className="primary" onClick={submit} disabled={!name.trim() || status === 'Creating…'}>Create team</button>
+          <AppButton onClick={onClose}>Cancel</AppButton>
+          <AppButton variant="primary" className="primary" onClick={submit} disabled={!name.trim() || status === 'Creating…'}>Create team</AppButton>
         </>
       )}
     >
@@ -403,8 +405,8 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, inline = fa
     title: team ? `${team.name} members` : 'Members',
     actions: (
       <>
-        <button type="button" className="danger tm-push-left" disabled={!team || soleAdmin} onClick={() => onLeave(team, me)}>Leave team</button>
-        <button type="button" onClick={onClose}>Close</button>
+        <AppButton variant="danger" className="danger tm-push-left" disabled={!team || soleAdmin} onClick={() => onLeave(team, me)}>Leave team</AppButton>
+        <AppButton onClick={onClose}>Close</AppButton>
       </>
     ),
   };
@@ -422,13 +424,13 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, inline = fa
                 onChange={(added) => apply(() => updateTeam(team.id, { invites: [...team.invites, ...added.filter((x) => !team.invites.includes(x))] }))}
               />
               {team.invite_url ? (
-                <button
-                  type="button"
-                  className="tm-link-btn"
-                  onClick={() => copyText(team.invite_url).then(() => setCopied('invite'))}
-                >
-                  <Link2 size={14} /> {copied === 'invite' ? 'Invite link copied' : 'Copy invite link'}
-                </button>
+                <CopyPromptButton
+                  className="tm-copy-invite"
+                  label="Copy invite link"
+                  copiedLabel="Invite link copied"
+                  copied={copied === 'invite'}
+                  onCopy={() => copyText(team.invite_url).then(() => setCopied('invite'))}
+                />
               ) : null}
             </section>
           ) : null}
@@ -437,9 +439,7 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, inline = fa
               <label className="field">Team link</label>
               <div className="tm-team-link">
                 <code>{team.team_url.replace(/^https?:\/\//, '')}</code>
-                <button type="button" className="tm-text-btn" onClick={() => copyText(team.team_url).then(() => setCopied('team'))}>
-                  {copied === 'team' ? 'Copied' : 'Copy'}
-                </button>
+                <CopyPromptButton label="Copy" copied={copied === 'team'} onCopy={() => copyText(team.team_url).then(() => setCopied('team'))} />
               </div>
               <p className="manage-hint">Opens the team for members and for people on the invite list. Anyone else is told whom to ask.</p>
             </section>
@@ -479,13 +479,12 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, inline = fa
                 name={invitee}
                 sub="Invited"
                 right={admin ? (
-                  <button
-                    type="button"
-                    className="tm-text-btn"
+                  <AppButton
+                    variant="quiet"
                     onClick={() => apply(() => updateTeam(team.id, { invites: team.invites.filter((x) => x !== invitee) }))}
                   >
                     Cancel invite
-                  </button>
+                  </AppButton>
                 ) : null}
               />
             ))}
@@ -497,7 +496,7 @@ export function MembersDialog({ teamId, onClose, onLeave, onChanged, inline = fa
           </p>
           <p className="status" role="status">{status || '\u00a0'}</p>
           {inline ? (
-            <button type="button" className="danger tm-settings-leave" disabled={soleAdmin} onClick={() => onLeave(team, me)}>Leave workspace</button>
+            <AppButton className="danger tm-settings-leave" disabled={soleAdmin} onClick={() => onLeave(team, me)}>Leave workspace</AppButton>
           ) : null}
         </>
       )}
@@ -562,14 +561,14 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
     setBusy(false);
   };
   const Shell = inline ? 'section' : AppDialog;
-  const saveButton = <button type="button" className="primary" onClick={save} disabled={busy || !form.endpoint.trim() || !form.bucket.trim() || !form.region.trim() || !form.access_key_id.trim() || !form.secret_access_key}>Connect and back up</button>;
+  const saveButton = <AppButton variant="primary" className="primary" onClick={save} disabled={busy || !form.endpoint.trim() || !form.bucket.trim() || !form.region.trim() || !form.access_key_id.trim() || !form.secret_access_key}>Connect and back up</AppButton>;
   const shellProps = inline ? { className: 'tm-settings-card', 'aria-labelledby': 'tm-backup-heading' } : {
     open: true,
     onOpenChange: (open) => { if (!open && !busy) onClose(); },
     title: `${team.name} data backup`,
     actions: (
       <>
-        <button type="button" onClick={onClose} disabled={busy}>Close</button>
+        <AppButton onClick={onClose} disabled={busy}>Close</AppButton>
         {saveButton}
       </>
     ),
@@ -599,10 +598,10 @@ export function TeamBackupDialog({ team, onClose, inline = false }) {
           {backup.last_error ? <span>{backup.last_error}</span> : null}
           <div className="tm-backup-health-actions">
             <div className="tm-backup-sync-action">
-              <button type="button" className="tm-text-btn" onClick={sync} disabled={busy}><RefreshCw size={14} /> Run full sync again</button>
+              <AppButton variant="quiet" onClick={sync} disabled={busy}><RefreshCw size={14} /> Run full sync again</AppButton>
               <span>Optional. Use this only to re-copy all current data.</span>
             </div>
-            <button type="button" className="tm-text-btn tm-backup-off" onClick={remove} disabled={busy}>Turn off</button>
+            <AppButton variant="quiet" className="tm-backup-off" onClick={remove} disabled={busy}>Turn off</AppButton>
           </div>
         </section>
       ) : null}
@@ -715,9 +714,9 @@ export function TeamBillingCard({ team }) {
       {status ? <p className="status" role="status">{status}</p> : null}
       <div className="tm-settings-actions">
         {(paid && !lifetime) || billing.has_customer ? (
-          <button type="button" className={paid && !lifetime ? 'primary' : 'tm-link-btn'} onClick={() => go('portal')} disabled={busy}>Manage billing</button>
+          <AppButton variant={paid && !lifetime ? 'primary' : 'secondary'} className={paid && !lifetime ? 'primary' : ''} onClick={() => go('portal')} disabled={busy}>Manage billing</AppButton>
         ) : null}
-        {paid ? null : <button type="button" className="primary" onClick={() => go('checkout')} disabled={busy}>Upgrade to Team</button>}
+        {paid ? null : <AppButton variant="primary" className="primary" onClick={() => go('checkout')} disabled={busy}>Upgrade to Team</AppButton>}
       </div>
     </section>
   );
@@ -737,7 +736,7 @@ function seenText(iso) {
 // can send them comments on team docs; admins add and remove them. Adding
 // gives one command for a dedicated machine; nothing personal should be on
 // it, because every member's comments drive it.
-function TeamAgentRow({ agent, team, canManage, onRemove }) {
+function TeamAgentRow({ agent, team, canManage, onRemove, onShowSetup }) {
   const devices = agent.devices || [];
   const sub = !agent.connected
     ? 'Waiting for its machine to run the setup command'
@@ -752,17 +751,20 @@ function TeamAgentRow({ agent, team, canManage, onRemove }) {
         <span className="tm-person-sub">{sub}</span>
       </div>
       <div className="tm-person-right">
+        {canManage && !agent.connected ? <button type="button" className="tm-text-btn" onClick={() => onShowSetup(agent)}>Show setup command</button> : null}
         {canManage ? <button type="button" className="tm-text-btn" onClick={() => onRemove(agent)}>Remove</button> : null}
       </div>
     </div>
   );
 }
 
-function AddTeamAgentDialog({ team, onClose, onAdded }) {
+// `issued` opens it straight on the Connect step, with a setup command just
+// reissued for an agent that has not connected yet.
+function AddTeamAgentDialog({ team, issued = null, onClose, onAdded }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
-  const [added, setAdded] = useState(null);
+  const [added, setAdded] = useState(issued);
   const add = async () => {
     setBusy(true);
     setStatus('');
@@ -794,7 +796,8 @@ function AddTeamAgentDialog({ team, onClose, onAdded }) {
           <>
             <p>Run this once on that machine. It installs tdoc if needed, connects as <b>{added.agent.name} · {team.name} team agent</b>, and starts picking up comments. It works once, within the hour.</p>
             <div className="tm-agent-command">
-              <code>{added.command}</code>
+              {/* One step per line to read; Copy takes the exact one-line command. */}
+              <code>{added.command.split('; ').join(';\n')}</code>
               <CopyPromptButton text={added.command} />
             </div>
             <p className="manage-hint">It reaches {team.name}&apos;s docs and nothing else: no one&apos;s personal docs, no other team. It cannot share, delete, invite or change billing. It belongs to the team, so it keeps working if you leave; remove it here to stop it.</p>
@@ -816,6 +819,7 @@ export function TeamAgentsSection({ team }) {
   const [canManage, setCanManage] = useState(false);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState(null);
+  const [issued, setIssued] = useState(null);
   const [status, setStatus] = useState('');
   useEffect(() => {
     let cancelled = false;
@@ -836,18 +840,28 @@ export function TeamAgentsSection({ team }) {
     } catch (error) { setStatus(message(error)); }
     setRemoving(null);
   };
+  // The first command is shown once; a new one replaces it (the old one stops working).
+  const showSetup = async (agent) => {
+    setStatus('');
+    try {
+      const result = await reissueTeamAgentSetup(team.id, agent.id);
+      setAgents(result.agents || []);
+      setIssued(result);
+    } catch (error) { setStatus(message(error)); }
+  };
   return (
     <section className="manage-section tm-team-agents" aria-labelledby="tm-team-agents-heading">
       <div className="tm-team-agents-head">
         <label className="field" id="tm-team-agents-heading">Team agents</label>
-        {canManage ? <button type="button" className="tm-link-btn" onClick={() => setAdding(true)}><Bot size={14} /> Add team agent</button> : null}
+        {canManage ? <AppButton onClick={() => setAdding(true)}><Bot size={14} /> Add team agent</AppButton> : null}
       </div>
       {agents === null ? <p className="muted">Loading…</p> : agents.length ? agents.map((agent) => (
-        <TeamAgentRow key={agent.id} agent={agent} team={team} canManage={canManage} onRemove={setRemoving} />
+        <TeamAgentRow key={agent.id} agent={agent} team={team} canManage={canManage} onRemove={setRemoving} onShowSetup={showSetup} />
       )) : <p className="empty">No team agent yet.{canManage ? '' : ' A team admin can add one.'}</p>}
       <p className="manage-hint">Every member can send a comment on a {team.name} doc to a team agent; its replies are visible to everyone who can see the doc. It belongs to the team, not to whoever added it.</p>
       {status ? <p className="status" role="status">{status}</p> : null}
       {adding ? <AddTeamAgentDialog team={team} onClose={() => setAdding(false)} onAdded={setAgents} /> : null}
+      {issued ? <AddTeamAgentDialog team={team} issued={issued} onClose={() => setIssued(null)} onAdded={setAgents} /> : null}
       {removing ? (
         <AppDialog
           open
@@ -855,8 +869,8 @@ export function TeamAgentsSection({ team }) {
           title={`Remove ${removing.name}?`}
           actions={(
             <>
-              <button type="button" onClick={() => setRemoving(null)}>Cancel</button>
-              <button type="button" className="danger" onClick={remove}>Remove</button>
+              <AppButton onClick={() => setRemoving(null)}>Cancel</AppButton>
+              <AppButton variant="danger" className="danger" onClick={remove}>Remove</AppButton>
             </>
           )}
         >
@@ -939,15 +953,15 @@ function TeamGuestsSection({ team }) {
         name={inviteeLabel(guest.invitee)}
         sub={`${guest.documents.length} ${guest.documents.length === 1 ? 'document' : 'documents'}: ${documentNames}${moreDocuments} · Added by ${guest.added_by || 'unknown'}${guest.documents.length >= 40 ? ' · Frequent collaborator — consider a member seat' : ''}`}
         right={team.role === 'admin' ? <>
-          <button type="button" className="tm-text-btn" onClick={() => act(guest.invitee, invited ? 'resend' : 'invite_member')}>{invited ? 'Resend invite' : 'Invite to team'}</button>
-          <button type="button" className="tm-text-btn" onClick={() => act(guest.invitee, 'remove')}>Remove</button>
+          <AppButton variant="quiet" onClick={() => act(guest.invitee, invited ? 'resend' : 'invite_member')}>{invited ? 'Resend invite' : 'Invite to team'}</AppButton>
+          <AppButton variant="quiet" onClick={() => act(guest.invitee, 'remove')}>Remove</AppButton>
         </> : null} />;
     })}
     {(data?.invites || []).filter((invitee) => !(data?.guests || []).some((guest) => guest.invitee === invitee))
       .map((invitee) => <PersonRow key={`invite:${invitee}`} className="tm-guest-row"
         member={{ name: invitee, key: invitee }} name={inviteeLabel(invitee)}
         sub="Team invitation pending · no document shared"
-        right={team.role === 'admin' ? <button type="button" className="tm-text-btn" onClick={() => act(invitee, 'resend')}>Resend invite</button> : null} />)}
+        right={team.role === 'admin' ? <AppButton variant="quiet" onClick={() => act(invitee, 'resend')}>Resend invite</AppButton> : null} />)}
     <p className="status" role="status">{status}</p>
   </section>;
 }
@@ -974,7 +988,7 @@ export function MoveToTeamDialog({
       open
       onOpenChange={(open) => { if (!open) onClose(); }}
       title={title || `Move ${count === 1 ? 'this doc' : `${count} docs`} to a team`}
-      actions={<button type="button" onClick={onClose}>Cancel</button>}
+      actions={<AppButton onClick={onClose}>Cancel</AppButton>}
     >
       <div className="move-list">
         {destinations.map((team) => (
@@ -1033,7 +1047,7 @@ export function MoveFolderToTeamDialog({ folder, teams, docCount, onClose, onSta
         open
         onOpenChange={(open) => { if (!open) close(); }}
         title={`Moved to ${target.name}`}
-        actions={<button type="button" onClick={close}>Close</button>}
+        actions={<AppButton onClick={close}>Close</AppButton>}
       >
         <p>{left.count === 1 ? '1 doc was' : `${left.count} docs were`} not yours to move, so {left.count === 1 ? 'it stays' : 'they stay'} in {folder.name} in My docs.</p>
       </AppDialog>
@@ -1045,7 +1059,7 @@ export function MoveFolderToTeamDialog({ folder, teams, docCount, onClose, onSta
         open
         onOpenChange={(open) => { if (!open) close(); }}
         title={`Move ${folder.name} to a team`}
-        actions={<button type="button" onClick={close}>Cancel</button>}
+        actions={<AppButton onClick={close}>Cancel</AppButton>}
       >
         <div className="move-list">
           {teams.map((team) => (
@@ -1067,8 +1081,8 @@ export function MoveFolderToTeamDialog({ folder, teams, docCount, onClose, onSta
       title={`Move ${folder.name} to ${target.name}?`}
       actions={(
         <>
-          <button type="button" onClick={() => { setTarget(null); setStatus(''); }} disabled={busy}>Back</button>
-          <button type="button" className="primary folder-move-team-confirm" onClick={run} disabled={busy}>Move {docs}</button>
+          <AppButton onClick={() => { setTarget(null); setStatus(''); }} disabled={busy}>Back</AppButton>
+          <AppButton variant="primary" className="primary folder-move-team-confirm" onClick={run} disabled={busy}>Move {docs}</AppButton>
         </>
       )}
     >
@@ -1096,8 +1110,8 @@ export function LeaveTeamDialog({ team, docCount, onLeave, onClose }) {
       title={`Leave ${team.name}?`}
       actions={(
         <>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" className="danger" onClick={leave}>Leave team</button>
+          <AppButton onClick={onClose}>Cancel</AppButton>
+          <AppButton variant="danger" className="danger" onClick={leave}>Leave team</AppButton>
         </>
       )}
     >

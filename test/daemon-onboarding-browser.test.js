@@ -33,8 +33,9 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    const context=await browser.newContext({viewport:{width,height:850},reducedMotion:'reduce'});
    const page=await context.newPage(); page.setDefaultTimeout(60000); page.setDefaultNavigationTimeout(90000); const errors=[];page.on('pageerror',e=>{errors.push(e.message); console.error('Browser error:',e.message);});
    page.on('requestfailed',r=>console.error('Request failed:',r.url(),r.failure()?.errorText));
-   let agents=[];let computers=[];let failPractice=true;let sent;let setupReady=false; let setupExpired=false; let defaultTarget=null;
+   let agents=[];let computers=[];let failPractice=true;let sent;let setupReady=false; let setupExpired=false; let defaultTarget=null; let mcpConnected=null; let mcpAfterSeen=false;
    await page.route('**/api/onboarding',route=>route.fulfill({json:{paired:false,record:{}}}));
+   await page.route('**/api/onboarding?mcp=*',route=>{ const query=new URL(route.request().url()).searchParams; if(query.get('mcp_after')==='2026-10-29T00:00:00Z') mcpAfterSeen=true; return route.fulfill({json:{paired:true,record:{agent_connected:'old'},observed_at:'2026-10-29T00:00:00Z',mcp_connected:query.get('mcp')===mcpConnected}}); });
    await page.route('**/api/onboarding/connect',route=>route.fulfill({json:{code:'a'.repeat(32),expires:'2099-01-01T00:00:00Z',ready:false}}));
    await page.route('**/api/onboarding/connect?code=*',route=>route.fulfill({status:setupExpired?410:200,json:setupExpired?{error:'setup_expired'}:{ready:setupReady}}));
    await page.route('**/api/me/computers',route=>{defaultTarget=route.request().postDataJSON(); return route.fulfill({json:{ok:true}});});
@@ -46,6 +47,37 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await page.route('**/api/me/connectors',route=>route.fulfill({json:{targets:[receiver]}}));
    await page.route('**/api/me/connectors/test',route=>{deliveryTests++;return route.fulfill({json:{delivery:{status:deliveryFails?'failed':'delivered'}}});});
    const shot=async name=>{if(SHOTS){fs.mkdirSync(SHOTS,{recursive:true});await page.screenshot({path:path.join(SHOTS,`${name}-${width}.png`)});}};
+   // MCP is the primary route: switching apps keeps one connection panel,
+   // and the optional tutorial stays manual rather than queuing a daemon.
+   await page.goto(base+'?setup=1&mcp=1');
+   await page.getByRole('heading',{name:'Connect your AI',exact:true}).waitFor();
+   const appChoices=page.getByRole('group',{name:'Choose your AI app',exact:true});
+   for(const app of ['Claude','ChatGPT','Cursor','VS Code','Codex','Gemini']) {
+     await appChoices.getByRole('button',{name:app,exact:true}).click();
+     await page.getByRole('region',{name:`Connect ${app}`,exact:true}).waitFor();
+     assert.equal(await page.locator('.tdoc-connect-app-panel').count(),1);
+   }
+   assert.ok(await page.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth),'MCP choices fit phone and desktop');
+   await shot('mcp-products');
+   await page.getByRole('button',{name:'Connect a computer instead',exact:true}).click();
+   await page.getByRole('heading',{name:'Connect a computer',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Choose another AI',exact:true}).click();
+   await page.getByRole('heading',{name:'Connect your AI',exact:true}).waitFor();
+   assert.equal(await page.getByRole('group',{name:'Choose your AI app'}).getByRole('button',{name:'Gemini',exact:true}).getAttribute('aria-pressed'),'true','returning keeps the app that the tutorial will use');
+   assert.equal(await page.getByRole('button',{name:'Try a comment',exact:true}).count(),0,'no tutorial before OAuth completes');
+   mcpConnected='claude_web';
+   await page.waitForTimeout(3300);
+   assert.equal(await page.getByRole('heading',{name:'You’re connected',exact:true}).count(),0,'another app or old daemon cannot finish this app');
+   assert.ok(mcpAfterSeen,'polls carry the server observation time for unknown app registrations');
+   mcpConnected='gemini';
+   await page.getByRole('heading',{name:'You’re connected',exact:true}).waitFor();
+   await page.getByText('Your AI is connected to Tdoc.',{exact:true}).waitFor();
+   await shot('mcp-ready');
+   failPractice=false;
+   await page.getByRole('button',{name:'Continue',exact:true}).click();
+   await page.waitForURL('**/d/practice?step=comment');
+   assert.deepEqual(sent,{mode:'manual',product:'gemini'},'MCP practice does not claim a connected computer');
+   failPractice=true;sent=null;mcpConnected=null;
    // An ordinary account (no dev mode) never sees the AI onboarding, even with ?setup=1.
    await page.goto(base+'?setup=1&classic=1');
    await page.waitForTimeout(500);

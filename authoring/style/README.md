@@ -43,6 +43,21 @@ An entry must obey the "Author HTML compatibility contract" in `SKILL.md`:
 - no page footer — the overlay injects its own
 - `tdoc-*` classes and ids stay reserved
 
+## Every entry carries the reading column
+
+Each entry's CSS block ends with a "Reading column" section: the column,
+media-cap, table-scroller and `pre` rules copied verbatim from
+`server/reader.css`, all `:where()` zero-specificity (the scroller keeps its
+reserved `tdoc-table-scroll` class, as in reader.css). It is there so a page
+that uses the style without going through `tdoc-write` / `tdoc-bake` (another
+app, an agent that skipped the bake) still reads in the same 720px column as a
+published doc. Because the values are identical and zero-specificity, a baked
+doc renders the same with or without them, and an author's own rules still
+win. It is the one exception to the "no root width/margin/padding" rule above:
+it restates reader.css, it does not override it. Do not edit the values in the
+style; change `server/reader.css` and copy them across.
+`test/style-reader-column.test.js` fails when the two drift.
+
 Rule of thumb: styles carried by left rules, pale fills, chips, type scale,
 and restrained color adapt cleanly. Styles carried by full-bleed hero
 sections, sticky navigation, card shadows, or an edge-to-edge background

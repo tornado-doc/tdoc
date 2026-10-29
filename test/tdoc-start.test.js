@@ -88,7 +88,8 @@ t('a newcomer is told what to have before pasting', () => {
   assert(/href="https:\/\/code\.claude\.com\/docs\/en\/overview"/.test(html), 'no Claude Code install link');
   assert(/Open\s+Terminal/.test(text) && /<code>claude<\/code>/.test(html), 'does not say where to paste');
   assert(/nodejs\.org/.test(html) && !/brew install/.test(html), 'Node is not offered as the nodejs.org installer');
-  assert(/not work in the claude\.ai or ChatGPT chat/.test(text), 'does not say which chats are unsupported');
+  assert(!/claude\.ai or ChatGPT chat/.test(text), 'still says the chats are unsupported');
+  assert(/Claude[\s\S]*ChatGPT[\s\S]*No terminal needed/.test(text) && html.includes('href="/start?connect=1"'), 'does not offer Connect in one click for the chat apps');
 });
 
 t('commenting sign-in names every method, not only GitHub', () => {

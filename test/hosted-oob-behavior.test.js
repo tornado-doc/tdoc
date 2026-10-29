@@ -168,6 +168,25 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(body.error === 'hosted_owner_store_unavailable', `unexpected body ${JSON.stringify(body)}`);
   });
 
+  await t('a preview without Durable Objects keeps owner rules in KV (signed-in publish works there)', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_PREVIEW: '1' });
+    const a = await issue(worker, env, 'preview-owner');
+    const b = await issue(worker, env, 'preview-other');
+    delete env.COMMENTS; // what preview.yml deploys
+    const up = (tok, v) => worker.fetch(req('/api/upload', { method: 'POST', token: tok.token, body: { slug: 'preview-doc', version: v, html: '<h1>x</h1>' } }), env, {});
+    const first = await up(a, 1);
+    assert(first.status === 200, `owner publish on preview: ${first.status} ${await first.clone().text()}`);
+    assert((await up(a, 2)).status === 200, 'owner publishes v2');
+    const other = await up(b, 3);
+    assert(other.status === 403, `another account may not write it: ${other.status}`);
+    // Production without the store still fails closed.
+    const prod = makeEnv(mod.CommentsStore);
+    const c = await issue(worker, prod, 'prod-no-do');
+    delete prod.COMMENTS;
+    const r = await worker.fetch(req('/api/upload', { method: 'POST', token: c.token, body: { slug: 'prod-doc', version: 1, html: '<h1>x</h1>' } }), prod, {});
+    assert(r.status === 503, `production without the store stays 503: ${r.status}`);
+  });
+
   await t('invalid access on first hosted upload does not park the slug', async () => {
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env, 'bad-access');

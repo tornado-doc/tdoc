@@ -1,7 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { getPublishSignin, publishDocument, requestQuotaBump } from './api.js';
 import { copyText } from './model.js';
+
+// A link to hand out: the URL in a light, readable field and Copy link as
+// the primary button beside it (under it on a phone). Copy link is the main
+// action of every share surface. `onCopy` copies and reports (toast,
+// status); `copyOnFieldClick` keeps the click-the-field-to-copy surfaces.
+export function ShareLinkRow({ url, id, onCopy, copyOnFieldClick = false, disabled = false, children = null }) {
+  return (
+    <div className="tdoc-share-link-row">
+      <div className="tdoc-share-link-field" id={id} onClick={copyOnFieldClick ? onCopy : undefined}>{url}</div>
+      <AppButton variant="primary" className="primary tdoc-share-copy" disabled={disabled} onClick={onCopy}>Copy link</AppButton>
+      {children}
+    </div>
+  );
+}
 
 // The second choice under every Share link: this exact version, for the
 // reader who must see what you saw. Quiet text, not a second button.
@@ -35,12 +51,11 @@ export function ShareDialog({ open, url, versionUrl, version, team, onOpenChange
         : 'Anyone with this link can read. To comment, they sign in.'}
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
-          <button type="button" className="primary" onClick={copy}>Copy link</button>
+          <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
         </>
       )}
     >
-      <div className="code url" id="tdoc-share-url">{url}</div>
+      <ShareLinkRow url={url} id="tdoc-share-url" onCopy={copy} />
       <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
     </AppDialog>
   );
@@ -74,14 +89,7 @@ export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopie
         : 'They are not on this doc yet, but they use tdoc — the mention is in their inbox. Send the link if you want them to see it sooner.'}
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
-          <button
-            type="button"
-            className="primary"
-            onClick={async () => { await copyText(url); onCopied(); }}
-          >
-            Copy link
-          </button>
+          <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
         </>
       )}
     >
@@ -92,7 +100,7 @@ export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopie
           </div>
         ))}
       </div>
-      <div className="code url" style={{ marginTop: 10 }}>{url}</div>
+      <ShareLinkRow url={url} onCopy={async () => { await copyText(url); onCopied(); }} />
     </AppDialog>
   );
 }
@@ -117,7 +125,7 @@ function PublishSignin({ signin }) {
       </div>
       <div className="code" style={{ marginTop: 8 }}>{signin.user_code}</div>
       <div className="actions" style={{ justifyContent: 'flex-start', gap: 8, marginTop: 8 }}>
-        <button type="button" onClick={() => copyText(signin.user_code)}>Copy code</button>
+        <CopyPromptButton label="Copy code" copied={false} onCopy={() => copyText(signin.user_code)} />
         <button
           type="button"
           onClick={() => window.open(signin.verification_uri, '_blank', 'noopener')}
@@ -175,8 +183,8 @@ export function PublishDialog({ open, slug, onOpenChange }) {
       title="Publish this doc"
       actions={url ? null : (
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" id="tdoc-pub-go" className="primary" disabled={busy} onClick={publish}>Publish</button>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="primary" id="tdoc-pub-go" className="primary" disabled={busy} onClick={publish}>Publish</AppButton>
         </>
       )}
     >
@@ -186,9 +194,8 @@ export function PublishDialog({ open, slug, onOpenChange }) {
       {signin ? <PublishSignin signin={signin} /> : null}
       {url ? (
         <div style={{ marginTop: 10 }}>
-          <div className="code url" id="tdoc-pub-url">{url}</div>
+          <ShareLinkRow url={url} id="tdoc-pub-url" onCopy={() => copyText(url)} />
           <div className="actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
-            <button type="button" className="primary" onClick={() => copyText(url)}>Copy link</button>
             <button type="button" onClick={() => window.open(url, '_blank', 'noopener')}>View live →</button>
           </div>
         </div>
@@ -203,7 +210,7 @@ export function MessageDialog({ message, onOpenChange }) {
       open={Boolean(message)}
       onOpenChange={onOpenChange}
       title={message?.title || 'Something went wrong'}
-      actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
+      actions={<AppButton onClick={() => onOpenChange(false)}>Close</AppButton>}
     >
       <p>{message?.message}</p>
     </AppDialog>
@@ -254,15 +261,14 @@ export function QuotaBumpDialog({ open, used, limit, onClose, onBumped }) {
         : 'This account is at its hosted-doc limit. Write why you need more — we raise it (up to 200).'}
       actions={(
         <>
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button
-            type="button"
+          <AppButton onClick={onClose}>Cancel</AppButton>
+          <AppButton variant="primary"
             className="primary"
             disabled={busy || !reason.trim()}
             onClick={submit}
           >
             {busy ? 'Requesting…' : 'Raise limit'}
-          </button>
+          </AppButton>
         </>
       )}
     >

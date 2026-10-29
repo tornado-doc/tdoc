@@ -351,7 +351,7 @@ async function startServer(worker, env) {
         assert.equal(await page.getByRole('menuitem', { name: 'new', exact: true }).count(), 0, 'document has only its own states');
         await shot(page, 'document-onboarding-test');
         await page.goto(`${base}/setup`);
-        await page.getByRole('heading', { name: 'Which AI do you use?', exact: true }).waitFor();
+        await page.getByRole('heading', { name: 'Connect your AI', exact: true }).waitFor();
         await page.keyboard.press('Escape');
         await page.getByRole('dialog').waitFor({ state: 'hidden' });
         await page.waitForURL(`${base}/me`);
