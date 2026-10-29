@@ -230,6 +230,9 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       'https://evil.example.com/client.json': { redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] },
       'https://sub.tdoc.dev/client.json': { redirect_uris: ['https://sub.tdoc.dev/cb'] },
       'https://someone.github.io/client.json': { redirect_uris: ['https://someone.github.io/cb'] },
+      // ChatGPT's real document: prefers private_key_jwt, also lists none.
+      'https://chatgpt.example.com/oauth/client.json': { redirect_uris: ['https://chatgpt.example.com/connector_platform_oauth_redirect'], token_endpoint_auth_method: 'private_key_jwt', token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'] },
+      'https://jwtonly.example.com/client.json': { redirect_uris: ['https://jwtonly.example.com/cb'], token_endpoint_auth_method: 'private_key_jwt', token_endpoint_auth_methods_supported: ['private_key_jwt'] },
     };
     const realFetch = globalThis.fetch;
     let fetched = 0;
@@ -246,6 +249,10 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       const boot = bootData(ok.text, '__TDOC_APP_BOOT__');
       assert(boot.client.verified_host === 'app.example.com' && boot.client.name_verified === true, JSON.stringify(boot.client));
       assert((await page('https://evil.example.com/client.json', 'https://claude.ai/api/mcp/auth_callback')).status === 400, 'a document naming another host\'s redirect');
+      // Julie, 2026-10-29: ChatGPT got "not registered" because its document
+      // prefers private_key_jwt; `none` is in its supported list, so accept.
+      assert((await page('https://chatgpt.example.com/oauth/client.json', 'https://chatgpt.example.com/connector_platform_oauth_redirect')).status === 200, 'ChatGPT-style document that also supports none');
+      assert((await page('https://jwtonly.example.com/client.json', 'https://jwtonly.example.com/cb')).status === 400, 'a client that cannot use none');
       const before = fetched;
       assert((await page('https://sub.tdoc.dev/client.json', 'https://sub.tdoc.dev/cb')).status === 400, 'this server\'s registrable domain');
       assert((await page('https://someone.github.io/client.json', 'https://someone.github.io/cb')).status === 400, 'user-content host');
