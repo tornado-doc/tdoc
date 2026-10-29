@@ -30,7 +30,9 @@ console.log('plugins/ packages');
 
 t('Claude: plugin.json + .mcp.json (type http)', () => {
   const p = json('claude/.claude-plugin/plugin.json');
-  assert(p.name === 'tdoc' && p.version === VERSION, `${p.name} ${p.version}`);
+  // tdoc-cloud: the repo marketplace already has a plugin named tdoc (the CLI
+  // one), and an entry name must equal its plugin.json name.
+  assert(p.name === 'tdoc-cloud' && p.version === VERSION, `${p.name} ${p.version}`);
   assert(typeof p.repository === 'string', 'repository is a string (#42)');
   assert(!p.icon || fs.existsSync(path.join(dir, 'claude', p.icon)), 'icon inside the plugin');
   const m = json('claude/.mcp.json');
@@ -42,6 +44,10 @@ t('Codex / ChatGPT: plugin.json + mcp.json (streamable-http)', () => {
   assert(p.name === 'tdoc' && p.version === VERSION, `${p.name} ${p.version}`);
   const ui = p.extensions && p.extensions['com.openai'] && p.extensions['com.openai'].interface;
   assert(ui && ui.displayName === 'tdoc', 'OpenAI interface block');
+  // OpenAI portal limits (https://developers.openai.com/plugins/deploy/submission)
+  assert(ui.displayName.length <= 30 && ui.shortDescription.length <= 30, 'displayName / shortDescription <= 30 chars');
+  assert(ui.longDescription.length <= 4000 && ui.developerName.length <= 80, 'longDescription <= 4000, developerName <= 80');
+  assert(ui.defaultPrompt.length <= 3 && ui.defaultPrompt.every((x) => x.length <= 128), 'at most 3 starter prompts of 128 chars');
   for (const k of ['logo', 'composerIcon']) assert(!ui[k] || fs.existsSync(path.join(dir, 'codex', ui[k])), `${k} inside the plugin`);
   const m = json('codex/mcp.json');
   assert(m.mcpServers.tdoc.type === 'streamable-http' && m.mcpServers.tdoc.url === URL_, JSON.stringify(m));
