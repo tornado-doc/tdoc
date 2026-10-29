@@ -96,6 +96,7 @@ const BLOCKED = {
         await dialog(page).getByText('Type alice to confirm').waitFor();
         const text = await dialog(page).textContent();
         assert.match(text, /signed out everywhere/);
+        assert.match(text, /team agents stay with\s+their team/);
         assert.match(text, /Deleted user/);
         assert.match(text, /only member of Solo/);
         assert.match(text, /You leave Acme/);

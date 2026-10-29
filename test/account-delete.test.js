@@ -147,6 +147,16 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     assert(!after.body.blockers.some((x) => x.kind === 'paid_team'), 'cancelled no longer blocks');
   });
 
+  await t('admin of a team with an active lifetime (AppSumo) license: refused too', async () => {
+    await env.META.put(`team-lifetime:${paid.id}`, JSON.stringify({ active: true, source: 'appsumo', tier: 1 }));
+    const pre = await call('/api/me/account/delete', { cookie: alice.cookie });
+    const b = pre.body.blockers.find((x) => x.kind === 'lifetime_team');
+    assert(b && b.team.id === paid.id && b.url.endsWith('#billing') && /lifetime license/.test(b.message), pre.text);
+    const r = await del(alice.cookie, 'alice');
+    assert(r.status === 409 && r.body.blockers.some((x) => x.kind === 'lifetime_team'), `${r.status} ${r.text}`);
+    await env.META.put(`team-lifetime:${paid.id}`, JSON.stringify({ active: false }));
+  });
+
   // Unblock Acme: bob becomes admin too.
   assert((await call('/api/team/role', { method: 'POST', cookie: alice.cookie, headers: SAME, body: { id: acme.id, account_id: bob.account_id, role: 'admin' } })).status === 200, 'promote bob');
 
@@ -194,6 +204,13 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     }
     assert(await env.META.get('hosted-account:alice'), 'nothing happened');
   });
+  // A team that invited alice (not joined), and a private doc bob shared
+  // with her by login.
+  const inviting = (await call('/api/teams', { method: 'POST', cookie: zed.cookie, headers: SAME, body: { name: 'Inviting', invites: ['alice'] } })).body.team;
+  assert(inviting && JSON.parse(await env.META.get(`team:${inviting.id}`)).invites.includes('alice'), 'invite');
+  assert((await publish(bob, 'bob-private', { visibility: 'private', allowed_users: ['alice'] })).status === 200, 'publish bob-private');
+  assert((await call('/d/bob-private', { cookie: alice.cookie })).status === 200, 'alice reads bob-private before');
+  await env.META.put(`team-billing:${solo.id}`, JSON.stringify({ status: 'canceled', customer: 'cus_solo' }));
   // Old sessions, both kinds, are live before.
   for (const c of [alice.cookie, aliceStamped]) assert((await call('/api/me/account/delete', { cookie: c })).status === 200, 'session live before');
 
@@ -266,6 +283,17 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     assert(!paidTeam.members.some((m) => m.account_id === alice.account_id), 'left Paid');
   });
 
+  await t('pending team invites to the identity are withdrawn', async () => {
+    const team = JSON.parse(await env.META.get(`team:${inviting.id}`));
+    assert(!team.invites.includes('alice'), JSON.stringify(team.invites));
+    assert(!(await env.META.get(`tinv:alice:${inviting.id}`)), 'invite marker left');
+  });
+
+  await t('the deletion record keeps no identity in plain sight in its tombstones', async () => {
+    assert(!(await env.META.get('account-deleted-identity:alice')), 'plaintext tombstone key');
+    assert([...env.META.map.keys()].some((k) => /^account-deleted-identity:[0-9a-f]{64}$/.test(k)), 'hashed tombstone written');
+  });
+
   await t('profile page and handle are gone; login and handle no longer resolve', async () => {
     const r = await call('/@alice', { headers: { Accept: 'application/json' } });
     assert(r.status === 404 || !r.text.includes('alice-plan'), `profile: ${r.status} ${r.text.slice(0, 120)}`);
@@ -281,6 +309,7 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
   const carolCookie = await session({ email: 'carol@example.com', name: 'Carol', oidc: true });
   assert((await call('/api/me/handle', { method: 'POST', cookie: carolCookie, headers: SAME, body: { handle: 'carol-c' } })).status === 200, 'carol gets an account');
   await comment(carolCookie, 'bob-doc', 'Carol says hi.');
+  await comment(bob.cookie, 'bob-doc', 'Thanks @carol@example.com');
 
   await t('an email account confirms with its address, and its address stops showing at once', async () => {
     const before = await authorsOn('bob-doc', { cookie: bob.cookie });
@@ -324,6 +353,53 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     await comment(cookie, 'bob-doc', 'New alice, after.');
   });
 
+  // A sign-in with an identity a deleted account had is stamped (reborn).
+  const reborn = await session({ login: 'alice', account_id: undefined, reborn: ['alice'] });
+  await t('a doc of the old account the deletion missed is never the new account\'s, though the login matches', async () => {
+    const meta = JSON.parse(await env.META.get('meta:acme-doc'));
+    const missed = { ...meta, slug: 'alice-missed', title: 'Missed', workspace_id: undefined, team_folder: undefined, access: { visibility: 'private', allowed_users: [] } };
+    delete missed.workspace_id;
+    await env.META.put('meta:alice-missed', JSON.stringify(missed));
+    assert(missed.hosted.account_id === alice.account_id && missed.hosted.github_login === 'alice', JSON.stringify(missed.hosted));
+    const r = await call('/api/doc?slug=alice-missed', { method: 'DELETE', cookie: reborn, headers: SAME });
+    assert([401, 403, 404].includes(r.status), `new account managed the old doc: ${r.status} ${r.text}`);
+    const read = await call('/d/alice-missed', { cookie: reborn });
+    assert(read.status !== 200, `new account read the old private doc: ${read.status}`);
+    await env.META.delete('meta:alice-missed');
+  });
+
+  await t('the re-registered login cannot edit or delete the old account\'s comment, nor use its invite before the sweep', async () => {
+    const list = await authorsOn('bob-doc', { cookie: bob.cookie });
+    const raw = env.COMMENTS.stateFor('bob-doc').storage.map.get('list') || [];
+    const old = raw.find((c) => c.events && c.events[0] && c.events[0].text === 'Alice was here.');
+    assert(old, `old comment ${JSON.stringify(list.out)}`);
+    const edit = await call('/api/comments', { method: 'PATCH', cookie: reborn, body: { slug: 'bob-doc', id: old.id, text: 'rewritten' } });
+    assert(edit.status === 403, `edit: ${edit.status} ${edit.text}`);
+    const delc = await call(`/api/comments?slug=bob-doc&id=${old.id}`, { method: 'DELETE', cookie: reborn });
+    assert(delc.status === 403, `delete: ${delc.status} ${delc.text}`);
+    const mine = await comment(reborn, 'bob-doc', 'Reborn alice writes.');
+    const own = await call('/api/comments', { method: 'PATCH', cookie: reborn, body: { slug: 'bob-doc', id: mine.id, text: 'Reborn alice edits.' } });
+    assert(own.status === 200, `own new comment: ${own.status} ${own.text}`);
+    const read = await call('/d/bob-private', { cookie: reborn });
+    assert(read.status !== 200, `old invite used: ${read.status}`);
+  });
+
+  await t('a token minted for the re-registered login is stamped too', async () => {
+    const r = await call('/api/hosted/token', { method: 'POST', cookie: reborn, body: { label: 'cli' } });
+    assert(r.status === 200 && r.body.token, `${r.status} ${r.text}`);
+    const rec = [...env.META.map.entries()].filter(([k]) => k.startsWith('hosted-token:')).map(([, v]) => JSON.parse(v)).find((x) => x.account_id === r.body.account_id);
+    assert(rec && Array.isArray(rec.reborn) && rec.reborn.includes('alice'), JSON.stringify(rec));
+  });
+
+  await t('the sweep (day 1) takes the identity out of invite lists; then a new invite works again', async () => {
+    await cron(Date.parse(deleted.deleted_at) + 1 * DAY);
+    const meta = JSON.parse(await env.META.get('meta:bob-private'));
+    assert(!meta.access.allowed_users.includes('alice'), JSON.stringify(meta.access));
+    const re = await call('/api/doc/access', { method: 'PATCH', cookie: bob.cookie, headers: SAME, body: { slug: 'bob-private', access: { allowed_users: ['alice'] } } });
+    assert(re.status === 200, `re-share ${re.status} ${re.text}`);
+    assert((await call('/d/bob-private', { cookie: reborn })).status === 200, 'a fresh invite after the sweep is honoured');
+  });
+
   console.log('account delete: the purge, 30 days later');
 
   await t('the scheduled run before the window ends changes nothing', async () => {
@@ -337,7 +413,7 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     for (const slug of ['alice-plan', 'alice-notes', 'solo-doc']) assert(!(await env.META.get(`meta:${slug}`)), `${slug} not purged`);
     assert(!(await env.META.get(`account-deleted:${alice.account_id}`)), 'record not purged');
     assert(!(await env.META.get(`account-deleted-stash:${alice.account_id}`)), 'stash not purged');
-    assert(!(await env.META.get('account-deleted-identity:alice')), 'identity tombstone not purged');
+    for (const [k, v] of env.META.map) if (k.startsWith('account-deleted-identity:')) assert(!/alice|carol/.test(v), `tombstone keeps an identity: ${v}`);
     const marker = JSON.parse(await env.META.get(`account-group:${alice.account_id}`));
     assert(marker.deleted_at && marker.purged_at && !JSON.stringify(marker).includes('alice@'), JSON.stringify(marker));
     const { out, raw } = await authorsOn('bob-doc', { cookie: bob.cookie });
@@ -345,14 +421,17 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     assert(old && old.author.name === 'Deleted user' && !old.author.login && !old.author.avatar_url, JSON.stringify(old));
     const carol = out.find((c) => c.text === 'Carol says hi.');
     assert(carol && carol.author.name === 'Deleted user' && !carol.author.login, JSON.stringify(carol));
-    assert(!raw.includes('carol@example.com') && !raw.includes('"Carol"'), 'carol\'s name or address left');
+    assert(!raw.includes('carol@example.com') && !raw.includes('"Carol"'), 'carol\'s name or address left (also in bob\'s mention, after the purge)');
     const after = out.find((c) => c.text === 'New alice, after.');
     assert(after && after.author.login === 'alice', `the new account's comment was anonymized: ${JSON.stringify(after)}`);
+    const reb = out.find((c) => c.text === 'Reborn alice edits.');
+    assert(reb && reb.author.login === 'alice', 'the re-registered account\'s comment kept');
+    for (const k of [`team-billing:${solo.id}`, `team-lifetime:${solo.id}`, `team-folders:${solo.id}`]) assert(!(await env.META.get(k)), `${k} left`);
   });
 
   await t('restore after the purge is refused', async () => {
     const r = await call('/api/admin/account/restore', { method: 'POST', token: 'admin-secret', body: { account_id: alice.account_id } });
-    assert(r.status === 404, `${r.status} ${r.text}`);
+    assert(r.status === 404 || r.status === 410, `${r.status} ${r.text}`);
   });
 
   console.log('account delete: operator restore inside the window');
@@ -376,6 +455,110 @@ const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.t
     const hub = await call('/api/me', { cookie: again });
     assert(hub.text.includes('dave-doc'), 'signing in again finds the restored docs');
     assert(!(await env.META.get(`account-deleted:${dave.account_id}`)), 'record cleared');
+  });
+
+  console.log('account delete: a run that fails part way loses nothing, and finishes later');
+
+  await t('a failure mid-run: signed out at once, every moved key still in the stash, the cron finishes, restore is complete', async () => {
+    const eve = await issue(worker, env, 'eve');
+    for (const slug of ['eve-a', 'eve-b', 'eve-c']) assert((await publish(eve, slug)).status === 200, `publish ${slug}`);
+    assert((await call('/api/me/handle', { method: 'POST', cookie: eve.cookie, headers: SAME, body: { handle: 'eve' } })).status === 200, 'handle');
+    assert((await call('/api/star', { method: 'POST', cookie: eve.cookie, body: { slug: 'bob-doc', starred: true } })).status === 200, 'star');
+    const profileBefore = await env.META.get(`account-profile:${eve.account_id}`);
+    const starsBefore = await env.META.get('stars:eve');
+    // The stash copy of the profile fails once (the original must survive),
+    // and moving one doc to Trash fails once (the step must be retried).
+    env.META.failPutOnce.add(`account-deleted-stash:${eve.account_id}:account-profile:${eve.account_id}`);
+    env.META.failPutOnce.add('meta:eve-b');
+    const r = await del(eve.cookie, 'eve');
+    assert(r.status === 200 && r.body.finishing === true, `${r.status} ${r.text}`);
+    assert((await call('/api/me/sign-in-methods', { cookie: eve.cookie })).status === 401, 'still signed in');
+    assert((await call('/api/hosted/whoami', { token: eve.token })).status === 401, 'token still works');
+    let rec = JSON.parse(await env.META.get(`account-deleted:${eve.account_id}`));
+    assert(rec.state === 'deleting' && rec.error && rec.error.step === 'identity', JSON.stringify(rec.error));
+    assert((await env.META.get(`account-profile:${eve.account_id}`)) === profileBefore, 'profile lost when its stash copy failed');
+    // A second request for the same account (another tab) is refused.
+    const again = await call('/api/me/account/delete', { method: 'POST', cookie: await session({ login: 'eve', account_id: eve.account_id }), headers: SAME, body: { confirm: 'eve' } });
+    assert(again.status === 401 || again.status === 409, `second run: ${again.status} ${again.text}`);
+    // The next scheduled run resumes: identity, then the docs step fails on eve-b once and is retried by the run after.
+    await cron(Date.now());
+    rec = JSON.parse(await env.META.get(`account-deleted:${eve.account_id}`));
+    assert(rec.steps.identity && !(await env.META.get(`account-profile:${eve.account_id}`)), 'identity step done');
+    await cron(Date.now());
+    rec = JSON.parse(await env.META.get(`account-deleted:${eve.account_id}`));
+    assert(rec.state === 'deleted' && !rec.error, `state ${rec.state} ${JSON.stringify(rec.error)}`);
+    for (const slug of ['eve-a', 'eve-b', 'eve-c']) assert(JSON.parse(await env.META.get(`meta:${slug}`)).trashed_at, `${slug} not in Trash`);
+    const back = await call('/api/admin/account/restore', { method: 'POST', token: 'admin-secret', body: { login: 'eve' } });
+    assert(back.status === 200, `${back.status} ${back.text}`);
+    assert((await env.META.get(`account-profile:${eve.account_id}`)) === profileBefore, 'profile not restored intact');
+    assert((await env.META.get('stars:eve')) === starsBefore, 'stars not restored');
+    assert(JSON.parse(await env.META.get('hosted-account:eve')).account_id === eve.account_id, 'login not restored');
+    for (const slug of ['eve-a', 'eve-b', 'eve-c']) assert(!JSON.parse(await env.META.get(`meta:${slug}`)).trashed_at, `${slug} not restored`);
+    assert(![...env.META.map.keys()].some((k) => k.startsWith(`account-deleted-stash:${eve.account_id}:`)), 'stash left after restore');
+  });
+
+  await t('two tabs deleting at once: one run, one record', async () => {
+    const fay = await issue(worker, env, 'fay');
+    assert((await publish(fay, 'fay-doc')).status === 200, 'publish');
+    const tab2 = await session({ login: 'fay', account_id: fay.account_id });
+    const [a, b] = await Promise.all([del(fay.cookie, 'fay'), del(tab2, 'fay')]);
+    const codes = [a.status, b.status].sort();
+    assert(codes[0] === 200 && codes[1] !== 200, `both ran: ${codes} ${a.text} ${b.text}`);
+    const rec = JSON.parse(await env.META.get(`account-deleted:${fay.account_id}`));
+    assert(rec.state === 'deleted' && rec.docs.includes('fay-doc'), JSON.stringify(rec));
+    assert(JSON.parse(await env.META.get('meta:fay-doc')).trashed_at, 'doc trashed');
+  });
+
+  console.log('account delete: many docs, several accounts, a slow sweep');
+
+  await t('with a sweep far slower than the catalog, day 30 still drops the stash and docs; every comment is anonymized as the sweep reaches it', async () => {
+    const env2 = makeEnv(mod.CommentsStore, { TDOC_UPLOAD_TOKEN: 'admin-secret', TDOC_ACCOUNT_SWEEP_BATCH: '7' });
+    const call2 = async (path, opts = {}) => {
+      const r = await worker.fetch(req(path, opts), env2, ctx);
+      const text = await r.clone().text();
+      let body = null; try { body = JSON.parse(text); } catch {}
+      return { status: r.status, body, text, r };
+    };
+    const cron2 = (at) => worker.scheduled({ scheduledTime: at, cron: '23 * * * *' }, env2, ctx);
+    const owner = await issue(worker, env2, 'owner');
+    const gus = await issue(worker, env2, 'gus');
+    const hal = await issue(worker, env2, 'hal');
+    const N = 45;
+    for (let i = 0; i < N; i++) {
+      const slug = `doc-${String(i).padStart(3, '0')}`;
+      const up = await call2('/api/upload', { method: 'POST', token: owner.token, body: { slug, version: 1, html: `<h1>${slug}</h1><p>x</p>`, meta: { title: slug, access: { visibility: 'public' } } } });
+      assert(up.status === 200, `publish ${slug}`);
+      if (i % 3 === 0) assert((await call2('/api/comments', { method: 'POST', cookie: gus.cookie, body: { slug, version: 1, text: `gus on ${slug}`, anchor: null } })).status === 200, 'gus comment');
+      if (i % 5 === 0) assert((await call2('/api/comments', { method: 'POST', cookie: hal.cookie, body: { slug, version: 1, text: `hal on ${slug}`, anchor: null } })).status === 200, 'hal comment');
+    }
+    assert((await call2('/api/upload', { method: 'POST', token: gus.token, body: { slug: 'gus-own', version: 1, html: '<h1>g</h1>', meta: { title: 'g', access: { visibility: 'public' } } } })).status === 200, 'gus own');
+    const delGus = await call2('/api/me/account/delete', { method: 'POST', cookie: gus.cookie, headers: SAME, body: { confirm: 'gus' } });
+    const delHal = await call2('/api/me/account/delete', { method: 'POST', cookie: hal.cookie, headers: SAME, body: { confirm: 'hal' } });
+    assert(delGus.status === 200 && delHal.status === 200, `${delGus.text} ${delHal.text}`);
+    const t0 = Date.parse(delGus.body.deleted_at);
+    // Two runs during the window: 14 of 46 docs read. Both accounts share them.
+    await cron2(t0 + 1 * DAY);
+    await cron2(t0 + 2 * DAY);
+    const state = JSON.parse(await env2.META.get('account-sweep:state'));
+    assert(state.scanned === 14, `one shared sweep for both accounts: ${JSON.stringify(state)}`);
+    // Day 30: stash and docs go at once, though the sweep is far from done.
+    await cron2(t0 + 30 * DAY + 1000);
+    assert(![...env2.META.map.keys()].some((k) => k.startsWith('account-deleted-stash:')), 'stash outlived day 30');
+    assert(!(await env2.META.get('meta:gus-own')), 'personal doc outlived day 30');
+    const gusRec = JSON.parse(await env2.META.get(`account-deleted:${gus.account_id}`));
+    assert(gusRec.state === 'purging' && !gusRec.login && !gusRec.emails.length, JSON.stringify(gusRec));
+    for (let i = 0; i < 12; i++) await cron2(t0 + (31 + i) * DAY);
+    assert(!(await env2.META.get(`account-deleted:${gus.account_id}`)) && !(await env2.META.get(`account-deleted:${hal.account_id}`)), 'records left');
+    for (let i = 0; i < N; i++) {
+      const slug = `doc-${String(i).padStart(3, '0')}`;
+      const list = env2.COMMENTS.stateFor(slug).storage.map.get('list') || [];
+      for (const c of list) {
+        assert(c.author && c.author.login !== 'gus' && c.author.login !== 'hal', `${slug} still names ${c.author.login}`);
+        assert(c.author.name === 'Deleted user', JSON.stringify(c.author));
+      }
+      const texts = list.map((c) => c.events[0].text);
+      if (i % 3 === 0) assert(texts.includes(`gus on ${slug}`), `${slug} lost gus's words`);
+    }
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

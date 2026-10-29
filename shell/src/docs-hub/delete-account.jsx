@@ -15,7 +15,7 @@ export function DeleteAccountCard() {
       <div className="tm-settings-head">
         <div>
           <h2 id="delete-account-heading">Delete account</h2>
-          <p>Signs you out everywhere, disconnects every agent and moves your docs to Trash. After 30 days they are erased for good.</p>
+          <p>Signs you out everywhere, disconnects your own agents and AI apps, and moves your docs to Trash. After 30 days they are erased for good.</p>
         </div>
       </div>
       <AppButton variant="danger" className="danger" onClick={() => setOpen(true)}>Delete account…</AppButton>
@@ -102,7 +102,8 @@ function DeleteAccountDialog({ onClose }) {
       {plan && !blockers.length ? (
         <>
           <p>
-            You are signed out everywhere and every agent and app connection is revoked. Your docs go to Trash and are
+            You are signed out everywhere and every agent and app you connected is disconnected (team agents stay with
+            their team). Your docs go to Trash and are
             erased for good after {days} days, with your profile. Comments you left on other people&apos;s docs stay,
             shown as &quot;Deleted user&quot;.
           </p>
