@@ -2,10 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { AppButton } from '../ui/button.jsx';
+import { AppCheckbox } from '../ui/checkbox.jsx';
 import { readStored, writeStored } from '../safe-storage.js';
 import { agentMentionName, sameTarget } from './agent-choices.js';
 import { AgentMenuItems } from './agent-menu.jsx';
-import { Author, CommentMessageText, ReplyMessage } from './comment-card.jsx';
+import { Author, CommentMessageText, ReplyMessage, authorLine } from './comment-card.jsx';
 import { HandoffSendResult, defaultInstruction, useHandoffSend } from './notify-handoff.jsx';
 
 // The last mode picked on this doc: Ask, or Send to agent.
@@ -42,46 +43,84 @@ function ModePicker({ mode, onPick, ready }) {
   </AppMenu>;
 }
 
+// What Send to agent hands over, one quiet line above the input: "5
+// comments will be sent · Choose". Choose opens every not-yet-sent comment
+// (who + its first line) as a checkbox, all checked by default; closing it
+// keeps the selection ("3 of 5 comments will be sent"). An unchecked
+// comment stays pending.
+function PendingComments({ comments, chosen, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const total = comments.length;
+  const k = comments.filter((c) => chosen.includes(c.id)).length;
+  return <div className="tdoc-ask-send-payload">
+    <div className="tdoc-ask-send-summary">
+      <span>{k === total ? `${commentCount(total)} will be sent` : `${k} of ${commentCount(total)} will be sent`}</span>
+      <span aria-hidden="true"> · </span>
+      <AppButton variant="quiet" size="s" className="tdoc-ask-send-choose" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Done' : 'Choose'}</AppButton>
+    </div>
+    {open ? <div className="tdoc-ask-send-list" role="group" aria-label="Comments to send">
+      {comments.map((c) => <AppCheckbox key={c.id} className="tdoc-ask-send-item" checked={chosen.includes(c.id)}
+        onCheckedChange={(on) => onToggle(c.id, on)}
+        label={<><b>{authorLine(c.author)}</b> <span>{String(c.text || '').split('\n').find((line) => line.trim()) || ''}</span></>} />)}
+    </div> : null}
+  </div>;
+}
+
 // Send to agent, inside Ask AI: the doc's comments ready to hand off, to
 // the agent picked here, through the Send to agent dialog's own send
-// (useHandoffSend) and its delivery line.
-function SendToAgentForm({ open, send, modePicker }) {
-  const { slug, choices, preselected, readyIds, onSent } = send;
+// (useHandoffSend) and its delivery line. The comments are the payload, so
+// they are counted above the input (and can be chosen) and on the button;
+// the note is optional, behind "+ Add a note".
+function SendToAgentForm({ send, modePicker }) {
+  const { slug, choices, preselected, readyIds, ready = [], onSent } = send;
   const [picked, setPicked] = useState(null);
   const [note, setNote] = useState('');
+  const [noteOpen, setNoteOpen] = useState(false);
   const sending = useHandoffSend(slug, onSent);
   const input = useRef(null);
-  useEffect(() => { if (open) input.current?.focus(); }, [open]);
+  useEffect(() => { if (noteOpen) input.current?.focus(); }, [noteOpen]);
   // The doc's own agent, as the dialog preselects it; else the person picks.
   const recipient = (picked && choices.find((t) => sameTarget(t, picked)))
     || (preselected && choices.find((t) => sameTarget(t, preselected))) || null;
-  const n = readyIds.length;
+  // The Send to agent dialog's selection: comment ids, kept only while
+  // still ready (as Agent activity's Ready to send). Tracked as unchecked
+  // ids so every comment -- and one arriving later -- starts checked.
+  const [unchecked, setUnchecked] = useState([]);
+  const chosen = readyIds.filter((id) => !unchecked.includes(id));
+  const toggle = (id, on) => setUnchecked((ids) => (on ? ids.filter((x) => x !== id) : [...ids, id]));
+  const n = chosen.length;
   const canSend = n > 0 && Boolean(recipient) && !sending.busy;
   const submit = async (event) => {
     event?.preventDefault();
     if (!canSend) return;
-    const body = await sending.send({ commentIds: readyIds, recipient, instruction: note.trim() || defaultInstruction(readyIds) });
-    if (body) setNote('');
+    const body = await sending.send({ commentIds: chosen, recipient, instruction: note.trim() || defaultInstruction(chosen) });
+    if (body) { setNote(''); setNoteOpen(false); setUnchecked([]); }
   };
   return <>
-    <form className="tdoc-ask-form tdoc-ask-send-form" onSubmit={submit}>
-      <textarea ref={input} aria-label="Note for the agent" placeholder="Note for the agent (optional)…"
-        rows={2} maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} />
-      <div className="tdoc-ask-form-bottom">
-        <div className="tdoc-ask-form-pills">
-          {modePicker}
-          {choices.length ? <AgentPill ariaLabel="Who should get these?" label={recipient ? agentMentionName(recipient, choices) : 'Choose an agent'}>
-            <AgentMenuItems choices={choices} current={recipient} preserveOrder maxVisible={4} showConnect={false} showRelevance
-              onPick={(target) => { setPicked(target); sending.setResult(null); }} />
-          </AgentPill> : null}
+    {readyIds.length ? <>
+      <PendingComments comments={ready.length ? ready : readyIds.map((id) => ({ id }))} chosen={chosen} onToggle={toggle} />
+      <form className="tdoc-ask-form tdoc-ask-send-form" onSubmit={submit}>
+        {noteOpen ? <textarea ref={input} aria-label="Note for the agent" placeholder="Note for the agent…"
+          rows={2} maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} />
+          : <div className="tdoc-ask-note-add"><AppButton variant="quiet" size="s" onClick={() => setNoteOpen(true)}>+ Add a note</AppButton></div>}
+        <div className="tdoc-ask-form-bottom">
+          <div className="tdoc-ask-form-pills">
+            {modePicker}
+            {choices.length ? <AgentPill ariaLabel="Who should get these?" label={recipient ? agentMentionName(recipient, choices) : 'Choose an agent'}>
+              <AgentMenuItems choices={choices} current={recipient} preserveOrder maxVisible={4} showConnect={false} showRelevance
+                onPick={(target) => { setPicked(target); sending.setResult(null); }} />
+            </AgentPill> : null}
+          </div>
+          {/* type="button": the Ask form's round ↑ styles every submit button in this row. */}
+          <AppButton variant="primary" size="s" className="tdoc-ask-send-btn" disabled={!canSend} onClick={submit}>
+            {sending.busy ? 'Sending…' : sending.result && !sending.result.ok ? 'Retry' : `Send ${commentCount(n)}`}
+          </AppButton>
         </div>
-        <span className="tdoc-ask-ready-count" title={n ? `${commentCount(n)} ready to send` : 'No comments ready to send'}>{commentCount(n)}</span>
-        {/* type="button": the Ask form's round ↑ styles every submit button in this row. */}
-        <AppButton variant="primary" size="s" className="tdoc-ask-send-btn" disabled={!canSend} onClick={submit}>
-          {sending.busy ? 'Sending…' : sending.result && !sending.result.ok ? 'Retry' : 'Send'}
-        </AppButton>
-      </div>
-    </form>
+      </form>
+    </> : <div className="tdoc-ask-send-empty">
+      <p className="tdoc-ask-send-none">No comments to send to an agent right now.</p>
+      <div className="tdoc-ask-form-bottom"><div className="tdoc-ask-form-pills">{modePicker}</div></div>
+    </div>}
     <HandoffSendResult result={sending.result} />
   </>;
 }
@@ -120,7 +159,7 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   const modePicker = send ? <ModePicker mode={mode} onPick={pickMode} ready={send.readyIds.length} /> : null;
   return <div className="tdoc-ask-panel">
     <h2>Ask AI</h2>
-    {mode === 'send' ? <SendToAgentForm open={open} send={send} modePicker={modePicker} /> : <>
+    {mode === 'send' ? <SendToAgentForm send={send} modePicker={modePicker} /> : <>
     <form className="tdoc-ask-form" onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
       <textarea ref={input} aria-label="Ask about this document" placeholder={latest ? 'Ask a follow-up…' : 'Ask about this document…'}
         rows={2} value={draft} onChange={(event) => onDraft(event.target.value)}

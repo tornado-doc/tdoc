@@ -1619,6 +1619,7 @@ export function DocumentShell({ boot, config }) {
         slug: config.slug,
         choices: orderedAgentChoices(notifyTargets),
         preselected: notifyTargets.default,
+        ready: handoffBuckets.ready,
         readyIds: handoffBuckets.ready.map((c) => c.id),
         onSent: () => comments.refresh(),
       } : null}
