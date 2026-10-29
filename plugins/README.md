@@ -15,6 +15,10 @@ Logos: Claude, Codex and Cursor require the logo path to be inside the plugin
 folder (no `..`), so each plugin carries a copy of `assets/icon-512-v3.png` as
 `assets/logo.png`. The Gemini and VS Code configs have no logo field.
 
+Privacy policy: `https://tdoc.dev/privacy`, set as `privacyPolicyUrl` (Claude)
+and `interface.privacyPolicyURL` (Codex). The Cursor, Gemini and VS Code
+manifests document no privacy field.
+
 Docs were read on 2026-10-28. "Verified" means the field or step appears in
 the cited official page. "UNVERIFIED" means it does not, or the pages disagree.
 
@@ -42,10 +46,8 @@ Install:
   different `name` in the marketplace entry (for example `tdoc-cloud`). That
   file is outside `plugins/` and is not changed here.
 
-`claude plugin validate plugins/claude` passes. Its one warning: no
-`privacyPolicyUrl`. `https://tdoc.dev/privacy` currently redirects to
-`/?notice=notfound`, so the field is left out. Add it once a privacy page
-exists.
+`claude plugin validate plugins/claude` passes. `privacyPolicyUrl` is
+`https://tdoc.dev/privacy`.
 
 Verified:
 
@@ -149,7 +151,8 @@ https://learn.chatgpt.com/docs/plugins):
 - Skills found in root `skills/`; assets under `./assets/`.
 - `interface` keys used: `displayName`, `shortDescription`,
   `longDescription`, `developerName`, `category`, `capabilities`,
-  `websiteURL`, `defaultPrompt` (array), `composerIcon`, `logo`.
+  `websiteURL`, `privacyPolicyURL` (`https://tdoc.dev/privacy`),
+  `defaultPrompt` (array), `composerIcon`, `logo`.
 - Marketplace locations, entry shape, `codex plugin marketplace add`.
 
 UNVERIFIED or omitted:
@@ -163,9 +166,9 @@ UNVERIFIED or omitted:
   that key. It is left out, so the file stays schema-valid. The Codex binary
   contains MCP OAuth metadata discovery, but whether ChatGPT discovers OAuth
   without the block is not confirmed. If sign-in does not start, add the block.
-- `privacyPolicyURL`, `termsOfServiceURL`, `brandColor`, `screenshots`, `apps`
-  (`.app.json`) are omitted: no tdoc privacy or terms page exists yet, and
-  `.app.json` has no documented schema.
+- `termsOfServiceURL`, `brandColor`, `screenshots`, `apps` (`.app.json`) are
+  omitted: no tdoc terms page exists yet, and `.app.json` has no documented
+  schema.
 - `policy.authentication`: only `ON_INSTALL` appears in the docs.
 
 ### ChatGPT custom MCP server (no plugin)

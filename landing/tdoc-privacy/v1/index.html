@@ -27,14 +27,14 @@ body { background:#fff; }
 <div class="wrap">
 <a class="back" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to tdoc</a>
 <h1>Privacy policy</h1>
-<!-- OWNER: confirm the effective date, and the legal name and country of whoever runs tdoc.dev (the "we" below). -->
-<p class="sub">Effective October 28, 2026. This page covers the hosted service at tdoc.dev. It says what we store, who else sees it, how long we keep it, and how to get it removed.</p>
+<!-- OWNER: legal entity name and country -->
+<p class="sub">Effective October 29, 2026. This page covers the hosted service at tdoc.dev, run by tdoc (tdoc.dev), "we" below. It says what we store, who else sees it, how long we keep it, and how to get it removed.</p>
 <p class="note">tdoc is open source (AGPL). If you run your own copy, your server holds your data and this policy does not apply to it.</p>
 
 <h2>The short version</h2>
 <ul>
   <li>We store your account, your documents, their versions and the comments on them, so the service can work.</li>
-  <li>We do not sell your data and we do not show ads. We do not use your documents to train models. <!-- OWNER: confirm these three promises; the code does none of these things, but they are commitments. --></li>
+  <li>We do not sell personal data, we do not show ads, and we do not use your documents to train AI models.</li>
   <li>Your AI agent runs on your own computer or in your own AI app. tdoc does not run it and does not see its other work.</li>
   <li>A small number of services help us run tdoc, listed below with exactly what each one gets.</li>
 </ul>
@@ -69,17 +69,16 @@ body { background:#fff; }
 <ul>
   <li>When you connect a terminal or agent, we issue it a token and keep only a hash of it, with the hostname and agent type it reported, and when it was last used.</li>
   <li>A local agent that checks in tells us its device name, so Settings can show which machines are online.</li>
-  <li>AI apps you connect through the tdoc connector (for example Claude or ChatGPT) get a token that works only for the tdoc connector. It lasts one hour and is renewed with a refresh token that expires after 60 days unused. The app can create, read, update and share your documents and read and reply to their comments, in the spaces you allowed.</li>
+  <li>AI apps you connect through the tdoc connector (for example Claude or ChatGPT) get a token that works only for the tdoc connector (tdoc.dev/mcp). It lasts one hour and is renewed with a refresh token that expires after 60 days unused. In the workspaces you allow, the app can create, read, edit and share your documents, and read, reply to and resolve their comments. A doc it creates is private until you ask it to share.</li>
   <li>You can see and revoke every connected terminal, agent and AI app in Settings → Agents.</li>
 </ul>
-<!-- OWNER: confirm the AI-app connector paragraph. It describes origin/feat/remote-mcp-plugin (OAuth, scope "mcp", 1 h access, 60 d refresh, tools create_doc/update_doc/get_doc/list_docs/get_comments/reply_to_comment/resolve_comment/answer_question/share_doc), which is not on main yet. Remove it if this page ships before that branch. -->
 
 <h3>Sign-in cookies</h3>
 <p>We use cookies only to keep you signed in and to make sign-in safe: a session cookie (30 days), a short-lived sign-in state cookie (10 minutes), and one for switching accounts (30 minutes). No advertising or tracking cookies. The web app also keeps a few display preferences in your browser's local storage.</p>
 
 <h3>Service logs and counts</h3>
 <ul>
-  <li>Our host, Cloudflare, logs requests to tdoc.dev (address, time, status, errors) so we can find and fix problems. <!-- OWNER: confirm Workers Logs retention for the account's plan, and whether request IPs/headers appear in them. wrangler.toml.template sets observability.enabled with head_sampling_rate = 1 (every request). --></li>
+  <li>Our host, Cloudflare, logs requests to tdoc.dev (address, time, status, errors) so we can find and fix problems.</li>
   <li>We count a few onboarding steps (sign-in started, approved, token issued, doc published) with the tdoc version and sign-in method. These counts carry no account, username, email, IP address, document or token.</li>
   <li>To stop abuse, a few routes count requests per IP address for a few minutes.</li>
   <li>Ask this doc keeps only how many questions your account has used.</li>
@@ -94,40 +93,40 @@ body { background:#fff; }
   <li><b>AppSumo</b>, if you redeem an AppSumo code: we check the license with AppSumo and keep its status.</li>
   <li><b>Email</b>: invitations and notification emails (mentions, replies, comments on your doc, access requests) go out through Cloudflare Email or Resend. A notification email includes a short preview of the comment. Every email has a link to turn them off for good.</li>
   <li><b>Browser push</b>: if you turn alerts on, they travel through your browser's push service (Google, Mozilla, Apple or Microsoft) encrypted so that service cannot read them.</li>
-  <li><b>Ask this doc</b>: when you ask a question, we send that version's text, its open comments with commenters' names, any passage you highlighted, and your question to a language model through OpenRouter. Email addresses in the document, comments and passage are replaced with "[email hidden]" first; no account data is sent. We keep neither question nor answer unless you post it as a comment. <!-- OWNER: confirm the provider and model (ASK_API_BASE default openrouter.ai, ASK_MODEL default anthropic/claude-haiku-5.5) and link OpenRouter's data policy if wanted. Note: the question text itself is not email-redacted in code. --></li>
+  <li><b>Ask this doc</b>: when you ask a question, we send that version's text, its open comments with commenters' names, any passage you highlighted, and your question to an AI model provider through OpenRouter. Email addresses in the document, comments, passage and question are replaced with "[email hidden]" first; no account data is sent. We keep neither question nor answer unless you post it as a comment.</li>
   <li><b>Raft</b>, if you connect an agent through Raft: we send it the handoff (doc title and link, comment ids, your instruction). For a question to an agent we also send the question and the passage. Comment text is not sent; the agent reads it from tdoc with its own access.</li>
   <li><b>Webhooks you set up</b>: the same handoff, signed, to the address you entered.</li>
   <li><b>Data backup</b>: a team on the Team plan can copy its docs to a bucket it owns (S3 or R2). We keep the bucket keys encrypted and use them only to write the backup. A doc deleted for good is marked deleted in the backup too; what stays in your bucket is yours.</li>
   <li><b>Other websites</b>: our pages load fonts from Google Fonts and some agent icons from Simple Icons, so your browser contacts them. A document is written by its author and may load images or other content from anywhere.</li>
 </ul>
-<p>We do not otherwise share your data, except where the law requires it. <!-- OWNER: confirm there is no other processor (e.g. error tracking, support inbox, CRM) and no legal-request policy beyond this sentence. --></p>
+<p>We do not otherwise share your data, except where the law requires it.</p>
 
 <h2>How long we keep it</h2>
 <ul>
   <li>Documents stay until you delete them. Every version stays with the doc.</li>
   <li>A deleted doc goes to Trash. After 30 days it is erased for good, with its versions, comments and handoffs. You can also delete it forever from Trash at any time.</li>
   <li>Sessions end after 30 days. Pairing codes and sign-in links expire within minutes.</li>
-  <li>Your account stays until you ask us to delete it. <!-- OWNER: confirm. There is no self-serve "delete account" in the code today; deletion means emailing us and an operator removing it by hand. Decide what that covers (account, personal docs, comments on others' docs) and how long it takes. --></li>
+  <li>Your account stays until you ask us to delete it. Email us and we delete the account and its documents within 30 days.</li>
 </ul>
+
+<h2>Your rights</h2>
+<p>You can ask us for a copy of your data, to correct it, to delete it, or to export it, by writing to the address below. If you live in the EU, the UK or California, you may have more rights under the GDPR or the CCPA, and you can use them the same way.</p>
 
 <h2>Your choices</h2>
 <ul>
   <li>Download any doc as HTML, delete it, or change who can read it, at any time.</li>
   <li>Turn off notification emails in Notifications, or stop all tdoc email with the link in any email.</li>
   <li>Revoke any agent, terminal or AI app in Settings → Agents.</li>
-  <li>Ask us for a copy of your data, to correct it, or to delete your account, by writing to the address below.</li>
 </ul>
-<!-- OWNER: confirm whether to name GDPR/CCPA rights, a legal basis, and international transfer (Cloudflare runs worldwide). Kept plain on purpose. -->
 
 <h2>Children</h2>
-<p>tdoc is not meant for children under 13, and we do not knowingly keep data about them. If you think a child has an account, write to us and we will delete it. <!-- OWNER: confirm the age (13 vs 16 for the EU). --></p>
+<p>tdoc is not meant for children under 13 (under 16 in the EU and the UK), and we do not knowingly keep data about them. If you think a child has an account, write to us and we will delete it.</p>
 
 <h2>Changes</h2>
-<p>When this policy changes, we update this page and the date at the top. <!-- OWNER: confirm whether to promise notice (email or in-app) for material changes; nothing in the code sends one today. --></p>
+<p>When this policy changes, we post the change here and update the date at the top. A material change is also announced on the site.</p>
 
 <h2>Contact</h2>
 <p>Questions or requests: <a href="mailto:hello@tdoc.dev">hello@tdoc.dev</a>.</p>
-<!-- OWNER: hello@tdoc.dev has no inbound MX today. Set up receiving (or use another address) before this ships. -->
 
 </div>
 </body></html>

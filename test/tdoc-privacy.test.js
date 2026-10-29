@@ -66,6 +66,20 @@ const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'publis
     assert(/<footer>[\s\S]*href="\/privacy"[\s\S]*<\/footer>/.test(home), 'homepage footer has no /privacy link');
   });
 
+  await t('the MCP consent page and the plugin manifests point at /privacy', () => {
+    const consent = fs.readFileSync(path.join(root, 'shell', 'src', 'oauth-consent-page.jsx'), 'utf8');
+    assert(/href="\/privacy"/.test(consent), 'consent page has no /privacy link');
+    const claude = JSON.parse(fs.readFileSync(path.join(root, 'plugins', 'claude', '.claude-plugin', 'plugin.json'), 'utf8'));
+    assert(claude.privacyPolicyUrl === 'https://tdoc.dev/privacy', 'claude plugin privacyPolicyUrl');
+    const codex = JSON.parse(fs.readFileSync(path.join(root, 'plugins', 'codex', 'plugin.json'), 'utf8'));
+    assert(codex.extensions['com.openai'].interface.privacyPolicyURL === 'https://tdoc.dev/privacy', 'codex plugin privacyPolicyURL');
+  });
+
+  await t('only the legal-entity note is left for the owner', () => {
+    const notes = html.match(/<!--[\s\S]*?-->/g) || [];
+    assert(notes.length === 1 && /OWNER: legal entity/.test(notes[0]), `unexpected comments: ${notes.join(' | ')}`);
+  });
+
   await t('navigation and SEO', () => {
     assert(/class="back" href="\/"/.test(html), 'back link missing');
     assert(/rel="canonical" href="https:\/\/tdoc\.dev\/privacy"/.test(html) && /property="og:title"/.test(html), 'SEO head incomplete');

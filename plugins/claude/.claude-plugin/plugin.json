@@ -8,6 +8,7 @@
     "url": "https://github.com/tornado-doc"
   },
   "homepage": "https://tdoc.dev",
+  "privacyPolicyUrl": "https://tdoc.dev/privacy",
   "repository": "https://github.com/tornado-doc/tdoc",
   "license": "AGPL-3.0-or-later",
   "keywords": ["docs", "documents", "html", "comments", "mcp"],

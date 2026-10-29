@@ -21,6 +21,7 @@
         "category": "Productivity",
         "capabilities": ["Read", "Write"],
         "websiteURL": "https://tdoc.dev",
+        "privacyPolicyURL": "https://tdoc.dev/privacy",
         "defaultPrompt": [
           "Use tdoc to write a one-page summary of this discussion.",
           "Read all comments on my tdoc and fix them."
