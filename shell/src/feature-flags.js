@@ -23,6 +23,11 @@ export const FLAGS = Object.freeze({
   // Try visibility-based read receipts in PR previews before enabling for
   // every document. The existing explicit read controls remain off-preview.
   autoReadComments: Object.freeze({ label: 'Read replies when seen', owner: 'julie', added: '2026-10-26', default: false, preview: true }),
+  // "Connect in one click" for AI apps with no terminal (Claude connector,
+  // ChatGPT custom MCP server, Cursor install link) on /start, /setup and
+  // Settings, through the remote MCP server at /mcp. On for everyone since
+  // tdoc.dev serves /mcp (TDOC_REMOTE_MCP=1 in wrangler.toml).
+  remoteMcp: Object.freeze({ label: 'Connect AI apps (remote MCP)', owner: 'julie', added: '2026-10-28', default: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { TopBar } from './top-bar.jsx';
+import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import './docs-hub.css';
 import './feedback-pages.css';
 
@@ -69,9 +70,17 @@ export function CodeCopy({ code }) {
   return (
     <div className="code-copy">
       <pre ref={preRef}><code>{code}</code></pre>
-      <button type="button" className={`copy-btn${state ? ` ${state}` : ''}`} aria-label="Copy code" onClick={copy}>
-        {state === 'copied' ? 'Copied' : state === 'failed' ? 'Press ⌘C' : 'Copy'}
-      </button>
+      {/* The one Copy control; this page keeps its own copy (with the ⌘C
+          fallback), so the button is controlled. */}
+      <CopyPromptButton
+        className={`copy-btn${state ? ` ${state}` : ''}`}
+        aria-label="Copy code"
+        label="Copy"
+        copied={Boolean(state)}
+        copiedLabel={state === 'failed' ? 'Press ⌘C' : 'Copied'}
+        showTick={state === 'copied'}
+        onCopy={copy}
+      />
     </div>
   );
 }
@@ -166,7 +175,6 @@ export function FeedbackInstall({ boot }) {
           <div className="bookmark-path" id="bookmarkPath">
             <h2>Drag a bookmark</h2>
             <p className="device-note muted">Desktop only — drag the pill onto your bookmarks bar.</p>
-            <p className="chrome-hint"><strong>Fullscreen tip.</strong> In Chrome, <kbd>⌘⇧F</kbd> keeps the top bar visible in fullscreen so the bookmarks bar has somewhere to live — or exit fullscreen, then drag.</p>
             <div className="demo" id="demo">
               <div className="demo-titlebar">
                 <div className="demo-dots" aria-hidden="true"><i className="r" /><i className="y" /><i className="g" /></div>
@@ -188,6 +196,7 @@ export function FeedbackInstall({ boot }) {
               <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
               <li><strong>No bookmarks bar?</strong> Hit <kbd>⌘⇧B</kbd> — same in Chrome and Safari (Safari calls it the Favorites bar)</li>
             </ol>
+            <p className="chrome-hint"><strong>Fullscreen tip.</strong> In Chrome, <kbd>⌘⇧F</kbd> keeps the top bar visible in fullscreen so the bookmarks bar has somewhere to live — or exit fullscreen, then drag.</p>
             <p className="muted step-after">After that, open your app and click the bookmark. First time opens a small {host} window to connect your account. Some production sites block outside scripts; local and preview builds generally don't.</p>
           </div>
 

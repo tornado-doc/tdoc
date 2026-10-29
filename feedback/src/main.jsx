@@ -155,6 +155,16 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-context:hover { color: var(--td-accent); }
     #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send { position: relative; padding: 7px; }
     #tdoc-feedback-root .tdoc-fb-send-badge { position: absolute; top: 0; right: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px; background: #1652f0; color: #fff; font: 700 9.5px/15px system-ui, sans-serif; text-align: center; }
+    /* Named like the feedback page's "Send to agent (2)" where there is room;
+       a phone keeps the icon and its corner count. */
+    #tdoc-feedback-root .tdoc-fb-send-label { display: none; }
+    @media (min-width: 701px) {
+      #tdoc-feedback-root .tdoc-fb-send-label { display: inline; }
+      #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send { padding: 7px 11px; color: #1a1a1a; }
+      #tdoc-feedback-root .tdoc-fb-send-badge { position: static; }
+    }
+    /* A click on an icon lands on its button (the X used to be the svg). */
+    #tdoc-feedback-root .tdoc-feedback-dock svg, #tdoc-feedback-root .tdoc-fb-panel .x svg { pointer-events: none; }
     #tdoc-feedback-root .tdoc-fb-panel .empty { margin: 4px 8px; color: #8a8985; }
     #tdoc-feedback-root .tdoc-fb-panel .link { appearance: none; border: 0; background: none; padding: 0; color: #1652f0; font: inherit; cursor: pointer; }
     #tdoc-feedback-root .tdoc-fb-agent { border-top: 1px solid #efeeea; padding: 12px 14px 14px; background: #fafaf8; }
@@ -690,7 +700,7 @@ ${uiCss}
           // The doc page's Send to agent: same icon, same count (comments
           // never sent, or with a human word since the last handoff).
           <button type="button" className="tdoc-fb-send" onClick={onSend} title={sendCount ? `Send to agent (${sendCount} ready)` : 'Send to agent'} aria-label="Send to agent">
-            <Send aria-hidden="true" />{sendCount ? <span className="tdoc-fb-send-badge">{sendCount > 99 ? '99+' : sendCount}</span> : null}
+            <Send aria-hidden="true" /><span className="tdoc-fb-send-label">Send to agent</span>{sendCount ? <span className="tdoc-fb-send-badge">{sendCount > 99 ? '99+' : sendCount}</span> : null}
           </button>
         ) : null}
         {shareUrl ? (
@@ -740,7 +750,7 @@ ${uiCss}
           </span>
           <button type="button" className="tdoc-fb-add" onClick={onPick}>+ Comment</button>
           <button type="button" className="tdoc-fb-refresh" aria-label="Refresh feedback" title="Refresh feedback" aria-busy={refreshing ? 'true' : 'false'} onClick={onRefresh}><RefreshCw aria-hidden="true" /></button>
-          <button type="button" className="x" aria-label="Close list" onClick={onClose}>×</button>
+          <button type="button" className="x" aria-label="Close list" onClick={onClose}><X size={14} aria-hidden="true" /></button>
         </header>
         {unreadComments.length ? <div className="tdoc-fb-readbar"><span>{unreadComments.length} new agent {unreadComments.length === 1 ? 'reply' : 'replies'}</span><button type="button" onClick={() => area.markAllRead(unreadComments)}>Mark all as read</button></div> : null}
         <div className="tdoc-fb-scroll">
@@ -1172,9 +1182,9 @@ ${uiCss}
 
         {notice ? (
           <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
-            <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" onClick={() => setNotice(null)}>×</button></div>
+            <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
             <p>{notice.error}</p>
-            <div className="foot"><span /><button className="submit" type="button" onClick={async () => {
+            <div className="foot"><span /><button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={async () => {
               setNotice(null);
               const result = await call({ type: 'tdoc-feedback-signin' });
               // This button is the continuation of "leave a comment", not a

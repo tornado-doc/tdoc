@@ -163,6 +163,42 @@ export function sameTarget(a, b) {
     && !(a.team_agent && b.team_agent && a.team_agent.id !== b.team_agent.id);
 }
 
+// One agent, several rows: a team agent's daemon registers one target per
+// CLI on its computer (bin/lib/daemon.js register; worker teamAgentTargets),
+// so "OpenTag" on "mac" came back twice, once for claude and once for codex,
+// and both rows read the same. They are one agent on one computer: the key
+// is the agent and the computer, not the program it runs.
+function sameAgentKey(t) {
+  if (!t || t.provider !== 'local' || !(t.team_agent && t.team_agent.id)) return '';
+  return `local:${t.device || t.server_id}:${t.team_agent.id}`;
+}
+
+// Each agent once: of the rows that are one agent on one computer, the one
+// in `keep` (the doc's default, the current pick) if there is one, else its
+// Claude Code row, else the first. The kept row takes the first one's place.
+export function oneRowPerAgent(list, keep = []) {
+  const rows = (Array.isArray(list) ? list : []).filter(Boolean);
+  const kept = (Array.isArray(keep) ? keep : [keep]).filter(Boolean);
+  const groups = new Map();
+  for (const t of rows) {
+    const key = sameAgentKey(t);
+    if (key) groups.set(key, [...(groups.get(key) || []), t]);
+  }
+  const out = [];
+  const done = new Set();
+  for (const t of rows) {
+    const key = sameAgentKey(t);
+    if (!key) { out.push(t); continue; }
+    if (done.has(key)) continue;
+    done.add(key);
+    const group = groups.get(key);
+    out.push(group.find((x) => kept.some((k) => sameTarget(k, x)))
+      || group.find((x) => agentCli(x) === 'claude')
+      || group[0]);
+  }
+  return out;
+}
+
 // This doc's agent (or the account default) first, then the others that
 // worked with tdoc or are in the server's directory, then the fallback —
 // each agent once.
@@ -176,7 +212,7 @@ export function orderedAgentChoices(targets) {
   if (targets.fallback && !choices.some((x) => sameTarget(x, targets.fallback))) {
     choices.push(targets.fallback);
   }
-  return choices;
+  return oneRowPerAgent(choices, [targets.default]);
 }
 
 // A word joiner after the `@`: the tag reads "@claude", but the server's
@@ -202,9 +238,9 @@ export function agentMentionName(t, list = null) {
 // Ask AI is answer-only. Lead with the agent that most recently wrote this
 // document when available. The server's remaining order reflects recent use.
 export function orderedAskAiChoices(agents, recent = null) {
-  return (agents || []).filter((agent) => agent && agent.status !== 'stopped')
+  return oneRowPerAgent((agents || []).filter((agent) => agent && agent.status !== 'stopped')
     .sort((a, b) => Number(Boolean(recent && sameTarget(b, recent))) - Number(Boolean(recent && sameTarget(a, recent)))
-      || Number(Boolean(b.last_writer)) - Number(Boolean(a.last_writer)));
+      || Number(Boolean(b.last_writer)) - Number(Boolean(a.last_writer))), [recent]);
 }
 
 // The agents to offer for what is typed after `@`. With nothing typed, the

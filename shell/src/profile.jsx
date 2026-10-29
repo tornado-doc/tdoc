@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { LayoutGrid, Rows3, Share2, UserRoundPen, PencilLine, X } from 'lucide-react';
 import { TopBar } from './top-bar.jsx';
 import { AppDialog } from './ui/dialog.jsx';
+import { AppButton } from './ui/button.jsx';
+import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import {
   DEFAULT_ANNOTATION_LINES,
   POSTER_KINDS,
@@ -63,9 +65,9 @@ function ProfileDialog({ title, children, confirmLabel, onConfirm, onClose, acti
       title={title}
       actions={actions || (
         <>
-          <button type="button" onClick={onClose}>Cancel</button>
+          <AppButton onClick={onClose}>Cancel</AppButton>
           {onConfirm ? (
-            <button type="button" className="primary" onClick={onConfirm}>{confirmLabel}</button>
+            <AppButton variant="primary" className="primary" onClick={onConfirm}>{confirmLabel}</AppButton>
           ) : null}
         </>
       )}
@@ -522,14 +524,14 @@ export function Profile({ boot }) {
         <ProfileDialog
           title="Share your profile"
           onClose={() => setModal(null)}
-          actions={<button type="button" className="primary" onClick={() => setModal(null)}>Done</button>}
+          actions={<AppButton variant="primary" className="primary" onClick={() => setModal(null)}>Done</AppButton>}
         >
           <p className="manage-hint">
             Copy the link, or download a poster with your handle filled in.
           </p>
           <div className="profile-share-link">
             <code>{profileUrl(login)}</code>
-            <button type="button" className="text-btn" onClick={copyProfileLink}>Copy link</button>
+            <CopyPromptButton label="Copy link" copied={false} onCopy={copyProfileLink} />
           </div>
           {shareStatus ? <p className="manage-hint">{shareStatus}</p> : null}
           <label className="profile-poster-field">
@@ -613,7 +615,7 @@ export function Profile({ boot }) {
         <ProfileDialog
           title="Public picks"
           onClose={() => setModal(null)}
-          actions={<button type="button" onClick={() => setModal(null)}>Done</button>}
+          actions={<AppButton onClick={() => setModal(null)}>Done</AppButton>}
         >
           <p className="manage-hint">
             Curating a doc makes it public on your profile. Take it down to restore the previous access.

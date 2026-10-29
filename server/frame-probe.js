@@ -100,20 +100,8 @@
   var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
-  var selectionAction = null;
-  var selectedPassage = null;
-  var selectionTimer = null;
-  var pointerSelecting = false;
-  var touchSelecting = false;
-  var selectionActionActivated = false;
   var reanchorMode = false;
-  var pointerHadSelection = false;
-  var pointerDownInSelection = false;
   var pointerStartX = 0, pointerStartY = 0;
-  function hideSelectionAction() {
-    selectedPassage = null;
-    if (selectionAction) selectionAction.style.display = 'none';
-  }
   function highlightCss(dark) {
     var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
     // The block that replaced a visible comment's words: a light, dashed mark.
@@ -140,6 +128,8 @@
   // overlay's .tdoc-hover-outline / .tdoc-comment-pill.
   (function () {
     var s = document.createElement('style');
+    var cursorSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="' + COMMENT_ICON_PATH + '" fill="' + COMMENT_ACCENT + '"/></svg>';
+    var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 2 2, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');
     // Author figure rules also match our SVG icons. Protect the provider's
@@ -149,8 +139,6 @@
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
-      '.tdoc-selection-action{position:absolute;z-index:2147483645;display:none;width:36px;height:36px;padding:0;align-items:center;justify-content:center;border:1px solid #dedee3;border-radius:10px;background:#fff;color:' + COMMENT_ACCENT + ';box-shadow:0 2px 10px rgba(0,0,0,.16);cursor:pointer;touch-action:manipulation;}' +
-      '.tdoc-selection-action svg{width:16px;height:16px;fill:currentColor;}' +
       'figure[data-tdoc-artifact="Diagram"][aria-label="Diagram"][data-tdoc-excalidraw]{border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;}' +
       'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;box-sizing:border-box;padding-right:52px;margin-bottom:4px;}' +
@@ -160,6 +148,8 @@
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
       'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:16px!important;min-width:16px!important;max-width:16px!important;height:16px!important;min-height:16px!important;max-height:16px!important;margin:0!important;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
       '@media print{figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:none!important;}}' +
+      'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
+      'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
@@ -351,71 +341,28 @@
   }
 
   function postTextSelection(range, text) {
-    selectionActionActivated = true;
-    hideSelectionAction();
     var placed = placeInView(range, text);
     var ctx = placed ? { before: placed.before, after: placed.after } : context(range, 60);
-    // Paint the pending anchor so it stays visibly marked while the composer
-    // (in the shell document) has focus; cleared on cancel/close (#281 parity).
+    // Keep the selected passage visible while the shell composer has focus.
     if (HL) {
       try {
         CSS.highlights.delete('tdoc-selecting');
         CSS.highlights.set('tdoc-pending', new Highlight(range.cloneRange()));
       } catch (e) {}
     }
-    var rect = selectionRect(range);
-    // The pending highlight keeps the quoted passage visible. Clear the native
-    // range once the action is chosen so the next drag selects fresh text.
-    try { window.getSelection().removeAllRanges(); } catch (e) {}
     post({ type: 'tdoc:selection', text: text, context_before: ctx.before, context_after: ctx.after,
            occurrence: placed ? placed.occurrence : null,
            occurrences: placed ? placed.occurrences : null,
-           rect: rect });
+           rect: selectionRect(range) });
   }
   function reportSelection() {
-    if (interactionMode !== 'comment' || visualViewerOpen() || shellUiOpen || selectionActionActivated) return;
+    if (interactionMode !== 'comment' || visualViewerOpen()) return;
     var sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideSelectionAction(); return; }
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     var text = sel.toString().trim();
-    if (!text) { hideSelectionAction(); return; }
-    var range = sel.getRangeAt(0);
-    selectedPassage = { range: range.cloneRange(), text: text };
-    if (!selectionAction) {
-      selectionAction = document.createElement('button');
-      selectionAction.type = 'button';
-      selectionAction.className = 'tdoc-comment-pill tdoc-selection-action';
-      selectionAction.setAttribute('data-tdoc-provider', '');
-      selectionAction.setAttribute('aria-label', 'Comment');
-      selectionAction.title = 'Comment';
-      selectionAction.innerHTML = '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="' + COMMENT_ICON_PATH + '"/></svg>';
-      selectionAction.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); });
-      selectionAction.addEventListener('click', function (e) {
-        e.preventDefault(); e.stopPropagation();
-        var passage = selectedPassage;
-        if (passage) postTextSelection(passage.range, passage.text);
-      });
-      document.body.appendChild(selectionAction);
-    }
-    var rect = selectionRect(range);
-    var mobile = window.innerWidth <= 700;
-    var top = mobile ? rect.bottom + 8 : rect.top - 4;
-    // Keep the native iOS Copy menu above the passage clear. If the passage
-    // ends at the screen edge, flip so the action stays reachable.
-    if (top + 36 > window.innerHeight - 8) top = rect.top - 44;
-    var left = mobile ? rect.left + (rect.width || 0) / 2 - 18 : rect.right + 8;
-    if (!mobile && left + 36 > window.innerWidth - 8) left = rect.left - 44;
-    selectionAction.style.left = Math.max(8, Math.min(left, window.innerWidth - 44)) + (window.scrollX || 0) + 'px';
-    selectionAction.style.top = Math.max(8, top) + (window.scrollY || 0) + 'px';
-    selectionAction.style.display = 'inline-flex';
+    if (!text) return;
+    postTextSelection(sel.getRangeAt(0), text);
   }
-  function scheduleSelectionAction(delay) {
-    clearTimeout(selectionTimer);
-    if (pointerSelecting || touchSelecting || selectionActionActivated) { hideSelectionAction(); return; }
-    selectionTimer = setTimeout(reportSelection, delay);
-  }
-  document.addEventListener('selectionchange', function () {
-    if (interactionMode === 'comment' && !shellUiOpen) scheduleSelectionAction(250);
-  });
   function caretAtPoint(x, y) {
     if (document.caretPositionFromPoint) {
       var pos = document.caretPositionFromPoint(x, y);
@@ -466,26 +413,28 @@
     return false;
   }
   function reportPointSelection(event) {
-    if (interactionMode !== 'comment' || event.button !== 0) return;
-    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return;
+    if (interactionMode !== 'comment' || event.button !== 0) return false;
+    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
     var current = window.getSelection();
-    if (current && !current.isCollapsed) return; // a drag selection owns this click
+    if (current && !current.isCollapsed) return false; // a drag selection owns this click
     var point = caretAtPoint(event.clientX, event.clientY);
-    if (!point || !point.node || point.node.nodeType !== Node.TEXT_NODE) return;
+    if (!point || !point.node || point.node.nodeType !== Node.TEXT_NODE) return false;
     var bounds = wordBounds(point.node.nodeValue || '', point.offset);
-    if (!bounds || bounds.end - bounds.start < 1) return;
+    if (!bounds || bounds.end - bounds.start < 1) return false;
     try {
       var range = document.createRange();
       range.setStart(point.node, bounds.start); range.setEnd(point.node, bounds.end);
       var text = range.toString().trim();
-      if (!text) return;
+      if (!text) return false;
       // Clicked past the text, not on it: leave the click to the clear path so
       // it dismisses whatever is open instead of commenting on a neighbour.
-      if (!pointOverRange(range, event.clientX, event.clientY)) return;
+      if (!pointOverRange(range, event.clientX, event.clientY)) return false;
       if (current) { current.removeAllRanges(); current.addRange(range); }
       event.preventDefault(); event.stopPropagation();
       postTextSelection(range, text);
+      return true;
     } catch (e) {}
+    return false;
   }
   // Links: a click inside the sandboxed frame would navigate the FRAME (nested
   // shell / 404), not the page. Intercept and hand navigation to the shell,
@@ -504,9 +453,7 @@
       }
       return;
     }
-    // The floating Comment action can sit over an existing text anchor. Its
-    // own click must reach its handler instead of opening that older thread.
-    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill,.tdoc-selection-action')) return;
+    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
     if (reanchorMode) { reportPointSelection(e); return; }
     // A drag across existing highlighted text can still finish with a click
     // event. Keep that gesture as a selection; opening the old thread would
@@ -522,7 +469,7 @@
       return;
     }
     var a = e.target && e.target.closest && e.target.closest('a[href]');
-    if (!a) return;
+    if (!a) { reportPointSelection(e); return; }
     if (interactionMode === 'edit') { e.preventDefault(); return; }
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#') return;                    // in-page anchors stay in the frame
@@ -535,7 +482,6 @@
   document.addEventListener('mouseup', function (e) {
     if (visualViewerOpen()) return;
     clearSelectingCursor();
-    pointerSelecting = false;
     if (reanchorMode) {
       var reanchorSelection = window.getSelection();
       if (reanchorSelection && !reanchorSelection.isCollapsed && reanchorSelection.rangeCount) {
@@ -543,15 +489,6 @@
         if (reanchorText) postTextSelection(reanchorSelection.getRangeAt(0), reanchorText);
       }
       return;
-    }
-    var wasOutsideSelection = pointerHadSelection && !pointerDownInSelection;
-    pointerHadSelection = false;
-    pointerDownInSelection = false;
-    if (wasOutsideSelection && Math.abs(e.clientX - pointerStartX) <= 4
-      && Math.abs(e.clientY - pointerStartY) <= 4
-      && !(e.target && e.target.closest && e.target.closest('.tdoc-selection-action'))) {
-      try { var oldSelection = window.getSelection(); if (oldSelection) oldSelection.removeAllRanges(); } catch (x) {}
-      hideSelectionAction();
     }
     // A dismissing click must not report a selection either. Content styled
     // `user-select: all` selects its whole block on a single click, which came
@@ -567,7 +504,7 @@
       var live = multi ? window.getSelection() : null;
       if (multi && live && !live.isCollapsed && live.rangeCount) {
         post({ type: 'tdoc:cleared' });
-        scheduleSelectionAction(0);
+        setTimeout(reportSelection, 0);
         return;
       }
       // A click whose only job is to dismiss. Content styled `user-select: all`
@@ -578,7 +515,7 @@
       post({ type: 'tdoc:cleared' });
       return;
     }
-    scheduleSelectionAction(0);
+    setTimeout(reportSelection, 0);
   }, true);
   // A tap on highlighted text. iOS Safari sends no click (and no mouse
   // events) for a tap on plain, non-interactive text, and a highlight is a
@@ -587,35 +524,30 @@
   // the tap itself: one finger, short, barely moved.
   var _tap = null;
   document.addEventListener('touchstart', function (e) {
-    touchSelecting = true;
     var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
     var selected = t ? window.getSelection() : null;
     _tap = t ? {
       x: t.clientX, y: t.clientY, at: Date.now(),
-      hadAction: !!selectedPassage,
       // A tap on the selected passage is for the native copy menu. A tap
       // elsewhere dismisses the composer, even on iOS where plain text taps
       // never produce the mouse events used by the desktop clear path.
       inSelection: !!(selected && !selected.isCollapsed && selected.rangeCount
         && pointOverRange(selected.getRangeAt(0), t.clientX, t.clientY))
     } : null;
-    if (!(e.target && e.target.closest && e.target.closest('.tdoc-selection-action'))) hideSelectionAction();
   }, { capture: true, passive: true });
   document.addEventListener('touchend', function (e) {
-    touchSelecting = false;
     var start = _tap;
     _tap = null;
     var t = e.changedTouches && e.changedTouches[0];
     var still = start && t && Math.abs(t.clientX - start.x) < 10
       && Math.abs(t.clientY - start.y) < 10 && Date.now() - start.at < 600;
-    if (still && (shellUiOpen || start.hadAction) && interactionMode === 'comment' && !start.inSelection
+    if (still && shellUiOpen && interactionMode === 'comment' && !start.inSelection
       && !visualViewerOpen() && !(e.target && e.target.closest
         && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
       // The pending CSS highlight outlives the browser selection. Clear both
       // before closing the composer so no yellow passage remains on the page.
       if (e.cancelable) e.preventDefault();
       if (HL) CSS.highlights.delete('tdoc-pending');
-      hideSelectionAction();
       try { var pendingSelection = window.getSelection(); if (pendingSelection) pendingSelection.removeAllRanges(); } catch (x) {}
       setActiveAnchor(null, false);
       post({ type: 'tdoc:cleared' });
@@ -634,13 +566,17 @@
           return;
         }
       }
+      // Safari does not dispatch a click for ordinary text. Reuse the same
+      // point-to-word path as desktop for a light tap, leaving drags alone.
+      if (still && interactionMode === 'comment' && (!sel || sel.isCollapsed)
+        && reportPointSelection({ button: 0, target: e.target,
+          clientX: t.clientX, clientY: t.clientY,
+          preventDefault: function () { if (e.cancelable) e.preventDefault(); },
+          stopPropagation: function () { e.stopPropagation(); } })) return;
     }
-    // Native iOS selection settles after touchend. Do not show an action
-    // while a handle is still moving or before the system Copy menu appears.
-    scheduleSelectionAction(250);
+    setTimeout(reportSelection, 0);
   }, true);
-  window.addEventListener('blur', function () { clearSelectingCursor(); pointerSelecting = false; touchSelecting = false; });
-  document.addEventListener('touchcancel', function () { touchSelecting = false; hideSelectionAction(); }, true);
+  window.addEventListener('blur', clearSelectingCursor);
   document.addEventListener('copy', function (e) {
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount || !e.clipboardData) return;
@@ -655,10 +591,7 @@
     } catch (x) {}
   }, true);
   document.addEventListener('mousedown', function (e) {
-    pointerSelecting = true;
     pointerStartX = e.clientX; pointerStartY = e.clientY;
-    pointerHadSelection = !!selectedPassage;
-    pointerDownInSelection = !!(selectedPassage && pointOverRange(selectedPassage.range, e.clientX, e.clientY));
     if (visualViewerOpen()) return;
     // Edit mode opts out of comment behaviour, but not out of dismissal: a card
     // opened from a pin stayed open there while every other mode closed it on
@@ -672,7 +605,7 @@
     // The pill is our own UI, so a click on it normally opens the composer
     // rather than clearing. While something is open it is outside that card
     // like anything else, and dismissal wins.
-    if (!shellUiOpen && e.target && e.target.closest && e.target.closest('.tdoc-comment-pill,.tdoc-selection-action')) return;
+    if (!shellUiOpen && e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
     // Dismissal does not hit-test. While the shell has something open, an anchor
     // under the pointer stops being special — the click that closes a card must
     // not also open the next one. Fall through rather than returning, so a drag
@@ -693,12 +626,10 @@
     // is in the middle of dragging. This sits AFTER the painting setup above:
     // an early return here stops a drag from painting at all.
     if (shellUiOpen) return;
-    hideSelectionAction();
     if (HL) CSS.highlights.delete('tdoc-pending');
     setActiveAnchor(null, false);
     post({ type: 'tdoc:cleared' });
   }, true);
-  window.addEventListener('scroll', hideSelectionAction, { passive: true });
 
   // --- element/region commenting (slice 1: hover a commentable artifact →
   //     outline + pill → click to comment on the whole element). Mirrors the
@@ -1685,7 +1616,6 @@
       }
     }
     if (HL && next !== 'comment') CSS.highlights.delete('tdoc-selecting');
-    if (next !== 'comment') hideSelectionAction();
     if (next === 'edit' || next !== 'comment' || !elementComment) { hideHover(); }
     if (next === 'edit') enableEditing();
   }
@@ -1740,8 +1670,6 @@
     if (d.type === 'tdoc:anchors') reportPins(d.comments);
     else if (d.type === 'tdoc:documentCommentsHeight') { /* old shells may still send this */ }
     else if (d.type === 'tdoc:clearPending') {
-      selectionActionActivated = false;
-      hideSelectionAction();
       if (HL) CSS.highlights.delete('tdoc-pending');
       // Drop the reader's own selection too. The browser paints it OVER our
       // anchor highlight, so after a comment is posted or an anchor is moved
@@ -1755,11 +1683,10 @@
       reanchorMode = !!d.active;
       document.documentElement.toggleAttribute('data-tdoc-reanchoring', reanchorMode);
       if (reanchorMode) {
-        hideSelectionAction();
         try { window.getSelection().removeAllRanges(); } catch (x) {}
       }
     }
-    else if (d.type === 'tdoc:uiOpen') { shellUiOpen = !!d.open; if (!shellUiOpen) selectionActionActivated = false; }
+    else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
     else if (d.type === 'tdoc:diagramApply') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!applyDiagram(d) });
     else if (d.type === 'tdoc:diagramInsert') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!insertDiagram(d) });
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);

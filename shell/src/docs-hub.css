@@ -1,13 +1,20 @@
-  :root {
+  /* Scoped to the docs-hub root (every page that loads this sheet renders
+     <div class="tdoc-app docs-hub">): these tokens and base rules used to sit
+     on :root / body / h1 / a and overrode the document page's own tokens
+     from chrome.css. :where() keeps the specificity the bare selectors had. */
+  :where(.docs-hub) {
     --td-accent: #1652f0; --td-accent-hover: #1245d0; --td-accent-tint: #e8eeff;
     --td-danger: #b42318; --td-danger-hover: #931c14; --td-danger-tint: #fdeceb; --td-ok: #087443;
     --td-ink: #111; --td-muted: #666; --td-line: #eee; --td-surface: #f7f7f7;
   }
-  body { font: 15px system-ui, -apple-system, sans-serif; margin: 0; color: var(--td-ink); }
+  :where(.docs-hub) { font: 15px system-ui, -apple-system, sans-serif; margin: 0; color: var(--td-ink); }
   .wrap { max-width: 680px; margin: 0 auto; padding: 24px 20px 48px; }
-  h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
-  a { color: var(--td-accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  :where(.docs-hub) h1 { font-size: 28px; margin: 0 0 24px; color: var(--td-accent); }
+  :where(.docs-hub) a { color: var(--td-accent); text-decoration: none; }
+  :where(.docs-hub) a:hover { text-decoration: underline; }
+  /* .muted is used across these pages for hints and notices; without a
+     colour it read as body text next to the muted card hints. */
+  :where(.docs-hub) .muted { color: var(--td-muted); }
   .empty { color: #888; padding: 40px 0; text-align: center; border: 1px dashed var(--td-line); border-radius: 12px; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
   .toolbar input[type="search"] { flex: 1 1 220px; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid var(--td-line); border-radius: 8px; background: #fff; color: var(--td-ink); }
@@ -554,6 +561,12 @@
     font-size: 12px;
   }
 }
+/* A 390px phone: all six views (Docs ... Settings) fit without the last one
+   being cut to "Settir"; narrower screens still scroll the row. */
+@media (max-width: 430px) {
+  .tabs { justify-content: space-between; }
+  .tab { padding-left: 4px; padding-right: 4px; }
+}
 
 /* Dark mode is the page-level invert in chrome.css — the Docs Hub inherits it
    like every other surface. It used to invert `.docs-hub` a second time, which
@@ -815,10 +828,8 @@
 .tdoc-conn-form { display: grid; grid-template-columns: 1fr 200px auto; gap: 10px; align-items: end; }
 .tdoc-conn-form label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--td-muted); }
 .tdoc-conn-form label em { font-style: normal; font-weight: 400; }
-.tdoc-conn-form .tdoc-fbspace-btn { height: 34px; }
 .tdoc-connectors, .tdoc-connector { min-width: 0; max-width: 100%; }
-.tdoc-conn-pre { box-sizing: border-box; min-width: 0; max-width: 100%; margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--td-surface, #f5f5f3); font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre; overflow-x: auto; color: var(--td-ink); }
-.tdoc-conn-form input { font-family: inherit; font-weight: 400; font-size: 14px; line-height: 1.2; height: 34px; padding: 0 10px; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
+.tdoc-conn-form input { font-family: inherit; font-weight: 400; font-size: 14px; line-height: 1.2; height: 32px; padding: 0 10px; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
 @media (max-width: 640px) { .tdoc-conn-form { grid-template-columns: 1fr; } }
 
 /* Feedback tab, nothing yet */
@@ -832,13 +843,15 @@
 .tdoc-fb-empty-art .win i:nth-child(1) { top: 16px; } .tdoc-fb-empty-art .win i:nth-child(2) { top: 31px; right: 46px; } .tdoc-fb-empty-art .win i:nth-child(3) { top: 46px; right: 58px; }
 .tdoc-fb-empty-art .pin { position: absolute; right: -10px; top: -12px; width: 34px; height: 34px; border-radius: 50%; background: var(--td-accent); display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 4px 12px var(--td-accent-ring, rgba(22,82,240,.28)); }
 .tdoc-conn-note { font-size: 13px; margin: 0; }
-.tdoc-inline-code { font: 12px ui-monospace, Menlo, monospace; background: var(--td-surface, #f5f5f3); padding: 1px 5px; border-radius: 4px; }
+/* The intro under a card's heading: the card-hint size, not body text. */
+.tdoc-conn-intro { margin: 0 0 4px; font-size: 13px; line-height: 1.45; }
+.tdoc-inline-code { font: 12px ui-monospace, Menlo, monospace; white-space: nowrap; background: var(--td-surface, #f5f5f3); padding: 1px 5px; border-radius: 4px; }
 .tdoc-conn-secret { word-break: break-all; }
 
 /* Devices & agents */
 .tdoc-dev-row { gap: 10px; }
 .tdoc-access-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
-.tdoc-access-intro .muted { margin: 0; max-width: 720px; }
+.tdoc-access-intro .muted { margin: 0; max-width: 720px; font-size: 13px; line-height: 1.45; }
 .tdoc-access-intro > button { flex: 0 0 auto; }
 .tdoc-dev-client { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--td-surface, #f3f3f1); color: var(--td-muted); font-size: 11.5px; font-weight: 600; }
 .tdoc-dev-remove:hover { border-color: var(--td-danger, #c33) !important; color: var(--td-danger, #c33) !important; }
@@ -863,7 +876,6 @@
 .tdoc-conn-alt[open] { display: grid; gap: 8px; }
 .tdoc-conn-alt code { box-sizing: border-box; min-width: 0; max-width: 100%; margin: 2px 0 0; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tdoc-conn-alt .tdoc-copy-prompt { justify-self: start; }
-.tdoc-connector > a.tdoc-fbspace-btn { justify-self: start; }
 
 .tdoc-connector.is-featured { border-color: var(--td-accent, #1652f0); box-shadow: 0 0 0 3px var(--td-accent-tint, #e8eeff); }
 
@@ -874,7 +886,6 @@
 .tdoc-conn-card-title strong { font-size: 15px; }
 .tdoc-conn-card-title .tdoc-connector-badge { margin: 0; }
 .tdoc-conn-card-actions { display: flex; gap: 8px; }
-.tdoc-conn-card-actions .tdoc-fbspace-btn, .tdoc-conn-inline-form .tdoc-fbspace-btn { height: 34px; }
 .tdoc-conn-facts { margin: 0; display: grid; gap: 4px; padding-left: 52px; font-size: 13px; }
 .tdoc-conn-facts div { display: grid; grid-template-columns: 110px 1fr; gap: 8px; }
 .tdoc-conn-facts dt { color: var(--td-muted); }
@@ -918,4 +929,4 @@
 .tdoc-computer-runtimes { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; font-size: 13px; }
 .tdoc-computer-runtimes li { display: flex; flex-wrap: wrap; gap: 10px; }
 .tdoc-computer-runtimes span { color: var(--td-muted); }
-@media (max-width: 600px) { .tdoc-computer-row { flex-wrap: wrap; } .tdoc-computer-row .doc-info { flex: 1 1 calc(100% - 40px); } .tdoc-computer-row .tdoc-dev-actions { flex-wrap: wrap; margin-left: 34px; } .tdoc-computers-head { flex-direction: column; align-items: flex-start; gap: 12px; } .tdoc-computer-row .tdoc-fbspace-btn { min-height: 44px; } }
+@media (max-width: 600px) { .tdoc-computer-row { flex-wrap: wrap; } .tdoc-computer-row .doc-info { flex: 1 1 calc(100% - 40px); } .tdoc-computer-row .tdoc-dev-actions { flex-wrap: wrap; margin-left: 34px; } .tdoc-computers-head { flex-direction: column; align-items: flex-start; gap: 12px; } }

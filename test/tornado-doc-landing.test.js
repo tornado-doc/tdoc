@@ -273,25 +273,29 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Works with/.test(visible), 'trusted-by label should be Works with, not a borrowed user list');
+  assert(/Use tdoc in your AI app/.test(visible), 'the apps row should be "Use tdoc in your AI app", not a borrowed user list');
 });
 
-t('names the apps it runs in, and the chats it does not', () => {
+t('names the apps it runs in, each linked to its connect step', () => {
   // Newcomers went to claude.ai and ChatGPT because the page showed those
-  // marks under "Works with" and "No setup", and said nothing to install.
+  // marks and said nothing to install, when tdoc ran only in Claude Code and
+  // Codex. The remote MCP server (/mcp) now puts it in those chats, so the
+  // page names them, and each mark is a link to that app's connect step.
   const visible = html
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
-  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Works with'));
-  assert(/Works in\s+Claude Code\s+or\s+Codex\s+on your computer/.test(hero), 'the hero does not name Claude Code and Codex');
-  assert(/Not yet in the claude\.ai or ChatGPT chat/.test(hero), 'the hero does not say which chats are unsupported');
+  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Use tdoc in your AI app'));
+  assert(/Claude[\s\S]*ChatGPT[\s\S]*Cursor[\s\S]*VS Code/.test(hero), 'the hero does not name the connector apps');
+  assert(/Claude Code\s+or\s+Codex\s+on your computer/.test(hero), 'the hero does not name Claude Code and Codex');
+  assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
   assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
-  const strip = html.slice(html.indexOf('<p class="trust-label">Works with</p>'), html.indexOf('<!-- ══ THE LOOP ══ -->'));
-  assert(/Claude Code/.test(strip) && /Codex/.test(strip), 'Works with does not list Claude Code and Codex');
-  assert(!/#i-(google|cloudflare|claude)"|Berkeley|tlogo-img|class="marquee"/.test(strip), 'Works with still shows company logos');
+  const strip = html.slice(html.indexOf('<p class="trust-label">Use tdoc in your AI app</p>'), html.indexOf('<!-- ══ THE LOOP ══ -->'));
+  const apps = [...strip.matchAll(/<a class="aiapp" href="([^"]+)">[\s\S]*?<\/svg>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
+  assert(apps.join(' ') === 'Claude=/start?connect=claude ChatGPT=/start?connect=chatgpt Cursor=/start?connect=cursor VS Code=/start?connect=vscode Codex=/start?connect=codex Gemini CLI=/start?connect=gemini', `apps row: ${apps.join(' ')}`);
+  assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(strip), 'the apps row shows company logos');
   assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
   const setup = html.slice(html.indexOf('<!-- ══ ONE PASTE ══'), html.indexOf('<!-- ══ FEATURES'));
   assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-terminal/.test(setup), 'Claude Code is not drawn as a terminal');

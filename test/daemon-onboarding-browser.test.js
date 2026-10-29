@@ -46,6 +46,23 @@ const SHOTS = process.env.TDOC_UI_SHOTS;
    await page.route('**/api/me/connectors',route=>route.fulfill({json:{targets:[receiver]}}));
    await page.route('**/api/me/connectors/test',route=>{deliveryTests++;return route.fulfill({json:{delivery:{status:deliveryFails?'failed':'delivered'}}});});
    const shot=async name=>{if(SHOTS){fs.mkdirSync(SHOTS,{recursive:true});await page.screenshot({path:path.join(SHOTS,`${name}-${width}.png`)});}};
+   // MCP is the primary route: switching apps keeps one connection panel,
+   // and the optional tutorial stays manual rather than queuing a daemon.
+   await page.goto(base+'?setup=1&mcp=1');
+   await page.getByRole('heading',{name:'Connect your AI',exact:true}).waitFor();
+   const appChoices=page.getByRole('group',{name:'Choose your AI app',exact:true});
+   for(const app of ['Claude','ChatGPT','Cursor','VS Code','Codex','Gemini']) {
+     await appChoices.getByRole('button',{name:app,exact:true}).click();
+     await page.getByRole('region',{name:`Connect ${app}`,exact:true}).waitFor();
+     assert.equal(await page.locator('.tdoc-connect-app-panel').count(),1);
+   }
+   assert.ok(await page.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth),'MCP choices fit phone and desktop');
+   await shot('mcp-products');
+   failPractice=false;
+   await page.getByRole('button',{name:'Try a comment',exact:true}).click();
+   await page.waitForURL('**/d/practice?step=comment');
+   assert.deepEqual(sent,{mode:'manual',product:'gemini'},'MCP practice does not claim a connected computer');
+   failPractice=true;sent=null;
    // An ordinary account (no dev mode) never sees the AI onboarding, even with ?setup=1.
    await page.goto(base+'?setup=1&classic=1');
    await page.waitForTimeout(500);

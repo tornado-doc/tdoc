@@ -23,9 +23,10 @@ const { loadWorker, makeEnv, req, putSession, issue } = require('./helpers/worke
     handoff_id: 'h1', at: new Date().toISOString(), comment_ids: [comment.id, untouched.id],
     delivery: { status: 'delivered' },
   }]));
+  // Publish first, then report: "applied" needs the version it names.
+  await upload(3);
   const reply = await call('/api/agent/reply', { method: 'POST', token,
     body: { slug, parent_id: comment.id, text: 'Updated in v3.', status: 'applied', applied_in: 3 } });
-  await upload(3);
   const old = (await call(`/api/comments?slug=${slug}&version=2`, { cookie: reader })).find(c => c.id === comment.id);
   assert.equal(old.status, 'open', 'v2 must not claim the v3 fix is in its text');
   assert.equal(old.replies.length, 0, 'historical reply text stays version-scoped');

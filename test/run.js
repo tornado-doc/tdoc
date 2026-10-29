@@ -21,6 +21,9 @@ const OFFLINE = [
   'agent-md.test.js',          // AGENTS.md one-line SoT rule; no ARCHITECTURE.md
   'authoring.test.js',        // authoring/ contract: voice floor wired into both generation paths
   'manifest.test.js',         // plugin.json / marketplace.json schema (#36, #42)
+  'marketplaces.test.js',     // repo marketplaces (.claude-plugin, .agents/plugins) parse and point at real plugin folders
+  'plugins.test.js',          // plugins/: Claude, Codex/ChatGPT, Cursor, Gemini, VS Code packages for the remote MCP server
+  'remote-mcp.test.js',       // /mcp + OAuth 2.1: PKCE, redirect URIs, consent CSRF, token mapping, refresh/revoke, tools and refusals, rate limit
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
@@ -54,6 +57,7 @@ const OFFLINE = [
   'agent-authorship.test.js',  // authorship at write time (upload, agent replies that mark applied) and answer-only locks from send to answer, per question, failing closed
   'comment-wipe-authorship.test.js', // the comment wipe and team move follow agent authorship; a successful wipe answers 200
   'comment-email-privacy.test.js', // email commenters: aliases for other readers, own/invited/team keep the address
+  'mcp-discovery.test.js',     // MCP findable: llms.txt Connect, markdown connect line, raw Link rel=mcp (bytes unchanged), server card + AI catalog, remoteMcp default on
   'agent-native.test.js',      // doc pages point agents at /raw + skill; /llms.txt; Bearer /raw for team/invited docs
   'me-management.test.js',    // /me remote SoT management UI guard
   'me-docs-experience.test.js', // /me sorting + recents + stars + folders (fake bindings)
@@ -134,6 +138,7 @@ const OFFLINE = [
   'worker-shell.test.js',     // step7 worker shell parity: /frame route, CSP, bundled builders
   'upload-linear-time.test.js', // malformed 1.5 MB HTML must stay fast through the real upload route
   'bake-reader.test.js',      // tdoc-new bakes the reader template → self-contained docs (shell)
+  'style-reader-column.test.js', // house styles carry reader.css's column values; baking them stays idempotent
   'dark-invert-parity.test.js', // the shell's dark invert and the frame's copy must not drift
   'write-invariants.test.js',  // every server write path bakes, stamps aids, records sha
   'comment-upload.test.js',   // local→worker comment merge (non-destructive)
@@ -142,6 +147,7 @@ const OFFLINE = [
   'kv-write-budget.test.js', // repeat actions spend no extra KV writes (daily quota)
   'team-billing.test.js', // #48 Team plan: Stripe checkout, portal, signed webhook, seat sync
   'team-scoped-token.test.js', // #65 a token narrowed to one team cannot read, list or write outside it
+  'team-publish-personal-quota.test.js', // --team lands a new doc in the team, so a full My docs does not refuse it
   'workspace-scoped-token.test.js', // agent connections reach only the workspaces ticked for them; change and remove take effect at once
   'appsumo-licensing.test.js', // #61 AppSumo lifetime licenses: signed webhook, OAuth claim, seat cap, refund
   'logout-provider.test.js', // #58 logout also ends the Clerk session
@@ -194,13 +200,17 @@ const BROWSER = [
   'slides-reflow.test.js', // phone browse: guide-style decks reflow into a page, others stay scaled; taps open nothing
   'reader-width-ui.test.js', // document width, retired preferences and provider-only serialization
   'reader-layout.test.js', // baked and legacy-served columns, grids and local scrollers
+  'style-reader-column-render.test.js', // a house style alone yields the same reading column as a baked doc
   'agents-page-ui.test.js', // Agents page + default-agent modal: AppSelect, 34px forms, list above dialogs
   'workspace-access-ui.test.js', // Allow page workspace ticks + Settings > Agents change/remove, checked against the server
+  'connect-ai-apps-ui.test.js', // remoteMcp flag: Connect in one click on /start, /setup, Settings (Claude/ChatGPT/Cursor links) + OAuth consent page, desktop + phone
   'team-agent-ui.test.js',     // team settings add/remove, member Send to team agent, the real daemon replying, desktop + phone
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
+  'ask-send-switch-ui.test.js', // Ask AI: Ask | Send to agent switch (sends ready comments, 0 ready disabled, mode remembered), one row per team agent, team agent answers in public; no phone paper-plane
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
+  'phone-ask-ai-scroll-ui.test.js', // WebKit + Chromium phone: a long Ask AI answer scrolls to its end in the drawer, the document scrolls after closing
   'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, mode switch in the bar, comments filter) and the composer's @agent pill / Answers only / Only me, desktop + phone, team docs
   'reply-agent-ui.test.js',    // the reply box's @agent = the composer's: pill at the caret, pill dropdown (Mine / Team / tdoc AI), Answers only where it may not edit, Only me in a reply; the @ list shows every agent
   'phone-top-bar-ui.test.js', // signed in on a phone: ⋯ stays on screen, spaces under ⋯ → Switch space
@@ -213,6 +223,7 @@ const BROWSER = [
   'daemon-onboarding-browser.test.js',
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
   'dev-mode-ui.test.js', // account menu Dev mode on/off and nested onboarding controls; two-press exit/replay, refused off the list, re-login skips the gate; desktop + phone
+  'ui-fonts-ui.test.js', // no serif in product controls: doc page (bar, card, composer, menus, drawer, Ask AI, Agent activity), /me, account + team settings, /feedback; settings hints muted, /me views fit a phone; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
 ];
 

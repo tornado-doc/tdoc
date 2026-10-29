@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { isFeatureOn } from './feature-flags.js';
 import { AppDialog } from './ui/dialog.jsx';
+import { AppButton } from './ui/button.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
+import { CodeBlock } from './ui/code-block.jsx';
 import { AGENT_CONNECTORS, CONNECT_AGENT_PROMPT, LOCAL_DAEMON_PROMPT, ConnectorHead, RaftConnectButton, RaftFallbackForm, ProviderMark, deliveryErrorText, localSeenText, providerMeta, readableHandle } from './document/notify-handoff.jsx';
 import './docs-hub.css';
 
@@ -14,7 +16,8 @@ async function call(path, body) {
     ? { credentials: 'same-origin' }
     : { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const b = await r.json().catch(() => null);
-  if (!r.ok) throw new Error((b && (b.message || b.error)) || `HTTP ${r.status}`);
+  // A bare status code is not a sentence (it showed as "HTTP 404" in settings).
+  if (!r.ok) throw new Error((b && (b.message || b.error)) || (r.status === 404 ? 'Agents are not available here yet.' : `Something went wrong (${r.status}). Try again.`));
   return b;
 }
 
@@ -106,7 +109,7 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
 
   return (
     <>
-        <p className="muted" style={{ marginTop: 0 }}>
+        <p className="muted tdoc-conn-intro">
           {team ? `Only workspace admins can send ${team.name}'s comments to the agents connected here.` : "Each doc's comments go to the agent you last picked for it in Send to agent, or else the agent that last worked on it. Docs with neither go to your default agent."}
         </p>
         {notice ? <p className="muted" role="status">{notice}</p> : null}
@@ -132,16 +135,14 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
                       <span className="tdoc-connector-badge">{isLocal ? (localUp ? 'Daemon running' : 'Daemon not running') : 'Connected'}</span>
                     </div>
                     <div className="tdoc-conn-card-actions">
-                      <button
-                        type="button"
-                        className="tdoc-fbspace-btn"
+                      <AppButton
                         disabled={!sample}
                         title={sample ? 'Send a test notification' : 'Choose an agent below before sending a test'}
                         onClick={() => { if (sample) test(sample); }}
                       >
                         Send test
-                      </button>
-                      <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirm({ ...c, title })}>Disconnect</button>
+                      </AppButton>
+                      <AppButton className="tdoc-dev-remove" onClick={() => setConfirm({ ...c, title })}>Disconnect</AppButton>
                     </div>
                   </div>
                   <dl className="tdoc-conn-facts">
@@ -188,8 +189,7 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
                   <RaftConnectButton startHref={`/api/me/connectors/raft/start?return=${encodeURIComponent(returnTo)}`} label={connectors.some((x) => x.kind === 'raft') ? 'Connect another Raft server' : 'Connect with Raft'} />
                   <details className="tdoc-conn-alt">
                     <summary>Or let an agent connect itself</summary>
-                    <code>{CONNECT_AGENT_PROMPT}</code>
-                    <CopyPromptButton text={CONNECT_AGENT_PROMPT} />
+                    <CodeBlock text={CONNECT_AGENT_PROMPT} />
                   </details>
                 </>
               ) : <p className="muted tdoc-conn-note">Raft is not configured on this host.</p>) : null}
@@ -201,15 +201,14 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
                   <p className="muted tdoc-conn-note"><a href="/setup">Open guided setup</a>. Runs while your computer is awake and signed in. Pause with <code>~/.local/bin/tdoc stop</code>; reconnect with <code>~/.local/bin/tdoc setup</code>.</p>
                   </> : <>
                   <p className="muted tdoc-conn-note">Needs the tdoc skill signed in on that computer (<code>tdoc-publish --signin-only</code>). Then, in a terminal or from the agent itself:</p>
-                  <pre className="tdoc-conn-pre">{`bash "$SKILL_DIR/bin/tdoc-daemon" install          # macOS: runs now and at login
+                  <CodeBlock wrap={false} text={`bash "$SKILL_DIR/bin/tdoc-daemon" install          # macOS: runs now and at login
 bash "$SKILL_DIR/bin/tdoc-daemon" uninstall        # turns it off
 bash "$SKILL_DIR/bin/tdoc-daemon" start            # in a terminal (Linux)
-bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # only prints a LaunchAgent plist`}</pre>
+bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # only prints a LaunchAgent plist`} />
                   </>}
                   <details className="tdoc-conn-alt">
                     <summary>{isFeatureOn('aiOnboarding') ? 'Setup instruction' : 'Or let the agent set it up'}</summary>
-                    <code>{LOCAL_DAEMON_PROMPT}</code>
-                    <CopyPromptButton text={LOCAL_DAEMON_PROMPT} />
+                    <CodeBlock text={LOCAL_DAEMON_PROMPT} />
                   </details>
                   <p className="muted tdoc-conn-note">Comments are untrusted input to that agent: the daemon runs the CLI with a conservative permission mode and tells it to touch only the doc. Only you, through the Send to agent button, can queue work for it.</p>
                 </>
@@ -225,12 +224,12 @@ bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # only prints a LaunchAgent p
                       <span>Name <em>optional</em></span>
                       <input type="text" placeholder="My bot" value={hookName} onChange={(e) => setHookName(e.target.value)} maxLength={60} />
                     </label>
-                    <button type="submit" className="tdoc-fbspace-btn primary" disabled={busy || !hookUrl}>Add webhook</button>
+                    <AppButton type="submit" variant="primary" className="primary" disabled={busy || !hookUrl}>Add webhook</AppButton>
                   </form>
                   <details className="tdoc-conn-alt">
                     <summary>What tdoc sends</summary>
                     <p className="muted tdoc-conn-note">A JSON POST, signed with the secret you get when you add it.</p>
-                    <pre className="tdoc-conn-pre">{`POST <your URL>
+                    <CodeBlock wrap={false} copy={false} text={`POST <your URL>
 X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
 
 {
@@ -239,7 +238,7 @@ X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
   "comment_ids": ["c_…"],
   "instruction": "address my new comments",
   "url": "https://tdoc.dev/d/q3-plan"
-}`}</pre>
+}`} />
                   </details>
                 </>
               ) : null}
@@ -254,8 +253,8 @@ X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
           onOpenChange={(o) => { if (!o && !busy) setConfirm(null); }}
           title="Disconnect this connector?"
           actions={(<>
-            <button type="button" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>
-            <button type="button" className="danger" disabled={busy} onClick={remove}>Disconnect</button>
+            <AppButton disabled={busy} onClick={() => setConfirm(null)}>Cancel</AppButton>
+            <AppButton variant="danger" className="danger" disabled={busy} onClick={remove}>Disconnect</AppButton>
           </>)}
         >
           <p><b>{confirm.title}</b> will stop receiving comments from tdoc{confirm.kind === 'raft' ? ' — every agent on this server, including on docs they wrote' : ''}. You can connect it again any time.</p>
@@ -283,11 +282,11 @@ X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
           onOpenChange={(o) => { if (!o) setMade(null); }}
           title="Webhook added"
           description="Copy the signing secret now — it is shown only once."
-          actions={<button type="button" className="primary" onClick={() => setMade(null)}>Done</button>}
+          actions={<AppButton variant="primary" className="primary" onClick={() => setMade(null)}>Done</AppButton>}
         >
           <div className="tdoc-connector">
             <code className="tdoc-conn-secret">{made.secret}</code>
-            <button type="button" className="tdoc-fbspace-btn" onClick={() => doCopy('secret', made.secret)}>{copied === 'secret' ? 'Copied' : 'Copy secret'}</button>
+            <CopyPromptButton label="Copy secret" copied={copied === 'secret'} onCopy={() => doCopy('secret', made.secret)} />
             <p className="manage-hint">Use Send test on the row above to check it arrives.</p>
           </div>
         </AppDialog>

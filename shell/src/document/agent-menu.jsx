@@ -22,7 +22,7 @@ export function agentTag(t, ai = null) {
 // offers.
 export function AgentMenuItems({ choices, ai = null, current = null, onPick,
   preserveOrder = false, maxVisible = Infinity, showConnect = true, showRelevance = false, pinTdocAi = false,
-  disabledChoices = [], guestAction = null }) {
+  disabledChoices = [], guestAction = null, onConnect = null }) {
   const list = choices || [];
   const rows = preserveOrder ? list : AGENT_GROUPS.flatMap((group) => list.filter((t) => whose(t) === group));
   const aiRow = pinTdocAi ? rows.find((t) => t.tdoc_ai) : null;
@@ -60,7 +60,9 @@ export function AgentMenuItems({ choices, ai = null, current = null, onPick,
       </AppMenuItem>)}
       {disabledChoices.length && guestAction ? <AppMenuItem className="tdoc-agent-menu-connect" onClick={guestAction.onClick}>{guestAction.label}</AppMenuItem> : null}
       {showConnect && rows.some((t) => t.tdoc_ai) ? (
-        <AppMenuLinkItem className="tdoc-agent-menu-connect" href="/start">Connect my agent</AppMenuLinkItem>
+        onConnect
+          ? <AppMenuItem className="tdoc-agent-menu-connect" onClick={onConnect}>Connect my agent</AppMenuItem>
+          : <AppMenuLinkItem className="tdoc-agent-menu-connect" href="/start">Connect my agent</AppMenuLinkItem>
       ) : null}
     </>
   );
