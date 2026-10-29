@@ -11167,8 +11167,29 @@ function tokenUsedKey(tokenHash) {
   return `token-used:${tokenHash}`;
 }
 
+// Previews run without Durable Objects (preview.yml strips them), so every
+// signed-in publish there failed with hosted_owner_store_unavailable. On a
+// preview only, the owner record lives in KV: the same rules, without the
+// transaction a shared production store needs.
+async function previewOwnerOp(env, slug, op) {
+  const key = `preview-owner:${slug}`;
+  const current = await env.META.get(key);
+  if (op && op.kind === 'release_owner') { await env.META.delete(key); return { ok: true }; }
+  const accountId = op && typeof op.account_id === 'string' ? op.account_id : '';
+  if (!accountId) return { ok: false, status: 400, error: 'account_id_required' };
+  if (op.kind === 'claim_owner') {
+    if (current === null) { await env.META.put(key, accountId); return { ok: true }; }
+    return current === accountId ? { ok: true } : { ok: false, status: 403, error: 'not_doc_owner' };
+  }
+  if (op.kind === 'verify_owner') {
+    return current === accountId ? { ok: true } : { ok: false, status: 403, error: 'not_doc_owner' };
+  }
+  return { ok: false, status: 400, error: 'bad_owner_op' };
+}
+
 async function hostedOwnerOp(env, slug, op) {
   if (!env.COMMENTS) {
+    if (env.TDOC_PREVIEW === '1' && env.META) return previewOwnerOp(env, slug, op);
     return { ok: false, status: 503, error: 'hosted_owner_store_unavailable' };
   }
   try {
@@ -14783,7 +14804,9 @@ async function handleAsk(env, req, url, slug) {
     truncated: doc.truncated,
     comments,
     selection: askNoEmails(selection),
-    question,
+    // The question leaves the worker too; an address typed into it is
+    // hidden like one in the doc or a comment.
+    question: askNoEmails(question),
   });
   // Reserve before the call so a burst cannot spend more than the allowance;
   // a failed call gives the question back.
