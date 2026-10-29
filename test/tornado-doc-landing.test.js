@@ -286,7 +286,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
   const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('One paste, and it'));
-  assert(/Claude[\s\S]*ChatGPT[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI/.test(hero), 'the hero picker does not name every app');
+  assert(/Claude[\s\S]*ChatGPT[\s\S]*Grok[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI[\s\S]*Grok Bot/.test(hero), 'the hero picker does not name every app');
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
@@ -295,7 +295,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   // in works from the sandboxed frame (an https link or a line to copy).
   const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
   const radios = [...pick.matchAll(/<input type="radio" name="pick" id="pick-r-([a-z]+)"/g)].map((m) => m[1]);
-  assert(radios.join(' ') === 'claude chatgpt cursor vscode claudecode codex gemini', `picker radios: ${radios.join(' ')}`);
+  assert(radios.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker radios: ${radios.join(' ')}`);
   assert(/id="pick-r-claude" class="pick-radio" checked/.test(pick), 'Claude is not picked first');
   for (const app of radios) {
     const panel = pick.slice(pick.indexOf(`class="pick-panel pick-p-${app}"`));

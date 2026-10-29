@@ -217,7 +217,7 @@ async function startServer(worker, env) {
         const pick = frame.locator('.pick');
         await pick.locator('.pick-pill').first().waitFor();
         const names = await pick.locator('.pick-pill').evaluateAll((els) => els.map((l) => l.textContent.trim()));
-        assert(JSON.stringify(names) === JSON.stringify(['Claude', 'ChatGPT', 'Cursor', 'VS Code', 'Claude Code', 'Codex', 'Gemini CLI']), JSON.stringify(names));
+        assert(JSON.stringify(names) === JSON.stringify(['Claude', 'ChatGPT', 'Grok', 'Cursor', 'VS Code', 'Claude Code', 'Codex', 'Gemini CLI', 'Grok Bot']), JSON.stringify(names));
         await pick.scrollIntoViewIfNeeded();
         for (const l of await pick.locator('.pick-pill').all()) {
           const b = await l.boundingBox();
@@ -229,7 +229,7 @@ async function startServer(worker, env) {
         const claude = await pick.locator('.pick-p-claude a.pick-go').getAttribute('href');
         assert(claude.startsWith('https://claude.ai/customize/connectors?') && claude.includes(encodeURIComponent('https://tdoc.dev/mcp')), claude);
         // Every app panel offers a way in that works from the sandboxed frame: an https link or a command to copy.
-        const expect = { chatgpt: 'https://tdoc.dev/mcp', cursor: 'https://cursor.com/en/install-mcp?', vscode: 'https://vscode.dev/redirect/mcp/install?', claudecode: 'FIRST-DOC.md', codex: 'FIRST-DOC.md', gemini: 'gemini mcp add --transport http tdoc https://tdoc.dev/mcp' };
+        const expect = { chatgpt: 'https://tdoc.dev/mcp', cursor: 'https://cursor.com/en/install-mcp?', vscode: 'https://vscode.dev/redirect/mcp/install?', claudecode: 'FIRST-DOC.md', codex: 'FIRST-DOC.md', gemini: 'gemini mcp add --transport http tdoc https://tdoc.dev/mcp', grok: 'https://grok.com/connectors', grokbot: 'FIRST-DOC.md' };
         for (const [app, needle] of Object.entries(expect)) {
           await pick.locator(`label[for="pick-r-${app}"]`).click();
           assert(JSON.stringify(await visible()) === JSON.stringify([`pick-panel pick-p-${app}`]), `${app}: ${JSON.stringify(await visible())}`);
