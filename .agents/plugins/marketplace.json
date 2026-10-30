@@ -8,6 +8,18 @@
       "name": "tdoc",
       "source": {
         "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "tdoc-cloud",
+      "source": {
+        "source": "local",
         "path": "./plugins/codex"
       },
       "policy": {
