@@ -227,6 +227,10 @@ async function startServer(worker, env) {
         assert((await pick.locator('#pick-prompt').innerText()).trim() === 'set up https://tdoc.dev/SKILL.md', 'setup prompt');
         const quick = await pick.locator('.pick-quick .pick-pill').evaluateAll((els) => els.map((l) => l.textContent.replace(/\u2197/g, '').trim()));
         assert(JSON.stringify(quick) === JSON.stringify(['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'More']), JSON.stringify(quick));
+        if (width > 560) {
+          const rows = await pick.locator('.pick-quick > *').evaluateAll((els) => new Set(els.map((e) => { const r = e.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2 / 10); })).size);
+          assert(rows === 1, `quick connect wraps onto ${rows} lines at ${label}`);
+        }
         const card = await pick.boundingBox();
         assert(card && card.x >= 0 && card.x + card.width <= width + 1, `card inside the page at ${label}: ${JSON.stringify(card)}`);
         for (const l of await pick.locator('.pick-quick .pick-pill').all()) {
