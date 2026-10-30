@@ -5,6 +5,8 @@ import { CodeBlock } from './ui/code-block.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { FIRST_DOC_LINE } from './onboarding-copy.js';
 import { isFeatureOn } from './feature-flags.js';
+import { QuickConnect } from './quick-connect.jsx';
+import { platformById } from './quick-connect-data.js';
 
 // "Connect in one click": tdoc in the AI app somebody already uses, through
 // the remote MCP server (/mcp) and its OAuth sign-in, with no terminal. One
@@ -118,12 +120,22 @@ export function requestedConnectApp(search = typeof location !== 'undefined' ? l
   return ['claude', 'chatgpt', 'cursor', 'vscode'].includes(app) ? app : 'other';
 }
 
+// The platform a /start?connect=<id> link asks the quick-connect dialog for
+// (claude-code, gemini... included), or null.
+export function requestedQuickConnect(search = typeof location !== 'undefined' ? location.search : '') {
+  const v = (new URLSearchParams(search).get('connect') || '').toLowerCase();
+  return platformById(v) ? v : null;
+}
+
 export function ConnectAiAppsStrip() {
   const on = isFeatureOn('remoteMcp');
+  // quickConnect: the setup prompt and one dialog frame per platform
+  // (quick-connect.jsx) in place of the list below.
+  const quick = on && isFeatureOn('quickConnect');
   const [asked] = useState(() => (on ? requestedConnectApp() : null));
   const [open, setOpen] = useState(asked !== null);
   useEffect(() => {
-    if (!open || !asked) return undefined;
+    if (!open || !asked || quick) return undefined;
     // After the dialog mounts: focus the app's button, or bring the URL into view.
     const timer = setTimeout(() => {
       const el = document.querySelector(`.tdoc-connect-dialog [data-app="${asked}"]`);
@@ -133,22 +145,22 @@ export function ConnectAiAppsStrip() {
       if (target) target.focus({ preventScroll: true });
     }, 60);
     return () => clearTimeout(timer);
-  }, [open, asked]);
+  }, [open, asked, quick]);
   if (!on) return null;
   return (
     <>
       <div className="tdoc-connect-strip" role="region" aria-label="Connect an AI app">
-        <span>No terminal? Use tdoc from Claude, ChatGPT, Cursor or VS Code.</span>
+        <span>{quick ? 'Connect Claude, Claude Code, Codex, Cursor, ChatGPT and more.' : 'No terminal? Use tdoc from Claude, ChatGPT, Cursor or VS Code.'}</span>
         <AppButton variant="primary" size="s" onClick={() => setOpen(true)}>Connect in one click</AppButton>
       </div>
       <AppDialog
         open={open}
         onOpenChange={setOpen}
-        title="Connect in one click"
-        description="Pick the app you already use. You sign in to tdoc once; the app keeps you connected."
+        title={quick ? 'Connect your agent to tdoc' : 'Connect in one click'}
+        description={quick ? undefined : 'Pick the app you already use. You sign in to tdoc once; the app keeps you connected.'}
         className="tdoc-connect-dialog"
       >
-        <ConnectAiApps />
+        {quick ? <QuickConnect initial={requestedQuickConnect()} /> : <ConnectAiApps />}
       </AppDialog>
     </>
   );

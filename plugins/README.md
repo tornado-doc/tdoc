@@ -9,6 +9,7 @@ first use; no API key to paste).
 | --- | --- |
 | Claude Code | `claude plugin install tdoc-cloud --marketplace tornado-doc/tdoc` (in a session: `/plugin install tdoc-cloud --marketplace tornado-doc/tdoc`) |
 | Claude Code, MCP only | `claude mcp add --transport http tdoc https://tdoc.dev/mcp` |
+| Claude Code, local CLI | `claude plugin marketplace add tornado-doc/tdoc && claude plugin install tdoc@tornado-tdoc` |
 | claude.ai / Claude Desktop | **Customize > Connectors > Add custom connector**, URL `https://tdoc.dev/mcp` |
 | Codex CLI | `codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc` |
 | Codex CLI, MCP only | `codex mcp add tdoc --url https://tdoc.dev/mcp` |

@@ -101,14 +101,15 @@ async function startServer(worker, env) {
   const widths = [['desktop', 1280, 860], ['phone', 390, 844]];
   // Somebody who has not connected anything yet: /setup still asks.
   const newcomer = await putSession(env, 'newbie');
-  const open = async (width, height, { flag, signedIn = true, as = cookie } = {}) => {
+  const open = async (width, height, { flag, quick = false, signedIn = true, as = cookie } = {}) => {
     const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
     if (signedIn) await context.addCookies([{ name: 'tdoc_sid', value: as.split('=')[1], url: base }]);
-    await context.addInitScript((pinned) => {
+    await context.addInitScript(([pinned, quickOn]) => {
       if (pinned !== null) window.__TDOC_FLAGS__ = { remoteMcp: pinned };
+      if (quickOn) window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), quickConnect: true };
       window.__opened = [];
       window.open = (href) => { window.__opened.push(String(href)); return null; };
-    }, flag === undefined ? null : flag);
+    }, [flag === undefined ? null : flag, quick]);
     const page = await context.newPage();
     return { context, page };
   };
@@ -167,6 +168,92 @@ async function startServer(worker, env) {
           assert(u.protocol === 'cursor:' && u.searchParams.get('name') === 'tdoc', cursorHref);
           assert(JSON.parse(Buffer.from(u.searchParams.get('config'), 'base64').toString()).url === `${base}/mcp`, 'cursor config');
         }
+        await context.close();
+      });
+
+      await t(`${label}: quickConnect on: the setup prompt, seven platforms and one frame per platform`, async () => {
+        const { context, page } = await open(width, height, { flag: true, quick: true, signedIn: false });
+        await page.goto(`${base}/start`);
+        const strip = page.locator('.tdoc-connect-strip');
+        await strip.waitFor();
+        await strip.getByRole('button', { name: 'Connect in one click' }).click();
+        const dialog = page.getByRole('dialog', { name: 'Connect your agent to tdoc' });
+        await dialog.waitFor();
+        const qc = dialog.locator('[data-testid="quick-connect"]');
+        await qc.waitFor();
+        await shot(page, `${label}-quick-connect`);
+        const box = await dialog.boundingBox();
+        assert(box && box.x >= 0 && box.x + box.width <= width + 1, `dialog fits the width: ${JSON.stringify(box)}`);
+        assert((await qc.locator('.tdoc-qc-prompt code').innerText()).trim() === `set up ${base}/SKILL.md`, 'setup prompt');
+        const promptBox = await qc.locator('.tdoc-qc-prompt').boundingBox();
+        const copyBox = await qc.locator('.tdoc-qc-prompt .ui-btn').boundingBox();
+        assert(copyBox.x >= promptBox.x && copyBox.x + copyBox.width <= promptBox.x + promptBox.width + 0.5, `Copy inside the prompt box: ${JSON.stringify({ promptBox, copyBox })}`);
+        const apps = await qc.locator('.tdoc-qc-grid .ui-btn').evaluateAll((els) => els.map((b) => b.textContent.trim()));
+        assert(apps.join(',') === 'Claude,Claude Code,Codex,Gemini CLI,Cursor,VS Code,ChatGPT', apps.join(','));
+        for (const btn of await qc.locator('.tdoc-qc-grid .ui-btn').all()) {
+          const b = await btn.boundingBox();
+          assert(b && b.x >= 0 && b.x + b.width <= width + 1, `platform button inside the page at ${label}`);
+        }
+        assert(await qc.getByRole('link', { name: /Add a webhook/ }).getAttribute('href') === '/me?view=settings#agents', 'bot link');
+
+        // Claude Code: local first, the README's commands, then back.
+        await qc.getByRole('button', { name: 'Claude Code', exact: true }).click();
+        const frame = dialog.locator('.tdoc-qc-frame[data-platform="claude-code"]');
+        await frame.waitFor();
+        await shot(page, `${label}-quick-connect-claude-code`);
+        const codes = await frame.locator('.ui-code-block code').allInnerTexts();
+        assert(/tdoc@tornado-tdoc$/.test(codes[0].trim()) && /tdoc-cloud/.test(codes[1]), codes.join(' | '));
+        assert(/Local \(recommended\)[\s\S]*MCP only/.test(await frame.innerText()), 'local before MCP');
+        await frame.getByRole('button', { name: 'All apps' }).click();
+        await qc.waitFor();
+
+        // Claude: marketplace to paste, Open Claude plugins, the connector fallback.
+        await qc.getByRole('button', { name: 'Claude', exact: true }).click();
+        const claude = dialog.locator('.tdoc-qc-frame[data-platform="claude"]');
+        await claude.waitFor();
+        await shot(page, `${label}-quick-connect-claude`);
+        assert((await claude.locator('.ui-code-block code').innerText()).trim() === 'tornado-doc/tdoc', 'marketplace');
+        await claude.getByRole('button', { name: 'Open Claude plugins' }).click();
+        await claude.locator('summary', { hasText: 'No Add marketplace?' }).click();
+        await claude.getByRole('button', { name: 'Add tdoc as a connector' }).click();
+        const opened = await page.evaluate(() => window.__opened);
+        assert(opened[0] === 'https://claude.ai/customize/plugins', opened[0]);
+        assert(new URL(opened[1]).searchParams.get('connectorUrl') === `${base}/mcp`, opened[1]);
+        await claude.getByRole('button', { name: 'Installed, next' }).click();
+        assert(/Connectors/.test(await claude.innerText()), 'screen 2');
+        await claude.getByRole('button', { name: 'All apps' }).click();
+
+        // ChatGPT: a five-step stepper that remembers its step across a reload.
+        await qc.getByRole('button', { name: 'ChatGPT', exact: true }).click();
+        const gpt = dialog.locator('.tdoc-qc-frame[data-platform="chatgpt"]');
+        await gpt.locator('[data-step="1"]').waitFor();
+        await gpt.getByRole('button', { name: 'Start' }).click();
+        await gpt.locator('[data-step="2"]').waitFor();
+        await gpt.getByRole('button', { name: 'Next' }).click();
+        await gpt.locator('[data-step="3"]').waitFor();
+        await shot(page, `${label}-quick-connect-chatgpt-3`);
+        assert((await gpt.locator('.ui-code-block code').allInnerTexts()).map((x) => x.trim()).join(',') === `tdoc,${base}/mcp`, 'name and URL');
+        await page.goto(`${base}/start?connect=chatgpt`);
+        await page.getByRole('dialog', { name: 'Connect your agent to tdoc' }).locator('.tdoc-qc-frame[data-platform="chatgpt"] [data-step="3"]').waitFor();
+        await context.close();
+      });
+
+      await t(`${label}: quickConnect on: /start?connect=<id> opens that frame (codex, gemini, cursor)`, async () => {
+        const { context, page } = await open(width, height, { flag: true, quick: true, signedIn: false });
+        await page.goto(`${base}/start?connect=codex`);
+        const codex = page.locator('.tdoc-qc-frame[data-platform="codex"]');
+        await codex.waitFor();
+        assert((await codex.locator('.tdoc-qc-prompt code').innerText()).trim() === `set up ${base}/SKILL.md`, 'codex local = setup prompt');
+        assert(/codex plugin add tdoc@tornado-tdoc/.test(await codex.locator('.ui-code-block code').innerText()), 'codex MCP plugin');
+        await page.goto(`${base}/start?connect=gemini`);
+        const gemini = page.locator('.tdoc-qc-frame[data-platform="gemini"]');
+        await gemini.waitFor();
+        assert(/gemini extensions install/.test(await gemini.locator('.ui-code-block code').innerText()), 'gemini command');
+        await page.goto(`${base}/start?connect=cursor`);
+        const cursor = page.locator('.tdoc-qc-frame[data-platform="cursor"]');
+        await cursor.waitFor();
+        await shot(page, `${label}-quick-connect-cursor`);
+        assert(await cursor.getByRole('button', { name: 'Add to Cursor' }).count() === 1, 'Add to Cursor');
         await context.close();
       });
 

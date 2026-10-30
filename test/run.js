@@ -113,6 +113,7 @@ const OFFLINE = [
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'resolve-a-thread.test.js',
   'onboarding-journey.test.js',
+  'quick-connect.test.js', // quickConnect: platforms, order, setup prompt, install commands read from plugins/README.md
   'feature-flags.test.js', // flag registry: dev-mode-only until default flips; unknown names off
   'dev-mode.test.js', // Dev mode switch (allow-list only, per account) + onboarding never returns on re-login
   'setup-gate.test.js', // the journey: two doors, three server-driven bridges, no daemon // #357 a person can resolve; resolved threads leave the margin

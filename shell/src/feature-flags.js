@@ -28,6 +28,10 @@ export const FLAGS = Object.freeze({
   // Settings -> Delete account (self-serve). Owner-approved; the flag is the
   // off switch while it settles.
   deleteAccount: Object.freeze({ label: 'Delete account in Settings', owner: 'julie', added: '2026-10-28', default: true }),
+  // Quick connect on /start (docs/design/onboarding.md): the one setup prompt,
+  // a button per platform and a dialog frame for each, in place of the
+  // remoteMcp list. Needs remoteMcp on. Dev-only until approved.
+  quickConnect: Object.freeze({ label: 'Quick connect: setup prompt + one dialog per platform', owner: 'serena', added: '2026-10-29', default: false }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
