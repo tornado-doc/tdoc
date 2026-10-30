@@ -9,6 +9,8 @@ export const SEND_APPS = Object.freeze({
   cursor: { name: 'Cursor', url: (t) => `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(t)}` },
   claude: { name: 'Claude', url: (t) => `claude://claude.ai/new?q=${encodeURIComponent(t)}` },
   claudeai: { name: 'Claude', url: (t) => `https://claude.ai/new?q=${encodeURIComponent(t)}` },
+  // Sends at once (not just filled in), and works signed out.
+  chatgpt: { name: 'ChatGPT', url: (t) => `https://chatgpt.com/?q=${encodeURIComponent(t)}` },
 });
 
 const MAX_PROMPT = 500;

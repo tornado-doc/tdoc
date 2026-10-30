@@ -19,6 +19,7 @@ const path = require('path');
     assert.equal(sendToAppLink('cursor', prompt).href, `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(prompt)}`);
     assert.equal(sendToAppLink('claude', prompt).href, `claude://claude.ai/new?q=${encodeURIComponent(prompt)}`);
     assert.equal(sendToAppLink('claudeai', prompt).href, `https://claude.ai/new?q=${encodeURIComponent(prompt)}`);
+    assert.equal(sendToAppLink('chatgpt', prompt).href, `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`);
     assert.equal(sendToAppLink('codex', prompt).name, 'Codex');
   });
 
@@ -26,7 +27,7 @@ const path = require('path');
     for (const app of ['javascript:alert(1)', 'https://evil.example', 'toString', '__proto__', '', undefined]) {
       assert.equal(sendToAppLink(app, prompt), null, String(app));
     }
-    assert.deepEqual(Object.keys(SEND_APPS).sort(), ['claude', 'claudeai', 'codex', 'cursor']);
+    assert.deepEqual(Object.keys(SEND_APPS).sort(), ['chatgpt', 'claude', 'claudeai', 'codex', 'cursor']);
   });
 
   t('the prompt cannot break out of its parameter', () => {

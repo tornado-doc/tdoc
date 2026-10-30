@@ -226,7 +226,7 @@ async function startServer(worker, env) {
         await pick.scrollIntoViewIfNeeded();
         assert((await pick.locator('#pick-prompt').innerText()).trim() === 'set up https://tdoc.dev/SKILL.md', 'setup prompt');
         const quick = await pick.locator('.pick-quick .pick-pill').evaluateAll((els) => els.map((l) => l.textContent.replace(/\u2197/g, '').trim()));
-        assert(JSON.stringify(quick) === JSON.stringify(['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'More']), JSON.stringify(quick));
+        assert(JSON.stringify(quick) === JSON.stringify(['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'More']), JSON.stringify(quick));
         const card = await pick.boundingBox();
         assert(card && card.x >= 0 && card.x + card.width <= width + 1, `card inside the page at ${label}: ${JSON.stringify(card)}`);
         for (const l of await pick.locator('.pick-quick .pick-pill').all()) {
@@ -240,12 +240,12 @@ async function startServer(worker, env) {
         await page.waitForTimeout(1800);
         assert((await copy.innerText()).trim() === '', `copy button text after: ${await copy.innerText()}`);
         if (SHOTS) await pick.screenshot({ path: path.join(SHOTS, `${label}-home-pick.png`) });
-        // Quick send: Codex, Cursor and Claude.ai copy the prompt and hand it to the app, filled in.
+        // Quick send: Codex, Cursor, Claude.ai and ChatGPT copy the prompt and hand it to the app, filled in.
         const prompt = encodeURIComponent('set up https://tdoc.dev/SKILL.md');
-        for (const [label2, href] of [['Codex', `codex://new?prompt=${prompt}`], ['Cursor', `cursor://anysphere.cursor-deeplink/prompt?text=${prompt}`], ['Claude.ai', `https://claude.ai/new?q=${prompt}`]]) {
+        for (const [label2, href] of [['Codex', `codex://new?prompt=${prompt}`], ['Cursor', `cursor://anysphere.cursor-deeplink/prompt?text=${prompt}`], ['Claude.ai', `https://claude.ai/new?q=${prompt}`], ['ChatGPT', `https://chatgpt.com/?q=${prompt}`]]) {
           await pick.locator('.pick-quick .pick-pill', { hasText: label2 }).click();
           await page.waitForFunction((h) => window.__appOpened.includes(h), href);
-          await page.getByText(/Prompt copied\. Opening (Codex|Cursor|Claude)/).first().waitFor();
+          await page.getByText(/Prompt copied\. Opening (Codex|Cursor|Claude|ChatGPT)/).first().waitFor();
         }
         if (SHOTS) await shot(page, `${label}-home-quick-send`);
         const openPops = async () => pick.locator('.pick-pop:popover-open').evaluateAll((els) => els.map((e) => e.id));

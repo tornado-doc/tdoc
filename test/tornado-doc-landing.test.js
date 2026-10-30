@@ -302,15 +302,15 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
   assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
-  // Claude Code opens its popover; Codex, Cursor and Claude.ai hand the prompt to the app (data-tdoc-send, the shell builds the link).
+  // Claude Code opens its popover; Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
   const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
   assert(quickApps.join(' ') === 'claudecode more', `quick connect popovers: ${quickApps.join(' ')}`);
   const sends = [...quick.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt"/g)].map((m) => m[1]);
-  assert(sends.join(' ') === 'codex cursor claudeai', `quick send: ${sends.join(' ')}`);
+  assert(sends.join(' ') === 'codex cursor claudeai chatgpt', `quick send: ${sends.join(' ')}`);
   assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
   const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'));
   const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
-  assert(moreApps.join(' ') === 'chatgpt grok vscode gemini grokbot claude cursor codex', `More: ${moreApps.join(' ')}`);
+  assert(moreApps.join(' ') === 'grok vscode gemini grokbot claude cursor codex chatgpt', `More: ${moreApps.join(' ')}`);
   assert(/href="\/me\?view=settings#agents">Add a webhook/.test(moreBody), 'More has no bot line to the Agents page');
   assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
   const apps = ['claudecode', ...moreApps];
