@@ -273,9 +273,9 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  // The hero connect card (docs/design/onboarding.md, "Landing page"): the one
-  // setup prompt on top, quick connect below, the bot line at the bottom.
-  assert(/Connect your agent to tdoc[\s\S]*Paste this into any agent[\s\S]*set up https:\/\/tdoc\.dev\/SKILL\.md[\s\S]*Or quick connect[\s\S]*Add a webhook/.test(visible), 'the hero connect card is not prompt, then quick connect, then the bot line');
+  // The hero connect card, after glasser.ai: one sentence, the setup prompt,
+  // one row of quick connect.
+  assert(/Send your agent this prompt to get started\.[\s\S]*set up https:\/\/tdoc\.dev\/SKILL\.md[\s\S]*Quick connect/.test(visible), 'the hero connect card is not sentence, prompt, quick connect');
 });
 
 t('names the apps it runs in, each linked to its connect step', () => {
@@ -293,22 +293,29 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
   assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
-  // The hero picker: one button per app, each opening its own popover (the
-  // HTML popover attribute, so it works with no script), and each popover's
-  // way in works from the sandboxed frame (an https link or a line to copy).
+  // The hero card: the setup prompt with Copy, four quick-connect buttons
+  // and More, every app in a popover of its own (the HTML popover attribute,
+  // so it works with no script). Each popover's way in works from the
+  // sandboxed frame (an https link or a line to copy).
   const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
-  const apps = [...pick.matchAll(/<button type="button" class="pick-pill" popovertarget="pick-pop-([a-z]+)">/g)].map((m) => m[1]);
-  assert(apps.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker buttons: ${apps.join(' ')}`);
-  assert(!/type="radio"|pick-panel/.test(pick), 'the inline radio panels are back');
-  assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-copy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
-  const costs = [...pick.matchAll(/<span class="pick-cost">([^<]+)<\/span>/g)].map((m) => m[1]);
-  assert(costs.length === apps.length && costs.every(Boolean), `every button says what it costs: ${costs.join(' | ')}`);
-  assert(/href="\/me\?view=settings#agents">Add a webhook/.test(pick), 'the bot line does not open the Agents page');
-  const pops = pick.split('<div class="pick-pop pick-p-').slice(1);
-  assert(pops.length === apps.length, `one popover per button: ${pops.length}`);
-  for (const [i, app] of apps.entries()) {
-    const body = pops[i];
-    assert(body.startsWith(`${app}" id="pick-pop-${app}" popover>`), `${app}: popover ${body.slice(0, 40)}`);
+  assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
+  const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
+  const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(quickApps.join(' ') === 'claudecode codex cursor claude more', `quick connect row: ${quickApps.join(' ')}`);
+  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'));
+  const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(moreApps.join(' ') === 'chatgpt grok vscode gemini grokbot', `More: ${moreApps.join(' ')}`);
+  assert(/href="\/me\?view=settings#agents">Add a webhook/.test(moreBody), 'More has no bot line to the Agents page');
+  assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
+  const apps = [...quickApps.filter((a) => a !== 'more'), ...moreApps];
+  const popOf = (app) => {
+    const i = pick.indexOf(`<div class="pick-pop pick-p-${app}" id="pick-pop-${app}" popover>`);
+    assert(i >= 0, `${app}: no popover`);
+    const j = pick.indexOf('<div class="pick-pop pick-p-', i + 1);
+    return pick.slice(i, j < 0 ? undefined : j);
+  };
+  for (const app of apps) {
+    const body = popOf(app);
     assert(body.includes(`popovertarget="pick-pop-${app}" popovertargetaction="hide"`), `${app}: no close button`);
     assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} popover has no way in`);
     assert(!/href="(cursor|vscode):/.test(body), `${app} popover links a custom scheme the frame cannot open`);
@@ -316,7 +323,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   // CLI first (docs/design/onboarding.md): Claude Code and Codex lead with the
   // local tdoc plugin; the MCP line comes second.
   for (const app of ['claudecode', 'codex']) {
-    const body = pops[apps.indexOf(app)];
+    const body = popOf(app);
     const codes = [...body.matchAll(/<code id="[^"]+">([^<]+)<\/code>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
     assert(/plugin (install|add) tdoc@tornado-tdoc$/.test(codes[0]) && / mcp add /.test(codes[1]), `${app}: local plugin first, then MCP: ${codes.join(' | ')}`);
   }
