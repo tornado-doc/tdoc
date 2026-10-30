@@ -81,7 +81,6 @@ function ClaudeSteps({ onPick }) {
 
 function LocalOrMcp({ platform }) {
   const url = remoteMcpUrl();
-  const prompt = setupPrompt();
   const difference = 'Local lets comments come back to this computer and works with local files; MCP needs no scripts.';
   if (platform === 'gemini') {
     return (
@@ -93,34 +92,22 @@ function LocalOrMcp({ platform }) {
       </div>
     );
   }
-  if (platform === 'claude-code') {
-    return (
-      <div className="tdoc-qc-steps">
-        <p className="tdoc-qc-note">{difference}</p>
-        <Choice title="Local (recommended)">
-          <CodeBlock text={installCommand(ROWS, 'Claude Code, local CLI', url)} />
-          <p className="tdoc-qc-note">Already have tdoc Cloud from claude.ai? Turn it off in Claude Code before installing the local version.</p>
-        </Choice>
-        <Choice title="MCP only">
-          <CodeBlock text={installCommand(ROWS, 'Claude Code', url)} />
-        </Choice>
-      </div>
-    );
-  }
-  // Codex: in Codex the marketplace's tdoc plugin is the MCP one, so the
-  // local install is the setup prompt, which installs the CLI.
+  // Claude Code and Codex share the plugin names: tdoc is the local CLI,
+  // tdoc-cloud the MCP server (plugins/README.md).
+  const [local, cloud] = platform === 'codex'
+    ? ['Codex CLI, local CLI', 'Codex CLI']
+    : ['Claude Code, local CLI', 'Claude Code'];
   return (
     <div className="tdoc-qc-steps">
       <p className="tdoc-qc-note">{difference}</p>
       <Choice title="Local (recommended)">
-        <p>Paste this into Codex:</p>
-        <div className="tdoc-qc-prompt">
-          <code>{prompt}</code>
-          <CopyPromptButton text={prompt} />
-        </div>
+        <CodeBlock text={installCommand(ROWS, local, url)} />
+        {platform === 'claude-code' ? (
+          <p className="tdoc-qc-note">Already have tdoc Cloud from claude.ai? Turn it off in Claude Code before installing the local version.</p>
+        ) : null}
       </Choice>
       <Choice title="MCP only">
-        <CodeBlock text={installCommand(ROWS, 'Codex CLI', url)} />
+        <CodeBlock text={installCommand(ROWS, cloud, url)} />
       </Choice>
     </div>
   );

@@ -248,8 +248,8 @@ async function startServer(worker, env) {
         await page.goto(`${base}/start?connect=codex`);
         const codex = page.locator('.tdoc-qc-frame[data-platform="codex"]');
         await codex.waitFor();
-        assert((await codex.locator('.tdoc-qc-prompt code').innerText()).trim() === `set up ${base}/SKILL.md`, 'codex local = setup prompt');
-        assert(/codex plugin add tdoc@tornado-tdoc/.test(await codex.locator('.ui-code-block code').innerText()), 'codex MCP plugin');
+        const codexCodes = (await codex.locator('.ui-code-block code').allInnerTexts()).map((x) => x.trim());
+        assert(/codex plugin add tdoc@tornado-tdoc$/.test(codexCodes[0]) && /codex plugin add tdoc-cloud@tornado-tdoc$/.test(codexCodes[1]), `codex: local plugin, then tdoc Cloud: ${codexCodes.join(' | ')}`);
         await page.goto(`${base}/start?connect=gemini`);
         const gemini = page.locator('.tdoc-qc-frame[data-platform="gemini"]');
         await gemini.waitFor();

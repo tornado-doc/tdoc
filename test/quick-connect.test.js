@@ -30,15 +30,19 @@ const assert = require('assert/strict');
   });
 
   t('every row the dialogs read exists in plugins/README.md', () => {
-    const labels = [...view.matchAll(/installCommand\(ROWS, '([^']+)'/g)].map((m) => m[1]);
-    assert.ok(labels.length >= 5, `labels read: ${labels.join(', ')}`);
-    for (const label of labels) assert.ok(data.installCommand(rows, label), `no command for "${label}" in plugins/README.md`);
+    const labels = ['Claude Code', 'Claude Code, local CLI', 'Codex CLI', 'Codex CLI, local CLI', 'Gemini CLI', 'VS Code (Copilot)'];
+    for (const label of labels) {
+      assert.ok(view.includes(`'${label}'`), `quick-connect.jsx no longer reads "${label}"`);
+      assert.ok(data.installCommand(rows, label), `no command for "${label}" in plugins/README.md`);
+    }
     assert.ok(!/claude plugin install|codex plugin add|gemini extensions|code --add-mcp/.test(view), 'quick-connect.jsx hand-copies a command');
   });
 
-  t('the local Claude Code row installs the local plugin; the plain row is tdoc Cloud', () => {
-    assert.match(data.installCommand(rows, 'Claude Code, local CLI'), /tdoc@tornado-tdoc$/);
-    assert.match(data.installCommand(rows, 'Claude Code'), /tdoc-cloud/);
+  t('Claude Code and Codex: the local CLI rows install tdoc, the plain rows tdoc Cloud', () => {
+    for (const host of ['Claude Code', 'Codex CLI']) {
+      assert.match(data.installCommand(rows, `${host}, local CLI`), /tdoc@tornado-tdoc$/, host);
+      assert.match(data.installCommand(rows, host), /tdoc-cloud/, host);
+    }
   });
 
   t('installCommand swaps the production MCP URL for this host', () => {
