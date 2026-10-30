@@ -213,6 +213,11 @@ async function startServer(worker, env) {
         await claude.waitFor();
         await shot(page, `${label}-quick-connect-claude`);
         assert((await claude.locator('.ui-code-block code').innerText()).trim() === 'tornado-doc/tdoc', 'marketplace');
+        // chrome.css's .tdoc-modal p (#444, 14px margin) must not win over the frame's own rules.
+        const warn = await claude.locator('.tdoc-qc-warn').evaluate((el) => ({ color: getComputedStyle(el).color, danger: getComputedStyle(el).getPropertyValue('--td-danger').trim(), margin: getComputedStyle(el).marginBottom }));
+        const probe = await page.evaluate((hex) => { const d = document.createElement('div'); d.style.color = hex; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; }, warn.danger);
+        assert(warn.danger && warn.color === probe, `warning is --td-danger: ${JSON.stringify(warn)} vs ${probe}`);
+        assert(warn.margin === '0px', `frame paragraphs have no modal margin: ${warn.margin}`);
         await claude.getByRole('button', { name: 'Open Claude plugins' }).click();
         await claude.locator('summary', { hasText: 'No Add marketplace?' }).click();
         await claude.getByRole('button', { name: 'Add tdoc as a connector' }).click();
