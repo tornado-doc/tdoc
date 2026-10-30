@@ -30,7 +30,8 @@ sharing, with a one-time sign-in (email, Google, or GitHub) gating comments.
 
 ## When the tdoc MCP tools are available, use them
 
-If your tools include tdoc's MCP server (`create_doc`, `update_doc`,
+If your tools include tdoc's MCP server (`get_writing_guide`, `create_doc`, `update_doc`,
+`edit_doc`, `create_upload`, `commit_upload`,
 `get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
 `resolve_comment`, `answer_question`, `share_doc`, from
 `https://tdoc.dev/mcp`, connected as a Claude/ChatGPT/Cursor connector or
@@ -40,8 +41,9 @@ authorship, answer-only locks, workspace scope). The mapping:
 
 | CLI | MCP tool |
 |---|---|
-| `tdoc-new` / `tdoc-write` + `tdoc-publish` (new doc) | `create_doc` (title + html or markdown, optional `team`; starts private) |
-| `tdoc-write --version next` + `tdoc-publish` | `update_doc` (the whole new document) |
+| reading `authoring/` (voice, visuals, components, style CSS) | `get_writing_guide` (optional `style`, `kind: "slides"`) |
+| `tdoc-new` / `tdoc-write --style <s>` + `tdoc-publish` (new doc) | with a shell: write the file, `create_upload`, `curl -T` each returned URL, `commit_upload` (local images by relative path are embedded); without one: `create_doc` (title + html or markdown, optional `team` and `style`; a fragment is wrapped in the house style; starts private) |
+| `tdoc-write --version next` + `tdoc-publish` | `create_upload` with `slug` + `curl -T` + `commit_upload`, or `update_doc` (the whole new document inline); a small change: `edit_doc` (exact find/replace, each `find` matching once) |
 | `tdoc-pull` | `get_comments`, and `get_doc` (format `html` for the source) |
 | `tdoc-agent-reply --status ...` | `reply_to_comment` (same statuses and `applied_in` rules) |
 | `tdoc-agent-reply --ask <ask_id>` | `answer_question` |

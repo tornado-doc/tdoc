@@ -208,5 +208,8 @@ export function useComments({ slug, version, onChange, onUnauthorized, demo = fa
     setResolved,
     remove,
     moveAnchor,
+    // The demo's agents (demo-agent.js) write their handoff state and replies
+    // into the same in-memory list. Nothing on a real doc.
+    demoUpdate: demo ? applyLocal : null,
   };
 }
