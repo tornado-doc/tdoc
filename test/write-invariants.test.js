@@ -149,6 +149,9 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
       'get_writing_guide', 'tdoc-daemon install', 'same tdoc account']) {
       assert(steps.includes(s), `setup steps lack ${s}`);
     }
+    const chatgpt = steps.split('\n').find((l) => l.includes('- ChatGPT'));
+    assert(chatgpt && chatgpt.includes('new chat') && chatgpt.includes('write my first doc') && chatgpt.includes('Do not ask for "done"'),
+      `ChatGPT step must send the user to a new chat, not ask for "done": ${chatgpt}`);
     assert(/^name: tdoc$/m.test(a) && /description: Set up tdoc/.test(a), 'frontmatter names setup');
   });
 
