@@ -137,6 +137,21 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     assert(a.includes('do not bypass it'), 'remote skill lost its access-control boundary');
   });
 
+  await t('/SKILL.md opens with the setup router, then the unchanged read contract', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const a = await (await worker.fetch(req('/SKILL.md'), env, {})).text();
+    const setup = a.indexOf('# Set up tdoc');
+    const read = a.indexOf('# tdoc remote document access');
+    assert(setup > 0 && read > setup, `setup ${setup}, read ${read}`);
+    const steps = a.slice(setup, read);
+    for (const s of ['ONBOARDING.md', 'tornado-doc/tdoc', 'tdoc Cloud', 'connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp',
+      'https://tdoc.dev/mcp', 'cursor.com/install-mcp', 'code --add-mcp', 'gemini extensions install', '#agents',
+      'get_writing_guide', 'tdoc-daemon install', 'same tdoc account']) {
+      assert(steps.includes(s), `setup steps lack ${s}`);
+    }
+    assert(/^name: tdoc$/m.test(a) && /description: Set up tdoc/.test(a), 'frontmatter names setup');
+  });
+
   await t('/SKILL.md supports HEAD without returning the body', async () => {
     const env = makeEnv(mod.CommentsStore);
     const r = await worker.fetch(req('/SKILL.md', { method: 'HEAD' }), env, {});

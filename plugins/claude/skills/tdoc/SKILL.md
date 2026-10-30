@@ -18,6 +18,11 @@ history, and comments anchored to text or visuals. You work with it through
 the tdoc MCP server (https://tdoc.dev/mcp). No terminal or local files are
 needed.
 
+If a local tdoc skill with a `bin/` folder (the `tdoc` plugin) is also
+installed in this agent, use that one instead of these tools: it is the main
+path on a computer and the one the local agent daemon runs. Sign both in to
+the same tdoc account.
+
 ## When to use
 
 - Any document the user asks for (report, analysis, proposal, PRD, spec,
