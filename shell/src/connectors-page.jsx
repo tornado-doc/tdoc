@@ -42,6 +42,7 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
   const [notice, setNotice] = useState('');
   const [hookUrl, setHookUrl] = useState('');
   const [hookName, setHookName] = useState('');
+  const [hookKey, setHookKey] = useState('');
   const [made, setMade] = useState(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState('');
@@ -87,8 +88,8 @@ export function ConnectorsBody({ team = null, returnTo = '/me?view=settings#agen
     e.preventDefault();
     setBusy(true);
     try {
-      const b = await call('/api/me/connectors/webhook', { url: hookUrl, label: hookName });
-      setMade(b); setHookUrl(''); setHookName(''); await load();
+      const b = await call('/api/me/connectors/webhook', { url: hookUrl, label: hookName, ...(hookKey.trim() ? { auth_key: hookKey } : {}) });
+      setMade(b); setHookUrl(''); setHookName(''); setHookKey(''); await load();
     } catch (err) { setNotice(err.message); }
     finally { setBusy(false); }
   };
@@ -217,6 +218,10 @@ bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # only prints a LaunchAgent p
                       <span>Name <em>optional</em></span>
                       <input type="text" placeholder="My bot" value={hookName} onChange={(e) => setHookName(e.target.value)} maxLength={60} />
                     </label>
+                    <label>
+                      <span>Key <em>optional</em></span>
+                      <input type="password" autoComplete="off" placeholder="If the service gives you one, like Grok Bot" value={hookKey} onChange={(e) => setHookKey(e.target.value)} maxLength={600} />
+                    </label>
                     <AppButton type="submit" variant="primary" className="primary" disabled={busy || !hookUrl}>Add webhook</AppButton>
                   </form>
                   <details className="tdoc-conn-alt">
@@ -224,6 +229,7 @@ bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # only prints a LaunchAgent p
                     <p className="muted tdoc-conn-note">A JSON POST, signed with the secret you get when you add it.</p>
                     <CodeBlock wrap={false} copy={false} text={`POST <your URL>
 X-Tdoc-Signature: sha256=<HMAC-SHA256(secret, body)>
+Authorization: Bearer <key>   (only if you gave one)
 
 {
   "type": "tdoc.handoff",
