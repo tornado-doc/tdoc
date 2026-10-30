@@ -18,6 +18,7 @@ first use; no API key to paste).
 | Cursor | [`cursor://anysphere.cursor-deeplink/mcp/install?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9`](https://cursor.com/install-mcp?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9) |
 | VS Code (Copilot) | `code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'` |
 | Gemini CLI | `git clone --depth 1 https://github.com/tornado-doc/tdoc && gemini extensions install ./tdoc/plugins/gemini` |
+| Gemini CLI, MCP only | `gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp` (then `/mcp auth tdoc` in Gemini CLI) |
 
 The older two-step Claude Code form also works:
 `claude plugin marketplace add tornado-doc/tdoc`, then
@@ -421,9 +422,11 @@ Verified:
   `https://vscode.dev/redirect`. Both are accepted by our rule.
   https://code.visualstudio.com/api/extension-guides/ai/mcp
 
-UNVERIFIED: GitHub Markdown does not link `vscode:` URLs. Third-party READMEs
-use an `https://insiders.vscode.dev/redirect/mcp/install?name=...&config=...`
-wrapper, which Microsoft does not document. It is not used here. The
+GitHub Markdown does not link `vscode:` URLs. A web page can use
+`https://vscode.dev/redirect/mcp/install?name=tdoc&config=...` instead (the
+homepage does): on 2026-10-30 it answered 302 to
+`vscode:mcp/install?{"type":"http","url":"https://tdoc.dev/mcp","name":"tdoc"}`.
+Microsoft does not document the wrapper. The
 "use MCP servers" page
 (https://code.visualstudio.com/docs/copilot/customization/mcp-servers) says the
 guided flow labels workspace `.vscode/mcp.json` as deprecated. The

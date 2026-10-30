@@ -273,7 +273,9 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Use tdoc in/.test(visible), 'the hero app picker should be "Use tdoc in", not a borrowed user list');
+  // The hero connect card, after glasser.ai: one sentence, the setup prompt,
+  // one row of quick connect.
+  assert(/Send your agent this prompt to get started\.[\s\S]*set up https:\/\/tdoc\.dev\/SKILL\.md[\s\S]*Quick connect/.test(visible), 'the hero connect card is not sentence, prompt, quick connect');
 });
 
 t('names the apps it runs in, each linked to its connect step', () => {
@@ -285,23 +287,58 @@ t('names the apps it runs in, each linked to its connect step', () => {
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
-  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Set up in a minute'));
+  const hero = visible.slice(visible.indexOf('Send your agent this prompt'), visible.indexOf('Set up in a minute'));
+  // The connect card is the hero's one action: no second "Create a free doc" above it.
+  assert(!/Create a free doc/.test(visible.slice(0, visible.indexOf('Send your agent this prompt'))), 'the hero still has a Create a free doc button');
   assert(/Claude[\s\S]*ChatGPT[\s\S]*Grok[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI[\s\S]*Grok Bot/.test(hero), 'the hero picker does not name every app');
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
   assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
-  // The hero picker: one radio per app, the first checked, and each panel's way
-  // in works from the sandboxed frame (an https link or a line to copy).
+  // The hero card: the setup prompt with Copy, four quick-connect buttons
+  // and More, every app in a popover of its own (the HTML popover attribute,
+  // so it works with no script). Each popover's way in works from the
+  // sandboxed frame (an https link or a line to copy).
   const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
-  const radios = [...pick.matchAll(/<input type="radio" name="pick" id="pick-r-([a-z]+)"/g)].map((m) => m[1]);
-  assert(radios.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker radios: ${radios.join(' ')}`);
-  assert(/id="pick-r-claude" class="pick-radio" checked/.test(pick), 'Claude is not picked first');
-  for (const app of radios) {
-    const panel = pick.slice(pick.indexOf(`class="pick-panel pick-p-${app}"`));
-    const body = panel.slice(0, panel.indexOf('</div>', panel.indexOf('</p>')) + 6);
-    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} panel has no way in`);
-    assert(!/href="(cursor|vscode):/.test(body), `${app} panel links a custom scheme the frame cannot open`);
+  assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
+  const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
+  const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(quickApps.join(' ') === 'claudecode codex cursor claude more', `quick connect row: ${quickApps.join(' ')}`);
+  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'));
+  const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(moreApps.join(' ') === 'chatgpt grok vscode gemini grokbot', `More: ${moreApps.join(' ')}`);
+  assert(/href="\/me\?view=settings#agents">Add a webhook/.test(moreBody), 'More has no bot line to the Agents page');
+  assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
+  const apps = [...quickApps.filter((a) => a !== 'more'), ...moreApps];
+  const popOf = (app) => {
+    const i = pick.indexOf(`<div class="pick-pop pick-p-${app}" id="pick-pop-${app}" popover>`);
+    assert(i >= 0, `${app}: no popover`);
+    const j = pick.indexOf('<div class="pick-pop pick-p-', i + 1);
+    return pick.slice(i, j < 0 ? undefined : j);
+  };
+  for (const app of apps) {
+    const body = popOf(app);
+    assert(body.includes(`popovertarget="pick-pop-${app}" popovertargetaction="hide"`), `${app}: no close button`);
+    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} popover has no way in`);
+    assert(!/href="(cursor|vscode):/.test(body), `${app} popover links a custom scheme the frame cannot open`);
+  }
+  // CLI first (docs/design/onboarding.md): Claude Code and Codex lead with the
+  // local tdoc plugin; the MCP line comes second.
+  for (const app of ['claudecode', 'codex']) {
+    const body = popOf(app);
+    const codes = [...body.matchAll(/<code id="[^"]+">([^<]+)<\/code>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+    assert(/plugin (install|add) tdoc@tornado-tdoc$/.test(codes[0]) && / mcp add /.test(codes[1]), `${app}: local plugin first, then MCP: ${codes.join(' | ')}`);
+  }
+  // Every command a popover offers is a row of plugins/README.md's install
+  // table, the one place commands change.
+  const readme = fs.readFileSync(path.join(root, 'plugins', 'README.md'), 'utf8');
+  const table = readme.slice(readme.indexOf('## Install tdoc in your AI app'), readme.indexOf('\n---'));
+  const known = new Set([...table.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  for (const id of ['pick-claudecode', 'pick-claudecode-mcp', 'pick-codex', 'pick-codex-mcp', 'pick-gemini']) {
+    const m = pick.match(new RegExp(`<code id="${id}">([^<]+)</code>`));
+    assert(m, `no ${id}`);
+    const cmd = m[1].replace(/&amp;/g, '&');
+    assert(known.has(cmd), `${id} is not in plugins/README.md: ${cmd}`);
   }
   assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(pick), 'the picker shows company logos');
   assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');

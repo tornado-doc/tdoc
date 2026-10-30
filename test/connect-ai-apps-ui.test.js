@@ -210,38 +210,71 @@ async function startServer(worker, env) {
         await context.close();
       });
 
-      await t(`${label}: homepage hero "Use tdoc in" picks an app and shows its connect step in place`, async () => {
+      await t(`${label}: homepage connect card: prompt + Copy, quick connect, each app in its own popover`, async () => {
         const { context, page } = await open(width, height, { signedIn: false });
         await page.goto(`${base}/`);
         const frame = page.frameLocator('iframe.tdoc-doc-frame');
         const pick = frame.locator('.pick');
-        await pick.locator('.pick-pill').first().waitFor();
-        const names = await pick.locator('.pick-pill').evaluateAll((els) => els.map((l) => l.textContent.trim()));
-        assert(JSON.stringify(names) === JSON.stringify(['Claude', 'ChatGPT', 'Grok', 'Cursor', 'VS Code', 'Claude Code', 'Codex', 'Gemini CLI', 'Grok Bot']), JSON.stringify(names));
-        await pick.scrollIntoViewIfNeeded();
-        for (const l of await pick.locator('.pick-pill').all()) {
-          const b = await l.boundingBox();
-          assert(b && b.x >= 0 && b.x + b.width <= width + 1, `pill inside the page at ${label}: ${JSON.stringify(b)}`);
-        }
-        const visible = async () => pick.locator('.pick-panel:visible').evaluateAll((els) => els.map((e) => e.className));
-        // Claude is picked first, and only its panel shows: a real https link, no popup.
-        assert(JSON.stringify(await visible()) === JSON.stringify(['pick-panel pick-p-claude']), JSON.stringify(await visible()));
-        const claude = await pick.locator('.pick-p-claude a.pick-go').getAttribute('href');
-        assert(claude.startsWith('https://claude.ai/customize/connectors?') && claude.includes(encodeURIComponent('https://tdoc.dev/mcp')), claude);
-        // Every app panel offers a way in that works from the sandboxed frame: an https link or a command to copy.
-        const expect = { chatgpt: 'https://tdoc.dev/mcp', cursor: 'https://cursor.com/en/install-mcp?', vscode: 'https://vscode.dev/redirect/mcp/install?', claudecode: 'claude mcp add --transport http tdoc https://tdoc.dev/mcp', codex: 'codex mcp add tdoc --url https://tdoc.dev/mcp', gemini: 'gemini mcp add --transport http tdoc https://tdoc.dev/mcp', grok: 'https://grok.com/connectors', grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp' };
-        for (const [app, needle] of Object.entries(expect)) {
-          await pick.locator(`label[for="pick-r-${app}"]`).click();
-          assert(JSON.stringify(await visible()) === JSON.stringify([`pick-panel pick-p-${app}`]), `${app}: ${JSON.stringify(await visible())}`);
-          const panel = pick.locator(`.pick-p-${app}`);
-          const text = await panel.evaluate((el) => [...el.querySelectorAll('a.pick-go')].map((a) => a.getAttribute('href')).concat([...el.querySelectorAll('code')].map((c) => c.textContent)).join(' '));
-          assert(text.includes(needle), `${app}: ${text}`);
-          for (const a of await panel.locator('a.pick-go').all()) assert(/^https:\/\//.test(await a.getAttribute('href')), `${app} link is https`);
-          const box = await panel.boundingBox();
-          assert(box && box.x + box.width <= width + 1, `${app} panel inside the page at ${label}`);
-        }
-        if (SHOTS) await pick.screenshot({ path: path.join(SHOTS, `${label}-home-pick.png`) });
+        await pick.locator('.pick-quick .pick-pill').first().waitFor();
         await shot(page, `${label}-home`);
+        await pick.scrollIntoViewIfNeeded();
+        assert((await pick.locator('#pick-prompt').innerText()).trim() === 'set up https://tdoc.dev/SKILL.md', 'setup prompt');
+        const quick = await pick.locator('.pick-quick .pick-pill').evaluateAll((els) => els.map((l) => l.textContent.replace(/\u2197/g, '').trim()));
+        assert(JSON.stringify(quick) === JSON.stringify(['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'More']), JSON.stringify(quick));
+        const card = await pick.boundingBox();
+        assert(card && card.x >= 0 && card.x + card.width <= width + 1, `card inside the page at ${label}: ${JSON.stringify(card)}`);
+        for (const l of await pick.locator('.pick-quick .pick-pill').all()) {
+          const b = await l.boundingBox();
+          assert(b && b.x >= 0 && b.x + b.width <= width + 1, `button inside the page at ${label}: ${JSON.stringify(b)}`);
+        }
+        // Copy shows the done mark, then the icon button comes back empty (its icon is a background).
+        const copy = pick.locator('.pick-promptcopy');
+        await copy.click();
+        assert((await copy.innerText()).trim() === '\u2713', `copy done mark: ${await copy.innerText()}`);
+        await page.waitForTimeout(1800);
+        assert((await copy.innerText()).trim() === '', `copy button text after: ${await copy.innerText()}`);
+        if (SHOTS) await pick.screenshot({ path: path.join(SHOTS, `${label}-home-pick.png`) });
+        const openPops = async () => pick.locator('.pick-pop:popover-open').evaluateAll((els) => els.map((e) => e.id));
+        assert(JSON.stringify(await openPops()) === '[]', `a popover is open before any click: ${await openPops()}`);
+        const expect = {
+          claudecode: 'claude plugin marketplace add tornado-doc/tdoc && claude plugin install tdoc@tornado-tdoc',
+          codex: 'codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc',
+          cursor: 'https://cursor.com/en/install-mcp?', claude: 'https://claude.ai/customize/connectors?',
+          chatgpt: 'https://tdoc.dev/mcp', grok: 'https://grok.com/connectors', vscode: 'https://vscode.dev/redirect/mcp/install?',
+          gemini: 'gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp',
+          grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp',
+        };
+        const inMore = ['chatgpt', 'grok', 'vscode', 'gemini', 'grokbot'];
+        for (const [app, needle] of Object.entries(expect)) {
+          if (inMore.includes(app)) {
+            await pick.locator('.pick-quick .pick-more').click();
+            assert(JSON.stringify(await openPops()) === '["pick-pop-more"]', `More: ${await openPops()}`);
+            if (app === 'chatgpt') {
+              assert(await pick.locator('#pick-pop-more').getByRole('link', { name: /Add a webhook/ }).getAttribute('href') === '/me?view=settings#agents', 'bot line in More');
+              await shot(page, `${label}-home-pop-more`);
+            }
+            await pick.locator(`#pick-pop-more .pick-pill[popovertarget="pick-pop-${app}"]`).click();
+          } else {
+            await pick.locator(`.pick-quick .pick-pill[popovertarget="pick-pop-${app}"]`).click();
+          }
+          // Opened from More, the app's popover stacks on top of the list; closing it goes back to the list.
+          const want = inMore.includes(app) ? [`pick-pop-${app}`, 'pick-pop-more'] : [`pick-pop-${app}`];
+          assert(JSON.stringify((await openPops()).sort()) === JSON.stringify(want.sort()), `${app}: ${JSON.stringify(await openPops())}`);
+          const pop = pick.locator(`#pick-pop-${app}`);
+          const text = await pop.evaluate((el) => [...el.querySelectorAll('a.pick-go')].map((a) => a.getAttribute('href')).concat([...el.querySelectorAll('code')].map((c) => c.textContent)).join(' '));
+          assert(text.includes(needle), `${app}: ${text}`);
+          for (const a of await pop.locator('a.pick-go').all()) assert(/^https:\/\//.test(await a.getAttribute('href')), `${app} link is https`);
+          const box = await pop.boundingBox();
+          assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y >= 0 && box.y + box.height <= height + 1, `${app} popover on screen at ${label}: ${JSON.stringify(box)}`);
+          if (app === 'claudecode') await shot(page, `${label}-home-pop-${app}`);
+          if (app === 'gemini') await page.keyboard.press('Escape');
+          else await pop.locator('.pick-close').click();
+          if (inMore.includes(app)) {
+            assert(JSON.stringify(await openPops()) === '["pick-pop-more"]', `${app}: closing did not go back to More: ${await openPops()}`);
+            await pick.locator('#pick-pop-more .pick-close').click();
+          }
+          assert(JSON.stringify(await openPops()) === '[]', `${app}: still open ${await openPops()}`);
+        }
         await context.close();
       });
 
