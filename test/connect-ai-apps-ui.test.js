@@ -222,6 +222,7 @@ async function startServer(worker, env) {
         const frame = page.frameLocator('iframe.tdoc-doc-frame');
         const pick = frame.locator('.pick');
         await pick.locator('.pick-quick .pick-pill').first().waitFor();
+        await shot(page, `${label}-home`);
         await pick.scrollIntoViewIfNeeded();
         assert((await pick.locator('#pick-prompt').innerText()).trim() === 'set up https://tdoc.dev/SKILL.md', 'setup prompt');
         const quick = await pick.locator('.pick-quick .pick-pill').evaluateAll((els) => els.map((l) => l.textContent.replace(/\u2197/g, '').trim()));
