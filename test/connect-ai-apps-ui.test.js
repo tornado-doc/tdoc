@@ -223,6 +223,12 @@ async function startServer(worker, env) {
           const b = await l.boundingBox();
           assert(b && b.x >= 0 && b.x + b.width <= width + 1, `pill inside the page at ${label}: ${JSON.stringify(b)}`);
         }
+        // The card: the setup prompt with Copy, a cost under every button, the bot line.
+        assert((await pick.locator('#pick-prompt').innerText()).trim() === 'set up https://tdoc.dev/SKILL.md', 'setup prompt');
+        assert(await pick.locator('.pick-cost').count() === 9, 'a cost under every button');
+        assert(await pick.getByRole('link', { name: /Add a webhook/ }).getAttribute('href') === '/me?view=settings#agents', 'bot line');
+        const card = await pick.boundingBox();
+        assert(card && card.x >= 0 && card.x + card.width <= width + 1, `card inside the page at ${label}: ${JSON.stringify(card)}`);
         const openPops = async () => pick.locator('.pick-pop:popover-open').evaluateAll((els) => els.map((e) => e.id));
         assert(JSON.stringify(await openPops()) === '[]', `a popover is open before any click: ${await openPops()}`);
         // Every app popover offers a way in that works from the sandboxed frame: an https link or a command to copy.

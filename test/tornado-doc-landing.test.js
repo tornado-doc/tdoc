@@ -273,7 +273,9 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Use tdoc in/.test(visible), 'the hero app picker should be "Use tdoc in", not a borrowed user list');
+  // The hero connect card (docs/design/onboarding.md, "Landing page"): the one
+  // setup prompt on top, quick connect below, the bot line at the bottom.
+  assert(/Connect your agent to tdoc[\s\S]*Paste this into any agent[\s\S]*set up https:\/\/tdoc\.dev\/SKILL\.md[\s\S]*Or quick connect[\s\S]*Add a webhook/.test(visible), 'the hero connect card is not prompt, then quick connect, then the bot line');
 });
 
 t('names the apps it runs in, each linked to its connect step', () => {
@@ -298,6 +300,10 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const apps = [...pick.matchAll(/<button type="button" class="pick-pill" popovertarget="pick-pop-([a-z]+)">/g)].map((m) => m[1]);
   assert(apps.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker buttons: ${apps.join(' ')}`);
   assert(!/type="radio"|pick-panel/.test(pick), 'the inline radio panels are back');
+  assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-copy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
+  const costs = [...pick.matchAll(/<span class="pick-cost">([^<]+)<\/span>/g)].map((m) => m[1]);
+  assert(costs.length === apps.length && costs.every(Boolean), `every button says what it costs: ${costs.join(' | ')}`);
+  assert(/href="\/me\?view=settings#agents">Add a webhook/.test(pick), 'the bot line does not open the Agents page');
   const pops = pick.split('<div class="pick-pop pick-p-').slice(1);
   assert(pops.length === apps.length, `one popover per button: ${pops.length}`);
   for (const [i, app] of apps.entries()) {
