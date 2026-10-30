@@ -291,17 +291,39 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
   assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
-  // The hero picker: one radio per app, the first checked, and each panel's way
-  // in works from the sandboxed frame (an https link or a line to copy).
+  // The hero picker: one button per app, each opening its own popover (the
+  // HTML popover attribute, so it works with no script), and each popover's
+  // way in works from the sandboxed frame (an https link or a line to copy).
   const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
-  const radios = [...pick.matchAll(/<input type="radio" name="pick" id="pick-r-([a-z]+)"/g)].map((m) => m[1]);
-  assert(radios.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker radios: ${radios.join(' ')}`);
-  assert(/id="pick-r-claude" class="pick-radio" checked/.test(pick), 'Claude is not picked first');
-  for (const app of radios) {
-    const panel = pick.slice(pick.indexOf(`class="pick-panel pick-p-${app}"`));
-    const body = panel.slice(0, panel.indexOf('</div>', panel.indexOf('</p>')) + 6);
-    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} panel has no way in`);
-    assert(!/href="(cursor|vscode):/.test(body), `${app} panel links a custom scheme the frame cannot open`);
+  const apps = [...pick.matchAll(/<button type="button" class="pick-pill" popovertarget="pick-pop-([a-z]+)">/g)].map((m) => m[1]);
+  assert(apps.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker buttons: ${apps.join(' ')}`);
+  assert(!/type="radio"|pick-panel/.test(pick), 'the inline radio panels are back');
+  const pops = pick.split('<div class="pick-pop pick-p-').slice(1);
+  assert(pops.length === apps.length, `one popover per button: ${pops.length}`);
+  for (const [i, app] of apps.entries()) {
+    const body = pops[i];
+    assert(body.startsWith(`${app}" id="pick-pop-${app}" popover>`), `${app}: popover ${body.slice(0, 40)}`);
+    assert(body.includes(`popovertarget="pick-pop-${app}" popovertargetaction="hide"`), `${app}: no close button`);
+    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} popover has no way in`);
+    assert(!/href="(cursor|vscode):/.test(body), `${app} popover links a custom scheme the frame cannot open`);
+  }
+  // CLI first (docs/design/onboarding.md): Claude Code and Codex lead with the
+  // local tdoc plugin; the MCP line comes second.
+  for (const app of ['claudecode', 'codex']) {
+    const body = pops[apps.indexOf(app)];
+    const codes = [...body.matchAll(/<code id="[^"]+">([^<]+)<\/code>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+    assert(/plugin (install|add) tdoc@tornado-tdoc$/.test(codes[0]) && / mcp add /.test(codes[1]), `${app}: local plugin first, then MCP: ${codes.join(' | ')}`);
+  }
+  // Every command a popover offers is a row of plugins/README.md's install
+  // table, the one place commands change.
+  const readme = fs.readFileSync(path.join(root, 'plugins', 'README.md'), 'utf8');
+  const table = readme.slice(readme.indexOf('## Install tdoc in your AI app'), readme.indexOf('\n---'));
+  const known = new Set([...table.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  for (const id of ['pick-claudecode', 'pick-claudecode-mcp', 'pick-codex', 'pick-codex-mcp', 'pick-gemini']) {
+    const m = pick.match(new RegExp(`<code id="${id}">([^<]+)</code>`));
+    assert(m, `no ${id}`);
+    const cmd = m[1].replace(/&amp;/g, '&');
+    assert(known.has(cmd), `${id} is not in plugins/README.md: ${cmd}`);
   }
   assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(pick), 'the picker shows company logos');
   assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
