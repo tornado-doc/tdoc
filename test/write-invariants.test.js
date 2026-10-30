@@ -127,7 +127,7 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     const singular = await worker.fetch(req('/SKILL.md'), env, {});
     const plural = await worker.fetch(req('/SKILLS.md'), env, {});
     assert(singular.status === 200 && plural.status === 200, `skill routes: ${singular.status}/${plural.status}`);
-    assert((singular.headers.get('content-type') || '').startsWith('text/markdown'), `skill content-type: ${singular.headers.get('content-type')}`);
+    assert((singular.headers.get('content-type') || '').startsWith('text/plain'), `skill content-type: ${singular.headers.get('content-type')}`);
     assert(singular.headers.get('access-control-allow-origin') === '*', 'remote skill must be fetchable cross-origin');
     const a = await singular.text();
     const b = await plural.text();
@@ -156,7 +156,7 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     const env = makeEnv(mod.CommentsStore);
     const r = await worker.fetch(req('/SKILL.md', { method: 'HEAD' }), env, {});
     assert(r.status === 200, `skill HEAD ${r.status}`);
-    assert((r.headers.get('content-type') || '').startsWith('text/markdown'), 'skill HEAD lost markdown type');
+    assert((r.headers.get('content-type') || '').startsWith('text/plain'), 'skill HEAD lost its plain-text type');
     assert((await r.text()) === '', 'skill HEAD must not return a body');
   });
 

@@ -216,7 +216,10 @@ function html(body, init = {}) {
   });
 }
 
-function remoteSkillResponse(method, body = REMOTE_SKILL_MD, type = 'text/markdown') {
+// Plain text, not text/markdown: ChatGPT's fetcher refuses text/markdown
+// ("unsupported content type") and falls back to search, so "set up
+// https://tdoc.dev/SKILL.md" never reached the setup router there.
+function remoteSkillResponse(method, body = REMOTE_SKILL_MD, type = 'text/plain') {
   return new Response(method === 'HEAD' ? null : body, {
     status: 200,
     headers: {
