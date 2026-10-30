@@ -335,6 +335,26 @@
 
   // Visually hidden, but real body text: fetch tools drop display:none,
   // [hidden] and aria-hidden, and keep this. The shell removes it on boot.
+  // Every distinct link in the document, as [text, href] pairs: plain http(s)
+  // or site-relative hrefs only, text stripped of markup. Bounded like the
+  // text blocks.
+  function linksFromHtml(html) {
+    if (typeof html !== 'string' || !html) return [];
+    const source = html.length > AGENT_SCAN_BYTES ? html.slice(0, AGENT_SCAN_BYTES) : html;
+    const out = [], seen = {};
+    const re = /<a\b[^>]*?\bhref\s*=\s*("([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = re.exec(source)) && out.length < 80) {
+      const href = decodeEntities((m[2] != null ? m[2] : m[3]) || '').trim();
+      if (!/^(https?:\/\/|\/(?!\/))/i.test(href) || seen[href]) continue;
+      const text = decodeEntities(m[4].replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (!text) continue;
+      seen[href] = true;
+      out.push([text, href]);
+    }
+    return out;
+  }
+
   function agentBodyHtml(d) {
     const v = d && d.agentView;
     if (!v) return '';
@@ -354,6 +374,11 @@
         else out += '<p>' + esc(b.text) + '</p>\n';
       });
       if (inList) out += '</ul>\n';
+    }
+    if (Array.isArray(v.links) && v.links.length) {
+      out += '<nav aria-label="Links"><ul>\n';
+      v.links.forEach(function (l) { out += '<li><a href="' + esc(l[1]) + '">' + esc(l[0]) + '</a></li>\n'; });
+      out += '</ul></nav>\n';
     }
     if (v.truncated && v.raw) out += '<p>' + esc('The text above is cut short. The full source is at ' + v.raw) + '</p>\n';
     if (Array.isArray(v.comments)) {
@@ -481,6 +506,7 @@ agentBodyHtml(d) +
     previewFromHtml: previewFromHtml,
     agentBlocksFromHtml: agentBlocksFromHtml,
     agentMarkdown: agentMarkdown,
+    linksFromHtml: linksFromHtml,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.TDOC_SHELL_BUILDER = api;

@@ -988,11 +988,11 @@ function shellDocument(slug, version, nonce, reqUrl) {
   try {
     rawHtml = fs.readFileSync(path.join(ROOT, slug, `v${version}`, 'index.html'), 'utf8');
   } catch {}
-  const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const ident = e2eIdentity();
   const isOwner = !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase());
   const isLanding = slug === 'tornado-doc';
+  const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame${isLanding ? '?tdoc_site=1' : ''}`;
   const cfgJson = safeJsonForScript({
     slug,
     title,
