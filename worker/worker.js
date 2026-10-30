@@ -14104,6 +14104,14 @@ function webhookUrl(raw) {
     return href.length <= 500 ? href : null;
   } catch { return null; }
 }
+// A receiver that only runs for a caller holding its key (Grok Bot routines:
+// "Authorization: Bearer <key>"). People paste the key, "Bearer <key>", or the
+// whole header line; all three mean the same key. Printable ASCII only, so it
+// can never smuggle a second header.
+function webhookAuthKey(raw) {
+  const key = String(raw || '').trim().replace(/^authorization\s*:\s*/i, '').replace(/^bearer\s+/i, '').trim();
+  return /^[\x21-\x7e]{1,512}$/.test(key) ? key : '';
+}
 async function hmacSha256Hex(secret, body) {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
@@ -14119,6 +14127,7 @@ NOTIFY_PROVIDERS.webhook = {
   async send(env, target, event) {
     const secret = await env.META.get(`notify-webhook-secret:${target.agent_sub}`);
     if (!secret) return { status: 'failed', error: 'webhook_secret_missing' };
+    const authKey = await env.META.get(`notify-webhook-auth:${target.agent_sub}`);
     const body = JSON.stringify({
       type: 'tdoc.handoff',
       id: event.externalEventId,
@@ -14138,6 +14147,7 @@ NOTIFY_PROVIDERS.webhook = {
           'X-Tdoc-Event': 'handoff',
           'X-Tdoc-Delivery': event.externalEventId,
           'X-Tdoc-Signature': `sha256=${await hmacSha256Hex(secret, body)}`,
+          ...(authKey ? { Authorization: `Bearer ${authKey}` } : {}),
         },
         body,
       });
@@ -23981,7 +23991,13 @@ const tdocHandlers = {
         const label = typeof body.label === 'string' ? body.label.trim().slice(0, 60) : '';
         const id = `wh_${rand(10)}`;
         const secret = `whsec_${rand(24)}`;
+        const hasAuth = body.auth_key != null && String(body.auth_key).trim() !== '';
+        const authKey = hasAuth ? webhookAuthKey(body.auth_key) : '';
+        if (hasAuth && !authKey) return json({ error: 'invalid_auth_key', message: 'The key has a space or a character that cannot go in a header.' }, { status: 400 });
         await env.META.put(`notify-webhook-secret:${id}`, secret);
+        // Like the secret, the key is write-only: it is sent to the receiver
+        // and never shown back to anyone, the account included.
+        if (authKey) await env.META.put(`notify-webhook-auth:${id}`, authKey);
         const target = normalizeNotifyTarget({ provider: 'webhook', server_id: 'webhook', agent_sub: id, url: hookUrl, agent_name: label || new URL(hookUrl).host });
         // Added at the end: a new webhook should not quietly become where
         // everything goes. It is the default only when it is the first.
@@ -24040,7 +24056,10 @@ const tdocHandlers = {
         const removed = await accountRemovedTargets(env, accountId);
         removed.add(notifyKey(target));
         await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
-        if (target.provider === 'webhook') { try { await env.META.delete(`notify-webhook-secret:${target.agent_sub}`); } catch {} }
+        if (target.provider === 'webhook') {
+          try { await env.META.delete(`notify-webhook-secret:${target.agent_sub}`); } catch {}
+          try { await env.META.delete(`notify-webhook-auth:${target.agent_sub}`); } catch {}
+        }
         return json({ ok: true });
       }
       return json({ error: 'not_found' }, { status: 404 });
