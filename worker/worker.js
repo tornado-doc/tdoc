@@ -215,17 +215,33 @@ function docAgentHints(origin, slug, version, head) {
 // page: built only for a response that already serves the doc.
 function docAgentView({ origin, slug, version, head, title, author, rawHtml, access, isLanding, mcp = false }) {
   const extracted = SHELL && SHELL.agentBlocksFromHtml ? SHELL.agentBlocksFromHtml(rawHtml) : { blocks: [], truncated: false };
+  // Site pages are crawled as a website: their links go in the page too, so a
+  // search engine finds /pricing, /start and the rest from the home page.
+  const links = isLanding && SHELL && SHELL.linksFromHtml ? SHELL.linksFromHtml(rawHtml) : null;
+  if (isLanding && slug !== LANDING_SLUG) {
+    return {
+      title,
+      contentHeading: 'Page text',
+      intro: [`This is the ${title} page of tdoc (https://tdoc.dev): documents your AI agent writes and your readers comment on.`],
+      blocks: extracted.blocks,
+      links,
+      truncated: false,
+    };
+  }
   if (isLanding) {
     return {
       title: 'tdoc — documents your AI agent writes and your readers comment on',
       contentHeading: 'Home page text',
       intro: [
-        'This is the home page of tdoc (https://tdoc.dev). tdoc publishes HTML documents at shareable links. People comment on any part of a document in the browser; their own AI agent (Claude Code or Codex) reads the comments and publishes the next version.',
-        `How to start: open ${origin}/start in a browser${mcp ? `, connect Claude, ChatGPT, Cursor or VS Code to the MCP server ${origin}/mcp (steps per app: ${origin}/llms.txt)` : ''}, or ask your agent to install tdoc and make a first document. In Claude Code: /plugin marketplace add tornado-doc/tdoc, then /plugin install tdoc@tornado-tdoc. Any other agent: follow ${TDOC_ONBOARDING_URL}.`,
+        'This is the home page of tdoc (https://tdoc.dev). tdoc publishes HTML documents at shareable links. People comment on any part of a document in the browser; their own AI (Claude, ChatGPT, Grok, Cursor, VS Code, Claude Code, Codex, Gemini CLI or Grok Bot) reads the comments and publishes the next version.',
+        mcp
+          ? `How to start: connect your AI to the tdoc MCP server ${origin}/mcp and sign in once. Claude: add it as a custom connector. ChatGPT: Plugins, Add, Add custom MCP server (step by step: ${origin}/d/connect-chatgpt). Grok: Connectors, New Connector, Custom. Cursor and VS Code: add it as an MCP server. Claude Code: claude mcp add --transport http tdoc ${origin}/mcp. Codex: codex mcp add tdoc --url ${origin}/mcp. Gemini CLI: gemini mcp add --transport http tdoc ${origin}/mcp, then /mcp auth tdoc. Grok Bot: ask it to connect ${origin}/mcp. Steps per app: ${origin}/llms.txt. To also let tdoc update docs while the AI is closed, connect a computer from ${origin}/start.`
+          : `How to start: open ${origin}/start in a browser, or ask your agent to install tdoc and make a first document. In Claude Code: /plugin marketplace add tornado-doc/tdoc, then /plugin install tdoc@tornado-tdoc. Any other agent: follow ${TDOC_ONBOARDING_URL}.`,
         `Pricing: free for your own docs, and for a team up to ${TEAM_FREE_DOCS} team docs with any number of members. The Team plan is $${TEAM_SEAT_PRICE_USD.month} per member a month or $${TEAM_SEAT_PRICE_USD.year} a year, for unlimited team docs and backup to storage the team owns. Agents never take a seat, and tdoc sends no AI bill: the writing runs on the Claude, ChatGPT, Claude Code or Codex plan you already have. Details: ${origin}/pricing.`,
         `For agents: ${origin}/llms.txt (short), ${origin}/llms-full.txt (everything), ${origin}/SKILL.md (how to read, comment and publish). Any tdoc document URL also answers Accept: text/markdown with its text and comments.`,
       ],
       blocks: extracted.blocks,
+      links,
       truncated: false,
     };
   }
@@ -3061,9 +3077,14 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // what they chose to share. Only robots (noindex) depends on Public.
   let seoTitle = title;
   let seoDescription = description || `A tdoc by ${author || 'tdoc'}.`;
-  if (isLanding) {
+  // Only the home page takes the product title; /pricing, /start and the
+  // other site pages keep their own title and excerpt, or every one of them
+  // would show up in search as a copy of the home page.
+  if (isLanding && slug === LANDING_SLUG) {
     seoTitle = 'Tornado: AI Native Docs';
     seoDescription = 'Your AI-native docs. Agents draft; you comment; they rewrite. Open source and free.';
+  }
+  if (isLanding) {
     shareImage = origin ? `${origin}/tdoc_logo-v2.png` : '/tdoc_logo-v2.png';
     shareImageLarge = false;
   }
@@ -3081,7 +3102,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     nonceAttr,
     cfgJson: safeJsonForScript(cfg),
     bootJson: safeJsonForScript({
-      frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame`,
+      frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame${isLanding ? '?tdoc_site=1' : ''}`,
       oldVersion,
     }),
     runtimeJsPath: SHELL_RUNTIME_JS_PATH,
@@ -3501,6 +3522,15 @@ const TEMPLATES_SLUG = 'tdoc-templates';
 const PRICING_SLUG = 'tdoc-pricing';
 // `/privacy` — the privacy policy. Same landing-doc mechanism.
 const PRIVACY_SLUG = 'tdoc-privacy';
+// Where each site page lives, for its canonical URL: /pricing, not
+// /d/tdoc-pricing/v/3.
+const SITE_PATHS = {
+  [LANDING_SLUG]: '/',
+  [START_SLUG]: '/start',
+  [TEMPLATES_SLUG]: '/templates',
+  [PRICING_SLUG]: '/pricing',
+  [PRIVACY_SLUG]: '/privacy',
+};
 
 // Render one published doc version as a full overlay page. Extracted so `/`
 // (the homepage) and `/d/<slug>/v/<n>` render through the SAME path — access
@@ -3616,8 +3646,8 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
   const reqUrl = new URL(req.url);
   // The bare /d/<slug> address is the doc's canonical page: it always
   // shows the newest version.
-  const pageUrl = isLanding && (reqUrl.pathname === '/' || reqUrl.pathname === '')
-    ? `${reqUrl.origin}/`
+  const pageUrl = isLanding && SITE_PATHS[slug]
+    ? `${reqUrl.origin}${SITE_PATHS[slug]}`
     : head
       ? `${reqUrl.origin}/d/${encodeURIComponent(slug)}`
       : `${reqUrl.origin}/d/${encodeURIComponent(slug)}/v/${version}`;
@@ -20590,12 +20620,17 @@ const tdocHandlers = {
           body = head + frameSuffix(tag, tail);
         }
       }
+      // A site page (home, pricing...) is one page to a search engine, at its
+      // own URL. Google's indexifembedded counts the framed text as part of
+      // the page that frames it; noindex keeps the frame URL out of results.
+      const siteFrame = url.searchParams.get('tdoc_site') === '1';
       return html(body, {
         headers: {
           'Content-Security-Policy': frameCspHeader(nonce),
           'X-Content-Type-Options': 'nosniff',
           'Cache-Control': 'no-store',
           'Vary': 'Sec-Fetch-Dest',
+          ...(siteFrame ? { 'X-Robots-Tag': 'noindex, indexifembedded' } : {}),
         },
       });
     }
