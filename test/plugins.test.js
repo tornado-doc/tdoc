@@ -41,9 +41,9 @@ t('Claude: plugin.json + .mcp.json (type http)', () => {
 
 t('Codex / ChatGPT: plugin.json + mcp.json (streamable-http)', () => {
   const p = json('codex/plugin.json');
-  assert(p.name === 'tdoc' && p.version === VERSION, `${p.name} ${p.version}`);
+  assert(p.name === 'tdoc-cloud' && p.version === VERSION, `${p.name} ${p.version}`);
   const ui = p.extensions && p.extensions['com.openai'] && p.extensions['com.openai'].interface;
-  assert(ui && ui.displayName === 'tdoc', 'OpenAI interface block');
+  assert(ui && ui.displayName === 'tdoc Cloud', 'OpenAI interface block');
   // OpenAI portal limits (https://developers.openai.com/plugins/deploy/submission)
   assert(ui.displayName.length <= 30 && ui.shortDescription.length <= 30, 'displayName / shortDescription <= 30 chars');
   assert(ui.longDescription.length <= 4000 && ui.developerName.length <= 80, 'longDescription <= 4000, developerName <= 80');

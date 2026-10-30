@@ -183,11 +183,17 @@ tdoc_resolve_skill_dir() {
     for d in "$HOME/.claude/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
       [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    d="$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${d%/}/SKILL.md" ] && { printf '%s\n' "${d%/}"; return; }
     printf '%s\n' "$HOME/.claude/skills/tdoc"
   elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${OPENAI_CODEX:-}${CODEX_HOME:-}${CODEX_SHELL:-}" ]; then
     for d in "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc"; do
       [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    d="$(ls -1d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${d%/}/SKILL.md" ] && { printf '%s\n' "${d%/}"; return; }
     printf '%s\n' "$HOME/.codex/skills/tdoc"
   else
     for d in "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
@@ -1542,11 +1548,17 @@ tdoc_resolve_skill_dir() {
     for _d in "$HOME/.claude/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
       [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    _d="$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${_d%/}/SKILL.md" ] && { printf '%s\n' "${_d%/}"; return; }
     printf '%s\n' "$HOME/.claude/skills/tdoc"
   elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${OPENAI_CODEX:-}${CODEX_HOME:-}${CODEX_SHELL:-}" ]; then
     for _d in "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc"; do
       [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    _d="$(ls -1d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${_d%/}/SKILL.md" ] && { printf '%s\n' "${_d%/}"; return; }
     printf '%s\n' "$HOME/.codex/skills/tdoc"
   else
     for _d in "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do

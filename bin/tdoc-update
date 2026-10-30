@@ -39,6 +39,17 @@ for arg in "$@"; do
   esac
 done
 
+# Installed as the tdoc plugin: the host's plugin manager owns this copy, so
+# --auto stays quiet and the other modes say which command updates it.
+case "$SKILL_DIR" in
+  */plugins/cache/*)
+    [ "$AUTO" = "1" ] && exit 0
+    echo "[tdoc-update] tdoc is installed as a plugin; update it with your agent:"
+    echo "               Claude Code: claude plugin update tdoc@tornado-tdoc"
+    echo "               Codex:       codex plugin marketplace upgrade tornado-tdoc && codex plugin add tdoc@tornado-tdoc"
+    exit 0 ;;
+esac
+
 if [ ! -d .git ]; then
   echo "[tdoc-update] this skill dir is not a git checkout."
   echo "             to install the latest, clone it instead:"
