@@ -93,6 +93,10 @@ async function startServer(worker, env) {
   const homeHtml = fs.readFileSync(path.join(homeDir, `v${homeLatest}`, 'index.html'), 'utf8').replace(new RegExp(`/d/tornado-doc/v/${homeLatest}/widget/`, 'g'), '/d/tornado-doc/v/1/widget/');
   const home = await call('/api/upload', { method: 'POST', token: 'admin-secret', body: { slug: 'tornado-doc', version: 1, html: homeHtml, meta: { title: homeMeta.title, versions: [{ n: 1, created: new Date().toISOString() }], access: { visibility: 'public' } } } });
   assert(home.status === 200, `ship homepage: ${home.status} ${home.text}`);
+  // A document of anybody's with a quick-send button: the shell must ignore it.
+  const probeHtml = '<!doctype html><html><head><title>Send probe</title></head><body><main><p id="p">pwn my agent</p><button id="send" type="button" data-tdoc-send="codex" data-tdoc-send-text="#p">Send</button></main></body></html>';
+  const sendProbe = await call('/api/upload', { method: 'POST', token: 'admin-secret', body: { slug: 'send-probe', version: 1, html: probeHtml, meta: { title: 'Send probe', versions: [{ n: 1, created: new Date().toISOString() }], access: { visibility: 'public' } } } });
+  assert(sendProbe.status === 200, `ship send probe: ${sendProbe.status} ${sendProbe.text}`);
   const cookie = await putSession(env, 'julie');
   await call('/api/hosted/token', { method: 'POST', cookie, body: { label: 'setup' } });
 
@@ -108,6 +112,8 @@ async function startServer(worker, env) {
       if (pinned !== null) window.__TDOC_FLAGS__ = { remoteMcp: pinned };
       window.__opened = [];
       window.open = (href) => { window.__opened.push(String(href)); return null; };
+      window.__appOpened = [];
+      window.__tdocOpenApp = (href) => { window.__appOpened.push(String(href)); };
     }, flag === undefined ? null : flag);
     const page = await context.newPage();
     return { context, page };
@@ -233,6 +239,14 @@ async function startServer(worker, env) {
         await page.waitForTimeout(1800);
         assert((await copy.innerText()).trim() === '', `copy button text after: ${await copy.innerText()}`);
         if (SHOTS) await pick.screenshot({ path: path.join(SHOTS, `${label}-home-pick.png`) });
+        // Quick send: Codex, Cursor and Claude.ai copy the prompt and hand it to the app, filled in.
+        const prompt = encodeURIComponent('set up https://tdoc.dev/SKILL.md');
+        for (const [label2, href] of [['Codex', `codex://new?prompt=${prompt}`], ['Cursor', `cursor://anysphere.cursor-deeplink/prompt?text=${prompt}`], ['Claude.ai', `https://claude.ai/new?q=${prompt}`]]) {
+          await pick.locator('.pick-quick .pick-pill', { hasText: label2 }).click();
+          await page.waitForFunction((h) => window.__appOpened.includes(h), href);
+          await page.getByText(/Prompt copied\. Opening (Codex|Cursor|Claude)/).first().waitFor();
+        }
+        if (SHOTS) await shot(page, `${label}-home-quick-send`);
         const openPops = async () => pick.locator('.pick-pop:popover-open').evaluateAll((els) => els.map((e) => e.id));
         assert(JSON.stringify(await openPops()) === '[]', `a popover is open before any click: ${await openPops()}`);
         const expect = {
@@ -243,7 +257,7 @@ async function startServer(worker, env) {
           gemini: 'gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp',
           grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp',
         };
-        const inMore = ['chatgpt', 'grok', 'vscode', 'gemini', 'grokbot'];
+        const inMore = ['chatgpt', 'grok', 'vscode', 'gemini', 'grokbot', 'claude', 'cursor', 'codex'];
         for (const [app, needle] of Object.entries(expect)) {
           if (inMore.includes(app)) {
             await pick.locator('.pick-quick .pick-more').click();
@@ -274,6 +288,18 @@ async function startServer(worker, env) {
           }
           assert(JSON.stringify(await openPops()) === '[]', `${app}: still open ${await openPops()}`);
         }
+        await context.close();
+      });
+
+      await t(`${label}: a published document cannot use quick send (site pages only)`, async () => {
+        const { context, page } = await open(width, height, { signedIn: false });
+        await page.goto(`${base}/d/send-probe`);
+        const frame = page.frameLocator('iframe.tdoc-doc-frame');
+        await frame.locator('#send').click();
+        await page.waitForTimeout(500);
+        const opened = await page.evaluate(() => window.__appOpened);
+        assert(JSON.stringify(opened) === '[]', `a document opened an app: ${JSON.stringify(opened)}`);
+        assert(await page.getByText(/Opening Codex/).count() === 0, 'toast shown for a document');
         await context.close();
       });
 
