@@ -64,34 +64,42 @@ export function OAuthConsentPage({ boot }) {
   };
 
   const who = identity ? (identity.email || identity.name || identity.login) : '';
+  // The name is the app's own claim, so it heads the card short ("Gemini CLI
+  // MCP Client" reads as "Gemini CLI") and gets a neutral initial, never a
+  // brand mark; the address that receives access is shown as is.
+  const name = String(client.name || 'This app').replace(/\s+MCP(\s+Client)?$/i, '').trim() || 'This app';
   return (
     <div className="tdoc-app tdoc-edge-page">
       <TopBar identity={identity} authConfigured={Boolean(boot.oidcAuth || boot.authConfigured)} onSignIn={signIn} />
       <main className="tdoc-status-page tdoc-activate-page tdoc-oauth-consent">
-        <div className={`tdoc-activate-stack${!identity ? ' tdoc-activate-signin' : ''}`}>
-          <h1>Allow {client.name || 'this app'}{client.redirect_host ? ` (${client.redirect_host})` : ''} to use tdoc</h1>
+        <div className={`tdoc-activate-stack tdoc-consent-card${!identity ? ' tdoc-activate-signin' : ''}`}>
+          <div className="tdoc-consent-marks" aria-hidden="true">
+            <span className="tdoc-consent-initial">{name.slice(0, 1).toUpperCase()}</span>
+            <span className="tdoc-consent-link" />
+            <img src="/tdoc_logo.svg" width="28" height="28" alt="" />
+          </div>
+          <h1>{name} wants to use your tdoc</h1>
+          {client.redirect_host ? (
+            <p className="tdoc-consent-from">from <code>{client.redirect_host}</code></p>
+          ) : null}
+          {identity ? <p className="tdoc-consent-as">as <b>{who}</b></p> : null}
+          <ul className="tdoc-consent-can" aria-label="It will be able to">
+            <li>Read, create and edit your docs</li>
+            <li>Reply to comments</li>
+            <li>Change sharing</li>
+          </ul>
           {!identity ? (
-            <>
-              <p>Sign in to tdoc, then allow the app to work with your documents.</p>
-              <p className="tdoc-activate-hint">New here? Signing in creates your account.</p>
-              {boot.oidcAuth || boot.authConfigured
-                ? <AppButton variant="primary" onClick={signIn}>Sign in</AppButton>
-                : <p>Sign-in is not configured on this host.</p>}
-            </>
+            boot.oidcAuth || boot.authConfigured ? (
+              <>
+                <AppButton variant="primary" onClick={signIn}>Sign in to continue</AppButton>
+                <p className="tdoc-activate-hint">New here? Signing in creates your account.</p>
+              </>
+            ) : <p className="tdoc-activate-hint">Sign-in is not configured on this host.</p>
           ) : (
             <>
-              <p className="tdoc-activate-grant">
-                An app at <b>{client.redirect_host}</b> will use tdoc as <b>{who}</b>: read, create and edit your docs, reply to comments, and change sharing.
-              </p>
-              <p className="tdoc-activate-hint tdoc-oauth-return">
-                {client.verified_host
-                  ? <>It calls itself “{client.name}”, published by <b>{client.verified_host}</b>. </>
-                  : <>It calls itself “{client.name}” (a name the app chose; tdoc has not checked it). </>}
-                If you did not start this from <b>{client.redirect_host}</b>, cancel.
-              </p>
               {choosing ? (
                 <div className="tdoc-activate-workspaces">
-                  <p className="tdoc-activate-ask">It can open, publish and edit docs in:</p>
+                  <p className="tdoc-activate-ask">In these workspaces:</p>
                   <WorkspaceChecklist
                     workspaces={workspaces}
                     picked={picked}
@@ -99,24 +107,24 @@ export function OAuthConsentPage({ boot }) {
                     disabled={busy}
                     label="Workspaces this app can reach"
                   />
-                  <p className="tdoc-activate-hint">
-                    {picked.length
-                      ? `${workspaceSummary(workspaces, picked.length === workspaces.length ? null : picked)}. You can change this or disconnect later in Settings → Agents.`
-                      : 'Tick at least one workspace.'}
-                  </p>
+                  {picked.length ? null : <p className="tdoc-activate-hint">Tick at least one workspace.</p>}
                 </div>
-              ) : (
-                <p className="tdoc-activate-hint">You can disconnect it later in Settings → Agents.</p>
-              )}
+              ) : null}
               <div className="tdoc-oauth-actions">
                 <AppButton variant="primary" disabled={busy || (choosing && !picked.length)} onClick={() => decide('allow')}>Allow</AppButton>
                 <AppButton disabled={busy} onClick={() => decide('deny')}>Cancel</AppButton>
               </div>
+              <p className="tdoc-activate-hint tdoc-oauth-return">
+                {client.verified_host
+                  ? <>Published by <b>{client.verified_host}</b>. </>
+                  : <>“{client.name}” is the name the app gave itself; tdoc has not checked it. </>}
+                If you did not start this from <b>{client.redirect_host}</b>, cancel. You can disconnect it later in Settings → Agents.
+              </p>
             </>
           )}
           {error ? <p role="alert" className="tdoc-activate-error">{error}</p> : null}
-          <p className="tdoc-activate-hint"><a href="/privacy">Privacy policy</a></p>
         </div>
+        <p className="tdoc-consent-foot"><a href="/privacy">Privacy policy</a></p>
         <SignInDialog open={signInOpen} onOpenChange={setSignInOpen} onSuccess={() => { setSignInOpen(false); location.reload(); }} />
       </main>
     </div>
