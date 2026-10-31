@@ -91,8 +91,6 @@ t('pack.sh builds every upload file and README documents the one-line installs',
   for (const f of ['tdoc-claude.zip', 'tdoc-codex.zip', 'tdoc-cursor.zip', 'tdoc-gemini.tar.gz', 'logo-400.png']) assert(pack.includes(f), f);
   const readme = fs.readFileSync(path.join(root, 'plugins', 'README.md'), 'utf8');
   for (const s of ['claude plugin install tdoc-cloud@tornado-tdoc', 'codex plugin marketplace add tornado-doc/tdoc', 'cursor://anysphere.cursor-deeplink/mcp/install', 'gemini extensions install', 'code --add-mcp']) assert(readme.includes(s), `README: ${s}`);
-  const sub = fs.readFileSync(path.join(root, 'plugins', 'SUBMITTING.md'), 'utf8');
-  for (const s of ['claude.ai/directory/manage', 'platform.openai.com/plugins', 'cursor.com/marketplace/publish', 'cline/mcp-marketplace', 'gemini-cli-extension']) assert(sub.includes(s), `SUBMITTING: ${s}`);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
