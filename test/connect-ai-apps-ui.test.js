@@ -277,6 +277,7 @@ async function startServer(worker, env) {
         await page.getByRole('heading', { name: 'Gemini CLI wants to use your tdoc' }).waitFor();
         assert((await page.locator('.tdoc-consent-from').innerText()) === 'from 127.0.0.1:55905', 'address shown as is');
         assert((await page.locator('.tdoc-consent-initial').innerText()) === 'G', 'neutral initial, not a brand mark');
+        assert((await page.locator('.tdoc-consent-brand').count()) === 0, 'a localhost return address gets no logo');
         assert((await page.locator('.tdoc-consent-can li').count()) === 1, 'what it can do, in one line');
         const card = await page.locator('.tdoc-consent-card').boundingBox();
         assert(card && card.x >= 0 && card.x + card.width <= width + 1, `card fits at ${label}: ${JSON.stringify(card)}`);
@@ -298,6 +299,7 @@ async function startServer(worker, env) {
         await page.getByRole('heading', { name: 'Claude wants to use your tdoc' }).waitFor();
         assert((await page.locator('.tdoc-consent-from').innerText()) === 'from claude.ai · as julie', 'return host and account in one line');
         assert((await page.locator('.tdoc-oauth-return').innerText()) === "Didn't start this? Cancel", 'one short cancel line');
+        assert((await page.locator('.tdoc-consent-brand svg').count()) === 1, 'code goes to https://claude.ai: Claude\'s logo');
         assert((await page.locator('.tdoc-consent-card .ui-btn').count()) === 1, 'signed in with one workspace: Allow is the only button');
         assert((await page.locator('.tdoc-activate-workspaces').count()) === 0, 'no workspace ticks for one workspace');
         await shot(page, `${label}-consent`);

@@ -3,6 +3,7 @@ import { TopBar } from './top-bar.jsx';
 import { AppButton } from './ui/button.jsx';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx';
+import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 
 // /oauth/authorize — an AI app (Claude, ChatGPT, Cursor...) asking to use
 // tdoc as this person, through the remote MCP server. The same page as the
@@ -65,8 +66,9 @@ export function OAuthConsentPage({ boot }) {
 
   const who = identity ? (identity.email || identity.name || identity.login) : '';
   // The name is the app's own claim, so it heads the card short ("Gemini CLI
-  // MCP Client" reads as "Gemini CLI") and gets a neutral initial, never a
-  // brand mark; the address that receives access is shown as is.
+  // MCP Client" reads as "Gemini CLI") and gets a neutral initial. A brand
+  // mark only when the server says the code goes back to that product's own
+  // site (client.app); the address that receives access is shown as is.
   const name = String(client.name || 'This app').replace(/\s+MCP(\s+Client)?$/i, '').trim() || 'This app';
   return (
     <div className="tdoc-app tdoc-edge-page">
@@ -74,7 +76,9 @@ export function OAuthConsentPage({ boot }) {
       <main className="tdoc-status-page tdoc-activate-page tdoc-oauth-consent">
         <div className={`tdoc-activate-stack tdoc-consent-card${!identity ? ' tdoc-activate-signin' : ''}`}>
           <div className="tdoc-consent-marks" aria-hidden="true">
-            <span className="tdoc-consent-initial">{name.slice(0, 1).toUpperCase()}</span>
+            {client.app === 'claude' ? <span className="tdoc-consent-initial tdoc-consent-brand"><ClaudeMark size={26} /></span>
+              : client.app === 'chatgpt' ? <span className="tdoc-consent-initial tdoc-consent-brand"><OpenAIMark size={26} /></span>
+              : <span className="tdoc-consent-initial">{name.slice(0, 1).toUpperCase()}</span>}
             <span className="tdoc-consent-link" />
             <img src="/tdoc_logo.svg" width="28" height="28" alt="" />
           </div>
