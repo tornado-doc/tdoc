@@ -117,6 +117,13 @@ t('links to the GitHub repo and install path', () => {
     'a CTA points at a raw GitHub file; that is a repo, not an onboarding');
 });
 
+t('has an entry to the feedback tool in a section of its own', () => {
+  // Feedback on your own app is a second way in; the homepage says so in
+  // its usual section head, and links to /feedback (the bookmark page).
+  assert(hrefs.includes('/feedback'), 'no link to /feedback');
+  assert(/<p class="eyebrow">Feedback<\/p>\s*<h2>[^<]+<\/h2>\s*<p>[^]*?href="\/feedback"/.test(html), 'the /feedback link is not in a section head');
+});
+
 t('demo doc and thread are siblings, not nested', () => {
   // Nesting the thread inside the doc collapses the two-column canvas.
   const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));

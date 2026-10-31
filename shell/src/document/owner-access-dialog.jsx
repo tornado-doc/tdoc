@@ -135,7 +135,10 @@ export function InviteField({ users, onChange }) {
   );
 }
 
-export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOpenChange, onCopied }) {
+// `onMove` adds where the doc lives and the move-to-team picker under it.
+// A feedback space passes it: its page has no ⋯ menu, which is where a doc
+// page keeps Move, so its Share dialog is where the space joins a team.
+export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOpenChange, onCopied, onMove = null }) {
   const manage = config.ownerManage || (config.teamManage?.canManage ? config.teamManage : null);
   const team = config.teamManage?.team || null;
   const [access, setAccess] = useState(manage?.access || {});
@@ -290,6 +293,16 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
           </>
         ) : null}
       </section>
+
+      {onMove ? (
+        <section className="manage-section" id="tdoc-share-workspace">
+          <label className="field">Workspace</label>
+          <p className="tdoc-share-version">
+            {team ? `In ${team.name}: its admins manage it.` : 'In My docs: only you manage it.'}{' '}
+            <button type="button" className="tdoc-quiet-link" onClick={onMove}>{team ? 'Move…' : 'Move to a team…'}</button>
+          </p>
+        </section>
+      ) : null}
 
       <details className="tdoc-adv">
         <summary>Advanced</summary>
