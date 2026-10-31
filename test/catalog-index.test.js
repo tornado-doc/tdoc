@@ -49,18 +49,17 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       `read other people's docs: ${metaReads.join(', ')}`);
   });
 
-  await t('a doc written before the index is read once and indexed on the way', async () => {
+  await t('a doc written before the index is read by the scan, and never written back', async () => {
     // The platform is only scanned while a viewer's own facet is being
     // built: `me` and `other` built theirs on their first publish (the quota
-    // count), so a newcomer's first My docs is the scan that gives the
-    // legacy key its index.
+    // count), so a newcomer's first My docs is the scan. It reads the legacy
+    // key but must not put it back: that copy could be older than the
+    // owner's own write (test/scan-backfill-race.test.js).
     const late = await issue(worker, env, 'late');
     await call('/api/me', { token: late.token });
-    const md = env.META.metadata.get('meta:theirs-legacy');
-    assert(md && md.a === other.account_id, `legacy key not backfilled: ${JSON.stringify(md)}`);
+    assert(!env.META.metadata.has('meta:theirs-legacy'), 'the scan wrote the legacy record back');
     env.META.gets = [];
     await call('/api/me', { token: me.token });
-    assert(!env.META.gets.includes('meta:theirs-legacy'), 'the backfilled key is still read in full');
     assert(!env.META.gets.some((k) => k.startsWith('meta:theirs-')), 'My docs read other people\'s docs');
   });
 
