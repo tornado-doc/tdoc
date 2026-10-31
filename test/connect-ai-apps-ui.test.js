@@ -86,7 +86,7 @@ async function startServer(worker, env) {
   const startHtml = fs.readFileSync(path.join(startDir, `v${latest}`, 'index.html'), 'utf8');
   const shipped = await call('/api/upload', { method: 'POST', token: 'admin-secret', body: { slug: 'tdoc-start', version: 1, html: startHtml, meta: { title: startMeta.title || 'Start', versions: [{ n: 1, created: new Date().toISOString() }], access: { visibility: 'public' } } } });
   assert(shipped.status === 200, `ship /start: ${shipped.status} ${shipped.text}`);
-  // The homepage too: its "Use tdoc in your AI app" row links into /start.
+  // The homepage too: its hero "Use tdoc in" picker.
   const homeDir = path.join(__dirname, '..', 'landing', 'tornado-doc');
   const homeMeta = JSON.parse(fs.readFileSync(path.join(homeDir, 'meta.json'), 'utf8'));
   const homeLatest = homeMeta.versions[homeMeta.versions.length - 1].n;
@@ -210,28 +210,38 @@ async function startServer(worker, env) {
         await context.close();
       });
 
-      await t(`${label}: homepage row "Use tdoc in your AI app" links each app to its connect step`, async () => {
+      await t(`${label}: homepage hero "Use tdoc in" picks an app and shows its connect step in place`, async () => {
         const { context, page } = await open(width, height, { signedIn: false });
         await page.goto(`${base}/`);
         const frame = page.frameLocator('iframe.tdoc-doc-frame');
-        const row = frame.locator('#ai-apps');
-        await row.locator('.aiapp').first().waitFor();
-        const links = await row.locator('.aiapp').evaluateAll((els) => els.map((a) => [a.textContent.trim(), a.getAttribute('href')]));
-        assert(JSON.stringify(links) === JSON.stringify([
-          ['Claude', '/start?connect=claude'], ['ChatGPT', '/start?connect=chatgpt'], ['Cursor', '/start?connect=cursor'],
-          ['VS Code', '/start?connect=vscode'], ['Codex', '/start?connect=codex'], ['Gemini CLI', '/start?connect=gemini'],
-        ]), JSON.stringify(links));
-        await row.scrollIntoViewIfNeeded();
-        for (const a of await row.locator('.aiapp').all()) {
-          const b = await a.boundingBox();
+        const pick = frame.locator('.pick');
+        await pick.locator('.pick-pill').first().waitFor();
+        const names = await pick.locator('.pick-pill').evaluateAll((els) => els.map((l) => l.textContent.trim()));
+        assert(JSON.stringify(names) === JSON.stringify(['Claude', 'ChatGPT', 'Grok', 'Cursor', 'VS Code', 'Claude Code', 'Codex', 'Gemini CLI', 'Grok Bot']), JSON.stringify(names));
+        await pick.scrollIntoViewIfNeeded();
+        for (const l of await pick.locator('.pick-pill').all()) {
+          const b = await l.boundingBox();
           assert(b && b.x >= 0 && b.x + b.width <= width + 1, `pill inside the page at ${label}: ${JSON.stringify(b)}`);
         }
-        if (SHOTS) await row.screenshot({ path: path.join(SHOTS, `${label}-home-ai-apps.png`) });
+        const visible = async () => pick.locator('.pick-panel:visible').evaluateAll((els) => els.map((e) => e.className));
+        // Claude is picked first, and only its panel shows: a real https link, no popup.
+        assert(JSON.stringify(await visible()) === JSON.stringify(['pick-panel pick-p-claude']), JSON.stringify(await visible()));
+        const claude = await pick.locator('.pick-p-claude a.pick-go').getAttribute('href');
+        assert(claude.startsWith('https://claude.ai/customize/connectors?') && claude.includes(encodeURIComponent('https://tdoc.dev/mcp')), claude);
+        // Every app panel offers a way in that works from the sandboxed frame: an https link or a command to copy.
+        const expect = { chatgpt: 'https://tdoc.dev/mcp', cursor: 'https://cursor.com/en/install-mcp?', vscode: 'https://vscode.dev/redirect/mcp/install?', claudecode: 'claude mcp add --transport http tdoc https://tdoc.dev/mcp', codex: 'codex mcp add tdoc --url https://tdoc.dev/mcp', gemini: 'gemini mcp add --transport http tdoc https://tdoc.dev/mcp', grok: 'https://grok.com/connectors', grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp' };
+        for (const [app, needle] of Object.entries(expect)) {
+          await pick.locator(`label[for="pick-r-${app}"]`).click();
+          assert(JSON.stringify(await visible()) === JSON.stringify([`pick-panel pick-p-${app}`]), `${app}: ${JSON.stringify(await visible())}`);
+          const panel = pick.locator(`.pick-p-${app}`);
+          const text = await panel.evaluate((el) => [...el.querySelectorAll('a.pick-go')].map((a) => a.getAttribute('href')).concat([...el.querySelectorAll('code')].map((c) => c.textContent)).join(' '));
+          assert(text.includes(needle), `${app}: ${text}`);
+          for (const a of await panel.locator('a.pick-go').all()) assert(/^https:\/\//.test(await a.getAttribute('href')), `${app} link is https`);
+          const box = await panel.boundingBox();
+          assert(box && box.x + box.width <= width + 1, `${app} panel inside the page at ${label}`);
+        }
+        if (SHOTS) await pick.screenshot({ path: path.join(SHOTS, `${label}-home-pick.png`) });
         await shot(page, `${label}-home`);
-        await row.getByRole('link', { name: 'Claude' }).click();
-        await page.waitForURL((u) => u.pathname === '/start' && u.searchParams.get('connect') === 'claude');
-        await page.getByRole('dialog', { name: 'Connect in one click' }).waitFor();
-        await page.waitForFunction(() => document.activeElement && document.activeElement.getAttribute('data-app') === 'claude');
         await context.close();
       });
 
