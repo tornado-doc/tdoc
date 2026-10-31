@@ -5143,15 +5143,17 @@ async function mergeVerifiedAccountState(env, group) {
     if (!team) continue;
     const aliases = team.members.filter((member) => accountIds.includes(member.account_id));
     if (!aliases.length) continue;
-    const before = JSON.stringify(team.members);
     const canonical = aliases.find((member) => member.account_id === group.canonical) || aliases[0];
+    const promote = aliases.some((member) => member.role === 'admin') && canonical.role !== 'admin';
+    // Only when the merge changes who is in the team or their role (not
+    // just the order). This runs on every sign-in, and a save of a copy read
+    // here (possibly a minute stale in this location) could put back a
+    // member, invite or agent an admin just removed.
+    if (aliases.length < 2 && canonical.account_id === group.canonical && !promote) continue;
     canonical.account_id = group.canonical;
-    if (aliases.some((member) => member.role === 'admin')) canonical.role = 'admin';
+    if (promote) canonical.role = 'admin';
     team.members = [canonical, ...team.members.filter((member) => !accountIds.includes(member.account_id))];
-    // Only when the merge changed something. This runs on every sign-in, and
-    // a save of a copy read here (possibly a minute stale in this location)
-    // could put back a member, invite or agent an admin just removed.
-    if (JSON.stringify(team.members) !== before) await saveTeam(env, team);
+    await saveTeam(env, team);
   }
   if (teamIds.size) await env.META.put(`account-teams:${group.canonical}`, JSON.stringify([...teamIds]));
 }
