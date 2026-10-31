@@ -3,7 +3,9 @@ import { TopBar } from './top-bar.jsx';
 import { AppButton } from './ui/button.jsx';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx';
-import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
+import { ClaudeMark, OpenAIMark, CursorMark, CopilotMark, GeminiMark } from './agent-marks.jsx';
+
+const APP_MARKS = { claude: ClaudeMark, chatgpt: OpenAIMark, cursor: CursorMark, copilot: CopilotMark, gemini: GeminiMark };
 
 // /oauth/authorize — an AI app (Claude, ChatGPT, Cursor...) asking to use
 // tdoc as this person, through the remote MCP server. The same page as the
@@ -76,8 +78,8 @@ export function OAuthConsentPage({ boot }) {
       <main className="tdoc-status-page tdoc-activate-page tdoc-oauth-consent">
         <div className={`tdoc-activate-stack tdoc-consent-card${!identity ? ' tdoc-activate-signin' : ''}`}>
           <div className="tdoc-consent-marks" aria-hidden="true">
-            {client.app === 'claude' ? <span className="tdoc-consent-initial tdoc-consent-brand"><ClaudeMark size={26} /></span>
-              : client.app === 'chatgpt' ? <span className="tdoc-consent-initial tdoc-consent-brand"><OpenAIMark size={26} /></span>
+            {APP_MARKS[client.app]
+              ? <span className="tdoc-consent-initial tdoc-consent-brand">{React.createElement(APP_MARKS[client.app], { size: client.app === 'claude' ? 26 : 24 })}</span>
               : <span className="tdoc-consent-initial">{name.slice(0, 1).toUpperCase()}</span>}
             <span className="tdoc-consent-link" />
             <img src="/tdoc_logo.svg" width="28" height="28" alt="" />

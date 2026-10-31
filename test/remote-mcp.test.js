@@ -268,10 +268,19 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const boot = bootData(page.text, '__TDOC_APP_BOOT__');
     assert(boot.request_id && boot.csrf && boot.client.name === 'Claude' && boot.client.redirect_host === 'claude.ai', JSON.stringify(boot.client));
     assert(boot.client.app === 'claude', `code goes to https://claude.ai: Claude's logo (${boot.client.app})`);
+    // Each product's own https site gets its mark, by address alone. From
+    // their own address, so the later tests keep the authorize rate budget.
+    const logoIp = { 'cf-connecting-ip': '198.51.100.7' };
+    // Each product's own https site gets its mark, by address alone.
+    for (const [uri, app] of [['https://chatgpt.com/connector_platform_oauth_redirect', 'chatgpt'], ['https://vscode.dev/redirect', 'copilot'], ['https://cursor.com/oauth/cb', 'cursor'], ['https://gemini.google.com/cb', 'gemini']]) {
+      const c = (await register({ client_name: 'Some app', redirect_uris: [uri] })).body;
+      const cb = bootData((await call(authorizeUrl(c, pkce(), { redirect_uri: uri }), { cookie: julie.cookie, headers: logoIp })).text, '__TDOC_APP_BOOT__');
+      assert(cb.client && cb.client.app === app, `${uri}: ${JSON.stringify(cb.client)}`);
+    }
     // The same name with any other return address gets no logo.
     for (const uri of ['https://claude.ai.evil.example/cb', 'https://example.com/cb']) {
       const fake = (await register({ redirect_uris: [uri] })).body;
-      const fp = await call(authorizeUrl(fake, pkce(), { redirect_uri: uri }), { cookie: julie.cookie });
+      const fp = await call(authorizeUrl(fake, pkce(), { redirect_uri: uri }), { cookie: julie.cookie, headers: logoIp });
       const fb = bootData(fp.text, '__TDOC_APP_BOOT__');
       assert(fb.client && fb.client.name === 'Claude' && fb.client.app === '', `${uri}: ${JSON.stringify(fb.client)}`);
     }
