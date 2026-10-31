@@ -23,14 +23,9 @@ The older two-step Claude Code form also works:
 lists `tdoc@tornado-tdoc`, the local CLI plugin (needs Bash and the `tdoc`
 CLI). Install one of the two, not both: both carry a skill named `tdoc`.
 
-Gemini CLI has no option to install from a folder inside a repo:
-`gemini extensions install https://github.com/tornado-doc/tdoc` fails with
-"Configuration file not found ... gemini-extension.json" (tested with
-gemini-cli 0.66.0). It will work once the latest GitHub release carries
-`tdoc-gemini.tar.gz` as its only asset; see `SUBMITTING.md`.
+Gemini CLI installs from the latest GitHub release, which must carry
+`tdoc-gemini.tar.gz` (built by `sh plugins/pack.sh`) as its only asset.
 
-Directory listings (Claude, ChatGPT/Codex, Cursor, Cline, Gemini gallery) are
-not live yet. `SUBMITTING.md` is the kit for submitting them, and
 `sh plugins/pack.sh` builds the upload files into `dist/plugins/`.
 
 ---
