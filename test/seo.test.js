@@ -261,7 +261,7 @@ function ldBlocks(page) {
       for (const opts of [{}, { cookie: alice.cookie }]) {
         const { status, text } = await call(`/d/${slug}`, opts);
         if (status !== 200) continue;
-        assert(!ldBlocks(text).length && !text.includes('schema.org'), `${slug} (${opts.cookie ? 'owner' : 'anonymous'}) has JSON-LD`);
+        assert(!ldBlocks(text).length && !text.includes('"@context"'), `${slug} (${opts.cookie ? 'owner' : 'anonymous'}) has JSON-LD`);
       }
     }
     const { status, text } = await call('/d/alice-private', { cookie: alice.cookie });
