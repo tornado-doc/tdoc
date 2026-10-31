@@ -1303,7 +1303,7 @@ a.ui-menu-item:visited {
   background: var(--td-surface, #f4f4f2); color: var(--td-ink, #1a1a1a); font: 650 19px var(--td-font-display);
 }
 .tdoc-consent-link { width: 28px; border-top: 2px dotted #c9c7c1; }
-.tdoc-consent-card > h1 { font-size: 21px; overflow-wrap: anywhere; }
+.tdoc-consent-card > h1 { font-size: 21px; overflow-wrap: anywhere; text-wrap: balance; }
 .tdoc-activate-page .tdoc-consent-from, .tdoc-activate-page .tdoc-consent-as { margin: 6px 0 0; font-size: 13.5px; line-height: 1.4; color: var(--td-muted, #6b6a66); }
 .tdoc-consent-from code { font: 500 12.5px ui-monospace, "SF Mono", Menlo, monospace; color: var(--td-ink, #1a1a1a); background: var(--td-surface, #f4f4f2); padding: 2px 6px; border-radius: 6px; }
 .tdoc-consent-as b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
