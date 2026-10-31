@@ -79,7 +79,7 @@ t('one skill, identical in every plugin, with SKILL.md\'s description verbatim a
   assert(frontDescription(copies[0]) === frontDescription(main), 'description drifted from SKILL.md');
   assert(/^name: tdoc$/m.test(copies[0]), 'name: tdoc');
   assert(!/allowed-tools/.test(copies[0]), 'no tool grants: these hosts may have no terminal');
-  for (const tool of ['create_doc', 'update_doc', 'get_doc', 'list_docs', 'get_comments', 'reply_to_comment', 'resolve_comment', 'answer_question', 'share_doc']) {
+  for (const tool of ['get_writing_guide', 'create_doc', 'update_doc', 'edit_doc', 'create_upload', 'commit_upload', 'get_doc', 'list_docs', 'get_comments', 'reply_to_comment', 'resolve_comment', 'answer_question', 'share_doc']) {
     assert(copies[0].includes(`\`${tool}\``), `skill names ${tool}`);
   }
 });
@@ -88,7 +88,7 @@ t('the skill names exactly the tools the worker serves', () => {
   const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   const block = worker.slice(worker.indexOf('const MCP_TOOLS = {'), worker.indexOf('const MCP_CAPABILITIES'));
   const served = [...block.matchAll(/^  ([a-z_]+): \{$/gm)].map((m) => m[1]).sort();
-  assert(served.join(',') === 'answer_question,create_doc,get_comments,get_doc,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', served.join(','));
+  assert(served.join(',') === 'answer_question,commit_upload,create_doc,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', served.join(','));
 });
 
 t('README cites sources and marks unverified fields', () => {

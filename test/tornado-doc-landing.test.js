@@ -117,6 +117,13 @@ t('links to the GitHub repo and install path', () => {
     'a CTA points at a raw GitHub file; that is a repo, not an onboarding');
 });
 
+t('has an entry to the feedback tool in a section of its own', () => {
+  // Feedback on your own app is a second way in; the homepage says so in
+  // its usual section head, and links to /feedback (the bookmark page).
+  assert(hrefs.includes('/feedback'), 'no link to /feedback');
+  assert(/<p class="eyebrow">Feedback<\/p>\s*<h2>[^<]+<\/h2>\s*<p>[^]*?href="\/feedback"/.test(html), 'the /feedback link is not in a section head');
+});
+
 t('demo doc and thread are siblings, not nested', () => {
   // Nesting the thread inside the doc collapses the two-column canvas.
   const demo = html.slice(html.indexOf('<div class="hd" style'), html.indexOf('<p class="hd-cap"'));
@@ -273,29 +280,45 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Works with/.test(visible), 'trusted-by label should be Works with, not a borrowed user list');
+  assert(/Use tdoc in/.test(visible), 'the hero app picker should be "Use tdoc in", not a borrowed user list');
 });
 
-t('names the apps it runs in, and the chats it does not', () => {
+t('names the apps it runs in, each linked to its connect step', () => {
   // Newcomers went to claude.ai and ChatGPT because the page showed those
-  // marks under "Works with" and "No setup", and said nothing to install.
+  // marks and said nothing to install, when tdoc ran only in Claude Code and
+  // Codex. The remote MCP server (/mcp) now puts it in those chats, so the
+  // page names them, and each mark is a link to that app's connect step.
   const visible = html
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
-  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Works with'));
-  assert(/Works in\s+Claude Code\s+or\s+Codex\s+on your computer/.test(hero), 'the hero does not name Claude Code and Codex');
-  assert(/Not yet in the claude\.ai or ChatGPT chat/.test(hero), 'the hero does not say which chats are unsupported');
+  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Set up in a minute'));
+  assert(/Claude[\s\S]*ChatGPT[\s\S]*Grok[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI[\s\S]*Grok Bot/.test(hero), 'the hero picker does not name every app');
+  assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
   assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
-  const strip = html.slice(html.indexOf('<p class="trust-label">Works with</p>'), html.indexOf('<!-- ══ THE LOOP ══ -->'));
-  assert(/Claude Code/.test(strip) && /Codex/.test(strip), 'Works with does not list Claude Code and Codex');
-  assert(!/#i-(google|cloudflare|claude)"|Berkeley|tlogo-img|class="marquee"/.test(strip), 'Works with still shows company logos');
+  // The hero picker: one radio per app, the first checked, and each panel's way
+  // in works from the sandboxed frame (an https link or a line to copy).
+  const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
+  const radios = [...pick.matchAll(/<input type="radio" name="pick" id="pick-r-([a-z]+)"/g)].map((m) => m[1]);
+  assert(radios.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker radios: ${radios.join(' ')}`);
+  assert(/id="pick-r-claude" class="pick-radio" checked/.test(pick), 'Claude is not picked first');
+  for (const app of radios) {
+    const panel = pick.slice(pick.indexOf(`class="pick-panel pick-p-${app}"`));
+    const body = panel.slice(0, panel.indexOf('</div>', panel.indexOf('</p>')) + 6);
+    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} panel has no way in`);
+    assert(!/href="(cursor|vscode):/.test(body), `${app} panel links a custom scheme the frame cannot open`);
+  }
+  assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(pick), 'the picker shows company logos');
   assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
   const setup = html.slice(html.indexOf('<!-- ══ ONE PASTE ══'), html.indexOf('<!-- ══ FEATURES'));
-  assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-terminal/.test(setup), 'Claude Code is not drawn as a terminal');
-  assert(!/#i-claude"|#i-grok"|#i-cursor"/.test(setup), 'setup shows apps tdoc does not install into');
+  // Setup shows every app the picker offers, each with its own mark: Claude
+  // Code is Claude's, not a generic terminal (ST1125, 2026-10-29).
+  const tiles = [...setup.matchAll(/class="apptile[^"]*" role="img" aria-label="([^"]+)"/g)].map((m) => m[1]);
+  assert(tiles.join('|') === 'Claude|ChatGPT|Grok|Cursor|VS Code|Claude Code|Codex|Gemini CLI|Grok Bot', `setup tiles: ${tiles.join('|')}`);
+  assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-claude"/.test(setup), 'Claude Code does not show the Claude mark');
+  assert(!/#i-terminal"|#i-code"/.test(setup + pick), 'a generic terminal or code icon stands in for an app');
   assert(/sign in once/.test(setup), 'setup does not say you sign in once');
 });
 
@@ -369,8 +392,13 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage bar must draw the GitHub mark itself');
   assert(/className="tdoc-gh-stars"/.test(toolbar) && /function starCount/.test(toolbar),
     'homepage bar must show the star count beside the mark');
-  assert(/config\.isLanding \? <LandingActions stars=\{config\.stars\} \/> : \(/.test(documentShell),
+  // The homepage bar: the demo's Ask AI (simulated, demo-agent.js) and
+  // GitHub; never the document's Share/Copy/Download actions.
+  const landingBar = documentShell.match(/actions=\{config\.isLanding \? <>([\s\S]*?)<\/> : \(/);
+  assert(landingBar && /<LandingActions stars=\{config\.stars\} \/>/.test(landingBar[1]),
     'homepage must not receive the document Share/Copy/Download actions');
+  assert(landingBar[1].replace(/\s+/g, ' ').trim() === '{askAiAction} <LandingActions stars={config.stars} />',
+    `homepage bar carries more than Ask AI + GitHub: ${landingBar[1]}`);
   assert(/demo: !!config\.demoComments/.test(documentShell),
     'homepage shell must wire demoComments into useComments');
   assert(/Type a GitHub @/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),

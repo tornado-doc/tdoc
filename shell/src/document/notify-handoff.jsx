@@ -2,7 +2,7 @@
 // Doc-level "send to agent" panel. Uses /api/notify/* (Raft is the first
 // provider). Single-comment send reuses postNotifyHandoff with one id.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Terminal, Webhook } from 'lucide-react';
 import { AskIcon } from '../ui/ask-icon.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from '../agent-marks.jsx';
@@ -416,6 +416,9 @@ function RaftConnectedNoAgentView({ servers, onClose, onSaved }) {
 }
 
 function ConnectAgentView({ onClose, onConnected, isConnected }) {
+  // In the feedback widget the page is someone else's site: settings links
+  // go to tdoc, in a new tab, not to a path on that site.
+  const offSite = tdocUrl('/') !== '/' ? { target: '_blank', rel: 'noopener noreferrer' } : {};
   return (
     <AppDialog
       open
@@ -430,7 +433,7 @@ function ConnectAgentView({ onClose, onConnected, isConnected }) {
             <ConnectorHead connector={c} />
             {c.id === 'raft'
               ? <RaftConnectButton onConnected={onConnected} isConnected={isConnected} />
-              : <a className="tdoc-connector-action" href={c.action.href}>{c.action.label}</a>}
+              : <a className="tdoc-connector-action" href={tdocUrl(c.action.href)} {...offSite}>{c.action.label}</a>}
             {c.prompt ? (
               <details open>
                 <summary className="manage-hint">Or paste this into your agent</summary>
@@ -440,7 +443,7 @@ function ConnectAgentView({ onClose, onConnected, isConnected }) {
             ) : null}
           </section>
         ))}
-        <p className="manage-hint">Manage connections any time in <a href="/me?view=settings#agents">workspace settings</a>.</p>
+        <p className="manage-hint">Manage connections any time in <a href={tdocUrl('/me?view=settings#agents')} {...offSite}>workspace settings</a>.</p>
       </div>
     </AppDialog>
   );
@@ -540,7 +543,13 @@ function isDefaultInstruction(text) {
 // dialog and Ask AI's "Send to agent" mode both send through this, so the
 // two never word a delivery differently. `result` is { ok, text }; after a
 // failure the caller's button reads Retry.
+// Where a send goes: POST /api/notify/handoff, unless the page provides
+// another (the homepage demo's simulated agent, demo-agent.js).
+export const HandoffSendTransport = createContext(null);
+
 export function useHandoffSend(slug, onSent = null) {
+  const transport = useContext(HandoffSendTransport);
+  const post = transport || postNotifyHandoff;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   // `sentText`: the success line when "Sent N comments" would misread (Ask
@@ -552,7 +561,7 @@ export function useHandoffSend(slug, onSent = null) {
     setResult(null);
     const to = agentLabel(recipient);
     try {
-      const body = await postNotifyHandoff({
+      const body = await post({
         slug,
         comment_ids: batch,
         instruction: String(instruction || '').trim(),
@@ -599,8 +608,11 @@ export function NotifyHandoffPanel({
   // { provider, agent_name } of an agent that did not pick these up: the
   // picker opens on someone else ("Send to another agent" on a card).
   avoid = null,
+  // False when the host has already said it cannot hand comments to an
+  // agent (the feedback widget's session): say so instead of asking.
+  hostNotify = true,
 }) {
-  const targets = useNotifyTargets(slug, open);
+  const targets = useNotifyTargets(slug, open && hostNotify);
   const [selected, setSelected] = useState(null);
   const [instruction, setInstruction] = useState(() => defaultInstruction(commentIds));
   const [resending, setResending] = useState(false);
@@ -683,7 +695,7 @@ export function NotifyHandoffPanel({
     }
   };
 
-  const unavailable = targets.ready && !targets.available;
+  const unavailable = !hostNotify || (targets.ready && !targets.available);
 
   // Nobody to send to: the panel's job becomes getting one connected, instead
   // of a Send button that cannot go anywhere. A connected server whose Raft
@@ -713,10 +725,10 @@ export function NotifyHandoffPanel({
       open={open}
       onOpenChange={(next) => { if (!next) onClose(); }}
       title="Send to agent"
-      description={!targets.ready
-        ? 'Finding your agents…'
-        : unavailable
+      description={unavailable
         ? 'Notify is not available on this host yet.'
+        : !targets.ready
+        ? 'Finding your agents…'
         : ids.length
           ? `${ids.length === 1 ? '1 comment' : `${ids.length} comments`} for ${chosen && chosen.team_agent ? 'the team agent' : 'your agent'} to fix. It replies on each one here.`
           : lastIds.length
@@ -724,7 +736,7 @@ export function NotifyHandoffPanel({
             : 'No new comments to send.'}
       actions={(
         <>
-          <AppButton onClick={onClose}>{batch.length > 0 ? 'Cancel' : 'Close'}</AppButton>
+          <AppButton onClick={onClose}>{batch.length > 0 && !unavailable ? 'Cancel' : 'Close'}</AppButton>
           {!unavailable && batch.length > 0 ? (
             <AppButton variant="primary" className="primary" disabled={!canSubmit} onClick={submit}>
               {busy ? `Sending to ${agentLabel(chosen)}…` : result && !result.ok ? 'Retry' : reassign ? `Send ${lastIds.length === 1 ? 'it' : 'them'} to ${agentLabel(chosen)}` : `Send to ${agentLabel(chosen)}`}

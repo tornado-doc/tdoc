@@ -31,7 +31,8 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     const page = await r.text();
     assert(r.status === 200, `status ${r.status}`);
     const desc = (page.match(/property="og:description" content="([^"]*)"/) || [])[1] || "";
-    assert(desc.includes("Big report Lead line of the report."), `excerpt: ${desc.slice(0, 80)}`);
+    // The lead, without the <title> and <h1> the page already shows as its title.
+    assert(desc.startsWith("Lead line of the report."), `excerpt: ${desc.slice(0, 80)}`);
   });
 
   await t('document HTML is not cached across shell deployments', async () => {

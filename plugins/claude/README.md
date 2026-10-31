@@ -11,8 +11,12 @@ plugin.
 
 ## What Claude can do with it
 
+- Read tdoc's writing guide and house style (`get_writing_guide`)
 - Create a document and return its link (`create_doc`)
-- Publish a new version of a document (`update_doc`)
+- Publish a new version of a document (`update_doc`), or edit it in place
+  with exact find/replace (`edit_doc`)
+- Publish a document and its local images from files through signed upload
+  URLs (`create_upload`, `commit_upload`)
 - Read a document, or list yours (`get_doc`, `list_docs`)
 - Read comments, reply to them, mark them handled (`get_comments`,
   `reply_to_comment`, `resolve_comment`)

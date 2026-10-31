@@ -1,6 +1,6 @@
 // "Connect in one click" in a real browser: tdoc in Claude, ChatGPT or
 // Cursor through the remote MCP server, with no terminal. Behind the
-// remoteMcp flag (on in PR previews only), so:
+// remoteMcp flag (on by default; a page can still pin it off), so:
 //   - flag off: /start, /setup and Settings look exactly as before
 //   - flag on: /start shows a strip that opens the panel; /setup and
 //     Settings -> Agents show it inline. Claude opens the prefilled custom
@@ -86,6 +86,13 @@ async function startServer(worker, env) {
   const startHtml = fs.readFileSync(path.join(startDir, `v${latest}`, 'index.html'), 'utf8');
   const shipped = await call('/api/upload', { method: 'POST', token: 'admin-secret', body: { slug: 'tdoc-start', version: 1, html: startHtml, meta: { title: startMeta.title || 'Start', versions: [{ n: 1, created: new Date().toISOString() }], access: { visibility: 'public' } } } });
   assert(shipped.status === 200, `ship /start: ${shipped.status} ${shipped.text}`);
+  // The homepage too: its hero "Use tdoc in" picker.
+  const homeDir = path.join(__dirname, '..', 'landing', 'tornado-doc');
+  const homeMeta = JSON.parse(fs.readFileSync(path.join(homeDir, 'meta.json'), 'utf8'));
+  const homeLatest = homeMeta.versions[homeMeta.versions.length - 1].n;
+  const homeHtml = fs.readFileSync(path.join(homeDir, `v${homeLatest}`, 'index.html'), 'utf8').replace(new RegExp(`/d/tornado-doc/v/${homeLatest}/widget/`, 'g'), '/d/tornado-doc/v/1/widget/');
+  const home = await call('/api/upload', { method: 'POST', token: 'admin-secret', body: { slug: 'tornado-doc', version: 1, html: homeHtml, meta: { title: homeMeta.title, versions: [{ n: 1, created: new Date().toISOString() }], access: { visibility: 'public' } } } });
+  assert(home.status === 200, `ship homepage: ${home.status} ${home.text}`);
   const cookie = await putSession(env, 'julie');
   await call('/api/hosted/token', { method: 'POST', cookie, body: { label: 'setup' } });
 
@@ -163,6 +170,81 @@ async function startServer(worker, env) {
         await context.close();
       });
 
+      await t(`${label}: flag at its default, signed out: /start shows the strip, ?connect=<app> opens the panel on that app`, async () => {
+        const { context, page } = await open(width, height, { signedIn: false });
+        await page.goto(`${base}/start`);
+        await page.locator('.tdoc-connect-strip').waitFor();
+        assert(await page.getByRole('dialog').count() === 0, 'dialog open without ?connect');
+        // The tutorial's Before you start box sends the chat apps to the same panel.
+        const before = page.frameLocator('iframe.tdoc-doc-frame').locator('.before');
+        assert(!/ChatGPT chat/.test(await before.innerText()), 'Before you start still says the chats are unsupported');
+        await before.scrollIntoViewIfNeeded();
+        await shot(page, `${label}-start-before`);
+        await before.getByRole('link', { name: 'Connect in one click' }).click();
+        await page.getByRole('dialog', { name: 'Connect in one click' }).waitFor();
+        await page.goto(`${base}/start`);
+        await page.locator('.tdoc-connect-strip').waitFor();
+        await page.goto(`${base}/start?connect=vscode`);
+        const dialog = page.getByRole('dialog', { name: 'Connect in one click' });
+        await dialog.waitFor();
+        await page.waitForFunction(() => document.activeElement && document.activeElement.getAttribute('data-app') === 'vscode');
+        await shot(page, `${label}-start-connect-vscode`);
+        const vscodeHref = await page.evaluate(() => {
+          let seen = '';
+          const desc = Object.getOwnPropertyDescriptor(window.Location.prototype, 'href');
+          try {
+            Object.defineProperty(window.location, 'href', { configurable: true, set(v) { seen = String(v); }, get() { return desc.get.call(window.location); } });
+          } catch { return 'unpatchable'; }
+          document.querySelector('.tdoc-connect-dialog [data-app="vscode"]').click();
+          return seen;
+        });
+        if (vscodeHref !== 'unpatchable') {
+          assert(vscodeHref.startsWith('vscode:mcp/install?'), vscodeHref);
+          const cfg = JSON.parse(decodeURIComponent(vscodeHref.slice('vscode:mcp/install?'.length)));
+          assert(cfg.name === 'tdoc' && cfg.type === 'http' && cfg.url === `${base}/mcp`, JSON.stringify(cfg));
+        }
+        // An app with no button of its own lands on the server URL.
+        await page.goto(`${base}/start?connect=codex`);
+        await page.getByRole('dialog', { name: 'Connect in one click' }).waitFor();
+        assert(/Codex, Gemini CLI/.test(await page.locator('.tdoc-connect-dialog [data-app="other"]').innerText()), 'codex lands on the URL block');
+        await context.close();
+      });
+
+      await t(`${label}: homepage hero "Use tdoc in" picks an app and shows its connect step in place`, async () => {
+        const { context, page } = await open(width, height, { signedIn: false });
+        await page.goto(`${base}/`);
+        const frame = page.frameLocator('iframe.tdoc-doc-frame');
+        const pick = frame.locator('.pick');
+        await pick.locator('.pick-pill').first().waitFor();
+        const names = await pick.locator('.pick-pill').evaluateAll((els) => els.map((l) => l.textContent.trim()));
+        assert(JSON.stringify(names) === JSON.stringify(['Claude', 'ChatGPT', 'Grok', 'Cursor', 'VS Code', 'Claude Code', 'Codex', 'Gemini CLI', 'Grok Bot']), JSON.stringify(names));
+        await pick.scrollIntoViewIfNeeded();
+        for (const l of await pick.locator('.pick-pill').all()) {
+          const b = await l.boundingBox();
+          assert(b && b.x >= 0 && b.x + b.width <= width + 1, `pill inside the page at ${label}: ${JSON.stringify(b)}`);
+        }
+        const visible = async () => pick.locator('.pick-panel:visible').evaluateAll((els) => els.map((e) => e.className));
+        // Claude is picked first, and only its panel shows: a real https link, no popup.
+        assert(JSON.stringify(await visible()) === JSON.stringify(['pick-panel pick-p-claude']), JSON.stringify(await visible()));
+        const claude = await pick.locator('.pick-p-claude a.pick-go').getAttribute('href');
+        assert(claude.startsWith('https://claude.ai/customize/connectors?') && claude.includes(encodeURIComponent('https://tdoc.dev/mcp')), claude);
+        // Every app panel offers a way in that works from the sandboxed frame: an https link or a command to copy.
+        const expect = { chatgpt: 'https://tdoc.dev/mcp', cursor: 'https://cursor.com/en/install-mcp?', vscode: 'https://vscode.dev/redirect/mcp/install?', claudecode: 'claude mcp add --transport http tdoc https://tdoc.dev/mcp', codex: 'codex mcp add tdoc --url https://tdoc.dev/mcp', gemini: 'gemini mcp add --transport http tdoc https://tdoc.dev/mcp', grok: 'https://grok.com/connectors', grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp' };
+        for (const [app, needle] of Object.entries(expect)) {
+          await pick.locator(`label[for="pick-r-${app}"]`).click();
+          assert(JSON.stringify(await visible()) === JSON.stringify([`pick-panel pick-p-${app}`]), `${app}: ${JSON.stringify(await visible())}`);
+          const panel = pick.locator(`.pick-p-${app}`);
+          const text = await panel.evaluate((el) => [...el.querySelectorAll('a.pick-go')].map((a) => a.getAttribute('href')).concat([...el.querySelectorAll('code')].map((c) => c.textContent)).join(' '));
+          assert(text.includes(needle), `${app}: ${text}`);
+          for (const a of await panel.locator('a.pick-go').all()) assert(/^https:\/\//.test(await a.getAttribute('href')), `${app} link is https`);
+          const box = await panel.boundingBox();
+          assert(box && box.x + box.width <= width + 1, `${app} panel inside the page at ${label}`);
+        }
+        if (SHOTS) await pick.screenshot({ path: path.join(SHOTS, `${label}-home-pick.png`) });
+        await shot(page, `${label}-home`);
+        await context.close();
+      });
+
       await t(`${label}: flag on, /setup and Settings -> Agents show the panel inline`, async () => {
         const { context, page } = await open(width, height, { flag: true, as: newcomer });
         await page.goto(`${base}/setup`);
@@ -177,7 +259,7 @@ async function startServer(worker, env) {
         await settings.scrollIntoViewIfNeeded();
         await shot(page, `${label}-settings`);
         const rows = await settings.locator('.tdoc-connect-app').count();
-        assert(rows === 3, `three app rows, got ${rows}`);
+        assert(rows === 4, `four app rows (Claude, ChatGPT, Cursor, VS Code), got ${rows}`);
         for (const btn of await settings.locator('.tdoc-connect-app .ui-btn').all()) {
           const b = await btn.boundingBox();
           assert(b && b.x + b.width <= width + 1, `button inside the page at ${label}`);

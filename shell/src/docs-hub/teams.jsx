@@ -978,6 +978,9 @@ export function MoveToTeamDialog({
   busy = false,
   error = '',
   title = '',
+  intro = '',
+  skipLabel = '',
+  onSkip = null,
 }) {
   const destinations = [
     ...(includePersonal ? [{ id: null, name: 'My docs', personal: true }] : []),
@@ -988,8 +991,14 @@ export function MoveToTeamDialog({
       open
       onOpenChange={(open) => { if (!open) onClose(); }}
       title={title || `Move ${count === 1 ? 'this doc' : `${count} docs`} to a team`}
-      actions={<AppButton onClick={onClose}>Cancel</AppButton>}
+      actions={(
+        <>
+          <AppButton onClick={onClose}>Cancel</AppButton>
+          {onSkip ? <AppButton disabled={busy} onClick={onSkip}>{skipLabel || 'Skip'}</AppButton> : null}
+        </>
+      )}
     >
+      {intro ? <p>{intro}</p> : null}
       <div className="move-list">
         {destinations.map((team) => (
           <button key={team.id || 'personal'} type="button" disabled={busy} onClick={() => onMove(team)}>

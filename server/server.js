@@ -988,11 +988,11 @@ function shellDocument(slug, version, nonce, reqUrl) {
   try {
     rawHtml = fs.readFileSync(path.join(ROOT, slug, `v${version}`, 'index.html'), 'utf8');
   } catch {}
-  const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame`;
   const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   const ident = e2eIdentity();
   const isOwner = !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase());
   const isLanding = slug === 'tornado-doc';
+  const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame${isLanding ? '?tdoc_site=1' : ''}`;
   const cfgJson = safeJsonForScript({
     slug,
     title,
@@ -1621,6 +1621,15 @@ const server = http.createServer(async (req, res) => {
     const latest = versions.map((item) => Number(item && item.n)).filter(Number.isFinite).sort((a, b) => b - a)[0];
     if (!latest) return send(res, 404, 'Not found: tdoc-pricing');
     res.writeHead(302, { Location: `/d/tdoc-pricing/v/${latest}`, 'Cache-Control': 'no-store' });
+    return res.end();
+  }
+
+  if (p === '/privacy' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const meta = readJson(path.join(ROOT, 'tdoc-privacy', 'meta.json'), {});
+    const versions = Array.isArray(meta.versions) ? meta.versions : [];
+    const latest = versions.map((item) => Number(item && item.n)).filter(Number.isFinite).sort((a, b) => b - a)[0];
+    if (!latest) return send(res, 404, 'Not found: tdoc-privacy');
+    res.writeHead(302, { Location: `/d/tdoc-privacy/v/${latest}`, 'Cache-Control': 'no-store' });
     return res.end();
   }
 
