@@ -97,10 +97,15 @@ t('README cites sources and marks unverified fields', () => {
   assert(/UNVERIFIED/.test(r), 'marks unverified');
 });
 
-t('SKILL.md prefers the MCP tools when they are connected; CLI stays the fallback', () => {
+t('SKILL.md puts the CLI first (it is what the daemon runs); MCP only without a CLI', () => {
   const main = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
-  const section = main.slice(main.indexOf('## When the tdoc MCP tools are available'), main.indexOf('## Document routing'));
-  assert(section.length > 200 && /prefer them to the CLI/.test(section) && /CLI stays\s+the fallback/.test(section), 'section missing');
+  const section = main.slice(main.indexOf('## The CLI first; the tdoc MCP tools when there is no CLI'), main.indexOf('## Document routing'));
+  assert(section.length > 200, 'section missing');
+  assert(/Use it even when tdoc's MCP tools/.test(section) && /daemon/.test(section), 'CLI-first rule missing');
+  assert(/MCP tools only when the CLI cannot run here/.test(section), 'MCP fallback missing');
+  assert(/same tdoc account/.test(section), 'one-account rule missing');
+  const cloud = read('claude/skills/tdoc/SKILL.md');
+  assert(/use that one instead of these tools/.test(cloud), 'tdoc Cloud skill does not defer to the local skill');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -782,6 +782,24 @@
     flashCopy(trigger);
   }, true);
 
+  // --- data-tdoc-send: copy a prompt and ask the shell to open an agent app
+  //     with it (tdoc's own site pages only; the shell checks). The element
+  //     names the app, never a URL: data-tdoc-send="codex|cursor|claude|claudeai",
+  //     data-tdoc-send-text="#id" holds the prompt. The label is left alone. ---
+  document.addEventListener('click', function (e) {
+    var trigger = e.target.closest && e.target.closest('[data-tdoc-send]');
+    if (!trigger) return;
+    e.preventDefault(); e.stopPropagation();
+    var raw = trigger.getAttribute('data-tdoc-send-text') || '', text = raw;
+    if (raw.charAt(0) === '#') { var src = document.getElementById(raw.slice(1)); text = src ? (src.innerText || src.textContent || '').replace(/\u00a0/g, ' ').trim() : ''; }
+    if (!text) return;
+    tdocFallbackCopy(text);
+    post({ type: 'tdoc:sendToApp', app: trigger.getAttribute('data-tdoc-send') || '', text: text });
+    trigger.classList.add('tdoc-sent');
+    clearTimeout(trigger._tdocSentTimer);
+    trigger._tdocSentTimer = setTimeout(function () { trigger.classList.remove('tdoc-sent'); }, 1600);
+  }, true);
+
   // --- anchor resolution (faithful port of overlay.js collectTextNodes/
   //     findTextRange). Normalizes whitespace so multi-block/wrapped selections
   //     (Selection.toString gives "para1\n\npara2" but the raw DOM has "\n   ")
