@@ -726,6 +726,24 @@ const SLUG = 'hostile-body-css';
       if (nested) throw new Error('shell nested inside the frame — link navigated the iframe');
     });
 
+    await t('modifier- and middle-click open author links in a new tab (#896)', async () => {
+      await page.setViewportSize({ width: 1400, height: 900 });
+      // ControlOrMeta: Cmd on macOS (where Ctrl-click is a context menu), Ctrl elsewhere.
+      for (const click of [{ modifiers: ['ControlOrMeta'] }, { modifiers: ['Shift'] }, { button: 'middle' }]) {
+        await page.goto(shellUrl, { waitUntil: 'networkidle' });
+        const docUrl = page.url();
+        const frame = page.frames().find(f => f.url().includes(SLUG) && f !== page.mainFrame());
+        await frame.evaluate(() => document.getElementById('internal-link').scrollIntoView({ block: 'center' }));
+        const [tab] = await Promise.all([
+          page.context().waitForEvent('page', { timeout: 4000 }),
+          frame.click('#internal-link', click),
+        ]);
+        await tab.waitForURL(/\/d\/hostile-body-css\/v\/1(?:$|[?#])/, { timeout: 4000 });
+        await tab.close();
+        if (page.url() !== docUrl) throw new Error(`${JSON.stringify(click)} navigated the doc tab to ${page.url()}`);
+      }
+    });
+
     // --- #3 MOBILE ------------------------------------------------------------
     await t('narrow viewport: fab opens a comment drawer listing the comments', async () => {
       await page.setViewportSize({ width: 480, height: 900 });

@@ -485,7 +485,20 @@
     if (!href || href.charAt(0) === '#') return;                    // in-page anchors stay in the frame
     if (!/^(https?:\/\/|\/(?!\/))/i.test(href)) return;             // javascript:/data: etc. — let CSP kill them
     e.preventDefault(); e.stopPropagation();
-    post({ type: 'tdoc:navigate', href: href, blank: a.getAttribute('target') === '_blank' });
+    // Cmd/Ctrl/Shift-click means "somewhere else", as on any page (#896).
+    var blank = a.getAttribute('target') === '_blank' || e.metaKey || e.ctrlKey || e.shiftKey;
+    post({ type: 'tdoc:navigate', href: href, blank: blank });
+  }, true);
+  // Middle-click fires auxclick, not click, and the sandbox has no
+  // allow-popups, so the browser's own new tab is blocked. Route it the same way.
+  document.addEventListener('auxclick', function (e) {
+    if (e.button !== 1 || visualViewerOpen() || interactionMode === 'edit') return;
+    var a = e.target && e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (!/^(https?:\/\/|\/(?!\/))/i.test(href)) return;
+    e.preventDefault(); e.stopPropagation();
+    post({ type: 'tdoc:navigate', href: href, blank: true });
   }, true);
 
   function clearSelectingCursor() { document.documentElement.removeAttribute('data-tdoc-selecting'); }
