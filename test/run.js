@@ -63,6 +63,7 @@ const OFFLINE = [
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
   'doc-index.test.js',          // per-owner/team doc index, invite index, one-pass frame bake + per-version cache (1102)
+  'scan-backfill-race.test.js', // index scans never write back a record they read: an owner's private/withdraw survives a racing scan
   'trash.test.js',              // Delete moves to Trash: gone on every path, restore, 30-day purge, folders, permissions
   'account-delete.test.js',     // Settings -> Delete account: blockers, browser-only, sessions/tokens end, fresh re-signup, 30-day purge, operator restore
   'trash-hardening.test.js',    // #815 review: resumable purge, restore quota, batched folder delete, bounded reads, write race, old CLIs, --forever

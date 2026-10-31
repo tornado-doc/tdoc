@@ -5143,11 +5143,15 @@ async function mergeVerifiedAccountState(env, group) {
     if (!team) continue;
     const aliases = team.members.filter((member) => accountIds.includes(member.account_id));
     if (!aliases.length) continue;
+    const before = JSON.stringify(team.members);
     const canonical = aliases.find((member) => member.account_id === group.canonical) || aliases[0];
     canonical.account_id = group.canonical;
     if (aliases.some((member) => member.role === 'admin')) canonical.role = 'admin';
     team.members = [canonical, ...team.members.filter((member) => !accountIds.includes(member.account_id))];
-    await saveTeam(env, team);
+    // Only when the merge changed something. This runs on every sign-in, and
+    // a save of a copy read here (possibly a minute stale in this location)
+    // could put back a member, invite or agent an admin just removed.
+    if (JSON.stringify(team.members) !== before) await saveTeam(env, team);
   }
   if (teamIds.size) await env.META.put(`account-teams:${group.canonical}`, JSON.stringify([...teamIds]));
 }
@@ -5731,10 +5735,8 @@ async function saveTeam(env, team) {
 // joined. From the invite markers once those exist for every team; until
 // then the old walk over every team answers, and writes the markers it
 // finds on the way, a bounded batch per request, then marks the index
-// built. Teams saved before the team index existed are read and indexed, a
-// few writes per request; the ones past that budget are still read (a read
-// is cheap, and a write that keeps failing — the free plan's daily cap —
-// must not hide a team for good), up to a bound that keeps the request short.
+// built. Teams saved before the team index existed are read (never written
+// back, see below), up to a bound that keeps the request short.
 // Index upkeep a page read can leave for after its response. With a request
 // context the work runs under waitUntil and the reader does not wait for it;
 // without one (tests, scripts) it is awaited, as before. Index writes are
@@ -5794,7 +5796,6 @@ async function pendingTeamInvitesFor(env, session, defer = deferIndexWork(null))
     return out.sort((a, b) => order.get(a.id) - order.get(b.id));
   }
   let cursor;
-  let backfills = 0;
   let reads = 0;
   let complete = true;
   const markers = [];
@@ -5809,10 +5810,13 @@ async function pendingTeamInvitesFor(env, session, defer = deferIndexWork(null))
         team = await loadTeam(env, teamId);
         reads += 1;
         if (!team) continue;
-        if (!idx && backfills < 10) {
-          backfills += 1;
-          try { await saveTeam(env, team); } catch {}
-        }
+        // Read only. A walk that saved the team it had just read (to give a
+        // pre-index record its metadata) could put back a copy older than
+        // an admin's own write -- a member removed, an invite withdrawn --
+        // and with it their access: KV has no compare-and-set, and a read
+        // elsewhere can be a minute stale. The record gets its index from
+        // the team's next real save; the invite markers below are separate
+        // keys, checked against the record when read.
         idx = { ...teamIndex(team), i: (team.invites || []).map(String), p: 0 };
       }
       for (const x of idx.i) markers.push([x, teamId]);
@@ -7465,11 +7469,20 @@ async function unbuildDocIndexes(env, facets) {
 }
 
 // Every doc's index record, the old way: one list call per 1,000 docs on
-// the platform, and a full read for each key written before the index (a
-// few of which are given their index on the way, as before). The scan is
-// what the lazy build consumes, and what a request still answers from
-// while its facets are being built.
-async function scanDocIndex(env, { backfill = 5 } = {}) {
+// the platform, and a full read for each key written before the index. The
+// scan is what the lazy build consumes, and what a request still answers
+// from while its facets are being built.
+//
+// Read-only. It used to give a few pre-index records their index on the
+// way by writing the value it had just read back to meta:<slug>. KV has no
+// compare-and-set, and a read may be up to a minute stale in another
+// location, so that put could land after the owner's own write (made
+// private, an invite removed, moved to Trash or to another owner) and put
+// the older, more open record back. A scan never owns the record: a legacy
+// record gets its index from its owner's next real write (putDocMetaJson),
+// and until then the scan reads it, which it does anyway. The facet
+// markers buildDocIndexes writes are separate keys and advisory only.
+async function scanDocIndex(env) {
   const rows = [];
   let cursor;
   do {
@@ -7481,7 +7494,6 @@ async function scanDocIndex(env, { backfill = 5 } = {}) {
     cursor = page.cursor;
     if (page.list_complete) break;
   } while (cursor);
-  let backfills = 0;
   await Promise.all(rows.filter((r) => !r.idx).map(async (r) => {
     let raw = null;
     let meta = null;
@@ -7490,12 +7502,6 @@ async function scanDocIndex(env, { backfill = 5 } = {}) {
     r.idx = docMetaIndex(meta);
     r.meta = meta;
     r.raw = raw;
-    // Gently: the free Workers plan allows 1,000 KV writes a day, and a
-    // publish needs a few of them.
-    if (backfills < backfill) {
-      backfills += 1;
-      try { await env.META.put(`meta:${r.slug}`, raw, { metadata: r.idx }); } catch {}
-    }
   }));
   return rows.filter((r) => r.idx && !r.idx.x);
 }
@@ -23123,7 +23129,11 @@ const tdocHandlers = {
       const team = await loadTeam(env, method === 'GET' ? url.searchParams.get('id') : body.id);
       if (!teamMember(team, s.account_id)) return json({ error: 'not_found' }, { status: 404 });
       const admin = teamRole(team, s.account_id) === 'admin';
-      if (dropExpiredTeamAgents(team)) await saveTeam(env, team);
+      // Expired setup codes leave the list on every read, but only an admin's
+      // own write stores that: a member's GET saving the copy it read could
+      // put back a member, invite or agent an admin just removed. Connect
+      // refuses an expired code on its own.
+      if (dropExpiredTeamAgents(team) && method !== 'GET' && admin) await saveTeam(env, team);
       if (method === 'GET') {
         return json({ ok: true, agents: await teamAgentRows(env, team), can_manage: admin }, { headers: { 'Cache-Control': 'no-store' } });
       }
