@@ -138,6 +138,23 @@ function ldBlocks(page) {
     await expire();
   });
 
+  await t('a build made just after a de-listing is not kept for the hour (KV lag)', async () => {
+    // A build within the margin may have read the doc before the write
+    // reached it; it is replaced on the next fetch, not served for an hour.
+    await env.META.put('sitemap:delisted-at', new Date(Date.now() - 1000).toISOString());
+    await call('/sitemap.xml');
+    const first = JSON.parse(env.META.map.get('sitemap:v1:tdoc.dev')).built_at;
+    await new Promise((r) => setTimeout(r, 5));
+    await call('/sitemap.xml');
+    assert(JSON.parse(env.META.map.get('sitemap:v1:tdoc.dev')).built_at !== first, 'a build inside the margin counted as fresh');
+    // Past the margin, the stored build is fresh again.
+    await env.META.put('sitemap:delisted-at', new Date(Date.now() - 10 * 60 * 1000).toISOString());
+    await call('/sitemap.xml');
+    const settled = JSON.parse(env.META.map.get('sitemap:v1:tdoc.dev')).built_at;
+    await call('/sitemap.xml');
+    assert(JSON.parse(env.META.map.get('sitemap:v1:tdoc.dev')).built_at === settled, 'a settled build was not reused');
+  });
+
   await t('a legacy record found unlisted is read once, not on every build', async () => {
     await call('/sitemap.xml');
     assert(JSON.parse(env.META.map.get('sitemap:v1:tdoc.dev')).unlisted.includes('alice-legacy'), 'legacy verdict not remembered');

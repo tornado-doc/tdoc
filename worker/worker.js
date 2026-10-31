@@ -3628,6 +3628,11 @@ const SITEMAP_EDGE_SECONDS = 300;
 const SITEMAP_READ_BUDGET = 400;
 const SITEMAP_MAX_URLS = 45000;
 const SITEMAP_DELISTED_KEY = 'sitemap:delisted-at';
+// KV reads and lists lag a write by up to a minute or so per location: a
+// build made that soon after a de-listing may still have seen the doc as
+// Public, so it does not count as fresh, and the next one (past the margin)
+// replaces it.
+const SITEMAP_DELIST_MARGIN_MS = 120 * 1000;
 // One record per host the worker answers on, so tdoc.dev and a workers.dev
 // address never overwrite each other's copy.
 function sitemapKey(origin) {
@@ -3737,10 +3742,11 @@ async function currentSitemap(env, origin, now = Date.now()) {
   const builtAt = usable ? Date.parse(stored.built_at) : NaN;
   const fresh = usable && typeof stored.xml === 'string' && Number.isFinite(builtAt)
     && builtAt <= now && now - builtAt < SITEMAP_TTL_SECONDS * 1000
-    && !(Number.isFinite(delistedAt) && delistedAt >= builtAt);
+    && !(Number.isFinite(delistedAt) && delistedAt + SITEMAP_DELIST_MARGIN_MS >= builtAt);
   if (fresh) return stored.xml;
-  // A de-listing since the stored build: its carried verdicts are not reused.
-  const voided = usable && Number.isFinite(delistedAt) && Number.isFinite(builtAt) && delistedAt >= builtAt;
+  // A de-listing since (or just before) the stored build: its carried
+  // verdicts are not reused.
+  const voided = usable && Number.isFinite(delistedAt) && Number.isFinite(builtAt) && delistedAt + SITEMAP_DELIST_MARGIN_MS >= builtAt;
   const built = await sitemapEntries(env, origin, {
     unlisted: usable && Array.isArray(stored.unlisted) ? stored.unlisted : [],
     verified: usable && !voided && stored.verified && typeof stored.verified === 'object' ? stored.verified : {},
