@@ -8873,9 +8873,10 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
     version,
     title: (meta && meta.title) || slug,
     doc_url: `${base}/d/${encodeURIComponent(slug)}/v/${version}`,
-    // The space doc with its normal Share dialog open: who can comment is
-    // whoever that dialog lets in, exactly as on any doc.
-    share_url: `${base}/d/${encodeURIComponent(slug)}?doc=1&share=1`,
+    // The space's own page with the doc Share dialog open: who can comment
+    // is whoever that dialog lets in, exactly as on any doc, and the owner
+    // can move the space into a team from there.
+    share_url: `${base}/d/${encodeURIComponent(slug)}?share=1`,
     origin: (meta && meta.feedback && meta.feedback.origin) || null,
     // This host can hand comments to an agent (the local twin cannot).
     notify: true,
@@ -20687,6 +20688,9 @@ const tdocHandlers = {
           const isOwner = signedIn && isDocOwnerSession(env, viewer, gate.meta);
           const joined = isOwner || (signedIn && (await env.META.get(feedbackSpaceIndexKey(viewer, spaceOrigin))) === slug);
           const access = accessFromMeta(gate.meta);
+          // Share on this page is the doc's Share dialog: the same owner-only
+          // manage data the doc page embeds, computed the same way.
+          const teamManage = await teamManageFor(env, viewer, gate.meta, access, isOwner);
           const nonce = rand(16);
           const agent = docAgentHints(url.origin, slug, vStr, docRoute.head);
           return html(SHELL.appHtml({
@@ -20701,7 +20705,7 @@ const tdocHandlers = {
               version: latestVersionNumber(gate.meta) || Number(vStr),
               title: gate.meta.title || 'Feedback',
               origin: spaceOrigin,
-              shareUrl: `/d/${encodeURIComponent(slug)}?doc=1&share=1`,
+              shareUrl: `${url.origin}/d/${encodeURIComponent(slug)}`,
               docUrl: `/d/${encodeURIComponent(slug)}/v/${Number(vStr)}?doc=1`,
               bookmarklet: feedbackBookmarklet(feedbackScriptSrc(url.origin)),
               identity: signedIn ? { login: actorKey(viewer), linked_actor_keys: actorKeys(viewer), avatar_url: viewer.avatar_url || '', name: actorDisplayName(viewer) } : null,
@@ -20709,6 +20713,9 @@ const tdocHandlers = {
               joined,
               canComment: signedIn && canCommentOnDoc(access, viewer, env, gate.meta),
               signinUrl: `/api/auth/oidc/login?return=${encodeURIComponent(`/d/${slug}`)}`,
+              ownerManage: isOwner ? { access } : null,
+              teamManage: signedIn ? teamManage : null,
+              workspaceId: gate.meta.workspace_id || null,
             }),
           }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store', 'Link': docAgentLinkHeader(agent) } });
         }

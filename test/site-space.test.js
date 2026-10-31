@@ -62,7 +62,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     await patchAccess({ allowed_users: ['friend'] });
     const r = await connectAs(friend);
     assert(r.status === 200 && r.body.slug === slug && r.body.token, `${r.status} ${JSON.stringify(r.body)}`);
-    assert(r.body.share_url && r.body.share_url.endsWith(`/d/${slug}?doc=1&share=1`) && !('invite_url' in r.body), `share_url ${r.body.share_url}`);
+    assert(r.body.share_url && r.body.share_url.endsWith(`/d/${slug}?share=1`) && !('invite_url' in r.body), `share_url ${r.body.share_url}`);
     const posted = await call('/api/comments', { method: 'POST', headers: { Authorization: `Bearer ${r.body.token}` }, body: { slug, version: 1, text: 'invited and here', anchor: { kind: 'product', url: `${site}/`, selector: 'main' } } });
     assert(posted.status === 200, `comment ${posted.status} ${JSON.stringify(posted.body)}`);
   });

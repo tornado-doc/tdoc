@@ -183,7 +183,7 @@ const APP = 'http://localhost:3000';
     const julie = await putSession(env, 'julie');
     const { body: space } = await connect(env, julie);
     // Share is the space doc's own Share dialog, as on any doc.
-    assert(space.share_url === `https://tdoc.dev/d/${space.slug}?doc=1&share=1` && !space.invite_url, `share_url ${space.share_url}`);
+    assert(space.share_url === `https://tdoc.dev/d/${space.slug}?share=1` && !space.invite_url, `share_url ${space.share_url}`);
     assert(space.origin === APP, `origin ${space.origin}`);
     const can = await putSession(env, 'can');
     // One link: the space's own page lists the comments and offers Join.
@@ -349,6 +349,88 @@ const APP = 'http://localhost:3000';
         body: { slug: space.slug, version: 1, id, anchor: anchor(url) } }), env, {});
       assert(re.status === (url.startsWith('https:') ? 200 : 400), `re-anchor ${url}: ${re.status}`);
     }
+  });
+
+  // Share on a space is the doc's Share (Julie, 2026-10-30: "feedback spaces
+  // are just like docs"): the page carries the same owner-only manage data a
+  // doc page does, and moving into a team is the doc move, with its rules.
+  const HOME = { Origin: 'https://tdoc.dev' };
+  const call = async (env, p, opts) => {
+    const r = await worker.fetch(req(p, opts), env, {});
+    let body = null; try { body = await r.json(); } catch {}
+    return { status: r.status, body };
+  };
+  const spaceBoot = async (env, cookie, slug) => bootData(await (await worker.fetch(req(`/d/${slug}`, { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+
+  await t('the space page carries Share: owner manage data for the owner, a copy link for everyone else', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'julie');
+    const { body: space } = await connect(env, owner.cookie);
+    const own = await spaceBoot(env, owner.cookie, space.slug);
+    assert(own.page === 'feedback-space' && own.isOwner === true, `owner boot ${JSON.stringify(own)}`);
+    assert(own.shareUrl === `https://tdoc.dev/d/${space.slug}`, `copy link ${own.shareUrl}`);
+    assert(own.ownerManage && own.ownerManage.access.visibility === 'unlisted', `ownerManage ${JSON.stringify(own.ownerManage)}`);
+    assert(own.workspaceId === null && own.teamManage === null, 'a personal space names no team');
+    const can = await issue(worker, env, 'can');
+    const theirs = await spaceBoot(env, can.cookie, space.slug);
+    assert(theirs.isOwner === false && theirs.ownerManage === null, `non-owner got manage data ${JSON.stringify(theirs.ownerManage)}`);
+    const anon = bootData(await (await worker.fetch(req(`/d/${space.slug}`), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(anon.ownerManage === null && anon.teamManage === null, 'anonymous got manage data');
+    const src = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-space.jsx'), 'utf8');
+    assert(src.includes('<OwnerAccessDialog') && src.includes('<ShareDialog') && src.includes('<MoveToTeamDialog'), 'space Share is not the doc Share dialog and move picker');
+    assert(src.includes('moveDocsToTeam([slug], target.id)'), 'space move is not the doc move');
+    const widget = fs.readFileSync(path.join(ROOT, 'feedback/src/main.jsx'), 'utf8');
+    assert(/className="tdoc-fb-share" href=\{shareUrl\}/.test(widget), 'the widget lost its Share entry');
+  });
+
+  await t('moving a space into a team: only its owner, only into a team they belong to; admins then manage it', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'julie');
+    const can = await issue(worker, env, 'can');
+    const mate = await issue(worker, env, 'mate');
+    const { body: space } = await connect(env, owner.cookie);
+    const acme = (await call(env, '/api/teams', { method: 'POST', cookie: owner.cookie, headers: HOME, body: { name: 'Acme', invites: ['mate'] } })).body.team;
+    assert(acme && acme.id, 'team');
+    assert((await call(env, '/api/team/accept-invite', { method: 'POST', cookie: mate.cookie, headers: HOME, body: { id: acme.id } })).status === 200, 'mate joins');
+    const other = (await call(env, '/api/teams', { method: 'POST', cookie: can.cookie, headers: HOME, body: { name: 'Elsewhere' } })).body.team;
+    // A commenter who joined the space does not own it.
+    await worker.fetch(joinReq(can.cookie, space.slug), env, {});
+    const notOwner = await call(env, '/api/team/move', { method: 'POST', cookie: can.cookie, headers: HOME, body: { slugs: [space.slug], team: other.id } });
+    assert(notOwner.status === 403 && notOwner.body.error === 'not_owner', `non-owner move ${notOwner.status} ${JSON.stringify(notOwner.body)}`);
+    // The owner cannot put it in a team they are not in.
+    const notMember = await call(env, '/api/team/move', { method: 'POST', cookie: owner.cookie, headers: HOME, body: { slugs: [space.slug], team: other.id } });
+    assert(notMember.status === 404 && notMember.body.error === 'team_not_found', `non-member move ${notMember.status} ${JSON.stringify(notMember.body)}`);
+    let meta = JSON.parse(await env.META.get(`meta:${space.slug}`));
+    assert(!meta.workspace_id, 'a refused move changed the space');
+    const moved = await call(env, '/api/team/move', { method: 'POST', cookie: owner.cookie, headers: HOME, body: { slugs: [space.slug], team: acme.id } });
+    assert(moved.status === 200, `owner move ${moved.status} ${JSON.stringify(moved.body)}`);
+    meta = JSON.parse(await env.META.get(`meta:${space.slug}`));
+    assert(meta.workspace_id === acme.id && meta.access.team === true && meta.created_from === 'feedback', `moved meta ${JSON.stringify(meta)}`);
+    // The team's admin manages it on its page, a member sees the team and no manage data.
+    const own = await spaceBoot(env, owner.cookie, space.slug);
+    assert(own.isOwner === true && own.workspaceId === acme.id && own.teamManage && own.teamManage.canManage === true && own.teamManage.team.name === 'Acme', `admin boot ${JSON.stringify(own.teamManage)}`);
+    const member = await spaceBoot(env, mate.cookie, space.slug);
+    assert(member.isOwner === false && member.ownerManage === null && member.teamManage && member.teamManage.canManage === false, `member boot ${JSON.stringify(member.teamManage)}`);
+    // A member cannot move it back out, nor bind it to a site.
+    const out = await call(env, '/api/team/move', { method: 'POST', cookie: mate.cookie, headers: HOME, body: { slugs: [space.slug], team: null } });
+    assert(out.status === 403 && out.body.error === 'not_owner', `member move-out ${out.status}`);
+    const bind = await call(env, '/api/feedback/site', { method: 'POST', cookie: mate.cookie, headers: HOME, body: { slug: space.slug, origins: [APP] } });
+    assert(bind.status === 403, `member bound the site ${bind.status}`);
+    const adminBind = await call(env, '/api/feedback/site', { method: 'POST', cookie: owner.cookie, headers: HOME, body: { slug: space.slug, origins: [APP] } });
+    assert(adminBind.status === 200 && adminBind.body.snippet.includes(`data-tdoc-space="${space.slug}"`), `admin bind ${adminBind.status}`);
+    // Still the owner's space for this app, and still on their Feedback tab.
+    const again = await connect(env, owner.cookie);
+    assert(again.body.slug === space.slug && again.body.is_owner === true, 'the owner lost their space after the move');
+    const me = await (await worker.fetch(req('/api/me', { cookie: owner.cookie }), env, {})).json();
+    const row = (me.feedback || []).find((x) => x.slug === space.slug);
+    assert(row && row.mine === true && row.workspace_id === acme.id, `feedback row ${JSON.stringify(me.feedback)}`);
+  });
+
+  await t('site mode on a personal space offers the move to a team first, with one click to stay personal', async () => {
+    const hub = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub.jsx'), 'utf8');
+    assert(/if \(!space\.site && !space\.workspace_id && adminTeams\.length\) setTeamFirst/.test(hub), 'no team-first prompt before site mode');
+    assert(hub.includes("(teams || []).filter((team) => team.role === 'admin')"), 'the prompt offers teams the person does not admin');
+    assert(hub.includes('skipLabel="Keep it personal"') && hub.includes('moveDocsToTeam([space.slug], team.id)'), 'no stay-personal choice, or not the doc move');
   });
 
   await t('/feedback is an app page under the shared top bar: no hand-rolled bar, the real avatar', async () => {

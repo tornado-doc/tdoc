@@ -233,6 +233,49 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       }
     });
 
+    // Share is in the dock for everyone, on a phone too: it opens the
+    // space's page on tdoc with the doc Share dialog open (?share=1), where
+    // people are invited and the owner moves the space into a team.
+    await test('the dock has Share: it opens the space page with Share open, and fits at 390, 430 and 1440', async () => {
+      for (const width of [390, 430, 1440]) {
+        const host = await context.newPage();
+        try {
+          await host.setViewportSize({ width, height: 800 });
+          await host.route('**/api/feedback/session', async (route) => {
+            const response = await route.fetch();
+            const body = await response.json();
+            await route.fulfill({ response, contentType: 'application/json', body: JSON.stringify({ ...body, share_url: `${tdocBase}/d/${body.slug}?share=1` }) });
+          });
+          await host.goto(`${appBase}/dashboard`);
+          await host.addScriptTag({ url: `${tdocBase}/feedback.js` });
+          await host.waitForFunction(() => Boolean(window.tdocFeedback));
+          await host.evaluate(() => window.tdocFeedback.open());
+          // The list opens first when there are comments; on a phone it
+          // covers the dock until it is closed.
+          const closeList = host.locator('#tdoc-feedback-root .tdoc-fb-panel button[aria-label="Close list"]');
+          await closeList.waitFor({ timeout: 3000 }).catch(() => {});
+          if (await closeList.count()) await closeList.click();
+          await host.locator('#tdoc-feedback-root .tdoc-fb-panel').waitFor({ state: 'detached', timeout: 5000 });
+          const share = host.locator('#tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share');
+          await share.waitFor({ timeout: 5000 });
+          assert((await share.getAttribute('aria-label')) === 'Share', 'Share is not named');
+          // The word shows on a desktop; a phone has the icon, as Send to agent.
+          assert((await share.innerText()).trim() === (width > 700 ? 'Share' : ''), `label at ${width}: ${await share.innerText()}`);
+          assert(/^Invite people/.test(await share.getAttribute('title')), 'Share does not say it invites');
+          const slug = await host.evaluate((key) => JSON.parse(localStorage.getItem(key)).slug, `tdoc-feedback:${tdocBase}`);
+          assert((await share.getAttribute('href')) === `${tdocBase}/d/${slug}?share=1`, `href ${await share.getAttribute('href')}`);
+          assert((await share.getAttribute('target')) === '_blank', 'Share navigates the app away');
+          const dock = await share.evaluate((el) => { const r = el.closest('.tdoc-feedback-dock').getBoundingClientRect(); return { x: r.x, width: r.width }; });
+          assert(dock && dock.x >= 0 && dock.x + dock.width <= width, `dock off screen at ${width}: ${JSON.stringify(dock)}`);
+          const box = await share.boundingBox();
+          assert(box && box.x >= 0 && box.x + box.width <= width, `Share off screen at ${width}: ${JSON.stringify(box)}`);
+          if (process.env.TDOC_UI_SHOTS) await host.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, `widget-dock-${width}.png`) });
+        } finally {
+          await host.close();
+        }
+      }
+    });
+
     await test('browsing leaves the app clickable; only + Comment takes over clicks', async () => {
       await page.evaluate(() => { window.__clicked = 0; document.getElementById('invite').addEventListener('click', () => { window.__clicked += 1; }); });
       await page.locator('#invite').click();
@@ -1055,6 +1098,9 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await host.waitForFunction(() => Boolean(window.tdocFeedback));
         await host.evaluate(() => window.tdocFeedback.open());
         const panel = host.locator('#tdoc-feedback-root .tdoc-fb-panel');
+        // open() loads first and opens the list itself when there are
+        // comments; only click the dock if it did not.
+        await panel.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
         if (!(await panel.isVisible())) await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
         await panel.waitFor({ state: 'visible' });
         await panel.getByRole('button', { name: 'All', exact: true }).click();

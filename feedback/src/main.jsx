@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MessageSquarePlus, MessagesSquare, Plus, Link2, ExternalLink, X, Send, RefreshCw } from 'lucide-react';
+import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw } from 'lucide-react';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentThreadList } from '../../shell/src/document/comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from '../../shell/src/document/comment-pin.jsx';
@@ -74,7 +74,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-feedback-dock a:hover,
     #tdoc-feedback-root .tdoc-feedback-dock .on { background: #f0f0ee; }
     #tdoc-feedback-root .tdoc-feedback-dock .icon, #tdoc-feedback-root .tdoc-feedback-dock a { padding: 7px; color: #6b6a66; }
-    #tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share { padding: 7px 11px; color: #1a1a1a; }
+    #tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share { color: #1a1a1a; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary { background: #1652f0; color: #fff; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary:hover,
     #tdoc-feedback-root .tdoc-feedback-dock button.primary.on { background: #1245d0; color: #fff; }
@@ -157,9 +157,10 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-send-badge { position: absolute; top: 0; right: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px; background: #1652f0; color: #fff; font: 700 9.5px/15px system-ui, sans-serif; text-align: center; }
     /* Named like the feedback page's "Send to agent (2)" where there is room;
        a phone keeps the icon and its corner count. */
-    #tdoc-feedback-root .tdoc-fb-send-label { display: none; }
+    #tdoc-feedback-root .tdoc-fb-send-label, #tdoc-feedback-root .tdoc-fb-share-label { display: none; }
     @media (min-width: 701px) {
-      #tdoc-feedback-root .tdoc-fb-send-label { display: inline; }
+      #tdoc-feedback-root .tdoc-fb-send-label, #tdoc-feedback-root .tdoc-fb-share-label { display: inline; }
+      #tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share { padding: 7px 11px; }
       #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send { padding: 7px 11px; color: #1a1a1a; }
       #tdoc-feedback-root .tdoc-fb-send-badge { position: static; }
     }
@@ -687,8 +688,11 @@ ${uiCss}
   };
 
   function Dock({ session, openCount, unreadCount = 0, panelOpen, picking, onList, onPick, onHide, sendCount, onSend }) {
-    // Share is the space doc's own Share dialog, as on any doc: who can
-    // comment here is whoever it lets in.
+    // Share opens the space's page on tdoc with the doc Share dialog open,
+    // as on any doc: who can comment here is whoever it lets in, and the
+    // owner moves the space into a team from there. The dialog is not drawn
+    // here: this page holds a token for comments on one doc, never one that
+    // may change who has access.
     const shareUrl = session && session.share_url;
     return (
       <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && innerWidth > 700 ? { right: PANEL_WIDTH + 18 } : null}>
@@ -707,8 +711,10 @@ ${uiCss}
           </button>
         ) : null}
         {shareUrl ? (
-          <a className="tdoc-fb-share" href={shareUrl} target="_blank" rel="noopener noreferrer" title="Choose who can see and comment, like any tdoc doc">
-            <Link2 aria-hidden="true" /> Share
+          // On a phone the dock is icons with counts (as Send to agent):
+          // the word does not fit beside them at 390px.
+          <a className="tdoc-fb-share" href={shareUrl} target="_blank" rel="noopener noreferrer" title="Invite people, or move this space into a team" aria-label="Share">
+            <Share2 aria-hidden="true" /><span className="tdoc-fb-share-label">Share</span>
           </a>
         ) : null}
         {session && session.doc_url ? (
