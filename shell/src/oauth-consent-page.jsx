@@ -110,15 +110,16 @@ export function OAuthConsentPage({ boot }) {
                   {picked.length ? null : <p className="tdoc-activate-hint">Tick at least one workspace.</p>}
                 </div>
               ) : null}
-              <div className="tdoc-oauth-actions">
-                <AppButton variant="primary" disabled={busy || (choosing && !picked.length)} onClick={() => decide('allow')}>Allow</AppButton>
-                <AppButton disabled={busy} onClick={() => decide('deny')}>Cancel</AppButton>
-              </div>
+              {/* One button: Allow. Cancel is a word in the line under it, still
+                  sent to the app as access_denied so it stops waiting. */}
+              <AppButton variant="primary" disabled={busy || (choosing && !picked.length)} onClick={() => decide('allow')}>Allow</AppButton>
               <p className="tdoc-activate-hint tdoc-oauth-return">
                 {client.verified_host
                   ? <>Published by <b>{client.verified_host}</b>. </>
                   : <>“{client.name}” is the name the app gave itself; tdoc has not checked it. </>}
-                If you did not start this from <b>{client.redirect_host}</b>, cancel. You can disconnect it later in Settings → Agents.
+                If you did not start this from <b>{client.redirect_host}</b>,{' '}
+                <button type="button" className="tdoc-consent-cancel" disabled={busy} onClick={() => decide('deny')}>cancel</button>.
+                {' '}You can disconnect it later in Settings → Agents.
               </p>
             </>
           )}
