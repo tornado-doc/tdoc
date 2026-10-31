@@ -155,14 +155,71 @@ const ROBOTS_TXT = `# tdoc.dev: agents and crawlers are welcome. Start at https:
 User-agent: *
 Allow: /
 Disallow: /api/auth/
+Content-Signal: search=yes, ai-input=yes, ai-train=no
 `;
 
+// AI training crawlers. Search engines and the fetchers that answer a
+// person's question (Googlebot, Bingbot, OAI-SearchBot, ChatGPT-User,
+// Claude-SearchBot, Claude-User, Perplexity-User, ...) are not here: they
+// read the `*` group above. These read only their own group, which lets them
+// fetch tdoc's own site pages and official guides and nothing else, so no
+// user's document, profile, team page or API is used for training.
+// Each token is matched by the crawler, case-insensitively.
+const AI_TRAINING_CRAWLERS = [
+  'GPTBot', 'ClaudeBot', 'anthropic-ai', 'Claude-Web',
+  'Google-Extended', 'Applebot-Extended', 'CCBot',
+  'meta-externalagent', 'FacebookBot', 'Amazonbot', 'Bytespider',
+  'PerplexityBot', 'cohere-ai', 'cohere-training-data-crawler',
+  'MistralAI-Training', 'Diffbot', 'omgili', 'AI2Bot', 'Ai2Bot-Dolma',
+  'Timpibot', 'Webzio-Extended', 'PanguBot', 'KimiBot', 'img2dataset',
+];
+
+// tdoc's own pages that training crawlers may read: exact paths only
+// (`$`), so /pricing does not open /pricing-anything. `/$` is the homepage
+// alone; `Allow: /` would open the whole site.
+const AI_TRAINING_SITE_PATHS = [
+  '/', '/start', '/templates', '/pricing', '/privacy', '/terms', '/feedback',
+  '/llms.txt', '/.well-known/llms.txt', '/llms-full.txt', '/SKILL.md', '/sitemap.xml',
+];
+
+// Official guide docs, written and owned by tdoc's own account and linked
+// from the homepage, /templates, /llms.txt or /start. The site-page docs
+// (SITE_PATHS: tornado-doc, tdoc-start, tdoc-pricing, ...) are added to these
+// in robotsTxt(), so a new site page is covered without editing this list.
+// Add a slug here only for a doc tdoc itself owns: every other /d/ doc is a
+// user's and stays closed to training.
+const OFFICIAL_GUIDE_SLUGS = [
+  'connect-chatgpt',     // "Connect tdoc to ChatGPT", linked from the homepage
+  'd-hctqbnme',          // product feedback doc, linked from /llms.txt
+  'tdoc-sys-default',    // template examples, linked from /templates
+  'tdoc-sys-technical',
+  'tdoc-sys-editorial',
+  'tdoc-sys-paper',
+];
+
+// One group for every training crawler: an Allow per official path (longer
+// than `/`, so it wins under longest-match), then `Disallow: /`. A doc is
+// opened as /d/<slug> exactly and everything under /d/<slug>/ (versions, raw,
+// widgets), never /d/<slug>-other, which could be a user's doc.
+function aiTrainingRobotsGroup() {
+  const slugs = [...new Set([...Object.keys(SITE_PATHS), ...OFFICIAL_GUIDE_SLUGS])];
+  return [
+    '# AI training crawlers: tdoc\'s own pages and official guides only. Users\'',
+    '# documents, profiles (/@...), team pages (/t/...) and the API are not for training.',
+    ...AI_TRAINING_CRAWLERS.map((ua) => `User-agent: ${ua}`),
+    'Content-Signal: search=yes, ai-input=yes, ai-train=yes',
+    ...AI_TRAINING_SITE_PATHS.map((path) => `Allow: ${path}$`),
+    ...slugs.flatMap((slug) => [`Allow: /d/${slug}$`, `Allow: /d/${slug}/`]),
+    'Disallow: /',
+    '',
+  ].join('\n');
+}
 
 // The Sitemap line points at this host's own sitemap. Appended after the
 // rules above, which it does not change (a Sitemap line belongs to no
 // User-agent group).
 function robotsTxt(origin) {
-  return `${ROBOTS_TXT}\nSitemap: ${origin}/sitemap.xml\n`;
+  return `${ROBOTS_TXT}\n${aiTrainingRobotsGroup()}\nSitemap: ${origin}/sitemap.xml\n`;
 }
 
 const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";

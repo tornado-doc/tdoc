@@ -28,6 +28,44 @@ async function seed(env, slug, { owner = null, access = PUBLIC, extra = {}, titl
   for (const n of [1, 2]) await env.DOCS.put(`docs/${slug}/v${n}/index.html`, html || `<h1>${title}</h1><p>Body of ${slug}.</p>`);
 }
 
+// RFC 9309 robots.txt, as a crawler reads it: the group naming this crawler
+// (case-insensitive), else `*`; the longest matching rule wins, Allow on a tie;
+// `*` is any run of characters and a trailing `$` anchors the end.
+function robotsGroups(text) {
+  const groups = [];
+  let cur = null, inAgents = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/#.*/, '').trim();
+    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1].toLowerCase(), val = m[2].trim();
+    if (key === 'user-agent') {
+      if (!inAgents) { cur = { agents: [], rules: [] }; groups.push(cur); inAgents = true; }
+      cur.agents.push(val.toLowerCase());
+    } else if (key === 'allow' || key === 'disallow') {
+      inAgents = false;
+      if (cur && val) cur.rules.push({ allow: key === 'allow', path: val });
+    } else if (key !== 'sitemap') inAgents = false;
+  }
+  return groups;
+}
+function robotsGroup(text, ua) {
+  const groups = robotsGroups(text);
+  const own = groups.filter((g) => g.agents.includes(ua.toLowerCase()));
+  const use = own.length ? own : groups.filter((g) => g.agents.includes('*'));
+  return use.flatMap((g) => g.rules);
+}
+function robotsAllows(text, ua, path) {
+  let best = null;
+  for (const r of robotsGroup(text, ua)) {
+    const anchored = r.path.endsWith('$');
+    const pat = (anchored ? r.path.slice(0, -1) : r.path).split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+    if (!new RegExp(`^${pat}${anchored ? '$' : ''}`).test(path)) continue;
+    if (!best || r.path.length > best.path.length || (r.path.length === best.path.length && r.allow)) best = r;
+  }
+  return !best || best.allow;
+}
+
 function ldBlocks(page) {
   const out = [];
   const re = /<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g;
@@ -167,12 +205,31 @@ function ldBlocks(page) {
     assert(env.META.gets.includes('meta:alice-public'), 'Public doc not re-checked against its record');
   });
 
-  await t('robots.txt adds the Sitemap line and keeps every rule', async () => {
+  await t('robots.txt adds the Sitemap line and keeps every rule for search', async () => {
     const { status, text } = await call('/robots.txt');
     assert(status === 200, `status ${status}`);
     assert(text.includes('\nSitemap: https://tdoc.dev/sitemap.xml\n'), text);
-    assert(text.includes('User-agent: *\nAllow: /\nDisallow: /api/auth/\n'), 'rules changed');
-    assert((text.match(/^(User-agent|Allow|Disallow):/gm) || []).length === 3, 'a rule was added or removed');
+    assert(text.includes('User-agent: *\nAllow: /\nDisallow: /api/auth/\nContent-Signal: search=yes, ai-input=yes, ai-train=no\n'), 'rules changed');
+    const star = robotsGroup(text, 'Googlebot');
+    assert(star.length === 2 && star[0].allow && star[0].path === '/' && !star[1].allow && star[1].path === '/api/auth/', `* group changed: ${JSON.stringify(star)}`);
+  });
+
+  await t('robots.txt: AI training crawlers read tdoc pages and official guides only', async () => {
+    const { text } = await call('/robots.txt');
+    const official = ['/', '/pricing', '/templates', '/start', '/privacy', '/terms', '/feedback', '/llms.txt', '/llms-full.txt', '/SKILL.md', '/sitemap.xml',
+      '/d/connect-chatgpt', '/d/connect-chatgpt/v/3', '/d/connect-chatgpt/raw', '/d/tornado-doc/v/46/widget/x', '/d/tdoc-pricing', '/d/tdoc-sys-default/v/1', '/d/d-hctqbnme'];
+    const userContent = ['/d/alice-public', '/d/alice-public/raw', '/d/connect-chatgpt-copy', '/d/tdoc-pricingx', '/@julie', '/@alice-writes', '/t/team-x', '/api/comments?slug=connect-chatgpt',
+      '/me', '/pricing-x', '/?notice=x', '/feedback/connect', '/SKILL.md.bak'];
+    for (const ua of ['GPTBot', 'ClaudeBot', 'anthropic-ai', 'Google-Extended', 'Applebot-Extended', 'CCBot', 'meta-externalagent', 'Amazonbot', 'Bytespider', 'PerplexityBot']) {
+      for (const p of official) assert(robotsAllows(text, ua, p), `${ua} cannot fetch ${p}`);
+      for (const p of userContent) assert(!robotsAllows(text, ua, p), `${ua} may fetch ${p}`);
+    }
+    for (const ua of ['Googlebot', 'Bingbot', 'OAI-SearchBot', 'ChatGPT-User', 'Claude-SearchBot', 'Claude-User', 'Perplexity-User']) {
+      for (const p of [...official, '/d/alice-public', '/@julie', '/t/team-x']) assert(robotsAllows(text, ua, p), `${ua} cannot fetch ${p}`);
+      assert(!robotsAllows(text, ua, '/api/auth/x'), `${ua} may fetch /api/auth/`);
+    }
+    const signals = text.match(/^Content-Signal: .*$/gm) || [];
+    assert(signals.length === 2 && signals[1] === 'Content-Signal: search=yes, ai-input=yes, ai-train=yes', signals.join(' | '));
   });
 
   // Profiles: alice pins everything; only Public docs may appear.
