@@ -277,7 +277,7 @@ async function startServer(worker, env) {
         await page.getByRole('heading', { name: 'Gemini CLI wants to use your tdoc' }).waitFor();
         assert((await page.locator('.tdoc-consent-from').innerText()) === 'from 127.0.0.1:55905', 'address shown as is');
         assert((await page.locator('.tdoc-consent-initial').innerText()) === 'G', 'neutral initial, not a brand mark');
-        assert((await page.locator('.tdoc-consent-can li').count()) === 3, 'what it can do');
+        assert((await page.locator('.tdoc-consent-can li').count()) === 1, 'what it can do, in one line');
         const card = await page.locator('.tdoc-consent-card').boundingBox();
         assert(card && card.x >= 0 && card.x + card.width <= width + 1, `card fits at ${label}: ${JSON.stringify(card)}`);
         const btn = await page.getByRole('button', { name: 'Sign in to continue' }).boundingBox();
@@ -296,8 +296,8 @@ async function startServer(worker, env) {
         await context.route('https://claude.ai/**', (route) => { landed = route.request().url(); route.fulfill({ status: 200, body: 'ok' }); });
         await page.goto(`${base}/oauth/authorize?${q}`);
         await page.getByRole('heading', { name: 'Claude wants to use your tdoc' }).waitFor();
-        assert((await page.locator('.tdoc-consent-from').innerText()) === 'from claude.ai', 'return host named');
-        assert(/claude\.ai/.test(await page.locator('.tdoc-oauth-return').innerText()), 'cancel line names the return host');
+        assert((await page.locator('.tdoc-consent-from').innerText()) === 'from claude.ai · as julie', 'return host and account in one line');
+        assert((await page.locator('.tdoc-oauth-return').innerText()) === "Didn't start this? Cancel", 'one short cancel line');
         assert((await page.locator('.tdoc-consent-card .ui-btn').count()) === 1, 'signed in with one workspace: Allow is the only button');
         assert((await page.locator('.tdoc-activate-workspaces').count()) === 0, 'no workspace ticks for one workspace');
         await shot(page, `${label}-consent`);
@@ -308,14 +308,14 @@ async function startServer(worker, env) {
         await context.close();
       });
 
-      await t(`${label}: the cancel word in the consent line tells the app access_denied`, async () => {
+      await t(`${label}: Cancel in the consent line tells the app access_denied`, async () => {
         const client = (await call('/oauth/register', { method: 'POST', body: { client_name: 'Claude', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'], token_endpoint_auth_method: 'none' } })).body;
         const q = new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: 'x'.repeat(43), code_challenge_method: 'S256', state: 'no', scope: 'mcp' });
         const { context, page } = await open(width, height, {});
         let landed = '';
         await context.route('https://claude.ai/**', (route) => { landed = route.request().url(); route.fulfill({ status: 200, body: 'ok' }); });
         await page.goto(`${base}/oauth/authorize?${q}`);
-        await page.getByRole('button', { name: 'cancel', exact: true }).click();
+        await page.getByRole('button', { name: 'Cancel', exact: true }).click();
         await page.waitForURL((u) => u.hostname === 'claude.ai');
         const u = new URL(landed);
         assert(u.searchParams.get('error') === 'access_denied' && u.searchParams.get('state') === 'no', landed);

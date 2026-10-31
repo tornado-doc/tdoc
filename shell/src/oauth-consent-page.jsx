@@ -79,14 +79,15 @@ export function OAuthConsentPage({ boot }) {
             <img src="/tdoc_logo.svg" width="28" height="28" alt="" />
           </div>
           <h1>{name} wants to use your tdoc</h1>
-          {client.redirect_host ? (
-            <p className="tdoc-consent-from">from <code>{client.redirect_host}</code></p>
+          {client.redirect_host || identity ? (
+            <p className="tdoc-consent-from">
+              {client.redirect_host ? <>from <code>{client.redirect_host}</code></> : null}
+              {client.redirect_host && identity ? ' · ' : null}
+              {identity ? <>as <b>{who}</b></> : null}
+            </p>
           ) : null}
-          {identity ? <p className="tdoc-consent-as">as <b>{who}</b></p> : null}
           <ul className="tdoc-consent-can" aria-label="It will be able to">
-            <li>Read, create and edit your docs</li>
-            <li>Reply to comments</li>
-            <li>Change sharing</li>
+            <li>Read, edit and share your docs</li>
           </ul>
           {!identity ? (
             boot.oidcAuth || boot.authConfigured ? (
@@ -111,15 +112,12 @@ export function OAuthConsentPage({ boot }) {
                 </div>
               ) : null}
               {/* One button: Allow. Cancel is a word in the line under it, still
-                  sent to the app as access_denied so it stops waiting. */}
+                  sent to the app as access_denied so it stops waiting. The
+                  name is unchecked, so the address above is what to trust. */}
               <AppButton variant="primary" disabled={busy || (choosing && !picked.length)} onClick={() => decide('allow')}>Allow</AppButton>
               <p className="tdoc-activate-hint tdoc-oauth-return">
-                {client.verified_host
-                  ? <>Published by <b>{client.verified_host}</b>. </>
-                  : <>“{client.name}” is the name the app gave itself; tdoc has not checked it. </>}
-                If you did not start this from <b>{client.redirect_host}</b>,{' '}
-                <button type="button" className="tdoc-consent-cancel" disabled={busy} onClick={() => decide('deny')}>cancel</button>.
-                {' '}You can disconnect it later in Settings → Agents.
+                Didn't start this?{' '}
+                <button type="button" className="tdoc-consent-cancel" disabled={busy} onClick={() => decide('deny')}>Cancel</button>
               </p>
             </>
           )}
