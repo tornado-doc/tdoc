@@ -60,13 +60,13 @@ Do this when the user pastes this link or asks you to set up tdoc. Stop at the f
 2. **Bash on the user's own computer** (Claude Code, Codex): follow ${TDOC_ONBOARDING_URL} end to end. It installs the local plugin, signs in, runs the doctor and makes the first document. Then go to step 6.
 3. **No Bash on the user's computer:** work out which app you are in and give the user one of these.
    - claude.ai, Claude Desktop or Cowork (it then reaches Claude Code too): Customize > Plugins > Add > Add marketplace > \`tornado-doc/tdoc\`, install **tdoc Cloud** (not "tdoc", which needs a terminal), then Connect tdoc on its Connectors tab. No "Add marketplace"? Add the connector alone: ${MCP_CLAUDE_CONNECTOR_LINK}
-   - ChatGPT (paid plans, on the web): Plugins (https://chatgpt.com/plugins) > + > Add custom MCP server, URL \`https://tdoc.dev/mcp\`, and sign in. The tools do not reach this chat: tell the user to start a new chat, pick tdoc from +, and say "use tdoc to write my first doc" (every new chat needs tdoc picked). Do not ask for "done" here.
+   - ChatGPT (paid plans, on the web): Plugins (https://chatgpt.com/plugins) > + > Add custom MCP server, URL \`https://tdoc.dev/mcp\`, and sign in. The tools never reach the chat they were added from, so end your reply with exactly: "Then open a new chat, pick tdoc from +, and say: use tdoc to write my first doc." (every new chat needs tdoc picked).
    - Cursor: ${MCP_CURSOR_INSTALL_LINK}
    - VS Code: \`code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'\`
    - Gemini CLI: \`git clone --depth 1 https://github.com/tornado-doc/tdoc && gemini extensions install ./tdoc/plugins/gemini\`
    - A bot or service the user runs: https://tdoc.dev/me?view=settings#agents
    - Anything else: steps for each app are at https://tdoc.dev/llms.txt
-   For the other apps, ask the user to reply "done".
+   Except in ChatGPT, ask the user to reply "done".
 4. **Installed but no tdoc tools yet?** Ask the user to open Connectors (\`/mcp\` in Claude Code) and click Connect on tdoc.
 5. **First document:** call \`get_writing_guide\`, write a one-screen document saying hello from your app, publish it, and give the user the link.
 6. **Comments back to you (ask once):** on the user's own computer, offer \`bin/tdoc-daemon install\` so comments sent with "Send to agent" reach you. A bot with an HTTPS endpoint can get them as webhooks from the page in step 3. Otherwise tell the user: "When people comment, come back and ask me to revise from the tdoc comments."

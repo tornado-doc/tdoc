@@ -150,7 +150,7 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
       assert(steps.includes(s), `setup steps lack ${s}`);
     }
     const chatgpt = steps.split('\n').find((l) => l.includes('- ChatGPT'));
-    assert(chatgpt && chatgpt.includes('new chat') && chatgpt.includes('write my first doc') && chatgpt.includes('Do not ask for "done"'),
+    assert(chatgpt && chatgpt.includes('open a new chat, pick tdoc from +') && chatgpt.includes('write my first doc') && steps.includes('Except in ChatGPT, ask the user to reply "done"'),
       `ChatGPT step must send the user to a new chat, not ask for "done": ${chatgpt}`);
     assert(/^name: tdoc$/m.test(a) && /description: Set up tdoc/.test(a), 'frontmatter names setup');
   });
