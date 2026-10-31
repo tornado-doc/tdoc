@@ -155,7 +155,7 @@ const ROBOTS_TXT = `# tdoc.dev: agents and crawlers are welcome. Start at https:
 User-agent: *
 Allow: /
 Disallow: /api/auth/
-Content-Signal: search=yes, ai-input=yes, ai-train=no
+Content-Signal: search=yes, ai-train=no
 `;
 
 // AI training crawlers. Search engines and the fetchers that answer a
@@ -169,7 +169,7 @@ const AI_TRAINING_CRAWLERS = [
   'GPTBot', 'ClaudeBot', 'anthropic-ai', 'Claude-Web',
   'Google-Extended', 'Applebot-Extended', 'CCBot',
   'meta-externalagent', 'FacebookBot', 'Amazonbot', 'Bytespider',
-  'PerplexityBot', 'cohere-ai', 'cohere-training-data-crawler',
+  'cohere-ai', 'cohere-training-data-crawler',
   'MistralAI-Training', 'Diffbot', 'omgili', 'AI2Bot', 'Ai2Bot-Dolma',
   'Timpibot', 'Webzio-Extended', 'PanguBot', 'KimiBot', 'img2dataset',
 ];

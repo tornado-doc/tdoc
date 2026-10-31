@@ -209,7 +209,7 @@ function ldBlocks(page) {
     const { status, text } = await call('/robots.txt');
     assert(status === 200, `status ${status}`);
     assert(text.includes('\nSitemap: https://tdoc.dev/sitemap.xml\n'), text);
-    assert(text.includes('User-agent: *\nAllow: /\nDisallow: /api/auth/\nContent-Signal: search=yes, ai-input=yes, ai-train=no\n'), 'rules changed');
+    assert(text.includes('User-agent: *\nAllow: /\nDisallow: /api/auth/\nContent-Signal: search=yes, ai-train=no\n'), 'rules changed');
     const star = robotsGroup(text, 'Googlebot');
     assert(star.length === 2 && star[0].allow && star[0].path === '/' && !star[1].allow && star[1].path === '/api/auth/', `* group changed: ${JSON.stringify(star)}`);
   });
@@ -220,11 +220,11 @@ function ldBlocks(page) {
       '/d/connect-chatgpt', '/d/connect-chatgpt/v/3', '/d/connect-chatgpt/raw', '/d/tornado-doc/v/46/widget/x', '/d/tdoc-pricing', '/d/tdoc-sys-default/v/1', '/d/d-hctqbnme'];
     const userContent = ['/d/alice-public', '/d/alice-public/raw', '/d/connect-chatgpt-copy', '/d/tdoc-pricingx', '/@julie', '/@alice-writes', '/t/team-x', '/api/comments?slug=connect-chatgpt',
       '/me', '/pricing-x', '/?notice=x', '/feedback/connect', '/SKILL.md.bak'];
-    for (const ua of ['GPTBot', 'ClaudeBot', 'anthropic-ai', 'Google-Extended', 'Applebot-Extended', 'CCBot', 'meta-externalagent', 'Amazonbot', 'Bytespider', 'PerplexityBot']) {
+    for (const ua of ['GPTBot', 'ClaudeBot', 'anthropic-ai', 'Google-Extended', 'Applebot-Extended', 'CCBot', 'meta-externalagent', 'Amazonbot', 'Bytespider']) {
       for (const p of official) assert(robotsAllows(text, ua, p), `${ua} cannot fetch ${p}`);
       for (const p of userContent) assert(!robotsAllows(text, ua, p), `${ua} may fetch ${p}`);
     }
-    for (const ua of ['Googlebot', 'Bingbot', 'OAI-SearchBot', 'ChatGPT-User', 'Claude-SearchBot', 'Claude-User', 'Perplexity-User']) {
+    for (const ua of ['Googlebot', 'Bingbot', 'OAI-SearchBot', 'ChatGPT-User', 'Claude-SearchBot', 'Claude-User', 'Perplexity-User', 'PerplexityBot']) {
       for (const p of [...official, '/d/alice-public', '/@julie', '/t/team-x']) assert(robotsAllows(text, ua, p), `${ua} cannot fetch ${p}`);
       assert(!robotsAllows(text, ua, '/api/auth/x'), `${ua} may fetch /api/auth/`);
     }
