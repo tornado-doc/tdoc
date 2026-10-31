@@ -87,37 +87,59 @@ function ldBlocks(page) {
     assert(!text.includes('/privacy') && !text.includes('/templates') && !text.includes('/start'), 'unpublished site page listed');
   });
 
-  await t('sharing changes re-stamp the index; the sitemap follows after its hour', async () => {
-    // Flip through the real API: the record and its index move together.
-    const flip = async (slug, visibility) => {
-      const r = await worker.fetch(req('/api/doc/access', { method: 'PATCH', cookie: alice.cookie, body: { slug, access: { visibility } } }), env, {});
-      assert(r.status === 200, `PATCH ${slug} ${r.status} ${await r.text()}`);
-    };
-    await flip('alice-link', 'public');
-    await flip('alice-public', 'unlisted');
-    assert(env.META.metadata.get('meta:alice-link').p === 1, 'public doc not stamped p=1');
-    assert(env.META.metadata.get('meta:alice-public').p === 0, 'unlisted doc not stamped p=0');
-    // Within the hour: the stored copy.
-    let text = (await call('/sitemap.xml')).text;
-    assert(text.includes('/d/alice-public') && !text.includes('/d/alice-link'), 'not served from the stored copy');
-    // Past the hour: rebuilt.
+  const flip = async (slug, visibility) => {
+    const r = await worker.fetch(req('/api/doc/access', { method: 'PATCH', cookie: alice.cookie, body: { slug, access: { visibility } } }), env, {});
+    assert(r.status === 200, `PATCH ${slug} ${r.status} ${await r.text()}`);
+  };
+  const expire = async () => {
     const stored = JSON.parse(env.META.map.get('sitemap:v1:tdoc.dev'));
     stored.built_at = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
     await env.META.put('sitemap:v1:tdoc.dev', JSON.stringify(stored));
-    text = (await call('/sitemap.xml')).text;
-    assert(text.includes('<loc>https://tdoc.dev/d/alice-link</loc>'), 'newly Public doc missing');
-    assert(!text.includes('alice-public'), 'doc made link-only still listed');
-    for (const slug of NEVER.filter((s) => s !== 'alice-link')) assert(!text.includes(slug), `${slug} leaked after rebuild`);
-    await flip('alice-link', 'unlisted');
-    await flip('alice-public', 'public');
+  };
+
+  await t('a doc made Public joins at the next hourly build; one leaving Public leaves at once', async () => {
+    try {
+      // Through the real API: the record and its index move together.
+      await flip('alice-link', 'public');
+      assert(env.META.metadata.get('meta:alice-link').p === 1, 'public doc not stamped p=1');
+      let text = (await call('/sitemap.xml')).text;
+      assert(!text.includes('/d/alice-link'), 'a new Public doc did not wait for the stored copy to age');
+      await expire();
+      text = (await call('/sitemap.xml')).text;
+      assert(text.includes('<loc>https://tdoc.dev/d/alice-link</loc>'), 'newly Public doc missing after the hour');
+      // Leaving Public voids the stored copy: gone on the next fetch.
+      await flip('alice-public', 'unlisted');
+      assert(env.META.metadata.get('meta:alice-public').p === 0, 'unlisted doc not stamped p=0');
+      assert(env.META.map.has('sitemap:delisted-at'), 'no de-listing stamp');
+      text = (await call('/sitemap.xml')).text;
+      assert(!text.includes('alice-public'), 'doc made link-only still listed within the hour');
+      for (const slug of NEVER.filter((x) => x !== 'alice-link')) assert(!text.includes(slug), `${slug} leaked after rebuild`);
+      // So does making it private.
+      await flip('alice-link', 'private');
+      text = (await call('/sitemap.xml')).text;
+      assert(!text.includes('alice-link'), 'doc made private still listed');
+    } finally {
+      await flip('alice-link', 'unlisted');
+      await flip('alice-public', 'public');
+      await expire();
+    }
+  });
+
+  await t('a carried entry is dropped as soon as its index disagrees, even without a re-read', async () => {
+    await call('/sitemap.xml');
+    // A record turned private behind the worker's back (no de-listing
+    // stamp) but with an index that says so: never listed on a stale verdict.
+    const raw = JSON.parse(env.META.map.get('meta:bob-public'));
+    await env.META.put('meta:bob-public', JSON.stringify({ ...raw, access: { ...PUBLIC, visibility: 'private' } }), { metadata: { v: 1, p: 0, u: C2 } });
+    await expire();
+    const text = (await call('/sitemap.xml', {})).text;
+    assert(!text.includes('bob-public'), 'carried over a doc whose index says not public');
+    await env.META.put('meta:bob-public', JSON.stringify(raw));
+    await expire();
   });
 
   await t('a legacy record found unlisted is read once, not on every build', async () => {
-    const expire = async () => {
-      const stored = JSON.parse(env.META.map.get('sitemap:v1:tdoc.dev'));
-      stored.built_at = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
-      await env.META.put('sitemap:v1:tdoc.dev', JSON.stringify(stored));
-    };
+    await call('/sitemap.xml');
     assert(JSON.parse(env.META.map.get('sitemap:v1:tdoc.dev')).unlisted.includes('alice-legacy'), 'legacy verdict not remembered');
     await expire();
     env.META.gets.length = 0;

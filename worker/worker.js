@@ -1052,6 +1052,8 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
     } while (kvCursor);
   }
   await env.META.delete(`meta:${slug}`);
+  // Deleted straight from Public (not via Trash, which already de-listed it).
+  if (idx && (idx.p === 1 || !('p' in idx)) && !idx.x) await markSitemapDelisted(env);
   await searchStoreOp(env, searchScopeFromIdx(idx), { kind: 'remove', slug }, { timeoutMs: SEARCH_WRITE_TIMEOUT_MS });
   // Free the hosted slug reservation so it can be republished. Data is already
   // gone; this goes after it. If COMMENTS is absent (Vercel) there was never a
@@ -3603,21 +3605,29 @@ async function readAgentStatus(env, slug) {
 // The site pages, then every doc its owner made Public (docPubliclyListed) --
 // never a link-only, private, team, feedback or trashed one. Built from one
 // KV list call per 1,000 docs: each meta key's index record carries `p`
-// (publicly listed), so only the docs that say so -- and records written
-// before `p` existed, which say nothing -- are read in full, and the full
-// record is what decides; the index can rule a doc out, never in. A record
-// that predates `p` and turns out not to be listed is remembered as such
-// (such a record has not been written since, or it would carry `p`), so it
-// is read once, not on every build; those still unread past
-// SITEMAP_READ_BUDGET wait for a later build, newest first.
+// (publicly listed, written in the same put as the record), so a doc whose
+// index says anything else is skipped unread. A doc is listed only when its
+// full record, read by this build or an earlier one, passed
+// docPubliclyListed AND its index still agrees:
+//   - p=1 and the same update stamp as when it was read: carried over;
+//     otherwise read now.
+//   - no `p` (a record not written since `p` shipped -- any write adds it):
+//     read once; the verdict either way is remembered, and stays true while
+//     the record stays unwritten.
+// Reads per build are capped (SITEMAP_READ_BUDGET), newest first; budget
+// left over re-reads the longest-carried entries, so every one is re-checked
+// in turn.
 //
-// Cost: one build an hour for the whole platform, kept in KV (one write an
-// hour), and the edge cache in front of it, so a crawler fetching the file
-// costs a cache read. A doc made private drops out at the next build; its
-// page answers noindex and a denial from that moment.
+// Freshness: one build an hour per host, stored in KV (one write), and the
+// edge cache in front for SITEMAP_EDGE_SECONDS. A write that takes a doc out
+// of Public stamps sitemap:delisted-at (putDocMetaJson), which voids every
+// stored build older than it, so the doc leaves the sitemap within the edge
+// window rather than the hour.
 const SITEMAP_TTL_SECONDS = 3600;
+const SITEMAP_EDGE_SECONDS = 300;
 const SITEMAP_READ_BUDGET = 400;
 const SITEMAP_MAX_URLS = 45000;
+const SITEMAP_DELISTED_KEY = 'sitemap:delisted-at';
 // One record per host the worker answers on, so tdoc.dev and a workers.dev
 // address never overwrite each other's copy.
 function sitemapKey(origin) {
@@ -3636,10 +3646,15 @@ function metaLastmod(meta) {
     || isoDate(versions[0] && versions[0].created) || isoDate(meta && meta.created);
 }
 
-// { entries: [{ loc, lastmod }], unlisted: [slug] } -- entries in order: site
-// pages, then docs newest first; `unlisted` the pre-`p` records found not
-// listed, this build's and the ones `known` already named.
-async function sitemapEntries(env, origin, { readBudget = SITEMAP_READ_BUDGET, unlisted = [] } = {}) {
+// A doc's record left Public (or may have): void every stored sitemap.
+async function markSitemapDelisted(env) {
+  try { await env.META.put(SITEMAP_DELISTED_KEY, new Date().toISOString()); } catch {}
+}
+
+// { entries, unlisted, verified } -- entries in order: site pages, then docs
+// newest first. `unlisted` and `verified` are the verdicts the next build
+// starts from (see above): `verified` maps slug -> { u, lastmod, at }.
+async function sitemapEntries(env, origin, { readBudget = SITEMAP_READ_BUDGET, unlisted = [], verified = {}, now = Date.now() } = {}) {
   const out = [];
   for (const [slug, path] of Object.entries(SITE_PATHS)) {
     const meta = await loadDocMeta(env, slug);
@@ -3650,10 +3665,12 @@ async function sitemapEntries(env, origin, { readBudget = SITEMAP_READ_BUDGET, u
   }
   out.push({ loc: `${origin}/feedback`, lastmod: '' });
 
-  const skip = new Set(unlisted);
-  const stillUnlisted = new Set();
-  const known = [];
-  const legacy = [];
+  const prior = verified && typeof verified === 'object' ? verified : {};
+  const skip = new Set(Array.isArray(unlisted) ? unlisted : []);
+  const nextUnlisted = new Set();
+  const nextVerified = {};
+  const carried = [];
+  const toRead = [];
   let cursor;
   do {
     const page = await env.META.list({ prefix: 'meta:', ...(cursor ? { cursor } : {}) });
@@ -3662,31 +3679,43 @@ async function sitemapEntries(env, origin, { readBudget = SITEMAP_READ_BUDGET, u
       if (!isValidSlug(slug) || Object.hasOwn(SITE_PATHS, slug)) continue;
       const idx = key.metadata && key.metadata.v === META_INDEX_VERSION ? key.metadata : null;
       if (idx && (idx.x || idx.f || idx.w)) continue;
-      if (idx && 'p' in idx) {
-        if (idx.p === 1) known.push({ slug, u: String(idx.u || '') });
-        continue;
-      }
-      if (skip.has(slug)) { stillUnlisted.add(slug); continue; }
-      legacy.push({ slug, u: String((idx && idx.u) || '') });
+      const u = String((idx && idx.u) || '');
+      const hasP = !!idx && 'p' in idx;
+      if (hasP && idx.p !== 1) continue;
+      if (!hasP && skip.has(slug)) { nextUnlisted.add(slug); continue; }
+      const seen = Object.hasOwn(prior, slug) ? prior[slug] : null;
+      // Carried only while the index still says what it said when read.
+      if (seen && seen.u === u && seen.p === hasP) carried.push({ slug, u, hasP, seen });
+      else toRead.push({ slug, u, hasP });
     }
     cursor = page.list_complete ? null : page.cursor;
   } while (cursor);
   const newest = (a, b) => (b.u > a.u ? 1 : b.u < a.u ? -1 : 0);
-  known.sort(newest);
-  legacy.sort(newest);
-  const candidates = [...known, ...legacy].slice(0, Math.max(0, readBudget));
-  const docs = await Promise.all(candidates.map(async (c) => {
+  toRead.sort(newest);
+  // Leftover budget re-reads the longest-carried entries first.
+  carried.sort((a, b) => String(a.seen.at || '').localeCompare(String(b.seen.at || '')));
+  const budget = Math.max(0, readBudget);
+  const reads = toRead.slice(0, budget);
+  const recheck = carried.splice(0, Math.max(0, budget - reads.length));
+  const at = new Date(now).toISOString();
+  const listed = [];
+  await Promise.all([...reads, ...recheck].map(async (c) => {
     const meta = await loadDocRecord(env, c.slug);
     const versions = meta && Array.isArray(meta.versions) ? meta.versions : [];
     if (!docPubliclyListed(meta) || !versions.length) {
-      if (meta && legacy.includes(c)) stillUnlisted.add(c.slug);
-      return null;
+      if (meta && !c.hasP) nextUnlisted.add(c.slug);
+      return;
     }
-    return { loc: `${origin}/d/${encodeURIComponent(c.slug)}`, lastmod: metaLastmod(meta) };
+    const lastmod = metaLastmod(meta);
+    nextVerified[c.slug] = { u: c.u, p: c.hasP, lastmod, at };
+    listed.push({ loc: `${origin}/d/${encodeURIComponent(c.slug)}`, lastmod });
   }));
-  const listed = docs.filter(Boolean);
+  for (const c of carried) {
+    nextVerified[c.slug] = c.seen;
+    listed.push({ loc: `${origin}/d/${encodeURIComponent(c.slug)}`, lastmod: String(c.seen.lastmod || '') });
+  }
   listed.sort((a, b) => (b.lastmod > a.lastmod ? 1 : b.lastmod < a.lastmod ? -1 : 0));
-  return { entries: [...out, ...listed].slice(0, SITEMAP_MAX_URLS), unlisted: [...stillUnlisted] };
+  return { entries: [...out, ...listed].slice(0, SITEMAP_MAX_URLS), unlisted: [...nextUnlisted], verified: nextVerified };
 }
 
 function sitemapXml(entries) {
@@ -3697,20 +3726,29 @@ function sitemapXml(entries) {
   return `${out}</urlset>\n`;
 }
 
-// The current sitemap for this origin: from KV when built within the hour,
-// else built now and stored.
+// The current sitemap for this origin: from KV when built within the hour
+// and after the last de-listing, else built now and stored.
 async function currentSitemap(env, origin, now = Date.now()) {
   let stored = null;
+  let delistedAt = NaN;
   try { stored = JSON.parse(await env.META.get(sitemapKey(origin)) || 'null'); } catch {}
-  const fresh = stored && stored.origin === origin && typeof stored.xml === 'string'
-    && Number.isFinite(Date.parse(stored.built_at)) && now - Date.parse(stored.built_at) < SITEMAP_TTL_SECONDS * 1000
-    && Date.parse(stored.built_at) <= now;
+  try { delistedAt = Date.parse(await env.META.get(SITEMAP_DELISTED_KEY) || ''); } catch {}
+  const usable = stored && typeof stored === 'object' && stored.origin === origin;
+  const builtAt = usable ? Date.parse(stored.built_at) : NaN;
+  const fresh = usable && typeof stored.xml === 'string' && Number.isFinite(builtAt)
+    && builtAt <= now && now - builtAt < SITEMAP_TTL_SECONDS * 1000
+    && !(Number.isFinite(delistedAt) && delistedAt >= builtAt);
   if (fresh) return stored.xml;
-  const prior = stored && stored.origin === origin && Array.isArray(stored.unlisted) ? stored.unlisted : [];
-  const built = await sitemapEntries(env, origin, { unlisted: prior });
+  // A de-listing since the stored build: its carried verdicts are not reused.
+  const voided = usable && Number.isFinite(delistedAt) && Number.isFinite(builtAt) && delistedAt >= builtAt;
+  const built = await sitemapEntries(env, origin, {
+    unlisted: usable && Array.isArray(stored.unlisted) ? stored.unlisted : [],
+    verified: usable && !voided && stored.verified && typeof stored.verified === 'object' ? stored.verified : {},
+    now,
+  });
   const xml = sitemapXml(built.entries);
   try {
-    await env.META.put(sitemapKey(origin), JSON.stringify({ origin, built_at: new Date(now).toISOString(), xml, unlisted: built.unlisted }));
+    await env.META.put(sitemapKey(origin), JSON.stringify({ origin, built_at: new Date(now).toISOString(), xml, unlisted: built.unlisted, verified: built.verified }));
   } catch (e) {
     console.error('[sitemap] store failed (served unstored):', e && e.message ? e.message : String(e));
   }
@@ -3720,7 +3758,7 @@ async function currentSitemap(env, origin, now = Date.now()) {
 async function sitemapResponse(env, origin, method, ctx) {
   const headers = {
     'Content-Type': 'application/xml; charset=utf-8',
-    'Cache-Control': `public, max-age=${SITEMAP_TTL_SECONDS}`,
+    'Cache-Control': `public, max-age=${SITEMAP_EDGE_SECONDS}`,
     'X-Content-Type-Options': 'nosniff',
   };
   const cache = edgeCache();
@@ -7205,6 +7243,16 @@ async function putDocMetaJson(env, slug, json, { restore = false } = {}) {
     }
   }
   await env.META.put(`meta:${slug}`, json, idx ? { metadata: idx } : undefined);
+  // A doc leaving Public voids the stored sitemap (sitemap:delisted-at). The
+  // prior index says whether it was listed; one written before `p` existed,
+  // or one that could not be read, is asked of the prior record itself.
+  if (!(idx && idx.p === 1)) {
+    let wasListed = false;
+    if (priorIdx && 'p' in priorIdx) wasListed = priorIdx.p === 1;
+    else if (prior.error) wasListed = true;
+    else if (prior.raw) { try { wasListed = docPubliclyListed(JSON.parse(prior.raw)); } catch { wasListed = true; } }
+    if (wasListed) await markSitemapDelisted(env);
+  }
   // Full-text search follows every record write: a new version is queued
   // for reindexing, a rename retitles, Trash takes the doc out. Best-effort.
   if (parsed) await searchIndexTouch(env, slug, parsed, priorIdx);
@@ -20661,7 +20709,7 @@ const tdocHandlers = {
           bio,
           docs,
           ...(mine ? { mine: true, catalog } : {}),
-        });
+        }, { headers: { 'Cache-Control': 'private, no-store', 'Vary': 'Accept, Cookie' } });
       }
       const nonce = rand(16);
       const identity = sessionPrincipal(session)
@@ -20710,7 +20758,8 @@ const tdocHandlers = {
           devMode: (await devModeBoot(env, session)).devMode,
         }),
       }), {
-        headers: { 'Content-Security-Policy': cspHeader(nonce) },
+        // The owner's copy carries their private pins in the boot data.
+        headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'private, no-store', 'Vary': 'Accept, Cookie' },
       });
     }
 
