@@ -158,6 +158,13 @@ Disallow: /api/auth/
 `;
 
 
+// The Sitemap line points at this host's own sitemap. Appended after the
+// rules above, which it does not change (a Sitemap line belongs to no
+// User-agent group).
+function robotsTxt(origin) {
+  return `${ROBOTS_TXT}\nSitemap: ${origin}/sitemap.xml\n`;
+}
+
 const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";
 
 const CORS = {
@@ -577,6 +584,23 @@ function newDocAccess() {
 // response that reads the doc (page, versions, raw, frame, widgets, export).
 function docIndexable(access) {
   return !!access && access.visibility === 'public';
+}
+// Stricter than docIndexable, for every place tdoc itself NAMES a doc to the
+// world: the sitemap, the server-rendered /@handle list, and structured data
+// on the doc page. Only a doc whose owner explicitly chose Public. Never one
+// that is unlisted, private, sign-in-only, team-filed, a feedback space, in
+// Trash, or left by a deleted account -- and never a legacy record with no
+// access field (still world-readable for back-compat, but nobody chose to
+// list it). The full record decides; an index entry only narrows.
+function docPubliclyListed(meta) {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return false;
+  if (isTrashedMeta(meta) || meta.account_deleted_at) return false;
+  if (meta.created_from === 'feedback' || meta.feedback) return false;
+  if (meta.workspace_id || meta.team_folder) return false;
+  const raw = meta.access;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  if (raw.visibility !== 'public' || raw.team === true || raw.signin_required === true) return false;
+  return docIndexable(accessFromMeta(meta));
 }
 
 function sessionLogin(session) {
@@ -2956,6 +2980,67 @@ function injectReaderCss(html, css) {
 const SHELL_SCAN_BYTES = 96 * 1024;
 // Matches the shell builder's AGENT_SCAN_BYTES.
 const AGENT_READ_BYTES = 256 * 1024;
+// schema.org structured data for the page's head: SoftwareApplication on the
+// home page, Article on a doc its owner made Public (docPubliclyListed), and
+// nothing anywhere else -- an unlisted, private or team doc's page says no
+// more to a crawler than it did before. The shell escapes it for the
+// <script> data block (jsonForHtml).
+function isoDate(v) {
+  const t = Date.parse(typeof v === 'string' ? v : '');
+  return Number.isFinite(t) ? new Date(t).toISOString() : '';
+}
+function docStructuredData({ origin, slug, isLanding, docMeta, title, description, author, image }) {
+  if (!origin) return null;
+  if (isLanding) {
+    if (slug !== LANDING_SLUG) return null;
+    return {
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'tdoc',
+      alternateName: 'Tornado',
+      url: `${origin}/`,
+      ...(description ? { description } : {}),
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'Web',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    };
+  }
+  if (!docPubliclyListed(docMeta)) return null;
+  const versions = Array.isArray(docMeta.versions) ? docMeta.versions : [];
+  const published = isoDate(versions[0] && versions[0].created) || isoDate(docMeta.created);
+  const modified = isoDate(versions[versions.length - 1] && versions[versions.length - 1].created) || published;
+  const url = `${origin}/d/${encodeURIComponent(slug)}`;
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: String(title || slug).slice(0, 110),
+    ...(description ? { description } : {}),
+    url,
+    mainEntityOfPage: url,
+    ...(published ? { datePublished: published } : {}),
+    ...(modified ? { dateModified: modified } : {}),
+    ...(author && author.name ? { author: { '@type': 'Person', name: author.name, ...(author.url ? { url: author.url } : {}) } } : {}),
+    publisher: { '@type': 'Organization', name: 'tdoc', url: `${origin}/` },
+    ...(image ? { image } : {}),
+  };
+}
+// Who a Public doc's structured data names: the owner's public handle, and
+// their /@handle page where profiles exist. Asked only for a listed doc.
+async function docSeoAuthor(env, meta, origin) {
+  if (!docPubliclyListed(meta)) return null;
+  const accountId = meta.hosted && typeof meta.hosted.account_id === 'string' ? meta.hosted.account_id : '';
+  let handle = null;
+  if (accountId) {
+    try { handle = await accountClaimedHandle(env, accountId); } catch {}
+  }
+  if (!handle) handle = hostedGithubLogin(meta);
+  if (!handle) return null;
+  return {
+    name: `@${handle}`,
+    ...(hostedRegistrationEnabled(env, origin) ? { url: `${origin}/@${handle}` } : {}),
+  };
+}
+
 function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocsFlag, isCatalog, webAuth, stars, viewerStar, versionWritesEnabled, commentWritesEnabled, docMeta, oidc, pageUrl) {
   // Unbundled worker (raw worker.js in tests): no shell builder inlined — serve
   // the author document bare rather than injecting anything.
@@ -3062,9 +3147,14 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // A version's card URL is unique so social crawlers do not pin an older
   // image.
   const preview = docMeta && docMeta.preview && typeof docMeta.preview === 'object' ? docMeta.preview : null;
-  const description = (preview && typeof preview.description === 'string' && Number(preview.description_v) === Number(version))
+  // Descriptions stored before the title was left out still open with it:
+  // stripped here too, so they need no republish.
+  const storedDescription = (preview && typeof preview.description === 'string' && Number(preview.description_v) === Number(version))
     ? preview.description
-    : ((SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180)) || '');
+    : null;
+  const description = storedDescription != null
+    ? (SHELL.stripLeadingTitle ? SHELL.stripLeadingTitle(storedDescription, title) : storedDescription)
+    : ((SHELL.descriptionFromHtml ? SHELL.descriptionFromHtml(scanHtml, 180, title) : (SHELL.excerptFromHtml && SHELL.excerptFromHtml(scanHtml, 180))) || '');
   // The generated/custom card is 1200x630 (summary_large_image); the logo
   // fallback is square (summary).
   let shareImageLarge = previewCardMatches(preview, slug, version);
@@ -3096,6 +3186,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     image_large: !!shareImageLarge,
     type: isLanding ? 'website' : 'article',
     robots: docIndexable(access) ? '' : 'noindex, nofollow',
+    jsonLd: docStructuredData({ origin, pageUrl, slug, isLanding, docMeta, title: seoTitle, description: seoDescription, author: oidc && oidc.seoAuthor, image: shareImageLarge ? shareImage : '' }),
   } : null;
   return SHELL.shellHtml({
     title,
@@ -3507,6 +3598,152 @@ async function readAgentStatus(env, slug) {
   return { read_at: (rec && rec.at) || null };
 }
 
+// ─────────────────────────────── /sitemap.xml ───────────────────────────────
+//
+// The site pages, then every doc its owner made Public (docPubliclyListed) --
+// never a link-only, private, team, feedback or trashed one. Built from one
+// KV list call per 1,000 docs: each meta key's index record carries `p`
+// (publicly listed), so only the docs that say so -- and records written
+// before `p` existed, which say nothing -- are read in full, and the full
+// record is what decides; the index can rule a doc out, never in. A record
+// that predates `p` and turns out not to be listed is remembered as such
+// (such a record has not been written since, or it would carry `p`), so it
+// is read once, not on every build; those still unread past
+// SITEMAP_READ_BUDGET wait for a later build, newest first.
+//
+// Cost: one build an hour for the whole platform, kept in KV (one write an
+// hour), and the edge cache in front of it, so a crawler fetching the file
+// costs a cache read. A doc made private drops out at the next build; its
+// page answers noindex and a denial from that moment.
+const SITEMAP_TTL_SECONDS = 3600;
+const SITEMAP_READ_BUDGET = 400;
+const SITEMAP_MAX_URLS = 45000;
+// One record per host the worker answers on, so tdoc.dev and a workers.dev
+// address never overwrite each other's copy.
+function sitemapKey(origin) {
+  let host = '';
+  try { host = new URL(origin).host; } catch {}
+  return `sitemap:v1:${host}`;
+}
+
+function xmlEscape(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
+}
+
+function metaLastmod(meta) {
+  const versions = Array.isArray(meta && meta.versions) ? meta.versions : [];
+  return isoDate(versions[versions.length - 1] && versions[versions.length - 1].created)
+    || isoDate(versions[0] && versions[0].created) || isoDate(meta && meta.created);
+}
+
+// { entries: [{ loc, lastmod }], unlisted: [slug] } -- entries in order: site
+// pages, then docs newest first; `unlisted` the pre-`p` records found not
+// listed, this build's and the ones `known` already named.
+async function sitemapEntries(env, origin, { readBudget = SITEMAP_READ_BUDGET, unlisted = [] } = {}) {
+  const out = [];
+  for (const [slug, path] of Object.entries(SITE_PATHS)) {
+    const meta = await loadDocMeta(env, slug);
+    // A site page is listed only when it is live and indexable -- the same
+    // test its own robots meta makes.
+    if (!meta || !Array.isArray(meta.versions) || !meta.versions.length || !docIndexable(accessFromMeta(meta))) continue;
+    out.push({ loc: `${origin}${path}`, lastmod: metaLastmod(meta) });
+  }
+  out.push({ loc: `${origin}/feedback`, lastmod: '' });
+
+  const skip = new Set(unlisted);
+  const stillUnlisted = new Set();
+  const known = [];
+  const legacy = [];
+  let cursor;
+  do {
+    const page = await env.META.list({ prefix: 'meta:', ...(cursor ? { cursor } : {}) });
+    for (const key of page.keys || []) {
+      const slug = key.name.slice('meta:'.length);
+      if (!isValidSlug(slug) || Object.hasOwn(SITE_PATHS, slug)) continue;
+      const idx = key.metadata && key.metadata.v === META_INDEX_VERSION ? key.metadata : null;
+      if (idx && (idx.x || idx.f || idx.w)) continue;
+      if (idx && 'p' in idx) {
+        if (idx.p === 1) known.push({ slug, u: String(idx.u || '') });
+        continue;
+      }
+      if (skip.has(slug)) { stillUnlisted.add(slug); continue; }
+      legacy.push({ slug, u: String((idx && idx.u) || '') });
+    }
+    cursor = page.list_complete ? null : page.cursor;
+  } while (cursor);
+  const newest = (a, b) => (b.u > a.u ? 1 : b.u < a.u ? -1 : 0);
+  known.sort(newest);
+  legacy.sort(newest);
+  const candidates = [...known, ...legacy].slice(0, Math.max(0, readBudget));
+  const docs = await Promise.all(candidates.map(async (c) => {
+    const meta = await loadDocRecord(env, c.slug);
+    const versions = meta && Array.isArray(meta.versions) ? meta.versions : [];
+    if (!docPubliclyListed(meta) || !versions.length) {
+      if (meta && legacy.includes(c)) stillUnlisted.add(c.slug);
+      return null;
+    }
+    return { loc: `${origin}/d/${encodeURIComponent(c.slug)}`, lastmod: metaLastmod(meta) };
+  }));
+  const listed = docs.filter(Boolean);
+  listed.sort((a, b) => (b.lastmod > a.lastmod ? 1 : b.lastmod < a.lastmod ? -1 : 0));
+  return { entries: [...out, ...listed].slice(0, SITEMAP_MAX_URLS), unlisted: [...stillUnlisted] };
+}
+
+function sitemapXml(entries) {
+  let out = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
+  for (const e of entries) {
+    out += `  <url><loc>${xmlEscape(e.loc)}</loc>${e.lastmod ? `<lastmod>${xmlEscape(e.lastmod)}</lastmod>` : ''}</url>\n`;
+  }
+  return `${out}</urlset>\n`;
+}
+
+// The current sitemap for this origin: from KV when built within the hour,
+// else built now and stored.
+async function currentSitemap(env, origin, now = Date.now()) {
+  let stored = null;
+  try { stored = JSON.parse(await env.META.get(sitemapKey(origin)) || 'null'); } catch {}
+  const fresh = stored && stored.origin === origin && typeof stored.xml === 'string'
+    && Number.isFinite(Date.parse(stored.built_at)) && now - Date.parse(stored.built_at) < SITEMAP_TTL_SECONDS * 1000
+    && Date.parse(stored.built_at) <= now;
+  if (fresh) return stored.xml;
+  const prior = stored && stored.origin === origin && Array.isArray(stored.unlisted) ? stored.unlisted : [];
+  const built = await sitemapEntries(env, origin, { unlisted: prior });
+  const xml = sitemapXml(built.entries);
+  try {
+    await env.META.put(sitemapKey(origin), JSON.stringify({ origin, built_at: new Date(now).toISOString(), xml, unlisted: built.unlisted }));
+  } catch (e) {
+    console.error('[sitemap] store failed (served unstored):', e && e.message ? e.message : String(e));
+  }
+  return xml;
+}
+
+async function sitemapResponse(env, origin, method, ctx) {
+  const headers = {
+    'Content-Type': 'application/xml; charset=utf-8',
+    'Cache-Control': `public, max-age=${SITEMAP_TTL_SECONDS}`,
+    'X-Content-Type-Options': 'nosniff',
+  };
+  const cache = edgeCache();
+  const key = `${origin}/__sitemap-cache/v1`;
+  let body = null;
+  if (cache) {
+    try { const hit = await cache.match(key); if (hit) body = await hit.text(); } catch {}
+  }
+  if (body == null) {
+    try {
+      body = await currentSitemap(env, origin);
+    } catch (e) {
+      console.error('[sitemap] build failed:', e && e.message ? e.message : String(e));
+      return text('Sitemap unavailable', { status: 503, headers: { 'Retry-After': '300' } });
+    }
+    if (cache) {
+      const put = cache.put(key, new Response(body, { headers })).catch(() => {});
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
+    }
+  }
+  return new Response(method === 'HEAD' ? null : body, { status: 200, headers });
+}
+
 // The doc whose latest version IS the site homepage (#127). tdoc.dev/ renders
 // this published tdoc rather than a hardcoded marketing page, so the landing
 // page is authored, reviewed, and versioned through tdoc itself.
@@ -3688,7 +3925,7 @@ async function serveDocVersion(env, req, slug, version, isLanding, { head = fals
     // session rides along so the /d/ route can record the visit (recents)
     // without a second session lookup.
     session,
-    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), folder: docFolder, ...(await devModeBoot(env, session)) }, pageUrl), {
+    response: html(render(raw, slug, version, identity, versions, isOwner, ownerManage, nonce, isLanding, canSeeMyDocs(env, session, requestOrigin(req)), false, githubDirectSignIn(env), stars, viewerStar, !!env.COMMENTS, canCommentOnDoc(gate.access, session, env, gate.meta), gate.meta, { enabled: !!oidcConfig(env), label: (oidcConfig(env) || {}).label || '', teamManage, agent, agentView, ask: askConfig(env), folder: docFolder, seoAuthor: isLanding ? null : await docSeoAuthor(env, gate.meta, reqUrl.origin), ...(await devModeBoot(env, session)) }, pageUrl), {
       headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'private, no-store', 'Vary': 'Accept', ...(agent ? { 'Link': docAgentLinkHeader(agent) } : {}) },
     }),
   };
@@ -6902,6 +7139,10 @@ function docMetaIndex(meta) {
     c: String(m.created || versions[0]?.created || ''),
     u: String(versions[versions.length - 1]?.created || m.created || versions[0]?.created || ''),
     t: String(m.title || '').slice(0, 300),
+    // Publicly listed (docPubliclyListed), so the sitemap can skip every
+    // other doc from the list call alone. A hint that only narrows: the
+    // sitemap still reads the full record of each doc it names.
+    p: docPubliclyListed(m) ? 1 : 0,
   };
   // In Trash: no facet lists it (docIndexFacets), no scan row counts it.
   if (isTrashedMeta(m)) idx.x = 1;
@@ -7581,6 +7822,9 @@ async function profileData(env, account, { includePrivate = false } = {}) {
     // A profile is a public listing: only Public docs appear on it. An
     // "anyone with the link" doc is never listed anywhere, pinned or not.
     if (!includePrivate && visibility !== 'public') continue;
+    // And only what tdoc may name in public at all: not a team or feedback
+    // doc, not a legacy record nobody chose to list (docPubliclyListed).
+    if (!includePrivate && !docPubliclyListed(meta)) continue;
     const versions = Array.isArray(meta.versions) ? meta.versions : [];
     const latest = versions[versions.length - 1]?.n || 1;
     const published = versions[0]?.created || meta.created || '';
@@ -10603,7 +10847,9 @@ function docPreviewFromHtml(html, { slug, version, title } = {}) {
   // the page would make (shellDocumentWorker), so the card does not change.
   if (typeof SHELL.excerptFromHtml === 'function') {
     const head = typeof html === 'string' && html.length > SHELL_SCAN_BYTES ? html.slice(0, SHELL_SCAN_BYTES) : (html || '');
-    preview.description = SHELL.excerptFromHtml(head, 180) || '';
+    preview.description = (typeof SHELL.descriptionFromHtml === 'function'
+      ? SHELL.descriptionFromHtml(head, 180, title)
+      : SHELL.excerptFromHtml(head, 180)) || '';
     // Stamped with the version it describes: a write path that leaves the
     // preview behind (the browser's Save) must not hand a newer version an
     // older one's words.
@@ -19475,7 +19721,10 @@ const tdocHandlers = {
       return remoteSkillResponse(method, llmsFullTxt(), 'text/plain');
     }
     if (p === '/robots.txt' && (method === 'GET' || method === 'HEAD')) {
-      return remoteSkillResponse(method, ROBOTS_TXT, 'text/plain');
+      return remoteSkillResponse(method, robotsTxt(url.origin), 'text/plain');
+    }
+    if (p === '/sitemap.xml' && (method === 'GET' || method === 'HEAD')) {
+      return sitemapResponse(env, url.origin, method, ctx);
     }
     if (p === '/api/ping') return json({ ok: true, service: 'tdoc' });
     if (p === '/api/runtime') return json({ ok: true, runtime: runtimeInfo() });
@@ -20418,8 +20667,33 @@ const tdocHandlers = {
       const identity = sessionPrincipal(session)
         ? { login: actorKey(session), avatar_url: session.avatar_url || '', name: actorDisplayName(session) }
         : null;
+      // What a crawler or a fetch tool gets without running the app: the
+      // same profile, Public docs only -- even when the owner is looking,
+      // since the page is the public one. One handle is the page's address:
+      // a GitHub login that resolves to an account with a claimed handle is
+      // an alias of /@<claimed>, and says so in its canonical link.
+      const publicDocs = mine ? await profileData(env, account, { includePrivate: false }) : docs;
+      const ssrDocs = publicDocs.map((d) => ({
+        title: d.title,
+        url: `${url.origin}/d/${encodeURIComponent(d.slug)}`,
+        excerpt: SHELL.stripLeadingTitle ? SHELL.stripLeadingTitle(d.excerpt || '', d.title) : (d.excerpt || ''),
+      }));
+      const profileUrl = `${url.origin}/@${handle}`;
+      const listed = ssrDocs.slice(0, 3).map((d) => d.title).join(', ');
+      let profileDescription = `${bio ? `${bio.replace(/\s+/g, ' ').trim()} · ` : ''}Public docs by @${handle} on tdoc${listed ? `: ${listed}` : '.'}`;
+      if (profileDescription.length > 200) profileDescription = `${profileDescription.slice(0, 199).replace(/\s+\S*$/, '')}\u2026`;
       return html(SHELL.appHtml({
         title: `@${handle} · tdoc`,
+        seo: {
+          title: `@${handle} · tdoc`,
+          description: profileDescription,
+          url: profileUrl,
+          image: `${url.origin}/tdoc_logo-v2.png`,
+          image_large: false,
+          type: 'profile',
+          robots: '',
+        },
+        profile: { handle, bio, docs: ssrDocs },
         nonceAttr: ` nonce="${nonce}"`,
         runtimeJsPath: SHELL_RUNTIME_JS_PATH,
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,

@@ -33,6 +33,7 @@ const OFFLINE = [
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'link-sharing.test.js',     // anyone with the link: noindex everywhere, unlisted by default, require sign-in, public->link migration
+  'seo.test.js',              // sitemap + robots Sitemap line, /@handle SSR, description dedupe, JSON-LD: Public docs only, escaped
   'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
