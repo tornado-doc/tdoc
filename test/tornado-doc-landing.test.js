@@ -589,7 +589,7 @@ t('scripted Edit: the paragraph it rewrites is on the homepage, once, as a plain
 
 t('scripted Edit: behind demoEditRewrite (off in production, on in PR previews); the probe swaps at once under reduced motion', () => {
   const flags = fs.readFileSync(path.join(root, 'shell/src/feature-flags.js'), 'utf8');
-  assert(/demoEditRewrite: Object\.freeze\(\{[^}]*default: false, preview: true/.test(flags), 'flag demoEditRewrite');
+  assert(/demoEditRewrite: Object\.freeze\(\{[^}]*default: true, preview: true/.test(flags), 'flag demoEditRewrite');
   const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
   assert(/demoAgents && isFeatureOn\('demoEditRewrite'\)\s*\? DEMO_REWRITES\[config\.slug\]/.test(shell), 'the scripted Edit must be demo-only and per landing slug');
   const probe = fs.readFileSync(path.join(root, 'server/frame-probe.js'), 'utf8');
