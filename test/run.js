@@ -33,6 +33,7 @@ const OFFLINE = [
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'link-sharing.test.js',     // anyone with the link: noindex everywhere, unlisted by default, require sign-in, public->link migration
+  'seo.test.js',              // sitemap + robots Sitemap line, /@handle SSR, description dedupe, JSON-LD: Public docs only, escaped
   'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
@@ -62,6 +63,7 @@ const OFFLINE = [
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
   'doc-index.test.js',          // per-owner/team doc index, invite index, one-pass frame bake + per-version cache (1102)
+  'scan-backfill-race.test.js', // index scans never write back a record they read: an owner's private/withdraw survives a racing scan
   'trash.test.js',              // Delete moves to Trash: gone on every path, restore, 30-day purge, folders, permissions
   'account-delete.test.js',     // Settings -> Delete account: blockers, browser-only, sessions/tokens end, fresh re-signup, 30-day purge, operator restore
   'trash-hardening.test.js',    // #815 review: resumable purge, restore quota, batched folder delete, bounded reads, write race, old CLIs, --forever
@@ -223,6 +225,7 @@ const BROWSER = [
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
   'dev-mode-ui.test.js', // account menu Dev mode on/off and nested onboarding controls; two-press exit/replay, refused off the list, re-login skips the gate; desktop + phone
   'ui-fonts-ui.test.js', // no serif in product controls: doc page (bar, card, composer, menus, drawer, Ask AI, Agent activity), /me, account + team settings, /feedback; settings hints muted, /me views fit a phone; desktop + phone
+  'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
 ];
 

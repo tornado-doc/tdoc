@@ -50,7 +50,7 @@
       while (nameEnd < end && /[a-z0-9]/.test(lower[nameEnd])) nameEnd++;
       const name = lower.slice(start, nameEnd);
       if (!closing && !/\/\s*>$/.test(html.slice(lt, end))
-        && (name === 'script' || name === 'style' || name === 'noscript' || (skipHeading && name === 'h1'))) {
+        && (name === 'script' || name === 'style' || name === 'noscript' || name === 'title' || (skipHeading && name === 'h1'))) {
         const closeEnd = closingTagEnd(html, lower, name, end);
         if (closeEnd === -1) break;
         if (name === 'h1') skipHeading = false;
@@ -75,11 +75,42 @@
       .replace(/&(?:#x?[0-9a-f]+|[a-z]+);/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+    return clipText(text, limit);
+  }
+  function clipText(text, limit) {
     if (!text) return '';
     if (text.length <= limit) return text;
     const cut = text.slice(0, limit - 1);
     const softer = cut.replace(/\s+\S*$/, '');
     return (softer.length >= 40 ? softer : cut) + '\u2026';
+  }
+
+  // A lead that opens with the document's own title (the <h1>, or the
+  // heading repeated as plain text right after it) says the title twice in
+  // a search result or a card: drop it, once or twice over.
+  function stripLeadingTitle(text, title) {
+    let out = typeof text === 'string' ? text : '';
+    const t = typeof title === 'string' ? title.replace(/\s+/g, ' ').trim() : '';
+    if (!out || !t) return out;
+    const needle = t.toLowerCase();
+    for (let i = 0; i < 2; i++) {
+      if (!out.toLowerCase().startsWith(needle)) break;
+      const rest = out.slice(t.length);
+      // Only a whole-word match: "Plan" must not eat the front of "Planning".
+      if (rest && !/^[\s\u2014\u2013\-:\u00b7.|]/.test(rest)) break;
+      out = rest.replace(/^[\s\u2014\u2013\-:\u00b7.|]+/, '').trim();
+    }
+    return out;
+  }
+
+  // The doc page's meta description: the lead of the document without its
+  // <title> and first <h1>, and without the title said again as text.
+  function descriptionFromHtml(html, maxLen, title) {
+    const limit = Math.max(40, Math.min(300, Number(maxLen) || 180));
+    const t = typeof title === 'string' ? title : '';
+    // Read a little past the limit so the cut lands after the title is gone.
+    const lead = excerptFromHtml(html, 300, true).replace(/\u2026$/, '');
+    return clipText(stripLeadingTitle(lead, t), limit);
   }
 
   // True for chrome icons stamped into author HTML (task-list checkboxes are
@@ -161,16 +192,8 @@
     const source = typeof html === 'string' ? html : '';
     let excerpt = excerptFromHtml(source, o.maxLen || 220, o.skipHeading !== false);
     const title = typeof o.title === 'string' ? o.title.trim() : '';
-    if (title && excerpt) {
-      const lower = excerpt.toLowerCase();
-      const needle = title.toLowerCase();
-      // Body sometimes repeats the heading as plain text right after <h1>.
-      if (lower.startsWith(needle + ' ' + needle)) {
-        excerpt = excerpt.slice((title + ' ' + title).length).replace(/^[\s\u2014\u2013\-:·.|]+/, '').trim();
-      } else if (lower.startsWith(needle)) {
-        excerpt = excerpt.slice(title.length).replace(/^[\s\u2014\u2013\-:·.|]+/, '').trim();
-      }
-    }
+    // Body sometimes repeats the heading as plain text right after <h1>.
+    if (title && excerpt) excerpt = stripLeadingTitle(excerpt, title);
     return {
       excerpt,
       image: resolveDocAssetUrl(firstImageFromHtml(html), o) || '',
@@ -202,6 +225,48 @@
     if (title) out += '<meta name="twitter:title" content="' + title + '">\n';
     if (description) out += '<meta name="twitter:description" content="' + description + '">\n';
     if (image) out += '<meta name="twitter:image" content="' + image + '">\n';
+    if (seo.jsonLd && typeof seo.jsonLd === 'object') out += jsonLdHtml(seo.jsonLd, d.nonceAttr);
+    return out;
+  }
+
+  // Structured data as a data block. JSON.stringify leaves `<`, `>` and `&`
+  // alone, so a title holding `</script>` would end the block and start
+  // markup; every one of them (and the two JS line separators) is written as
+  // a \u escape instead, which every JSON parser reads back unchanged.
+  function jsonForHtml(obj) {
+    return JSON.stringify(obj).replace(/[<>&\u2028\u2029]/g, function (c) {
+      return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
+    });
+  }
+  function jsonLdHtml(obj, nonceAttr) {
+    const nonce = typeof nonceAttr === 'string' && /^ nonce="[0-9a-f]+"$/.test(nonceAttr) ? nonceAttr : '';
+    return '<script type="application/ld+json"' + nonce + '>' + jsonForHtml(obj) + '</scr' + 'ipt>\n';
+  }
+
+  // A public profile as plain HTML, for crawlers and fetch tools that never
+  // run the app: who it is and the docs they made Public. Visually hidden
+  // (the same class as the doc page's agent view) and inside the app root,
+  // which the app replaces when it mounts, so a person never sees it twice.
+  // Every string is escaped here; the caller passes only Public docs.
+  function profileBodyHtml(p) {
+    if (!p || typeof p !== 'object') return '';
+    const handle = String(p.handle || '');
+    let out = '<section class="tdoc-agent-view" id="tdoc-profile-ssr">\n';
+    out += '<h1>' + esc('@' + handle) + '</h1>\n';
+    if (p.bio) out += '<p>' + esc(p.bio) + '</p>\n';
+    const docs = Array.isArray(p.docs) ? p.docs : [];
+    out += '<h2>' + esc('Public documents by @' + handle) + '</h2>\n';
+    if (!docs.length) out += '<p>No public documents yet.</p>\n';
+    else {
+      out += '<ul>\n';
+      docs.forEach(function (doc) {
+        out += '<li><a href="' + esc(doc.url || '') + '">' + esc(doc.title || '') + '</a>';
+        if (doc.excerpt) out += '<p>' + esc(doc.excerpt) + '</p>';
+        out += '</li>\n';
+      });
+      out += '</ul>\n';
+    }
+    out += '</section>\n';
     return out;
   }
 
@@ -335,6 +400,26 @@
 
   // Visually hidden, but real body text: fetch tools drop display:none,
   // [hidden] and aria-hidden, and keep this. The shell removes it on boot.
+  // Every distinct link in the document, as [text, href] pairs: plain http(s)
+  // or site-relative hrefs only, text stripped of markup. Bounded like the
+  // text blocks.
+  function linksFromHtml(html) {
+    if (typeof html !== 'string' || !html) return [];
+    const source = html.length > AGENT_SCAN_BYTES ? html.slice(0, AGENT_SCAN_BYTES) : html;
+    const out = [], seen = {};
+    const re = /<a\b[^>]*?\bhref\s*=\s*("([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = re.exec(source)) && out.length < 80) {
+      const href = decodeEntities((m[2] != null ? m[2] : m[3]) || '').trim();
+      if (!/^(https?:\/\/|\/(?!\/))/i.test(href) || seen[href]) continue;
+      const text = decodeEntities(m[4].replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (!text) continue;
+      seen[href] = true;
+      out.push([text, href]);
+    }
+    return out;
+  }
+
   function agentBodyHtml(d) {
     const v = d && d.agentView;
     if (!v) return '';
@@ -354,6 +439,11 @@
         else out += '<p>' + esc(b.text) + '</p>\n';
       });
       if (inList) out += '</ul>\n';
+    }
+    if (Array.isArray(v.links) && v.links.length) {
+      out += '<nav aria-label="Links"><ul>\n';
+      v.links.forEach(function (l) { out += '<li><a href="' + esc(l[1]) + '">' + esc(l[0]) + '</a></li>\n'; });
+      out += '</ul></nav>\n';
     }
     if (v.truncated && v.raw) out += '<p>' + esc('The text above is cut short. The full source is at ' + v.raw) + '</p>\n';
     if (Array.isArray(v.comments)) {
@@ -465,8 +555,9 @@ agentBodyHtml(d) +
       '<link rel="apple-touch-icon" href="/apple-touch-icon-v3.png">\n' +
       '<link rel="manifest" href="/site.webmanifest">\n' +
       '<title>' + esc(d.title) + '</title>\n' +
+      seoHeadHtml(d) +
       '<link rel="stylesheet" href="' + esc(d.runtimeCssPath) + '">\n' +
-      '</head><body><div id="tdoc-app-root"></div>\n' +
+      '</head><body>' + (d.profile ? '<div id="tdoc-app-root">' + profileBodyHtml(d.profile) + '</div>' : '<div id="tdoc-app-root"></div>') + '\n' +
       '<script' + d.nonceAttr + '>window.__TDOC_APP_BOOT__ = ' + d.bootJson + ';</scr' + 'ipt>\n' +
       '<script type="module" src="' + esc(d.runtimeJsPath) + '"' + d.nonceAttr + '></scr' + 'ipt>\n' +
       '</body></html>';
@@ -476,11 +567,15 @@ agentBodyHtml(d) +
     shellHtml: shellHtml,
     appHtml: appHtml,
     excerptFromHtml: excerptFromHtml,
+    descriptionFromHtml: descriptionFromHtml,
+    stripLeadingTitle: stripLeadingTitle,
+    jsonForHtml: jsonForHtml,
     firstImageFromHtml: firstImageFromHtml,
     resolveDocAssetUrl: resolveDocAssetUrl,
     previewFromHtml: previewFromHtml,
     agentBlocksFromHtml: agentBlocksFromHtml,
     agentMarkdown: agentMarkdown,
+    linksFromHtml: linksFromHtml,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof globalThis !== 'undefined') globalThis.TDOC_SHELL_BUILDER = api;

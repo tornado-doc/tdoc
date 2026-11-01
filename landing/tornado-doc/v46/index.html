@@ -342,6 +342,11 @@
     .apptile.ns-small { width:42px; height:42px; border-radius:11px; }
     .apptile.ns-small svg { width:21px; height:21px; }
     .apptile.ns-small img.apptile-img { width:25px; height:25px; }
+    .logorow.ns-row { display:grid; grid-template-columns:repeat(9,76px); gap:18px 10px; justify-content:center; }
+    @media (max-width:760px) { .logorow.ns-row { grid-template-columns:repeat(3,88px); } }
+    .apptile.ns-mid { width:60px; height:60px; border-radius:15px; }
+    .apptile.ns-mid svg { width:30px; height:30px; }
+    .ns-row .apptile-name { font-size:13px; text-align:center; white-space:nowrap; }
 
     /* feature cards, opentag layout */
         /* rows stretch so the four bottoms line up. align-items:start hugs the
@@ -441,20 +446,36 @@
        -- exactly the two places it does not. */
     .apps { display:flex; flex-wrap:wrap; justify-content:center; gap:14px 56px; }
     .apps .tlogo { margin-right:0; opacity:.85; }
+    /* Use tdoc in: pick the app, its connect step shows right here. The page
+       runs no script, so the pills are radios and :checked shows one panel;
+       Copy is the reader's data-tdoc-copy. Links are https so the reader can
+       open them from the frame (custom schemes cannot leave it). */
+    .pick { margin:26px 0 0; max-width:640px; }
+    .pick-radio { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+    .pick-label { margin:0 0 12px; font:700 13px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+    .pick-pills { display:flex; flex-wrap:wrap; gap:8px; }
+    .pick-pill { display:inline-flex; align-items:center; gap:8px; height:40px; padding:0 15px; border:1px solid #d8dce5; border-radius:999px; background:#fff; color:var(--ink); font-weight:600; font-size:15px; white-space:nowrap; cursor:pointer; user-select:none; }
+    .pick-pill:hover { border-color:#b9c0cd; }
+    .pick-pill svg { width:16px; height:16px; flex:none; fill:currentColor; }
+    .pick-panel { display:none; margin:14px 0 0; }
+    .pick-panel p { margin:0 0 12px; font-size:16px; line-height:1.55; color:var(--ink); }
+    .pick-panel p code { font-size:15px; }
+    .pick-cmd { display:flex; align-items:center; gap:10px; min-width:0; padding:10px 10px 10px 14px; border-radius:10px; background:#10121a; }
+    /* Wrap, never scroll: a sideways scrollbar under one line covered half the box. */
+    .pick-cmd code { flex:1; min-width:0; white-space:normal; overflow-wrap:anywhere; background:none; padding:0; color:#e9ebf1; font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .pick-copy { flex:none; height:36px; min-width:64px; padding:0 14px; border:1px solid #3a3e4b; border-radius:7px; background:transparent; color:#e9ebf1; font:600 15px system-ui,sans-serif; cursor:pointer; }
+    .pick-copy:hover { border-color:#6b7080; }
+    .pick-form { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px 14px; align-items:center; margin:0 0 12px; font-size:16px; }
+    .pick-form dt { color:var(--muted); }
+    .pick-form dd { margin:0; min-width:0; font-weight:600; color:var(--ink); }
+    .pick-guide { margin-left:18px; color:var(--muted); }
+    .pick-then { margin:14px 0 10px !important; }
+    .pick-note { margin:18px 0 0; font-size:15px; color:var(--muted); }
+    .pick-go { display:inline-flex; align-items:center; margin:12px 0 0; font-weight:650; font-size:16px; text-decoration:none; }
+    #pick-r-claude:checked ~ .pick-p-claude, #pick-r-chatgpt:checked ~ .pick-p-chatgpt, #pick-r-cursor:checked ~ .pick-p-cursor, #pick-r-vscode:checked ~ .pick-p-vscode, #pick-r-claudecode:checked ~ .pick-p-claudecode, #pick-r-codex:checked ~ .pick-p-codex, #pick-r-gemini:checked ~ .pick-p-gemini, #pick-r-grokbot:checked ~ .pick-p-grokbot, #pick-r-grok:checked ~ .pick-p-grok { display:block; }
+    #pick-r-claude:checked ~ .pick-pills label[for="pick-r-claude"], #pick-r-chatgpt:checked ~ .pick-pills label[for="pick-r-chatgpt"], #pick-r-cursor:checked ~ .pick-pills label[for="pick-r-cursor"], #pick-r-vscode:checked ~ .pick-pills label[for="pick-r-vscode"], #pick-r-claudecode:checked ~ .pick-pills label[for="pick-r-claudecode"], #pick-r-codex:checked ~ .pick-pills label[for="pick-r-codex"], #pick-r-gemini:checked ~ .pick-pills label[for="pick-r-gemini"], #pick-r-grokbot:checked ~ .pick-pills label[for="pick-r-grokbot"], #pick-r-grok:checked ~ .pick-pills label[for="pick-r-grok"] { border-color:var(--ink); box-shadow:inset 0 0 0 1px var(--ink); }
+    #pick-r-claude:focus-visible ~ .pick-pills label[for="pick-r-claude"], #pick-r-chatgpt:focus-visible ~ .pick-pills label[for="pick-r-chatgpt"], #pick-r-cursor:focus-visible ~ .pick-pills label[for="pick-r-cursor"], #pick-r-vscode:focus-visible ~ .pick-pills label[for="pick-r-vscode"], #pick-r-claudecode:focus-visible ~ .pick-pills label[for="pick-r-claudecode"], #pick-r-codex:focus-visible ~ .pick-pills label[for="pick-r-codex"], #pick-r-gemini:focus-visible ~ .pick-pills label[for="pick-r-gemini"], #pick-r-grokbot:focus-visible ~ .pick-pills label[for="pick-r-grokbot"], #pick-r-grok:focus-visible ~ .pick-pills label[for="pick-r-grok"] { outline:2px solid var(--accent); outline-offset:2px; }
     .apps-not { margin:16px 0 0; text-align:center; font-size:14px; color:var(--muted); }
-    /* Use tdoc in your AI app: one pill per app, each opening the connect
-       panel on /start with that app picked (the shell's Connect in one click:
-       remote MCP at /mcp, OAuth sign-in). The page runs no script, so these
-       are plain links. */
-    .aiapps { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin:0 auto; max-width:900px; }
-    .aiapp { display:inline-flex; align-items:center; justify-content:center; gap:9px; height:44px; padding:0 18px; border:1px solid #d8dce5; border-radius:999px; background:#fff; color:var(--ink); font-weight:650; font-size:15px; letter-spacing:-.01em; white-space:nowrap; text-decoration:none; transition:transform .12s, border-color .12s; }
-    .aiapp:hover { transform:translateY(-1px); border-color:#b9c0cd; }
-    .aiapp svg { width:18px; height:18px; flex:none; fill:currentColor; }
-    @media (max-width:520px) { .aiapps { display:grid; grid-template-columns:1fr 1fr; } .aiapp { font-size:14px; padding:0 12px; } }
-    /* Under the CTA: what you need, said before the click, and what an
-       "agent" is, at the first place the page leans on the word. */
-    .cta-req { margin:14px 0 0; font-size:14px; line-height:1.55; color:#767c8b; max-width:640px; }
-    .cta-req b { color:var(--ink); font-weight:650; }
     .apptile-fig { display:flex; flex-direction:column; align-items:center; gap:8px; margin:0; }
     .apptile-fig .apptile-name { font-size:14px; font-weight:650; color:var(--ink); }
     /* trusted by marquee */
@@ -620,6 +641,7 @@
   <symbol id="i-gemini" viewBox="0 0 24 24"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/></symbol><symbol id="i-grok" viewBox="0 0 24 24"><path fill="currentColor" d="m3.005 8.858 8.783 12.544h3.904L6.908 8.858zM6.905 15.825 3 21.402h3.907l1.951-2.788zM16.585 2l-6.75 9.64 1.953 2.79L20.492 2zM17.292 7.965v13.437h3.2V3.395z"/></symbol>
   <symbol id="i-cloudflare" viewBox="0 0 24 24"><path d="M16.5088 16.8447c.1475-.5068.0908-.9707-.1553-1.3154-.2246-.3164-.6045-.499-1.0615-.5205l-8.6592-.1123a.1559.1559 0 0 1-.1333-.0713c-.0283-.042-.0351-.0986-.021-.1553.0278-.084.1123-.1484.2036-.1562l8.7359-.1123c1.0351-.0489 2.1601-.8868 2.5537-1.9136l.499-1.3013c.0215-.0561.0293-.1128.0147-.168-.5625-2.5463-2.835-4.4453-5.5499-4.4453-2.5039 0-4.6284 1.6177-5.3876 3.8614-.4927-.3658-1.1187-.5625-1.794-.499-1.2026.119-2.1665 1.083-2.2861 2.2856-.0283.31-.0069.6128.0635.894C1.5683 13.171 0 14.7754 0 16.752c0 .1748.0142.3515.0352.5273.0141.083.0844.1475.1689.1475h15.9814c.0909 0 .1758-.0645.2032-.1553l.12-.4268zm2.7568-5.5634c-.0771 0-.1611 0-.2383.0112-.0566 0-.1054.0415-.127.0976l-.3378 1.1744c-.1475.5068-.0918.9707.1543 1.3164.2256.3164.6055.498 1.0625.5195l1.8437.1133c.0557 0 .1055.0263.1329.0703.0283.043.0351.1074.0214.1562-.0283.084-.1132.1485-.204.1553l-1.921.1123c-1.041.0488-2.1582.8867-2.5527 1.914l-.1406.3585c-.0283.0713.0215.1416.0986.1416h6.5977c.0771 0 .1474-.0489.169-.126.1122-.4082.1757-.837.1757-1.2803 0-2.6025-2.125-4.727-4.7344-4.727"/></symbol>
+  <symbol id="i-vscode" viewBox="0 0 256 254"><defs><linearGradient id="vsc-g" x1="50%" x2="50%" y1="0%" y2="100%"><stop offset="0%" stop-color="#fff"/><stop offset="100%" stop-color="#fff" stop-opacity="0"/></linearGradient><path id="vsc-p" d="M180.828 252.605a15.87 15.87 0 0 0 12.65-.486l52.501-25.262a15.94 15.94 0 0 0 9.025-14.364V41.197a15.94 15.94 0 0 0-9.025-14.363l-52.5-25.263a15.88 15.88 0 0 0-18.115 3.084L74.857 96.35l-43.78-33.232a10.614 10.614 0 0 0-13.56.603L3.476 76.494c-4.63 4.211-4.635 11.495-.012 15.713l37.967 34.638l-37.967 34.637c-4.623 4.219-4.618 11.502.012 15.714l14.041 12.772a10.614 10.614 0 0 0 13.56.604l43.78-33.233l100.507 91.695a15.85 15.85 0 0 0 5.464 3.571m10.464-183.649l-76.262 57.889l76.262 57.888z"/></defs><mask id="vsc-m" fill="#fff"><use href="#vsc-p"/></mask><path fill="#0065a9" d="M246.135 26.873L193.593 1.575a15.885 15.885 0 0 0-18.123 3.08L3.466 161.482c-4.626 4.219-4.62 11.502.012 15.714l14.05 12.772a10.625 10.625 0 0 0 13.569.604L238.229 33.436c6.949-5.271 16.93-.315 16.93 8.407v-.61a15.94 15.94 0 0 0-9.024-14.36" mask="url(#vsc-m)"/><path fill="#007acc" d="m246.135 226.816l-52.542 25.298a15.89 15.89 0 0 1-18.123-3.08L3.466 92.207c-4.626-4.218-4.62-11.502.012-15.713l14.05-12.773a10.625 10.625 0 0 1 13.569-.603l207.132 157.135c6.949 5.271 16.93.315 16.93-8.408v.611a15.94 15.94 0 0 1-9.024 14.36" mask="url(#vsc-m)"/><path fill="#1f9cf0" d="M193.428 252.134a15.89 15.89 0 0 1-18.125-3.083c5.881 5.88 15.938 1.715 15.938-6.603V11.273c0-8.318-10.057-12.483-15.938-6.602a15.89 15.89 0 0 1 18.125-3.084l52.533 25.263a15.94 15.94 0 0 1 9.03 14.363V212.51c0 6.125-3.51 11.709-9.03 14.363z" mask="url(#vsc-m)"/><path fill="url(#vsc-g)" fill-opacity=".25" d="M180.828 252.605a15.87 15.87 0 0 0 12.65-.486l52.5-25.263a15.94 15.94 0 0 0 9.026-14.363V41.197a15.94 15.94 0 0 0-9.025-14.363L193.477 1.57a15.88 15.88 0 0 0-18.114 3.084L74.857 96.35l-43.78-33.232a10.614 10.614 0 0 0-13.56.603L3.476 76.494c-4.63 4.211-4.635 11.495-.012 15.713l37.967 34.638l-37.967 34.637c-4.623 4.219-4.618 11.502.012 15.714l14.041 12.772a10.614 10.614 0 0 0 13.56.604l43.78-33.233l100.506 91.695a15.9 15.9 0 0 0 5.465 3.571m10.464-183.65l-76.262 57.89l76.262 57.888z" mask="url(#vsc-m)"/></symbol>
   <symbol id="i-vercel" viewBox="0 0 24 24"><path d="m12 1.608 12 20.784H0Z"/></symbol>
   <symbol id="i-google" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></symbol>
   <symbol id="i-coinbase" viewBox="0 0 24 24"><path d="M22.35 9.7A10.6 10.6 0 1 0 22.35 14.3L15.63 14.3A4.3 4.3 0 1 1 15.63 9.7Z"/></symbol>
@@ -653,7 +675,13 @@
       <a class="btn btn-primary" href="/start"><span class="btn-in">Create a free doc</span></a>
       <p style="margin:10px 0 0;font-size:14px;color:#767c8b">or <a href="/templates" style="color:inherit">browse the looks</a> first.</p>
     </div>
-    <p class="cta-req">Works in <b>Claude</b>, <b>ChatGPT</b>, <b>Cursor</b> and <b>VS Code</b> as a connector, and in <b>Claude Code</b> or <b>Codex</b> on your computer.<br>What's an agent? An AI that runs on your computer and can read and write files.</p>
+    <div class="pick">
+      <input type="radio" name="pick" id="pick-r-claude" class="pick-radio" checked><input type="radio" name="pick" id="pick-r-chatgpt" class="pick-radio"><input type="radio" name="pick" id="pick-r-grok" class="pick-radio"><input type="radio" name="pick" id="pick-r-cursor" class="pick-radio"><input type="radio" name="pick" id="pick-r-vscode" class="pick-radio"><input type="radio" name="pick" id="pick-r-claudecode" class="pick-radio"><input type="radio" name="pick" id="pick-r-codex" class="pick-radio"><input type="radio" name="pick" id="pick-r-gemini" class="pick-radio"><input type="radio" name="pick" id="pick-r-grokbot" class="pick-radio">
+      <p class="pick-label">Use tdoc in</p>
+      <div class="pick-pills" role="group" aria-label="Choose your AI app"><label for="pick-r-claude" class="pick-pill"><svg style="color:#D97757" aria-hidden="true"><use href="#i-claude"/></svg>Claude</label><label for="pick-r-chatgpt" class="pick-pill"><svg aria-hidden="true"><use href="#i-openai"/></svg>ChatGPT</label><label for="pick-r-grok" class="pick-pill"><svg aria-hidden="true"><use href="#i-grok"/></svg>Grok</label><label for="pick-r-cursor" class="pick-pill"><svg aria-hidden="true"><use href="#i-cursor"/></svg>Cursor</label><label for="pick-r-vscode" class="pick-pill"><svg style="color:#007ACC" aria-hidden="true"><use href="#i-vscode"/></svg>VS Code</label><label for="pick-r-claudecode" class="pick-pill"><svg style="color:#D97757" aria-hidden="true"><use href="#i-claude"/></svg>Claude Code</label><label for="pick-r-codex" class="pick-pill"><svg aria-hidden="true"><use href="#i-openai"/></svg>Codex</label><label for="pick-r-gemini" class="pick-pill"><svg style="color:#3186FF" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="gem-g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4796E3"/><stop offset=".55" stop-color="#9177C7"/><stop offset="1" stop-color="#CA6673"/></linearGradient></defs><path fill="url(#gem-g1)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg>Gemini CLI</label><label for="pick-r-grokbot" class="pick-pill"><svg aria-hidden="true"><use href="#i-grok"/></svg>Grok Bot</label></div>
+      <div class="pick-panel pick-p-claude"><p>Adds tdoc to Claude. Sign in to tdoc once.</p><a class="pick-go" href="https://claude.ai/customize/connectors?modal=add-custom-connector&amp;connectorName=tdoc&amp;connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp" target="_blank" rel="noopener">Add to Claude &#8594;</a></div><div class="pick-panel pick-p-chatgpt"><p>In ChatGPT Plugins, click Add, then Add custom MCP server. Fill in:</p><dl class="pick-form"><dt>Name</dt><dd>tdoc</dd><dt>Server URL</dt><dd><div class="pick-cmd"><code id="pick-chatgpt">https://tdoc.dev/mcp</code><button type="button" class="pick-copy" data-tdoc-copy="#pick-chatgpt" data-tdoc-copy-done="Copied">Copy</button></div></dd><dt>Authentication</dt><dd>OAuth</dd></dl><p>Tick I understand, click Create as a plugin, then Connect tdoc and sign in.</p><a class="pick-go" href="https://chatgpt.com/plugins" target="_blank" rel="noopener">Open ChatGPT &#8594;</a> <a class="pick-go pick-guide" href="https://tdoc.dev/d/connect-chatgpt" target="_blank" rel="noopener">See it step by step</a></div><div class="pick-panel pick-p-grok"><p>In Grok, open Connectors, New Connector, Custom. Paste this, then sign in to tdoc.</p><div class="pick-cmd"><code id="pick-grok">https://tdoc.dev/mcp</code><button type="button" class="pick-copy" data-tdoc-copy="#pick-grok" data-tdoc-copy-done="Copied">Copy</button></div><a class="pick-go" href="https://grok.com/connectors" target="_blank" rel="noopener">Open Grok &#8594;</a></div><div class="pick-panel pick-p-cursor"><p>Adds tdoc to Cursor. Sign in when your browser opens.</p><a class="pick-go" href="https://cursor.com/en/install-mcp?name=tdoc&amp;config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9" target="_blank" rel="noopener">Add to Cursor &#8594;</a></div><div class="pick-panel pick-p-vscode"><p>Adds tdoc to VS Code. Sign in when your browser opens.</p><a class="pick-go" href="https://vscode.dev/redirect/mcp/install?name=tdoc&amp;config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A//tdoc.dev/mcp%22%7D" target="_blank" rel="noopener">Add to VS Code &#8594;</a></div><div class="pick-panel pick-p-claudecode"><p>Run this in Terminal. Then type <code>/mcp</code> in Claude Code and sign in to tdoc.</p><div class="pick-cmd"><code id="pick-claudecode">claude mcp add --transport http tdoc https://tdoc.dev/mcp</code><button type="button" class="pick-copy" data-tdoc-copy="#pick-claudecode" data-tdoc-copy-done="Copied">Copy</button></div></div><div class="pick-panel pick-p-codex"><p>Run this in Terminal, then sign in to tdoc in your browser.</p><div class="pick-cmd"><code id="pick-codex">codex mcp add tdoc --url https://tdoc.dev/mcp</code><button type="button" class="pick-copy" data-tdoc-copy="#pick-codex" data-tdoc-copy-done="Copied">Copy</button></div></div><div class="pick-panel pick-p-gemini"><p>Run this in Terminal:</p><div class="pick-cmd"><code id="pick-gemini">gemini mcp add --transport http tdoc https://tdoc.dev/mcp</code><button type="button" class="pick-copy" data-tdoc-copy="#pick-gemini" data-tdoc-copy-done="Copied">Copy</button></div><p class="pick-then">Then in Gemini CLI, sign in to tdoc:</p><div class="pick-cmd"><code id="pick-gemini2">/mcp auth tdoc</code><button type="button" class="pick-copy" data-tdoc-copy="#pick-gemini2" data-tdoc-copy-done="Copied">Copy</button></div></div><div class="pick-panel pick-p-grokbot"><p>Send this to Grok Bot, then click Connect on the card it shows.</p><div class="pick-cmd"><code id="pick-grokbot">Connect the tdoc MCP server: https://tdoc.dev/mcp</code><button type="button" class="pick-copy" data-tdoc-copy="#pick-grokbot" data-tdoc-copy-done="Copied">Copy</button></div></div>
+    </div>
+    <p class="pick-note">What's an agent? An AI that runs on your computer and can read and write files.</p>
 
     <!-- tdoc demo: refined static mock (self-contained, hd- namespaced).
          Auto-rotates the three docs until a tab is clicked, then pins. -->
@@ -922,23 +950,6 @@
 
   </section>
 
-  <!-- ══ USE TDOC IN YOUR AI APP ══
-       The apps tdoc actually runs in, each a link to its connect step. It
-       used to say "Not yet in the claude.ai or ChatGPT chat"; the remote MCP
-       server (tdoc.dev/mcp) put tdoc in both. -->
-  <section style="padding:40px 0" id="ai-apps">
-    <p class="trust-label">Use tdoc in your AI app</p>
-    <nav class="aiapps" aria-label="Connect tdoc to your AI app">
-      <a class="aiapp" href="/start?connect=claude"><svg style="color:#D97757" aria-hidden="true"><use href="#i-claude"/></svg>Claude</a>
-      <a class="aiapp" href="/start?connect=chatgpt"><svg aria-hidden="true"><use href="#i-openai"/></svg>ChatGPT</a>
-      <a class="aiapp" href="/start?connect=cursor"><svg aria-hidden="true"><use href="#i-cursor"/></svg>Cursor</a>
-      <a class="aiapp" href="/start?connect=vscode"><svg style="color:#007ACC" aria-hidden="true"><use href="#i-code"/></svg>VS Code</a>
-      <a class="aiapp" href="/start?connect=codex"><svg aria-hidden="true"><use href="#i-terminal"/></svg>Codex</a>
-      <a class="aiapp" href="/start?connect=gemini"><svg style="color:#3186FF" aria-hidden="true"><use href="#i-gemini"/></svg>Gemini CLI</a>
-    </nav>
-    <p class="apps-not">You sign in to tdoc once; nothing to install. Working in Claude Code or Codex? <a href="/start" style="color:inherit">Paste one line</a>.</p>
-  </section>
-
   <!-- ══ THE LOOP ══ -->
   <section>
     <div class="sec-head ctr">
@@ -991,6 +1002,15 @@
     </div>
   </section>
 
+  <!-- ══ FEEDBACK ══ the same comments, on the app you are building. -->
+  <section>
+    <div class="sec-head ctr">
+      <p class="eyebrow">Feedback</p>
+      <h2>Comment on your own app, too.</h2>
+      <p>Click anything in the app you are building, say what is wrong, and send it to your agent. One bookmark, nothing to install. <a href="/feedback" style="color:inherit">Get the bookmark &#8594;</a></p>
+    </div>
+  </section>
+
   <!-- ══ ONE PASTE ══
        This used to say "Nothing to install, no account, no key", beside the
        claude.ai mark, ChatGPT and Grok. A newcomer installs a skill and signs
@@ -998,16 +1018,23 @@
   <section>
     <div class="sec-head ctr">
       <p class="eyebrow">Setup</p>
-      <h2>One paste, and it's set up.</h2>
-      <p>Paste one line into Claude Code or Codex. It installs tdoc, and you sign in once with email, Google, or GitHub. No key, no card.</p>
+      <h2>Set up in a minute.</h2>
+      <p>Pick your AI at the top of this page. Most take one click; terminals take one line. You sign in once with email, Google, or GitHub. No key, no card.</p>
     </div>
 
     <div class="nosetup">
-      <div class="logorow">
-        <div class="apptile-fig"><div class="apptile" role="img" aria-label="Claude Code" title="Claude Code" style="background:#1d1f21"><svg style="color:#D97757" aria-hidden="true"><use href="#i-terminal"/></svg></div><span class="apptile-name">Claude Code</span></div>
-        <div class="apptile-fig"><div class="apptile" role="img" aria-label="Codex" title="Codex" style="background:#fff"><svg fill="#0A0A0A" aria-hidden="true"><use href="#i-openai"/></svg></div><span class="apptile-name">Codex</span></div>
+      <div class="logorow ns-row">
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="Claude" title="Claude" style="background:#fff"><svg style="color:#D97757" fill="currentColor" aria-hidden="true"><use href="#i-claude"/></svg></div><span class="apptile-name">Claude</span></div>
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="ChatGPT" title="ChatGPT" style="background:#fff"><svg style="color:#0A0A0A" fill="currentColor" aria-hidden="true"><use href="#i-openai"/></svg></div><span class="apptile-name">ChatGPT</span></div>
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="Grok" title="Grok" style="background:#fff"><svg style="color:#0A0A0A" fill="currentColor" aria-hidden="true"><use href="#i-grok"/></svg></div><span class="apptile-name">Grok</span></div>
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="Cursor" title="Cursor" style="background:#fff"><svg style="color:#0A0A0A" fill="currentColor" aria-hidden="true"><use href="#i-cursor"/></svg></div><span class="apptile-name">Cursor</span></div>
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="VS Code" title="VS Code" style="background:#fff"><svg style="color:#007ACC" fill="currentColor" aria-hidden="true"><use href="#i-vscode"/></svg></div><span class="apptile-name">VS Code</span></div>
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="Claude Code" title="Claude Code" style="background:#1d1f21"><svg style="color:#D97757" fill="currentColor" aria-hidden="true"><use href="#i-claude"/></svg></div><span class="apptile-name">Claude Code</span></div>
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="Codex" title="Codex" style="background:#1d1f21"><svg style="color:#fff" fill="currentColor" aria-hidden="true"><use href="#i-openai"/></svg></div><span class="apptile-name">Codex</span></div>
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="Gemini CLI" title="Gemini CLI" style="background:#fff"><svg style="color:#3186FF" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="gem-g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4796E3"/><stop offset=".55" stop-color="#9177C7"/><stop offset="1" stop-color="#CA6673"/></linearGradient></defs><path fill="url(#gem-g2)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg></div><span class="apptile-name">Gemini CLI</span></div>
+        <div class="apptile-fig"><div class="apptile ns-mid" role="img" aria-label="Grok Bot" title="Grok Bot" style="background:#1d1f21"><svg style="color:#fff" fill="currentColor" aria-hidden="true"><use href="#i-grok"/></svg></div><span class="apptile-name">Grok Bot</span></div>
       </div>
-      <p class="ns-cap">Both run on your computer. <a href="/start" style="color:inherit">See the steps</a>.</p>
+      <p class="ns-cap">Claude Code and Codex can also run on your computer, so docs update while the AI is closed. <a href="/start" style="color:inherit">See the steps</a>.</p>
       <div class="ns-host">
         <span>Open source, AGPL. Published to <b>tdoc.dev</b> by default, or <a href="https://github.com/tornado-doc/tdoc" target="_blank" rel="noopener">self-host it on your own stack &#8594;</a></span>
       </div>
@@ -1135,7 +1162,7 @@
   <section style="text-align:center">
     <div class="sec-head ctr" style="margin-bottom:26px;max-width:660px">
       <h2>Send the next review as a tdoc.</h2>
-      <p><span>Paste one line into Claude Code or Codex. It sets everything up and hands you a link.</span><span>Whoever you send it to comments like it's a Google Doc, with nothing to install.</span></p>
+      <p><span>Ask your AI to make a tdoc. It hands you a link.</span><span>Whoever you send it to comments like it's a Google Doc, with nothing to install.</span></p>
     </div>
     <div class="cta" style="justify-content:center">
       <a class="btn btn-primary" href="/start"><span class="btn-in">Create a free doc</span></a>
