@@ -19,7 +19,7 @@ import { observeVisibleRead } from './visible-read.js';
 
 const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };
 
-function authorLine(author) {
+export function authorLine(author) {
   if (!author) return 'anonymous';
   if (author.kind === 'agent') {
     // Brand stays on the avatar; the text line is name · owner, the owner
