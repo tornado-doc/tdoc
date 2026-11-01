@@ -411,8 +411,12 @@ async function touchSelect(page, phrase) {
     };
     const phoneEdit = async (page) => {
       await page.locator('.tdoc-fab').click();
-      await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
       const panel = page.locator('#tdoc-comment-layer .tdoc-ask-panel');
+      // WebKit can take the tab tap while the drawer is still sliding in.
+      for (let i = 0; i < 3; i++) {
+        await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
+        try { await panel.getByRole('button', { name: /^Mode:/ }).waitFor({ timeout: 4000 }); break; } catch (e) { if (i === 2) throw e; }
+      }
       return { panel, box: await pickEdit(page, panel) };
     };
     for (const engine of ['chromium', 'webkit']) for (const width of [430, 390]) {
