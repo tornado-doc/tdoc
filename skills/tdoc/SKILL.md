@@ -23,6 +23,7 @@ Open-source, collaborative. Docs are HTML build
 artifacts, not files the user maintains.
 
 **Source of truth (see `AGENTS.md`):** Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold. Authoring interface is a prompt.
+**House style:** before writing HTML, pick `--style` (default|technical|editorial|paper) and match `$SKILL_DIR/authoring/style/<name>.md`. `tdoc-new` / `tdoc-write` hard-reject deviations unless `--custom-template` + `--custom-template-reason`. Full style detail lives under `authoring/` — do not invent a page-wide aesthetic.
 Every edit creates a new version. Comments anchor to highlighted text or to
 artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
