@@ -28,6 +28,11 @@ export const FLAGS = Object.freeze({
   // Settings -> Delete account (self-serve). Owner-approved; the flag is the
   // off switch while it settles.
   deleteAccount: Object.freeze({ label: 'Delete account in Settings', owner: 'julie', added: '2026-10-28', default: true }),
+  // The homepage demo's scripted Edit: Ask AI's Edit opens with a ready
+  // request, sending it rewrites a paragraph in front of the visitor, then a
+  // sign-up call to action (demo-agent.js DEMO_REWRITES). Landing doc only;
+  // on in PR previews until approved.
+  demoEditRewrite: Object.freeze({ label: 'Homepage demo: scripted Edit', owner: 'julie', added: '2026-11-01', default: true, preview: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;

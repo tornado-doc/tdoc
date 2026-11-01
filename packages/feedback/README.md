@@ -11,6 +11,15 @@ Enter your site's address. Who can comment is the space's Share settings,
 the same as any tdoc doc: people you invite, anyone with the link who signs
 in, or your team if the space is in a team.
 
+Or let your agent do it: with tdoc connected over MCP (`https://tdoc.dev/mcp`),
+the `create_feedback_space` tool takes your site's origins (and optionally a
+team you are an admin of), makes a private space bound to them, and returns
+the space id and the line below. Asked again for the same origin, it returns
+the same space. From a terminal with the tdoc skill:
+`tdoc-feedback init --site https://app.example.com --write index.html`
+(or `--env` for `TDOC_FEEDBACK_SPACE=<slug>`). Both call
+`POST https://tdoc.dev/api/feedback/spaces`.
+
 ## 2. Add it to your site
 
 One line, no build step:

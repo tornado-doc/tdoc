@@ -51,6 +51,17 @@ Short answers and edits to files in a repository do not need tdoc.
 - `resolve_comment`: mark a comment handed to you as handled.
 - `answer_question`: answer a reader's Ask AI question by `ask_id`.
 - `share_doc`: set visibility (`private`, `unlisted`, `public`) and invite people.
+- `create_feedback_space`: a private product-feedback space for a website
+  (`origins`, optional `team` you are an admin of, optional `title`); returns
+  the `<script>` line that adds tdoc comments to the site, or the space you
+  already have for that origin. Its comments come back through `get_comments`.
+
+"Add tdoc feedback to my project": call `create_feedback_space` with every
+origin the app runs on (production and local dev, e.g. `http://localhost:3000`),
+then add the returned `<script>` line before `</head>` in the project's HTML
+entry (or set `TDOC_FEEDBACK_SPACE=<slug>` where the app reads it). Comments
+left on the site come back through `get_comments` with that slug. In a terminal,
+`tdoc-feedback init --site <origin> --write index.html` does the same.
 
 Resources `tdoc://authoring/<path>.md` hold the authoring guides: `essentials.md`
 (the short contract), `voice.md`,
