@@ -11,7 +11,7 @@ import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } f
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
-import { avatarFor, QUICK_REACTIONS } from './model.js';
+import { avatarFor, avatarInitial, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
 import { productPageUrl } from './product-url.js';
@@ -95,7 +95,8 @@ export function Author({ author, timestamp }) {
           onClick={(event) => event.stopPropagation()}>
           <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />
         </a>
-      ) : <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />) : null}
+      ) : <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />)
+        : <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(author)}</span>}
       <span className="tdoc-cc-who">
         {hoverCard ? <AgentAuthorName author={author} /> : <span className="login">{authorLine(author)}</span>}
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}

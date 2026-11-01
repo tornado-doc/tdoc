@@ -321,6 +321,14 @@
   .tdoc-cc-icon:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 1px; }
   .tdoc-margin-comment .author { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .tdoc-margin-comment .author img { width: 24px; height: 24px; border-radius: 50%; }
+  /* No picture: the first letter on the accent, as the top bar draws it
+     (docs-hub.css .tdoc-avatar-fallback, which the feedback overlay does not
+     load). Sized like the face it stands in for. */
+  .tdoc-margin-comment .author .tdoc-avatar-fallback,
+  .tdoc-reply .author .tdoc-avatar-fallback,
+  .tdoc-pin .tdoc-avatar-fallback { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: var(--td-accent); color: #fff; font: 700 12px/1 system-ui, sans-serif; }
+  .tdoc-reply .author .tdoc-avatar-fallback { width: 18px; height: 18px; font-size: 10px; }
+  .tdoc-pin .tdoc-avatar-fallback { width: 100%; height: 100%; }
   .tdoc-author-profile { display: inline-flex; flex-shrink: 0; border-radius: 50%; }
   .tdoc-author-profile:hover { box-shadow: 0 0 0 2px var(--td-accent); }
   .tdoc-author-profile:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
@@ -459,7 +467,8 @@
      still waiting for an answer. */
   .tdoc-pin.tdoc-pin-deleted { border-style: dashed; border-color: #c9ccd1; opacity: 0.55; }
   .tdoc-pin.tdoc-pin-deleted img,
-  .tdoc-pin.tdoc-pin-deleted .tdoc-pin-anon { display: none; }
+  .tdoc-pin.tdoc-pin-deleted .tdoc-pin-anon,
+  .tdoc-pin.tdoc-pin-deleted .tdoc-avatar-fallback { display: none; }
   .tdoc-pin.tdoc-pin-deleted::before { content: ""; width: 10px; height: 2px; border-radius: 1px; background: #8a93a2; }
   .tdoc-pin.tdoc-pin-deleted:hover { opacity: 1; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
