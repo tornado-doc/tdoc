@@ -51,6 +51,10 @@ Short answers and edits to files in a repository do not need tdoc.
 - `resolve_comment`: mark a comment handed to you as handled.
 - `answer_question`: answer a reader's Ask AI question by `ask_id`.
 - `share_doc`: set visibility (`private`, `unlisted`, `public`) and invite people.
+- `create_feedback_space`: a private product-feedback space for a website
+  (`origins`, optional `team` you are an admin of, optional `title`); returns
+  the `<script>` line that adds tdoc comments to the site, or the space you
+  already have for that origin. Its comments come back through `get_comments`.
 
 Resources `tdoc://authoring/<path>.md` hold the authoring guides: `essentials.md`
 (the short contract), `voice.md`,

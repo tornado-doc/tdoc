@@ -19,3 +19,11 @@ time it runs on an app it opens `/feedback/connect` on the tdoc origin, which
 signs the person in, finds or creates the app's feedback space (a normal doc,
 `created_from: 'feedback'`), and posts back a token bound to that one doc.
 See `getSession` and `FEEDBACK_TOKEN_PATHS` in `worker/worker.js`.
+
+A site's own space (`data-tdoc-space`, the SDK in `packages/feedback`) is
+bound to its origins in My docs → Feedback → Add to your site, or by an agent
+with the MCP tool `create_feedback_space` (`POST /api/feedback/space`), which
+makes a private space bound to the origins and returns the embed line. The
+binding lives in its own KV key, `site:<slug>` (legacy: `meta.site`), so
+binding a site and changing Share never overwrite each other; see
+`siteBindingKey`.

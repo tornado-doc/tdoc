@@ -72,6 +72,8 @@ const OFFLINE = [
   'operator-fallback.test.js',  // TDOC_OWNER owns only ownerless docs, not email accounts' docs
   'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
+  'feedback-space-mcp.test.js', // create_feedback_space: agent-made site space, team-admin rule, dedupe; site binding vs Share race
+
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
   'local-agent.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
   'team-agent.test.js',         // team agents: admin adds, members call, one team's reach, survives the adder, revoke
