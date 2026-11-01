@@ -106,6 +106,17 @@ async function startServer(worker, env) {
   const open = async (who, opts, context = null) => {
     const ctx = context || await browser.newContext(opts);
     if (!context) await ctx.addCookies([{ name: 'tdoc_sid', value: who.cookie.split('=')[1], domain: '127.0.0.1', path: '/' }]);
+    // The homepage demo's scripted Edit is pinned on: a real doc must still
+    // get no ready request and no rewrite message to its frame.
+    if (!context) {
+      await ctx.addInitScript(() => {
+        window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), demoEditRewrite: true };
+        window.__demoRewriteMessages = [];
+        window.addEventListener('message', (e) => {
+          if (/^tdoc:demoRewrite/.test(String(e.data && e.data.type))) window.__demoRewriteMessages.push(e.data.type);
+        }, true);
+      });
+    }
     const page = await ctx.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
@@ -176,6 +187,7 @@ async function startServer(worker, env) {
       await box.waitFor();
       if ((await box.getAttribute('placeholder')) !== 'What should the agent change?') throw new Error('instruction placeholder');
       if (!(await box.evaluate((el) => el === document.activeElement))) throw new Error('the instruction is not focused');
+      if (await box.inputValue()) throw new Error(`a real doc's Edit is prefilled: ${await box.inputValue()}`);
       if (await panel.getByRole('button', { name: /Add a note/ }).count()) throw new Error('"+ Add a note" is back');
       const summary = panel.locator('.tdoc-ask-send-summary');
       const summaryIs = async (text) => { await summary.filter({ hasText: text }).waitFor({ timeout: 10000 }); };
@@ -264,6 +276,13 @@ async function startServer(worker, env) {
       if (await box.inputValue()) throw new Error('the instruction stays after sending');
       await panel.locator('.tdoc-ask-send-summary').waitFor({ state: 'detached', timeout: 10000 });
       await shot(page, 'edit-mode-instruction-sent-1280.png');
+      // No scripted rewrite on a real doc: no message to the frame, no
+      // call to action.
+      const frame = page.frames().find((f) => f !== page.mainFrame());
+      const toFrame = frame ? await frame.evaluate(() => window.__demoRewriteMessages || []) : [];
+      if (toFrame.length) throw new Error(`a real doc got the demo rewrite: ${toFrame.join(', ')}`);
+      if (await panel.locator('.tdoc-ask-demo-cta').count()) throw new Error('a real doc shows the demo call to action');
+      if (await page.evaluate(() => document.body.dataset.tdocDemoRewrite)) throw new Error('a real doc is in the demo rewrite state');
       if (desktop.errors.length) throw new Error(desktop.errors.join('\n'));
     });
 

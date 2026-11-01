@@ -8,6 +8,12 @@
 //   - Ask AI (the bar on desktop, the drawer's Ask AI tab on a phone) gives
 //     the demo answer, and its Send to agent hands a ready comment to Claude
 //     (demo), which replies;
+//   - the scripted Edit (flag demoEditRewrite, demo-agent.js DEMO_REWRITES):
+//     Edit opens with a ready request; Send hands it to Claude (demo), the
+//     paragraph is rewritten in the doc (struck, typed, then marked as an
+//     insertion), the reply arrives in Agent activity, and Ask AI shows
+//     "Create a free doc" (to /start) and Undo; reduced motion swaps the
+//     text at once; flag off, Edit opens empty as before;
 //   - no request reaches /api/comments, /api/notify or /api/docs/*, and
 //     nothing but GETs reaches /api at all.
 // Desktop 1280 and phone 390. Screenshots: TDOC_UI_SHOTS (default
@@ -26,6 +32,16 @@ const SHOTS = process.env.TDOC_UI_SHOTS || '/tmp/landing-demo';
 const TOKEN = 'landing-upload-token';
 const SLUG = 'tornado-doc';
 const root = path.join(__dirname, '..');
+const { DEMO_REWRITES } = loadDemoRewrites();
+
+// demo-agent.js is an ES module; read its script without a bundler.
+function loadDemoRewrites() {
+  const src = fs.readFileSync(path.join(root, 'shell/src/document/demo-agent.js'), 'utf8')
+    .replace(/^import .*$/m, 'const TDOC_AI = {};')
+    .replace(/^export /gm, '');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src}\nreturn { DEMO_REWRITES };`)();
+}
 
 async function startServer(worker, env) {
   const assets = loadRuntimeAssets();
@@ -143,8 +159,9 @@ async function touchSelect(page, phrase) {
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.stack || error.message}`); } };
 
-  const open = async (name, opts) => {
+  const open = async (name, opts, flags = null) => {
     const context = await browser.newContext(opts);
+    if (flags) await context.addInitScript((pinned) => { window.__TDOC_FLAGS__ = pinned; }, flags);
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
@@ -192,7 +209,192 @@ async function touchSelect(page, phrase) {
     return seq;
   };
 
+  // The scripted Edit.
+  const script = DEMO_REWRITES[SLUG];
+  const REWRITE_ON = { demoEditRewrite: true };
+  // The paragraph's state in the frame: its text, the marked insertion, and
+  // the animation step (data-tdoc-demo-rewrite).
+  const paragraph = async (page) => {
+    const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+    return frame.evaluate(({ before, after }) => {
+      const norm = (x) => x.replace(/\s+/g, ' ').trim();
+      const el = [...document.querySelectorAll('[data-tdoc-demo-rewrite], p')]
+        .find((p) => p.hasAttribute('data-tdoc-demo-rewrite') || norm(p.textContent) === norm(before) || norm(p.textContent) === norm(after));
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const ins = el.querySelector('ins.tdoc-diff-ins');
+      return {
+        text: norm(el.textContent),
+        step: el.getAttribute('data-tdoc-demo-rewrite'),
+        ins: ins ? norm(ins.textContent) : null,
+        insBg: ins ? getComputedStyle(ins).backgroundColor : null,
+        del: el.querySelectorAll('del').length,
+        top: r.top, bottom: r.bottom, innerH: innerHeight,
+      };
+    }, script);
+  };
+  // Every step the paragraph goes through, recorded in the frame.
+  const recordSteps = async (page) => {
+    const frame = await (await page.locator('iframe').first().elementHandle()).contentFrame();
+    await frame.evaluate(() => {
+      window.__steps = [];
+      new MutationObserver((list) => list.forEach((m) => {
+        const v = m.target.getAttribute('data-tdoc-demo-rewrite');
+        if (v && window.__steps[window.__steps.length - 1] !== v) window.__steps.push(v);
+      })).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-tdoc-demo-rewrite'] });
+    });
+    return () => frame.evaluate(() => window.__steps);
+  };
+  const pickEdit = async (page, panel) => {
+    await panel.getByRole('button', { name: /^Mode:/ }).click();
+    await page.getByRole('menuitem', { name: /^Edit/ }).click();
+    return panel.getByRole('textbox', { name: 'What should the agent change?' });
+  };
+  const noOverflow = async (page, name) => {
+    const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    if (over > 0) throw new Error(`${name}: ${over}px of horizontal overflow`);
+  };
+  const ctaShown = async (page, panel, width, name) => {
+    const cta = panel.locator('.tdoc-ask-demo-cta');
+    await cta.waitFor({ timeout: 10000 });
+    const link = cta.getByRole('link', { name: 'Create a free doc' });
+    if ((await link.getAttribute('href')) !== '/start') throw new Error(`${name}: CTA goes to ${await link.getAttribute('href')}`);
+    if (!/\bui-btn-primary\b/.test(await link.getAttribute('class'))) throw new Error(`${name}: the CTA is not the primary button`);
+    await link.scrollIntoViewIfNeeded();
+    const box = await link.boundingBox();
+    const vp = page.viewportSize();
+    if (!box || box.x < 0 || box.x + box.width > width || box.y < 0 || box.y + box.height > vp.height) throw new Error(`${name}: CTA off screen: ${JSON.stringify(box)}`);
+    return cta;
+  };
+
   try {
+    await t('desktop 1440: Edit opens with the scripted request; Send rewrites the paragraph in the doc, Claude (demo) replies, then "Create a free doc"; Undo resets', async () => {
+      const { context, page, shot, noWrites } = await open('desktop', { viewport: { width: 1440, height: 900 } }, REWRITE_ON);
+      const steps = await recordSteps(page);
+      await page.locator('#tdoc-send-agent-btn').click();
+      const panel = page.locator('.tdoc-ask-panel');
+      await panel.waitFor();
+      const box = await pickEdit(page, panel);
+      if ((await box.inputValue()) !== script.prompt) throw new Error(`Edit input: ${JSON.stringify(await box.inputValue())}`);
+      const send = panel.getByRole('button', { name: 'Send to Claude (demo)', exact: true });
+      if (await send.isDisabled()) throw new Error('Send is off with the prefilled request');
+      await shot('desktop-1440-rewrite-before.png');
+      await send.click();
+      await panel.getByText('Sent to Claude (demo) ✓').waitFor({ timeout: 5000 });
+      // During: the old words struck, the new ones typing in.
+      const deadline = Date.now() + 8000;
+      let mid = null;
+      while (Date.now() < deadline) {
+        mid = await paragraph(page);
+        if (mid && mid.step === 'typing' && mid.ins) break;
+        await page.waitForTimeout(80);
+      }
+      if (!mid || mid.step !== 'typing' || mid.del !== 1) throw new Error(`no struck-and-typing step: ${JSON.stringify(mid)}`);
+      await shot('desktop-1440-rewrite-during.png');
+      await ctaShown(page, panel, 1440, 'desktop');
+      const end = await paragraph(page);
+      if (end.step !== 'done' || end.text !== script.after || end.ins !== script.after || end.del !== 0) throw new Error(`end state: ${JSON.stringify(end)}`);
+      if (!end.insBg || end.insBg === 'rgba(0, 0, 0, 0)') throw new Error('the new text is not marked');
+      if (end.top < 0 || end.bottom > end.innerH) throw new Error(`the rewritten paragraph is not in view: ${JSON.stringify(end)}`);
+      const seen = await steps();
+      if (seen.join(' → ') !== 'striking → typing → folding → done') throw new Error(`steps: ${seen.join(' → ')}`);
+      // The reply, in Agent activity, as a real handoff ends.
+      const activity = panel.locator('.tdoc-ask-activity');
+      await activity.waitFor();
+      await activity.getByText(/^Make the paragraph under/).first().waitFor({ timeout: 5000 });
+      if (!/\bDone\b/.test(await activity.innerText())) throw new Error(`Agent activity row: ${await activity.innerText()}`);
+      await noOverflow(page, 'desktop');
+      await shot('desktop-1440-rewrite-after-cta.png');
+      // Undo: the paragraph and the request come back; it can run again.
+      await panel.getByRole('button', { name: 'Undo', exact: true }).click();
+      await panel.locator('.tdoc-ask-demo-cta').waitFor({ state: 'detached' });
+      let back = await paragraph(page);
+      for (let i = 0; i < 20 && back.step; i++) { await page.waitForTimeout(50); back = await paragraph(page); }
+      if (back.text !== script.before.replace(/\s+/g, ' ') || back.step) throw new Error(`after Undo: ${JSON.stringify(back)}`);
+      if ((await box.inputValue()) !== script.prompt) throw new Error('Undo did not put the request back');
+      // The reply is under the request's comment, as any agent reply is.
+      await activity.getByText(/^Make the paragraph under/).first().click();
+      const card = page.locator('[data-comment-id]').filter({ hasText: 'Make the paragraph under' }).first();
+      await card.locator('.tdoc-handoff-chip[data-handoff-state="answered"]').waitFor({ timeout: 5000 });
+      await card.locator('.tdoc-replies-toggle').click();
+      await card.getByText(/^Done: that paragraph is 19 words now, down from 28/).waitFor({ timeout: 5000 });
+      noWrites();
+      await context.close();
+    });
+
+    await t('desktop 1440, reduced motion: the paragraph swaps at once, no striking or typing; the CTA still follows', async () => {
+      const { context, page, shot, noWrites } = await open('desktop-reduced', { viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' }, REWRITE_ON);
+      const steps = await recordSteps(page);
+      await page.locator('#tdoc-send-agent-btn').click();
+      const panel = page.locator('.tdoc-ask-panel');
+      await (await pickEdit(page, panel)).waitFor();
+      await panel.getByRole('button', { name: 'Send to Claude (demo)', exact: true }).click();
+      await ctaShown(page, panel, 1440, 'reduced');
+      const end = await paragraph(page);
+      if (end.step !== 'done' || end.ins !== script.after) throw new Error(`end state: ${JSON.stringify(end)}`);
+      const seen = await steps();
+      if (seen.join(',') !== 'done') throw new Error(`reduced motion animated: ${seen.join(' → ')}`);
+      await shot('desktop-1440-rewrite-reduced.png');
+      noWrites();
+      await context.close();
+    });
+
+    await t('desktop: a different instruction gets the plain demo reply and leaves the doc alone; flag off, Edit opens empty', async () => {
+      const { context, page, noWrites } = await open('desktop-other', { viewport: { width: 1280, height: 800 } }, REWRITE_ON);
+      await page.locator('#tdoc-send-agent-btn').click();
+      const panel = page.locator('.tdoc-ask-panel');
+      const box = await pickEdit(page, panel);
+      await box.fill('Translate the headline into French');
+      await panel.getByRole('button', { name: 'Send to Claude (demo)', exact: true }).click();
+      await panel.getByText('Sent to Claude (demo) ✓').waitFor({ timeout: 5000 });
+      await page.waitForTimeout(4200);
+      const p = await paragraph(page);
+      if (!p || p.step || p.text !== script.before.replace(/\s+/g, ' ')) throw new Error(`the doc changed: ${JSON.stringify(p)}`);
+      if (await panel.locator('.tdoc-ask-demo-cta').count()) throw new Error('CTA without the scripted edit');
+      noWrites();
+      await context.close();
+      const off = await open('desktop-flag-off', { viewport: { width: 1280, height: 800 } }, { demoEditRewrite: false });
+      await off.page.locator('#tdoc-send-agent-btn').click();
+      const offPanel = off.page.locator('.tdoc-ask-panel');
+      const offBox = await pickEdit(off.page, offPanel);
+      if (await offBox.inputValue()) throw new Error(`flag off, Edit prefilled: ${await offBox.inputValue()}`);
+      await off.context.close();
+    });
+
+    for (const width of [430, 390]) {
+      await t(`phone ${width}: the drawer's Edit is prefilled; the paragraph is rewritten above the drawer; the CTA shows in the drawer`, async () => {
+        const PHONE = { ...devices['iPhone 13'], defaultBrowserType: undefined, viewport: { width, height: 844 } };
+        const { context, page, shot, noWrites } = await open(`phone-${width}`, PHONE, REWRITE_ON);
+        await page.locator('.tdoc-fab').click();
+        await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
+        const panel = page.locator('#tdoc-comment-layer .tdoc-ask-panel');
+        const box = await pickEdit(page, panel);
+        if ((await box.inputValue()) !== script.prompt) throw new Error(`Edit input: ${JSON.stringify(await box.inputValue())}`);
+        await shot(`phone-${width}-rewrite-before.png`);
+        await panel.getByRole('button', { name: 'Send to Claude (demo)' }).first().click();
+        let mid = null;
+        const deadline = Date.now() + 8000;
+        while (Date.now() < deadline) {
+          mid = await paragraph(page);
+          if (mid && mid.step === 'typing' && mid.ins && mid.ins.split(' ').length > 6) break;
+          await page.waitForTimeout(80);
+        }
+        await shot(`phone-${width}-rewrite-during.png`);
+        await ctaShown(page, panel, width, `phone ${width}`);
+        const end = await paragraph(page);
+        if (end.step !== 'done' || end.ins !== script.after) throw new Error(`end state: ${JSON.stringify(end)}`);
+        // Above the drawer: the frame's top part, which the drawer leaves showing.
+        const frameBox = await page.locator('iframe').first().boundingBox();
+        const drawerTop = (await page.locator('#tdoc-comment-layer').boundingBox()).y;
+        const top = frameBox.y + end.top; const bottom = frameBox.y + end.bottom;
+        if (top < frameBox.y - 1 || bottom > drawerTop + 1) throw new Error(`the paragraph is hidden by the drawer: ${top}-${bottom}, drawer at ${drawerTop}`);
+        await noOverflow(page, `phone ${width}`);
+        await shot(`phone-${width}-rewrite-after-cta.png`);
+        noWrites();
+        await context.close();
+      });
+    }
+
     await t('desktop 1280: @agent → Claude (demo) pill; the comment runs the real handoff line to a reply', async () => {
       const { context, page, shot, noWrites } = await open('desktop', { viewport: { width: 1280, height: 800 } });
       await dragSelect(page, 'Humans and agents collaborate');

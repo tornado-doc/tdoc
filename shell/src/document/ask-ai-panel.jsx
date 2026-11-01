@@ -79,13 +79,22 @@ function PendingComments({ comments, chosen, onToggle }) {
 //                           then that comment is handed off; the agent
 //                           replies under it as usual
 function EditForm({ send, modePicker }) {
-  const { slug, choices, preselected, readyIds, ready = [], createDocumentComment, onSent } = send;
+  const { slug, choices, preselected, readyIds, ready = [], createDocumentComment, onSent, prefill = '' } = send;
   const [picked, setPicked] = useState(null);
-  const [instruction, setInstruction] = useState('');
+  const [instruction, setInstruction] = useState(prefill);
   const [posting, setPosting] = useState(false);
   const sending = useHandoffSend(slug, onSent);
   const input = useRef(null);
-  useEffect(() => { input.current?.focus(); }, []);
+  // The homepage demo's ready request (demo-agent.js DEMO_REWRITES): in the
+  // input, caret at its end, so the visitor only presses Send. It comes back
+  // after Undo.
+  useEffect(() => { if (prefill) setInstruction(prefill); }, [prefill]);
+  useEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
   useEffect(() => {
     if (!input.current) return;
     input.current.style.height = 'auto';
@@ -151,13 +160,28 @@ function EditForm({ send, modePicker }) {
   </>;
 }
 
+// After the homepage demo's scripted Edit has changed the doc: the landing's
+// own call to action (its "Create a free doc", to /start), here in Ask AI
+// because that is where the visitor is looking -- the popover on desktop,
+// the drawer on a phone. Undo puts the paragraph back and the request in
+// the input, so it can run again.
+export function DemoRewriteCta({ onUndo }) {
+  return <div className="tdoc-ask-notice tdoc-ask-demo-cta" role="status">
+    <p>That’s tdoc: ask, and your agent edits the doc in place. Try it on your own docs.</p>
+    <div className="tdoc-ask-demo-cta-actions">
+      <a className="ui-btn ui-btn-primary ui-btn-m" href="/start">Create a free doc</a>
+      <AppButton variant="quiet" size="m" onClick={onUndo}>Undo</AppButton>
+    </div>
+  </div>;
+}
+
 // A document-level question starts private; a team agent's answer is a
 // comment everyone sees, and the panel says so before anything is sent.
 // Where the viewer may hand off comments (`send`), the same panel switches
 // to Edit: an instruction (and any pending comments) to the agent picked here.
 export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets, viewer,
   disabledChoices = [], guestAction = null,
-  turns, busy, remaining, onAsk, onKeep, onPost, send = null,
+  turns, busy, remaining, onAsk, onKeep, onPost, send = null, cta = null,
   activityOpen, onActivityOpen, unreadCount, signInToAsk = false, onConnect = null, children }) {
   const input = useRef(null);
   const [expandedTurnId, setExpandedTurnId] = useState(null);
@@ -206,6 +230,7 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
     {noFreeAnswers ? <div className="tdoc-ask-notice">No free tdoc AI answers left. <a href="/start">Connect my agent</a> to keep asking.</div> : null}
     {!targets.length && !signInToAsk ? <div className="tdoc-ask-notice">Connect an agent to ask about this document. <a href="/start">Connect my agent</a></div> : null}
     </>}
+    {cta}
     {turns.length ? <div className="tdoc-ask-conversation" aria-live="polite">
       {turns.map((turn) => activeTurnId !== turn.id ? <button type="button" className="tdoc-ask-turn-summary" key={turn.id}
         aria-expanded="false" onClick={() => setExpandedTurnId(turn.id)}>

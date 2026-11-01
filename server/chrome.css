@@ -856,6 +856,9 @@
      it can also kick in when the comment column would crowd the article. */
   body.tdoc-narrow .tdoc-drawer-viewport { position: fixed; inset: 0; height: 100dvh; z-index: 1000001; }
   body.tdoc-narrow .tdoc-drawer-backdrop { position: fixed; inset: 0; z-index: 1000000; background: rgba(0,0,0,.28); }
+  /* The homepage demo's scripted Edit is played in the page above the drawer:
+     no dimming while it is on show. */
+  body.tdoc-narrow[data-tdoc-demo-rewrite] .tdoc-drawer-backdrop { background: transparent; }
   body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px calc(max(24px, env(safe-area-inset-bottom)) + var(--drawer-snap-point-offset, 0px)); box-sizing: border-box; z-index: 999998; }
   /* The popup is 100dvh tall and moved down by the snap offset (30% at the
      0.7 snap), so without the offset as bottom padding the scroll area ran
@@ -894,6 +897,7 @@
      instead of the desktop popover's 11px. */
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-only-hint { margin-top: 7px; font-size: 13px; line-height: 1.4; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-send-result { font-size: 14px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-demo-cta { font-size: 15px; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-activity-toggle { min-height: 44px; align-items: center; margin-top: 12px; padding-top: 0; font-size: 14px; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-activity { margin-top: 4px; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-section-title { font-size: 14px; }
@@ -1135,7 +1139,13 @@
   .tdoc-ask-form-bottom button[type="submit"] { width: 28px; height: 28px; border: 0; border-radius: 8px; background: var(--td-accent, #1652f0); color: #fff; font: 700 19px/1 Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }
   .tdoc-ask-notice { margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
-  .tdoc-ask-notice a { color: var(--td-accent, #1652f0); font-weight: 650; }
+  .tdoc-ask-notice a:not(.ui-btn) { color: var(--td-accent, #1652f0); font-weight: 650; }
+  /* The homepage demo's call to action after its scripted Edit: the notice
+     box, in ink rather than muted, with the landing's primary button. */
+  .tdoc-ask-demo-cta { color: var(--td-ink, #1a1a1a); font-size: 13px; line-height: 1.45; }
+  .tdoc-ask-demo-cta p { margin: 0 0 10px; }
+  .tdoc-ask-demo-cta-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .tdoc-ask-demo-cta-actions a.ui-btn { text-decoration: none; }
   .tdoc-ask-public-notice { color: var(--td-ink, #1a1a1a); }
   .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
   .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }
