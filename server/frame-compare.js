@@ -11,7 +11,7 @@
   css.textContent = '[data-tdoc-change="add"]{background:rgba(37,168,91,.16)!important;outline:1px solid rgba(37,168,91,.48);outline-offset:2px}'+
     '[data-tdoc-change="delete"]{background:rgba(219,58,75,.13)!important;outline:1px solid rgba(219,58,75,.42);outline-offset:2px}'+
     '[data-tdoc-change="modify"]{outline:2px solid #c18b1d;outline-offset:3px}'+
-    '.tdoc-diff-ins{text-decoration:none;background:rgba(37,168,91,.16)!important;padding:1px 2px}.tdoc-diff-del{text-decoration:line-through;background:rgba(219,58,75,.13)!important;padding:1px 2px;margin-inline-end:.15em}'+
+    engine.markCss+
     'td>.tdoc-diff-del,td>.tdoc-diff-ins{display:block}'+
     '.tdoc-diff-label{display:block!important;font:12px/1.5 system-ui!important;margin:8px 0!important;color:inherit!important;opacity:.8}'+
     '.tdoc-diff-label button{font:inherit;color:inherit;text-decoration:underline;border:0;background:none;padding:0;cursor:pointer}'+

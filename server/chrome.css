@@ -865,6 +865,9 @@
      it can also kick in when the comment column would crowd the article. */
   body.tdoc-narrow .tdoc-drawer-viewport { position: fixed; inset: 0; height: 100dvh; z-index: 1000001; }
   body.tdoc-narrow .tdoc-drawer-backdrop { position: fixed; inset: 0; z-index: 1000000; background: rgba(0,0,0,.28); }
+  /* The homepage demo's scripted Edit is played in the page above the drawer:
+     no dimming while it is on show. */
+  body.tdoc-narrow[data-tdoc-demo-rewrite] .tdoc-drawer-backdrop { background: transparent; }
   body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px calc(max(24px, env(safe-area-inset-bottom)) + var(--drawer-snap-point-offset, 0px)); box-sizing: border-box; z-index: 999998; }
   /* The popup is 100dvh tall and moved down by the snap offset (30% at the
      0.7 snap), so without the offset as bottom padding the scroll area ran
@@ -903,6 +906,17 @@
      instead of the desktop popover's 11px. */
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-only-hint { margin-top: 7px; font-size: 13px; line-height: 1.4; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-send-result { font-size: 14px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-demo-cta { font-size: 15px; }
+  /* The homepage demo's scripted Edit on a phone: the slim bar that stands in
+     for the drawer while the paragraph changes (ask-ai-panel.jsx
+     DemoRewriteBar). Same surface, line and shadow as the drawer. */
+  body.tdoc-narrow .tdoc-demo-rewrite-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 999998; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 60px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); box-sizing: border-box; background: #fff; border-top: 1px solid var(--td-line, #e8e7e3); box-shadow: 0 -4px 24px rgba(0,0,0,0.08); color: var(--td-ink, #1a1a1a); font: 500 15px/1.35 Inter, system-ui, sans-serif; }
+  body.tdoc-narrow .tdoc-demo-rewrite-bar-text { min-width: 0; display: inline-flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.tdoc-narrow .tdoc-demo-rewrite-bar.is-done .tdoc-demo-rewrite-bar-text { color: var(--td-muted, #6b6a66); font-size: 13px; white-space: normal; }
+  body.tdoc-narrow .tdoc-demo-rewrite-bar .tdoc-ask-demo-cta-actions { flex: none; flex-wrap: nowrap; }
+  body.tdoc-narrow .tdoc-demo-rewrite-bar-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--td-accent, #1652f0); animation: tdoc-demo-bar-pulse 1s ease-in-out infinite alternate; }
+  @keyframes tdoc-demo-bar-pulse { from { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { body.tdoc-narrow .tdoc-demo-rewrite-bar-dot { animation: none; } }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-activity-toggle { min-height: 44px; align-items: center; margin-top: 12px; padding-top: 0; font-size: 14px; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-activity { margin-top: 4px; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-section-title { font-size: 14px; }
@@ -1105,18 +1119,56 @@
   .tdoc-ask-panel h2 { margin: 0 0 12px; font: 700 16px/1.3 Inter, system-ui, sans-serif; }
   .tdoc-ask-form { border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; padding: 8px 10px 9px; }
   .tdoc-ask-form:focus-within { border-color: var(--td-accent, #1652f0); }
+  /* The homepage demo's fixed request (Edit, read-only): the notice surface,
+     no focus ring, so it reads as given rather than typed. */
+  .tdoc-ask-form.is-fixed, .tdoc-ask-form.is-fixed:focus-within { border-color: var(--td-line, #e8e7e3); background: var(--td-surface-2, #f7f7f5); }
+  .tdoc-ask-form.is-fixed textarea { cursor: default; }
   .tdoc-ask-form textarea { display: block; width: 100%; min-height: 44px; max-height: 160px; resize: none; overflow-y: auto; padding: 2px 0; border: 0; outline: 0; background: transparent; color: var(--td-ink, #1a1a1a); font: 16px/1.5 Inter, system-ui, sans-serif; box-sizing: border-box; }
   .tdoc-ask-form-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   /* A quiet text selector, not a filled pill: who answers is a setting, the
      question is the focus. */
   .tdoc-ask-form-bottom button.tdoc-ask-target-pill { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; max-width: calc(100% - 42px); padding: 0 6px; margin-left: -6px; border: 0; border-radius: 6px; background: transparent; box-shadow: none; color: var(--td-muted); font: 500 13px Inter, system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
   .tdoc-ask-form-bottom button.tdoc-ask-target-pill:hover, .tdoc-ask-form-bottom button.tdoc-ask-target-pill[data-popup-open] { background: var(--td-surface-2, #f4f4f2); color: var(--td-ink); box-shadow: none; }
+  /* Mode (Ask / Edit) and agent, side by side in the same quiet style,
+     never wrapping the row: a long agent name ends in an ellipsis. */
+  .tdoc-ask-form-bottom { flex-wrap: nowrap; min-width: 0; }
+  .tdoc-ask-form-pills { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; margin-left: -6px; }
+  .tdoc-ask-form-pills button.tdoc-ask-target-pill { flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: 0; }
+  .tdoc-ask-form-pills button.tdoc-ask-mode-pill { flex: none; }
+  .tdoc-ask-pill-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Edit's optional attachments, above its input: "N comments included ·
+     Choose"; Choose lists each pending comment (who + first line) as a
+     checkbox. */
+  .tdoc-ask-send-summary { display: flex; align-items: baseline; flex-wrap: wrap; margin: 0 0 6px; color: var(--td-muted, #6b6a66); font-size: 13px; }
+  .tdoc-ask-send-summary > span[aria-hidden] { white-space: pre; }
+  .tdoc-ask-send-summary .ui-btn.ui-btn-quiet.tdoc-ask-send-choose { color: var(--td-accent, #1652f0); }
+  .tdoc-ask-send-list { display: grid; gap: 2px; max-height: 40vh; overflow-y: auto; margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px; background: var(--td-ground); }
+  .tdoc-ask-send-list .ui-checkbox.tdoc-ask-send-item { display: flex; gap: 8px; min-width: 0; padding: 2px 0; font: 13px/1.45 Inter, system-ui, sans-serif; color: var(--td-ink, #1a1a1a); }
+  .tdoc-ask-send-item .ui-checkbox-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tdoc-ask-send-item b { font-weight: 600; }
+  .tdoc-ask-send-item .ui-checkbox-label span { opacity: .86; }
+  /* "Send to <agent>" on a wide screen; on a phone, the Ask form's round ↑
+     (same name to a screen reader), so the row fits one line. */
+  .tdoc-ask-send-form .tdoc-ask-send-btn { flex: none; margin-left: auto; }
+  .tdoc-ask-send-form .tdoc-ask-send-icon { display: none; flex: none; }
+  .tdoc-ask-mode-item-text { flex: 1 1 auto; min-width: 0; color: var(--td-muted, #6b6a66); }
+  .tdoc-ask-mode-item-text b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
+  @media (max-width: 480px) {
+    .tdoc-ask-send-form .ui-btn.tdoc-ask-send-btn { display: none; }
+    .tdoc-ask-send-form .tdoc-ask-send-icon { display: inline-block; }
+    .tdoc-ask-form-pills .tdoc-ask-pill-label { max-width: 12ch; }
+  }
   .tdoc-ask-only-hint { margin-top: 5px; color: var(--td-muted, #6b6a66); font-size: 11px; }
   .tdoc-ask-form-bottom button[type="submit"] { width: 28px; height: 28px; border: 0; border-radius: 8px; background: var(--td-accent, #1652f0); color: #fff; font: 700 19px/1 Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }
   .tdoc-ask-notice { margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
-  .tdoc-ask-notice a { color: var(--td-accent, #1652f0); font-weight: 650; }
-  .tdoc-ask-mode-switch.tdoc-seg { display: inline-flex; margin: 0 0 10px; }
+  .tdoc-ask-notice a:not(.ui-btn) { color: var(--td-accent, #1652f0); font-weight: 650; }
+  /* The homepage demo's call to action after its scripted Edit: the notice
+     box, in ink rather than muted, with the landing's primary button. */
+  .tdoc-ask-demo-cta { color: var(--td-ink, #1a1a1a); font-size: 13px; line-height: 1.45; }
+  .tdoc-ask-demo-cta p { margin: 0 0 10px; }
+  .tdoc-ask-demo-cta-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .tdoc-ask-demo-cta-actions a.ui-btn { text-decoration: none; }
   .tdoc-ask-public-notice { color: var(--td-ink, #1a1a1a); }
   .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
   .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }

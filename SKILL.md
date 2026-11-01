@@ -33,7 +33,7 @@ sharing, with a one-time sign-in (email, Google, or GitHub) gating comments.
 If your tools include tdoc's MCP server (`get_writing_guide`, `create_doc`, `update_doc`,
 `edit_doc`, `create_upload`, `commit_upload`,
 `get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
-`resolve_comment`, `answer_question`, `share_doc`, from
+`resolve_comment`, `answer_question`, `share_doc`, `create_feedback_space`, from
 `https://tdoc.dev/mcp`, connected as a Claude/ChatGPT/Cursor connector or
 plugin), prefer them to the CLI below: they need no terminal, no local files
 and no sign-in step, and the server applies the same rules (write access,
@@ -48,6 +48,7 @@ authorship, answer-only locks, workspace scope). The mapping:
 | `tdoc-agent-reply --status ...` | `reply_to_comment` (same statuses and `applied_in` rules) |
 | `tdoc-agent-reply --ask <ask_id>` | `answer_question` |
 | `tdoc-publish --visibility` / `--allow-user` | `share_doc` |
+| My docs → Feedback → Add to your site (a website's comment space + embed line) | `create_feedback_space` (`origins`, optional `team` you admin, `title`; private; returns the `<script>` line, or the space you already have for that origin) |
 
 The authoring guides are the MCP resources `tdoc://authoring/<path>.md`
 (`essentials.md` first, then `voice.md`, `visuals.md`, `structure/components.md`, `style/*.md`); every
@@ -776,6 +777,27 @@ also reaches their own daemon: the prompt then asks for an answer through
 and no edit. That run is claude only, with a smaller
 allow-list (read the doc folder, `tdoc-pull` and `tdoc-agent-reply`; no Edit,
 no `tdoc-write` / `tdoc-publish`, which refuse under `TDOC_DAEMON_ASK`).
+
+### `tdoc-feedback` — add tdoc feedback to a project
+
+When the person says "add tdoc feedback to my project" (comments on their own
+web app or site), make the site's feedback space and add the embed line, in
+one step. MCP: `create_feedback_space`. CLI:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-feedback" init --site https://app.example.com --site http://localhost:3000 \
+  [--team <id|handle|name>] [--title <title>] [--write path/to/index.html] [--env]
+```
+
+Name every origin the app runs on (production, preview, local dev). It prints
+the `<script src=".../feedback.js" data-tdoc-space="<slug>" async></script>`
+line; `--write` puts it before `</head>` in the project's HTML entry (running
+it again leaves one tag); `--env` prints `TDOC_FEEDBACK_SPACE=<slug>` for an
+app that reads the id from its environment. The space is private: the person
+and the people they invite, or with `--team` (team admins only) the team's
+members. Asking again for an origin returns the same space. Comments left on
+the site come back through `tdoc-pull <slug>` like any doc. Same endpoint as
+the MCP tool: `POST /api/feedback/spaces`.
 
 ### `tdoc-site` — make the person's own website commentable
 

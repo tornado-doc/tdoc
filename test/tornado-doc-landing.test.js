@@ -563,5 +563,73 @@ t('shipping the homepage ships content, not just worker code', () => {
     'the automatic workflow_run path must not rotate TDOC_UPLOAD_TOKEN');
 });
 
-console.log(`\n${pass} passed, ${fail} failed.`);
-process.exit(fail ? 1 : 0);
+// The homepage demo's scripted Edit (demo-agent.js DEMO_REWRITES, flag
+// demoEditRewrite): its paragraph must still be on the homepage, word for
+// word, or the demo silently falls back to the plain reply.
+function loadDemoAgent() {
+  const src = fs.readFileSync(path.join(root, 'shell/src/document/demo-agent.js'), 'utf8')
+    .replace(/^import .*$/m, 'const TDOC_AI = { tdoc_ai: true };')
+    .replace(/^export /gm, '');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src}\nreturn { DEMO_REWRITES, DEMO_EDIT_REPLY, createDemoBackend };`)();
+}
+const demoAgent = loadDemoAgent();
+const visibleText = (h) => h.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/g, '')
+  .replace(/<[^>]+>/g, ' ').replace(/&#8209;/g, '\u2011').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+
+t('scripted Edit: the paragraph it rewrites is on the homepage, once, as a plain <p>', () => {
+  const script = demoAgent.DEMO_REWRITES['tornado-doc'];
+  assert(script, 'no DEMO_REWRITES entry for tornado-doc');
+  const plain = html.match(/<p>([^<]*)<\/p>/g).map((p) => p.slice(3, -4).replace(/\s+/g, ' ').trim());
+  assert(plain.filter((p) => p === script.before).length === 1, `"${script.before}" is not one plain <p> on v${latest}`);
+  assert(visibleText(html).includes('Many people, many agents'), 'the prompt names a heading that is gone');
+  assert(script.after.split(/\s+/).length < script.before.split(/\s+/).length, 'the rewrite is not shorter');
+  assert(/\b19 words now, down from 28\b/.test(script.reply), `reply: ${script.reply}`);
+});
+
+t('scripted Edit: behind demoEditRewrite (off in production, on in PR previews); the probe swaps at once under reduced motion', () => {
+  const flags = fs.readFileSync(path.join(root, 'shell/src/feature-flags.js'), 'utf8');
+  assert(/demoEditRewrite: Object\.freeze\(\{[^}]*default: true, preview: true/.test(flags), 'flag demoEditRewrite');
+  const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
+  assert(/demoAgents && isFeatureOn\('demoEditRewrite'\)\s*\? DEMO_REWRITES\[config\.slug\]/.test(shell), 'the scripted Edit must be demo-only and per landing slug');
+  const probe = fs.readFileSync(path.join(root, 'server/frame-probe.js'), 'utf8');
+  assert(/d\.type === 'tdoc:demoRewrite'\) runDemoRewrite\(d\)/.test(probe), 'probe handler');
+  assert(/prefers-reduced-motion: reduce[\s\S]{0,2000}if \(reduce\) \{ done\(\); return; \}/.test(probe), 'reduced motion must jump to the end state');
+});
+
+async function asyncTests() {
+  const at = async (n, fn) => { try { await fn(); ok(n); } catch (e) { bad(n, e.message); } };
+  const backend = (played) => {
+    let list = [{ id: 'c1', text: 'x', replies: [] }];
+    const b = demoAgent.createDemoBackend({
+      update: (fn) => { list = fn(list); },
+      delays: { answer: 1, ack: 5, reply: 10 },
+      rewrite: { ...demoAgent.DEMO_REWRITES['tornado-doc'], play: async () => { played.push('play'); return true; }, onDone: (ok2) => played.push(ok2 ? 'done' : 'fail') },
+    });
+    return { b, list: () => list };
+  };
+  await at('scripted Edit: the prompt plays the rewrite, then the agent replies with what changed', async () => {
+    const played = [];
+    const { b, list } = backend(played);
+    b.markScripted('c1', demoAgent.DEMO_REWRITES['tornado-doc'].prompt);
+    await b.postNotifyHandoff({ comment_ids: ['c1'], recipient: null, instruction: 'Handle 1 comment' });
+    await new Promise((r) => setTimeout(r, 60));
+    assert(played.join(',') === 'play,done', `played: ${played}`);
+    const reply = list()[0].replies[0];
+    assert(reply && reply.text === demoAgent.DEMO_REWRITES['tornado-doc'].reply, `reply: ${JSON.stringify(reply)}`);
+  });
+  await at('scripted Edit: any other instruction gets the plain demo reply and no rewrite', async () => {
+    const played = [];
+    const { b, list } = backend(played);
+    b.markScripted('c1', 'Translate it to French');
+    await b.postNotifyHandoff({ comment_ids: ['c1'], recipient: null, instruction: 'Translate it to French' });
+    await new Promise((r) => setTimeout(r, 60));
+    assert(!played.length, `played: ${played}`);
+    assert(list()[0].replies[0]?.text === demoAgent.DEMO_EDIT_REPLY, 'plain demo reply');
+  });
+}
+
+asyncTests().then(() => {
+  console.log(`\n${pass} passed, ${fail} failed.`);
+  process.exit(fail ? 1 : 0);
+});
