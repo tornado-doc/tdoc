@@ -139,7 +139,7 @@ export function ActivatePage({ boot, preview = null }) {
   if (approved) {
     return frame(
       <main className="tdoc-status-page tdoc-activate-page">
-        <div className="tdoc-activate-stack">
+        <div className="tdoc-activate-stack tdoc-consent-card">
         {mark}
         <h1>Access allowed</h1>
         {/* What happens next, not what this page cannot do. `window.close()`
@@ -166,7 +166,7 @@ export function ActivatePage({ boot, preview = null }) {
 
   return frame(
     <main className="tdoc-status-page tdoc-activate-page">
-      <div className={`tdoc-activate-stack${!identity ? ' tdoc-activate-signin' : ''}`}>
+      <div className={`tdoc-activate-stack tdoc-consent-card${!identity ? ' tdoc-activate-signin' : ''}`}>
       {mark}
       <h1>{pending ? 'Allow access to tdoc' : 'Approve device login'}</h1>
       {!identity ? (

@@ -17886,6 +17886,10 @@ async function handleOAuthAuthorize(env, req, url) {
         // A metadata-document client is named by a URL its owner controls;
         // a dynamically registered one names itself.
         verified_host: client.cimd ? new URL(client.client_id).host : '',
+        // A logo only where the browser itself will hand the code to that
+        // product's own site: anyone can register as "Claude", but a code
+        // sent to https://claude.ai goes to Claude and to no one else.
+        app: consentAppMark(redirectUri),
       },
       workspaces,
       returnTo: sanitizeReturn(url.pathname + url.search),
@@ -18423,6 +18427,16 @@ const MCP_VERIFIED_APPS = [
   [/(^|\.)(vscode\.dev|visualstudio\.com|github\.com)$/, 'copilot', 'Copilot'],
   [/(^|\.)google\.com$/, 'gemini', 'Gemini'],
 ];
+// The consent page's logo: by the https host the code is sent back to.
+const CONSENT_APP_MARKS = new Set(['claude', 'chatgpt', 'cursor', 'copilot']);
+function consentAppMark(redirectUri) {
+  let u;
+  try { u = new URL(redirectUri); } catch { return ''; }
+  if (u.protocol !== 'https:') return '';
+  const host = u.hostname.toLowerCase();
+  for (const [re, login] of MCP_VERIFIED_APPS) if (re.test(host)) return CONSENT_APP_MARKS.has(login) ? login : '';
+  return '';
+}
 function mcpAgentIdentity(call) {
   const o = call.actor.oauth;
   if (o && o.cimd) {
