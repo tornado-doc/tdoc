@@ -34,7 +34,7 @@ Build the upload files:
 
 ```
 sh plugins/pack.sh      # writes dist/plugins/: tdoc-claude.zip, tdoc-codex.zip,
-                        # tdoc-cursor.zip, tdoc-gemini.tar.gz, logo-400.png, SHA256SUMS
+                        # tdoc-cursor.zip, logo-400.png, SHA256SUMS
 ```
 
 ### Shared copy
@@ -279,43 +279,6 @@ servers: https://docs.cline.bot/mcp/connecting-to-a-remote-server.
 UNKNOWN: whether the marketplace lists remote-only servers (the README only
 talks about repositories); not tested in Cline.
 
-## 6. Gemini CLI extensions gallery
-
-There is no form. The gallery (https://geminicli.com/extensions/browse/)
-crawls public GitHub repos with the topic `gemini-cli-extension` daily and
-lists those whose `gemini-extension.json` is at the root of the repository
-**or of the release archive**, if they pass validation.
-
-Steps:
-
-1. Run `sh plugins/pack.sh`.
-2. Attach `dist/plugins/tdoc-gemini.tar.gz` to the **Latest** GitHub release
-   as its **only** asset:
-   `gh release upload v0.9.0 dist/plugins/tdoc-gemini.tar.gz -R tornado-doc/tdoc`
-   (or the next release). Every later release needs the same single asset,
-   or URL installs fall back to the source tarball and fail.
-3. Add the topic:
-   `gh repo edit tornado-doc/tdoc --add-topic gemini-cli-extension`
-4. Check: `gemini extensions install https://github.com/tornado-doc/tdoc`.
-
-Files to upload: `tdoc-gemini.tar.gz` (release asset).
-
-Verified: the topic, daily crawl, root-of-repo-or-archive rule
-(https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/releasing.md);
-URL install of the repo today fails ("Configuration file not found"), and a
-local install of `plugins/gemini` works (gemini-cli 0.66.0, throwaway HOME).
-How gemini-cli picks a release asset (Latest release; exactly one asset
-without `darwin`/`linux`/`win32` in its name; manifest at the archive root or
-in one folder) was read in the gemini-cli 0.66.0 bundle.
-
-UNKNOWN: not tested end to end, since that needs a real release asset;
-whether the crawler validates the release archive or only the repo root; the
-banner on the docs says Gemini CLI was replaced by Antigravity CLI for unpaid
-and Google One users on 2026-06-18, and whether Antigravity loads Gemini
-extensions was not checked.
-
----
-
 ## Order of work for the owner
 
 1. Merge PR #880 (privacy page) and deploy; confirm `https://tdoc.dev/privacy` opens.
@@ -326,5 +289,4 @@ extensions was not checked.
 5. Claude: connector (section 1), then plugin bundle (section 2).
 6. OpenAI: verify the organization, upload the zip, serve the domain
    challenge token, fill review details (section 3).
-7. Cursor form (section 4). Cline issue (section 5). Gemini release asset and
-   topic (section 6).
+7. Cursor form (section 4). Cline issue (section 5).
