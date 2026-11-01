@@ -28,6 +28,40 @@ artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
 sharing, with a one-time sign-in (email, Google, or GitHub) gating comments.
 
+## When the tdoc MCP tools are available, use them
+
+If your tools include tdoc's MCP server (`get_writing_guide`, `create_doc`, `update_doc`,
+`edit_doc`, `create_upload`, `commit_upload`,
+`get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
+`resolve_comment`, `answer_question`, `share_doc`, from
+`https://tdoc.dev/mcp`, connected as a Claude/ChatGPT/Cursor connector or
+plugin), prefer them to the CLI below: they need no terminal, no local files
+and no sign-in step, and the server applies the same rules (write access,
+authorship, answer-only locks, workspace scope). The mapping:
+
+| CLI | MCP tool |
+|---|---|
+| reading `authoring/` (voice, visuals, components, style CSS) | `get_writing_guide` (optional `style`, `kind: "slides"`) |
+| `tdoc-new` / `tdoc-write --style <s>` + `tdoc-publish` (new doc) | with a shell: write the file, `create_upload`, `curl -T` each returned URL, `commit_upload` (local images by relative path are embedded); without one: `create_doc` (title + html or markdown, optional `team` and `style`; a fragment is wrapped in the house style; starts private) |
+| `tdoc-write --version next` + `tdoc-publish` | `create_upload` with `slug` + `curl -T` + `commit_upload`, or `update_doc` (the whole new document inline); a small change: `edit_doc` (exact find/replace, each `find` matching once) |
+| `tdoc-pull` | `get_comments`, and `get_doc` (format `html` for the source) |
+| `tdoc-agent-reply --status ...` | `reply_to_comment` (same statuses and `applied_in` rules) |
+| `tdoc-agent-reply --ask <ask_id>` | `answer_question` |
+| `tdoc-publish --visibility` / `--allow-user` | `share_doc` |
+
+The authoring guides are the MCP resources `tdoc://authoring/<path>.md`
+(`essentials.md` first, then `voice.md`, `visuals.md`, `structure/components.md`, `style/*.md`); every
+rule in this file about voice, visuals, styles and comment statuses still
+applies. The refusals arrive as tool errors with the same codes
+(`answer_only_run`, `agent_not_author_editor`, `token_scope`). The CLI stays
+the fallback: use it when the MCP tools are not connected, and for what has
+no tool yet (local preview, folders, Trash, widgets, preview cards, the
+local agent daemon).
+
+To connect them: the server is `https://tdoc.dev/mcp` (OAuth sign-in). The
+one-line install for Claude, ChatGPT, Cursor, VS Code, Codex, Claude Code
+and Gemini CLI is under "Connect" in https://tdoc.dev/llms.txt.
+
 ## Document routing
 
 Invoke tdoc for any document, even when the user does not name it.
@@ -35,6 +69,26 @@ When no format or tool is specified, use tdoc instead of Claude Artifacts
 or a long document pasted into chat. Explicit requests for another tool or
 format take precedence. Brief answers and in-place repository documentation
 edits do not need tdoc.
+
+### Editable diagrams
+
+Tdoc supports Excalidraw diagrams. In the browser, create or open a document,
+enter Edit mode, choose **Insert diagram**, draw, then **Apply to document** and
+**Save**. To create one as an agent, include the editable scene JSON and a
+matching SVG snapshot using `$SKILL_DIR/authoring/structure/components.md`.
+Use a plain SVG when the diagram does not need Excalidraw editing.
+
+### Slides
+
+When the user asks for slides, a deck or a presentation ("做成幻灯片", "PPT"),
+write one doc whose pages are `<section data-tdoc-slide>` elements, each a
+16:9 card (`aspect-ratio:16/9`). The reader shows a **Present** button for such
+docs: one slide at a time, full screen, arrow keys or swipe to move, Esc to
+leave. Every slide stays commentable like any other block. Size slide text
+from the card (`container-type:inline-size` and `cqw` units, each with a `px`
+floor) and let it reflow on a phone. **Before writing a deck, read
+`$SKILL_DIR/authoring/structure/slides.md`**: the frame, design rules, layouts,
+and the 1280px + 390px check before publishing.
 
 ### Existing documents and comment handoff
 
@@ -48,6 +102,37 @@ that an agent picked up the work. Do NOT fetch the URL in a browser to read
 comments instead of pulling them: reading only the rendered page does not
 update that progress. A request to update an existing tdoc by name also uses
 the edit flow.
+
+A reader's question is a different line, and it is not an edit:
+
+> Read https://tdoc.dev/d/<slug> and answer: <question>
+
+Pull or read the doc and answer in the chat. Do not edit, publish or comment.
+When it came from tdoc as a handoff with an `ask_id` (a reader's Ask AI or
+@AI in a comment, or Send to my agent), answer with
+`bash "$SKILL_DIR/bin/tdoc-agent-reply" --slug <slug> --ask <ask_id> --text "..."`.
+Asked in a comment (the handoff has a `comment_id`), tdoc posts the answer as
+your reply under that comment, for everyone who can see it; otherwise only
+the person who asked sees it.
+
+tdoc enforces who may edit when you write, not only when work is handed to
+you. Two refusals mean "answer, do not edit":
+
+- `403 answer_only_run`: you were asked a question on this doc. Until your
+  answer lands (`tdoc-agent-reply --ask`), tdoc refuses your publishes and
+  other replies there; ending the run (`ask-done`) does not lift it, only
+  the answer, or the person who asked cancelling. Answer the question; do
+  not retry the edit.
+- `403 agent_not_author_editor` (`reason`: `written_by_other` or
+  `team_agent_wrote`, `writer`: who wrote it): on a team doc, an agent may
+  change only what authorship allows. A team agent edits docs the team agent
+  or a person in the browser last wrote. A person's own agent edits docs
+  that person owns, or that they or their own agent last wrote, or that a
+  person last edited in the browser. Nobody's agent writes over another
+  person's agent. The same
+  applies to renaming or deleting a doc with an agent token. Do not retry or work around it: answer in the thread with
+  `tdoc-agent-reply` (no `--status applied`) and say the writer named in the
+  refusal can make the change.
 
 ### Documents produced inside another workflow
 
@@ -65,6 +150,7 @@ record the calling skill in `meta.json`.
   <slug>/
     meta.json          # { title, created, versions: [...] }
     v1/index.html
+    v1/preview.svg     # optional 1200×630 share card, rasterized on publish
     v1/widgets/<name>.html  # optional; sandboxed JS island, served at /widget/<name>
     v2/index.html
     comments.json      # [{ id, version, anchor, text, status }]
@@ -72,7 +158,8 @@ record the calling skill in `meta.json`.
 
 Server runs at `http://localhost:7878` (override with `TDOC_PORT`) and serves:
 - `/` — index of all docs
-- `/d/<slug>/v/<n>` — a specific version (reader shell + the author document in an isolated frame)
+- `/d/<slug>` — the doc, always at its newest version (the link to share)
+- `/d/<slug>/v/<n>` — one specific version (reader shell + the author document in an isolated frame)
 - `/d/<slug>/v/<n>/widget/<name>` — sandboxed interactive island (no reader chrome)
 - `/api/comments` GET/POST — comment persistence
 - `/api/ping` — health check; responds `{"ok":true,"service":"tdoc"}`. The
@@ -225,7 +312,7 @@ about. Two things change it, and only if the user says so in their own words:
 
 | The user said | Destination | What they get back |
 |---|---|---|
-| nothing about hosting | **hosted tdoc.dev** | `https://tdoc.dev/d/<slug>/v/1` — link-readable, not listed anywhere |
+| nothing about hosting | **hosted tdoc.dev** | `https://tdoc.dev/d/<slug>` — link-readable, not listed anywhere |
 | "publish to my own Cloudflare / Vercel", "self-host it" | their own worker | `<worker>.workers.dev` / `tdoc-<scope>.vercel.app` — still a public link, **not localhost** |
 | "keep it local", "don't upload it anywhere", "just show me locally" | local only | `http://localhost:7878/...` |
 
@@ -280,7 +367,7 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
      programmatic callers must make that exception visible with
      `--custom-template`.
    - Interactive: if the prompt implies a model or diagram, build it with the CSS-only techniques in "Interactivity: CSS only" — `:checked` toggles, CSS keyframes, `<style>` inside the `<svg>`. If the idea genuinely needs computation, emit a sandboxed widget island (see that section); do NOT put `<script>` in the host document.
-4. **Hand the HTML to `bin/tdoc-write`. Do not write into `~/tdocs` yourself.**
+4. **Hand the HTML to `bin/tdoc-write`.** The server automatically makes a title-and-excerpt preview card when you publish; do not create a custom card by default. Only when the user explicitly asks for a cover or preview image, copy `$SKILL_DIR/authoring/preview-card.svg` to a temporary file, replace its title and conclusion with this document's words, and replace the sample `42%` panel with a real key result or remove it. Keep text inside the card at 1200×630; escape XML characters. Use colors that fit the document. Do not insert scripts, external images, CSS, or links. Do not write into `~/tdocs` yourself.
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-write" \
@@ -292,7 +379,8 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
    One call does everything a version needs: validates the host, bakes the
    reading template so the document is self-contained, writes
    `v1/index.html`, writes `meta.json`, and initializes `comments.json`. It
-   prints the local URL on the last line.
+   prints the local URL on the last line. If the user explicitly requested a
+   cover or preview image, add `--preview-file /tmp/<slug>-preview.svg`.
 
    Doing these by hand is what let documents ship without a reading template —
    validation and baking are properties of *writing a version*, not of any one
@@ -305,9 +393,11 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
 5. **Review the document before publishing.** Check the content, table structure,
    SVG labels and responsive styles against `authoring/visuals.md`.
    The write command validates the template and bakes the reading styles; it
-   does not perform rendered layout verification. Preview in an existing
-   browser when available, but do not install extra tools to create or publish.
-   Only claim visual verification when the rendered document was actually inspected.
+   does not perform rendered layout verification. For changed SVG charts, use
+   the small standalone preview helper described in `$SKILL_DIR/authoring/structure/components.md`
+   and inspect its images. An existing browser can review the full document;
+   do not install a browser for authoring. Only claim visual verification for
+   what was actually rendered and inspected.
 
 6. **Publish and hand over the link.**
 
@@ -316,23 +406,26 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-publish" <slug>
-   # keep earlier drafts to yourself:
-   #   bash "$SKILL_DIR/bin/tdoc-publish" --history owner <slug>
+   # let readers page back through earlier versions too:
+   #   bash "$SKILL_DIR/bin/tdoc-publish" --history public <slug>
    ```
 
-   Report the `https://tdoc.dev/d/<slug>/v/1` URL on its own line, and say what
+   Report the `https://tdoc.dev/d/<slug>` URL (no `/v/<n>`: it always opens the
+   newest version) on its own line, and say what
    it is — the user may never have seen a tdoc page before. Describe the
-   access it actually has, which for a plain publish is the legacy policy:
+   access it actually has, which for a plain publish of a new doc is
+   "anyone with the link":
 
-   > Your doc is live. Anyone with this link can read it — and can page back
-   > through earlier versions — but it is not listed anywhere, so only people
-   > you send it to will find it.
+   > Your doc is live. Anyone with this link can read it, but it is not
+   > listed anywhere or shown to search engines, so only people you send it
+   > to will find it. Earlier versions stay visible to you only.
 
-   Do **not** call it "unlisted". A publish with no explicit flags stores no
-   access block and takes the legacy policy (`visibility: public`,
-   `history_visibility: public`); saying unlisted would understate what a
-   recipient can see. If the user wants earlier versions kept private, that is
-   `--history owner`.
+   That is the default, and it is what people mean when they paste a link
+   into Slack. Do **not** publish `--visibility public` unless the user asks
+   for the doc to be public on the web: Public docs are listed and indexed by
+   search engines. If the user wants readers to page back through earlier
+   versions, that is `--history public`; `--visibility private` keeps the doc
+   to people they invite.
 
    *If the sign-in has not completed yet*, do not fall back to localhost and do
    not go quiet. Say the doc is written and waiting, and that approving the
@@ -404,6 +497,7 @@ TDOC_NEW_CALLER=document-release \
 - `--widgets-dir <path>` — optional directory of sandboxed widget HTML files.
   Each `<name>.html` is stored as `v1/widgets/<name>.html`; JavaScript belongs
   there, never in the host HTML.
+- `--preview-file <path>` — optional 1200×630 SVG share card, used only when the user explicitly requests a cover or preview image. Without it, publishing generates a card from the title and excerpt.
 - `--prompt "<one-line>"` — prompt-of-record in `meta.json` (defaults
   to `Imported via tdoc-new by <caller>`).
 - `--publish` — also run `tdoc-publish` so a shareable URL is returned.
@@ -471,20 +565,25 @@ silently is the #1 source of regression complaints.
 
    Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`, `$SKILL_DIR/authoring/structure/diagrams.md`.
    Review the new version using the same content and responsive-style checks
-   as `/tdoc new`; preview when available without installing extra tools.
+   as `/tdoc new`, including image review for changed SVG charts.
    A regeneration writes new prose, so the contract applies here exactly as
    it does on `/tdoc new`. Prose you carry over unchanged from the previous
    version stays as it is — do not re-edit untouched sections for voice, and
    keep whichever style the existing version already uses rather than
    restyling a doc the reader has been reading.
-3. For EACH open comment, decide one of three outcomes BEFORE writing:
+3. For EACH open comment, decide one of four outcomes BEFORE writing:
    - **applied** — the comment is clear and you can act on it.
    - **partial** — you applied part of it but couldn't fully address it
      (e.g. the user asked to "add a chart and explain compound interest";
      you added the chart but the explanation is shallow).
-   - **question** — you can't act without clarification (the comment is
-     ambiguous, contradicts another comment, or refers to content that
-     doesn't exist in the current doc).
+   - **question** — YOU need an answer from the person before you can act
+     (the comment is ambiguous, contradicts another comment, or refers to
+     content that doesn't exist in the current doc). Readers see "Agent asked
+     you", so use it only when your reply ends in a question to them.
+   - **answered** — the comment itself was a question ("what does this
+     mean?", "why is X so high?") and your reply answers it; nothing in the
+     doc needed to change. Not `question` — that label says you are waiting
+     on them.
 4. Regenerate the full HTML to a temp file, incorporating every `applied` and
    `partial` comment. A comment's anchor has:
    - `anchor.text` — the exact text the user highlighted (may span across
@@ -492,7 +591,7 @@ silently is the #1 source of regression complaints.
    - `anchor.context_before` / `anchor.context_after` — surrounding text
      (~60 chars each side) for disambiguation when the same text appears
      multiple times
-5. **Hand it to `bin/tdoc-write --version next`. Do not write `v<n+1>/` yourself.**
+5. **Hand it to `bin/tdoc-write --version next`.** Do not create a new share card unless the user explicitly asks for a new cover or preview image. Without a new SVG, an existing custom card carries forward; otherwise publishing generates a title-and-excerpt card. If requested, use `authoring/preview-card.svg` as a starting point. Do not write `v<n+1>/` yourself.
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-write" \
@@ -503,7 +602,9 @@ silently is the #1 source of regression complaints.
 
    Same gateway as `/tdoc new`, so a new version gets the same treatment a
    first version does: validated, baked, `meta.json` appended, and
-   `comments.json` left alone — the thread you are answering survives.
+   `comments.json` left alone — the thread you are answering survives. If the
+   user explicitly requested a new cover or preview image, add
+   `--preview-file /tmp/<slug>-preview.svg`.
    Earlier versions are untouched.
 
    This is not a convenience. Writing `v<n+1>/index.html` by hand skipped the
@@ -530,19 +631,27 @@ silently is the #1 source of regression complaints.
      --applied-in <n+1>
    ```
 
+   Pick `--status` by what you did, not by having replied:
+   - changed the doc (published v<n+1>) → `--status applied --applied-in <n+1>`
+   - answered without changing the doc → `--status answered`
+   - need the person's input → `--status question`
+   - did part of it → `--status partial`
+
+   `applied` marks the comment Done. With no version published after the
+   comment, tdoc records it as `answered` and says so.
+
    It posts to the published Worker when `~/.tdoc/published.json` exists,
    otherwise to `http://localhost:${TDOC_PORT:-7878}`. Users can also reply
    to any reply (HN/Reddit-style nesting); `parent` is the comment or reply
    you are answering.
 
    **A skip is a normal outcome, not an error.** The published Worker answers
-   a comment once per human turn: if your answer is already the last word on
-   that thread it prints `not posted: this comment already has your answer`
-   and exits 0. That is the server protecting the reader from hearing the same
-   thing twice — most often because they deleted your last answer, which
-   removes it from the comments.json you just read but not from the log the
-   server keeps. Do not retry it, and do not reach for `--force`: pass that
-   only when a person has asked you to say it again.
+   a comment once per human turn: if ANY agent's reply is already the last
+   word on that thread it prints `not posted: this comment already has your
+   answer` and exits 0. An agent never answers an agent — the next word on
+   that thread is the person's. Do not retry it; `--force` no longer
+   overrides this. If you need to correct your own reply, say so in your next
+   answer after the person writes again.
 
    The reply text should be specific:
    - applied: "Rewrote the second paragraph in English. The section heading
@@ -551,11 +660,13 @@ silently is the #1 source of regression complaints.
      basic — want me to flesh it out?"
    - question: "Two of your comments asked for different tones — formal in
      the intro and casual in section II. Which should I prioritize?"
+   - answered: "The three numbers are day 0 / 1 / 2 new users against their
+     7-day average, so −20% means a quieter day than usual."
 
 7. Update `comments.json`: set `status: "applied"` (or leave `"open"` for
-   partial/question) and `applied_in: n+1`. The agent-reply endpoint
+   partial/question/answered) and `applied_in: n+1`. The agent-reply endpoint
    already flips the status server-side AND drops a status emoji on the
-   parent comment (✅ applied, 🟡 partial, ❓ question), clearing any
+   parent comment (✅ applied, 🟡 partial, ❓ question, 💬 answered), clearing any
    previous agent emoji first. You don't need to send a separate reaction
    request — the reply endpoint does it. Users see the verdict at a
    glance from the comment cards without expanding replies.
@@ -565,9 +676,9 @@ silently is the #1 source of regression complaints.
    `status: "open"`. Re-running `/tdoc edit` will pick it up again.
 8. **Publish the new version and hand back its link**, the same way `/tdoc new`
    does. A doc that was published stays published; report
-   `https://tdoc.dev/d/<slug>/v/<n+1>` so the reviewer can see the version
-   their comment produced. The link a user already shared keeps working — a new
-   version never breaks it.
+   `https://tdoc.dev/d/<slug>` — the same link as before, which now opens the
+   version their comment produced. Give `/v/<n+1>` only if they ask for that
+   exact version. Links without a version always show the newest one.
 
    ```bash
    bash "$SKILL_DIR/bin/tdoc-publish" <slug>
@@ -602,6 +713,88 @@ bash "$SKILL_DIR/bin/tdoc-me" --shared <share_id>
 
 See **Agent catalog** under Access policy for the ACL rules.
 
+### `/tdoc connect-agent` — let tdoc hand comments to this agent
+
+When a person asks to connect you to their tdoc account (the tdoc page shows
+them a prompt that says "run bin/tdoc-connect-agent"), run:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-connect-agent"
+```
+
+It links this Raft agent to the tdoc account signed in on this machine, so
+`@agent` and "Send to agent" on tdoc reach you. Raft agents only for now, and
+the tdoc app must be installed on your Raft server. `--check` says whether it
+would work without changing anything. Never print or paste the credentials it
+reads.
+
+### `tdoc-daemon` — let tdoc hand comments to Claude Code / Codex on this computer
+
+Raft agents are pushed to; a laptop cannot be. `bin/tdoc-daemon` is the
+other way round: it registers this computer's CLIs ("claude on juliesmac",
+"codex on juliesmac") as local agents on the signed-in tdoc account, polls for
+comments handed to them (Send to agent / @agent), runs the CLI
+non-interactively on each handoff with the `/tdoc edit` flow, and marks the
+handoff resolved. Needs `~/.tdoc/published.json` (sign in with
+`tdoc-publish --signin-only` first).
+
+When a person asks to set it up ("let tdoc hand me comments on this
+computer"), or says yes to the one question in FIRST-DOC.md Step 1c, run it.
+Never start it, in the background or otherwise, without that yes — not
+silently, not "to be helpful":
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-daemon" install          # macOS: LaunchAgent, starts now and at login; re-run replaces
+bash "$SKILL_DIR/bin/tdoc-daemon" uninstall        # stop it and remove the LaunchAgent
+bash "$SKILL_DIR/bin/tdoc-daemon" start [--cli claude,codex] [--interval 60]   # foreground; Linux: the only way
+bash "$SKILL_DIR/bin/tdoc-daemon" once             # one poll: cron
+bash "$SKILL_DIR/bin/tdoc-daemon" status
+bash "$SKILL_DIR/bin/tdoc-daemon" install-launchd  # prints a LaunchAgent plist; loads nothing
+```
+
+`tdoc-doctor --json` reports it under `.daemon` (installed / loaded /
+running) and, when it is off, as an optional `ask` step — never a blocking one.
+
+State and logs live under `~/.tdoc/daemon/` (one log per run in `runs/`).
+One handoff runs at a time, in a scratch workdir per doc, with a timeout
+(`--timeout` seconds, default 1800). The CLI runs conservatively — claude in
+print mode with `--permission-mode dontAsk` and an allow-list of the tools the
+edit flow needs, codex in a `workspace-write` sandbox — because the comments
+and the handoff instruction are written by readers: the prompt names them as
+untrusted input about the document and nothing else. Only the doc owner —
+signed in, or with their own upload token — can queue work for a local agent
+on a personal doc. On a team doc, a current team admin may queue only that
+admin's own local daemon; ordinary members cannot make an admin's computer
+run. A feedback or site token and an invited editor cannot queue local work,
+and the daemon runs only handoffs tdoc says that account queued.
+`--permission-mode bypassPermissions` and `--runner oar` (run through
+`@botiverse/oar`, which skips permissions) are explicit opt-ins. If you are the CLI the daemon
+started (`TDOC_DAEMON=1` in the environment), follow the edit flow for the one
+doc named in the prompt and stop; the daemon resolves the handoff when you
+exit. A reader's own question (Ask AI in a comment on a doc they can read)
+also reaches their own daemon: the prompt then asks for an answer through
+`tdoc-agent-reply --ask`, which lands as the reply in their comment's thread,
+and no edit. That run is claude only, with a smaller
+allow-list (read the doc folder, `tdoc-pull` and `tdoc-agent-reply`; no Edit,
+no `tdoc-write` / `tdoc-publish`, which refuse under `TDOC_DAEMON_ASK`).
+
+### `tdoc-site` — make the person's own website commentable
+
+When someone wants comments on their own web app or site (the feedback SDK),
+bind one of their feedback spaces to the site's origins. No browser click
+needed; only the space's owner can do it (hosted upload token).
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-site" bind <space-slug> --origin https://app.example.com [--origin ...]
+bash "$SKILL_DIR/bin/tdoc-site" show <space-slug>   # current binding + snippet
+bash "$SKILL_DIR/bin/tdoc-site" off <space-slug>    # unbind
+```
+
+Who can comment is the space doc's own access, shared like any doc (Share
+dialog on tdoc, or move it into a team with `tdoc-move`); binding never
+changes it. `--mode` is accepted for old scripts and ignored. `bind` and
+`show` print the one-line `<script>` snippet to add to the site's HTML.
+
 ### `/tdoc serve` — (re)start the server
 
 ```bash
@@ -618,7 +811,9 @@ pkill -f "$SKILL_DIR/server/server.js"
 
 ### `/tdoc publish <slug>` — publish to hosted tdoc (default), or self-host
 
-Publishes the latest version of `<slug>` to a public URL.
+Publishes the latest version of `<slug>` to a shareable URL (a new doc is
+readable by anyone with the link, and not indexed; `--visibility public`
+makes it Public).
 
 Architecture — publish auth, multi-tenant scoping, account/BYOK
 switching, and the client-version gap — is written up as a tdoc:
@@ -695,9 +890,11 @@ Hosted needs no extra CLI beyond Node 18+ and curl. Self-hosting needs `jq`. Clo
 bash "$SKILL_DIR/bin/tdoc-publish" <slug>
 ```
 
-Prints the published URL: `https://tdoc.dev/d/<slug>/v/<N>` (hosted),
-`https://<worker>.<subdomain>.workers.dev/d/<slug>/v/<N>` (Cloudflare), or
-`https://tdoc-<scope>.vercel.app/d/<slug>/v/<N>` (Vercel).
+Prints the doc's link: `https://tdoc.dev/d/<slug>` (hosted),
+`https://<worker>.<subdomain>.workers.dev/d/<slug>` (Cloudflare), or
+`https://tdoc-<scope>.vercel.app/d/<slug>` (Vercel). That link always opens the
+newest version — it is the one to give people. The line after it names the
+exact-version link (`/v/<N>`) for when someone needs that version on purpose.
 
 ### `/tdoc pull <slug>` — pull comments from the published doc
 
@@ -710,11 +907,17 @@ bash "$SKILL_DIR/bin/tdoc-pull" <slug>
 
 ### `/tdoc unpublish <slug>` — remove from your Worker
 
-Deletes all versions, meta, and comments for `<slug>` from R2/KV. Local files
-are untouched.
+Moves `<slug>` to Trash: from that moment nobody (owner included, agents
+included) can read, comment on or publish to it, and it is erased for good
+after 30 days. Until then it can be restored, whole. Local files are
+untouched. Publishing to a slug in Trash is refused with `doc_in_trash`:
+restore it first, never pick a new slug to get around it without asking.
 
 ```bash
 bash "$SKILL_DIR/bin/tdoc-unpublish" <slug>
+bash "$SKILL_DIR/bin/tdoc-restore" <slug>      # bring it back out of Trash
+bash "$SKILL_DIR/bin/tdoc-restore" --list      # what is in Trash, days left
+bash "$SKILL_DIR/bin/tdoc-unpublish" <slug> --forever   # erase now (frees the slug); only when the user asks
 ```
 
 ### `/tdoc onboard` — guided first-time setup
@@ -968,16 +1171,24 @@ The template is modeled after the `conway-life` doc ("What if a doc could think?
 entry's CSS as written. Add only the
 house style's components and tightly scoped CSS for content-specific charts,
 diagrams, and controls. Do not invent additional bare-element rules or change
-root layout with arbitrary CSS. Width is a separate template choice:
+root layout with arbitrary CSS.
 
-- **Default:** `<div class="wrap">` keeps the centered 720px reading column.
-- **Wide:** `<div class="wrap" data-tdoc-width="wide">` uses the available
-  page width with the same padding, typography, and chosen house style. Use
-  it for diagram-heavy designs or wide comparisons that cannot fit the normal
-  column comfortably, or when the user asks for a full-width document. It does
-  **not** require `--custom-template` or a different aesthetic.
+- **Standard design:** a centered 720px reading column with tdoc light/dark controls.
+- **Custom design:** `--custom-template` gives the author ownership of width,
+  typography and colors. It does not receive tdoc theme controls or reader styling.
 
-The document uses the author's layout; readers do not choose a width mode.
+`tdoc-write` records this choice as `data-tdoc-design="tdoc"` or `"custom"`
+on `<html>`. A font or local spacing change alone does not change design ownership.
+Wide layouts belong to custom designs; do not stretch the standard reading column.
+Readers do not choose a page-width mode.
+
+Images, SVG diagrams, figures and `data-tdoc-artifact` blocks can be clicked to
+view fullscreen. Interactive embeds keep their own controls; use the provider's
+expand button. Closing restores the reading position and the original widget state.
+Use a `figure` or `data-tdoc-artifact` wrapper for composed HTML/CSS visualizations.
+Do not add your own fullscreen controls or convert a diagram to Excalidraw solely
+to make it expandable. Choose the visualization tool that fits the content.
+
 At the standard 720px root, 24px padding per side leaves **672px for content**;
 on a 375px phone there are about **311px**. Design for the content box, not the
 browser window. Use container queries for layout changes inside that root.
@@ -1032,8 +1243,7 @@ What to write:
 ```
 
 The baked template's `:where()` rules handle:
-- Centered article column (`max-width: 720px`, padded) by default; opt into
-  the available full width with `data-tdoc-width="wide"` on the root.
+- Centered article column (`max-width: 720px`, padded) for standard designs.
   Do not restate root sizing in CSS: the template owns spacing, and
   `frame-probe.js` measures the result to place comments
 - All heading sizes, weights, spacing
@@ -1051,13 +1261,13 @@ Wrap the doc content in a single container element with one of these selectors: 
 - Anchor the article to the LEFT when there are comments (so growing/shrinking the window preserves the right-side comment column)
 - Calculate where comment cards land
 
-Note: select the column with `data-tdoc-width="wide"` when needed; do not set arbitrary root width, margin or padding. The template supplies spacing, and the probe measures the resulting column for comment placement.
+Note: standard designs retain the reading column; custom designs own their width. Do not override standard root width, margin or padding. The template supplies spacing, and the probe measures the resulting column for comment placement.
 
 ### Required: explicit body background
 
 Always set `body { background: #fff; }` (or your chosen color) so the page doesn't render as transparent over the reader's own ground.
 
-**Author in light only — dark mode is a whole-page invert**, applied inside the frame by `frame-probe.js` (`filter: invert(1) hue-rotate(180deg)`, the Dark Reader trick). A hand-written dark palette gets inverted back to light, so a `@media (prefers-color-scheme: dark)` block that sets dark colors renders *light*. Style the light look well and the dark one is its clean inverse, for free. See `$SKILL_DIR/authoring/style/technical.md` for the full rule.
+**Standard designs: author in light only — dark mode is a whole-page invert**, applied inside the frame by `frame-probe.js` (`filter: invert(1) hue-rotate(180deg)`, the Dark Reader trick). A hand-written dark palette gets inverted back to light, so a `@media (prefers-color-scheme: dark)` block that sets dark colors renders *light*. Style the light look well and the dark one is its clean inverse, for free. See `$SKILL_DIR/authoring/style/technical.md` for the full rule. Custom designs retain their own palette and receive no tdoc theme inversion.
 
 ### Responsive defaults (REQUIRED)
 
@@ -1065,14 +1275,20 @@ Every doc must work on mobile out of the box. The baked template carries defensi
 
 - **Always include** `<meta name="viewport" content="width=device-width, initial-scale=1">` in `<head>`. Nothing adds it for you — the frame serves your HTML as written — and the validator rejects a document without it.
 - **Use fluid widths**, not hardcoded pixels. The default 720px column has a
-  **672px** usable canvas; select `data-tdoc-width="wide"` on the root when
-  the content needs more room. Keep root spacing in the template. On phones
+  **672px** usable canvas. Readers can expand individual visuals fullscreen;
+  a wider page requires a custom design. Keep root spacing in the template. On phones
   both layouts shrink to the viewport. Use `minmax(0, 1fr)` for grid text tracks,
   `min-width: 0` on their children and `overflow-wrap: anywhere` for long identifiers;
   stack text-heavy columns on small screens.
 - **SVG / images**: use fluid sizing (`width: 100%; height: auto`) and an SVG
   `viewBox`. Follow the figure rules in `$SKILL_DIR/authoring/structure/components.md`
   for readable labels, HTML captions and intentional local scrolling.
+- **Video / audio**: never paste it into the HTML as base64 (publish refuses more than
+  200KB of it). Put the file on storage the reader can reach and link it:
+  `<video src="https://…" poster="https://…/cover.jpg" preload="none" controls
+  style="width:100%;height:auto"></video>`. `preload="none"` + a poster means the page
+  loads only the cover until someone presses play. Readers in China cannot open
+  YouTube; use a host they can reach (Bilibili, OSS/R2 with a public URL).
 - **Tables**: wrap in `<div class="tdoc-table-scroll">`. Preserve semantic
   `<table>` / `<th>` / `<td>` relationships; mark atomic cells with
   `data-tdoc-cell="value"`. Do not use page clipping or shrinking text to fit.
@@ -1102,8 +1318,9 @@ that a file opened without the provider will have the same layout.
 Agents generate arbitrary HTML. The baked template is **`:where()` zero-specificity** so **author CSS always wins** — property by property: what you name is yours, what you leave alone keeps the default. That also means a bad author rule silently breaks layout (e.g. `padding: 0 24px` on the content root wiped the top reading space — #96). Contract:
 
 - One primary content container: `.wrap` (preferred), `main`, `article`, `.content`, or `.container`.
-- Select default or `data-tdoc-width="wide"` on the primary root. **No arbitrary**
-  root width / `margin` / `padding` overrides — the template owns column spacing.
+- Standard design keeps the narrow primary root. **No arbitrary** root width /
+  `margin` / `padding` overrides — the template owns column spacing. Custom design
+  owns its layout and must remain responsive.
 - Treat `tdoc-*` classes/ids as reserved.
 - Scope document UI rules to the document (never global `button:hover`).
 - Prefer fluid/`max-width` layouts over fixed pixel shells.
@@ -1115,22 +1332,29 @@ Remote storage holds optional `meta.access`:
 ```json
 {
   "visibility": "public | unlisted | private",
+  "signin_required": "true | false (unlisted only)",
   "commenting": "owner | invited | signed_in | off",
   "history_visibility": "owner | invited | public",
   "allowed_users": ["github-login"]
 }
 ```
 
-- **public / unlisted**: link-readable without login. Unlisted is not catalog-discovery; `/me` still lists the signed-in publisher's docs.
+- **unlisted** ("Anyone with the link"; `--visibility unlisted`): link-readable without login, every response `noindex`, listed nowhere (not on profiles, not in /llms.txt). `/me` still lists the signed-in publisher's docs. `signin_required: true` (Share panel "Require sign-in to view") lets any signed-in account read it instead of anyone. The default for a new doc.
+- **public** ("Public"; `--visibility public`): link-readable without login and indexable by search engines. Profile pins (`/@handle`) are always public. Only on explicit request.
 - **private**: the doc publisher (hosted `github_login`, or `TDOC_OWNER` on BYOK/legacy) + `allowed_users`. Gates `/d/.../v/N`, export, fork, `GET /api/comments`.
 - **history_visibility**: version picker visibility (new policies default owner-only / pure-publish).
-- Legacy meta without `access` stays world-readable + full history (back-compat).
+- Legacy meta without `access` stays world-readable + full history (back-compat); `worker/migrate-public-to-link.mjs` (manual, dry run by default) moves those and other non-profile public docs to unlisted.
 - **Access only ever tightens by omission.** A flag left out keeps what is
   already stored — the CLI leaves an existing `meta.access` alone, and the
   worker carries the stored block forward when an upload names none. A publish
-  that means to OPEN a doc must say so (`--visibility public`); this is why
-  FIRST-DOC.md names the policy instead of publishing flagless.
+  that means to OPEN a doc must say so (`--visibility unlisted` or `public`), and a
+  re-publish that must stay closed is safest saying so too; this is why
+  FIRST-DOC.md names the policy (`--visibility private --history owner`)
+  instead of publishing flagless.
 - Initial publish can set access via `tdoc-publish --visibility|--history|--commenting|--allow-user`.
+- `tdoc-publish --team <name|id>` puts the doc in a team workspace the account belongs to (hosted). Safe to pass on every publish; once the doc is there it is a no-op. Use it for recurring docs that belong to a team (daily reports), so they never land in My docs.
+- `tdoc-move --team <name|id> <slug>...` / `tdoc-move --personal <slug>...` moves existing docs in or out of a team; `tdoc-move --teams` lists yours; `tdoc-move --create-team <name>` (or `--create` / publish `--create-team` alongside `--team`) makes one with you as admin. Inviting people stays on the web. Same rules as the web: the author moves a personal doc in; a team doc is moved by the team's admins.
+- Default place for NEW docs, nearest first: `TDOC_TEAM=<team>` (this agent), a `.tdoc.json` with `{"team": "<name|id>"}` in the working directory or a parent (this project), `tdoc-move --set-default <team>` (this machine; `personal` undoes it). `tdoc-publish --personal` skips the default once. Existing docs never move. Every hosted publish ends with `[tdoc] location: …` — check it.
 - After publish, access must be mutable directly on remote storage (`PATCH /api/doc/access` with the upload token) without local `meta.json` or full HTML re-upload.
 - `/me` on hosted tdoc.dev lists the signed-in account's docs. On BYOK it lists the worker operator's docs. Remote write actions still use the upload token for CLI; the publisher's session cookie may mutate their own docs (CSP on every response).
 
@@ -1161,6 +1385,74 @@ private doc only to that invitee (cookie or their hosted Bearer).
 
 Underlying APIs (CLI wraps these; prefer the CLI): `GET /api/me`,
 `GET /api/folders/shared?id=<share_id>`.
+
+### Folders: file docs in My docs or a team (`tdoc-folder`)
+
+Agents organize with the same folders people see on `/me` (hosted Bearer,
+same rules as the web). Add `--team <name|id>` to work in a team's folders
+instead of My docs.
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-folder" list [--team BeFreed]                 # id, path (, doc count)
+bash "$SKILL_DIR/bin/tdoc-folder" create "Daily reports" [--parent Reports] [--team BeFreed]
+bash "$SKILL_DIR/bin/tdoc-folder" add <slug>... --folder "Daily reports" --create [--team BeFreed]
+bash "$SKILL_DIR/bin/tdoc-folder" remove <slug>... [--team BeFreed]     # back to the top level
+bash "$SKILL_DIR/bin/tdoc-folder" rename <folder> <new name> | delete <folder>  [--team ...]
+bash "$SKILL_DIR/bin/tdoc-folder" share <folder> [--visibility unlisted|private|public] [--team ...]  # prints /f/<id>
+bash "$SKILL_DIR/bin/tdoc-folder" unshare <folder> [--team ...]          # the link stops working
+bash "$SKILL_DIR/bin/tdoc-folder" move-to-team <folder> --team BeFreed   # a whole My docs folder into a team
+```
+
+- Recurring docs (daily reports): publish with `--team <t> --folder <f>`
+  (`tdoc-publish` or `tdoc-move`). Both are idempotent — the folder is made on
+  first use and every later run is a no-op — so pass them on every publish.
+- `<folder>` is an id (`f_…`), a path (`Reports/Daily`), or a name unique in
+  that space. `create` on an existing name returns the existing folder.
+- My docs folders hold your own docs. Team folders: any member makes one; its
+  maker or a team admin renames/deletes it; a team doc is filed by its author
+  or an admin, and must already be in the team (`tdoc-move --team` first).
+- Deleting a folder moves it to Trash with its subfolders and every doc in
+  them that you could delete yourself; restoring the folder (Trash in My docs
+  or the team) brings them all back. Docs you could not delete move up a level.
+- `share` (My docs or team; in a team, maker or admin) prints a link listing
+  the folder's docs (not subfolders). It grants no doc access: each doc still
+  opens only for whoever its own access allows, so a team-only doc stays
+  hidden outside the team. `private` = you (team: its members) + invitees.
+- `move-to-team` moves a My docs folder with its subfolders and your docs into
+  a team: the same folders are made there (a same-named folder at the same
+  level is merged into), each doc moves like `tdoc-move --team` and is filed
+  in its folder, and the emptied My docs folders are removed (a folder's
+  share link goes with it). It loops in batches until done and prints the
+  team folder's `/me` link; re-running finishes an interrupted move. A doc
+  that is not yours is skipped and reported, and keeps its folder. There is
+  no reverse for a whole folder: move team docs back one by one
+  (`tdoc-move --personal` / "Move to My docs").
+
+### Team data portability backups (`tdoc-backup`)
+
+A team admin can connect one customer-owned S3-compatible bucket from
+**Members → Data backup**. tdoc remains the source of truth and copies an
+open-format backup asynchronously; a destination outage never blocks reading,
+commenting, or publishing. Turning the feature off never deletes the copy.
+
+The backup contains a versioned `manifest.json`, sanitized team/folder data,
+every document's metadata, comments, HTML versions and widget files. It does
+not contain tdoc sessions, account ids, invite/share tokens, or publisher-token
+fingerprints. Deleted or moved-out docs get tombstones instead of destructive
+remote deletes.
+
+To download with the AWS CLI (S3, R2, or a compatible endpoint) and verify all
+recorded sizes/checksums, or to verify a directory downloaded another way:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-backup" download s3://<bucket>/<prefix>/<team-id> <directory> \
+  --endpoint https://<account>.r2.cloudflarestorage.com --region auto
+bash "$SKILL_DIR/bin/tdoc-backup" verify <directory>
+```
+
+Download uses the customer's normal AWS credentials/profile. The first release
+is an independently readable/exportable copy; importing it back into tdoc is a
+separate recovery feature, not implied by verification.
 
 
 ### Comment anchor stability (important for `/tdoc edit`)

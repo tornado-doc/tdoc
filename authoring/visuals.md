@@ -42,6 +42,8 @@ sequence + a metrics row. Reach for the variety the content earns.
 
 The official Excalidraw editor is available. Its scene and SVG snapshot format
 is documented in `structure/components.md`.
+In the browser, **Insert diagram** in document Edit mode opens it for new or
+existing docs; **Apply to document** then **Save** publishes the editable scene.
 
 ## The style owns the look, not the choice
 

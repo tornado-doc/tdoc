@@ -30,12 +30,12 @@ import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSub
 // involved" and nothing about which of these two answers you are picking.
 // Which agents is a separate question, answered by the marks at the end of
 // the row, where a list of what something works with belongs.
-export function CreateMenu({ create, canCreate = true, onAgent, onQuota, trigger }) {
+export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuota, trigger }) {
   const [busy, setBusy] = useState(false);
   const startBlank = async () => {
     if (busy) return;
     setBusy(true);
-    const result = await create();
+    const result = await create(team);
     if (result === true) return;
     setBusy(false);
     if (result && result.quota && onQuota) onQuota(result.quota);

@@ -72,3 +72,38 @@ separate destination-gated nested-frame route.
 TypeScript is intentionally deferred. The current API, model, hook, and
 component boundaries are the migration units; conversion should not change the
 runtime protocol or server boot shapes.
+
+## Rendered version comparison
+
+The version menu and document overflow menu open **View changes** directly in
+the document area, with no dialog or setup controls. The current published
+version is always compared with its previous version; the first version is
+compared with an empty document. `?compare=1` opens this view
+directly, and browser Back/Forward restore the reading/comparison mode. The
+original reader stays mounted but hidden, preserving unsaved editor state.
+Comparison includes published versions only.
+
+Each side loads the existing `/d/:slug/v/:n/frame` route with its existing
+access checks and opaque `allow-scripts` sandbox. The shell exchanges bounded
+snapshots through a window-identity-checked comparison bridge; it never mounts
+author markup in the provider DOM. `frame-compare.js` is dormant outside these
+disposable frames. Leaving the view discards all comparison annotations. Both panes scroll together
+using matched block positions, with start/end anchors and interpolation through
+added or removed sections. A following frame suppresses its own resulting scroll
+event so either side can lead without feedback loops.
+
+`version-diff.js` matches stable block IDs, then equal content, then compatible
+gaps. Word edits preserve unchanged inline markup. Simple tables align unique
+headers and row labels; ambiguous or spanning tables fall back to whole-table
+comparison. Stable SVG element IDs allow local marks; unkeyed graphics fall
+back to an artifact outline and a link to the previous version. Mobile
+comparison inserts inert historical text/table copies into the newer view; copied
+markup cannot carry scripts, URLs, IDs or event handlers.
+
+Finite Web Animations timelines share a bounded clock. Embedded widgets,
+video, SMIL and unbounded timelines explicitly report that precise sync is
+unavailable. The comparison is side by side on desktop and merged on mobile.
+A contextual animation control temporarily stacks both animation frames on
+mobile; changed graphics link to their previous published version. Source
+styles retain their original per-version isolation; style changes are reported
+separately from content changes.

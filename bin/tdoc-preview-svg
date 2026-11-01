@@ -1,0 +1,59 @@
+#!/usr/bin/env node
+// Standalone SVG previews, with renderer diagnostics checked before publishing PNGs.
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const tool = path.resolve(__dirname, '../tools/svg-preview');
+const usage = 'Usage: node bin/tdoc-preview-svg input.svg --out NEW_DIRECTORY --font FILE [--font FILE ...] [--widths 343,672]\nInstall once: npm ci --prefix tools/svg-preview --ignore-scripts --no-audit --no-fund\nSupply the document fonts, including a CJK font for Chinese. No system font scan.\nExit 0 means previews are ready for visual review, not that layout passed.';
+let staging;
+function fail(code, message, details = {}) { throw Object.assign(new Error(message), { code, details }); }
+try {
+  const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) { console.log(usage); process.exit(0); }
+  const input = args.shift();
+  let out, widths = [343, 672];
+  const fonts = [];
+  while (args.length) {
+    const flag = args.shift(), value = args.shift();
+    if (!value || value.startsWith('--')) fail('usage', usage);
+    if (flag === '--out') out = path.resolve(value);
+    else if (flag === '--font') fonts.push(path.resolve(value));
+    else if (flag === '--widths') widths = value.split(',').map(Number);
+    else fail('usage', usage);
+  }
+  if (!input || !out || !fonts.length) fail('usage', usage);
+  if (!widths.length || widths.length > 4 || widths.some(w => !Number.isInteger(w) || w < 1 || w > 2048)) fail('usage', 'Use 1–4 widths between 1 and 2048 pixels.');
+  if (fs.existsSync(out)) fail('output_exists', 'Choose a new output directory; existing previews are never overwritten.');
+  for (const font of fonts) if (!fs.statSync(font).isFile()) fail('font_file', `Not a font file: ${font}`);
+  if (fs.statSync(input).size > 2 * 1024 * 1024) fail('input_size', 'SVG input exceeds 2 MiB.');
+  const svg = fs.readFileSync(input, 'utf8');
+  try { require.resolve('@resvg/resvg-js', { paths: [tool] }); }
+  catch { fail('dependency_missing', `Install the small preview helper once: npm ci --prefix "${tool}" --ignore-scripts --no-audit --no-fund`); }
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  staging = fs.mkdtempSync(path.join(path.dirname(out), '.tdoc-svg-'));
+  // A fresh process makes the native logger deterministic and captures its fd 2 output.
+  const result = spawnSync(process.execPath, [path.join(tool, 'render.cjs')], {
+    input: JSON.stringify({ svg, fonts, widths: [...new Set(widths)], out: staging }),
+    encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024,
+    env: { ...process.env, RUST_LOG: 'warn', RUST_LOG_STYLE: 'never' },
+  });
+  const diagnostics = [...new Set((result.stderr || '').split('\n').filter(Boolean).map(line => line.replace(/^\[[^\]]+\]\s*/, '')))];
+  const missingGlyphs = [...new Map(diagnostics.flatMap(line => {
+    const match = line.match(/No fonts with a (.+)\/(U\+[0-9A-Fa-f]+) character were found/);
+    return match ? [[match[2], { character: match[1], codePoint: match[2] }]] : [];
+  })).values()];
+  if (missingGlyphs.length) fail('missing_glyphs', 'No loaded font covers these characters. Add a matching font with --font and retry.', { missingGlyphs, diagnostics });
+  if (result.error || result.status !== 0) fail('render_failed', result.error?.message || 'SVG renderer failed.', { diagnostics });
+  // Successful glyph fallback is useful information, not a missing-glyph error.
+  const errors = diagnostics.filter(line => !/^Fallback from .+ to .+\.$/.test(line));
+  if (errors.length) fail('render_warning', 'Renderer diagnostics need attention; no previews were accepted.', { diagnostics });
+  const rendered = JSON.parse(result.stdout);
+  fs.renameSync(staging, out); staging = undefined;
+  console.log(JSON.stringify({ status: 'preview_ready', reviewRequired: true, warnings: diagnostics,
+    images: rendered.images.map(name => path.join(out, name)) }));
+} catch (error) {
+  console.log(JSON.stringify({ status: 'error', code: error.code || 'preview_failed', message: error.message, ...error.details }));
+  process.exitCode = 1;
+} finally {
+  if (staging) fs.rmSync(staging, { recursive: true, force: true });
+}

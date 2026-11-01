@@ -226,9 +226,16 @@ function get(port, p, headers = {}) {
     // the /frame route (the overlay boot that used to do this is deleted).
     const s = workerSrc.indexOf("const frameMatch = p.match(/^\\/d\\/([^/]+)\\/v\\/(\\d+)\\/frame");
     if (s < 0) throw new Error('/frame route not found');
-    const body = workerSrc.slice(s, s + 1200);
-    if (!body.includes('forceWidgetSandbox(await obj.text())')) {
-      throw new Error('the /frame route must rewrite widget iframes via forceWidgetSandbox');
+    const body = workerSrc.slice(s, s + 2400);
+    // The bake (sandbox rewrite, reader template, table wrappers) lives in
+    // bakeFrameBody so its output can be cached per version; the route must
+    // still feed every stored body through it, and it must still sandbox.
+    if (!body.includes('bakeFrameBody(await obj.text())')) {
+      throw new Error('the /frame route must bake author HTML via bakeFrameBody');
+    }
+    const b = workerSrc.indexOf('function bakeFrameBody(');
+    if (b < 0 || !workerSrc.slice(b, b + 400).includes('forceWidgetSandbox(raw)')) {
+      throw new Error('bakeFrameBody must rewrite widget iframes via forceWidgetSandbox');
     }
   });
 

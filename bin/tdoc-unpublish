@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# tdoc-unpublish — delete a published doc (all versions + comments) from the Worker.
+# tdoc-unpublish — delete a published doc from the Worker. Delete moves it to
+# Trash: unreadable everywhere at once, erased for good after 30 days, and
+# back with tdoc-restore <slug> until then. --forever erases it now instead
+# (from Trash too), which frees the slug to be published again.
 #
-# Usage: tdoc-unpublish <slug>
+# Usage: tdoc-unpublish <slug> [--forever]
 set -euo pipefail
 TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$TDOC_BIN_DIR/lib/json.sh"
@@ -37,6 +40,29 @@ else
   BASE="https://${WORKER_NAME}.${SUBDOMAIN}.workers.dev"
 fi
 
-curl -sS --connect-timeout 10 --max-time 60 -X DELETE "$BASE/api/doc?slug=$SLUG" \
-  -H "Authorization: Bearer $TOKEN" | json_pretty
-echo "Unpublished $SLUG."
+RESP="$(curl -sS --connect-timeout 10 --max-time 60 -X DELETE "$BASE/api/doc?slug=$SLUG" \
+  -H "Authorization: Bearer $TOKEN")"
+printf '%s' "$RESP" | json_pretty
+if [ "${2:-}" = "--forever" ]; then
+  # Already in Trash answers not_found above; either way, erase it now.
+  case "$(printf '%s' "$RESP" | json_error || true)" in ""|not_found) ;; *) echo "[tdoc] $SLUG was not deleted: $(printf '%s' "$RESP" | json_error)" >&2; exit 1 ;; esac
+  RESP="$(curl -sS --connect-timeout 10 --max-time 60 -X POST "$BASE/api/trash/purge" \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "{\"slug\":\"$SLUG\"}")"
+  if ERR="$(printf '%s' "$RESP" | json_error)"; then
+    echo "[tdoc] $SLUG was not deleted for good: $ERR" >&2
+    exit 1
+  fi
+  echo "Deleted $SLUG for good. The slug is free to publish again."
+  exit 0
+fi
+if ERR="$(printf '%s' "$RESP" | json_error)"; then
+  echo "[tdoc] $SLUG was not deleted: $ERR" >&2
+  exit 1
+fi
+if [ "$(printf '%s' "$RESP" | json_get trashed)" = "true" ]; then
+  PURGE="$(printf '%s' "$RESP" | json_get purge_at)"
+  echo "Moved $SLUG to Trash. It is deleted for good after 30 days${PURGE:+ (${PURGE%%T*})}; until then: tdoc-restore $SLUG"
+else
+  # A self-hosted Worker from before Trash erases at once.
+  echo "Unpublished $SLUG."
+fi

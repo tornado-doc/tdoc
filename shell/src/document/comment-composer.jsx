@@ -1,6 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { MentionField } from './mention-field.jsx';
-import { TOP_BAR_HEIGHT } from './model.js';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import { Copy, X } from 'lucide-react';
+import { AgentButtonsContext, MentionField } from './mention-field.jsx';
+import { joinAiTags, mentionsAi } from './ai-answerer.js';
+import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
+import { TOP_BAR_HEIGHT, copyText } from './model.js';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 
 // The shell's chrome does not scroll — the frame does — so the composer's
 // coordinates are viewport coordinates.
@@ -57,15 +61,31 @@ export function composerPosition(rect, viewport) {
 
 export function CommentComposer({
   selection,
+  inline = false,
+  initialText = '',
   onSubmit,
   onClose,
   mentionable = [],
   demo = false,
   canSendToAgent = false,
   sendToAgentDisabledReason = null,
+  // Set when @agent would work but nobody is linked yet: the button stays,
+  // and pressing it explains how to connect instead of vanishing silently.
+  // Only where the @agent buttons are (AgentButtonsContext).
+  connectAgentPrompt = null,
+  // Where "Set up an agent" goes. The feedback overlay runs on someone
+  // else's app, so it passes an absolute tdoc URL.
+  agentSetupHref = '/me?view=settings#agents',
+  // An "Only me" question in flight or answered: { question, label, status,
+  // answer, error }. The composer turns into its answer, with Make public.
+  privateAsk = null,
+  onMakePublic = null,
+  onCopyToast = null,
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialText);
+  const [connectOpen, setConnectOpen] = useState(false);
   const [viewport, setViewport] = useState(readViewport);
+  const agentButtons = useContext(AgentButtonsContext);
 
   useEffect(() => {
     const onChange = () => setViewport(readViewport());
@@ -84,54 +104,143 @@ export function CommentComposer({
   const { top, left } = composerPosition(selection.rect || {}, viewport);
 
   const quoted = String(selection.text || '');
-  const preview = selection.kind === 'element'
+  const copyQuote = async () => {
+    let copied = false;
+    try { copied = await copyText(quoted); } catch {}
+    onCopyToast?.(copied ? 'Copied' : 'Copy failed', !copied);
+  };
+  const copyEmptyDraftQuote = (event) => {
+    if (!quoted || text.length || event.altKey || event.shiftKey || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'c') return;
+    const textarea = field.current;
+    if (!textarea || document.activeElement !== textarea || textarea.selectionStart !== textarea.selectionEnd) return;
+    event.preventDefault();
+    void copyQuote();
+  };
+  const preview = selection.kind === 'document'
+    ? 'On this document'
+    : selection.kind === 'element'
     ? selection.label || 'Selected element'
     : `"${quoted.slice(0, 80)}${quoted.length > 80 ? '…' : ''}"`;
 
   // One submit at a time. ⌘+Enter and the buttons both land here, and a second
   // press while the first post is still in flight used to post a twin.
   const [busy, setBusy] = useState(false);
+  // The @agent button and its pill, and Only me (agent-ask.jsx, shared with
+  // the reply box). The feedback overlay keeps its own @agent buttons.
+  const field = useRef(null);
+  const ask = useAgentAsk(text, setText, field);
+  const { agents, target } = ask;
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
+    if (sendToAgent && !agentButtons && !target && !agents.preselected) { ask.putDefault(); return; }
     setBusy(true);
     try {
-      await onSubmit(text, { sendToAgent: canSendToAgent && sendToAgent });
+      if (agentButtons) {
+        // The feedback overlay: its @agent button hands the comment to the
+        // following agent.
+        await onSubmit(text, { sendToAgent: canSendToAgent && sendToAgent, recipient: null, target: null, askOnly: false, onlyMe: false });
+        return;
+      }
+      // ⌘⇧Enter puts the default agent in, then sends. A named agent that
+      // may edit this doc gets the comment to answer or change; one that may
+      // not (or Only me) answers only.
+      const out = ask.outgoing(sendToAgent);
+      const recipient = canSendToAgent && out.target && !out.askOnly ? out.target : null;
+      await onSubmit(out.target || mentionsAi(out.text) ? joinAiTags(out.text) : out.text, {
+        sendToAgent: Boolean(recipient),
+        recipient,
+        target: out.target,
+        askOnly: out.askOnly,
+        onlyMe: out.onlyMe,
+      });
     } finally {
       setBusy(false);
     }
   };
 
+  if (privateAsk) {
+    return (
+      <div
+        className={`tdoc-popup tdoc-private-ask${inline ? ' tdoc-inline-composer' : ''}`}
+        style={inline ? undefined : { top, left }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="head">
+          <span className="h">{preview}</span>
+          <button type="button" className="x" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button>
+        </div>
+        <PrivateAnswer privateAsk={privateAsk} onMakePublic={onMakePublic} />
+      </div>
+    );
+  }
+
   return (
     <div
-      className="tdoc-popup"
-      style={{ top, left }}
+      className={`tdoc-popup${inline ? ' tdoc-inline-composer' : ''}`}
+      style={inline ? undefined : { top, left }}
       onPointerDown={(event) => event.stopPropagation()}
+      onKeyDownCapture={copyEmptyDraftQuote}
     >
       <div className="head">
         {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
         <span className="h">{preview}</span>
-        <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
+        {quoted ? <button type="button" className="tdoc-copy-quote" aria-label="Copy selected text" title="Copy selected text" onMouseDown={(event) => event.preventDefault()} onClick={copyQuote}><Copy size={15} aria-hidden="true" /></button> : null}
+        <button type="button" className="x" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button>
       </div>
-      <MentionField
+      <div><MentionField
         autoFocus
+        fieldRef={field}
         placeholder={demo
           ? 'What should change? Type a GitHub @ — or @email'
-          : 'What should change? Type @ to notify someone'}
+          : (agents.choices || []).length && !agentButtons
+            ? 'Comment, or type @ to ask an agent'
+            : 'What should change? Type @ to notify someone'}
         value={text}
         people={mentionable}
         onChange={setText}
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
-      />
+      /></div>
+      {!agentButtons ? <AgentAskRow ask={ask} /> : null}
+      {connectOpen && connectAgentPrompt ? (
+        <div className="tdoc-connect-agent">
+          <p><strong>No agent is connected yet.</strong> Connect one once (Raft or a webhook), then @agent works here.</p>
+          <a className="tdoc-connect-agent-cta" href={agentSetupHref || '/me?view=settings#agents'}>Set up an agent</a>
+          <details>
+            <summary>Or paste this into your agent</summary>
+            <code>{connectAgentPrompt}</code>
+            <CopyPromptButton text={connectAgentPrompt} />
+          </details>
+        </div>
+      ) : null}
       <div className="foot">
-        <span className="hint">
-          {demo
-            ? 'Demo — refresh clears it'
-            : (canSendToAgent ? '⌘+Enter · ⌘⇧+Enter @agent' : '⌘+Enter to submit')}
-        </span>
+        {target && !agentButtons ? (
+          <span className="hint">{agentAskHint(ask)}</span>
+        ) : (
+          <span className={demo ? 'hint' : 'hint tdoc-keyboard-shortcut-hint'}>
+            {demo
+              ? 'Demo — refresh clears it'
+              : (canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ask.choices.length ? '⌘+Enter · ⌘⇧+Enter with @agent' : '⌘+Enter to submit')}
+          </span>
+        )}
         <div className="tdoc-composer-foot-actions">
-          {canSendToAgent ? (
+          {!agentButtons && connectAgentPrompt ? (
+            <button className="tdoc-composer-agent ui-btn ui-btn-secondary ui-btn-m" type="button" disabled={busy} aria-expanded={connectOpen}
+              onClick={() => setConnectOpen((value) => !value)} title="Connect an agent to use @agent">@agent</button>
+          ) : !agentButtons ? <AgentButton ask={ask} busy={busy} /> : null}
+          {agentButtons && !canSendToAgent && connectAgentPrompt ? (
             <button
-              className="submit agent"
+              className="submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m"
+              type="button"
+              aria-expanded={connectOpen}
+              onClick={() => setConnectOpen((v) => !v)}
+              title="Connect an agent to hand comments to it"
+            >
+              @agent
+            </button>
+          ) : null}
+          {agentButtons && canSendToAgent ? (
+            <button
+              className="submit agent ui-btn ui-btn-secondary ui-btn-m"
               type="button"
               onClick={() => submit(true)}
               disabled={busy}
@@ -140,7 +249,7 @@ export function CommentComposer({
               {busy ? 'Posting…' : '@agent'}
             </button>
           ) : null}
-          <button className="submit" type="button" onClick={() => submit(false)} disabled={busy}>
+          <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Comment'}
           </button>
         </div>

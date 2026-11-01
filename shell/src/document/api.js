@@ -1,8 +1,25 @@
+// Where requests go. On a tdoc page: this origin, with the cookie. The
+// feedback overlay runs inside someone else's app, so it points the same
+// calls at the tdoc host with its feedback token instead — that is what lets
+// it reuse panels written for the doc page (Send to agent) unchanged.
+let transport = null;
+export function setApiTransport(next) { transport = next || null; }
+// Account settings (/api/me/*) need the tdoc browser session, which the
+// overlay's feedback token is not.
+export function hasAccountSession() { return !transport; }
+export function tdocUrl(path) { return transport ? `${transport.base}${path}` : path; }
+
 async function request(path, options) {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...options,
-  });
+  const response = transport
+    ? await fetch(`${transport.base}${path}`, {
+      credentials: 'omit',
+      ...options,
+      headers: { ...((options && options.headers) || {}), ...transport.headers() },
+    })
+    : await fetch(path, {
+      credentials: 'same-origin',
+      ...options,
+    });
 
   const body = await response.json().catch(() => null);
   if (!response.ok) {
@@ -36,6 +53,16 @@ export function postOnboardingEvent(action, doc) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(doc ? { action, doc } : { action }),
+  });
+}
+
+// The person's own tick on a checklist row. Kept beside the stamps, not as
+// one: the funnel still reads only what the server saw.
+export function postOnboardingCheck(step, checked) {
+  return request('/api/onboarding/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: checked ? 'step_checked' : 'step_unchecked', step }),
   });
 }
 
@@ -112,11 +139,11 @@ export function setDocumentStar(slug, starred) {
 // Start from scratch. There is no title yet — the author types one into the
 // page — so the server mints an opaque slug and returns the new doc's URL,
 // already carrying ?edit=1.
-export function createDocument() {
+export function createDocument(team) {
   return request('/api/doc/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify(team ? { team } : {}),
   });
 }
 
@@ -185,9 +212,48 @@ export function deleteDocument(slug) {
   return request(`/api/doc?${query}`, { method: 'DELETE' });
 }
 
+// Trash. Delete moves a doc (or a folder with its docs) here for 30 days;
+// `target` is { slug } for a doc, { folder, team? } for a folder.
+// `recent`: { slugs, folders } this browser just deleted, which a Trash list
+// a moment behind its write would otherwise miss.
+export function listTrash(team, recent = {}) {
+  const params = new URLSearchParams();
+  if (team) params.set('team', team);
+  if (recent.slugs?.length) params.set('slugs', recent.slugs.join(','));
+  if (recent.folders?.length) params.set('folders', recent.folders.join(','));
+  const query = params.toString();
+  return request(`/api/trash${query ? `?${query}` : ''}`);
+}
+
+export function restoreFromTrash(target) {
+  return request('/api/trash/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(target),
+  });
+}
+
+// A folder is erased a batch per request, like its delete.
+export async function deleteForever(target) {
+  for (let round = 0; round < 200; round += 1) {
+    const body = await request('/api/trash/purge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(target),
+    });
+    if (!body || !body.remaining) return body;
+  }
+  throw new Error('Still deleting. Try again.');
+}
+
 export function listNotifications(offset = 0) {
   const query = new URLSearchParams({ offset: String(offset) });
   return request(`/api/notifications?${query}`);
+}
+
+export function listTeamComments(team, offset = 0) {
+  const query = new URLSearchParams({ id: team, offset: String(offset) });
+  return request(`/api/team/comments?${query}`);
 }
 
 // Raft / provider notify handoff (Connected App). Same endpoint for doc-level
@@ -213,6 +279,20 @@ export function postNotifyHandoff({ slug, comment_ids, instruction, recipient })
   });
 }
 
+// Which agent on a connected Raft server gets comments on docs no agent has
+// worked on yet. Delivery is by handle.
+export function setRaftFallbackAgent({ server_id, agent_name, agent_sub }) {
+  return request('/api/me/connectors/raft/default', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server_id, agent_name, agent_sub }),
+  });
+}
+
+export function getRaftConnectAttempt(id) {
+  return request(`/api/me/connectors/raft/attempt?id=${encodeURIComponent(id)}`);
+}
+
 export function resendNotifyHandoff({ slug, handoff_id }) {
   return request('/api/notify/handoff/resend', {
     method: 'POST',
@@ -223,6 +303,56 @@ export function resendNotifyHandoff({ slug, handoff_id }) {
 
 export function getUnreadNotificationCount() {
   return request('/api/notifications/unread');
+}
+
+export function answerAccessRequest({ slug, requester, action }) {
+  return request('/api/doc/access-request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug, requester, action }),
+  });
+}
+
+// Notification email (#772): { available, on } for the signed-in person.
+export function getEmailNotifications() {
+  return request('/api/notifications/email');
+}
+
+export function setEmailNotifications(on) {
+  return request('/api/notifications/email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on }),
+  });
+}
+
+// Web push (#771): this browser's subscription for the bell.
+export function getPushKey() {
+  return request('/api/push/key');
+}
+
+export function savePushSubscription(subscription) {
+  return request('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+export function dropPushSubscription(endpoint) {
+  return request('/api/push/unsubscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export function markAllNotificationsRead() {
+  return request('/api/notifications/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ all: true }),
+  });
 }
 
 export function markNotificationsRead(ids) {
@@ -248,34 +378,38 @@ export function pollDeviceSignIn(deviceCode) {
   });
 }
 
-export function moveDocsToFolder(slugs, folder) {
+// `team` (optional) targets that team's folders instead of My docs'.
+export function moveDocsToFolder(slugs, folder, team) {
   return request('/api/folders/move', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ slugs, folder: folder || null }),
+    body: JSON.stringify({ slugs, folder: folder || null, team: team || undefined }),
   });
 }
 
-export function createFolder(name, parent) {
+export function createFolder(name, parent, team) {
   return request('/api/folders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, parent: parent || undefined }),
+    body: JSON.stringify({ name, parent: parent || undefined, team: team || undefined }),
   });
 }
 
-export function renameFolder(id, name) {
+export function renameFolder(id, name, team) {
   return request('/api/folders', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, name }),
+    body: JSON.stringify({ id, name, team: team || undefined }),
   });
 }
 
-export function updateFolderAccess(id, { visibility, allowed_users } = {}) {
+// `share: false` stops sharing (the link dies); `team` names a team folder.
+export function updateFolderAccess(id, { visibility, allowed_users, share } = {}, team) {
   const body = { id };
   if (visibility !== undefined) body.visibility = visibility;
   if (allowed_users !== undefined) body.allowed_users = allowed_users;
+  if (share === false) body.share = false;
+  if (team) body.team = team;
   return request('/api/folders', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -283,7 +417,193 @@ export function updateFolderAccess(id, { visibility, allowed_users } = {}) {
   });
 }
 
-export function deleteFolder(id) {
-  const query = new URLSearchParams({ id });
-  return request(`/api/folders?${query}`, { method: 'DELETE' });
+// A folder goes to Trash with its docs a batch per request; this keeps
+// asking until the server says nothing remains, and returns every doc taken.
+export async function deleteFolder(id, team) {
+  const docs = [];
+  let after = '';
+  for (let round = 0; round < 200; round += 1) {
+    const query = new URLSearchParams({ id, batch: '1', ...(team ? { team } : {}), ...(after ? { after } : {}) });
+    const body = await request(`/api/folders?${query}`, { method: 'DELETE' });
+    docs.push(...((body && body.docs) || []));
+    if (!body || !body.remaining) return { ...body, docs };
+    after = body.after || '';
+  }
+  throw new Error('The folder is still being moved to Trash. Try again.');
+}
+
+function teamRequest(path, method, body) {
+  return request(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function createTeam(name, invites) {
+  return teamRequest('/api/teams', 'POST', { name, invites });
+}
+
+export function listTeams() {
+  return request('/api/teams');
+}
+
+export function getTeam(id) {
+  return request(`/api/team?${new URLSearchParams({ id })}`);
+}
+
+export function getTeamGuests(id) {
+  return request(`/api/team/guests?${new URLSearchParams({ id })}`);
+}
+
+export function changeTeamGuest(id, invitee, action) {
+  return teamRequest('/api/team/guests', 'POST', { id, invitee, action });
+}
+
+export function requestTeamJoin(slug) {
+  return teamRequest('/api/team/request-join', 'POST', { slug });
+}
+
+export function updateTeam(id, patch) {
+  return teamRequest('/api/team', 'PATCH', { id, ...patch });
+}
+
+export function getTeamBackup(id) {
+  return request(`/api/team/backup?${new URLSearchParams({ id })}`);
+}
+
+export function saveTeamBackup(id, backup) {
+  return teamRequest('/api/team/backup', 'PUT', { id, ...backup });
+}
+
+export function syncTeamBackup(id) {
+  return teamRequest('/api/team/backup', 'POST', { id });
+}
+
+export function removeTeamBackup(id) {
+  return teamRequest('/api/team/backup', 'DELETE', { id });
+}
+
+// Team agents: every member lists them; an admin adds one (a one-time
+// setup command comes back) or removes it.
+export function listTeamAgents(id) {
+  return request(`/api/team/agents?${new URLSearchParams({ id })}`);
+}
+
+export function addTeamAgent(id, name) {
+  return teamRequest('/api/team/agents', 'POST', { id, name });
+}
+
+// A new one-time setup command for an agent not connected yet; the previous
+// one stops working.
+export function reissueTeamAgentSetup(id, agent) {
+  return teamRequest('/api/team/agents', 'POST', { id, agent, action: 'reissue' });
+}
+
+export function removeTeamAgent(id, agent) {
+  return teamRequest('/api/team/agents', 'DELETE', { id, agent });
+}
+
+export function getTeamBilling(id) {
+  return request(`/api/team/billing?${new URLSearchParams({ id })}`);
+}
+
+// Returns a Stripe-hosted URL: Checkout (`interval` month|year) or the
+// Customer Portal.
+export function openTeamBilling(id, action, interval) {
+  return teamRequest('/api/team/billing', 'POST', { id, action, ...(interval ? { interval } : {}) });
+}
+
+export function setTeamRole(id, accountId, role) {
+  return teamRequest('/api/team/role', 'POST', { id, account_id: accountId, role });
+}
+
+export function removeTeamMember(id, accountId) {
+  return teamRequest('/api/team/remove', 'POST', { id, account_id: accountId });
+}
+
+export function joinTeam(token) {
+  return teamRequest('/api/team/join', 'POST', { token });
+}
+
+// Join without a link: the team's invite list names this handle or address.
+export function acceptTeamInvite(id) {
+  return teamRequest('/api/team/accept-invite', 'POST', { id });
+}
+
+export function moveDocsToTeam(slugs, team) {
+  return teamRequest('/api/team/move', 'POST', { slugs, team: team || null });
+}
+
+// A whole My docs folder into a team. The server moves a bounded batch per
+// call and says how many are `remaining`; each call hands back the team
+// folders it made (`known`) and the docs already moved (`done`) so a stale
+// read on the next one neither duplicates a folder nor re-reads every doc.
+export async function moveFolderToTeam(folder, team, onProgress) {
+  let known = [];
+  const done = [];
+  let moved = 0;
+  const skipped = [];
+  for (let round = 0; round < 100; round += 1) {
+    const r = await teamRequest('/api/folders/move-to-team', 'POST', { folder, team, known, done });
+    const progress = (r.results || []).filter((x) => !(x.status === 'skipped' && x.reason === 'not_owner'));
+    known = r.folders || known;
+    for (const x of progress) done.push(x.slug);
+    for (const x of r.results || []) if (x.status === 'skipped' && !skipped.some((y) => y.slug === x.slug)) skipped.push(x);
+    moved += r.moved || 0;
+    if (onProgress) onProgress({ moved, remaining: r.remaining || 0 });
+    if (!r.remaining || !progress.length) return { ...r, moved, skipped };
+  }
+  throw new Error('The move did not finish; try again to pick up where it stopped.');
+}
+
+// Ask this doc: the free server-side answer for a reader without an agent.
+// Browser session only; the server keeps nothing but the count.
+export function getAskAllowance(slug) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/ask`);
+}
+
+// With comment_id, the answer is posted as a reply under that comment (the
+// asker's own) and the response carries the reply instead of the answer.
+export function askDocument(slug, { question, version, selection, commentId = null }) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/ask`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, version, ...(selection ? { selection } : {}), ...(commentId ? { comment_id: commentId } : {}) }),
+  });
+}
+
+// Send to my agent: the reader's own agents and the questions this reader
+// sent them about this doc. Browser session only; the server never offers
+// anyone else's agent, and nobody else ever sees these answers.
+export function getMyAgent(slug) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/my-agent`);
+}
+
+// The comment composer's one door to an agent: ask_only false hands the
+// comment to EDIT the doc; true asks for an answer (only_me: privately).
+export function handOff(slug, payload) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/hand-off`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+// Make public: the asker's private answer goes under their new comment.
+// kind 'ask' (tdoc AI) or 'my-agent'. The server posts what it kept.
+export function publishAsk(slug, kind, { askId, commentId }) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/${kind}/publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ask_id: askId, comment_id: commentId }),
+  });
+}
+
+export function sendToMyAgent(slug, { question, passage, commentId = null }) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/my-agent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, ...(passage ? { passage } : {}), ...(commentId ? { comment_id: commentId } : {}) }),
+  });
 }
