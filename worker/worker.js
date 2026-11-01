@@ -18371,7 +18371,7 @@ const MCP_VERIFIED_APPS = [
   [/(^|\.)google\.com$/, 'gemini', 'Gemini'],
 ];
 // The consent page's logo: by the https host the code is sent back to.
-const CONSENT_APP_MARKS = new Set(['claude', 'chatgpt', 'cursor', 'copilot', 'gemini']);
+const CONSENT_APP_MARKS = new Set(['claude', 'chatgpt', 'cursor', 'copilot']);
 function consentAppMark(redirectUri) {
   let u;
   try { u = new URL(redirectUri); } catch { return ''; }

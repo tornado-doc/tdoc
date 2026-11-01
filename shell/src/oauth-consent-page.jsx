@@ -3,9 +3,9 @@ import { TopBar } from './top-bar.jsx';
 import { AppButton } from './ui/button.jsx';
 import { SignInDialog } from './sign-in-dialog.jsx';
 import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx';
-import { ClaudeMark, OpenAIMark, CursorMark, CopilotMark, GeminiMark } from './agent-marks.jsx';
+import { ClaudeMark, OpenAIMark, CursorMark, CopilotMark } from './agent-marks.jsx';
 
-const APP_MARKS = { claude: ClaudeMark, chatgpt: OpenAIMark, cursor: CursorMark, copilot: CopilotMark, gemini: GeminiMark };
+const APP_MARKS = { claude: ClaudeMark, chatgpt: OpenAIMark, cursor: CursorMark, copilot: CopilotMark };
 
 // /oauth/authorize — an AI app (Claude, ChatGPT, Cursor...) asking to use
 // tdoc as this person, through the remote MCP server. The same page as the
