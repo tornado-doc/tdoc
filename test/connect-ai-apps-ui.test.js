@@ -212,7 +212,7 @@ async function startServer(worker, env) {
         // An app with no button of its own lands on the server URL.
         await page.goto(`${base}/start?connect=codex`);
         await page.getByRole('dialog', { name: 'Connect in one click' }).waitFor();
-        assert(/Codex, Gemini CLI/.test(await page.locator('.tdoc-connect-dialog [data-app="other"]').innerText()), 'codex lands on the URL block');
+        assert(/^Codex or any other app/.test(await page.locator('.tdoc-connect-dialog [data-app="other"]').innerText()), 'codex lands on the URL block');
         await context.close();
       });
 
@@ -259,10 +259,9 @@ async function startServer(worker, env) {
           codex: 'codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc',
           cursor: 'https://cursor.com/en/install-mcp?', claude: 'https://claude.ai/customize/connectors?',
           chatgpt: 'https://tdoc.dev/mcp', grok: 'https://grok.com/connectors', vscode: 'https://vscode.dev/redirect/mcp/install?',
-          gemini: 'gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp',
           grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp',
         };
-        const inMore = ['chatgpt', 'grok', 'vscode', 'gemini', 'grokbot', 'claude', 'cursor', 'codex'];
+        const inMore = ['chatgpt', 'grok', 'vscode', 'grokbot', 'claude', 'cursor', 'codex'];
         for (const [app, needle] of Object.entries(expect)) {
           if (inMore.includes(app)) {
             await pick.locator('.pick-quick .pick-more').click();
@@ -285,7 +284,7 @@ async function startServer(worker, env) {
           const box = await pop.boundingBox();
           assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y >= 0 && box.y + box.height <= height + 1, `${app} popover on screen at ${label}: ${JSON.stringify(box)}`);
           if (app === 'claudecode') await shot(page, `${label}-home-pop-${app}`);
-          if (app === 'gemini') await page.keyboard.press('Escape');
+          if (app === 'grokbot') await page.keyboard.press('Escape');
           else await pop.locator('.pick-close').click();
           if (inMore.includes(app)) {
             assert(JSON.stringify(await openPops()) === '["pick-pop-more"]', `${app}: closing did not go back to More: ${await openPops()}`);

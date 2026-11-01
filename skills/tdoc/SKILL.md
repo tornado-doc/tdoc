@@ -64,8 +64,8 @@ preview, folders, Trash, widgets, preview cards and the local agent daemon
 have no MCP tool.
 
 To connect them: the server is `https://tdoc.dev/mcp` (OAuth sign-in). The
-one-line install for Claude, ChatGPT, Cursor, VS Code, Codex, Claude Code
-and Gemini CLI is under "Connect" in https://tdoc.dev/llms.txt.
+one-line install for Claude, ChatGPT, Cursor, VS Code, Codex and Claude
+Code is under "Connect" in https://tdoc.dev/llms.txt.
 
 ## Document routing
 
