@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# tdoc-feedback — add tdoc comments to your own website or app, in one step.
+#
+# `init` makes the site's feedback space (private: you and the people you
+# invite, or your team's members with --team, which needs a team admin), or
+# finds the one you already have for that origin, and prints the one-line
+# <script> to add to the site. Same server code as the MCP tool
+# create_feedback_space (POST /api/feedback/spaces). Uses the hosted Bearer
+# in ~/.tdoc/published.json.
+#
+# Usage:
+#   tdoc-feedback init --site https://app.example.com [--site ...]
+#                      [--team <id|handle|name>] [--title <title>]
+#                      [--write path/to/index.html] [--env]
+#     --write  put the <script> tag before </head> of that file (idempotent:
+#              an existing tdoc feedback tag is replaced, never duplicated)
+#     --env    print TDOC_FEEDBACK_SPACE=<slug> instead of the snippet
+#   tdoc-feedback --help
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; }
+
+CMD="${1:-}"
+case "$CMD" in
+  -h|--help|help) usage; exit 0 ;;
+  init) shift ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+SITES=(); TEAM=""; TITLE=""; WRITE=""; ENV_OUT=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --site|--origin) [ -n "${2:-}" ] || { echo "$1 needs an origin like https://app.example.com" >&2; exit 2; }; SITES+=("$2"); shift 2 ;;
+    --site=*) SITES+=("${1#--site=}"); shift ;;
+    --origin=*) SITES+=("${1#--origin=}"); shift ;;
+    --team) [ -n "${2:-}" ] || { echo "--team needs a team id, handle or name" >&2; exit 2; }; TEAM="$2"; shift 2 ;;
+    --team=*) TEAM="${1#--team=}"; shift ;;
+    --title) [ -n "${2:-}" ] || { echo "--title needs a title" >&2; exit 2; }; TITLE="$2"; shift 2 ;;
+    --title=*) TITLE="${1#--title=}"; shift ;;
+    --write) [ -n "${2:-}" ] || { echo "--write needs an HTML file" >&2; exit 2; }; WRITE="$2"; shift 2 ;;
+    --write=*) WRITE="${1#--write=}"; shift ;;
+    --env) ENV_OUT=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+[ "${#SITES[@]}" -gt 0 ] || { echo "name the site: --site https://app.example.com" >&2; exit 2; }
+if [ -n "$WRITE" ] && [ ! -f "$WRITE" ]; then
+  echo "[tdoc] --write: no such file: $WRITE" >&2; exit 2
+fi
+
+CONFIG_FILE="$HOME/.tdoc/published.json"
+TOKEN="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" upload_token || true)"
+BASE="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" base || true)"
+if [ -z "$TOKEN" ] || [ -z "$BASE" ]; then
+  echo "[tdoc] not signed in to hosted tdoc — run 'tdoc-publish --signin-only' first." >&2
+  exit 1
+fi
+BASE="${BASE%/}"
+
+BODY="$(node -e '
+  const [team, title, ...origins] = process.argv.slice(1);
+  process.stdout.write(JSON.stringify({ origins, ...(team ? { team } : {}), ...(title ? { title } : {}) }));
+' "$TEAM" "$TITLE" "${SITES[@]}")"
+
+resp="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "$BASE/api/feedback/spaces" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$BODY")" \
+  || { echo "[tdoc] no response from $BASE" >&2; exit 1; }
+
+# What the server says is shown, never interpreted: control characters
+# (terminal escapes) are dropped first.
+clean() { printf '%s' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\177' | head -c 2000; }
+
+if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
+  resp="$(clean "$resp")"
+  msg="$(printf '%s' "$resp" | json_get message)"
+  case "$(printf '%s' "$resp" | json_get error)" in
+    sign_in_required|unauthorized) echo "[tdoc] the saved token was refused — run 'tdoc-publish --signin-only' again." >&2 ;;
+    invalid_origin) echo "[tdoc] not a site origin: $(printf '%s' "$resp" | json_get origin) (use https://host[:port], no path)." >&2 ;;
+    too_many_origins) echo "[tdoc] at most $(printf '%s' "$resp" | json_get limit) sites per space." >&2 ;;
+    *) echo "[tdoc] ${msg:-could not set up feedback: $resp}" >&2 ;;
+  esac
+  exit 1
+fi
+
+SLUG="$(printf '%s' "$resp" | json_get slug)"
+# The tag goes into the person's own HTML, so it is built here from a slug
+# that can only be a slug, never copied from the response.
+printf '%s' "$SLUG" | grep -Eq '^[a-z0-9][a-z0-9-]{0,63}$' || { echo "[tdoc] the server returned no valid space id" >&2; exit 1; }
+SNIPPET="<script src=\"$BASE/feedback.js\" data-tdoc-space=\"$SLUG\" async></script>"
+printf '%s' "$resp" | node -e '
+  let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+    const b = JSON.parse(s);
+    const where = b.team ? `team ${b.team.name}` : "My docs";
+    const c = (v) => String(v == null ? "" : v).replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+    process.stderr.write(`[tdoc] ${b.created ? "created" : "found your"} feedback space in ${c(where)}: ${c(b.url)}\n`);
+    process.stderr.write(`[tdoc] sites: ${c((b.origins || []).join(" "))}\n[tdoc] ${c(b.who_can_comment)}\n`);
+  });'
+
+if [ -n "$WRITE" ]; then
+  node -e '
+    const fs = require("fs");
+    const [file, snippet] = process.argv.slice(1);
+    const src = fs.readFileSync(file, "utf8");
+    // Any tdoc feedback tag already there (this space or another) is the
+    // one replaced: running init twice leaves one tag.
+    const existing = /[ \t]*<script\b[^>]*\bdata-tdoc-space\b[^>]*>[^<]*<\/script>[ \t]*\r?\n?/gi;
+    let out;
+    let first = true;
+    if (existing.test(src)) {
+      // The first one becomes the tag for this space; any others go.
+      out = src.replace(existing, (m) => {
+        if (!first) return "";
+        first = false;
+        const indent = (m.match(/^[ \t]*/) || [""])[0];
+        return `${indent}${snippet}\n`;
+      });
+    } else if (/<\/head>/i.test(src)) {
+      out = src.replace(/([ \t]*)<\/head>/i, (m, indent) => `${indent}  ${snippet}\n${indent}</head>`);
+    } else {
+      process.stderr.write(`[tdoc] --write: ${file} has no </head>; add the line yourself:\n${snippet}\n`);
+      process.exit(3);
+    }
+    if (out !== src) fs.writeFileSync(file, out);
+    process.stderr.write(out === src ? `[tdoc] ${file} already has the tag\n` : `[tdoc] added the tag to ${file}\n`);
+  ' "$WRITE" "$SNIPPET" || exit 1
+fi
+
+if [ "$ENV_OUT" = 1 ]; then
+  echo "TDOC_FEEDBACK_SPACE=$SLUG"
+else
+  echo "$SNIPPET"
+fi
