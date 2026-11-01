@@ -79,27 +79,28 @@ function PendingComments({ comments, chosen, onToggle }) {
 //                           then that comment is handed off; the agent
 //                           replies under it as usual
 function EditForm({ send, modePicker }) {
-  const { slug, choices, preselected, readyIds, ready = [], createDocumentComment, onSent, prefill = '' } = send;
+  const { slug, choices, preselected, readyIds, ready = [], createDocumentComment, onSent, fixed = '', fixedBusy = false } = send;
   const [picked, setPicked] = useState(null);
-  const [instruction, setInstruction] = useState(prefill);
+  const [instruction, setInstruction] = useState('');
   const [posting, setPosting] = useState(false);
   const sending = useHandoffSend(slug, onSent);
   const input = useRef(null);
-  // The homepage demo's ready request (demo-agent.js DEMO_REWRITES): in the
-  // input, caret at its end, so the visitor only presses Send. It comes back
-  // after Undo.
-  useEffect(() => { if (prefill) setInstruction(prefill); }, [prefill]);
+  // The homepage demo's request (demo-agent.js DEMO_REWRITES) is fixed: shown
+  // read-only, so the visitor only presses Send (and can't send something
+  // the demo can't act out). Not focused then: no caret, no phone keyboard.
+  const value = fixed || instruction;
   useEffect(() => {
     const el = input.current;
-    if (!el) return;
+    if (!el || fixed) return;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (!input.current) return;
     input.current.style.height = 'auto';
     input.current.style.height = `${Math.min(input.current.scrollHeight, 160)}px`;
-  }, [instruction]);
+  }, [value]);
   // The doc's own agent, as the dialog preselects it; else the person picks.
   const recipient = (picked && choices.find((t) => sameTarget(t, picked)))
     || (preselected && choices.find((t) => sameTarget(t, preselected))) || null;
@@ -110,8 +111,8 @@ function EditForm({ send, modePicker }) {
   const [unchecked, setUnchecked] = useState([]);
   const chosen = readyIds.filter((id) => !unchecked.includes(id));
   const toggle = (id, on) => setUnchecked((ids) => (on ? ids.filter((x) => x !== id) : [...ids, id]));
-  const text = instruction.trim();
-  const busy = sending.busy || posting;
+  const text = value.trim();
+  const busy = sending.busy || posting || (Boolean(fixed) && fixedBusy);
   const canSend = (Boolean(text) || chosen.length > 0) && Boolean(recipient) && !busy;
   const submit = async (event) => {
     event?.preventDefault();
@@ -139,9 +140,10 @@ function EditForm({ send, modePicker }) {
   const label = sending.busy || posting ? 'Sending…' : sending.result && !sending.result.ok ? 'Retry' : recipient ? `Send to ${to}` : 'Send';
   return <>
     {readyIds.length ? <PendingComments comments={ready.length ? ready : readyIds.map((id) => ({ id }))} chosen={chosen} onToggle={toggle} /> : null}
-    <form className="tdoc-ask-form tdoc-ask-send-form" onSubmit={submit}>
+    <form className={`tdoc-ask-form tdoc-ask-send-form${fixed ? ' is-fixed' : ''}`} onSubmit={submit}>
       <textarea ref={input} aria-label="What should the agent change?" placeholder="What should the agent change?"
-        rows={2} maxLength={2000} value={instruction} onChange={(event) => setInstruction(event.target.value)} />
+        rows={2} maxLength={2000} value={value} readOnly={Boolean(fixed)}
+        onChange={(event) => { if (!fixed) setInstruction(event.target.value); }} />
       <div className="tdoc-ask-form-bottom">
         <div className="tdoc-ask-form-pills">
           {modePicker}
@@ -163,8 +165,9 @@ function EditForm({ send, modePicker }) {
 // After the homepage demo's scripted Edit has changed the doc: the landing's
 // own call to action (its "Create a free doc", to /start), here in Ask AI
 // because that is where the visitor is looking -- the popover on desktop,
-// the drawer on a phone. Undo puts the paragraph back and the request in
-// the input, so it can run again.
+// the drawer on a phone (closed while the paragraph changes, reopened for
+// this). Undo puts the paragraph back and Edit as it was, so it can run
+// again.
 export function DemoRewriteCta({ onUndo }) {
   return <div className="tdoc-ask-notice tdoc-ask-demo-cta" role="status">
     <p>That’s tdoc: ask, and your agent edits the doc in place. Try it on your own docs.</p>
@@ -172,6 +175,25 @@ export function DemoRewriteCta({ onUndo }) {
       <a className="ui-btn ui-btn-primary ui-btn-m" href="/start">Create a free doc</a>
       <AppButton variant="quiet" size="m" onClick={onUndo}>Undo</AppButton>
     </div>
+  </div>;
+}
+
+// The phone's stand-in for the drawer while the homepage demo's scripted
+// Edit plays: the drawer (70% of the screen) would cover the paragraph, so
+// it closes and this slim bar sits at the bottom instead -- "Editing…" while
+// the paragraph changes, then the same call to action as DemoRewriteCta.
+// The page brings the paragraph above it; it never covers it. Why not the
+// drawer: its smallest snap point covers most of the screen.
+export function DemoRewriteBar({ state, agent, onUndo }) {
+  const done = state === 'done';
+  return <div className={`tdoc-demo-rewrite-bar${done ? ' is-done' : ''}`} role="status" aria-live="polite">
+    {done ? <>
+      <span className="tdoc-demo-rewrite-bar-text">Edited by {agent}</span>
+      <span className="tdoc-ask-demo-cta-actions">
+        <a className="ui-btn ui-btn-primary ui-btn-m" href="/start">Create a free doc</a>
+        <AppButton variant="quiet" size="m" onClick={onUndo}>Undo</AppButton>
+      </span>
+    </> : <span className="tdoc-demo-rewrite-bar-text"><span className="tdoc-demo-rewrite-bar-dot" aria-hidden="true" />{agent} · Editing…</span>}
   </div>;
 }
 
@@ -209,7 +231,7 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   const modePicker = send ? <ModePicker mode={mode} onPick={pickMode} /> : null;
   return <div className="tdoc-ask-panel">
     <h2>Ask AI</h2>
-    {mode === 'edit' ? <EditForm send={send} modePicker={modePicker} /> : <>
+    {mode === 'edit' ? <EditForm key={send.resetKey || 0} send={send} modePicker={modePicker} /> : <>
     <form className="tdoc-ask-form" onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
       <textarea ref={input} aria-label="Ask about this document" placeholder={latest ? 'Ask a follow-up…' : 'Ask about this document…'}
         rows={2} value={draft} onChange={(event) => onDraft(event.target.value)}

@@ -1686,6 +1686,8 @@
   //   { type:'tdoc:demoRewrite', id, before, after, view:{ top, bottom } }
   //     (view: the band of this frame the visitor can see, in its viewport)
   //     → { type:'tdoc:demoRewriteDone', id, ok }
+  //   { type:'tdoc:demoRewriteShow', view } (bring the rewritten paragraph
+  //     into a new band: a phone's drawer has reopened over the page)
   //   { type:'tdoc:demoRewriteUndo' }
   var demoRewrite = null; // { el, html, timers }
   function demoRewriteCss() {
@@ -1721,6 +1723,20 @@
     demoRewrite = null;
     rereportPins();
   }
+  // Bring the paragraph into the band the visitor can see (under the shell's
+  // bar; on a phone the whole page while the drawer is closed, then the part
+  // above it once it reopens): centred, or its top near the band's when it
+  // is taller than the band.
+  function showDemoParagraph(el, view, reduce) {
+    var r = el.getBoundingClientRect();
+    var band = view || {};
+    var bandTop = Math.max(0, Number(band.top) || 0);
+    var bandBottom = Math.min(window.innerHeight, Number(band.bottom) || window.innerHeight);
+    if (bandBottom - bandTop < 60) { bandTop = 0; bandBottom = window.innerHeight; }
+    var slack = bandBottom - bandTop - r.height;
+    var y = (window.scrollY || 0) + r.top - bandTop - (slack > 16 ? slack / 2 : 8);
+    try { window.scrollTo({ top: Math.max(0, y), behavior: reduce ? 'auto' : 'smooth' }); } catch (x) { window.scrollTo(0, Math.max(0, y)); }
+  }
   function runDemoRewrite(d) {
     undoDemoRewrite();
     var el = findDemoParagraph(d.before);
@@ -1731,17 +1747,7 @@
     try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (x) {}
     var run = demoRewrite = { el: el, html: el.innerHTML, timers: [] };
     var later = function (ms, fn) { run.timers.push(setTimeout(fn, ms)); };
-    // Bring it into the band the visitor can see (under the shell's bar,
-    // above a phone's drawer): centred, or its top near the band's when it
-    // is taller than the band.
-    var r = el.getBoundingClientRect();
-    var band = d.view || {};
-    var bandTop = Math.max(0, Number(band.top) || 0);
-    var bandBottom = Math.min(window.innerHeight, Number(band.bottom) || window.innerHeight);
-    if (bandBottom - bandTop < 60) { bandTop = 0; bandBottom = window.innerHeight; }
-    var slack = bandBottom - bandTop - r.height;
-    var y = (window.scrollY || 0) + r.top - bandTop - (slack > 16 ? slack / 2 : 8);
-    try { window.scrollTo({ top: Math.max(0, y), behavior: reduce ? 'auto' : 'smooth' }); } catch (x) { window.scrollTo(0, Math.max(0, y)); }
+    showDemoParagraph(el, d.view, reduce);
     var del = document.createElement('del');
     del.className = 'tdoc-diff-del';
     del.textContent = normalizeNeedle(el.textContent);
@@ -1817,6 +1823,13 @@
       post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument() });
     }
     else if (d.type === 'tdoc:demoRewrite') runDemoRewrite(d);
+    else if (d.type === 'tdoc:demoRewriteShow') {
+      if (demoRewrite) {
+        var reduceShow = false;
+        try { reduceShow = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (x) {}
+        showDemoParagraph(demoRewrite.el, d.view, reduceShow);
+      }
+    }
     else if (d.type === 'tdoc:demoRewriteUndo') undoDemoRewrite();
     else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }

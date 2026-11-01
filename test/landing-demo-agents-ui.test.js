@@ -9,14 +9,17 @@
 //     the demo answer, and its Send to agent hands a ready comment to Claude
 //     (demo), which replies;
 //   - the scripted Edit (flag demoEditRewrite, demo-agent.js DEMO_REWRITES):
-//     Edit opens with a ready request; Send hands it to Claude (demo), the
-//     paragraph is rewritten in the doc (struck, typed, then marked as an
-//     insertion), the reply arrives in Agent activity, and Ask AI shows
-//     "Create a free doc" (to /start) and Undo; reduced motion swaps the
-//     text at once; flag off, Edit opens empty as before;
+//     Edit opens with a fixed request (read-only: the visitor can't change
+//     it); Send hands it to Claude (demo), the paragraph is rewritten in the
+//     doc (struck, typed, then marked as an insertion), the reply arrives in
+//     Agent activity, and Ask AI shows "Create a free doc" (to /start) and
+//     Undo, which puts Edit back as it was; on a phone (Chromium and WebKit,
+//     430 and 390) the drawer gives way to a slim "Editing…" bar that
+//     becomes the call to action, and the paragraph stays fully above it;
+//     reduced motion swaps the text at once; flag off, Edit opens empty;
 //   - no request reaches /api/comments, /api/notify or /api/docs/*, and
 //     nothing but GETs reaches /api at all.
-// Desktop 1280 and phone 390. Screenshots: TDOC_UI_SHOTS (default
+// Desktop 1280/1440 and phone 390/430. Screenshots: TDOC_UI_SHOTS (default
 // /tmp/landing-demo).
 // Run with: node test/landing-demo-agents-ui.test.js
 
@@ -27,7 +30,7 @@ const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { loadWorker, makeEnv } = require('./helpers/worker-harness');
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
-const { chromium, devices } = requirePlaywrightOrSkip('landing-demo-agents-ui.test.js');
+const { chromium, webkit, devices } = requirePlaywrightOrSkip('landing-demo-agents-ui.test.js');
 const SHOTS = process.env.TDOC_UI_SHOTS || '/tmp/landing-demo';
 const TOKEN = 'landing-upload-token';
 const SLUG = 'tornado-doc';
@@ -155,12 +158,14 @@ async function touchSelect(page, phrase) {
 
   const { server, base } = await startServer(worker, env);
   const browser = await chromium.launch({ headless: true });
+  let webkitBrowser = null;
+  const browsers = { chromium: () => browser, webkit: async () => (webkitBrowser ||= await webkit.launch({ headless: true })) };
   fs.mkdirSync(SHOTS, { recursive: true });
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.stack || error.message}`); } };
 
-  const open = async (name, opts, flags = null) => {
-    const context = await browser.newContext(opts);
+  const open = async (name, opts, flags = null, engine = 'chromium') => {
+    const context = await (await browsers[engine]()).newContext(opts);
     if (flags) await context.addInitScript((pinned) => { window.__TDOC_FLAGS__ = pinned; }, flags);
     const page = await context.newPage();
     const errors = [];
@@ -250,6 +255,18 @@ async function touchSelect(page, phrase) {
     await page.getByRole('menuitem', { name: /^Edit/ }).click();
     return panel.getByRole('textbox', { name: 'What should the agent change?' });
   };
+  // The scripted request is fixed: read-only, and typing, deleting or
+  // pasting leaves it as it is.
+  const fixedRequest = async (page, box, name) => {
+    if (await box.isEditable()) throw new Error(`${name}: the request is editable`);
+    if ((await box.getAttribute('readonly')) === null) throw new Error(`${name}: the request is not read-only`);
+    await box.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type(' and in French');
+    await box.evaluate((el) => el.blur());
+    if ((await box.inputValue()) !== script.prompt) throw new Error(`${name}: the request changed: ${await box.inputValue()}`);
+  };
   const noOverflow = async (page, name) => {
     const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     if (over > 0) throw new Error(`${name}: ${over}px of horizontal overflow`);
@@ -276,6 +293,7 @@ async function touchSelect(page, phrase) {
       await panel.waitFor();
       const box = await pickEdit(page, panel);
       if ((await box.inputValue()) !== script.prompt) throw new Error(`Edit input: ${JSON.stringify(await box.inputValue())}`);
+      await fixedRequest(page, box, 'desktop');
       const send = panel.getByRole('button', { name: 'Send to Claude (demo)', exact: true });
       if (await send.isDisabled()) throw new Error('Send is off with the prefilled request');
       await shot('desktop-1440-rewrite-before.png');
@@ -312,6 +330,9 @@ async function touchSelect(page, phrase) {
       for (let i = 0; i < 20 && back.step; i++) { await page.waitForTimeout(50); back = await paragraph(page); }
       if (back.text !== script.before.replace(/\s+/g, ' ') || back.step) throw new Error(`after Undo: ${JSON.stringify(back)}`);
       if ((await box.inputValue()) !== script.prompt) throw new Error('Undo did not put the request back');
+      await fixedRequest(page, box, 'desktop after Undo');
+      if (await send.isDisabled()) throw new Error('after Undo, Send is off');
+      if (await panel.getByText('Sent to Claude (demo) ✓').count()) throw new Error('after Undo, the old "Sent" line is still there');
       // The reply is under the request's comment, as any agent reply is.
       await activity.getByText(/^Make the paragraph under/).first().click();
       const card = page.locator('[data-comment-id]').filter({ hasText: 'Make the paragraph under' }).first();
@@ -339,18 +360,23 @@ async function touchSelect(page, phrase) {
       await context.close();
     });
 
-    await t('desktop: a different instruction gets the plain demo reply and leaves the doc alone; flag off, Edit opens empty', async () => {
-      const { context, page, noWrites } = await open('desktop-other', { viewport: { width: 1280, height: 800 } }, REWRITE_ON);
+    // A different instruction (plain demo reply, no rewrite) is covered by
+    // tornado-doc-landing.test.js against the backend: the visitor can no
+    // longer type one.
+    await t('desktop: the request can\'t be changed or emptied; flag off, Edit opens empty and editable', async () => {
+      const { context, page, noWrites } = await open('desktop-fixed', { viewport: { width: 1280, height: 800 } }, REWRITE_ON);
       await page.locator('#tdoc-send-agent-btn').click();
       const panel = page.locator('.tdoc-ask-panel');
       const box = await pickEdit(page, panel);
-      await box.fill('Translate the headline into French');
-      await panel.getByRole('button', { name: 'Send to Claude (demo)', exact: true }).click();
-      await panel.getByText('Sent to Claude (demo) ✓').waitFor({ timeout: 5000 });
-      await page.waitForTimeout(4200);
-      const p = await paragraph(page);
-      if (!p || p.step || p.text !== script.before.replace(/\s+/g, ' ')) throw new Error(`the doc changed: ${JSON.stringify(p)}`);
-      if (await panel.locator('.tdoc-ask-demo-cta').count()) throw new Error('CTA without the scripted edit');
+      await fixedRequest(page, box, 'desktop');
+      await box.click();
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+      await page.keyboard.press('Delete');
+      if ((await box.inputValue()) !== script.prompt) throw new Error('select-all + Delete emptied the request');
+      let filled = true;
+      try { await box.fill('Translate the headline into French', { timeout: 1500 }); } catch { filled = false; }
+      if (filled || (await box.inputValue()) !== script.prompt) throw new Error('fill() changed the request');
+      if (await panel.getByRole('button', { name: 'Send to Claude (demo)', exact: true }).isDisabled()) throw new Error('Send is off');
       noWrites();
       await context.close();
       const off = await open('desktop-flag-off', { viewport: { width: 1280, height: 800 } }, { demoEditRewrite: false });
@@ -358,20 +384,48 @@ async function touchSelect(page, phrase) {
       const offPanel = off.page.locator('.tdoc-ask-panel');
       const offBox = await pickEdit(off.page, offPanel);
       if (await offBox.inputValue()) throw new Error(`flag off, Edit prefilled: ${await offBox.inputValue()}`);
+      if (!(await offBox.isEditable())) throw new Error('flag off, Edit is read-only');
       await off.context.close();
     });
 
-    for (const width of [430, 390]) {
-      await t(`phone ${width}: the drawer's Edit is prefilled; the paragraph is rewritten above the drawer; the CTA shows in the drawer`, async () => {
+    // On a phone the drawer covers 70% of the screen: after Send it gives
+    // way to a slim bar ("Editing…"), the paragraph is rewritten fully above
+    // that bar, and the bar becomes "Create a free doc" + Undo.
+    const slimBar = (page) => page.locator('.tdoc-demo-rewrite-bar');
+    const aboveBar = async (page, name) => {
+      const p = await paragraph(page);
+      const frameBox = await page.locator('iframe').first().boundingBox();
+      const bar = await slimBar(page).boundingBox();
+      const top = await page.locator('.tdoc-bar').first().boundingBox();
+      const pTop = frameBox.y + p.top; const pBottom = frameBox.y + p.bottom;
+      if (!bar) throw new Error(`${name}: no slim bar`);
+      if (pTop < (top ? top.y + top.height : frameBox.y) - 1 || pBottom > bar.y + 1) throw new Error(`${name}: the paragraph (${pTop}-${pBottom}) is not between the top bar and the slim bar at ${bar.y}`);
+      return p;
+    };
+    const drawerClosed = async (page, name) => {
+      const layer = page.locator('#tdoc-comment-layer');
+      if (await layer.count() && await layer.isVisible()) {
+        const b = await layer.boundingBox();
+        if (b && b.y < page.viewportSize().height - 2) throw new Error(`${name}: the drawer is still open (top ${b.y})`);
+      }
+    };
+    const phoneEdit = async (page) => {
+      await page.locator('.tdoc-fab').click();
+      await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
+      const panel = page.locator('#tdoc-comment-layer .tdoc-ask-panel');
+      return { panel, box: await pickEdit(page, panel) };
+    };
+    for (const engine of ['chromium', 'webkit']) for (const width of [430, 390]) {
+      await t(`phone ${width} ${engine}: the request is fixed; after Send the drawer gives way to an "Editing…" bar, the paragraph is rewritten above it, the bar becomes the CTA; Undo brings the drawer back`, async () => {
         const PHONE = { ...devices['iPhone 13'], defaultBrowserType: undefined, viewport: { width, height: 844 } };
-        const { context, page, shot, noWrites } = await open(`phone-${width}`, PHONE, REWRITE_ON);
-        await page.locator('.tdoc-fab').click();
-        await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
-        const panel = page.locator('#tdoc-comment-layer .tdoc-ask-panel');
-        const box = await pickEdit(page, panel);
+        const { context, page, shot, noWrites } = await open(`phone-${width}-${engine}`, PHONE, REWRITE_ON, engine);
+        const steps = await recordSteps(page);
+        const { panel, box } = await phoneEdit(page);
         if ((await box.inputValue()) !== script.prompt) throw new Error(`Edit input: ${JSON.stringify(await box.inputValue())}`);
-        await shot(`phone-${width}-rewrite-before.png`);
+        if (await box.isEditable() || (await box.getAttribute('readonly')) === null) throw new Error('the request is editable');
+        await shot(`phone-${width}-${engine}-rewrite-before.png`);
         await panel.getByRole('button', { name: 'Send to Claude (demo)' }).first().click();
+        await slimBar(page).getByText(/Editing…/).waitFor({ timeout: 5000 });
         let mid = null;
         const deadline = Date.now() + 8000;
         while (Date.now() < deadline) {
@@ -379,21 +433,59 @@ async function touchSelect(page, phrase) {
           if (mid && mid.step === 'typing' && mid.ins && mid.ins.split(' ').length > 6) break;
           await page.waitForTimeout(80);
         }
-        await shot(`phone-${width}-rewrite-during.png`);
-        await ctaShown(page, panel, width, `phone ${width}`);
-        const end = await paragraph(page);
+        if (!mid || mid.step !== 'typing') throw new Error(`no typing step: ${JSON.stringify(mid)}`);
+        await drawerClosed(page, 'during');
+        if (!/Editing…/.test(await slimBar(page).innerText())) throw new Error('the bar is not "Editing…" during the rewrite');
+        await page.waitForTimeout(400); // the smooth scroll settles
+        await aboveBar(page, 'during');
+        await shot(`phone-${width}-${engine}-rewrite-during.png`);
+        const link = slimBar(page).getByRole('link', { name: 'Create a free doc' });
+        await link.waitFor({ timeout: 10000 });
+        if ((await link.getAttribute('href')) !== '/start') throw new Error(`CTA goes to ${await link.getAttribute('href')}`);
+        if (!/\bui-btn-primary\b/.test(await link.getAttribute('class'))) throw new Error('the CTA is not the primary button');
+        await page.waitForTimeout(500);
+        const end = await aboveBar(page, 'after');
         if (end.step !== 'done' || end.ins !== script.after) throw new Error(`end state: ${JSON.stringify(end)}`);
-        // Above the drawer: the frame's top part, which the drawer leaves showing.
-        const frameBox = await page.locator('iframe').first().boundingBox();
-        const drawerTop = (await page.locator('#tdoc-comment-layer').boundingBox()).y;
-        const top = frameBox.y + end.top; const bottom = frameBox.y + end.bottom;
-        if (top < frameBox.y - 1 || bottom > drawerTop + 1) throw new Error(`the paragraph is hidden by the drawer: ${top}-${bottom}, drawer at ${drawerTop}`);
+        if ((await steps()).join(' → ') !== 'striking → typing → folding → done') throw new Error(`steps: ${(await steps()).join(' → ')}`);
+        await drawerClosed(page, 'after');
+        const vp = page.viewportSize();
+        for (const el of [link, slimBar(page).getByRole('button', { name: 'Undo' })]) {
+          const b = await el.boundingBox();
+          if (!b || b.x < 0 || b.x + b.width > width || b.y + b.height > vp.height) throw new Error(`bar control off screen: ${JSON.stringify(b)}`);
+        }
         await noOverflow(page, `phone ${width}`);
-        await shot(`phone-${width}-rewrite-after-cta.png`);
+        await shot(`phone-${width}-${engine}-rewrite-after-cta.png`);
+        // Undo: the paragraph back, the drawer's Edit as before Send.
+        await slimBar(page).getByRole('button', { name: 'Undo' }).click();
+        await slimBar(page).waitFor({ state: 'detached' });
+        const again = page.locator('#tdoc-comment-layer .tdoc-ask-panel').getByRole('textbox', { name: 'What should the agent change?' });
+        await again.waitFor();
+        if ((await again.inputValue()) !== script.prompt) throw new Error('Undo did not bring the request back');
+        if (await page.locator('#tdoc-comment-layer .tdoc-ask-panel').getByRole('button', { name: 'Send to Claude (demo)' }).first().isDisabled()) throw new Error('after Undo, Send is off');
+        let back = await paragraph(page);
+        for (let i = 0; i < 20 && back.step; i++) { await page.waitForTimeout(50); back = await paragraph(page); }
+        if (back.text !== script.before.replace(/\s+/g, ' ') || back.step) throw new Error(`after Undo: ${JSON.stringify(back)}`);
         noWrites();
         await context.close();
       });
     }
+
+    await t('phone 390, reduced motion: the bar shows, the paragraph swaps at once above it, the CTA follows', async () => {
+      const PHONE = { ...devices['iPhone 13'], defaultBrowserType: undefined, viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' };
+      const { context, page, shot, noWrites } = await open('phone-390-reduced', PHONE, REWRITE_ON);
+      const steps = await recordSteps(page);
+      const { panel } = await phoneEdit(page);
+      await panel.getByRole('button', { name: 'Send to Claude (demo)' }).first().click();
+      await slimBar(page).waitFor({ timeout: 5000 });
+      await slimBar(page).getByRole('link', { name: 'Create a free doc' }).waitFor({ timeout: 10000 });
+      await page.waitForTimeout(200);
+      const end = await aboveBar(page, 'reduced');
+      if (end.step !== 'done' || end.ins !== script.after) throw new Error(`end state: ${JSON.stringify(end)}`);
+      if ((await steps()).join(',') !== 'done') throw new Error(`reduced motion animated: ${(await steps()).join(' → ')}`);
+      await shot('phone-390-rewrite-reduced.png');
+      noWrites();
+      await context.close();
+    });
 
     await t('desktop 1280: @agent → Claude (demo) pill; the comment runs the real handoff line to a reply', async () => {
       const { context, page, shot, noWrites } = await open('desktop', { viewport: { width: 1280, height: 800 } });
@@ -504,6 +596,7 @@ async function touchSelect(page, phrase) {
     });
   } finally {
     await browser.close();
+    if (webkitBrowser) await webkitBrowser.close();
     server.close();
     globalThis.fetch = realFetch;
   }

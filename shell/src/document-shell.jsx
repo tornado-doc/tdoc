@@ -70,7 +70,7 @@ import { CONNECT_AGENT_PROMPT, HandoffSendTransport, NotifyHandoffPanel, readabl
 import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAgentChoices, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
-import { AskAiPanel, DemoRewriteCta } from './document/ask-ai-panel.jsx';
+import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-panel.jsx';
 import { useCommentArea } from './document/comment-area.js';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
@@ -347,17 +347,23 @@ export function DocumentShell({ boot, config }) {
   // simulated agent (demo-agent.js) that writes only into the demo comments.
   const demoAgents = Boolean(config.demoComments);
   // The homepage's scripted Edit (demo-agent.js DEMO_REWRITES): the frame
-  // plays it (demoPlayRef, set once the bridge exists); the panel prefills
-  // its prompt while idle and shows the sign-up call to action once done.
+  // plays it (demoPlayRef, set once the bridge exists); the panel shows its
+  // prompt, fixed, and the sign-up call to action once done. On a phone the
+  // drawer gives way to a slim bar while it plays (demoBar).
   const [demoRewrite] = useState(() => (demoAgents && isFeatureOn('demoEditRewrite')
     ? DEMO_REWRITES[config.slug] || null : null));
   const [demoRewriteState, setDemoRewriteState] = useState('idle');
+  const [demoRewriteResets, setDemoRewriteResets] = useState(0);
+  const [demoBar, setDemoBar] = useState(false);
   const demoPlayRef = useRef(null);
   const demoBackend = useMemo(() => (demoAgents && comments.demoUpdate
     ? createDemoBackend({ update: comments.demoUpdate, rewrite: demoRewrite ? {
       ...demoRewrite,
       play: () => (demoPlayRef.current ? demoPlayRef.current() : Promise.resolve(false)),
-      onDone: (ok) => setDemoRewriteState(ok ? 'done' : 'idle'),
+      onDone: (ok) => {
+        setDemoRewriteState(ok ? 'done' : 'idle');
+        if (!ok) setDemoBar(false);
+      },
     } : null }) : null), [demoAgents, comments.demoUpdate, demoRewrite]);
   useEffect(() => () => demoBackend?.dispose(), [demoBackend]);
   // The three write endpoints the agent flows use, or the demo's stand-ins.
@@ -575,8 +581,25 @@ export function DocumentShell({ boot, config }) {
   // The scripted Edit's run in the frame (frame-probe.js tdoc:demoRewrite):
   // resolves once the paragraph is rewritten, false if it isn't on the page.
   // Agent activity opens so its row walks delivered → on it → replied as the
-  // doc changes. On a phone the paragraph is brought to the top, the part
-  // the drawer leaves showing.
+  // doc changes. On a phone the drawer would cover the paragraph: it closes
+  // and a slim bar ("Editing…", then the call to action) takes its place,
+  // and the paragraph is brought above that bar.
+  const demoBand = () => {
+    // The part of the frame the visitor can see: below the bar and, on a
+    // phone, above the slim bar; on a desktop, below the Ask AI popover (with
+    // room for the call to action it grows by), which would otherwise cover
+    // the paragraph's right end. The frame brings the paragraph into it.
+    const frame = bridge.frameRef.current?.getBoundingClientRect();
+    const bar = document.querySelector('.tdoc-bar')?.getBoundingClientRect();
+    const slim = narrow ? document.querySelector('.tdoc-demo-rewrite-bar')?.getBoundingClientRect() : null;
+    const drawer = narrow && !slim ? document.getElementById('tdoc-comment-layer')?.getBoundingClientRect() : null;
+    const below = slim && slim.top > 0 ? slim.top - 8 : drawer && drawer.top > 0 ? drawer.top : window.innerHeight;
+    const popover = narrow ? null : document.querySelector('.tdoc-ask-panel')?.getBoundingClientRect();
+    const above = Math.max(bar ? bar.bottom : 0, popover && popover.height ? popover.bottom + 130 : 0);
+    const top = frame ? Math.max(0, above - frame.top) : 0;
+    const bottom = frame ? Math.min(frame.height, below - frame.top) : 0;
+    return { top, bottom };
+  };
   demoPlayRef.current = demoRewrite ? () => new Promise((resolve) => {
     demoRewriteWait.current?.resolve(false);
     const id = `rewrite_${Date.now().toString(36)}`;
@@ -589,19 +612,23 @@ export function DocumentShell({ boot, config }) {
     demoRewriteWait.current = { id, resolve: finish };
     setDemoRewriteState('running');
     setAgentActivityOpen(true);
-    // The part of the frame the visitor can see: below the bar and, on a
-    // phone, above the drawer; on a desktop, below the Ask AI popover (with
-    // room for the call to action it grows by), which would otherwise cover
-    // the paragraph's right end. The frame brings the paragraph into it.
-    const frame = bridge.frameRef.current?.getBoundingClientRect();
-    const bar = document.querySelector('.tdoc-bar')?.getBoundingClientRect();
-    const drawer = narrow ? document.getElementById('tdoc-comment-layer')?.getBoundingClientRect() : null;
-    const popover = narrow ? null : document.querySelector('.tdoc-ask-panel')?.getBoundingClientRect();
-    const above = Math.max(bar ? bar.bottom : 0, popover && popover.height ? popover.bottom + 130 : 0);
-    const top = frame ? Math.max(0, above - frame.top) : 0;
-    const bottom = frame ? Math.min(frame.height, (drawer && drawer.top > 0 ? drawer.top : window.innerHeight) - frame.top) : 0;
-    bridge.send({ type: 'tdoc:demoRewrite', id, before: demoRewrite.before, after: demoRewrite.after, view: { top, bottom } });
+    const play = () => bridge.send({ type: 'tdoc:demoRewrite', id, before: demoRewrite.before, after: demoRewrite.after, view: demoBand() });
+    if (unifiedEntry) {
+      // The drawer slides away (.2s) and the slim bar is in place before
+      // the paragraph is measured against it.
+      setDrawerOpen(false);
+      setDemoBar(true);
+      setTimeout(play, 260);
+    } else play();
   }) : null;
+  // Done: the slim bar now holds the call to action (it may have changed
+  // height), so the paragraph is brought above it again.
+  useEffect(() => {
+    if (!demoBar || demoRewriteState !== 'done') return undefined;
+    const id = requestAnimationFrame(() => bridge.send({ type: 'tdoc:demoRewriteShow', view: demoBand() }));
+    return () => cancelAnimationFrame(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoBar, demoRewriteState]);
   // While the rewritten paragraph is on show, the phone drawer's backdrop
   // stops dimming the page above it.
   useEffect(() => {
@@ -610,9 +637,17 @@ export function DocumentShell({ boot, config }) {
     else document.body.dataset.tdocDemoRewrite = demoRewriteState;
     return undefined;
   }, [demoRewrite, demoRewriteState]);
+  // Undo: the paragraph back, and Edit as it was before Send (a fresh form;
+  // on a phone, the drawer's Ask AI tab again).
   const undoDemoRewrite = () => {
     bridge.send({ type: 'tdoc:demoRewriteUndo' });
     setDemoRewriteState('idle');
+    setDemoRewriteResets((n) => n + 1);
+    if (demoBar) {
+      setDemoBar(false);
+      setDrawerTab('ask');
+      setDrawerOpen(true);
+    }
   };
 
   const disableCommentSelection = useCallback(() => {
@@ -1708,8 +1743,11 @@ export function DocumentShell({ boot, config }) {
           return comment;
         },
         onSent: () => comments.refresh(),
-        // The homepage demo: Edit opens with the scripted request.
-        prefill: demoRewrite && demoRewriteState === 'idle' ? demoRewrite.prompt : '',
+        // The homepage demo: Edit holds the scripted request, fixed; Send
+        // is off while it plays and after, until Undo.
+        fixed: demoRewrite ? demoRewrite.prompt : '',
+        fixedBusy: demoRewriteState !== 'idle',
+        resetKey: demoRewriteResets,
       } : null}
       cta={demoRewrite && demoRewriteState === 'done' ? <DemoRewriteCta onUndo={undoDemoRewrite} /> : null}
       activityOpen={agentActivityOpen}
@@ -2042,6 +2080,7 @@ export function DocumentShell({ boot, config }) {
           onOpenComment={(id) => { setOpenCommentId(id); setDrawerTab('comments'); setDrawerOpen(true); }}
           onOpenCluster={() => { setOpenCommentId(null); setDrawerTab('comments'); setDrawerOpen(true); }}
         /> : null}
+        {demoBar && !drawerOpen ? <DemoRewriteBar state={demoRewriteState} agent={DEMO_AGENT.handle} onUndo={undoDemoRewrite} /> : null}
         <MobileCommentDrawer
           filter={commentFilterControl}
           open={drawerOpen && !comparing}
@@ -2065,7 +2104,7 @@ export function DocumentShell({ boot, config }) {
           canSendToAgent={canSendToAgent}
           agentSetupHref={notifyEnabled && notifyTargets.ready && notifyTargets.reason === 'no_agent_bound' ? '/me?view=settings#agents' : null}
           onOpenChange={(open) => { setDrawerOpen(open); if (open) setHandoffDetailsOpen(false); }}
-          hideFab={handoffDetailsOpen || editor.mode === 'read'}
+          hideFab={handoffDetailsOpen || editor.mode === 'read' || demoBar}
           askAi={unifiedEntry ? askAiPanel(drawerOpen && drawerTab === 'ask') : null}
           tab={drawerTab}
           onTab={setDrawerTab}
