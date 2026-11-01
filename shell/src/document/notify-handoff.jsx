@@ -552,7 +552,9 @@ export function useHandoffSend(slug, onSent = null) {
   const post = transport || postNotifyHandoff;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
-  const send = async ({ commentIds, recipient, instruction = '' }) => {
+  // `sentText`: the success line when "Sent N comments" would misread (Ask
+  // AI's Edit, where the person typed an instruction rather than picked comments).
+  const send = async ({ commentIds, recipient, instruction = '', sentText = '' }) => {
     const batch = (commentIds || []).filter(Boolean);
     if (busy || !batch.length || !recipient) return null;
     setBusy(true);
@@ -572,7 +574,7 @@ export function useHandoffSend(slug, onSent = null) {
         setResult({ ok: false, text: `Not delivered to ${to}${body.delivery?.error ? `: ${deliveryErrorText(body.delivery.error)}` : ''}.` });
       } else {
         const n = body.sent || batch.length;
-        setResult({ ok: true, text: `Sent ${n} comment${n === 1 ? '' : 's'} to ${to} ✓` });
+        setResult({ ok: true, text: sentText || `Sent ${n} comment${n === 1 ? '' : 's'} to ${to} ✓` });
       }
       if (onSent) await onSent(body);
       return body;

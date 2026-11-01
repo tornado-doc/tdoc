@@ -285,14 +285,25 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
         }
         const activity = page.locator(label === 'phone' ? '#tdoc-comment-layer' : '.tdoc-handoff-popover');
         await activity.waitFor();
-        await activity.getByRole('radiogroup', { name: 'Ask or send to agent' }).getByRole('radio', { name: 'Send to agent' }).click();
-        const readySummary = activity.locator('.tdoc-ask-ready-count');
-        if (!(await readySummary.innerText()).includes('1 comment ready')) throw new Error('the team member has no ready-to-send summary');
-        const pill = await activity.getByRole('button', { name: 'Who should get these?' }).innerText();
+        const pickMode = async (name) => {
+          await activity.getByRole('button', { name: /^Mode:/ }).click();
+          await page.locator('.tdoc-ask-mode-menu').getByRole('menuitem', { name: new RegExp(`^${name} —`) }).click();
+          await page.locator('.tdoc-ask-mode-menu').waitFor({ state: 'detached' });
+        };
+        await pickMode('Edit');
+        // Edit: the pending comment is an optional attachment, counted above
+        // the input (Choose lists it); the button names the agent.
+        await activity.locator('.tdoc-ask-send-summary').filter({ hasText: '1 comment included · Choose' }).waitFor();
+        await activity.locator('.tdoc-ask-send-summary').getByRole('button', { name: 'Choose' }).click();
+        const listed = await activity.locator('.tdoc-ask-send-list .tdoc-ask-send-item').allInnerTexts();
+        if (listed.length !== 1 || !listed[0].includes('Can you add last week for comparison?')) throw new Error(`the team member's pending list: ${JSON.stringify(listed)}`);
+        await activity.locator('.tdoc-ask-send-summary').getByRole('button', { name: 'Done' }).click();
+        await activity.locator('.tdoc-ask-send-form').getByRole('button', { name: /^Send to / }).waitFor();
+        const pill = await activity.getByRole('button', { name: 'Who should change it?' }).innerText();
         if (!pill.includes(agentName)) throw new Error(`Send mode recipient: ${pill}`);
         if (process.env.TDOC_UI_SHOTS) { await page.waitForTimeout(700); await page.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, `app-ask-send-mode-${width}.png`) }); }
         // Back to Ask: the per-comment selection lives in Agent activity.
-        await activity.getByRole('radiogroup', { name: 'Ask or send to agent' }).getByRole('radio', { name: 'Ask', exact: true }).click();
+        await pickMode('Ask');
         await activity.getByRole('button', { name: /Agent activity/ }).click();
         const ready = activity.locator('.tdoc-handoff-ready');
         if (!(await ready.innerText()).includes('Can you add last week for comparison?')) throw new Error('comment missing from Ready to send');
