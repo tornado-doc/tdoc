@@ -9359,16 +9359,22 @@ async function existingFeedbackSiteSpace(env, session, team, origins) {
 
 // Index a site space under each origin it serves, so the next call finds
 // it. The bookmarklet's key (feedbackSpaceFor) is pointed at it only when
-// it points at nothing yet, or at a doc that is gone: a person who already
+// it points at nothing yet, or at a doc that is gone (and never for a team
+// space): a person who already
 // comments on that origin through the bookmarklet, in their own space or
 // one they joined, is not moved out of it by an agent.
 async function indexFeedbackSiteSpace(env, session, team, slug, origins) {
   for (const o of origins) {
     await env.META.put(team ? feedbackTeamSpaceIndexKey(team.id, o) : feedbackSiteSpaceIndexKey(session, o), slug);
+    // A team space never becomes where the admin's own bookmarklet comments
+    // go: those stay personal unless the admin joins the team space.
+    if (team) continue;
     const key = feedbackSpaceIndexKey(session, o);
     const current = await env.META.get(key);
     if (current === slug) continue;
-    if (!current || !isValidSlug(current) || !(await loadDocMeta(env, current))) await env.META.put(key, slug);
+    // Gone means no record at all: a space in Trash keeps its pointer, so
+    // restoring it brings the bookmarklet back to it.
+    if (!current || !isValidSlug(current) || !(await loadDocRecord(env, current))) await env.META.put(key, slug);
   }
 }
 

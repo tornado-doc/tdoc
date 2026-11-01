@@ -218,6 +218,9 @@ function interleaveRead(env, key, during) {
     assert((await connectSpace(bob, d.slug, 'https://acme.example')).status === 200, 'a member comments');
     const out = await connectSpace(carl, d.slug, 'https://acme.example');
     assert(out.status === 403, `outsider ${out.status}`);
+    // The admin's own bookmarklet on that origin stays personal.
+    const bm = await call('/api/feedback/connect', { method: 'POST', cookie: julie.cookie, headers: home, body: { origin: 'https://acme.example' } });
+    assert(bm.status === 200 && bm.body.slug !== d.slug && !(await stored(bm.body.slug)).workspace_id, `bookmarklet went to the team space: ${bm.body.slug}`);
     // By id or handle too, and again: the same space.
     const byId = (await tool(julie.token, { origins: ['https://acme.example'], team: team.id })).structuredContent;
     assert(byId.created === false && byId.slug === d.slug, JSON.stringify(byId));
@@ -321,6 +324,17 @@ function interleaveRead(env, key, during) {
     assert((await tool(dana.token, { origins: ['https://bm.example'] })).structuredContent.slug === r.slug, 'found again');
   });
 
+  await t('a bookmarklet space in Trash keeps its pointer: restored, the bookmarklet finds it again', async () => {
+    const bm = (await call('/api/feedback/connect', { method: 'POST', cookie: dana.cookie, headers: home, body: { origin: 'https://trashed.example' } })).body.slug;
+    assert((await call(`/api/doc?slug=${bm}`, { method: 'DELETE', cookie: dana.cookie, headers: home })).status === 200, 'trash');
+    const site = (await tool(dana.token, { origins: ['https://trashed.example'] })).structuredContent;
+    assert(site.created && site.slug !== bm, 'a new site space');
+    const back = await call('/api/trash/restore', { method: 'POST', cookie: dana.cookie, headers: home, body: { slug: bm } });
+    assert(back.status === 200, `restore ${back.status} ${back.text}`);
+    const again = await call('/api/feedback/connect', { method: 'POST', cookie: dana.cookie, headers: home, body: { origin: 'https://trashed.example' } });
+    assert(again.body.slug === bm, `bookmarklet now at ${again.body.slug}`);
+  });
+
   await t('an origin added to an existing space is indexed: asking for it alone returns the same space', async () => {
     const a = (await tool(dana.token, { origins: ['https://one.example'] })).structuredContent;
     const ab = (await tool(dana.token, { origins: ['https://one.example', 'https://two.example'] })).structuredContent;
@@ -366,7 +380,9 @@ function interleaveRead(env, key, during) {
       const viaMcp = (await tool(julie.token, { origins: ['https://cli.example'] })).structuredContent;
       const out = await runBin(bin, ['init', '--site', 'https://cli.example'], jEnv);
       assert(out.status === 0, `init ${out.status}\n${out.stderr}`);
-      assert(out.stdout.trim() === viaMcp.snippet, `snippet ${JSON.stringify(out.stdout)} vs ${viaMcp.snippet}`);
+      // The CLI builds the tag itself, on the tdoc it is signed in to.
+      const cliSnippet = viaMcp.snippet.replace(ORIGIN, base);
+      assert(out.stdout.trim() === cliSnippet, `snippet ${JSON.stringify(out.stdout)} vs ${cliSnippet}`);
       assert(/found your feedback space in My docs/.test(out.stderr) && out.stderr.includes(viaMcp.url), out.stderr);
       const envOut = await runBin(bin, ['init', '--site', 'https://cli.example', '--env'], jEnv);
       assert(envOut.stdout.trim() === `TDOC_FEEDBACK_SPACE=${viaMcp.slug}`, envOut.stdout);
@@ -384,15 +400,17 @@ function interleaveRead(env, key, during) {
       }
       const html = fs.readFileSync(page, 'utf8');
       assert(html.split('data-tdoc-space=').length === 2, `tag count: ${html}`);
-      assert(html.indexOf(viaMcp.snippet) < html.indexOf('</head>') && html.indexOf(viaMcp.snippet) > html.indexOf('<title>'), html);
-      // A tag for another space is replaced, not added to.
-      fs.writeFileSync(page, html.replace(viaMcp.slug, 'old-space'));
+      assert(html.indexOf(cliSnippet) < html.indexOf('</head>') && html.indexOf(cliSnippet) > html.indexOf('<title>'), html);
+      // Tags for another space (two, one unquoted) are replaced by one.
+      fs.writeFileSync(page, html.replace(cliSnippet, `${cliSnippet.replace(viaMcp.slug, 'old-space')}\n    <script src="x/feedback.js" data-tdoc-space=older async></script>`));
       await runBin(bin, ['init', '--site', 'https://cli.example', '--write', page], jEnv);
       const html2 = fs.readFileSync(page, 'utf8');
-      assert(html2.split('data-tdoc-space=').length === 2 && html2.includes(viaMcp.snippet) && !html2.includes('old-space'), html2);
+      assert(html2.split('data-tdoc-space=').length === 2 && html2.includes(cliSnippet) && !html2.includes('old-space') && !html2.includes('older'), html2);
       // Refusals arrive as messages, exit 1, nothing on stdout.
       const notAdmin = await runBin(bin, ['init', '--site', 'https://bob-cli.example', '--team', team.id], as(bob));
       assert(notAdmin.status === 1 && !notAdmin.stdout.trim() && /Only an admin of Acme/.test(notAdmin.stderr), `${notAdmin.status} ${notAdmin.stderr}`);
+      const noTitle = await runBin(bin, ['init', '--site', 'https://x.example', '--title'], jEnv);
+      assert(noTitle.status === 2 && /--title needs/.test(noTitle.stderr), noTitle.stderr);
       const bad = await runBin(bin, ['init', '--site', 'https://x.example/path'], jEnv);
       assert(bad.status === 1 && /not a site origin/.test(bad.stderr), bad.stderr);
       const noSignin = await runBin(bin, ['init', '--site', 'https://x.example'], { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nohome-')) });

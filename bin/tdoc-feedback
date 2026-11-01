@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
     --origin=*) SITES+=("${1#--origin=}"); shift ;;
     --team) [ -n "${2:-}" ] || { echo "--team needs a team id, handle or name" >&2; exit 2; }; TEAM="$2"; shift 2 ;;
     --team=*) TEAM="${1#--team=}"; shift ;;
-    --title) TITLE="${2:-}"; shift 2 ;;
+    --title) [ -n "${2:-}" ] || { echo "--title needs a title" >&2; exit 2; }; TITLE="$2"; shift 2 ;;
     --title=*) TITLE="${1#--title=}"; shift ;;
     --write) [ -n "${2:-}" ] || { echo "--write needs an HTML file" >&2; exit 2; }; WRITE="$2"; shift 2 ;;
     --write=*) WRITE="${1#--write=}"; shift ;;
@@ -69,7 +69,12 @@ resp="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "$BASE/api/feedback/
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$BODY")" \
   || { echo "[tdoc] no response from $BASE" >&2; exit 1; }
 
+# What the server says is shown, never interpreted: control characters
+# (terminal escapes) are dropped first.
+clean() { printf '%s' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\177' | head -c 2000; }
+
 if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
+  resp="$(clean "$resp")"
   msg="$(printf '%s' "$resp" | json_get message)"
   case "$(printf '%s' "$resp" | json_get error)" in
     sign_in_required|unauthorized) echo "[tdoc] the saved token was refused — run 'tdoc-publish --signin-only' again." >&2 ;;
@@ -81,13 +86,17 @@ if [ "$(printf '%s' "$resp" | json_get ok)" != "true" ]; then
 fi
 
 SLUG="$(printf '%s' "$resp" | json_get slug)"
-SNIPPET="$(printf '%s' "$resp" | json_get snippet)"
+# The tag goes into the person's own HTML, so it is built here from a slug
+# that can only be a slug, never copied from the response.
+printf '%s' "$SLUG" | grep -Eq '^[a-z0-9][a-z0-9-]{0,63}$' || { echo "[tdoc] the server returned no valid space id" >&2; exit 1; }
+SNIPPET="<script src=\"$BASE/feedback.js\" data-tdoc-space=\"$SLUG\" async></script>"
 printf '%s' "$resp" | node -e '
   let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
     const b = JSON.parse(s);
     const where = b.team ? `team ${b.team.name}` : "My docs";
-    process.stderr.write(`[tdoc] ${b.created ? "created" : "found your"} feedback space in ${where}: ${b.url}\n`);
-    process.stderr.write(`[tdoc] sites: ${b.origins.join(" ")}\n[tdoc] ${b.who_can_comment}\n`);
+    const c = (v) => String(v == null ? "" : v).replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+    process.stderr.write(`[tdoc] ${b.created ? "created" : "found your"} feedback space in ${c(where)}: ${c(b.url)}\n`);
+    process.stderr.write(`[tdoc] sites: ${c((b.origins || []).join(" "))}\n[tdoc] ${c(b.who_can_comment)}\n`);
   });'
 
 if [ -n "$WRITE" ]; then
@@ -97,10 +106,17 @@ if [ -n "$WRITE" ]; then
     const src = fs.readFileSync(file, "utf8");
     // Any tdoc feedback tag already there (this space or another) is the
     // one replaced: running init twice leaves one tag.
-    const existing = /[ \t]*<script\b[^>]*\bdata-tdoc-space=["'"'"'][^"'"'"']*["'"'"'][^>]*>\s*<\/script>[ \t]*\r?\n?/i;
+    const existing = /[ \t]*<script\b[^>]*\bdata-tdoc-space\b[^>]*>[^<]*<\/script>[ \t]*\r?\n?/gi;
     let out;
+    let first = true;
     if (existing.test(src)) {
-      out = src.replace(existing, (m) => { const indent = (m.match(/^[ \t]*/) || [""])[0]; return `${indent}${snippet}\n`; });
+      // The first one becomes the tag for this space; any others go.
+      out = src.replace(existing, (m) => {
+        if (!first) return "";
+        first = false;
+        const indent = (m.match(/^[ \t]*/) || [""])[0];
+        return `${indent}${snippet}\n`;
+      });
     } else if (/<\/head>/i.test(src)) {
       out = src.replace(/([ \t]*)<\/head>/i, (m, indent) => `${indent}  ${snippet}\n${indent}</head>`);
     } else {
