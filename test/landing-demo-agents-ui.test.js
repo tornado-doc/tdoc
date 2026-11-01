@@ -214,6 +214,13 @@ async function touchSelect(page, phrase) {
       const card = page.locator('[data-comment-id]').filter({ hasText: 'Make the headline shorter' }).first();
       await card.waitFor({ timeout: 5000 });
       await page.waitForTimeout(300);
+      // The signed-out "You" has no picture: its face is the initial, on the
+      // card and on the margin pin, never a blank.
+      const face = (await card.locator('.author .tdoc-avatar-fallback').first().textContent().catch(() => '')).trim();
+      if (face !== 'Y') throw new Error(`the "You" card has no initial face: ${JSON.stringify(face)}`);
+      const pins = await page.locator('.tdoc-pin[data-id]').count();
+      const pinFaces = await page.locator('.tdoc-pin .tdoc-avatar-fallback').allTextContents();
+      if (!pins || !pinFaces.includes('Y')) throw new Error(`the "You" pin has no initial face: ${JSON.stringify(pinFaces)}`);
       await shot('desktop-handoff-delivered.png');
       await handoffRuns(page, card);
       await shot('desktop-handoff-replied.png');
