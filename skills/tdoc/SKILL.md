@@ -778,6 +778,27 @@ and no edit. That run is claude only, with a smaller
 allow-list (read the doc folder, `tdoc-pull` and `tdoc-agent-reply`; no Edit,
 no `tdoc-write` / `tdoc-publish`, which refuse under `TDOC_DAEMON_ASK`).
 
+### `tdoc-feedback` — add tdoc feedback to a project
+
+When the person says "add tdoc feedback to my project" (comments on their own
+web app or site), make the site's feedback space and add the embed line, in
+one step. MCP: `create_feedback_space`. CLI:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-feedback" init --site https://app.example.com --site http://localhost:3000 \
+  [--team <id|handle|name>] [--title <title>] [--write path/to/index.html] [--env]
+```
+
+Name every origin the app runs on (production, preview, local dev). It prints
+the `<script src=".../feedback.js" data-tdoc-space="<slug>" async></script>`
+line; `--write` puts it before `</head>` in the project's HTML entry (running
+it again leaves one tag); `--env` prints `TDOC_FEEDBACK_SPACE=<slug>` for an
+app that reads the id from its environment. The space is private: the person
+and the people they invite, or with `--team` (team admins only) the team's
+members. Asking again for an origin returns the same space. Comments left on
+the site come back through `tdoc-pull <slug>` like any doc. Same endpoint as
+the MCP tool: `POST /api/feedback/spaces`.
+
 ### `tdoc-site` — make the person's own website commentable
 
 When someone wants comments on their own web app or site (the feedback SDK),

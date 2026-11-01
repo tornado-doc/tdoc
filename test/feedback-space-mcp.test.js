@@ -1,4 +1,5 @@
-// create_feedback_space (remote MCP) and POST /api/feedback/space: an agent
+// create_feedback_space (remote MCP) and POST /api/feedback/spaces (browser
+// session or hosted token; same code, same result): an agent
 // makes a website's comment space and gets the embed line, with nobody
 // clicking through /feedback.
 //   - personal: private (owner + invitees), bound to the origins, one meta
@@ -19,6 +20,11 @@
 // Run with: node test/feedback-space-mcp.test.js
 
 const crypto = require('crypto');
+const fs = require('fs');
+const http = require('http');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
 const { loadWorker, makeEnv, req, issue, putSession, bootData } = require('./helpers/worker-harness');
 
 let pass = 0, fail = 0;
@@ -35,6 +41,16 @@ const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').
 // The first time `key` is read while armed, run `during` (the other
 // writer) before the reader gets the value it read: the reader holds a
 // record that is now stale, exactly as a KV read from another location can.
+function runBin(bin, args, env) {
+  return new Promise((resolve) => {
+    const child = spawn(bin, args, { env });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
 function interleaveRead(env, key, during) {
   const orig = env.META.get.bind(env.META);
   let fired = false;
@@ -234,23 +250,23 @@ function interleaveRead(env, key, during) {
     assert(none.isError && none.structuredContent.error === 'invalid_arguments', JSON.stringify(none.structuredContent));
     const many = await tool(julie.token, { origins: Array.from({ length: 11 }, (_, i) => `https://s${i}.example`) });
     assert(many.isError, 'eleven origins');
-    const direct = await call('/api/feedback/space', { method: 'POST', token: julie.token, body: { origins: Array.from({ length: 11 }, (_, i) => `https://s${i}.example`) } });
+    const direct = await call('/api/feedback/spaces', { method: 'POST', token: julie.token, body: { origins: Array.from({ length: 11 }, (_, i) => `https://s${i}.example`) } });
     assert(direct.status === 400 && direct.body.error === 'too_many_origins', `${direct.status} ${direct.text}`);
-    const notArray = await call('/api/feedback/space', { method: 'POST', token: julie.token, body: { origins: SITE } });
+    const notArray = await call('/api/feedback/spaces', { method: 'POST', token: julie.token, body: { origins: SITE } });
     assert(notArray.status === 400, `string origins ${notArray.status}`);
   });
 
   await t('a feedback token cannot make a space (route or /mcp)', async () => {
     const fb = await call('/api/feedback/connect', { method: 'POST', cookie: carl.cookie, headers: home, body: { origin: 'https://carl.example' } });
     assert(fb.status === 200 && /^fb_/.test(fb.body.token), `fb token ${fb.status}`);
-    const r = await call('/api/feedback/space', { method: 'POST', token: fb.body.token, body: { origins: ['https://carl2.example'] } });
+    const r = await call('/api/feedback/spaces', { method: 'POST', token: fb.body.token, body: { origins: ['https://carl2.example'] } });
     assert(r.status === 403 && r.body.error === 'feedback_token_scope', `${r.status} ${r.text}`);
     const m = await mcp(fb.body.token, 'tools/call', { name: 'create_feedback_space', arguments: { origins: ['https://carl2.example'] } });
     assert(m.status === 401, `/mcp with a feedback token ${m.status}`);
   });
 
   await t('a cookie session from another origin is refused (CSRF)', async () => {
-    const r = await call('/api/feedback/space', { method: 'POST', cookie: julie.cookie, headers: { Origin: 'https://evil.example' }, body: { origins: ['https://x.example'] } });
+    const r = await call('/api/feedback/spaces', { method: 'POST', cookie: julie.cookie, headers: { Origin: 'https://evil.example' }, body: { origins: ['https://x.example'] } });
     assert(r.status === 403 && r.body.error === 'forbidden', `${r.status} ${r.text}`);
   });
 
@@ -258,12 +274,133 @@ function interleaveRead(env, key, during) {
     const meOnly = (await call('/api/hosted/token/scoped', { method: 'POST', token: julie.token, body: { workspaces: ['me'], label: 'me-bot' } })).body.token;
     const teamOnly = (await call('/api/hosted/token/scoped', { method: 'POST', token: julie.token, body: { workspaces: [team.id], label: 'team-bot' } })).body.token;
     assert(meOnly && teamOnly, 'scoped tokens');
-    const a = await call('/api/feedback/space', { method: 'POST', token: meOnly, body: { origins: ['https://acme.example'], team: team.id } });
+    const a = await call('/api/feedback/spaces', { method: 'POST', token: meOnly, body: { origins: ['https://acme.example'], team: team.id } });
     assert(a.status === 403 && a.body.error === 'token_scope', `me-only into a team ${a.status} ${a.text}`);
-    const b = await call('/api/feedback/space', { method: 'POST', token: teamOnly, body: { origins: [SITE] } });
+    const b = await call('/api/feedback/spaces', { method: 'POST', token: teamOnly, body: { origins: [SITE] } });
     assert(b.status === 403 && b.body.error === 'token_scope', `team-only into My docs ${b.status} ${b.text}`);
-    const c = await call('/api/feedback/space', { method: 'POST', token: teamOnly, body: { origins: ['https://acme.example'], team: 'Acme' } });
+    const c = await call('/api/feedback/spaces', { method: 'POST', token: teamOnly, body: { origins: ['https://acme.example'], team: 'Acme' } });
     assert(c.status === 200 && c.body.slug === teamSpace, `team-only into its team ${c.status} ${c.text}`);
+  });
+
+  // ------------------------------------------------- HTTP endpoint
+  await t('HTTP: a same-origin browser session makes a space; the body is the MCP tool\'s result', async () => {
+    const http = await call('/api/feedback/spaces', { method: 'POST', cookie: dana.cookie, headers: home, body: { origins: ['https://dana-http.example'], title: 'Dana app' } });
+    assert(http.status === 201 && http.body.created === true, `${http.status} ${http.text}`);
+    assert(http.body.snippet.includes(`data-tdoc-space="${http.body.slug}"`) && http.body.access.visibility === 'private', JSON.stringify(http.body));
+    assert((await stored(http.body.slug)).title === 'Dana app', 'title');
+    // The same request through MCP returns the same object (now: the existing space).
+    const viaMcp = (await tool(dana.token, { origins: ['https://dana-http.example'] })).structuredContent;
+    const viaHttp = (await call('/api/feedback/spaces', { method: 'POST', cookie: dana.cookie, headers: home, body: { origins: ['https://dana-http.example'] } }));
+    assert(viaHttp.status === 200, `again ${viaHttp.status}`);
+    assert(JSON.stringify(viaMcp) === JSON.stringify(viaHttp.body), `MCP ${JSON.stringify(viaMcp)}\nHTTP ${JSON.stringify(viaHttp.body)}`);
+  });
+
+  await t('HTTP: a hosted Bearer token makes a space, and a team one for an admin', async () => {
+    const r = await call('/api/feedback/spaces', { method: 'POST', token: julie.token, body: { origins: ['https://bearer.example'] } });
+    assert(r.status === 201 && r.body.team === null && (await stored(r.body.slug)).hosted.account_id === julie.account_id, `${r.status} ${r.text}`);
+    const tm = await call('/api/feedback/spaces', { method: 'POST', token: julie.token, body: { origins: ['https://bearer-team.example'], team: team.id } });
+    assert(tm.status === 201 && tm.body.team.id === team.id && tm.body.access.team === true, `${tm.status} ${tm.text}`);
+    const notAdmin = await call('/api/feedback/spaces', { method: 'POST', token: bob.token, body: { origins: ['https://bob2.example'], team: team.id } });
+    assert(notAdmin.status === 403 && notAdmin.body.error === 'not_team_admin', `${notAdmin.status}`);
+    const anon = await call('/api/feedback/spaces', { method: 'POST', body: { origins: ['https://anon.example'] } });
+    assert(anon.status === 401, `anonymous ${anon.status}`);
+  });
+
+  await t('HTTP: a cookie POST with no Origin header is refused like a cross-origin one', async () => {
+    const r = await call('/api/feedback/spaces', { method: 'POST', cookie: julie.cookie, body: { origins: ['https://x.example'] } });
+    assert(r.status === 403 && r.body.error === 'forbidden', `${r.status} ${r.text}`);
+  });
+
+  await t("an existing bookmarklet space (own or joined) keeps the owner's bookmarklet; the site space is found again by its own key", async () => {
+    // Carl joined Julie's space for SITE earlier, and made his own site space after.
+    const bm = await call('/api/feedback/connect', { method: 'POST', cookie: dana.cookie, headers: home, body: { origin: 'https://bm.example' } });
+    const r = (await tool(dana.token, { origins: ['https://bm.example'] })).structuredContent;
+    assert(r.created && r.slug !== bm.body.slug, 'a new private site space');
+    const again = await call('/api/feedback/connect', { method: 'POST', cookie: dana.cookie, headers: home, body: { origin: 'https://bm.example' } });
+    assert(again.body.slug === bm.body.slug, `the bookmarklet was moved to ${again.body.slug}`);
+    assert((await tool(dana.token, { origins: ['https://bm.example'] })).structuredContent.slug === r.slug, 'found again');
+  });
+
+  await t('an origin added to an existing space is indexed: asking for it alone returns the same space', async () => {
+    const a = (await tool(dana.token, { origins: ['https://one.example'] })).structuredContent;
+    const ab = (await tool(dana.token, { origins: ['https://one.example', 'https://two.example'] })).structuredContent;
+    assert(ab.slug === a.slug, 'extended');
+    const b = (await tool(dana.token, { origins: ['https://two.example'] })).structuredContent;
+    assert(b.created === false && b.slug === a.slug, `a second space for two.example: ${b.slug}`);
+  });
+
+  await t('a team word that is one team\'s handle and another\'s name is refused as ambiguous', async () => {
+    const t2 = (await call('/api/teams', { method: 'POST', cookie: julie.cookie, headers: home, body: { name: team.handle || 'acme' } })).body.team;
+    assert(t2 && t2.id !== team.id, 'second team');
+    assert(team.handle, 'the team has a handle');
+    const r = await call('/api/feedback/spaces', { method: 'POST', token: julie.token, body: { origins: ['https://amb.example'], team: team.handle } });
+    assert(r.status === 409 && r.body.error === 'team_ambiguous', `${r.status} ${r.text}`);
+  });
+
+  // ------------------------------------------------------------- CLI
+  await t('CLI: tdoc-feedback init prints the snippet, --env the slug, --write adds the tag once; same space as MCP', async () => {
+    const server = http.createServer((q, s) => {
+      let b = '';
+      q.on('data', (d) => { b += d; }).on('end', async () => {
+        const u = new URL(q.url, ORIGIN);
+        const r = await worker.fetch(new Request(`${ORIGIN}${u.pathname}${u.search}`, {
+          method: q.method, headers: { authorization: q.headers.authorization || '', 'content-type': 'application/json' }, body: b || undefined,
+        }), env, {});
+        s.writeHead(r.status, { 'content-type': 'application/json' });
+        s.end(await r.text());
+      });
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-feedback-'));
+    const bin = path.join(__dirname, '..', 'bin', 'tdoc-feedback');
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const as = (who) => {
+      const dir = path.join(home, who.login);
+      fs.mkdirSync(path.join(dir, '.tdoc'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base, upload_token: who.token }));
+      return { ...process.env, HOME: dir };
+    };
+    try {
+      const jEnv = as(julie);
+      // Parity: the CLI and the MCP tool, same inputs, same space and snippet.
+      const viaMcp = (await tool(julie.token, { origins: ['https://cli.example'] })).structuredContent;
+      const out = await runBin(bin, ['init', '--site', 'https://cli.example'], jEnv);
+      assert(out.status === 0, `init ${out.status}\n${out.stderr}`);
+      assert(out.stdout.trim() === viaMcp.snippet, `snippet ${JSON.stringify(out.stdout)} vs ${viaMcp.snippet}`);
+      assert(/found your feedback space in My docs/.test(out.stderr) && out.stderr.includes(viaMcp.url), out.stderr);
+      const envOut = await runBin(bin, ['init', '--site', 'https://cli.example', '--env'], jEnv);
+      assert(envOut.stdout.trim() === `TDOC_FEEDBACK_SPACE=${viaMcp.slug}`, envOut.stdout);
+      // A new site through the CLI first, then MCP finds that one.
+      const fresh = await runBin(bin, ['init', '--site', 'https://cli-new.example/', '--team', team.id, '--env'], jEnv);
+      assert(fresh.status === 0 && /created feedback space in team Acme/.test(fresh.stderr), `${fresh.status} ${fresh.stderr}`);
+      const freshSlug = fresh.stdout.trim().split('=')[1];
+      assert((await tool(julie.token, { origins: ['https://cli-new.example'], team: team.id })).structuredContent.slug === freshSlug, 'MCP finds the CLI-made space');
+      // --write: before </head>, once.
+      const page = path.join(home, 'index.html');
+      fs.writeFileSync(page, '<!doctype html>\n<html>\n  <head>\n    <title>App</title>\n  </head>\n  <body></body>\n</html>\n');
+      for (let i = 0; i < 2; i++) {
+        const w = await runBin(bin, ['init', '--site', 'https://cli.example', '--write', page], jEnv);
+        assert(w.status === 0, `write ${w.status} ${w.stderr}`);
+      }
+      const html = fs.readFileSync(page, 'utf8');
+      assert(html.split('data-tdoc-space=').length === 2, `tag count: ${html}`);
+      assert(html.indexOf(viaMcp.snippet) < html.indexOf('</head>') && html.indexOf(viaMcp.snippet) > html.indexOf('<title>'), html);
+      // A tag for another space is replaced, not added to.
+      fs.writeFileSync(page, html.replace(viaMcp.slug, 'old-space'));
+      await runBin(bin, ['init', '--site', 'https://cli.example', '--write', page], jEnv);
+      const html2 = fs.readFileSync(page, 'utf8');
+      assert(html2.split('data-tdoc-space=').length === 2 && html2.includes(viaMcp.snippet) && !html2.includes('old-space'), html2);
+      // Refusals arrive as messages, exit 1, nothing on stdout.
+      const notAdmin = await runBin(bin, ['init', '--site', 'https://bob-cli.example', '--team', team.id], as(bob));
+      assert(notAdmin.status === 1 && !notAdmin.stdout.trim() && /Only an admin of Acme/.test(notAdmin.stderr), `${notAdmin.status} ${notAdmin.stderr}`);
+      const bad = await runBin(bin, ['init', '--site', 'https://x.example/path'], jEnv);
+      assert(bad.status === 1 && /not a site origin/.test(bad.stderr), bad.stderr);
+      const noSignin = await runBin(bin, ['init', '--site', 'https://x.example'], { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-nohome-')) });
+      assert(noSignin.status === 1 && /tdoc-publish --signin-only/.test(noSignin.stderr), noSignin.stderr);
+    } finally {
+      server.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   // ---------------------------------------------------------------- race

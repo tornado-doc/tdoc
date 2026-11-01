@@ -15,7 +15,10 @@ Or let your agent do it: with tdoc connected over MCP (`https://tdoc.dev/mcp`),
 the `create_feedback_space` tool takes your site's origins (and optionally a
 team you are an admin of), makes a private space bound to them, and returns
 the space id and the line below. Asked again for the same origin, it returns
-the same space.
+the same space. From a terminal with the tdoc skill:
+`tdoc-feedback init --site https://app.example.com --write index.html`
+(or `--env` for `TDOC_FEEDBACK_SPACE=<slug>`). Both call
+`POST https://tdoc.dev/api/feedback/spaces`.
 
 ## 2. Add it to your site
 

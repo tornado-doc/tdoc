@@ -73,6 +73,7 @@ const OFFLINE = [
   'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
   'feedback-space-mcp.test.js', // create_feedback_space: agent-made site space, team-admin rule, dedupe; site binding vs Share race
+  'cli-mcp-parity.test.js',     // AGENTS.md: every MCP tool maps to an HTTP route and a CLI command (or a stated exception)
 
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
   'local-agent.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
