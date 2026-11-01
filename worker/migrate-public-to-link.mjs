@@ -40,7 +40,7 @@ import { pathToFileURL } from 'node:url';
 
 // The site's own pages: served at / , /start, /templates, /pricing and linked
 // from /llms.txt. They are published Public on purpose.
-export const SITE_PUBLIC_SLUGS = ['tornado-doc', 'tdoc-start', 'tdoc-templates', 'tdoc-pricing', 'd-hctqbnme'];
+export const SITE_PUBLIC_SLUGS = ['tornado-doc', 'tdoc-start', 'tdoc-templates', 'tdoc-pricing', 'tdoc-privacy', 'd-hctqbnme'];
 
 const LINK_ACCESS_FOR_LEGACY = { visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'public', allowed_users: [] };
 

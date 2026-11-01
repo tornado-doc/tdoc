@@ -78,6 +78,22 @@ table    { border-collapse:separate; border-spacing:3px; width:100%; }
 th       { color:#737373; text-align:left; font:600 11px/1 ui-monospace,Menlo,monospace; letter-spacing:.04em; text-transform:uppercase; padding:8px 10px; }
 td       { background:#f5f5f5; color:#171717; padding:9px 10px; border-radius:4px; }
 .callout { border-left:3px solid #ff4b2e; background:#fff5f3; padding:12px 16px; margin:16px 0; }
+
+/* Reading column: the same rules server/reader.css bakes into a published doc,
+   so a page carrying only this CSS (unbaked, or written in another app) reads
+   like a published tdoc. :where() keeps them at zero specificity, so any rule
+   of your own wins. Keep values as-is; test/style-reader-column.test.js holds
+   them equal to reader.css. */
+:where(body) { overflow-wrap: anywhere; }
+:where(body > .wrap, body > main, body > article, body > .content, body > .container) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
+:where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) { max-width: 720px; margin-left: auto; margin-right: auto; padding: 56px 24px 80px; box-sizing: border-box; }
+:where(body img, body video, body iframe, body svg, body canvas) { max-width: 100% !important; height: auto; box-sizing: border-box; }
+:where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; max-width: 100%; overflow-wrap: normal; }
+:where(body th, body td) { padding: 10px 14px; border: 0; text-align: left; }
+:where(body th) { font-weight: 600; }
+.tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tdoc-table-scroll > table { max-width: none; }
+:where(body pre) { max-width: 100%; overflow-x: auto; }
 ```
 
 ## Diagrams — draw them light; they invert with the page

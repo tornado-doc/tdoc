@@ -297,7 +297,7 @@ t('comment card derives the mutate gate from the author login or doc owner', () 
   assert(decl.includes('isOwner'), 'mayMutate ignores the doc owner');
   assert(decl.includes('item.author?.login') && decl.includes('currentUser'),
     'mayMutate does not compare the author to the signed-in viewer');
-  assert(cardSrc.includes('const canMutate = mayMutate(comment, currentUser, isOwner);'),
+  assert(cardSrc.includes('const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);'),
     'the root comment no longer runs through mayMutate');
 });
 t('comment card renders delete for the author, and for the owner only on an agent record', () => {

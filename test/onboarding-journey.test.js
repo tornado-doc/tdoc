@@ -185,15 +185,13 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(server.includes("if (url.searchParams.get('version') === 'all') { try { markAgentReadLocal(slug); } catch {} }"), 'local twin marks the read');
 });
 
-t('a visitor with no session still sees a way to comment, and it is the sign-in', () => {
+t('a visitor with no session can enter Comment mode and signs in only when posting', () => {
   assert(/cfg\.signInToComment = !identity && !isLanding\s*&& accessFromMeta\(docMeta \|\| \{\}\)\.commenting !== 'off'/.test(worker),
     'the flag is on when the doc takes comments and this visitor has no session');
   assert(server.includes('signInToComment: false'), 'local preview is anonymous by design and may always comment');
   assert(toolbar.includes("(option.value === 'comment' && (canComment || signInToComment))"), 'the Comment option shows for the visitor');
-  assert(toolbar.includes("? 'Sign in to comment'"), 'and says what it will do');
-  assert(toolbar.includes('? onSignIn?.()'), 'and opens the sign-in rather than the mode');
-  // The mode switch is back in the bar (DocumentModeControl); Comment there signs in.
-  assert(shell.includes('signInToComment={Boolean(config.signInToComment)}') && shell.includes('onSignIn={() => signIn()}'), 'the shell wires it');
+  assert(!toolbar.includes("? 'Sign in to comment'") && toolbar.includes('onClick={() => onChange(option.value)}'), 'Comment mode opens without signing in');
+  assert(shell.includes('if (!config.canComment && !config.signInToComment) {') && shell.includes('setComposer(selection);'), 'selection opens the composer for a visitor');
 });
 
 t('bridge 1 is read off the server, and a paired account is never asked for a code', () => {

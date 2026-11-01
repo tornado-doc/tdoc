@@ -6,6 +6,7 @@ import { AgentMarks } from './agent-marks.jsx';
 import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
 import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
 import { TopBar } from './top-bar.jsx';
+import { ConnectAiAppsSection } from './connect-ai-apps.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -457,6 +458,13 @@ export function SetupGate({ boot, preview = null }) {
                 ) : null}
 
                 {step === 'doc' ? null : <WorksWith />}
+
+                {/* No terminal: the same account, connected from the AI app
+                    itself (remote MCP). The page moves on the same way when
+                    that connection is approved. */}
+                {step === 'doc' || state === 'done' ? null : (
+                  <ConnectAiAppsSection className="sg-connect-apps" title="No terminal? Connect in one click" blurb="Use tdoc from Claude, ChatGPT, Cursor or VS Code instead." />
+                )}
 
                 {step === 'doc' && !choice ? null : (
                 <ol className="sg-steps">

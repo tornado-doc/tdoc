@@ -152,7 +152,7 @@ export function HandoffDetailsPanel({
                     }}>
                       <input aria-label={`Reply to agent about ${shortCommentPreview(comment.text)}`} placeholder="Answer your agent…"
                         value={replyDrafts[comment.id] || ''} onChange={(event) => setReplyDrafts((drafts) => ({ ...drafts, [comment.id]: event.target.value }))} />
-                      <button type="submit" disabled={!String(replyDrafts[comment.id] || '').trim() || Boolean(replyBusy)}>{replyBusy === comment.id ? 'Sending…' : 'Reply'}</button>
+                      <button type="submit" className="ui-btn ui-btn-primary ui-btn-s" disabled={!String(replyDrafts[comment.id] || '').trim() || Boolean(replyBusy)}>{replyBusy === comment.id ? 'Sending…' : 'Reply'}</button>
                   </form> : null}
                 </div>
               </li>

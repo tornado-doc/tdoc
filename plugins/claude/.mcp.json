@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tdoc": {
+      "type": "http",
+      "url": "https://tdoc.dev/mcp"
+    }
+  }
+}

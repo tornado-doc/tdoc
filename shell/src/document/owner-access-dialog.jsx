@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AppSwitch } from '../ui/switch.jsx';
 import { deleteDocument, getTeam, getTeamGuests, updateDocumentAccess, updateTeam } from './api.js';
 import { isFeatureOn } from '../feature-flags.js';
 import { rememberTrashed } from '../recent-trash.js';
-import { VersionLinkChoice } from './document-dialogs.jsx';
+import { ShareLinkRow, VersionLinkChoice } from './document-dialogs.jsx';
 import { normalizeLogin, useGithubUserSearch } from './github-user-search.js';
 
 // Mirrors normalizeInvitee in the worker: a handle reading first (so "@Bob"
@@ -99,7 +100,7 @@ export function InviteField({ users, onChange }) {
               aria-label={`Remove ${login}`}
               onClick={() => onChange(users.filter((user) => user !== login))}
             >
-              ×
+              <X size={12} aria-hidden="true" />
             </button>
           </span>
         ))}
@@ -134,7 +135,10 @@ export function InviteField({ users, onChange }) {
   );
 }
 
-export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOpenChange, onCopied }) {
+// `onMove` adds where the doc lives and the move-to-team picker under it.
+// A feedback space passes it: its page has no ⋯ menu, which is where a doc
+// page keeps Move, so its Share dialog is where the space joins a team.
+export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOpenChange, onCopied, onMove = null }) {
   const manage = config.ownerManage || (config.teamManage?.canManage ? config.teamManage : null);
   const team = config.teamManage?.team || null;
   const [access, setAccess] = useState(manage?.access || {});
@@ -233,20 +237,9 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
       open={open}
       onOpenChange={onOpenChange}
       title="Share"
-      actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
+      actions={<AppButton onClick={() => onOpenChange(false)}>Close</AppButton>}
     >
-      <div
-        className="code url"
-        id="tdoc-share-url"
-        onClick={() => copyText(url).then(onCopied)}
-      >
-        {url}
-      </div>
-      <div className="actions" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
-        <button type="button" className="primary" onClick={() => copyText(url).then(onCopied)}>
-          Copy link
-        </button>
-      </div>
+      <ShareLinkRow url={url} id="tdoc-share-url" copyOnFieldClick onCopy={() => copyText(url).then(onCopied)} />
       <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
       {manage.versionCount != null ? (
         <p className="muted" style={{ margin: '8px 0 0' }}>
@@ -293,13 +286,23 @@ export function OwnerAccessDialog({ open, config, url, versionUrl, version, onOp
             {pendingInvite ? <div className="manage-section" role="group" aria-label="Invitation choice">
               <p>{pendingInvite.invitee} shares a team email domain. How should they join?</p>
               <div className="actions">
-                <button type="button" className="primary" onClick={inviteToTeam}>Invite to team (uses a seat)</button>
-                <button type="button" onClick={() => { const users = pendingInvite.allowedUsers; setPendingInvite(null); save({ allowed_users: users }); }}>Only this document (guest)</button>
+                <AppButton variant="primary" className="primary" onClick={inviteToTeam}>Invite to team (uses a seat)</AppButton>
+                <AppButton onClick={() => { const users = pendingInvite.allowedUsers; setPendingInvite(null); save({ allowed_users: users }); }}>Only this document (guest)</AppButton>
               </div>
             </div> : null}
           </>
         ) : null}
       </section>
+
+      {onMove ? (
+        <section className="manage-section" id="tdoc-share-workspace">
+          <label className="field">Workspace</label>
+          <p className="tdoc-share-version">
+            {team ? `In ${team.name}: its admins manage it.` : 'In My docs: only you manage it.'}{' '}
+            <button type="button" className="tdoc-quiet-link" onClick={onMove}>{team ? 'Move…' : 'Move to a team…'}</button>
+          </p>
+        </section>
+      ) : null}
 
       <details className="tdoc-adv">
         <summary>Advanced</summary>
@@ -358,10 +361,10 @@ export function DeleteDocumentDialog({ open, config, onOpenChange }) {
       description={`${config.slug}, its ${versions} and ${comments} move to ${where} for 30 days, then they are deleted for good.`}
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" className="danger" onClick={remove}>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="danger" className="danger" onClick={remove}>
             <Trash2 size={14} /> Delete
-          </button>
+          </AppButton>
         </>
       )}
     >

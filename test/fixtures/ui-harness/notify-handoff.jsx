@@ -82,6 +82,8 @@ function ActivityDemo() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [askDraft, setAskDraft] = useState('');
   const [log, setLog] = useState('');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState('comments');
   const phone = window.innerWidth < 700;
   if (phone) document.body.classList.add('tdoc-narrow');
   const activityCards = CARDS.filter((c) => (params.has('failed') || c.id !== 'failed') && (!params.has('noready') || !['human-followup', 'new-comment'].includes(c.id)))
@@ -101,8 +103,7 @@ function ActivityDemo() {
       <DocumentSendAgentAction counts={counts} unread={unread} open={open} onOpenChange={setOpen}>
         <AskAiPanel open={open} draft={askDraft} onDraft={setAskDraft} targetKey="tdoc-ai" onTarget={() => {}}
           targets={[{ key: 'tdoc-ai', label: 'tdoc AI', tdocAi: true }]} turns={[]} busy={false} remaining={5}
-          onAsk={() => {}} onKeep={() => {}} onPost={() => {}} readyCount={counts.ready}
-          onSendReady={() => setLog(`send-ready:${buckets.ready.map((item) => item.id).join(',')}`)}
+          onAsk={() => {}} onKeep={() => {}} onPost={() => {}}
           activityOpen={activityOpen} onActivityOpen={setActivityOpen} unreadCount={visibleUnread}>
         <HandoffDetailsPanel slug="doc" open={open} comments={activityCards} seenMap={seenMap} handoffViewer="julie" onClose={() => setOpen(false)}
           onJump={(id) => setLog(`jump:${id}`)} onSendReady={(selected) => { setLog(`send-ready:${selected.join(',')}`); setOpen(false); }}
@@ -119,8 +120,9 @@ function ActivityDemo() {
       <p>The third section compares three options. The final recommendation is a seat based plan.</p>
     </main>
     {!phone ? <div style={{ position: 'absolute', left: '72%', top: 145 }}><PinDemo seenMap={seenMap} /></div>
-      : <MobileCommentDrawer open={false} onOpenChange={() => {}} comments={activityCards} openCount={activityCards.length}
-          unread={visibleUnread > 0} pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => {}} />}
+      : <MobileCommentDrawer open={drawerOpen} onOpenChange={setDrawerOpen} comments={activityCards} openCount={activityCards.length}
+          unread={visibleUnread > 0} pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => {}}
+          askAi={params.has('unified') ? <div>Ask AI panel</div> : null} tab={drawerTab} onTab={setDrawerTab} />}
     <output id="activity-log">{log}</output>
   </>;
 }
@@ -172,8 +174,22 @@ function MobileFabDemo() {
   </>;
 }
 
+// Mounted closed, then opened: the document page keeps the panel mounted
+// and flips `open`, so the first open render must not read as unavailable.
+function OpenLaterDemo() {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <button type="button" id="open-send" onClick={() => setOpen(true)}>Open</button>
+      <NotifyHandoffPanel slug="doc" open={open} commentIds={ids} avoid={avoid} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
 createRoot(document.getElementById('root')).render(
-  params.get('view') === 'status'
+  params.get('view') === 'open-later'
+    ? <OpenLaterDemo />
+    : params.get('view') === 'status'
     ? <StatusCards />
     : params.get('view') === 'activity'
       ? <ActivityDemo />

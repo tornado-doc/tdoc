@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { AppDialog } from './ui/dialog.jsx';
+import { AppButton } from './ui/button.jsx';
 import { pollDeviceSignIn, startDeviceSignIn } from './document/api.js';
 import { copyText } from './document/model.js';
 
@@ -81,7 +82,7 @@ export function SignInDialog({ open, onOpenChange, onSuccess, preview = null }) 
       open={open}
       onOpenChange={onOpenChange}
       title="Sign in with GitHub"
-      actions={<button type="button" onClick={() => onOpenChange(false)}>Cancel</button>}
+      actions={<AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>}
     >
       <div className="tds-step"><span className="tds-n">1</span><span>Copy this code:</span></div>
       <div className="tds-codewrap">

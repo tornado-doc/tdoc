@@ -15,6 +15,7 @@ import { DocumentShell } from './document-shell.jsx';
 import { NeutralLanding } from './neutral-landing.jsx';
 import { StatusPage } from './status-page.jsx';
 import { ActivatePage } from './activate-page.jsx';
+import { OAuthConsentPage } from './oauth-consent-page.jsx';
 import { SetupGate } from './setup-gate.jsx';
 import { TeamJoinPage } from './team-join.jsx';
 
@@ -51,6 +52,7 @@ if (appRoot && appBoot) {
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;
   else if (appBoot.page === 'status') page = <StatusPage boot={appBoot} />;
   else if (appBoot.page === 'activate') page = <ActivatePage boot={appBoot} />;
+  else if (appBoot.page === 'oauth-consent') page = <OAuthConsentPage boot={appBoot} />;
   else if (appBoot.page === 'setup') page = <SetupGate boot={appBoot} />;
   else if (appBoot.page === 'team-join') page = <TeamJoinPage boot={appBoot} />;
   else page = <NeutralLanding boot={appBoot} />;
@@ -63,7 +65,12 @@ if (appRoot && appBoot) {
     throw new Error('tdoc boot payload is missing');
   }
   // The app shows the document now; the text copy for agents would only be
-  // read twice by a screen reader.
-  document.getElementById('tdoc-agent-view')?.remove();
+  // read twice by a screen reader. Site pages keep it: the page lives in a
+  // frame, and a search engine that runs scripts credits the frame's text to
+  // the frame's own URL, not to tdoc.dev/ or /pricing. It is hidden from
+  // assistive tech instead, so nobody hears the page twice.
+  const agentView = document.getElementById('tdoc-agent-view');
+  if (config.isLanding) agentView?.setAttribute('aria-hidden', 'true');
+  else agentView?.remove();
   createRoot(root).render(<DocumentShell boot={boot} config={config} />);
 }

@@ -163,12 +163,11 @@
   .tdoc-connector-title { display: grid; gap: 2px; }
   .tdoc-connector-badge { justify-self: start; margin: 2px 0; padding: 1px 7px; border-radius: 999px; background: var(--td-accent-tint, #e8eeff); color: var(--td-accent, #1652f0); font-size: 11px; font-weight: 600; }
   .tdoc-connector-head .muted { font-size: 12.5px; }
-  .tdoc-connector code { display: block; padding: 8px; border-radius: 6px; background: var(--td-surface, #f7f7f5); font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
+  .tdoc-connector code:not(.tdoc-inline-code) { display: block; padding: 8px; border-radius: 6px; background: var(--td-surface, #f7f7f5); font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
   .tdoc-connector .primary { justify-self: start; }
   /* Agents surfaces share one look: 12px cards, 6px buttons. */
   .tdoc-connector { border-radius: 12px !important; padding: 16px !important; gap: 12px !important; }
-  .tdoc-raft-btn { justify-self: start; display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 10px; border-radius: 6px; background: #141111; color: #fff !important; font: 600 13px/1 -apple-system, system-ui, sans-serif; text-decoration: none; }
-  .tdoc-raft-btn:hover { background: #2a2626; }
+  .tdoc-raft-btn { justify-self: start; }
   .tdoc-connector .tdoc-connector-action { justify-self: start; display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 6px; background: var(--td-accent, #1652f0); color: #fff; font: 600 13px/1.2 system-ui, sans-serif; text-decoration: none; }
   .tdoc-connector details summary { cursor: pointer; }
   .tdoc-connector details[open] { display: grid; gap: 8px; }
@@ -322,6 +321,14 @@
   .tdoc-cc-icon:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 1px; }
   .tdoc-margin-comment .author { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .tdoc-margin-comment .author img { width: 24px; height: 24px; border-radius: 50%; }
+  /* No picture: the first letter on the accent, as the top bar draws it
+     (docs-hub.css .tdoc-avatar-fallback, which the feedback overlay does not
+     load). Sized like the face it stands in for. */
+  .tdoc-margin-comment .author .tdoc-avatar-fallback,
+  .tdoc-reply .author .tdoc-avatar-fallback,
+  .tdoc-pin .tdoc-avatar-fallback { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: var(--td-accent); color: #fff; font: 700 12px/1 system-ui, sans-serif; }
+  .tdoc-reply .author .tdoc-avatar-fallback { width: 18px; height: 18px; font-size: 10px; }
+  .tdoc-pin .tdoc-avatar-fallback { width: 100%; height: 100%; }
   .tdoc-author-profile { display: inline-flex; flex-shrink: 0; border-radius: 50%; }
   .tdoc-author-profile:hover { box-shadow: 0 0 0 2px var(--td-accent); }
   .tdoc-author-profile:focus-visible { outline: 2px solid var(--td-accent); outline-offset: 2px; }
@@ -460,16 +467,13 @@
      still waiting for an answer. */
   .tdoc-pin.tdoc-pin-deleted { border-style: dashed; border-color: #c9ccd1; opacity: 0.55; }
   .tdoc-pin.tdoc-pin-deleted img,
-  .tdoc-pin.tdoc-pin-deleted .tdoc-pin-anon { display: none; }
+  .tdoc-pin.tdoc-pin-deleted .tdoc-pin-anon,
+  .tdoc-pin.tdoc-pin-deleted .tdoc-avatar-fallback { display: none; }
   .tdoc-pin.tdoc-pin-deleted::before { content: ""; width: 10px; height: 2px; border-radius: 1px; background: #8a93a2; }
   .tdoc-pin.tdoc-pin-deleted:hover { opacity: 1; }
   /* Cluster badge — N comments at the same Y collapsed into one marker. */
   .tdoc-pin.tdoc-pin-cluster { background: var(--td-accent); border-color: var(--td-accent); color: #fff; font: 600 12px system-ui; }
-  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster { width: 42px; background: transparent; border: 0; box-shadow: none; }
-  .tdoc-document-pin-faces { display: flex; align-items: center; padding-left: 2px; }
-  .tdoc-document-pin-faces img, .tdoc-document-pin-faces .tdoc-pin-anon { position: relative; flex: 0 0 21px; width: 21px; height: 21px; margin-left: -5px; border: 2px solid #fff; border-radius: 50%; box-sizing: border-box; box-shadow: 0 1px 3px rgba(0,0,0,.16); }
   .tdoc-pin.tdoc-pin-cluster.tdoc-cluster-allresolved { background: #1a7340; border-color: #1a7340; }
-  .tdoc-pin.tdoc-pin-document.tdoc-pin-cluster.tdoc-cluster-allresolved { background: transparent; border: 0; }
   .tdoc-pin.tdoc-pin-cluster::after { content: none; }
 
   /* Floating card: when open via a pin, it sits to the left of the gutter and
@@ -570,8 +574,7 @@
   .tdoc-handoff-toggle { flex: 1 1 auto; display: inline-flex; align-items: center; gap: 4px; min-width: 0; appearance: none; border: 0; padding: 0; background: none; font: 600 12px system-ui, -apple-system, sans-serif; color: #111; cursor: pointer; text-align: left; }
   .tdoc-handoff-toggle .chev { flex: 0 0 auto; color: #888; transition: transform .12s; }
   .tdoc-handoff.open .tdoc-handoff-toggle .chev { transform: rotate(90deg); }
-  .tdoc-handoff-copy { flex: 0 0 auto; appearance: none; border: 1px solid #d0d0d6; border-radius: 6px; padding: 3px 9px; background: #fff; font: 600 12px system-ui, -apple-system, sans-serif; color: #111; cursor: pointer; }
-  .tdoc-handoff-copy.done { border-color: #1a7340; background: #1a7340; color: #fff; }
+  .tdoc-handoff-copy { flex: 0 0 auto; }
   /* The prompt is its own box, white on the block's grey, with Copy on it —
      what the button copies is exactly what the box holds. */
   .tdoc-handoff-line { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 0; padding: 8px 10px; border: 1px solid #d0d0d6; border-radius: 6px; background: #fff; }
@@ -607,20 +610,12 @@
   .tdoc-reply-form-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
   .tdoc-reply-form-foot .hint { color: #888; font-size: 11px; min-width: 0; }
   .tdoc-reply-form-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-  .tdoc-reply-form-foot .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
-  .tdoc-reply-form-foot .tdoc-reply-submit:hover { background: var(--td-accent-hover); }
-  .tdoc-reply-form-foot .tdoc-reply-submit.agent { background: #f4f4f5; color: #202124; border: 1px solid #d0d0d6; }
-  .tdoc-reply-form-foot .tdoc-reply-submit.agent:hover { background: #eaeaec; }
 
   /* Editing a comment in place: the reply form's textarea, with Cancel/Save
      where the composer has its hint and submit. */
   .tdoc-edit-form { display: none; margin: 2px 0 0; }
   .tdoc-edit-form.open { display: block; }
   .tdoc-edit-form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 6px; }
-  .tdoc-edit-form-foot .tdoc-edit-cancel { background: none; border: none; color: #888; font: 12px system-ui; cursor: pointer; padding: 5px 4px; }
-  .tdoc-edit-form-foot .tdoc-edit-cancel:hover { color: #111; text-decoration: underline; }
-  .tdoc-edit-form-foot .tdoc-edit-save { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
-  .tdoc-edit-form-foot .tdoc-edit-save:hover { background: var(--td-accent-hover); }
 
   /* Anchor highlights (Custom Highlight API + fallback span) */
   ::highlight(tdoc-pending) { background-color: #fff3a8; }
@@ -699,11 +694,13 @@
   .tdoc-popup .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
   .tdoc-popup .tdoc-composer-foot-actions { display: flex; align-items: center; gap: 8px; }
   .tdoc-popup .hint { color: #888; font-size: 11px; }
-  .tdoc-popup .submit { background: var(--td-accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 500; }
-  .tdoc-popup .submit:hover { background: var(--td-accent-hover); }
-  /* Secondary action on the dark composer — same shape as Comment, quieter fill. */
-  .tdoc-popup .submit.agent { background: #2c2c2c; color: #f0f0f0; border: 1px solid #4a4a4a; }
-  .tdoc-popup .submit.agent:hover { background: #3a3a3a; }
+  @media (max-width: 700px) {
+    .tdoc-popup .tdoc-keyboard-shortcut-hint,
+    .tdoc-reply-form-foot .tdoc-keyboard-shortcut-hint { display: none; }
+  }
+  /* The composer popover is dark: secondary AppButtons take its colours, not a new size. */
+  .tdoc-popup .ui-btn.ui-btn-secondary { background: #2c2c2c; color: #f0f0f0; border-color: #4a4a4a; }
+  .tdoc-popup .ui-btn.ui-btn-secondary:hover:not(:disabled) { background: #3a3a3a; }
   .tdoc-popup .signin-needed { color: #f5a623; font-size: 12px; padding: 8px 0; }
 
   /* @mention picker + chips. The field wrapper is the positioning context for
@@ -714,8 +711,8 @@
   /* Positioned in viewport coordinates by MentionField and portalled to the
      body, so a scrolling comment card cannot clip it (#363). */
   .tdoc-mention-menu { position: fixed; z-index: 1000002; max-height: 184px; overflow-y: auto; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); padding: 4px; }
-  .tdoc-mention-option { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; appearance: none; border: 0; background: none; padding: 6px 8px; border-radius: 6px; cursor: pointer; font: 13px system-ui, sans-serif; color: var(--td-ink); text-align: left; }
-  .tdoc-mention-option.active { background: var(--td-accent-tint); }
+  .tdoc-mention-option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; box-sizing: border-box; appearance: none; border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font: 13px system-ui, sans-serif; color: var(--td-ink); text-align: left; }
+  .tdoc-mention-option.active { background: #f0f1f4; }
   .tdoc-mention-option img { width: 18px; height: 18px; border-radius: 50%; flex: none; }
   .tdoc-mention-anon { width: 18px; height: 18px; border-radius: 50%; background: var(--td-surface); flex: none; }
   .tdoc-mention-login { font-weight: 600; }
@@ -796,7 +793,7 @@
   .tdoc-token.invalid { background: #fdeceb; border-color: #f1b8b2; color: var(--td-danger); }
   .tdoc-token img, .tdoc-token .mark { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; background: #ddd; flex: none; }
   .tdoc-token .mark { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; background: #f1b8b2; color: #fff; }
-  .tdoc-token .rm { cursor: pointer; color: #999; font-size: 15px; padding: 0 3px; }
+  .tdoc-token .rm { display: inline-flex; align-items: center; cursor: pointer; color: #999; font-size: 15px; padding: 0 3px; }
   .tdoc-token .rm:hover { color: var(--td-danger); }
   .tdoc-ac { position: relative; }
   .tdoc-ac-list { position: absolute; left: 0; right: 0; top: 2px; z-index: 10; background: #fff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; }
@@ -868,7 +865,11 @@
      it can also kick in when the comment column would crowd the article. */
   body.tdoc-narrow .tdoc-drawer-viewport { position: fixed; inset: 0; height: 100dvh; z-index: 1000001; }
   body.tdoc-narrow .tdoc-drawer-backdrop { position: fixed; inset: 0; z-index: 1000000; background: rgba(0,0,0,.28); }
-  body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px max(24px, env(safe-area-inset-bottom)); box-sizing: border-box; z-index: 999998; }
+  body.tdoc-narrow #tdoc-comment-layer { display: flex; flex-direction: column; position: fixed; top: auto; left: 0; right: 0; bottom: 0; height: 100dvh; max-height: 100dvh; width: 100%; pointer-events: auto; background: #fff; border-top: 1px solid #e5e5e5; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); transform: translateY(calc(var(--drawer-snap-point-offset, 0px) + var(--drawer-swipe-movement-y, 0px))); transition: transform .2s; overflow: hidden; padding: 12px 12px calc(max(24px, env(safe-area-inset-bottom)) + var(--drawer-snap-point-offset, 0px)); box-sizing: border-box; z-index: 999998; }
+  /* The popup is 100dvh tall and moved down by the snap offset (30% at the
+     0.7 snap), so without the offset as bottom padding the scroll area ran
+     past the screen and the end of a long Ask AI answer (and its Keep / Post
+     buttons) could never be scrolled into view. */
   body.tdoc-narrow #tdoc-comment-layer[data-starting-style], body.tdoc-narrow #tdoc-comment-layer[data-ending-style] { transform: translateY(100%); }
   /* Backdrop scrim behind the mobile drawer. A dedicated element is what makes
      tap-to-dismiss reliable: iOS Safari won't synthesize a click for a tap on
@@ -897,6 +898,25 @@
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-answer-body .text,
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-question .text { font-size: 15px; line-height: 1.55; }
   body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-panel > h2 { display: none; }
+  /* Phone Ask AI tab: the Send to agent status lines and Agent activity are
+     read at arm's length, so they get the drawer's reading sizes (13-15px)
+     instead of the desktop popover's 11px. */
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-only-hint { margin-top: 7px; font-size: 13px; line-height: 1.4; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-send-result { font-size: 14px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-activity-toggle { min-height: 44px; align-items: center; margin-top: 12px; padding-top: 0; font-size: 14px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-ask-activity { margin-top: 4px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-section-title { font-size: 14px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-mark-all { font-size: 13px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-list { max-height: none; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-row { padding: 11px 2px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-preview { font-size: 15px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-heading { align-items: flex-start; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-state { font-size: 12px; margin-top: 1px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-meta { gap: 14px; margin-top: 4px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-recipient,
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-expand { font-size: 13px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-history { font-size: 13px; line-height: 1.55; margin-top: 6px; padding-left: 10px; }
+  body.tdoc-narrow .tdoc-drawer-ask .tdoc-handoff-details-reply { font-size: 14px; }
   body.tdoc-narrow .tdoc-fab .tdoc-fab-ai { margin-left: -4px; margin-top: -10px; }
   body.tdoc-narrow .tdoc-drawer-empty-actions button.primary { background: var(--td-accent, #1652f0); color: #fff; border-color: var(--td-accent, #1652f0); }
   body.tdoc-narrow .tdoc-drawer-empty .tdoc-link-btn { border: 0; background: transparent; color: var(--td-muted); text-decoration: underline; text-underline-offset: 3px; }
@@ -1077,7 +1097,7 @@
   .tdoc-ask-mobile-drawer[data-swiping] { transition: none; }
   .tdoc-ask-drawer-grip { display: flex; align-items: center; justify-content: center; flex: none; align-self: center; width: 64px; height: 24px; margin: -8px auto 4px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
   .tdoc-ask-drawer-grip span { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--td-line); }
-  .tdoc-ask-drawer-close { position: absolute; top: 2px; right: 5px; width: 44px; height: 44px; border: 0; background: transparent; color: var(--td-muted); font: 23px/1 system-ui, sans-serif; cursor: pointer; }
+  .tdoc-ask-drawer-close { position: absolute; top: 2px; right: 5px; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--td-muted); font: 23px/1 system-ui, sans-serif; cursor: pointer; }
   .tdoc-ask-drawer-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
   .tdoc-ask-mobile-drawer .tdoc-ask-conversation { max-height: none; }
   .tdoc-ask-mobile-drawer .tdoc-ask-answer-body .text { font-size: 15px; line-height: 1.55; }
@@ -1096,8 +1116,8 @@
   .tdoc-ask-form-bottom button[type="submit"]:disabled { opacity: .45; cursor: default; }
   .tdoc-ask-notice { margin-top: 10px; padding: 10px; border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
   .tdoc-ask-notice a { color: var(--td-accent, #1652f0); font-weight: 650; }
-  .tdoc-ask-ready { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px; background: var(--td-surface-2, #f7f7f5); color: var(--td-muted, #6b6a66); font-size: 12px; }
-  .tdoc-ask-ready button { border: 0; padding: 0; background: transparent; color: var(--td-accent, #1652f0); font: 650 12px Inter, system-ui, sans-serif; white-space: nowrap; cursor: pointer; }
+  .tdoc-ask-mode-switch.tdoc-seg { display: inline-flex; margin: 0 0 10px; }
+  .tdoc-ask-public-notice { color: var(--td-ink, #1a1a1a); }
   .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
   .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }
   .tdoc-ask-turn { display: grid; min-width: 0; gap: 8px; }
@@ -1119,17 +1139,19 @@
   .tdoc-ask-turn-collapse { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--td-accent); font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
   .tdoc-margin-comment .text .tdoc-md-heading, .tdoc-reply .text .tdoc-md-heading { margin: 6px 0 3px; font-size: 1em; }
   .tdoc-ask-answer-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
-  .tdoc-ask-answer-actions button, .tdoc-ask-answer.is-error button { border: 1px solid var(--td-line, #e8e7e3); border-radius: 6px; padding: 6px 14px; background: var(--td-ground); color: var(--td-ink, #1a1a1a); font: inherit; font-weight: 500; cursor: pointer; }
-  .tdoc-ask-answer-actions button.primary, .tdoc-ask-answer.is-error button { border-color: var(--td-accent, #1652f0); background: var(--td-accent, #1652f0); color: #fff; }
-  .tdoc-ask-answer-actions button:disabled { opacity: .55; cursor: default; }
   .tdoc-ask-private-note { display: block; margin-top: 8px; color: var(--td-muted, #6b6a66); font-size: 11px; }
   .tdoc-ask-activity-toggle { display: flex; width: 100%; justify-content: space-between; margin-top: 14px; padding: 10px 0 0; border: 0; border-top: 1px solid var(--td-line, #e8e7e3); background: transparent; color: var(--td-muted, #6b6a66); font: 650 12px Inter, system-ui, sans-serif; text-align: left; cursor: pointer; }
   .tdoc-ask-activity-toggle span:last-child { color: var(--td-accent, #1652f0); }
   .tdoc-ask-activity { margin-top: 12px; }
+  /* Send to agent's delivery line inside Ask AI: the Send to agent dialog's
+     own result style (green when sent, danger when not). */
+  .tdoc-ask-panel .tdoc-send-result { margin: 8px 0 0; color: var(--td-muted, #6b6a66); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+  .tdoc-ask-panel .tdoc-send-result.is-ok { color: #1a7340; font-weight: 600; }
+  .tdoc-ask-panel .tdoc-send-result.tdoc-notify-error { color: var(--td-danger); }
   .tdoc-handoff-details-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-  .tdoc-handoff-popover .tdoc-handoff-details-section-title { margin: 0; font-size: 13px; font-weight: 650; }
-  .tdoc-handoff-popover button.tdoc-handoff-details-mark-all { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--td-accent, #1652f0); font: inherit; font-size: 11px; cursor: pointer; }
-  .tdoc-handoff-popover button.tdoc-handoff-details-mark-all:hover { text-decoration: underline; }
+  .tdoc-handoff-details .tdoc-handoff-details-section-title { margin: 0; font-size: 13px; font-weight: 650; }
+  .tdoc-handoff-details button.tdoc-handoff-details-mark-all { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--td-accent, #1652f0); font: inherit; font-size: 11px; cursor: pointer; }
+  .tdoc-handoff-details button.tdoc-handoff-details-mark-all:hover { text-decoration: underline; }
   .tdoc-handoff-details-list {
     list-style: none;
     margin: 0;
@@ -1152,7 +1174,7 @@
   .tdoc-handoff-details-heading { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .tdoc-handoff-details-meta { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
   .tdoc-handoff-details-recipient { color: #888; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tdoc-handoff-popover button.tdoc-handoff-details-jump {
+  .tdoc-handoff-details button.tdoc-handoff-details-jump {
     flex: 1 1 auto;
     min-width: 0;
     appearance: none;
@@ -1241,12 +1263,10 @@
     padding: 0;
   }
   .tdoc-handoff-details-state .tdoc-handoff-details-resend:disabled { opacity: .55; cursor: not-allowed; }
-  .tdoc-handoff-popover button.tdoc-handoff-details-expand { border: 0; background: transparent; color: var(--td-accent, #1652f0); padding: 0; min-height: 0; font: inherit; font-size: 11px; cursor: pointer; }
+  .tdoc-handoff-details button.tdoc-handoff-details-expand { border: 0; background: transparent; color: var(--td-accent, #1652f0); padding: 0; min-height: 0; font: inherit; font-size: 11px; cursor: pointer; }
   .tdoc-handoff-details-history { color: #5f6368; font-size: 11px; line-height: 1.5; padding: 5px 0 0 8px; border-left: 2px solid #e8eeff; }
   .tdoc-handoff-details-reply-form { display: flex; gap: 6px; margin-top: 8px; }
   .tdoc-handoff-details-reply-form input { min-width: 0; flex: 1; border: 1px solid #c9d7f5; border-radius: 7px; padding: 7px; font: 12px Inter, system-ui, sans-serif; }
-  .tdoc-handoff-details-reply-form button { border: 0; border-radius: 7px; padding: 0 10px; background: var(--td-accent, #1652f0); color: #fff; font: 600 11px Inter, system-ui, sans-serif; cursor: pointer; }
-  .tdoc-handoff-details-reply-form button:disabled { opacity: .5; cursor: default; }
   .tdoc-handoff-ready { border-top: 1px solid var(--td-line, #e6e4dc); padding-top: 10px; }
   .tdoc-handoff-ready h3 { margin: 0 0 6px; color: #888; font-size: 11px; font-weight: 500; }
   .tdoc-handoff-ready-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; font-size: 12px; }
@@ -1347,8 +1367,6 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
 
 /* The comment composer's @agent button, the agent pill's menu
    and the Answers only / Only me row under the text. */
-.tdoc-popup .tdoc-composer-agent { padding: 6px 10px; border: 1px solid #4a4a4a; border-radius: 6px; background: #2c2c2c; color: #f0f0f0; font: inherit; font-weight: 500; cursor: pointer; white-space: nowrap; }
-.tdoc-popup .tdoc-composer-agent:hover { background: #3a3a3a; }
 .tdoc-popup .tdoc-ask-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; color: #e8e8e8; }
 .tdoc-popup .tdoc-ask-mode { border-color: #4a4a4a; flex-wrap: nowrap; }
 .tdoc-popup .tdoc-ask-mode button { padding: 4px 10px; background: #1d1d1f; color: #d8d8d8; font-size: 12px; white-space: nowrap; }
@@ -1362,8 +1380,8 @@ html[data-tdoc-navigating], html[data-tdoc-navigating] body { cursor: progress; 
    short name, a small grey tag (Mine / Team / "5 free"), a quiet check on
    the agent in the text. Connect my agent is a quiet link row. */
 .ui-menu-popup.tdoc-agent-menu { min-width: 200px; max-width: 320px; padding: 4px; background: #fff; border: 1px solid var(--td-line, #e5e5e7); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); outline: none; }
-.ui-menu-item.tdoc-agent-menu-item { display: flex; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box; padding: 4px 8px; border-radius: 6px; font: 13px system-ui, sans-serif; color: var(--td-ink, #1a1a1a); outline: none; }
-.ui-menu-item.tdoc-agent-menu-item[data-highlighted] { background: var(--td-accent-tint, #e8eeff); }
+.ui-menu-item.tdoc-agent-menu-item { display: flex; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; font: 13px system-ui, sans-serif; color: var(--td-ink, #1a1a1a); outline: none; }
+.ui-menu-item.tdoc-agent-menu-item[data-highlighted] { background: #f0f1f4; }
 .ui-menu-item.tdoc-agent-menu-more { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
 .ui-menu-item.tdoc-agent-menu-more::after { content: '›'; font-size: 18px; color: var(--td-muted); }
 .tdoc-agent-menu-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
@@ -1439,9 +1457,5 @@ a.ui-menu-item.tdoc-agent-menu-connect[data-highlighted] { background: none; col
 .tdoc-reply-form.tdoc-private-ask .tdoc-private-status { color: #888; }
 .tdoc-reply-form.tdoc-private-ask .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; }
 .tdoc-reply-form.tdoc-private-ask .hint { display: inline-flex; align-items: center; gap: 4px; color: #888; font-size: 11px; }
-.tdoc-reply-form.tdoc-private-ask .tdoc-reply-submit { background: var(--td-accent); color: #fff; border: none; border-radius: 6px; padding: 5px 12px; font: 12px system-ui; cursor: pointer; }
-.tdoc-reply-form.tdoc-private-ask .tdoc-reply-submit:disabled { opacity: .5; cursor: default; }
 .tdoc-reply-form.tdoc-private-ask .tdoc-composer-foot-actions { display: inline-flex; gap: 6px; }
-.tdoc-private-dismiss { background: none; border: 1px solid #d0d0d6; border-radius: 6px; padding: 4px 10px; font: 12px system-ui; color: #444; cursor: pointer; }
-.tdoc-popup .tdoc-private-dismiss { border-color: #4a4a4a; color: #d8d8d8; }
 .tdoc-reply-form .tdoc-ask-hint { color: #888; font-size: 11px; }

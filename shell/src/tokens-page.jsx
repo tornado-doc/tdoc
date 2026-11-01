@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Laptop } from 'lucide-react';
 import { AppDialog } from './ui/dialog.jsx';
+import { AppButton } from './ui/button.jsx';
 import { ClaudeMark, OpenAIMark, RaftMark } from './agent-marks.jsx';
 import { WorkspaceChecklist, workspaceSummary } from './workspace-checklist.jsx';
 import './docs-hub.css';
@@ -133,7 +134,7 @@ export function DevicesBody({ tokens: given, workspaces: givenWorkspaces }) {
           <p className="muted">
             Every computer or agent you approved can open, publish and edit docs as you, in the workspaces it can reach. Remove any you don’t recognise; it will need your approval to come back.
           </p>
-          {tokens.length ? <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirmAll(true)}>Remove all access</button> : null}
+          {tokens.length ? <AppButton className="tdoc-dev-remove" onClick={() => setConfirmAll(true)}>Remove all access</AppButton> : null}
         </div>
         {notice ? <p className="muted" role="status">{notice}</p> : null}
         {tokens.length === 0 ? (
@@ -158,15 +159,13 @@ export function DevicesBody({ tokens: given, workspaces: givenWorkspaces }) {
                 </div>
                 <div className="tdoc-dev-actions">
                   {choosing ? (
-                    <button
-                      type="button"
-                      className="tdoc-fbspace-btn"
+                    <AppButton
                       onClick={() => setEditing({ token: t, picked: Array.isArray(t.workspaces) ? t.workspaces.filter((id) => workspaces.some((w) => w.id === id)) : workspaces.map((w) => w.id) })}
                     >
                       Change
-                    </button>
+                    </AppButton>
                   ) : null}
-                  <button type="button" className="tdoc-fbspace-btn tdoc-dev-remove" onClick={() => setConfirm(t)}>Remove</button>
+                  <AppButton className="tdoc-dev-remove" onClick={() => setConfirm(t)}>Remove</AppButton>
                 </div>
               </div>
             ))}
@@ -180,8 +179,8 @@ export function DevicesBody({ tokens: given, workspaces: givenWorkspaces }) {
           title="Remove this device?"
           actions={(
             <>
-              <button type="button" disabled={busy} onClick={() => setConfirm(null)}>Cancel</button>
-              <button type="button" className="danger" disabled={busy} onClick={revoke}>Remove</button>
+              <AppButton disabled={busy} onClick={() => setConfirm(null)}>Cancel</AppButton>
+              <AppButton variant="danger" className="danger" disabled={busy} onClick={revoke}>Remove</AppButton>
             </>
           )}
         >
@@ -200,8 +199,8 @@ export function DevicesBody({ tokens: given, workspaces: givenWorkspaces }) {
           title="Which workspaces can it reach?"
           actions={(
             <>
-              <button type="button" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
-              <button type="button" className="primary" disabled={busy || !editing.picked.length} onClick={saveWorkspaces}>Save</button>
+              <AppButton disabled={busy} onClick={() => setEditing(null)}>Cancel</AppButton>
+              <AppButton variant="primary" className="primary" disabled={busy || !editing.picked.length} onClick={saveWorkspaces}>Save</AppButton>
             </>
           )}
         >
@@ -226,8 +225,8 @@ export function DevicesBody({ tokens: given, workspaces: givenWorkspaces }) {
           title="Remove all device access?"
           actions={(
             <>
-              <button type="button" disabled={busy} onClick={() => setConfirmAll(false)}>Cancel</button>
-              <button type="button" className="danger" disabled={busy} onClick={revokeAll}>Remove all</button>
+              <AppButton disabled={busy} onClick={() => setConfirmAll(false)}>Cancel</AppButton>
+              <AppButton variant="danger" className="danger" disabled={busy} onClick={revokeAll}>Remove all</AppButton>
             </>
           )}
         >

@@ -61,9 +61,15 @@ class FakeR2 {
     this.throwList = false;
     this.putCalls = 0;
   }
-  async put(k, v) {
+  // As R2: an object, or null when `onlyIf` fails (only If-None-Match: *,
+  // as Headers or etagDoesNotMatch '*', is modelled: "write only if absent").
+  async put(k, v, opts) {
     this.putCalls++;
+    const cond = opts && opts.onlyIf;
+    const ifNoneMatch = cond && (typeof cond.get === 'function' ? cond.get('If-None-Match') : cond.etagDoesNotMatch);
+    if (ifNoneMatch === '*' && this.map.has(k)) return null;
     this.map.set(k, v instanceof Uint8Array ? new Uint8Array(v) : String(v));
+    return { key: k };
   }
   // `range` as R2 takes it: the shell page reads only the head of a doc.
   async get(k, opts) {
@@ -191,6 +197,8 @@ async function loadWorker({ previewRenderer = false } = {}) {
   src = src.replace('/* __TDOC_NOTIFICATION_TEXT__ */', fs.readFileSync(path.join(root, 'shell', 'src', 'notification-text.js'), 'utf8').replace(/^export /gm, ''));
   src = src.replace('/* __TDOC_PREVIEW_VALIDATOR__ */', fs.readFileSync(path.join(root, 'server', 'preview', 'validate-svg.js'), 'utf8'));
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
+  const guides = require(path.join(root, 'server', 'authoring-guides.js')).loadAuthoringGuides(root);
+  src = src.replace(/const AUTHORING_GUIDES = "__TDOC_AUTHORING_GUIDES__";/, 'const AUTHORING_GUIDES = ' + JSON.stringify(guides) + ';');
   if (previewRenderer) {
     const dir = path.join(root, 'server', 'preview');
     const resvg = fs.readFileSync(path.join(dir, 'resvg.mjs'), 'utf8')

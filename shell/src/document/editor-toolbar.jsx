@@ -21,6 +21,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { AppDialog } from '../ui/dialog.jsx';
+import { AppButton } from '../ui/button.jsx';
 import { CommentIcon } from '../ui/comment-icon.jsx';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { formatDraftAge } from './draft-store.js';
@@ -31,20 +32,17 @@ export const MODES = [
   { value: 'edit', label: 'Edit', Icon: Pencil },
 ];
 
-// `signInToComment`: the doc takes comments, this visitor has no session. The
-// Comment option still shows — the door has to be where the person looks for
-// it, not hidden behind a Sign in button in the corner — and choosing it opens
-// the sign-in instead of the mode.
+// `signInToComment`: the doc takes comments, but the visitor has no session.
+// Let them enter Comment mode; sending the comment is the sign-in boundary.
 export function availableModes({ canComment, canEdit, signInToComment = false }) {
   return MODES.filter((option) => (
     option.value === 'read'
     || (option.value === 'comment' && (canComment || signInToComment))
     || (option.value === 'edit' && canEdit)
-  ))
-    .map((option) => (option.value === 'comment' && !canComment && signInToComment ? { ...option, label: 'Sign in to comment', signIn: true } : option));
+  ));
 }
 
-export function DocumentModeControl({ mode, canComment, canEdit, onChange, signInToComment = false, onSignIn }) {
+export function DocumentModeControl({ mode, canComment, canEdit, onChange, signInToComment = false }) {
   const options = availableModes({ canComment, canEdit, signInToComment });
   if (options.length < 2) return !canComment && !signInToComment ? (
     <span className="tdoc-mode-trigger tdoc-mode-readonly" aria-label="Read only; commenting is disabled by the author" title="Commenting is disabled by the author">
@@ -79,14 +77,10 @@ export function DocumentModeControl({ mode, canComment, canEdit, onChange, signI
             className={`tdoc-mode-item${selected ? ' current' : ''}`}
             role="menuitemradio"
             aria-checked={selected}
-            onClick={() => (
-              option.value === 'comment' && !canComment && signInToComment
-                ? onSignIn?.()
-                : onChange(option.value)
-            )}
+            onClick={() => onChange(option.value)}
           >
             <Icon size={15} />
-            <span>{option.value === 'comment' && !canComment && signInToComment ? 'Sign in to comment' : option.label}</span>
+            <span>{option.label}</span>
             {selected ? <Check className="tdoc-mode-check" size={14} /> : null}
           </AppMenuItem>
         );
@@ -154,8 +148,8 @@ export function StaleDraftDialog({ draft, currentVersion, onRestore, onKeep }) {
       description={description}
       actions={(
         <>
-          <button type="button" onClick={onKeep}>Keep this version</button>
-          <button type="button" className="primary" onClick={onRestore}>Restore draft</button>
+          <AppButton onClick={onKeep}>Keep this version</AppButton>
+          <AppButton variant="primary" className="primary" onClick={onRestore}>Restore draft</AppButton>
         </>
       )}
     />
@@ -171,10 +165,10 @@ export function SaveConflictDialog({ conflict, onClose }) {
       description="Your draft is still saved in this browser. Open the latest version to review it before saving again."
       actions={(
         <>
-          <button type="button" onClick={onClose}>Keep editing</button>
-          <button type="button" className="primary" onClick={() => { location.href = conflict.latestUrl; }}>
+          <AppButton onClick={onClose}>Keep editing</AppButton>
+          <AppButton variant="primary" className="primary" onClick={() => { location.href = conflict.latestUrl; }}>
             Open v{conflict?.latestVersion}
-          </button>
+          </AppButton>
         </>
       )}
     />
@@ -223,8 +217,8 @@ export function SaveNoticeDialog({ open, onOpenChange, onConfirm }) {
       description="Your draft becomes the next version of this document. If you have shared the link, that is what people see from now on — earlier versions stay reachable, and comments stay on the text they were left on."
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" className="primary" onClick={confirm}>Save and publish</button>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="primary" className="primary" onClick={confirm}>Save and publish</AppButton>
         </>
       )}
     >
@@ -261,8 +255,8 @@ export function LinkDialog({ open, onOpenChange, onSubmit }) {
       title="Add link"
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" className="primary" onClick={addLink}>Add link</button>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="primary" className="primary" onClick={addLink}>Add link</AppButton>
         </>
       )}
     >

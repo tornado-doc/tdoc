@@ -89,6 +89,9 @@ tag = "v1-comments-do"
 new_sqlite_classes = ["CommentsStore"]
 
 [vars]
+# Remote MCP at /mcp (OAuth + tools). On for tdoc.dev (Julie, 2026-10-29);
+# the onboarding buttons stay behind the remoteMcp flag until announced.
+TDOC_REMOTE_MCP = "1"
 OIDC_ISSUER = "https://clerk.tdoc.dev"
 OIDC_CLIENT_ID = "qKJaxWEoECYonmld"
 OIDC_LABEL = "Email"

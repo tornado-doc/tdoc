@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Copy } from 'lucide-react';
+import { Copy, X } from 'lucide-react';
 import { AgentButtonsContext, MentionField } from './mention-field.jsx';
 import { joinAiTags, mentionsAi } from './ai-answerer.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
@@ -167,7 +167,7 @@ export function CommentComposer({
       >
         <div className="head">
           <span className="h">{preview}</span>
-          <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
+          <button type="button" className="x" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button>
         </div>
         <PrivateAnswer privateAsk={privateAsk} onMakePublic={onMakePublic} />
       </div>
@@ -185,10 +185,10 @@ export function CommentComposer({
         {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
         <span className="h">{preview}</span>
         {quoted ? <button type="button" className="tdoc-copy-quote" aria-label="Copy selected text" title="Copy selected text" onMouseDown={(event) => event.preventDefault()} onClick={copyQuote}><Copy size={15} aria-hidden="true" /></button> : null}
-        <button type="button" className="x" aria-label="Close" onClick={onClose}>×</button>
+        <button type="button" className="x" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button>
       </div>
       <div><MentionField
-        autoFocus={viewport.width > 700}
+        autoFocus
         fieldRef={field}
         placeholder={demo
           ? 'What should change? Type a GitHub @ — or @email'
@@ -216,7 +216,7 @@ export function CommentComposer({
         {target && !agentButtons ? (
           <span className="hint">{agentAskHint(ask)}</span>
         ) : (
-          <span className="hint">
+          <span className={demo ? 'hint' : 'hint tdoc-keyboard-shortcut-hint'}>
             {demo
               ? 'Demo — refresh clears it'
               : (canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ask.choices.length ? '⌘+Enter · ⌘⇧+Enter with @agent' : '⌘+Enter to submit')}
@@ -224,12 +224,12 @@ export function CommentComposer({
         )}
         <div className="tdoc-composer-foot-actions">
           {!agentButtons && connectAgentPrompt ? (
-            <button className="tdoc-composer-agent" type="button" disabled={busy} aria-expanded={connectOpen}
+            <button className="tdoc-composer-agent ui-btn ui-btn-secondary ui-btn-m" type="button" disabled={busy} aria-expanded={connectOpen}
               onClick={() => setConnectOpen((value) => !value)} title="Connect an agent to use @agent">@agent</button>
           ) : !agentButtons ? <AgentButton ask={ask} busy={busy} /> : null}
           {agentButtons && !canSendToAgent && connectAgentPrompt ? (
             <button
-              className="submit agent tdoc-agent-unlinked"
+              className="submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m"
               type="button"
               aria-expanded={connectOpen}
               onClick={() => setConnectOpen((v) => !v)}
@@ -240,7 +240,7 @@ export function CommentComposer({
           ) : null}
           {agentButtons && canSendToAgent ? (
             <button
-              className="submit agent"
+              className="submit agent ui-btn ui-btn-secondary ui-btn-m"
               type="button"
               onClick={() => submit(true)}
               disabled={busy}
@@ -249,7 +249,7 @@ export function CommentComposer({
               {busy ? 'Posting…' : '@agent'}
             </button>
           ) : null}
-          <button className="submit" type="button" onClick={() => submit(false)} disabled={busy}>
+          <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Comment'}
           </button>
         </div>

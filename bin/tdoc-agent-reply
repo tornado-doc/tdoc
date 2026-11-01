@@ -193,6 +193,10 @@ post_reply() {
       *)                echo "[tdoc] not posted: ${reason:-skipped}" >&2 ;;
     esac
   fi
+  # "applied" with no version published after the comment is an answer.
+  if [ "$(printf '%s' "$body" | json_get downgraded_from)" = "applied" ]; then
+    echo "[tdoc] recorded as answered, not applied: no version was published after this comment. Publish the change first, then reply --status applied --applied-in <n+1>." >&2
+  fi
   return 0
 }
 

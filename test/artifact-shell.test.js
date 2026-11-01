@@ -165,6 +165,9 @@ const SLUG = 'hostile-body-css';
       if (!frame) throw new Error('author-content frame not found');
       // Select the first paragraph's text inside the iframe.
       await frame.evaluate(() => {
+        const authorStyle = document.createElement('style');
+        authorStyle.textContent = 'button svg { width:80px!important;height:80px!important } button { padding:20px!important;min-width:80px!important }';
+        document.head.appendChild(authorStyle);
         const p = document.getElementById('para-1');
         const r = document.createRange();
         r.selectNodeContents(p);
@@ -175,7 +178,26 @@ const SLUG = 'hostile-body-css';
         }));
       });
       await frame.waitForSelector('.tdoc-selection-action', { state: 'visible', timeout: 2000 });
-      await frame.click('.tdoc-selection-action');
+      const actionStyle = await frame.$eval('.tdoc-selection-action', (toolbar) => {
+        const style = getComputedStyle(toolbar);
+        const buttons = [...toolbar.querySelectorAll('button')];
+        return {
+          width: parseFloat(style.width), height: parseFloat(style.height),
+          background: style.backgroundColor, radius: style.borderRadius, border: style.borderWidth,
+          labels: buttons.map((button) => button.textContent),
+          buttonHeights: buttons.map((button) => button.getBoundingClientRect().height),
+          buttonWidths: buttons.map((button) => button.getBoundingClientRect().width),
+        };
+      });
+      if (actionStyle.height !== 38 || actionStyle.width > 180 || actionStyle.background !== 'rgb(255, 255, 255)'
+        || actionStyle.radius !== '8px' || actionStyle.border !== '1px'
+        || actionStyle.labels.join('|') !== 'Comment|Copy'
+        || actionStyle.buttonHeights.some((height) => height !== 32)
+        || actionStyle.buttonWidths.some((width) => width < 72 || width > 90)) {
+        throw new Error(`selection toolbar lost its compact shape under author CSS: ${JSON.stringify(actionStyle)}`);
+      }
+      if (process.env.TDOC_UI_SHOTS) await page.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, 'selection-action.png') });
+      await frame.click('.tdoc-selection-comment');
       await page.waitForSelector('.tdoc-popup', { timeout: 2000 });
     });
 

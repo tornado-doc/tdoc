@@ -1,16 +1,17 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
-import { Check, ChevronRight, MoreVertical, SmilePlus } from 'lucide-react';
+import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
 import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { usePortalContainer } from '../ui/portal.js';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
-import { avatarFor, QUICK_REACTIONS } from './model.js';
+import { avatarFor, avatarInitial, QUICK_REACTIONS } from './model.js';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
 import { productPageUrl } from './product-url.js';
@@ -94,7 +95,8 @@ export function Author({ author, timestamp }) {
           onClick={(event) => event.stopPropagation()}>
           <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />
         </a>
-      ) : <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />) : null}
+      ) : <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />)
+        : <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(author)}</span>}
       <span className="tdoc-cc-who">
         {hoverCard ? <AgentAuthorName author={author} /> : <span className="login">{authorLine(author)}</span>}
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
@@ -256,19 +258,19 @@ function ReplyForm({
       />
       {v4 ? <AgentAskRow ask={ask} hint={agentAskHint(ask)} /> : null}
       <div className="tdoc-reply-form-foot">
-        <span className="hint">
+        <span className="hint tdoc-keyboard-shortcut-hint">
           {canSendToAgent && agentButtons ? '⌘+Enter · ⌘⇧+Enter @agent' : ''}
         </span>
         <div className="tdoc-reply-form-actions">
           {v4 && agentSetupHref && !canSendToAgent ? (
-            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
-          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent" /> : null}
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref} title="Connect an agent first">@agent</a>
+          ) : v4 ? <AgentButton ask={ask} busy={busy} className="tdoc-reply-submit agent tdoc-reply-agent ui-btn ui-btn-secondary ui-btn-m" /> : null}
           {agentButtons && !canSendToAgent && agentSetupHref ? (
-            <a className="tdoc-reply-submit agent tdoc-agent-unlinked" href={agentSetupHref} title="Connect an agent first">@agent</a>
+            <a className="tdoc-reply-submit agent tdoc-agent-unlinked ui-btn ui-btn-secondary ui-btn-m" href={agentSetupHref} title="Connect an agent first">@agent</a>
           ) : null}
           {agentButtons && canSendToAgent ? (
             <button
-              className="tdoc-reply-submit agent"
+              className="tdoc-reply-submit agent ui-btn ui-btn-secondary ui-btn-m"
               type="button"
               onClick={() => submit(true)}
               disabled={busy}
@@ -277,7 +279,7 @@ function ReplyForm({
               {busy ? 'Posting…' : '@agent'}
             </button>
           ) : null}
-          <button className="tdoc-reply-submit" type="button" onClick={() => submit(false)} disabled={busy}>
+          <button className="tdoc-reply-submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>
             {busy ? 'Posting…' : 'Reply'}
           </button>
         </div>
@@ -324,8 +326,8 @@ function EditForm({ item, onSave, onCancel }) {
         }}
       />
       <div className="tdoc-edit-form-foot">
-        <button className="tdoc-edit-cancel" type="button" onClick={onCancel}>Cancel</button>
-        <button className="tdoc-edit-save" type="button" onClick={submit}>Save</button>
+        <button className="tdoc-edit-cancel ui-btn ui-btn-quiet ui-btn-m" type="button" onClick={onCancel}>Cancel</button>
+        <button className="tdoc-edit-save ui-btn ui-btn-primary ui-btn-m" type="button" onClick={submit}>Save</button>
       </div>
     </div>
   );
@@ -374,19 +376,23 @@ function mayDelete(item, currentUser, isOwner) {
   return authoredBy(item, currentUser) || (isOwner && item.author?.kind === 'agent');
 }
 
-// Mirrors the worker's canMutate(): re-anchoring is the author's or the doc
-// owner's, nobody else's. Without this the button rendered for every reader
-// and the server's 403 (`not_author`) was the only thing stopping them — a
-// toast where there should have been no affordance at all. Delete used to
-// share this gate; it is authoredBy's now.
-function mayMutate(item, currentUser, isOwner) {
-  return Boolean(
-    isOwner
-    || (currentUser
-      && currentUser !== 'anon'
-      && item.author?.login
-      && item.author.login === currentUser),
-  );
+// Mirrors the worker's canMutate(): resolving and re-anchoring are the
+// author's or the doc owner's, nobody else's. Without this the buttons
+// rendered for every reader and the server's 403 (`not_author`) was the only
+// thing stopping them — a toast where there should have been no affordance at
+// all. Delete used to share this gate; it is authoredBy's now.
+//   - isOwner is the worker's isDocOwnerSession(), sent as is: the doc's
+//     owner, or for a team doc the team's admins, or a feedback space's owner.
+//   - the author is matched like actorKeys(session): case-insensitive, and
+//     against every key the viewer is known by (handoffViewer carries the
+//     linked ones). An exact compare on one login hid ✓ from an author who
+//     signed in with the other half of a linked account (Julie, 2026-10-27).
+export function mayMutate(item, currentUser, isOwner, viewerKeys = []) {
+  const who = String(item.author?.login || '').trim().toLowerCase();
+  if (isOwner) return true;
+  if (!who) return false;
+  return [currentUser, ...[].concat(viewerKeys || [])]
+    .some((key) => key && key !== 'anon' && String(key).trim().toLowerCase() === who);
 }
 
 function hasReactions(item) {
@@ -750,7 +756,7 @@ export function CommentCard({
   const reactionCount = hasReactions(comment);
   const isMine = authoredBy(comment, currentUser);
   const canDelete = mayDelete(comment, currentUser, isOwner);
-  const canMutate = mayMutate(comment, currentUser, isOwner);
+  const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);
   const createdAt = formatCreated(comment.created);
   const replies = comment.replies || [];
   // Orphans — their parent reply was deleted — still show under the root
@@ -882,7 +888,7 @@ export function CommentCard({
             <AppMenu
               trigger={(
                 <button type="button" className="tdoc-cc-icon" title="More" aria-label="More actions">
-                  <MoreVertical size={16} />
+                  <MoreHorizontal size={16} />
                 </button>
               )}
             >
@@ -933,13 +939,14 @@ export function CommentCard({
       {handoff && handoff.threadId === comment.id && comment.status !== 'applied'
         && !replies.some((reply) => reply.author?.kind === 'agent') ? (() => {
           const copyButton = (
-            <button
-              type="button"
+            <CopyPromptButton
               className={handoff.state !== 'idle' ? 'tdoc-handoff-copy done' : 'tdoc-handoff-copy'}
-              onClick={handoff.onCopy}
-            >
-              {handoff.state === 'idle' ? 'Copy' : handoff.copyFailed ? 'Select & copy' : 'Copied'}
-            </button>
+              label="Copy"
+              copied={handoff.state !== 'idle'}
+              copiedLabel={handoff.copyFailed ? 'Select & copy' : 'Copied'}
+              showTick={!handoff.copyFailed}
+              onCopy={handoff.onCopy}
+            />
           );
           return (
           <div className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}>
