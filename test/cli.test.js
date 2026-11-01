@@ -732,6 +732,23 @@ t('user-facing CLIs invoke tdoc-update-nag', () => {
     'tdoc-update must not nag (it IS the update)');
 });
 
+t('tdoc-update in a plugin cache: --auto is silent, otherwise names the plugin update commands', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-plugin-'));
+  const skillDir = path.join(dir, 'plugins', 'cache', 'tornado-tdoc', 'tdoc', '0.9.0');
+  fs.mkdirSync(skillDir, { recursive: true });
+  try {
+    const run = (args) => spawnSync('bash', [path.join(BIN, 'tdoc-update'), ...args], { env: { ...process.env, SKILL_DIR: skillDir }, encoding: 'utf8' });
+    const auto = run(['--auto']);
+    assert(auto.status === 0 && !auto.stdout && !auto.stderr, `--auto: ${auto.status} ${auto.stdout}${auto.stderr}`);
+    const check = run(['--check']);
+    assert(check.status === 0, `--check exit ${check.status}`);
+    assert(/claude plugin update tdoc@tornado-tdoc/.test(check.stdout) && /codex plugin add tdoc@tornado-tdoc/.test(check.stdout), check.stdout);
+    assert(!/git clone|rm -rf/.test(check.stdout), 'tells a plugin install to re-clone');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 t('tdoc-update-nag is silent when skipped or current (mock: skip)', () => {
   const nag = path.join(BIN, 'tdoc-update-nag');
   const r = spawnSync(nag, [], { env: { ...process.env, TDOC_SKIP_UPDATE_CHECK: '1' }, encoding: 'utf8' });
@@ -1724,6 +1741,32 @@ t('SKILL.md resolves the checkout for the active agent host', () => {
         CODEX_SESSION_ID: 'codex-test',
         TDOC_SKILL_DIR: override,
       }) === override, 'TDOC_SKILL_DIR no longer overrides host detection');
+
+      // Installed as the tdoc plugin (tdoc@tornado-tdoc) and nothing under
+      // skills/: the host's plugin cache, newest version first.
+      for (const root of Object.values(roots)) fs.renameSync(path.join(root, 'SKILL.md'), path.join(root, 'SKILL.off'));
+      try {
+        const cache = (base, v) => {
+          const d = path.join(base, 'plugins', 'cache', 'tornado-tdoc', 'tdoc', v);
+          fs.mkdirSync(d, { recursive: true });
+          fs.writeFileSync(path.join(d, 'SKILL.md'), 'fixture\n');
+          return d;
+        };
+        cache(path.join(home, '.claude'), '0.9.0');
+        const claudeNewest = cache(path.join(home, '.claude'), '0.10.0');
+        assert(resolve(resolver, { CLAUDECODE: '1' }) === claudeNewest,
+          'Claude did not find the newest tdoc plugin in its plugin cache');
+        const configDir = path.join(home, 'claude-config');
+        const claudeCustom = cache(configDir, '0.9.0');
+        assert(resolve(resolver, { CLAUDECODE: '1', CLAUDE_CONFIG_DIR: configDir }) === claudeCustom,
+          'Claude did not read the plugin cache under CLAUDE_CONFIG_DIR');
+        const codexHome = path.join(home, 'codex-home');
+        const codexPlugin = cache(codexHome, '0.9.0');
+        assert(resolve(resolver, { CODEX_HOME: codexHome }) === codexPlugin,
+          'Codex did not find the tdoc plugin under CODEX_HOME');
+      } finally {
+        for (const root of Object.values(roots)) fs.renameSync(path.join(root, 'SKILL.off'), path.join(root, 'SKILL.md'));
+      }
     }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });

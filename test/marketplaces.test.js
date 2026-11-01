@@ -50,17 +50,25 @@ t('Claude Code: .claude-plugin/marketplace.json lists tdoc (CLI) and tdoc-cloud 
   assert(mcp.mcpServers.tdoc.url === 'https://tdoc.dev/mcp', 'tdoc-cloud ships the remote MCP server');
 });
 
-t('Codex / ChatGPT: .agents/plugins/marketplace.json lists tdoc -> plugins/codex', () => {
+t('Codex / ChatGPT: .agents/plugins/marketplace.json lists tdoc (local CLI, ./) and tdoc-cloud -> plugins/codex, the Claude names', () => {
   const m = json('.agents/plugins/marketplace.json');
   assert(NAME.test(m.name), 'name');
   assert(m.interface && m.interface.displayName, 'interface.displayName');
-  assert(Array.isArray(m.plugins) && m.plugins.length === 1, 'one plugin');
+  assert(Array.isArray(m.plugins) && m.plugins.map((p) => p.name).join(',') === 'tdoc,tdoc-cloud', `plugins: ${m.plugins.map((p) => p.name)}`);
+  const claude = json('.claude-plugin/marketplace.json');
   for (const [i, p] of m.plugins.entries()) {
     const src = typeof p.source === 'string' ? p.source : (p.source.source === 'local' && p.source.path);
     const dir = folder(src, `plugins[${i}]`);
-    const pj = JSON.parse(fs.readFileSync(path.join(dir, 'plugin.json'), 'utf8'));
-    assert(pj.name === p.name, `entry "${p.name}" != plugin.json "${pj.name}"`);
-    assert(fs.existsSync(path.join(dir, 'mcp.json')), 'mcp.json');
+    if (p.name === 'tdoc') {
+      // The local CLI plugin is the repo root, as in Claude Code: the skill plus bin/.
+      const local = claude.plugins.find((c) => c.name === 'tdoc');
+      assert(src === './' && local.source === './', 'tdoc -> ./ in both marketplaces');
+      assert(fs.existsSync(path.join(dir, 'SKILL.md')) && fs.existsSync(path.join(dir, 'bin', 'tdoc-publish')), 'SKILL.md + bin/');
+    } else {
+      const pj = JSON.parse(fs.readFileSync(path.join(dir, 'plugin.json'), 'utf8'));
+      assert(pj.name === p.name, `entry "${p.name}" != plugin.json "${pj.name}"`);
+      assert(fs.existsSync(path.join(dir, 'mcp.json')), 'mcp.json');
+    }
     assert(p.policy && ['AVAILABLE', 'INSTALLED_BY_DEFAULT', 'NOT_AVAILABLE'].includes(p.policy.installation), 'policy.installation');
     assert(p.policy.authentication, 'policy.authentication');
     assert(typeof p.category === 'string' && p.category, 'category');
