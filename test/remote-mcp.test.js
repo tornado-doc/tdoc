@@ -147,11 +147,15 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       const r = await register({ redirect_uris: [uri] });
       assert(r.status === 201 && /^mcpc_/.test(r.body.client_id), `${uri} -> ${r.status} ${r.text}`);
     }
-    // localhost resolves by name: refused alone, dropped beside a usable URI.
-    const alone = await register({ redirect_uris: ['http://localhost:8787/callback'] });
-    assert(alone.status === 400 && alone.body.error === 'invalid_redirect_uri', `localhost alone: ${alone.status}`);
+    // localhost loopback is accepted (Gemini CLI and Cursor desktop send it); https localhost lookalikes are not loopback.
+    const gemini = await register({ redirect_uris: ['http://localhost:7777/oauth/callback'] });
+    assert(gemini.status === 201 && /^mcpc_/.test(gemini.body.client_id), `localhost alone: ${gemini.status} ${gemini.text}`);
     const cursor = await register({ redirect_uris: ['http://localhost:8787/callback', 'https://www.cursor.com/agents/mcp/oauth/callback'] });
-    assert(cursor.status === 201 && JSON.stringify(cursor.body.redirect_uris) === '["https://www.cursor.com/agents/mcp/oauth/callback"]', cursor.text);
+    assert(cursor.status === 201 && JSON.stringify(cursor.body.redirect_uris) === '["http://localhost:8787/callback","https://www.cursor.com/agents/mcp/oauth/callback"]', cursor.text);
+    for (const uri of ['http://localhost.evil.example/cb', 'http://evil.localhost/cb', 'http://user@localhost:1/cb']) {
+      const r = await register({ redirect_uris: [uri] });
+      assert(r.status === 400 && r.body.error === 'invalid_redirect_uri', `${uri} -> ${r.status}`);
+    }
     const noArr = await register({ redirect_uris: 'https://claude.ai/cb' });
     assert(noArr.status === 400, 'string, not array');
     const implicit = await register({ response_types: ['token'] });
@@ -192,6 +196,17 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(new URL(ok.body.redirect).port === '50999', ok.body.redirect);
     const wrongPort = await form('/oauth/token', { grant_type: 'authorization_code', code, code_verifier: p.verifier, redirect_uri: 'http://127.0.0.1:33418/callback', client_id: client.client_id });
     assert(wrongPort.status === 400, 'the token request must repeat the port it was given');
+  });
+
+  await t('a localhost redirect (Gemini CLI) also matches on any port, and stays apart from 127.0.0.1', async () => {
+    const client = (await register({ redirect_uris: ['http://localhost:7777/oauth/callback'], token_endpoint_auth_method: 'none' })).body;
+    const p = pkce();
+    const q = (redirect) => `/oauth/authorize?${new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: redirect, code_challenge: p.challenge, code_challenge_method: 'S256', state: 's' })}`;
+    // Its own network address, so these requests leave the per-IP authorize budget of the tests below alone.
+    const opts = { cookie: julie.cookie, headers: { 'cf-connecting-ip': '203.0.113.77' } };
+    assert((await call(q('http://localhost:61234/oauth/callback'), opts)).status === 200, 'another port');
+    assert((await call(q('http://localhost:61234/other'), opts)).status === 400, 'another path');
+    assert((await call(q('http://127.0.0.1:61234/oauth/callback'), opts)).status === 400, 'registered localhost does not stand in for 127.0.0.1');
   });
 
   await t('authorize: PKCE S256 required, scope and resource checked; malformed requests get an error page, not a redirect', async () => {

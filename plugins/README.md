@@ -109,8 +109,8 @@ Verified:
   three; upload as `.zip`. https://claude.com/docs/plugins/overview
 - Claude's OAuth redirect URIs: `https://claude.ai/api/mcp/auth_callback`
   (web, desktop, mobile, Cowork) and a loopback `http://localhost:<port>/callback`
-  (refused by tdoc, which takes only `127.0.0.1` / `[::1]`)
-  or `http://127.0.0.1:<port>/callback` on any port (Claude Code). Claude
+  or `http://127.0.0.1:<port>/callback` on any port (Claude Code); tdoc
+  accepts http loopback as `127.0.0.1`, `[::1]` or `localhost`. Claude
   prefers CIMD only when the authorization server metadata advertises
   `client_id_metadata_document_supported: true` and `none` in
   `token_endpoint_auth_methods_supported`. Otherwise it uses DCR.
@@ -316,10 +316,8 @@ redirect URL"):
 - Web and Cursor Agents: `https://www.cursor.com/agents/mcp/oauth/callback`
 
 With DCR, the desktop app registers both and may send the web callback, which
-hands sign-in back to the desktop app. The https one is accepted. tdoc accepts loopback only as `127.0.0.1` / `[::1]`
-(any port), not `localhost`: registration drops the localhost URI and keeps
-the https one, so Cursor desktop sign-in must go through the web callback.
-UNVERIFIED that Cursor desktop handles that. Cursor uses authorization code + PKCE, reads
+hands sign-in back to the desktop app. tdoc accepts both: http loopback as
+`127.0.0.1`, `[::1]` or `localhost` (any port), and the https callback. Cursor uses authorization code + PKCE, reads
 RFC 9728 protected resource metadata, and registers as a public client.
 
 ---
@@ -360,9 +358,10 @@ Verified:
   command. https://geminicli.com/docs/extensions/reference/
 - `httpUrl` is Streamable HTTP; `url` is SSE. OAuth is discovered on a 401,
   with dynamic client registration. The default redirect URI is
-  `http://localhost:<random-port>/oauth/callback`. UNVERIFIED for tdoc: the
-  server accepts loopback only as `127.0.0.1` / `[::1]`, so Gemini CLI sign-in
-  may need a `127.0.0.1` redirect setting or the `tdoc_` Bearer header.
+  `http://localhost:<random-port>/oauth/callback` (gemini-cli 0.66.0,
+  `getRedirectUri`); tdoc accepts http loopback on `localhost` too, any port.
+  `gemini mcp add` writes project settings by default and refuses in a folder
+  Gemini does not trust yet; add `--scope user`.
   https://geminicli.com/docs/tools/mcp-server/
 
 Note: the extension reference page carries a banner saying Gemini CLI was

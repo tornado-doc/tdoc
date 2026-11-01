@@ -17275,17 +17275,20 @@ const PKCE_CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
 // Redirect URIs: https anywhere, or http on the loopback interface (native
 // apps, RFC 8252). No fragment, no credentials, no custom schemes. Compared
 // later by exact string match against what was registered.
-// Loopback by IP literal only (RFC 8252 §8.3: "localhost" can be resolved
-// elsewhere). The port is the app's to pick at run time (§7.3), so a
-// loopback redirect matches a registered one on scheme, host, path and
-// query with any port.
+// The port is the app's to pick at run time (RFC 8252 §7.3), so a loopback
+// redirect matches a registered one on scheme, host, path and query with any
+// port. LOOPBACK_HOSTS (IP literals) also gates CIMD hosts and MCP origins.
+// Redirects also take `localhost` (§7.3 allows it; §8.3 prefers the IP):
+// Gemini CLI always sends http://localhost:<port>/oauth/callback and Cursor
+// desktop http://localhost:8787/callback, so without it neither can sign in.
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]']);
+const REDIRECT_LOOPBACK_HOSTS = new Set([...LOOPBACK_HOSTS, 'localhost']);
 function redirectUriRegistered(client, requested) {
   if (typeof requested !== 'string' || !requested) return false;
   if (client.redirect_uris.includes(requested)) return true;
   let r;
   try { r = new URL(requested); } catch { return false; }
-  if (r.protocol !== 'http:' || !LOOPBACK_HOSTS.has(r.hostname) || !validRedirectUri(requested)) return false;
+  if (r.protocol !== 'http:' || !REDIRECT_LOOPBACK_HOSTS.has(r.hostname) || !validRedirectUri(requested)) return false;
   return client.redirect_uris.some((uri) => {
     let u;
     try { u = new URL(uri); } catch { return false; }
@@ -17299,7 +17302,7 @@ function validRedirectUri(raw) {
   try { u = new URL(raw); } catch { return false; }
   if (u.username || u.password || u.hash) return false;
   if (u.protocol === 'https:') return !!u.hostname;
-  if (u.protocol === 'http:') return LOOPBACK_HOSTS.has(u.hostname);
+  if (u.protocol === 'http:') return REDIRECT_LOOPBACK_HOSTS.has(u.hostname);
   return false;
 }
 
@@ -17425,7 +17428,7 @@ async function loadCimdClient(env, clientId, origin = '') {
   if (!redirects.length || redirects.length > 10 || !redirects.every(validRedirectUri)) return failed();
   // The document speaks for its own host: an https redirect elsewhere is not
   // that host's to name. Loopback (a native app) is allowed.
-  if (!redirects.every((uri) => { const r = new URL(uri); return r.protocol === 'http:' ? LOOPBACK_HOSTS.has(r.hostname) : r.hostname.toLowerCase() === host; })) return failed();
+  if (!redirects.every((uri) => { const r = new URL(uri); return r.protocol === 'http:' ? REDIRECT_LOOPBACK_HOSTS.has(r.hostname) : r.hostname.toLowerCase() === host; })) return failed();
   // A public client here: tdoc accepts only `none` for metadata-document
   // clients. A document may prefer another method in the singular field
   // while listing several it can use (ChatGPT: private_key_jwt preferred,
@@ -17746,13 +17749,8 @@ async function handleOAuthRegister(env, req, url) {
   if (!Array.isArray(redirects) || !redirects.length || redirects.length > 10) {
     return oauthError('invalid_redirect_uri', 'redirect_uris: one to ten URIs.');
   }
-  // http://localhost/... is dropped, not refused, when the client also gives
-  // a usable URI (Cursor registers its localhost and its https callback):
-  // the response lists what was actually registered (RFC 7591 §3.2.1).
-  const isLocalhost = (uri) => { try { const u = new URL(uri); return u.protocol === 'http:' && u.hostname === 'localhost'; } catch { return false; } };
-  const kept = redirects.filter((uri) => !isLocalhost(uri));
-  if (!kept.length || !kept.every(validRedirectUri)) {
-    return oauthError('invalid_redirect_uri', 'Each redirect URI must be https, or http on 127.0.0.1 / [::1] (any port), with no fragment.');
+  if (!redirects.every(validRedirectUri)) {
+    return oauthError('invalid_redirect_uri', 'Each redirect URI must be https, or http on 127.0.0.1 / [::1] / localhost (any port), with no fragment.');
   }
   const method = body.token_endpoint_auth_method === undefined ? 'client_secret_basic' : body.token_endpoint_auth_method;
   if (!['none', 'client_secret_post', 'client_secret_basic'].includes(method)) {
@@ -17775,7 +17773,7 @@ async function handleOAuthRegister(env, req, url) {
   const rec = {
     client_id: clientId,
     client_name: cleanClientText(body.client_name, 80) || 'MCP client',
-    redirect_uris: kept,
+    redirect_uris: redirects,
     token_endpoint_auth_method: method,
     grant_types: [...new Set(grants)],
     ...(secret ? { secret_hash: await sha256Hex(secret) } : {}),
