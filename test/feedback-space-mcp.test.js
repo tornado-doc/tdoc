@@ -186,7 +186,7 @@ function interleaveRead(env, key, during) {
     const again = (await tool(julie.token, { origins: [SITE] })).structuredContent;
     assert(again.created === false && again.slug === personal, JSON.stringify(again));
     const more = (await tool(julie.token, { origins: ['https://staging.example.com', SITE] })).structuredContent;
-    assert(more.slug === personal && more.origins.includes('https://staging.example.com') && more.origins.includes(SITE), JSON.stringify(more.origins));
+    assert(more.slug === personal && JSON.stringify([...more.origins].sort()) === JSON.stringify(['http://localhost:3000', SITE, 'https://staging.example.com'].sort()), JSON.stringify(more.origins));
     const r = await connectSpace(julie, personal, 'https://staging.example.com');
     assert(r.status === 200, `new origin ${r.status}`);
   });
