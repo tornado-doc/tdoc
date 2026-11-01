@@ -527,7 +527,8 @@ async function touchSelect(page, phrase) {
     });
 
     await t('desktop 1280: Ask AI gives the demo answer; Send to agent hands a ready comment to Claude (demo)', async () => {
-      const { context, page, shot, noWrites } = await open('desktop', { viewport: { width: 1280, height: 800 } });
+      // The plain handoff path; the scripted rewrite (demoEditRewrite) has its own tests.
+      const { context, page, shot, noWrites } = await open('desktop', { viewport: { width: 1280, height: 800 } }, { demoEditRewrite: false });
       // A plain comment: ready to send.
       await dragSelect(page, 'An AI that runs on your computer');
       const pop = page.locator('.tdoc-popup');
