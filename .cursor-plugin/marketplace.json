@@ -1,0 +1,16 @@
+{
+  "name": "tornado-tdoc",
+  "owner": {
+    "name": "Tornado"
+  },
+  "metadata": {
+    "description": "tdoc for Cursor: the remote MCP server at https://tdoc.dev/mcp and the tdoc skill."
+  },
+  "plugins": [
+    {
+      "name": "tdoc",
+      "source": "plugins/cursor",
+      "description": "Create, edit, and share hosted HTML documents with anchored comments on tdoc.dev, through the tdoc remote MCP server."
+    }
+  ]
+}

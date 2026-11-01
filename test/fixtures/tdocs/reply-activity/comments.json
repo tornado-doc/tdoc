@@ -1,0 +1,41 @@
+[
+  {
+    "id": "delivery",
+    "version": 2,
+    "created_in": 2,
+    "text": "Move delivery to Monday.",
+    "author": {
+      "login": "preview-reviewer",
+      "name": "Reviewer"
+    },
+    "created": "2026-10-06T10:00:00Z",
+    "status": "applied",
+    "applied_in": 3,
+    "anchor": {
+      "kind": "element",
+      "aid": "delivery",
+      "selector": "[data-tdoc-aid=\"delivery\"]",
+      "label": "Delivery"
+    },
+    "handoff_status": "sent",
+    "handoff_at": "2026-10-06T10:01:00Z",
+    "handoff_delivery": {
+      "status": "delivered"
+    },
+    "replies": [
+      {
+        "id": "delivery-reply",
+        "version": 3,
+        "parent_id": "delivery",
+        "text": "Moved delivery to Monday in v3.",
+        "author": {
+          "kind": "agent",
+          "login": "codex",
+          "name": "Codex"
+        },
+        "created": "2026-10-06T10:02:00Z",
+        "agent_status": "applied"
+      }
+    ]
+  }
+]

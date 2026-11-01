@@ -120,8 +120,10 @@ function resolveDisplay(width) {
 console.log('bar overflow trigger (the ⋯ never opens an empty menu)');
 
 t('top-bar marks the trigger mobile-only exactly when it has no desktop actions', () => {
-  assert(topBar.includes("overflowActions ? '' : ' tdoc-mobile-overflow-trigger'"),
-    'the ⋯ trigger no longer opts into the mobile-only class when overflowActions is absent');
+  // Desktop items: the page's overflow actions, or (signed out) the theme row.
+  assert(topBar.includes("const moreOnDesktop = Boolean(overflowActions) || themeInMore;")
+    && topBar.includes("moreOnDesktop ? '' : ' tdoc-mobile-overflow-trigger'"),
+    'the ⋯ trigger no longer opts into the mobile-only class when it has no desktop items');
 });
 
 t('a trigger with no desktop actions is hidden above the 700px breakpoint', () => {

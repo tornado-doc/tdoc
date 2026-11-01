@@ -83,6 +83,40 @@ console.log('draft-store per-doc cache');
     await clearDraft(key);
   });
 
+  await t('an older clear or mode write cannot erase a newer keystroke', async () => {
+    const key = 'interleaved:ada';
+    await saveDraft(key, '<p>baseline</p>', { baseHash: 'base', baseVersion: 1 });
+    const clearing = clearDraftBody(key, '<p>baseline</p>');
+    const next = saveDraft(key, '<p>new after clear</p>', { baseHash: 'base', baseVersion: 1 });
+    await Promise.all([clearing, next]);
+    assert.strictEqual((await loadDraft(key)).bodyHtml, '<p>new after clear</p>');
+
+    const modeWrite = saveDraftMode(key, 'edit');
+    const last = saveDraft(key, '<p>new after mode</p>', { baseHash: 'base', baseVersion: 1 });
+    await Promise.all([modeWrite, last]);
+    const record = await loadDraft(key);
+    assert.strictEqual(record.mode, 'edit');
+    assert.strictEqual(record.bodyHtml, '<p>new after mode</p>');
+    await clearDraft(key);
+  });
+
+  await t('a keystroke after a mode write wins within the same millisecond', async () => {
+    const key = 'same-tick:ada';
+    const realDate = box.Date;
+    box.Date = class extends realDate { static now() { return 1_800_000_000_000; } };
+    try {
+      await saveDraft(key, '<p>before</p>', { baseHash: 'base', baseVersion: 1 });
+      await saveDraftMode(key, 'edit');
+      await saveDraft(key, '<p>after</p>', { baseHash: 'base', baseVersion: 1 });
+      const record = await loadDraft(key);
+      assert.strictEqual(record.bodyHtml, '<p>after</p>');
+      assert.strictEqual(record.mode, 'edit');
+    } finally {
+      box.Date = realDate;
+      await clearDraft(key);
+    }
+  });
+
   await t('mode is stored on the same per-doc record as the body', async () => {
     const key = 'doc:ada';
     await saveDraftMode(key, 'edit');

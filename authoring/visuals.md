@@ -11,8 +11,8 @@ a tradeoff in it, **draw it** — prose is the connective tissue between visuals
 not the main body. Aim for a visual roughly every screenful, wherever in the
 doc the material earns one.
 
-Everything here is buildable as inline SVG or CSS — the host runs no author
-JS, so no chart library. An SVG chart is also a commentable artifact, which is
+The host runs no author JavaScript. Use SVG/CSS for inline visuals; optional
+provider-owned editors can also supply a static SVG snapshot. An SVG chart is also a commentable artifact, which is
 the point of tdoc. Draw honestly: real numbers, labeled axes, no chartjunk.
 
 ## Match the visual to the data
@@ -37,6 +37,13 @@ Most non-trivial docs carry **several different types**, not one repeated. A
 competitor analysis wants stat tiles + a positioning map + a comparison matrix
 + maybe a bar chart. A technical design wants an architecture diagram + a
 sequence + a metrics row. Reach for the variety the content earns.
+
+## Excalidraw
+
+The official Excalidraw editor is available. Its scene and SVG snapshot format
+is documented in `structure/components.md`.
+In the browser, **Insert diagram** in document Edit mode opens it for new or
+existing docs; **Apply to document** then **Save** publishes the editable scene.
 
 ## The style owns the look, not the choice
 
@@ -80,3 +87,33 @@ Wrap wide charts in `<div class="diagram-box">` (or `tdoc-table-scroll` for
 tables) so they scroll on a phone instead of overflowing. Tag an author-built
 figure `data-tdoc-artifact` if it is a composed block rather than a single
 `<svg>`, so a reader can comment on it as a unit.
+
+
+## Width and visual verification
+
+Width is independent of house style. Use the default reading column for prose;
+use `<div class="wrap" data-tdoc-width="wide">` for a diagram-heavy design or
+comparison that needs the available page width. Both keep template spacing.
+A larger page does not fix labels that overlap or escape their SVG boxes.
+
+Creation validates the HTML/template and bakes the reader styles. Creation and
+publishing do not run a rendered layout audit. Review the source for readable
+labels, wrapping text and intentional local scrolling. If a preview is available,
+inspect phone and desktop layouts in it without installing additional tools.
+Do not describe an uninspected document as visually verified.
+
+Use `data-tdoc-cell="value"` on atomic amounts/units, statuses or identifiers.
+Keep prose wrappable. The shared table policy measures each cell's unwrapped
+ink, reserves its natural width up to a 12em prose reading measure (uncapped
+for explicit values), and allows the wrapper to scroll when needed. It does
+not guess meaning from a column number, header label or language. Existing
+explicit line breaks, merged cells and author card reflows remain intact.
+The policy protects hosted readers, including old versions and browser edits;
+its transient style is not serialized into author HTML. Check standalone
+exports separately. The reader protection applies to CLI uploads, direct HTTP
+uploads and browser saves; it is not proof that every author layout is correct.
+
+Use the figure sizing and text rules in `authoring/structure/components.md`.
+In a preview, inspect label fit, arrow meaning and table readability. On phones,
+keep necessary scrolling local and hint when content continues off-screen.
+Never hide page overflow: that makes content inaccessible.

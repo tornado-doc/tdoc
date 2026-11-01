@@ -106,27 +106,55 @@ numerals (`<span class="num">$1.4B</span>`), not on the cell that contains them.
 `bin/tdoc-validate-template` fails a cell class that narrows type or forbids
 wrapping while sitting on prose, on the custom-template path too.
 
+**Atomic values and prose have different wrapping needs.** Tabular numerals
+do not keep a number together with its unit. For a cell that is one value, use
+`<td data-tdoc-cell="value"><span class="num">5</span> days</td>`.
+Use the same attribute for a price, date, compact status or identifier; do not
+mark a paragraph as a value. Keep paragraph cells normally wrappable. Do not
+assign one first-column percentage to every table: an ID column and a prose
+column have different intrinsic widths.
+
+The provider and CLI preview share a content-based safety floor for native
+tables. Each cell reserves its natural unwrapped width up to a 12em prose
+reading measure; explicit value cells reserve the complete value. Insufficient
+space becomes local scrolling, not one-character columns or reduced type.
+This also covers old documents that have no value annotations. It does not
+replace reviewing all tables in both content widths, and does not run in a
+standalone HTML file opened without the provider. Author card reflows keep
+their own layout; the provider does not guess whether a matrix is a record list.
+
 **Scroll wrappers** — `tdoc-table-scroll` for a table, `diagram-box` for a
 figure. Both are `overflow-x: auto`.
 
-A figure has to say how wide it is. An `<svg>` with `width="960"` on the tag
-renders at 960 physical pixels, so in a narrower column it runs past the right
-edge and the wrapper scrolls it out of sight — the last panel is simply gone
-unless the reader thinks to drag it. The document is what has to fix that, not
-the page it happens to be served by:
+Use wrapping HTML/CSS for text-heavy panels and HTML captions for explanations.
+Keep SVG labels short; split longer labels into lines that fit their nodes.
 
 ```css
-.diagram-box svg { display: block; width: 100%; height: auto; }
+.diagram-box svg { display: block; width: min(100%, var(--figure-width)); height: auto; }
 ```
 
-`width: 100%` makes the drawing fluid: the viewBox does the scaling, so the
-figure fits whatever column it lands in and nothing is ever off-screen.
+Set `--figure-width` per figure from its content and the selected style’s
+typography. Bound `width`, not just `max-width` (the reader supplies its own
+responsive maximum); do not enlarge a small figure just to fill the column.
+Estimate SVG label size as `font-size × displayed SVG width / viewBox width`,
+including cumulative scale from the text and its ancestors; target at least
+12px at the smallest intended width. If transforms make this uncertain, use an
+unscaled label layer or HTML. Split dense figures, or preserve their spatial
+layout with `min-width` and local scrolling. Recheck label/node fit after sizing;
+the estimate does not prove rendered fit.
 
-Add a `min-width` when shrinking to fit would cost more than scrolling does. A
-dense figure squeezed into a phone puts its labels at a few pixels, which is
-worth trading for a swipe — that is the case the wrapper exists for, and
-without a `min-width` it never engages. Pick the width that keeps the smallest
-type around 9px.
+Before finalizing a changed SVG chart, save a standalone copy with its actual
+styles and preview it at the intended display widths:
+`node "$SKILL_DIR/bin/tdoc-preview-svg" figure.svg --out /tmp/figure-preview --font /path/to/font.ttf --widths 343,400`.
+Pass the actual smallest/largest displayed widths after the CSS cap, not the
+page viewport widths; compare label size with surrounding prose in a page preview.
+Repeat `--font` for other faces or CJK fallback; only supplied fonts are loaded.
+Use a new `--out` directory for each revision so stale previews cannot be reused.
+First use: `npm ci --prefix "$SKILL_DIR/tools/svg-preview" --ignore-scripts --no-audit --no-fund`.
+Inspect the PNGs and fix clipping, unintended overlap and small labels without
+removing content or changing data. Re-preview changes, not an unchanged publish.
+Missing glyphs/render warnings fail; exit 0 means ready for visual review, not
+layout approved. This previews the SVG only, not surrounding HTML/CSS.
 
 **Stat tile row** — a few numbers that carry an argument on their own. Three or
 four; a fifth is a table. It earns its place from the numbers in it, like any
@@ -141,6 +169,24 @@ standing at the top of every document as a header band.
 
 **Note** — an aside that qualifies rather than warns. One rule, no fill, no
 icon: `<p class="note">`.
+
+**Slide** — one page of a deck. A doc that has them gets the reader's
+Present control; nothing else changes about how it reads or takes comments.
+
+```html
+<section class="slide" data-tdoc-slide data-tdoc-artifact="Slide 3: the loop">
+  <h2>…</h2> …
+</section>
+```
+
+```css
+.slide { container-type:inline-size; aspect-ratio:16/9; overflow:hidden; }
+.slide h2 { font-size:max(3.6cqw,24px); } .slide p { font-size:max(1.75cqw,15px); }
+```
+
+Keep every slide's content inside its 16:9 box: the presenter scales the box
+to the screen, so anything that spills is cut off. One idea per slide. Design,
+layouts and phone reflow: `$SKILL_DIR/authoring/structure/slides.md`.
 
 ## Figure parts
 
@@ -199,8 +245,10 @@ Either use a semantic tag — `<section>`, `<aside>`, `<details>` — or mark it
 `data-tdoc-artifact`. That is what makes it something a reader can point at,
 which is the reason it is in a tdoc rather than a screenshot.
 
-**Survive a phone.** Fluid widths, a `viewBox` rather than pixel `width`/
-`height`, and a scroll wrapper if it genuinely cannot narrow.
+**Survive a phone.** Use fluid widths, an SVG `viewBox`, and local scrolling
+when a figure cannot narrow. Let text containers grow with their content;
+never fit required text with clipping, line clamping or a fixed/max height.
+An intentionally bounded viewport must scroll to expose all its content.
 
 **Compute nothing in the host.** The same rule as everything else: `:checked`
 for state, CSS `@keyframes` for motion, a sandboxed widget island if it truly
@@ -228,3 +276,35 @@ works. A toggle is `:checked` plus sibling selectors; motion is CSS
 `@keyframes` with a `prefers-reduced-motion` guard; SVG styling goes in a
 `<style>` *inside* the `<svg>`. Anything that genuinely needs to compute belongs
 in a sandboxed widget island.
+
+
+## Optional Excalidraw artifact
+
+The provider loads the official `@excalidraw/excalidraw` React editor on demand.
+Do not add React, script tags, an editor iframe, or a CDN import to author HTML.
+
+```html
+<figure id="value-flow" data-tdoc-artifact="Value flow"
+  aria-label="Value flow" data-tdoc-excalidraw="HTML-ATTRIBUTE-ESCAPED SCENE JSON">
+  <div class="diagram-box" data-tdoc-diagram-snapshot>
+    <!-- the SVG exported from the same scene -->
+  </div>
+  <figcaption>What the diagram shows.</figcaption>
+</figure>
+```
+
+Give every figure a unique stable ID. Store valid Excalidraw JSON (`type`,
+`version`, `elements`, `appState`, `files`) in the attribute, escaping `&`, `"`,
+`<` and `>` for HTML. Source limit: 2 MB and 5,000 elements. This first version
+supports shapes, text, lines, arrows and freehand drawings, not embedded web
+pages or image elements. Use native text/container and arrow bindings so labels
+and connectors follow their shapes. Include a responsive, accessible SVG
+snapshot even when no JavaScript is available. Keep scene and snapshot in sync.
+After manual edits, update the saved scene while preserving element IDs and
+positions rather than regenerating a layout that discards those edits.
+
+The source and snapshot live in the same HTML version: existing write, publish,
+pull, duplicate and download flows carry both. Owners choose Apply to document
+then Save, using the normal permission and base-version conflict checks. Readers
+may edit a temporary copy and download it; they cannot apply it to the source
+document. Comments attach to the figure, not individual Excalidraw elements.

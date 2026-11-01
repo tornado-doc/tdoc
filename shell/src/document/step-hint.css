@@ -126,7 +126,8 @@
 .sh-hint.ticked .sh-text { color: var(--td-muted, #6b6a66); text-decoration: line-through; }
 
 @media (max-width: 720px) {
-  .sh-hint { padding: 8px 10px; }
+  /* 46px card + 22px padding = the same 68px reserved by comment positioning. */
+  .sh-hint { padding: 11px 10px; }
   .sh-inner { height: 46px; gap: 9px; padding: 0 8px 0 11px; border-radius: 12px; }
   .sh-text { font-size: 13.5px; }
   .sh-go { padding: 0 12px; }

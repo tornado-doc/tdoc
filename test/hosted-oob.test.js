@@ -29,15 +29,19 @@ function block(startNeedle, endNeedle) {
 const hostedRoute = block("if (p === '/api/hosted/token' && method === 'POST')", '// ---- comments ----');
 const uploadRoute = block("if (p === '/api/upload' && method === 'POST')", '// ---- admin access mutation ----');
 const accessRoute = block("if (p === '/api/doc/access' && method === 'PATCH')", '// ---- admin delete ----');
-const deleteRoute = block("if (p === '/api/doc' && method === 'DELETE')", "return text('Not found'");
+const deleteRoute = block("if (p === '/api/doc' && method === 'DELETE')", '// ---- Trash: list, restore, delete forever ----');
+// Delete moves a doc to Trash; "Delete forever" (and the scheduled purge)
+// is where the erasing happens now.
+const purgeRoute = block("if ((p === '/api/trash/restore' || p === '/api/trash/purge') && method === 'POST')", "return text('Not found'");
+const purgeHelper = block('async function purgeTrashedDoc(env, slug) {', '// Who may restore or purge a trashed doc');
 // The erasing itself lives in a named helper now, because the replay reset
 // deletes a doc too and a second, thinner copy is how one of them ends up
 // leaving the DO populated. The order still matters, so the order is still
 // pinned -- just where it is written.
-const deleteBody = block('async function deleteDocEverywhere(env, slug) {', 'async function loadDocMeta');
+const deleteBody = block('async function deleteDocEverywhere(env, slug', 'async function loadDocMeta');
 const wipeRoute = block("url.searchParams.get('all') === '1'", '// Soft-delete:');
 const agentReplyRoute = block("if (p === '/api/agent/reply' && method === 'POST')", '// ---- admin upload');
-const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env, slug) {');
+const authorizeStart = worker.indexOf('async function authorizeOwnerMutation(req, env, slug');
 const authorizeEnd = worker.indexOf('// #34 — Per-slug write serialization', authorizeStart);
 const authorizeSrc = worker.slice(authorizeStart, authorizeEnd);
 
@@ -71,14 +75,16 @@ t('CLI mint and Duplicate share one hosted-account registry', () => {
   assert(!issue.includes('hosted-github:'), 'token mint must not write a second registry');
 });
 
-t('tdoc.dev opens hosted registration by hostname; BYOK template does not', () => {
+t('tdoc.dev opens hosted registration by hostname or tdoc-cd bundle; BYOK template does not', () => {
   const uncommented = wranglerTpl.split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
   assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(uncommented),
     'wrangler template must not set TDOC_HOSTED_REGISTRATION=1 (BYOK stays single-owner /me)');
   assert(!/TDOC_HOSTED_REGISTRATION\s*=\s*"?1"?/.test(deployWf),
-    'tdoc.dev CD must not set TDOC_HOSTED_REGISTRATION=1 (hostname opens it)');
+    'tdoc.dev CD must not set TDOC_HOSTED_REGISTRATION=1 (bundle provenance opens it)');
   assert(worker.includes("origin === 'https://tdoc.dev'"),
     'unset registration must enable on the tdoc.dev origin');
+  assert(worker.includes("generated_by === 'tdoc-cd'"),
+    'tdoc-cd bundles must enable hosted /me on every hostname');
 });
 
 t('Hosted tokens are stored hashed, not in cleartext', () => {
@@ -104,7 +110,7 @@ t('Combined owner-mutation gate is session OR admin token OR (hosted token + slu
 t('Hosted upload stamps remote meta ownership before writing', () => {
   assert(uploadRoute.includes('requireDocWriteAccess(env, auth.actor, slug, { create: true })'), 'upload must enforce create/claim write access');
   assert(uploadRoute.includes('stampHostedOwnership(incoming, auth.actor)'), 'upload must stamp hosted owner');
-  assert(uploadRoute.includes('quota_docs'), 'hosted create must enforce a per-account doc quota');
+  assert(uploadRoute.includes('quotaDocsPayload'), 'hosted create must enforce a per-account doc quota');
   assert(uploadRoute.includes('quota_upload_bytes'), 'hosted upload must cap payload bytes');
   assert(uploadRoute.includes('utf8ByteLength(doc)'), 'upload quota must count UTF-8 bytes');
   assert(!uploadRoute.includes('doc.length > maxBytes'), 'upload quota must not use JS string length');
@@ -112,7 +118,7 @@ t('Hosted upload stamps remote meta ownership before writing', () => {
   const validate = uploadRoute.indexOf('validateAccessWrite');
   const claim = uploadRoute.indexOf("kind: 'claim_owner'");
   const r2 = uploadRoute.indexOf('env.DOCS.put');
-  const meta = uploadRoute.indexOf('env.META.put(`meta:${slug}`');
+  const meta = uploadRoute.indexOf('putDocMetaJson(env, slug, ');
   assert(gate >= 0 && gate < r2, 'upload must enforce owner before R2 write');
   assert(gate < meta, 'upload must enforce owner before META write');
   assert(validate >= 0 && claim >= 0 && validate < claim,
@@ -139,7 +145,7 @@ t('Hosted slug ownership claim is backed by per-slug Durable Object storage', ()
 
 t('Access mutation and delete go through the shared gate with the slug', () => {
   for (const [name, route] of [['access', accessRoute], ['delete', deleteRoute]]) {
-    assert(route.includes('authorizeOwnerMutation(req, env, slug)'), `${name}: combined gate missing slug`);
+    assert(route.includes('authorizeOwnerMutation(req, env, slug'), `${name}: combined gate missing slug`);
     const gate = route.indexOf('authorizeOwnerMutation(req, env, slug)');
     const metaWrite = route.indexOf('env.META.put');
     const docDelete = route.indexOf('env.DOCS.delete');
@@ -148,18 +154,21 @@ t('Access mutation and delete go through the shared gate with the slug', () => {
   }
 });
 
-t('DELETE releases hosted slug ownership after wiping storage', () => {
+t('Delete forever releases hosted slug ownership after wiping storage', () => {
   const release = deleteBody.indexOf("kind: 'release_owner'");
   const metaDel = deleteBody.indexOf('env.META.delete(`meta:${slug}`)');
   const wipe = deleteBody.indexOf("kind: 'wipe'");
   assert(release >= 0, 'DELETE must call release_owner');
-  assert(deleteRoute.includes('await deleteDocEverywhere(env, slug)'), 'and it is the route that asks for it');
+  assert(purgeHelper.includes('deleteDocEverywhere(env, slug)'), 'and the purge is what asks for it');
+  assert(purgeRoute.includes('await purgeTrashedDoc(env, slug)'), 'from the Delete forever route');
+  assert(!deleteRoute.includes('deleteDocEverywhere'), 'plain Delete erases nothing: it moves to Trash');
+  assert(deleteRoute.includes('trashDoc(env, slug, meta, auth)'), 'plain Delete moves to Trash');
   assert(metaDel >= 0 && wipe >= 0 && metaDel < release && wipe < release,
     'release_owner must run after meta/comment wipe so a failed delete cannot free a live slug');
   assert(deleteBody.indexOf('DOCS.delete') < metaDel, 'and the bytes go before the index that finds them');
-  assert(deleteRoute.includes('released.ok === false'),
-    'DELETE must fail closed when COMMENTS is present and release_owner fails');
-  assert(deleteRoute.includes("error: released.error || 'owner_release_failed'"),
+  assert(purgeRoute.includes('released.ok === false'),
+    'Delete forever must fail closed when COMMENTS is present and release_owner fails');
+  assert(purgeRoute.includes("error: released.error || 'owner_release_failed'"),
     'failed release must surface owner_release_failed (or DO error)');
 });
 

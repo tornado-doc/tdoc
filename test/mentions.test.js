@@ -53,6 +53,7 @@ vm.runInContext([
   fn(src, 'normalizeEmail'),
   fn(src, 'normalizeActorKey'),
   fn(src, 'parseMentionLogins'),
+  fn(src, 'isNonHumanAuthor'),
   fn(src, 'commentParticipants'),
   fn(src, 'mentionableUsers'),
   fn(src, 'mentionCandidates'),
@@ -131,6 +132,19 @@ t('participants come off the event log, deleted comments included', () => {
   const people = box.commentParticipants(list);
   assert(JSON.stringify(people.map(p => p.login)) === '["bo","cy"]', JSON.stringify(people));
   assert(people[0].name === 'Bo Chen' && people[0].avatar_url === 'bo.png');
+});
+
+t('agents and the tdoc note are not participants; people keep their order', () => {
+  const people = box.commentParticipants([
+    { id: 'c0', author: { login: 'tdoc', name: 'tdoc', kind: 'system' } },
+    {
+      id: 'c1', author: { login: 'bo' },
+      replies: [{ author: { login: 'claude', kind: 'agent' } }, { author: { login: 'cy' } }],
+      events: [{ kind: 'reply_added', reply: { author: { login: 'codex', kind: 'agent' } } }],
+    },
+    { id: 'c2', author: { login: 'dee', kind: 'human' } },
+  ]);
+  assert(JSON.stringify(people.map(p => p.login)) === '["bo","cy","dee"]', JSON.stringify(people));
 });
 
 t('the mentionable set is owner + allowlist + participants, deduped', () => {
@@ -224,10 +238,15 @@ t('the picker opens on the token under the caret only', () => {
   assert(shell.mentionQueryAt('@', 1)?.query === '');
 });
 
-t('matches rank prefix hits first and cap at six', () => {
+t('matches rank prefix hits first, keep the server\'s relevance order, and cap at six', () => {
   const people = [{ login: 'cydana' }, { login: 'dana' }, { login: 'dan', name: 'X' }];
   const m = shell.matchMentionable(people, 'da');
-  assert(JSON.stringify(m.map(p => p.login)) === '["dan","dana","cydana"]', JSON.stringify(m));
+  assert(JSON.stringify(m.map(p => p.login)) === '["dana","dan","cydana"]', JSON.stringify(m));
+  // A name matches on any word, an email person on the address's parts.
+  const folks = [{ login: 'yayashuxue', name: 'Jingyu Shi (Julie)' }, { login: 'email:claire@befreed.ai', name: 'claire' }];
+  assert(shell.matchMentionable(folks, 'julie')[0].login === 'yayashuxue', 'name word');
+  assert(shell.matchMentionable(folks, 'befreed')[0].login === 'email:claire@befreed.ai', 'email domain part');
+  assert(shell.mentionReason({ tags: ['recent', 'teammate'] }) === 'teammate');
   const many = Array.from({ length: 12 }, (_, i) => ({ login: `dev${i}` }));
   assert(shell.matchMentionable(many, 'dev').length === 6);
 });

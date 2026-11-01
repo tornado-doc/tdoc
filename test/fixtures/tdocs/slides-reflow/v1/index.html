@@ -1,0 +1,28 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Slides reflow</title>
+<style>
+body{margin:0;background:#eee;font-family:system-ui}.wrap{max-width:960px;margin:0 auto;padding:16px}
+.slide{container-type:inline-size;aspect-ratio:16/9;position:relative;overflow:hidden;background:#fff;margin:0 0 24px;box-sizing:border-box}
+.slide.dark{background:#111;color:#fff}
+.inner{position:absolute;inset:0;display:flex;flex-direction:column;padding:4.2cqw 5.2cqw 3.4cqw}
+.top,.foot{display:flex;justify-content:space-between}
+.body{flex:1;display:flex;flex-direction:column;justify-content:center;min-height:0}
+.slide h2{font-size:max(4.2cqw,24px);margin:0 0 .4em}
+.slide p,.slide li{font-size:max(1.75cqw,15px);margin:0 0 .5em}
+.slide small,.foot,.top{font-size:max(1.1cqw,12px);color:#667085}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:3cqw}
+.big{font-size:max(10cqw,48px);font-weight:700;color:#1652f0;line-height:1}
+@container (max-width: 640px){.inner{position:static}.cols{grid-template-columns:1fr!important}}
+</style></head>
+<body><div class="wrap"><h1>Guide deck</h1>
+<section class="slide dark" data-tdoc-slide data-tdoc-artifact="Slide 1: cover" id="r1"><div class="inner">
+<div class="top"><span class="tag">Guest journey</span><span>Shoji</span></div>
+<div class="body"><h2 id="r1t" style="color:inherit">Guests wait longest at the door</h2><p id="r1p">Three visits out of four start with a queue nobody planned for.</p></div>
+<div class="foot"><span>Source: floor study</span><span>01 / 03</span></div></div></section>
+<section class="slide" data-tdoc-slide data-tdoc-artifact="Slide 2: compare" id="r2"><div class="inner">
+<div class="top"><span class="tag">Compare</span><span>Before and after</span></div>
+<div class="body"><h2>Seating by text halves the wait</h2><div class="cols"><div><div class="big">18 min</div><p id="r2p">Average wait before, with a paper list at the host stand and no way to leave.</p></div><div><div class="big">9 min</div><p>Average wait after guests could leave and get a text when the table was ready.</p></div></div></div>
+<div class="foot"><span>Source: two weeks of logs</span><span>02 / 03</span></div></div></section>
+<section class="slide dark" data-tdoc-slide data-tdoc-artifact="Slide 3: closing" id="r3"><div class="inner">
+<div class="body"><h2 style="color:inherit">Next steps</h2><ol><li>Pilot the text queue at the Shoji door for two weeks.</li><li>Measure walk-aways, not only the wait.</li><li>Decide on the rollout in the review.</li></ol></div>
+<div class="foot"><span>Proposal</span><span>03 / 03</span></div></div></section>
+</div></body></html>

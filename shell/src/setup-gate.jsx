@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { copyText } from './document/model.js';
 import { getOnboarding, postOnboardingEvent } from './document/api.js';
-import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
+import { ANOTHER_DOC_RECIPE, COPY_FALLBACK, FIRST_DOC_LINE, NOTHING_YET, RECIPE_URL, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
 import { ConnectReplay, DocReplay } from './setup-gate/replay.jsx';
-import { DebugBar } from './debug-bar.jsx';
+import { clearPendingAsk, peekPendingAsk } from './document/my-agent.js';
+import { TopBar } from './top-bar.jsx';
+import { ConnectAiAppsSection } from './connect-ai-apps.jsx';
 
 // `/setup` — the gate. Setup is not a tutorial: it is the one thing that has
 // to be true before tdoc can do anything, so it gets its own full-screen
@@ -29,11 +31,12 @@ import { DebugBar } from './debug-bar.jsx';
 // gate that state means handing out a per-account setup link and having the
 // CLI fetch it. That is a real change to the prompt, not a UI tweak.
 
-// ONBOARDING.md only reaches the connection in its step 5, as a side effect of
-// building a first doc -- which this page deliberately no longer asks for. So
-// the line names the command that pairs, and stops there.
-
-export const SETUP_PROMPT = 'Install tdoc from https://github.com/tornado-doc/tdoc/blob/main/ONBOARDING.md, then connect it to my account by running: bin/tdoc-publish --signin-only';
+// The same line /start shows. It used to be a second one -- ONBOARDING.md plus
+// a shell command to pair -- because ONBOARDING.md only connects as a side
+// effect of its first-doc step. FIRST-DOC.md connects first (its Step 1b),
+// before it reads anything, so this page still sees the agent turn up early,
+// and a newcomer is handed one line everywhere instead of two.
+export const SETUP_PROMPT = FIRST_DOC_LINE;
 // The second ask, on the same route, and the one place in the whole journey
 // where there is a choice to make. Everybody being marched through the same
 // "what AI knows about you" is what made the old version feel like a
@@ -67,7 +70,7 @@ export const replaySlugFor = (choice, subject) => {
   const words = String(subject || '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/[\s-]+/).filter(Boolean);
   return words.slice(0, 4).join('-') || 'my-first-doc';
 };
-// FIRST_DOC_RECIPE opens with "Set up tdoc and", which is true on the landing
+// FIRST_DOC_LINE opens with "Set up tdoc and", which is true on the landing
 // page and false here: by the time anyone reads this screen the skill is
 // installed and the account is connected. Same recipe, without the preamble.
 export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;
@@ -77,8 +80,8 @@ export const PORTRAIT_PROMPT = `Make my first doc: ${RECIPE_URL}`;
 // than the doc, and "the one about me" pointed at something with a pronoun
 // nobody had introduced -- which one? -- so neither could be read at a glance.
 export const DOC_CHOICES = [
-  { id: 'own', label: 'Write about anything I want', sub: 'I name the topic. My agent writes it.' },
-  { id: 'portrait', label: 'Write about how I use AI', sub: 'I choose the traces. My agent writes it.' },
+  { id: 'own', label: 'My own topic', sub: 'Choose what to write about.' },
+  { id: 'portrait', label: 'How I use AI', sub: 'Choose which activity to share.' },
 ];
 // Kept as the export it always was: the placeholder line still answers "what
 // do I paste" for anyone who lands here with no choice made.
@@ -111,7 +114,7 @@ function WorksWith() {
       {/* The same 21px the create menu uses. At 17 the three marks were a
           smudge -- Claude's line art in particular needs the diameter. */}
       <AgentMarks size={21} />
-      <span className="sg-sr">Claude Code, ChatGPT and Grok</span>
+      <span className="sg-sr">Claude Code and Codex</span>
     </p>
   );
 }
@@ -184,90 +187,24 @@ function SceneStuck() {
   );
 }
 
-// The product, at its own sizes: 48px bar, 280px card, #fff7d0 anchor. Scaled
-// down it would stop being the product, so it is cropped by the pane instead.
-function SceneDone({ bare = false }) {
-  return (
-    <>
-      <div className="sg-app">
-        <div className="sg-bar">
-          <div className="sg-mk"><Mark size={24} /></div>
-          <div className="sg-ver">{bare ? 'v1 ▾' : 'v2 ▾'}</div>
-          <div className="sg-title">{bare ? 'How our pricing actually works' : 'What AI knows about you'}</div>
-          <div className="sg-owner">· you</div>
-          <div className="sg-star">☆</div>
-          <div className="sg-sp" />
-          {bare ? null : <div className="sg-res"><span className="sg-sw" /> Resolved (1)</div>}
-          <div className="sg-btn tint">Comment ▾</div>
-          <div className="sg-btn solid">Share</div>
-          <div className="sg-ic">⋯</div>
-          <div className="sg-me"><i /> You</div>
-        </div>
-        <div className={`sg-page${bare ? ' bare' : ''}`}>
-          <div className="sg-doc">
-            {bare ? (
-              <>
-                <h2>How our pricing actually works</h2>
-                <p>Three plans, one number that matters: what you pay when a month goes badly.</p>
-                <p>Seats are billed on the day you add them and refunded to the hour when you take them away. Nothing renews without an invoice you can read first.</p>
-                <p className="faint">Published a moment ago. Your agent has the link.</p>
-              </>
-            ) : (
-              <>
-                <h2>What AI knows about you</h2>
-                <p>You have been treating your agent like a search box, and it shows.</p>
-                <p><span className="sg-anchor">Nothing you asked it this month required memory.</span> Every session started from nothing, and you paid for that in re-explaining yourself.</p>
-                <p className="faint">The traces say you work in bursts, late, and abandon about a third of what you start before the second message.</p>
-              </>
-            )}
-          </div>
-          {bare ? null : (
-          <div className="sg-margin">
-            <div className="sg-pin"><i /></div>
-            <div className="sg-card active">
-              <div className="sg-cc-head">
-                <div className="sg-cc-av" />
-                <div className="sg-cc-who"><b>You</b><span className="sg-cc-when">2:41 PM</span></div>
-                <div className="sg-cc-acts"><span>✓</span><span>⋯</span></div>
-              </div>
-              <p className="sg-cc-text">This is too kind. I abandon far more than a third — check the real number.</p>
-              <div className="sg-react"><span>👍 1</span></div>
-            </div>
-            <div className="sg-pin b"><i /></div>
-            <div className="sg-card b">
-              <div className="sg-chip">✓ Applied in v2</div>
-              <div className="sg-cc-head">
-                <div className="sg-cc-av bot" />
-                <div className="sg-cc-who"><b>Your agent</b><span className="sg-cc-when">2:48 PM</span></div>
-              </div>
-              <p className="sg-cc-text">Counted it properly: 61%. Rewrote the paragraph and published v2.</p>
-            </div>
-          </div>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
-
 // ------------------------------------------------------------------ the gate
 
-export function SetupGate({ boot }) {
-  const [record, setRecord] = useState(null);
-  const [paired, setPaired] = useState(false);
+export function SetupGate({ boot, preview = null }) {
+  const [record, setRecord] = useState(preview?.record || null);
+  const [paired, setPaired] = useState(Boolean(preview?.paired));
   // The choice, and the subject it may carry. Nothing is chosen on arrival:
   // pre-selecting one would answer the only question this screen asks.
   const [choice, setChoice] = useState(null);
   // Nothing in the form column is drawn until the server has answered once.
   // Before that the record is empty, which reads as "not connected" and paints
   // the connect step for a beat on a page that was asked for the doc step.
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(Boolean(preview));
   const [subject, setSubject] = useState('');
   const subjectRef = useRef(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const promptRef = useRef(null);
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsed, setElapsed] = useState(preview?.elapsed || 0);
   const [identity, setIdentity] = useState(boot?.identity || null);
   const signedIn = Boolean(identity);
   const waitingSince = useRef(null);
@@ -323,9 +260,13 @@ export function SetupGate({ boot }) {
   // The clock starts when this page starts waiting, not when somebody presses
   // a button. It is the same wait either way.
   if (loaded && signedIn && state !== 'done' && !waitingSince.current) waitingSince.current = Date.now();
+  // A reader who pressed "Connect my agent" on somebody's doc goes back to
+  // that doc, where the question they were asking waits for the new agent
+  // (document/my-agent.js).
+  const [pendingAsk] = useState(() => peekPendingAsk());
   const onward = step === 'doc' && ownDoc
     ? `/d/${encodeURIComponent(ownDoc)}?step=comment`
-    : '/me';
+    : pendingAsk ? `/d/${encodeURIComponent(pendingAsk.slug)}` : '/me';
   // Both steps are one layout with a status line under it. Swapping the doc
   // step into a second, emptier face when its doc arrived made a page out of a
   // sentence: whoever landed on it was told their first tdoc is live and
@@ -338,7 +279,7 @@ export function SetupGate({ boot }) {
 
   // The record is the only thing that moves this page.
   useEffect(() => {
-    if (!signedIn) return undefined;
+    if (!signedIn || preview) return undefined;
     let cancelled = false;
     let timer = null;
     const tick = async () => {
@@ -367,6 +308,7 @@ export function SetupGate({ boot }) {
   // OIDC provider and back to /setup. Signing in is signing up, so there is no
   // second door to offer.
   const signIn = () => {
+    if (preview) return;
     const here = wantsDoc ? '/setup?step=doc' : '/setup';
     location.href = `/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(here)}`;
   };
@@ -376,6 +318,7 @@ export function SetupGate({ boot }) {
     setCopied(ok !== false);
     setCopyFailed(ok === false);
     if (ok === false) selectContents(promptRef.current);
+    if (preview) return;
     if (!stamped.current) { stamped.current = true; postOnboardingEvent('door_own_agent').catch(() => {}); }
     postOnboardingEvent('copy_clicked').catch(() => {});
   };
@@ -386,8 +329,11 @@ export function SetupGate({ boot }) {
   // Nothing typed for somebody who cannot act on it yet: a signed-out visitor
   // watching the composer spell out a line they have no account to use is the
   // page rehearsing in front of them.
+  // No separate scene for `done`. It used to swap in a hand-drawn document
+  // window -- a different object, in a different style, at the exact moment
+  // the reader has just succeeded. The desk they have been watching is where
+  // the result of that success lives, so it stays.
   const scene = signedIn && !loaded ? null
-    : state === 'done' ? <SceneDone bare={step === 'doc'} />
       : state === 'stuck' ? <SceneStuck />
         // Waiting is the only state with time to fill, and the only one where
         // the reader has not done the thing yet -- so it is the one that shows
@@ -406,13 +352,36 @@ export function SetupGate({ boot }) {
           // Two acts, two recordings. The first is a line being pasted; the
           // second is a line being typed, as the reader types it.
           : step === 'doc'
-            ? <DocReplay prompt={prompt} slug={replaySlug} />
+            // `ready`, not just a line. Until a subject is typed the line is
+            // composed from the field's PLACEHOLDER, so it is a complete
+            // sentence that nobody wrote -- and the take played it in full,
+            // publishing a document about "what it should be about" while the
+            // field was still empty. The Copy button already refuses that line
+            // for the same reason.
+            ? <DocReplay prompt={prompt} slug={replaySlug} ready={promptReady} />
             : <ConnectReplay prompt={prompt} />;
 
   return (
-    <div className="sg-split">
+    <div className={`sg-split${preview ? '' : ' sg-has-bar'}`}>
+      {/* The onboarding focus page keeps its layout, with the shared top bar
+          laid over its top edge: the same mark home and the same account
+          chip as every other page. The design preview has no session, so it
+          keeps the plain mark. */}
+      {preview ? null : <div className="sg-topbar"><TopBar
+        identity={identity}
+        onboardingTest={boot?.debug ? {
+          record,
+          surface: step === 'doc' ? 'doc' : 'connect',
+          onState: async () => {
+            setCopied(false); setCopyFailed(false);
+            waitingSince.current = Date.now(); setElapsed(0);
+            const result = await getOnboarding().catch(() => null);
+            setRecord(result?.record || {});
+          },
+        } : null}
+      /></div>}
       <section className="sg-pane-form">
-        <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a>
+        {preview ? <a className="sg-brand" href="/me" title="My docs" aria-label="My docs"><Mark /></a> : null}
         <div className="sg-mid">
           <div className="sg-col">
             {signedIn && !loaded ? null : (
@@ -490,19 +459,26 @@ export function SetupGate({ boot }) {
 
                 {step === 'doc' ? null : <WorksWith />}
 
+                {/* No terminal: the same account, connected from the AI app
+                    itself (remote MCP). The page moves on the same way when
+                    that connection is approved. */}
+                {step === 'doc' || state === 'done' ? null : (
+                  <ConnectAiAppsSection className="sg-connect-apps" title="No terminal? Connect in one click" blurb="Use tdoc from Claude, ChatGPT, Cursor or VS Code instead." />
+                )}
+
                 {step === 'doc' && !choice ? null : (
                 <ol className="sg-steps">
                   {step === 'doc' ? (
                     <>
-                      <li>Paste it into your agent.</li>
-                      <li>It writes the page and publishes it as you.</li>
-                      <li>The doc turns up here on its own. No need to refresh.</li>
+                      <li>Paste into your agent.</li>
+                      <li>Your agent writes and publishes to your account.</li>
+                      <li>Your doc appears here automatically.</li>
                     </>
                   ) : (
                     <>
-                      <li>Paste it into your agent.</li>
-                      <li>Approve the request when it opens in your browser.</li>
-                      <li>Your agent shows up here on its own. No need to refresh.</li>
+                      <li>Paste into Claude Code or Codex on your computer.</li>
+                      <li>Approve the request in your browser.</li>
+                      <li>Connection status updates automatically.</li>
                     </>
                   )}
                 </ol>
@@ -522,7 +498,7 @@ export function SetupGate({ boot }) {
                   ) : null}
                   {state === 'stuck' ? (
                     <div className="sg-status stuck">
-                      <div className="head">Still nothing. Ask your agent to check itself:</div>
+                      <div className="head">Ask your agent to check the connection:</div>
                       <div className="sg-doctor">
                         <code>{DOCTOR_PROMPT}</code>
                         <button type="button" onClick={() => copyText(DOCTOR_PROMPT)}>Copy</button>
@@ -536,23 +512,35 @@ export function SetupGate({ boot }) {
                         <path d="M8.2 12.3l2.6 2.6 5-5.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                       {step === 'doc'
-                        ? <div><b>Published.</b> <span className="found">Your first tdoc is live.</span></div>
-                        : <div><b>Connected.</b> <span className="found">Your agent can publish as you.</span></div>}
+                        ? <div><b>Published.</b></div>
+                        : <div><b>Connected.</b></div>}
                     </div>
                   ) : null}
+
                 </div>
 
+                {/* Optional, after the agent is connected: the agent can
+                    already use tdoc; this is for the other direction — tdoc
+                    pinging the agent when comments come in. */}
+                {state === 'done' && step !== 'doc' ? (
+                  <p className="sg-optional">
+                    <span>Optional</span> Want to send comments to your agent from tdoc (Send to agent, @agent)? <a href="/me?view=settings#agents">Set that up</a>.
+                  </p>
+                ) : null}
+
                 <a className={`sg-primary${state === 'done' ? '' : ' off'}`} href={state === 'done' ? onward : undefined} aria-disabled={state !== 'done'}>
-                  {step === 'doc' ? 'Open it' : 'Continue'}
+                  {step === 'doc' ? 'Open doc' : pendingAsk ? 'Back to the doc' : 'Continue'}
                 </a>
-                <p className="sg-account"><a href="/me">I’ll do this later</a></p>
+                {/* Later is a way out of the question too: dismissed, the
+                    setup page stops leading back to that doc. */}
+                <p className="sg-account"><a href="/me" onClick={() => { if (pendingAsk) clearPendingAsk(); }}>Later</a></p>
               </>
             ) : (
               <>
-                <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in to start</button>
+                <button type="button" className="sg-primary" onClick={signIn} disabled={!boot?.oidcAuth}>Sign in</button>
                 <p className="sg-account">
                   {boot?.oidcAuth
-                    ? 'Signing in creates your account. There is no separate sign-up.'
+                    ? 'New here? Signing in creates your account.'
                     : 'Sign-in is not configured on this host.'}
                 </p>
               </>
@@ -560,22 +548,6 @@ export function SetupGate({ boot }) {
           </div>
         </div>
       </section>
-
-      {/* On every page a walk passes through, not just this one -- a new
-          reader starts at the landing page, and everything between there and
-          here is part of what is being tested. */}
-      {boot?.debug ? (
-        <DebugBar
-          record={record}
-          surface={step === 'doc' ? 'doc' : 'connect'}
-          onState={async () => {
-            setCopied(false); setCopyFailed(false);
-            waitingSince.current = Date.now(); setElapsed(0);
-            const result = await getOnboarding().catch(() => null);
-            setRecord(result?.record || {});
-          }}
-        />
-      ) : null}
 
       <aside className="sg-pane-art">
         <div className="sg-stage">

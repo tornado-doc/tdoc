@@ -1,0 +1,29 @@
+#!/usr/bin/env node
+// Admin-only preview-card backfill. Dry-run unless --apply is explicit.
+// TDOC_ADMIN_TOKEN=... node bin/tdoc-backfill-preview-cards --base-url https://tdoc.dev
+const base = process.argv.find((arg) => arg.startsWith('--base-url='))?.slice('--base-url='.length)
+  || (process.argv.indexOf('--base-url') >= 0 ? process.argv[process.argv.indexOf('--base-url') + 1] : '');
+const apply = process.argv.includes('--apply');
+const token = process.env.TDOC_ADMIN_TOKEN;
+if (!base || !/^https?:\/\//.test(base) || !token) {
+  console.error('Usage: TDOC_ADMIN_TOKEN=... tdoc-backfill-preview-cards --base-url https://tdoc.dev [--apply]');
+  process.exit(2);
+}
+let cursor = null;
+const total = { scanned: 0, eligible: 0, updated: 0, failed: 0 };
+do {
+  const response = await fetch(new URL('/api/admin/preview-cards/backfill', base), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apply, cursor, limit: 5 }),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok) {
+    console.error(`Backfill stopped: HTTP ${response.status} ${data.error || 'unknown_error'}`);
+    process.exit(1);
+  }
+  for (const key of Object.keys(total)) total[key] += Number(data[key]) || 0;
+  cursor = data.cursor || null;
+} while (cursor);
+console.log(JSON.stringify({ mode: apply ? 'apply' : 'dry-run', ...total }));
+if (total.failed) process.exitCode = 1;

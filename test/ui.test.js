@@ -2,6 +2,7 @@
 // artifact-shell.test.js; this suite protects the reusable menu/dialog facades,
 // shell framing, and Docs Hub at desktop and phone widths.
 const { requirePlaywrightOrSkip, resolveTarget } = require('./helpers/fixture-server');
+const { toggleTheme, themeRow } = require('./helpers/theme-toggle');
 const { chromium } = requirePlaywrightOrSkip('ui.test.js');
 
 let pass = 0, fail = 0;
@@ -41,10 +42,11 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
   await t('theme toggle persists and reaches the author frame', async () => {
     await page.evaluate(() => localStorage.removeItem('tdoc-theme'));
     await page.reload({ waitUntil: 'networkidle' });
-    await page.click('#tdoc-theme-btn');
+    await toggleTheme(page);
     await page.waitForFunction(() => document.documentElement.dataset.tdocTheme === 'dark');
     const stored = await page.evaluate(() => localStorage.getItem('tdoc-theme'));
     const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
+    await frame.waitForFunction(() => document.documentElement.dataset.tdocTheme === 'dark');
     const frameTheme = await frame.evaluate(() => document.documentElement.dataset.tdocTheme);
     if (stored !== 'dark' || frameTheme !== 'dark') throw new Error(`theme did not persist/bridge: ${stored}/${frameTheme}`);
   });
@@ -106,7 +108,7 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
           scrollWidth: document.documentElement.scrollWidth,
           innerWidth: window.innerWidth,
           visible: ['.tdoc-bar-mark', '.tdoc-mode-trigger', '#tdoc-more-btn'].map(measure),
-          secondary: ['#tdoc-version-toggle', '#tdoc-star-btn', '#tdoc-publish-btn', '#tdoc-theme-btn', '.tdoc-account-trigger'].map(measure),
+          secondary: ['#tdoc-version-toggle', '#tdoc-star-btn', '#tdoc-publish-btn', '.tdoc-account-trigger'].map(measure),
           straySeparator: Boolean(document.querySelector('.crumb-sep-slug')?.getClientRects().length),
         };
       });
@@ -183,6 +185,13 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     }
   });
 
+  await t('Docs Hub rows show the cached preview without opening document content', async () => {
+    const row = page.locator('.doc-row[data-slug="sample-doc"]');
+    const excerpt = await row.locator('.doc-preview-excerpt').textContent();
+    if (!excerpt.includes('recognizable before opening')) throw new Error(`preview excerpt missing: ${excerpt}`);
+    if (await row.locator('img').count()) throw new Error('list rows must not show a picture');
+  });
+
   await t('Docs Hub Create a doc is a menu, and the agent answer composes its line', async () => {
     await page.click('.mk-btn');
     // A modal to choose between two things is a room built for a sentence, so
@@ -217,15 +226,21 @@ async function t(name, fn) { try { await fn(); ok(name); } catch (error) { bad(n
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`${origin}/me`, { waitUntil: 'networkidle' });
     const layout = await page.evaluate(() => {
-      const controls = [...document.querySelectorAll('button, input, select')].map((element) => element.getBoundingClientRect());
+      const controls = [...document.querySelectorAll('button, input, select')]
+        .filter((element) => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden')
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const scroller = element.closest('.tabs');
+          return { element: `${element.tagName.toLowerCase()}.${element.className}`, rect, scrollableTab: !!scroller && scroller.scrollWidth > scroller.clientWidth };
+        });
       return {
         scrollWidth: document.documentElement.scrollWidth,
         innerWidth: window.innerWidth,
-        clipped: controls.some((rect) => rect.right > window.innerWidth + 1 || rect.left < -1),
+        clipped: controls.filter(({ rect, scrollableTab }) => !scrollableTab && (rect.right > window.innerWidth + 1 || rect.left < -1)).map(({ element, rect }) => `${element} ${Math.round(rect.left)}..${Math.round(rect.right)}`),
       };
     });
     if (layout.scrollWidth > layout.innerWidth + 1) throw new Error(`horizontal overflow ${layout.scrollWidth}/${layout.innerWidth}`);
-    if (layout.clipped) throw new Error('a control is clipped outside the viewport');
+    if (layout.clipped.length) throw new Error(`controls clipped outside the viewport: ${layout.clipped.join(', ')}`);
   });
 
   await t('Docs Hub phone tabs and Create action are at least 44px', async () => {

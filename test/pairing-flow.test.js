@@ -171,6 +171,12 @@ async function approve(worker, env, cookie, user_code) {
     assert(jhtml.includes('"code":""'), 'junk code should normalize to empty');
   });
 
+  await t('the onboarding design gallery is unavailable on a production build', async () => {
+    const response = await worker.fetch(req('/__preview/onboarding'), makeEnv(mod.CommentsStore), {});
+    assert(response.status === 404, 'sample approval screens must not be served on production');
+    assert(!(await response.text()).includes('"page":"onboarding-preview"'), 'preview boot escaped its build guard');
+  });
+
   await t('the doc shell advertises the seat too — no surface left on the old door', async () => {
     const env = makeEnv(mod.CommentsStore, {
       OIDC_ISSUER: 'https://issuer.example', OIDC_CLIENT_ID: 'cid',

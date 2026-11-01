@@ -12,12 +12,29 @@ export const QUICK_REACTIONS = [
   '✅',
   '❌',
   '❓',
+  '💬',
   '❗',
   'LGTM',
 ];
 
+// The face for a person with no picture (an email sign-in, or the signed-out
+// "You" on the homepage demo): the first letter of their name, drawn as the
+// top bar's .tdoc-avatar-fallback. Agents always have a mark, so never here.
+export function avatarInitial(author) {
+  const name = String(author?.name || author?.handle || author?.login || '').trim();
+  return (Array.from(name)[0] || '?').toUpperCase();
+}
+
 export function avatarFor(author) {
   const key = String(author?.login || author?.name || '').toLowerCase();
+  // Product seed ("First reader here") and other system/tdoc rows use the
+  // global mark — even when older comments stored an empty avatar_url. So
+  // does tdoc AI's answer in a thread (Ask AI in a comment).
+  if (key === 'tdoc' || key === 'tdoc-ai' || author?.kind === 'system') {
+    // Filled light square (white field). Empty avatar_url on older seed rows
+    // must not fall back to the stroke-only chrome mark.
+    return author?.avatar_url || '/tdoc_logo.png';
+  }
   if (author?.kind !== 'agent') return author?.avatar_url || '';
   if (key.includes('claude') || key.includes('anthropic')) {
     return 'https://cdn.simpleicons.org/claude/d97757';
@@ -32,6 +49,7 @@ export function avatarFor(author) {
 }
 
 export function anchorFromSelection(selection) {
+  if (selection.kind === 'document') return null;
   if (selection.kind === 'element') {
     return {
       kind: 'element',
@@ -52,6 +70,10 @@ export function anchorFromSelection(selection) {
       ? { occurrence: selection.occurrence, occurrences: selection.occurrences }
       : {}),
   };
+}
+
+export function isDocumentComment(comment) {
+  return !comment?.anchor || comment.anchor.kind === 'document';
 }
 
 export function layoutPins(pins, docHeight) {
@@ -81,7 +103,8 @@ export function layoutPins(pins, docHeight) {
 
   for (const row of rows) {
     const previous = clusters.at(-1);
-    if (previous && row.y - previous.maxY <= 12) {
+    if (previous && row.y - previous.maxY <= 12
+      && Boolean(previous.items[0].comment.document) === Boolean(row.comment.document)) {
       previous.items.push(row);
       previous.maxY = row.y;
       previous.y = (previous.items[0].y + row.y) / 2;

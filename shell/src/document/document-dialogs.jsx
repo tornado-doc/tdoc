@@ -1,9 +1,39 @@
 import React, { useEffect, useState } from 'react';
 import { AppDialog } from '../ui/dialog.jsx';
-import { getPublishSignin, publishDocument } from './api.js';
+import { AppButton } from '../ui/button.jsx';
+import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
+import { getPublishSignin, publishDocument, requestQuotaBump } from './api.js';
 import { copyText } from './model.js';
 
-export function ShareDialog({ open, url, onOpenChange, onCopied }) {
+// A link to hand out: the URL in a light, readable field and Copy link as
+// the primary button beside it (under it on a phone). Copy link is the main
+// action of every share surface. `onCopy` copies and reports (toast,
+// status); `copyOnFieldClick` keeps the click-the-field-to-copy surfaces.
+export function ShareLinkRow({ url, id, onCopy, copyOnFieldClick = false, disabled = false, children = null }) {
+  return (
+    <div className="tdoc-share-link-row">
+      <div className="tdoc-share-link-field" id={id} onClick={copyOnFieldClick ? onCopy : undefined}>{url}</div>
+      <AppButton variant="primary" className="primary tdoc-share-copy" disabled={disabled} onClick={onCopy}>Copy link</AppButton>
+      {children}
+    </div>
+  );
+}
+
+// The second choice under every Share link: this exact version, for the
+// reader who must see what you saw. Quiet text, not a second button.
+export function VersionLinkChoice({ versionUrl, version, onCopied }) {
+  if (!versionUrl) return null;
+  return (
+    <p className="tdoc-share-version">
+      This link always opens the newest version.{' '}
+      <button type="button" className="tdoc-quiet-link" onClick={() => copyText(versionUrl).then(() => onCopied && onCopied())}>
+        Copy a link to v{version} instead
+      </button>
+    </p>
+  );
+}
+
+export function ShareDialog({ open, url, versionUrl, version, team, onOpenChange, onCopied }) {
   const copy = async () => {
     await copyText(url);
     onCopied();
@@ -14,15 +44,19 @@ export function ShareDialog({ open, url, onOpenChange, onCopied }) {
       open={open}
       onOpenChange={onOpenChange}
       title="Share"
-      description="Anyone with this link can read. To comment, they sign in."
+      description={team
+        ? `${team.access?.visibility === 'private'
+          ? (team.access?.team ? `Everyone in ${team.team.name} can open and comment.` : 'Only people with access can open it.')
+          : 'Anyone with this link can read.'} Only team admins can change access.`
+        : 'Anyone with this link can read. To comment, they sign in.'}
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
-          <button type="button" className="primary" onClick={copy}>Copy link</button>
+          <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
         </>
       )}
     >
-      <div className="code url" id="tdoc-share-url">{url}</div>
+      <ShareLinkRow url={url} id="tdoc-share-url" onCopy={copy} />
+      <VersionLinkChoice versionUrl={versionUrl} version={version} onCopied={onCopied} />
     </AppDialog>
   );
 }
@@ -55,14 +89,7 @@ export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopie
         : 'They are not on this doc yet, but they use tdoc — the mention is in their inbox. Send the link if you want them to see it sooner.'}
       actions={(
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Close</button>
-          <button
-            type="button"
-            className="primary"
-            onClick={async () => { await copyText(url); onCopied(); }}
-          >
-            Copy link
-          </button>
+          <AppButton onClick={() => onOpenChange(false)}>Close</AppButton>
         </>
       )}
     >
@@ -73,7 +100,7 @@ export function MentionReachDialog({ open, newcomers, url, onOpenChange, onCopie
           </div>
         ))}
       </div>
-      <div className="code url" style={{ marginTop: 10 }}>{url}</div>
+      <ShareLinkRow url={url} onCopy={async () => { await copyText(url); onCopied(); }} />
     </AppDialog>
   );
 }
@@ -98,7 +125,7 @@ function PublishSignin({ signin }) {
       </div>
       <div className="code" style={{ marginTop: 8 }}>{signin.user_code}</div>
       <div className="actions" style={{ justifyContent: 'flex-start', gap: 8, marginTop: 8 }}>
-        <button type="button" onClick={() => copyText(signin.user_code)}>Copy code</button>
+        <CopyPromptButton label="Copy code" copied={false} onCopy={() => copyText(signin.user_code)} />
         <button
           type="button"
           onClick={() => window.open(signin.verification_uri, '_blank', 'noopener')}
@@ -156,8 +183,8 @@ export function PublishDialog({ open, slug, onOpenChange }) {
       title="Publish this doc"
       actions={url ? null : (
         <>
-          <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
-          <button type="button" id="tdoc-pub-go" className="primary" disabled={busy} onClick={publish}>Publish</button>
+          <AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>
+          <AppButton variant="primary" id="tdoc-pub-go" className="primary" disabled={busy} onClick={publish}>Publish</AppButton>
         </>
       )}
     >
@@ -167,9 +194,8 @@ export function PublishDialog({ open, slug, onOpenChange }) {
       {signin ? <PublishSignin signin={signin} /> : null}
       {url ? (
         <div style={{ marginTop: 10 }}>
-          <div className="code url" id="tdoc-pub-url">{url}</div>
+          <ShareLinkRow url={url} id="tdoc-pub-url" onCopy={() => copyText(url)} />
           <div className="actions" style={{ justifyContent: 'flex-start', gap: 8 }}>
-            <button type="button" className="primary" onClick={() => copyText(url)}>Copy link</button>
             <button type="button" onClick={() => window.open(url, '_blank', 'noopener')}>View live →</button>
           </div>
         </div>
@@ -184,9 +210,80 @@ export function MessageDialog({ message, onOpenChange }) {
       open={Boolean(message)}
       onOpenChange={onOpenChange}
       title={message?.title || 'Something went wrong'}
-      actions={<button type="button" onClick={() => onOpenChange(false)}>Close</button>}
+      actions={<AppButton onClick={() => onOpenChange(false)}>Close</AppButton>}
     >
       <p>{message?.message}</p>
+    </AppDialog>
+  );
+}
+
+// Shown when create/duplicate hits quota_docs. One reason → bump (50→100, then
+// 100→200). Agents get the same escape hatch from the error body's `bump` field.
+export function QuotaBumpDialog({ open, used, limit, onClose, onBumped }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setReason('');
+    setBusy(false);
+    setStatus('');
+  }, [open]);
+
+  const submit = async () => {
+    const trimmed = reason.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      const result = await requestQuotaBump(trimmed);
+      if (result.already) {
+        setStatus(`Already at the self-serve cap (${result.to}). A human has to raise it further.`);
+        return;
+      }
+      onBumped?.(result);
+      onClose?.();
+    } catch (error) {
+      setStatus(error.message || 'Could not raise the limit');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AppDialog
+      open={open}
+      onOpenChange={(next) => { if (!next) onClose?.(); }}
+      title="Doc limit reached"
+      description={typeof used === 'number' && typeof limit === 'number'
+        ? `This account has ${used} of ${limit} hosted docs. Write why you need more — we raise the limit (up to 200).`
+        : 'This account is at its hosted-doc limit. Write why you need more — we raise it (up to 200).'}
+      actions={(
+        <>
+          <AppButton onClick={onClose}>Cancel</AppButton>
+          <AppButton variant="primary"
+            className="primary"
+            disabled={busy || !reason.trim()}
+            onClick={submit}
+          >
+            {busy ? 'Requesting…' : 'Raise limit'}
+          </AppButton>
+        </>
+      )}
+    >
+      <label className="manage-hint" style={{ display: 'block' }}>
+        Reason
+        <textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          rows={3}
+          maxLength={500}
+          placeholder="e.g. shipping a series of design drafts this week"
+          style={{ display: 'block', width: '100%', marginTop: 6, resize: 'vertical' }}
+        />
+      </label>
+      {status ? <div className="status" style={{ marginTop: 10 }}>{status}</div> : null}
     </AppDialog>
   );
 }

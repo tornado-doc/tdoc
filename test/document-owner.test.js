@@ -39,7 +39,7 @@ t('the worker hands the shell an owner, from the one field that records one', ()
 });
 
 t('the whole meta record is passed, not one field at a time', () => {
-  assert(/commentWritesEnabled, docMeta, oidc\)/.test(worker), 'the shell builder should take the meta record');
+  assert(/commentWritesEnabled, docMeta, oidc(?:, pageUrl)?\)/.test(worker), 'the shell builder should take the meta record');
   assert(/canCommentOnDoc\(gate\.access, session, env, gate\.meta\), gate\.meta, /.test(worker),
     'the call site should hand over the record it already loaded');
 });
@@ -52,8 +52,12 @@ t('the local server declares an owner it can never have', () => {
 });
 
 t('a document with nobody recorded names nobody', () => {
-  assert(/\{config\.author \? <span className="doc-author">\{config\.author\}<\/span> : null\}/.test(toolbar),
-    'the bar must render nothing at all when there is no owner');
+  // The bar names the document, not its owner: logo and title on the left,
+  // nothing else (no space / folder / owner crumbs).
+  const start = toolbar.indexOf('export function DocumentBreadcrumbs(');
+  const block = toolbar.slice(start, toolbar.indexOf('\nexport function', start + 20));
+  assert(!/config\.author/.test(block), 'the owner is back in the bar');
+  assert(!/tdoc-crumb/.test(toolbar), 'crumbs are back in the bar');
   assert(ownerLabel({ owner: '' }, 'serena') === null, 'an empty owner is not a label');
   assert(ownerLabel({}, 'serena') === null, 'a missing owner is not a label');
 });
@@ -73,12 +77,9 @@ t('one rule across the lists, not one per list', () => {
     'both lists must go through the same rule');
 });
 
-t('the title outlives the author when the bar tightens', () => {
-  const narrow = chromeCss.slice(chromeCss.indexOf('@media (max-width: 900px)'));
-  assert(/\.tdoc-bar \.doc-author \{ display: none; \}/.test(narrow.slice(0, 400)),
-    'the author should fold away at the same breakpoint as the identity name');
-  assert(/\.tdoc-bar \.doc-author \{[^}]*flex: 0 0 auto/.test(chromeCss),
-    'a long login must truncate itself rather than take the title\'s room');
+t('no dead owner or crumb styling is left in the bar', () => {
+  assert(!/\.tdoc-bar \.doc-author/.test(chromeCss), 'dead .doc-author bar styling left behind');
+  assert(!/tdoc-crumb/.test(chromeCss), 'dead crumb styling left behind');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

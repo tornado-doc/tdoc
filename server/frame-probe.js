@@ -22,7 +22,81 @@
   function post(msg) {
     try { window.parent.postMessage(Object.assign({ source: 'tdoc-frame' }, msg), '*'); } catch (e) {}
   }
+  // A baked reader block is present on every upload, including fully authored
+  // designs. Its presence alone is not consent to restyle or invert the page.
+  function usesReaderDesign() {
+    var explicit = document.documentElement.getAttribute('data-tdoc-design');
+    if (explicit === 'custom') return false;
+    if (explicit === 'tdoc') return true;
+    var roots = [document.documentElement, document.body];
+    Array.prototype.forEach.call(document.querySelectorAll('body > main, body > article, body > section, body > div'), function (content) { roots.push(content); });
+    // Keep ownership per element: house presets put the page background on
+    // body and inherited text color on .wrap. Combining those is not evidence
+    // that one author surface supplies its own complete palette.
+    var palettes = roots.map(function () { return { background: false, color: false }; });
+    function foundation(style, palette) {
+      if (!style) return false;
+      // Token-based adjustments still use the reader design. Typography,
+      // layout and individual accents do not opt out: require an author
+      // background AND text color before removing the house stylesheet.
+      function own(prop) {
+        var value = style.getPropertyValue(prop).trim();
+        return value && !/var\(\s*--td-/.test(value) && !/^(inherit|initial|unset|revert|transparent)$/.test(value);
+      }
+      if (own('background-color') || own('background')) palette.background = true;
+      if (own('color')) palette.color = true;
+      return palette.background && palette.color;
+    }
+    function rulesHaveDesign(rules) {
+      for (var i = 0; i < rules.length; i++) {
+        var rule = rules[i];
+        if (rule.selectorText && roots.some(function (root, index) {
+          try { return root && root.matches(rule.selectorText) && foundation(rule.style, palettes[index]); } catch (_) { return false; }
+        })) return true;
+        // Include conditional styles: the design must not switch ownership
+        // when a viewport breakpoint or OS color preference changes.
+        if (rule.cssRules && rulesHaveDesign(rule.cssRules)) return true;
+      }
+      return false;
+    }
+    for (var i = 0; i < roots.length; i++) if (roots[i] && foundation(roots[i].style, palettes[i])) return false;
+    for (var j = 0; j < document.styleSheets.length; j++) {
+      var sheet = document.styleSheets[j], owner = sheet.ownerNode;
+      if (sheet.disabled || (owner && (owner.id === 'tdoc-reader' || owner.id === 'tdoc-reader-patch' || owner.hasAttribute('data-tdoc-provider')))) continue;
+      try { if (rulesHaveDesign(sheet.cssRules)) return false; }
+      catch (_) {} // Opaque stylesheets (including web fonts) do not prove a custom palette.
+    }
+    return true;
+  }
+  var supportsTheme = usesReaderDesign();
+  if (supportsTheme) {
+    // Serve-time enforcement also covers older documents carrying a baked
+    // wide-column rule. Custom designs never receive this constraint.
+    var designStyle = document.createElement('style');
+    designStyle.setAttribute('data-tdoc-provider', '');
+    designStyle.textContent = 'body > :is(.wrap,main,article,.content,.container):not(:popover-open){width:100%!important;max-width:720px!important;box-sizing:border-box!important;margin-left:auto!important;margin-right:auto!important;}';
+    (document.head || document.documentElement).appendChild(designStyle);
+  }
+  if (!supportsTheme) {
+    // Disable only the house design, not the provider's table/overflow patch,
+    // comments or author styles. CSSOM state is not serialized into storage.
+    Array.prototype.forEach.call(document.querySelectorAll('style#tdoc-reader'), function (style) {
+      if (style.sheet) style.sheet.disabled = true;
+    });
+  }
   var interactionMode = 'read';
+  // Site pages (home, pricing, start, templates, privacy) load the frame with
+  // ?tdoc_site=1. They read as an ordinary website: a normal cursor, no
+  // document chrome on visuals, and no comment on a bare click. Selecting text
+  // still opens a comment -- that is the demo.
+  var SITE = new URLSearchParams(location.search).get('tdoc_site') === '1';
+  if (SITE) document.documentElement.setAttribute('data-tdoc-site', '');
+  function visualViewerOpen() { return document.documentElement.hasAttribute('data-tdoc-visual-open'); }
+  // Block/artifact hover outline. Off on the homepage — landing sections are
+  // huge commentable boxes and the dashed chrome gets in the way. Text
+  // selection commenting still works. Shell sets this via tdoc:mode.
+  var elementComment = true;
+
   // Whether the shell currently has a comment card, cluster, or composer open.
   // While something is open, the next click anywhere in the document only
   // dismisses it — it must not open a different comment or start a new one.
@@ -32,18 +106,17 @@
   var COMMENT_ICON_PATH = 'M2 2H12A10 10 0 1 1 2 12V2Z';
   var COMMENT_ACCENT = '#1652f0';
   var HL = !!(window.CSS && CSS.highlights && window.Highlight);
+  var reanchorMode = false;
+  var pointerStartX = 0, pointerStartY = 0;
   function highlightCss(dark) {
     var anchor = dark ? 'rgba(255,214,0,.78)' : 'rgba(255,214,0,.38)';
-    // A resolved thread the margin is not showing still marks its sentence,
-    // lightly — there is history here, and a click opens it.
-    var resolved = dark ? 'rgba(255,214,0,.34)' : 'rgba(255,214,0,.16)';
-    // The block that replaced a comment's words: the same light mark, dashed.
-    var moved = resolved;
+    // The block that replaced a visible comment's words: a light, dashed mark.
+    var moved = dark ? 'rgba(255,214,0,.34)' : 'rgba(255,214,0,.16)';
     var pending = dark ? 'rgba(255,214,0,.88)' : 'rgba(255,214,0,.55)';
     var selecting = dark ? 'rgba(76,137,255,.72)' : 'rgba(22,82,240,.32)';
     return '::highlight(tdoc-anchor){background:' + anchor + ';text-decoration:underline solid rgba(184,134,11,.7);text-decoration-thickness:2px;}' +
       '::highlight(tdoc-anchor-active){background:rgba(255,216,77,.94);text-decoration:underline solid #b8860b;text-decoration-thickness:3px;}' +
-      '::highlight(tdoc-anchor-resolved){background:' + resolved + ';text-decoration:underline dotted rgba(184,134,11,.55);text-decoration-thickness:1.5px;}' +
+      '::highlight(tdoc-anchor-flash){background:rgba(255,185,0,.98);text-decoration:underline solid #9a6200;text-decoration-thickness:3px;}' +
       '::highlight(tdoc-anchor-moved){background:' + moved + ';text-decoration:underline dashed rgba(184,134,11,.55);text-decoration-thickness:1.5px;}' +
       '::highlight(tdoc-selecting){background:' + selecting + ';}' +
       '::highlight(tdoc-pending){background:' + pending + ';}';
@@ -65,19 +138,135 @@
     var commentCursor = 'url("data:image/svg+xml,' + encodeURIComponent(cursorSvg) + '") 2 2, crosshair';
     s.id = 'tdoc-provider-comment-style';
     s.setAttribute('data-tdoc-provider', '');
+    // Author figure rules also match our SVG icons. Protect the provider's
+    // fixed icon geometry from ID-scoped map sizing and reader image margins.
     s.textContent =
       '.tdoc-hover-outline{position:absolute;pointer-events:none;z-index:2147483644;border:2px dashed ' + COMMENT_ACCENT + ';border-radius:4px;background:rgba(22,82,240,.06);box-sizing:border-box;}' +
       '.tdoc-comment-pill{position:absolute;z-index:2147483645;width:30px;height:30px;padding:0;background:rgba(255,255,255,.96);color:' + COMMENT_ACCENT + ';border:1px solid #dedee3;border-radius:999px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);display:inline-flex;align-items:center;justify-content:center;line-height:1;}' +
       '.tdoc-comment-pill:hover{background:' + COMMENT_ACCENT + ';color:#fff;border-color:' + COMMENT_ACCENT + ';}' +
       '.tdoc-comment-pill svg{width:14px;height:14px;stroke:none;}' +
+      'figure[data-tdoc-artifact="Diagram"][aria-label="Diagram"][data-tdoc-excalidraw]{border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;}' +
+      'figure[data-tdoc-excalidraw] > figcaption[data-tdoc-provider]{display:none;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{display:flex;justify-content:flex-end;box-sizing:border-box;padding-right:52px;margin-bottom:4px;}' +
+      'html[data-tdoc-interaction-mode="edit"] figure[data-tdoc-excalidraw] [data-tdoc-diagram-tools]{padding-right:0;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 13px;border:1px solid #c8d7fc;border-radius:999px;background:#f3f7ff;box-shadow:none;color:#1652f0;font:600 13px/1.2 system-ui,sans-serif;white-space:nowrap;cursor:pointer;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:hover{background:#e8f0ff;border-color:#a9c0f8;color:#1244c5;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]:focus-visible{outline:2px solid #1652f0;outline-offset:2px;}' +
+      'figure[data-tdoc-excalidraw] [data-tdoc-diagram-open] svg{width:16px!important;min-width:16px!important;max-width:16px!important;height:16px!important;min-height:16px!important;max-height:16px!important;margin:0!important;flex:0 0 16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}' +
+      '@media print{figure[data-tdoc-excalidraw] [data-tdoc-diagram-open]{display:none!important;}}' +
       'html[data-tdoc-interaction-mode="comment"] body,html[data-tdoc-interaction-mode="comment"] body *{cursor:' + commentCursor + '!important;}' +
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
+      'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
+      'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
+      'html[data-tdoc-site] [data-tdoc-diagram-tools]{display:none!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]:focus{box-shadow:inset 0 0 0 1px rgba(22,82,240,.18);}';
     (document.head || document.documentElement).appendChild(s);
   })();
+
+  // Excalidraw is opt-in. Source travels with the document through existing
+  // pull/publish/download/version paths; provider buttons are never serialized.
+  function diagramById(id) {
+    return Array.prototype.find.call(document.querySelectorAll('figure[data-tdoc-excalidraw]'), function (el) { return el.id === id; });
+  }
+  function prepareDiagrams() {
+    Array.prototype.forEach.call(document.querySelectorAll('figure[data-tdoc-excalidraw]'), function (figure) {
+      if (!figure.id || figure.querySelector('[data-tdoc-diagram-open]')) return;
+      var caption = figure.querySelector(':scope > figcaption');
+      if (caption && caption.textContent.trim() === 'Diagram') caption.setAttribute('data-tdoc-provider', '');
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4L16.5 3.5Z"/></svg><span>Edit diagram</span>';
+      button.setAttribute('aria-label', 'Edit diagram');
+      button.setAttribute('data-tdoc-provider', '');
+      button.setAttribute('data-tdoc-diagram-open', '');
+      button.setAttribute('contenteditable', 'false');
+      button.addEventListener('click', function (event) {
+        event.preventDefault(); event.stopPropagation();
+        post({ type: 'tdoc:diagramOpen', id: figure.id, title: figure.getAttribute('aria-label') || 'Diagram', json: figure.getAttribute('data-tdoc-excalidraw') });
+      });
+      var tools = document.createElement('div');
+      tools.setAttribute('data-tdoc-provider', '');
+      tools.setAttribute('data-tdoc-diagram-tools', '');
+      tools.appendChild(button);
+      figure.insertBefore(tools, figure.firstChild);
+    });
+  }
+  function applyDiagram(d) {
+    var figure = diagramById(d.id);
+    if (!figure || typeof d.json !== 'string' || d.json.length > 2000000 || typeof d.svg !== 'string' || d.svg.length > 4000000) return;
+    try {
+      var scene = JSON.parse(d.json);
+      if (scene.type !== 'excalidraw' || !Array.isArray(scene.elements)) return;
+      var parsed = new DOMParser().parseFromString(d.svg, 'image/svg+xml');
+      var svg = parsed.documentElement;
+      if (svg.localName !== 'svg' || parsed.querySelector('parsererror')) return;
+      // Only use the exported vector snapshot; no active content or links.
+      Array.prototype.forEach.call(svg.querySelectorAll('script,foreignObject,iframe,object,embed,a,image,use'), function (el) { el.remove(); });
+      Array.prototype.forEach.call([svg].concat(Array.prototype.slice.call(svg.querySelectorAll('*'))), function (el) {
+        Array.prototype.forEach.call(Array.prototype.slice.call(el.attributes), function (attr) {
+          if (/^on/i.test(attr.name) || /href$/i.test(attr.name)) el.removeAttribute(attr.name);
+        });
+      });
+      var snapshot = figure.querySelector('[data-tdoc-diagram-snapshot]');
+      if (!snapshot) return;
+      if (interactionMode !== 'edit') setInteractionMode('edit');
+      svg.style.maxWidth = '100%';
+      svg.style.height = 'auto';
+      snapshot.replaceChildren(document.importNode(svg, true));
+      figure.setAttribute('data-tdoc-excalidraw', d.json);
+      onEditInput();
+      return true;
+    } catch (error) { return false; }
+  }
+  function insertDiagram(d) {
+    if (interactionMode !== 'edit' || typeof d.id !== 'string' || !/^diagram-[a-f0-9-]{36}$/i.test(d.id) || document.getElementById(d.id)) return false;
+    var root = findEditRoot();
+    if (!root) return false;
+    var figure = document.createElement('figure');
+    figure.id = d.id;
+    figure.setAttribute('data-tdoc-artifact', 'Diagram');
+    figure.setAttribute('data-tdoc-excalidraw', '');
+    figure.setAttribute('aria-label', 'Diagram');
+    figure.setAttribute('data-tdoc-editor-atomic', '');
+    figure.setAttribute('data-tdoc-editor-original-editable', '__missing__');
+    figure.setAttribute('contenteditable', 'false');
+    figure.style.cssText = 'display:block;max-width:100%;margin:1.5rem 0';
+    var snapshot = document.createElement('div');
+    snapshot.setAttribute('data-tdoc-diagram-snapshot', '');
+    snapshot.style.overflow = 'hidden';
+    figure.appendChild(snapshot);
+
+    var range = savedRange;
+    if (!range && window.getSelection().rangeCount) range = window.getSelection().getRangeAt(0);
+    var node = range && range.startContainer;
+    if (node && node.nodeType !== 1) node = node.parentNode;
+    while (node && node !== root && node.parentNode !== root) node = node.parentNode;
+    if (node && node.parentNode === root) node.after(figure);
+    else root.appendChild(figure);
+    if (!applyDiagram(d)) { figure.remove(); return false; }
+    prepareDiagrams();
+    var after = figure.nextElementSibling;
+    if (!after) {
+      after = document.createElement('p');
+      after.appendChild(document.createElement('br'));
+      figure.after(after);
+      onEditInput();
+    }
+    try {
+      root.focus({ preventScroll: true });
+      var caret = document.createRange();
+      caret.selectNodeContents(after);
+      caret.collapse(true);
+      var selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(caret);
+      savedRange = caret.cloneRange();
+    } catch (e) {}
+    return true;
+  }
 
   // --- selection capture ---------------------------------------------------
   function selectionRect(range) {
@@ -163,8 +352,7 @@
   function postTextSelection(range, text) {
     var placed = placeInView(range, text);
     var ctx = placed ? { before: placed.before, after: placed.after } : context(range, 60);
-    // Paint the pending anchor so it stays visibly marked while the composer
-    // (in the shell document) has focus; cleared on cancel/close (#281 parity).
+    // Keep the selected passage visible while the shell composer has focus.
     if (HL) {
       try {
         CSS.highlights.delete('tdoc-selecting');
@@ -177,13 +365,12 @@
            rect: selectionRect(range) });
   }
   function reportSelection() {
-    if (interactionMode !== 'comment') return;
+    if (interactionMode !== 'comment' || visualViewerOpen()) return;
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     var text = sel.toString().trim();
     if (!text) return;
-    var range = sel.getRangeAt(0);
-    postTextSelection(range, text);
+    postTextSelection(sel.getRangeAt(0), text);
   }
   function caretAtPoint(x, y) {
     if (document.caretPositionFromPoint) {
@@ -235,31 +422,36 @@
     return false;
   }
   function reportPointSelection(event) {
-    if (interactionMode !== 'comment' || event.button !== 0) return;
-    if (event.target && event.target.closest && event.target.closest('a,button,input,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return;
+    if (interactionMode !== 'comment' || event.button !== 0) return false;
+    if (SITE && !reanchorMode) return false;
+    if (event.target && event.target.closest && event.target.closest('a,button,input,label,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
     var current = window.getSelection();
-    if (current && !current.isCollapsed) return; // a drag selection owns this click
+    if (current && !current.isCollapsed) return false; // a drag selection owns this click
     var point = caretAtPoint(event.clientX, event.clientY);
-    if (!point || !point.node || point.node.nodeType !== Node.TEXT_NODE) return;
+    if (!point || !point.node || point.node.nodeType !== Node.TEXT_NODE) return false;
     var bounds = wordBounds(point.node.nodeValue || '', point.offset);
-    if (!bounds || bounds.end - bounds.start < 1) return;
+    if (!bounds || bounds.end - bounds.start < 1) return false;
     try {
       var range = document.createRange();
       range.setStart(point.node, bounds.start); range.setEnd(point.node, bounds.end);
       var text = range.toString().trim();
-      if (!text) return;
+      if (!text) return false;
       // Clicked past the text, not on it: leave the click to the clear path so
       // it dismisses whatever is open instead of commenting on a neighbour.
-      if (!pointOverRange(range, event.clientX, event.clientY)) return;
+      if (!pointOverRange(range, event.clientX, event.clientY)) return false;
       if (current) { current.removeAllRanges(); current.addRange(range); }
       event.preventDefault(); event.stopPropagation();
       postTextSelection(range, text);
+      return true;
     } catch (e) {}
+    return false;
   }
   // Links: a click inside the sandboxed frame would navigate the FRAME (nested
   // shell / 404), not the page. Intercept and hand navigation to the shell,
   // which navigates the top document (or opens a tab for target=_blank).
   document.addEventListener('click', function (e) {
+    if (visualViewerOpen() || e.target.closest?.('.tdoc-visual-open')) return;
+    if (e.target.closest && e.target.closest('[data-tdoc-diagram-open]')) return;
     // The mousedown of this same gesture dismissed something. Let it end there.
     if (swallowClick) {
       swallowClick = false;
@@ -271,7 +463,15 @@
       }
       return;
     }
-    var commentId = interactionMode === 'edit' ? null : anchorIdAtPoint(e.clientX, e.clientY);
+    if (e.target && e.target.closest && e.target.closest('.tdoc-comment-pill')) return;
+    if (reanchorMode) { reportPointSelection(e); return; }
+    // A drag across existing highlighted text can still finish with a click
+    // event. Keep that gesture as a selection; opening the old thread would
+    // make the next tap on Comment dismiss the card instead of composing.
+    var dragSelection = window.getSelection();
+    if (dragSelection && !dragSelection.isCollapsed
+      && (Math.abs(e.clientX - pointerStartX) > 4 || Math.abs(e.clientY - pointerStartY) > 4)) return;
+    var commentId = interactionMode === 'comment' ? anchorIdAtPoint(e.clientX, e.clientY) : null;
     if (commentId) {
       e.preventDefault(); e.stopPropagation();
       setActiveAnchor(commentId, false);
@@ -290,7 +490,16 @@
 
   function clearSelectingCursor() { document.documentElement.removeAttribute('data-tdoc-selecting'); }
   document.addEventListener('mouseup', function (e) {
+    if (visualViewerOpen()) return;
     clearSelectingCursor();
+    if (reanchorMode) {
+      var reanchorSelection = window.getSelection();
+      if (reanchorSelection && !reanchorSelection.isCollapsed && reanchorSelection.rangeCount) {
+        var reanchorText = reanchorSelection.toString().trim();
+        if (reanchorText) postTextSelection(reanchorSelection.getRangeAt(0), reanchorText);
+      }
+      return;
+    }
     // A dismissing click must not report a selection either. Content styled
     // `user-select: all` selects its whole block on a single click, which came
     // back as a composer on the very click that closed a card. A real drag is
@@ -318,7 +527,65 @@
     }
     setTimeout(reportSelection, 0);
   }, true);
-  document.addEventListener('touchend', function () { setTimeout(reportSelection, 0); }, true);
+  // A tap on highlighted text. iOS Safari sends no click (and no mouse
+  // events) for a tap on plain, non-interactive text, and a highlight is a
+  // painted range, not an element -- so on an iPhone the click handler above
+  // never ran and tapping a highlight did nothing (Julie, 2026-10-13). Read
+  // the tap itself: one finger, short, barely moved.
+  var _tap = null;
+  document.addEventListener('touchstart', function (e) {
+    var t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+    var selected = t ? window.getSelection() : null;
+    _tap = t ? {
+      x: t.clientX, y: t.clientY, at: Date.now(),
+      // A tap on the selected passage is for the native copy menu. A tap
+      // elsewhere dismisses the composer, even on iOS where plain text taps
+      // never produce the mouse events used by the desktop clear path.
+      inSelection: !!(selected && !selected.isCollapsed && selected.rangeCount
+        && pointOverRange(selected.getRangeAt(0), t.clientX, t.clientY))
+    } : null;
+  }, { capture: true, passive: true });
+  document.addEventListener('touchend', function (e) {
+    var start = _tap;
+    _tap = null;
+    var t = e.changedTouches && e.changedTouches[0];
+    var still = start && t && Math.abs(t.clientX - start.x) < 10
+      && Math.abs(t.clientY - start.y) < 10 && Date.now() - start.at < 600;
+    if (still && shellUiOpen && interactionMode === 'comment' && !start.inSelection
+      && !visualViewerOpen() && !(e.target && e.target.closest
+        && e.target.closest('a,button,input,label,textarea,select,summary,[contenteditable]'))) {
+      // The pending CSS highlight outlives the browser selection. Clear both
+      // before closing the composer so no yellow passage remains on the page.
+      if (e.cancelable) e.preventDefault();
+      if (HL) CSS.highlights.delete('tdoc-pending');
+      try { var pendingSelection = window.getSelection(); if (pendingSelection) pendingSelection.removeAllRanges(); } catch (x) {}
+      setActiveAnchor(null, false);
+      post({ type: 'tdoc:cleared' });
+      return;
+    }
+    if (start && !shellUiOpen && interactionMode !== 'edit' && !visualViewerOpen()) {
+      var sel = window.getSelection();
+      if (still && (!sel || sel.isCollapsed)) {
+        var hit = anchorIdAtPoint(t.clientX, t.clientY);
+        if (hit) {
+          // The synthetic mouse events and click that may follow would run the
+          // handlers above a second time.
+          if (e.cancelable) e.preventDefault();
+          setActiveAnchor(hit, false);
+          post({ type: 'tdoc:anchorClick', id: hit });
+          return;
+        }
+      }
+      // Safari does not dispatch a click for ordinary text. Reuse the same
+      // point-to-word path as desktop for a light tap, leaving drags alone.
+      if (still && interactionMode === 'comment' && (!sel || sel.isCollapsed)
+        && reportPointSelection({ button: 0, target: e.target,
+          clientX: t.clientX, clientY: t.clientY,
+          preventDefault: function () { if (e.cancelable) e.preventDefault(); },
+          stopPropagation: function () { e.stopPropagation(); } })) return;
+    }
+    setTimeout(reportSelection, 0);
+  }, true);
   window.addEventListener('blur', clearSelectingCursor);
   document.addEventListener('copy', function (e) {
     var sel = window.getSelection();
@@ -334,6 +601,8 @@
     } catch (x) {}
   }, true);
   document.addEventListener('mousedown', function (e) {
+    pointerStartX = e.clientX; pointerStartY = e.clientY;
+    if (visualViewerOpen()) return;
     // Edit mode opts out of comment behaviour, but not out of dismissal: a card
     // opened from a pin stayed open there while every other mode closed it on
     // a click outside. Everything below is already mode-agnostic, so letting
@@ -354,9 +623,9 @@
     swallowClick = shellUiOpen;
     dismissDownX = e.clientX; dismissDownY = e.clientY;
 
-    if (!shellUiOpen && anchorIdAtPoint(e.clientX, e.clientY)) return;
+    if (!shellUiOpen && interactionMode === 'comment' && anchorIdAtPoint(e.clientX, e.clientY)) return;
     if (interactionMode === 'comment' && e.button === 0
-      && !(e.target && e.target.closest && e.target.closest('a,button,input,textarea,select,summary,[contenteditable]'))) {
+      && !(e.target && e.target.closest && e.target.closest('a,button,input,label,textarea,select,summary,[contenteditable]'))) {
       var point = caretAtPoint(e.clientX, e.clientY);
       if (point && point.node && point.node.nodeType === Node.TEXT_NODE) {
         document.documentElement.setAttribute('data-tdoc-selecting', '');
@@ -377,7 +646,7 @@
   //     overlay COMMENTABLE set + hover affordance; the marquee sub-region
   //     gesture is a follow-on slice. ---
   var COMMENTABLE = 'img, svg, canvas, video, pre, figure, iframe[src], section, aside, blockquote, table, details, [data-tdoc-artifact], [class*="tdoc-artifact"]';
-  var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill';
+  var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill, [data-tdoc-provider]';
   function isProbeUI(el) { return !!(el && el.closest && el.closest(UI_SEL)); }
   function artifactFor(node) {
     if (!node || isProbeUI(node)) return null;
@@ -445,14 +714,14 @@
     hoverPill.style.left = (r.right + sx - 34) + 'px'; hoverPill.style.top = (r.top + sy + 6) + 'px';
   }
   function hideHover() { hoverEl = null; if (hoverOutline) hoverOutline.style.display = 'none'; if (hoverPill) hoverPill.style.display = 'none'; }
-  function commentOnElement(el) {
+  function commentOnElement(el, near) {
     var r = clipRect(el);   // visible box — the raw rect of a scroll-container child can be miles wide
     var label = el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('data-tdoc-artifact') || el.tagName.toLowerCase();
     // Anchor the composer to the PILL the user just clicked (element top-right),
     // not the element box — a tall section would otherwise park the composer
     // below the whole box, far from the click.
     var pr = (hoverPill && hoverPill.style.display !== 'none') ? hoverPill.getBoundingClientRect() : null;
-    var ar = pr && (pr.width || pr.height) ? pr : { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
+    var ar = near || (pr && (pr.width || pr.height) ? pr : null) || { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
     post({
       type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: cssPath(el),
       text: '', context_before: '', context_after: '',
@@ -460,8 +729,15 @@
     });
     hideHover();
   }
+  // The slides presenter's "Comment on this slide" asks for a whole-element
+  // comment the same way the hover pill does.
+  document.addEventListener('tdoc:comment-element', function (e) {
+    var d = e.detail || {};
+    if (!d.el || !d.el.isConnected) return;
+    hideHover(); commentOnElement(d.el, d.rect || null);
+  });
   document.addEventListener('mousemove', function (e) {
-    if (interactionMode !== 'comment') { if (hoverEl) hideHover(); return; }
+    if (interactionMode !== 'comment' || !elementComment || visualViewerOpen()) { if (hoverEl) hideHover(); return; }
     var t = e.target;
     if (isProbeUI(t)) return; // keep the pill/outline up while the cursor is on them
     var art = artifactFor(t);
@@ -495,6 +771,7 @@
     }, 1600);
   }
   document.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('[data-tdoc-diagram-open]')) return;
     var trigger = e.target.closest && e.target.closest('[data-tdoc-copy]');
     if (!trigger) return;
     e.preventDefault(); e.stopPropagation();
@@ -661,6 +938,34 @@
     return null;
   }
 
+  // Partial rewrites often leave a phrase of the original selection alive even
+  // when the whole sentence no longer matches. Prefer a unique surviving run
+  // of the anchor text over dumping the comment at the foot of the page.
+  function findSurvivingFragment(anchor, view) {
+    if (!anchor || !view || !view.norm) return null;
+    var text = normalizeContext(anchor.text).trim();
+    if (text.length < NEAR_CONTEXT_MIN) return null;
+    var best = null;
+    for (var len = Math.min(text.length, 64); len >= NEAR_CONTEXT_MIN; len--) {
+      for (var start = 0; start + len <= text.length; start++) {
+        var slice = text.slice(start, start + len);
+        var i = view.norm.indexOf(slice);
+        if (i === -1) continue;
+        if (view.norm.indexOf(slice, i + 1) !== -1) continue;
+        best = { at: i, len: len };
+        break;
+      }
+      if (best) break;
+    }
+    if (!best) return null;
+    var candidate = rangeFromNorm(view, best.at, best.len);
+    if (!candidate) return null;
+    var box = candidate.getBoundingClientRect();
+    if (!(box.width || box.height)) return null;
+    candidate.tdocSide = 'after';
+    return candidate;
+  }
+
   // The words a comment sat on are gone, but the block that replaced them is
   // right there — after the surviving context_before, or before the surviving
   // context_after. That block is what the comment is now about, so it gets a
@@ -755,6 +1060,25 @@
   // the whole doc + re-scanning every anchor (O(N + C·D)) every time.
   var _view = null, _rangeCache = {}, _anchorTargets = {}, _activeAnchorId = null;
   var _lastComments = [];   // re-report pins when layout settles (images/fonts)
+  // Whole-document comments share one pin beside the first title. This is
+  // geometry only: inserting a spacer changed the author's article layout.
+  function documentCommentsGeometry() {
+    var root = findEditRoot();
+    if (!root) return null;
+    var heading = root.querySelector('h1');
+    var rect = (heading || root).getBoundingClientRect();
+    return { docY: rect.top + (window.scrollY || 0), left: rect.left,
+      width: rect.width };
+  }
+  // The renderer owns these collections for the frame's lifetime. Mutate the
+  // registered ranges so removal invalidates their old painted area. Replacing
+  // a Highlight with a new empty object can leave stale pixels in Safari.
+  var _anchorHighlight = HL ? new Highlight() : null;
+  var _movedHighlight = HL ? new Highlight() : null;
+  if (HL) {
+    CSS.highlights.set('tdoc-anchor', _anchorHighlight);
+    CSS.highlights.set('tdoc-anchor-moved', _movedHighlight);
+  }
   function docView() { return _view || (_view = collectTextNodes()); }
   function anchorIdAtPoint(x, y) {
     var ids = Object.keys(_anchorTargets);
@@ -771,27 +1095,88 @@
     }
     return null;
   }
+  // CSS Highlights are paint-only and have no mouseenter target. Send the id
+  // under the pointer so the outer shell can light up the matching avatar,
+  // without adding any status text to the highlighted document itself.
+  var _hoverAnchorId = null, _hoverTimer = null, _hoverPoint = null;
+  function reportAnchorHover(id) {
+    if (id === _hoverAnchorId) return;
+    _hoverAnchorId = id;
+    post({ type: 'tdoc:anchorHover', id: id });
+  }
+  document.addEventListener('pointermove', function (event) {
+    if (event.pointerType === 'touch' || interactionMode === 'edit') return;
+    _hoverPoint = { x: event.clientX, y: event.clientY };
+    if (_hoverTimer) return;
+    _hoverTimer = setTimeout(function () {
+      _hoverTimer = null;
+      reportAnchorHover(_hoverPoint ? anchorIdAtPoint(_hoverPoint.x, _hoverPoint.y) : null);
+    }, 50);
+  }, { passive: true });
+  document.addEventListener('pointerleave', function () {
+    if (_hoverTimer) clearTimeout(_hoverTimer);
+    _hoverTimer = null; _hoverPoint = null;
+    reportAnchorHover(null);
+  });
+  window.addEventListener('scroll', function () { reportAnchorHover(null); }, { passive: true });
   function setActiveAnchor(id, scroll) {
-    _activeAnchorId = id || null;
-    if (HL) CSS.highlights.delete('tdoc-anchor-active');
     var target = id && _anchorTargets[id];
+    if (_activeAnchorId !== (target ? id : null)) {
+      for (var i = 0; i < _flashTimers.length; i++) clearTimeout(_flashTimers[i]);
+      _flashTimers = [];
+      if (HL) CSS.highlights.delete('tdoc-anchor-flash');
+    }
+    _activeAnchorId = target ? id : null;
+    if (HL) CSS.highlights.delete('tdoc-anchor-active');
     if (!target) return;
     if (HL && target.range) CSS.highlights.set('tdoc-anchor-active', new Highlight(target.range));
     if (!scroll) return;
     var rect = target.range ? target.range.getBoundingClientRect() : target.element.getBoundingClientRect();
     var top = rect.top + (window.scrollY || 0) - Math.max(80, window.innerHeight / 3);
+    var before = window.scrollY || 0;
     try { window.scrollTo(0, Math.max(0, top)); } catch (e) {}
+    // Where the frame does not scroll itself (a phone browser that sizes the
+    // frame to its content and scrolls the page instead), scrollTo is a no-op;
+    // scrollIntoView reaches whichever box actually scrolls.
+    var after = window.scrollY || 0;
+    var r2 = target.range ? target.range.getBoundingClientRect() : target.element.getBoundingClientRect();
+    if (Math.abs(after - before) < 1 && (r2.top < 0 || r2.bottom > window.innerHeight)) {
+      var node = target.element || (target.range.startContainer.nodeType === 1 ? target.range.startContainer : target.range.startContainer.parentElement);
+      try { node.scrollIntoView({ block: 'center' }); } catch (e) {}
+    }
+    flashActiveAnchor(id);
+  }
+  // Arriving at a comment's text from its card: blink the highlight twice so
+  // the eye lands on it (Julie, 2026-10-13: on a phone the card just closed
+  // and nothing said where to look).
+  var _flashTimers = [];
+  function flashActiveAnchor(id) {
+    for (var i = 0; i < _flashTimers.length; i++) clearTimeout(_flashTimers[i]);
+    _flashTimers = [];
+    if (!HL) return;
+    CSS.highlights.delete('tdoc-anchor-flash');
+    var target = _anchorTargets[id];
+    if (!target || !target.range) return;
+    [160, 320, 480, 640].forEach(function (ms, n) {
+      _flashTimers.push(setTimeout(function () {
+        if (_activeAnchorId !== id) return;
+        if (n % 2 === 0) CSS.highlights.set('tdoc-anchor-flash', new Highlight(target.range));
+        else CSS.highlights.delete('tdoc-anchor-flash');
+      }, ms));
+    });
   }
   function reportPins(comments) {
     _lastComments = comments || [];
     _anchorTargets = {};
-    var pins = [], hl = HL ? new Highlight() : null, hlResolved = HL ? new Highlight() : null, hlMoved = HL ? new Highlight() : null;
+    var pins = [], hl = _anchorHighlight, hlMoved = _movedHighlight;
+    if (hl) hl.clear();
+    if (hlMoved) hlMoved.clear();
     // An anchor that cannot be placed still deserves a seat. Without a pin the
     // desktop rail has no coordinate to draw the card at, so the comment sits in
     // the data and nowhere on screen — while the phone drawer, which renders the
     // list directly, shows it.
     //
-    // The seat goes at the END of the document, not the top. At the top a stack
+    // The seat goes near the END of the document, not the top. At the top a stack
     // of comments from an older version is the first thing beside the title,
     // which reads as "these matter most"; at the end it reads as what it is —
     // what the last revision left behind. Everything downstream is unchanged:
@@ -800,30 +1185,46 @@
     // Not the very last pixel: the rail culls a pin that falls outside the
     // viewport, and a seat pinned to the document's final row is never on
     // screen even when you scroll all the way down. Sit just above the end.
+    //
+    // Several lost seats must NOT share one Y. After a big rewrite many anchors
+    // miss both their text and their neighbours, and a single seatY collapsed
+    // them into one pile that looked like the comments had vanished. Step each
+    // new seat up the page so the rail can show them as a stack.
     var seatY = Math.max(0, document.documentElement.scrollHeight - 160);
+    var seatStep = 36;
+    var seated = 0;
     function seat(c, extra) {
-      var pin = { id: c.id, docY: seatY, lost: true, login: (c.author && c.author.login) || null,
+      var y = Math.max(0, seatY - seated * seatStep);
+      seated++;
+      var pin = { id: c.id, docY: y, lost: true, login: (c.author && c.author.login) || null,
         avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null,
         resolved: c.status === 'applied', deleted: !!c.deleted };
       if (extra) for (var k in extra) pin[k] = extra[k];
       pins.push(pin);
     }
+    var documentPoint = documentCommentsGeometry();
     (comments || []).forEach(function (c) {
-      if (!c) return;
-      // A hidden thread (resolved, switch off) gets a mark and a click target,
-      // never a pin and never a seat.
-      if (!c.anchor) return c.hidden ? undefined : seat(c);
+      // Skip before registering targets or painting exact/moved ranges: the
+      // visibility switch governs every affordance, including element anchors.
+      if (!c || c.hidden) return;
+      if (!c.anchor || c.anchor.kind === 'document') {
+        if (documentPoint) pins.push({ id: c.id, docY: documentPoint.docY,
+          document: true, login: (c.author && c.author.login) || null,
+          avatar_url: (c.author && c.author.avatar_url) || null,
+          kind: (c.author && c.author.kind) || null,
+          resolved: c.status === 'applied', deleted: !!c.deleted });
+        return;
+      }
       if (c.anchor.kind === 'element' && c.anchor.selector) {
         var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
         if (eel) {
           _anchorTargets[c.id] = { element: eel };
-          if (c.hidden) return;
           var er = eel.getBoundingClientRect();
           pins.push({ id: c.id, docY: er.top + (window.scrollY || 0), elementKey: c.anchor.selector, elementTop: er.top + (window.scrollY || 0), elementHeight: er.height, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
         } else seat(c);
         return;
       }
-      if (c.anchor.kind !== 'text') return c.hidden ? undefined : seat(c);
+      if (c.anchor.kind !== 'text') return seat(c);
       var key = (c.anchor.text || '') + '\u0000' + (c.anchor.context_before || '') + '\u0000' + (c.anchor.context_after || '');
       var r = (key in _rangeCache) ? _rangeCache[key] : (_rangeCache[key] = findTextRange(c.anchor, docView()));
       // Exact first, then the neighbourhood, then a seat at the end. The middle
@@ -834,11 +1235,14 @@
         r = findNearContext(c.anchor, docView());
         approximate = !!r;
       }
-      if (!r) return c.hidden ? undefined : seat(c);
+      if (!r) {
+        r = findSurvivingFragment(c.anchor, docView());
+        approximate = !!r;
+      }
+      if (!r) return seat(c);
       _anchorTargets[c.id] = { range: r };
-      // Rewritten words: mark the block that replaced them, hidden or not.
+      // Rewritten words: mark the block that replaced this visible thread.
       if (approximate && hlMoved && !c.deleted) { var mv = blockForMoved(r); if (mv) hlMoved.add(mv); }
-      if (c.hidden) { if (hlResolved && !c.deleted && !approximate) hlResolved.add(r); return; }
       if (hl && !c.deleted && !approximate) hl.add(r);
       var rect = r.getBoundingClientRect();
       // Second line of defence: findNearContext already measures its candidates,
@@ -846,11 +1250,11 @@
       if (approximate && !rect.width && !rect.height) return seat(c);
       pins.push({ id: c.id, docY: rect.top + (window.scrollY || 0), lost: approximate || undefined, login: (c.author && c.author.login) || null, avatar_url: (c.author && c.author.avatar_url) || null, kind: (c.author && c.author.kind) || null, resolved: c.status === 'applied', deleted: !!c.deleted });
     });
-    if (HL) CSS.highlights.set('tdoc-anchor', hl);
-    if (HL) CSS.highlights.set('tdoc-anchor-resolved', hlResolved);
-    if (HL) CSS.highlights.set('tdoc-anchor-moved', hlMoved);
     setActiveAnchor(_activeAnchorId, false);
-    post({ type: 'tdoc:pins', pins: pins, scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
+    // Frame-local: the slides presenter counts the threads on the slide shown.
+    try { document.dispatchEvent(new CustomEvent('tdoc:anchors-resolved', { detail: { targets: _anchorTargets, comments: (comments || []).filter(function (c) { return c && !c.hidden && !c.deleted; }).map(function (c) { return c.id; }) } })); } catch (x) {}
+    post({ type: 'tdoc:pins', pins: pins, documentComments: documentPoint,
+      scrollY: window.scrollY || 0, articleRight: Math.round(articleRight()), docHeight: document.documentElement.scrollHeight });
   }
 
   // Geometry can settle AFTER the first pin report (images/fonts load, layout
@@ -859,9 +1263,52 @@
   var _geoTimer = null;
   function rereportPins() { if (_geoTimer) clearTimeout(_geoTimer); _geoTimer = setTimeout(function () { _view = null; _rangeCache = {}; reportPins(_lastComments); }, 150); }
   window.addEventListener('load', rereportPins);
+  // The provider owns table readability for old and newly-authored versions.
+  // Recompute from content/fonts/container geometry, not only window width:
+  // a reader width toggle, an opened <details>, or an edit can change it.
+  var tableLayoutTimer = null;
+  function refreshTableLayout() {
+    if (tableLayoutTimer) clearTimeout(tableLayoutTimer);
+    tableLayoutTimer = setTimeout(function () {
+      layoutTables();
+      rereportPins();
+      reportScroll();
+    }, 80);
+  }
+  layoutTables();
+  window.addEventListener('resize', refreshTableLayout);
+  window.addEventListener('load', refreshTableLayout);
+  document.addEventListener('toggle', refreshTableLayout, true);
+  document.addEventListener('input', refreshTableLayout);
+  if (document.fonts) {
+    document.fonts.ready.then(refreshTableLayout);
+    document.fonts.addEventListener('loadingdone', refreshTableLayout);
+  }
   if (typeof ResizeObserver !== 'undefined') {
     try { new ResizeObserver(rereportPins).observe(document.body); } catch (e) {}
+    try {
+      var tableWidths = new WeakMap();
+      var tableResize = new ResizeObserver(function (entries) {
+        entries.forEach(function (entry) {
+          var width = entry.contentRect.width;
+          if (tableWidths.get(entry.target) !== width) {
+            tableWidths.set(entry.target, width); refreshTableLayout();
+          }
+        });
+      });
+      tableResize.observe(document.body);
+      document.querySelectorAll('body>.wrap,body>main,body>article,body>.content,body>.container').forEach(function (root) { tableResize.observe(root); });
+    } catch (e) {}
   }
+  new MutationObserver(function (records) {
+    if (records.some(function (record) {
+      var el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      if (el && el.closest('table')) return true;
+      return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(function (node) {
+        return node.nodeType === 1 && (node.matches('table') || node.querySelector('table'));
+      });
+    })) refreshTableLayout();
+  }).observe(document.body, { childList:true, characterData:true, subtree:true });
 
   // Doc → Markdown (verbatim port of overlay.js htmlToMarkdown 4176-4253). Runs
   // in the frame (the only place with the doc DOM) on a tdoc:copyDoc request.
@@ -915,12 +1362,12 @@
     return walk(root, { inPre: false }).replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  // Dark mode = filter-invert applied INSIDE the frame (verbatim from overlay.js
-  // 821-842). Works on any author doc without knowing its colors; photos/video/
-  // canvas are inverted back. An author can opt an element out with
-  // data-tdoc-dark="invert", or ship their own theme (then avoid our toggle).
+  // Only the tdoc reader design participates in the shell theme. Custom
+  // designs keep their original palette, even if an old shell sends a theme.
+  // Photos/video/canvas are inverted back for the default reader.
   var themeStyle = null;
   function applyTheme(theme) {
+    if (!supportsTheme) return;
     var html = document.documentElement;
     if (theme === 'dark') html.setAttribute('data-tdoc-theme', 'dark'); else html.removeAttribute('data-tdoc-theme');
     if (st) st.textContent = highlightCss(theme === 'dark');
@@ -940,7 +1387,7 @@
   // Comment targets are not editing boundaries. Keep only elements whose
   // native interaction or internal structure should be isolated from the
   // surrounding editing host; authors can opt other widgets out explicitly.
-  var ATOMIC = 'img,svg,canvas,video,audio,pre,iframe,table,[data-tdoc-edit-atomic]';
+  var ATOMIC = 'img,svg,canvas,video,audio,pre,iframe,table,[data-tdoc-edit-atomic],[data-tdoc-excalidraw]';
   function findEditRoot() {
     if (editRoot && document.contains(editRoot)) return editRoot;
     var children = document.body ? document.body.children : [];
@@ -1155,15 +1602,32 @@
     document.documentElement.removeAttribute('data-tdoc-editing');
     savedRange = null;
   }
-  function setInteractionMode(mode) {
+  function setInteractionMode(mode, opts) {
     var next = /^(read|comment|edit)$/.test(mode) ? mode : 'read';
     if (interactionMode === 'edit' && next !== 'edit') disableEditing();
     interactionMode = next;
+    if (opts && typeof opts.elementComment === 'boolean') elementComment = opts.elementComment;
     document.documentElement.setAttribute('data-tdoc-interaction-mode', next);
     clearSelectingCursor();
+    if (HL) {
+      if (next === 'comment') {
+        CSS.highlights.set('tdoc-anchor', _anchorHighlight);
+        CSS.highlights.set('tdoc-anchor-moved', _movedHighlight);
+        // A mode message may arrive while the mobile drawer is closing after
+        // a comment was chosen. Keep its focused anchor visible in Comment.
+        if (_activeAnchorId) setActiveAnchor(_activeAnchorId, false);
+      } else {
+        CSS.highlights.delete('tdoc-anchor');
+        CSS.highlights.delete('tdoc-anchor-moved');
+        CSS.highlights.delete('tdoc-anchor-active');
+        CSS.highlights.delete('tdoc-anchor-flash');
+        for (var i = 0; i < _flashTimers.length; i++) clearTimeout(_flashTimers[i]);
+        _flashTimers = [];
+      }
+    }
     if (HL && next !== 'comment') CSS.highlights.delete('tdoc-selecting');
-    if (next === 'edit') { hideHover(); enableEditing(); }
-    else if (next !== 'comment') hideHover();
+    if (next === 'edit' || next !== 'comment' || !elementComment) { hideHover(); }
+    if (next === 'edit') enableEditing();
   }
   function restoreSelection() {
     if (!savedRange) return;
@@ -1204,6 +1668,9 @@
     cleanEditorAttributes(clone);
     clone.removeAttribute('data-tdoc-theme');
     clone.removeAttribute('data-tdoc-editing');
+    clone.removeAttribute('data-tdoc-slides');
+    clone.removeAttribute('data-tdoc-presenting');
+    clone.removeAttribute('data-tdoc-visual-open');
     return '<!doctype html>\n' + clone.outerHTML;
   }
 
@@ -1211,6 +1678,7 @@
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || d.source !== 'tdoc-shell') return;
     if (d.type === 'tdoc:anchors') reportPins(d.comments);
+    else if (d.type === 'tdoc:documentCommentsHeight') { /* old shells may still send this */ }
     else if (d.type === 'tdoc:clearPending') {
       if (HL) CSS.highlights.delete('tdoc-pending');
       // Drop the reader's own selection too. The browser paints it OVER our
@@ -1220,18 +1688,29 @@
       try { var s0 = window.getSelection(); if (s0) s0.removeAllRanges(); } catch (x0) {}
     }
     else if (d.type === 'tdoc:theme') applyTheme(d.theme);
-    else if (d.type === 'tdoc:mode') setInteractionMode(d.mode);
+    else if (d.type === 'tdoc:mode') setInteractionMode(d.mode, d);
+    else if (d.type === 'tdoc:reanchorMode') {
+      reanchorMode = !!d.active;
+      document.documentElement.toggleAttribute('data-tdoc-reanchoring', reanchorMode);
+      if (reanchorMode) {
+        try { window.getSelection().removeAllRanges(); } catch (x) {}
+      }
+    }
     else if (d.type === 'tdoc:uiOpen') shellUiOpen = !!d.open;
+    else if (d.type === 'tdoc:diagramApply') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!applyDiagram(d) });
+    else if (d.type === 'tdoc:diagramInsert') post({ type: 'tdoc:diagramApplied', requestId: d.requestId, ok: !!insertDiagram(d) });
     else if (d.type === 'tdoc:editFormat') formatEdit(d.command, d.value);
     else if (d.type === 'tdoc:editRestore') {
       var restoreRoot = findEditRoot();
       if (restoreRoot && typeof d.bodyHtml === 'string') {
         restoreRoot.innerHTML = d.bodyHtml;
+        prepareDiagrams();
         if (interactionMode === 'edit') { disableEditing(); enableEditing(); }
         var restoredHtml = draftBodyHtml();
         var restoredDirty = restoredHtml !== editBaselineHtml;
         setDirty(restoredDirty, false);
         post({ type: 'tdoc:editSnapshot', bodyHtml: restoredHtml, dirty: restoredDirty });
+        refreshTableLayout();
         rereportPins();
       }
     }
@@ -1240,6 +1719,7 @@
     }
     else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
+    else if (d.type === 'tdoc:scrollBy') { try { window.scrollBy(0, Number(d.deltaY) || 0); } catch (x) {} }
     else if (d.type === 'tdoc:copyDoc') {
       var clone = document.body.cloneNode(true);
       Array.prototype.forEach.call(clone.querySelectorAll('script, style, noscript, .tdoc-hover-outline, .tdoc-comment-pill'), function (n) { n.remove(); });
@@ -1259,6 +1739,7 @@
     requestAnimationFrame(function () { ticking = false; reportScroll(); });
   }, { passive: true });
 
-  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
+  prepareDiagrams();
+  post({ type: 'tdoc:ready', height: document.documentElement.scrollHeight, supportsTheme: supportsTheme, defaultTheme: document.documentElement.getAttribute('data-tdoc-default-theme') || null });
   reportScroll(); // initial position so the shell can evaluate at-bottom for short docs
 })();

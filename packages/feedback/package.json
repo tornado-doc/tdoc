@@ -1,0 +1,20 @@
+{
+  "name": "@tdoc/feedback",
+  "version": "0.1.0",
+  "description": "Let visitors comment on any page of your site, with tdoc.",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": { "types": "./index.d.ts", "default": "./index.js" },
+    "./react": { "types": "./react.d.ts", "default": "./react.js" }
+  },
+  "files": ["index.js", "index.d.ts", "react.js", "react.d.ts", "README.md"],
+  "peerDependencies": { "react": ">=17" },
+  "peerDependenciesMeta": { "react": { "optional": true } },
+  "sideEffects": false,
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/tornado-doc/tdoc", "directory": "packages/feedback" },
+  "homepage": "https://tdoc.dev/feedback"
+}

@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# tdoc-site — bind a feedback space to your own website, without a browser.
+#
+# Same as "Add to your site" on the web: the space's owner names the site
+# origins it serves. Who may comment is the space doc's own access, shared
+# like any doc (Share on tdoc, or tdoc-move into a team).
+# Prints the <script> snippet to paste into the site. Uses the hosted Bearer
+# in ~/.tdoc/published.json.
+#
+# Usage:
+#   tdoc-site bind <space-slug> --origin https://app.example.com [--origin ...]
+#   tdoc-site show <space-slug>    # current binding and snippet
+#   tdoc-site off <space-slug>     # unbind; visitors can no longer connect
+#   tdoc-site --help
+set -euo pipefail
+TDOC_BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$TDOC_BIN_DIR/lib/json.sh"
+
+usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; }
+
+CMD="${1:-}"
+case "$CMD" in
+  -h|--help|help) usage; exit 0 ;;
+  bind|show|off) shift ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+SLUG=""; MODE=""; ORIGINS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --origin) [ -n "${2:-}" ] || { echo "--origin needs a URL like https://app.example.com" >&2; exit 2; }; ORIGINS+=("$2"); shift 2 ;;
+    --origin=*) ORIGINS+=("${1#--origin=}"); shift ;;
+    --mode) MODE="${2:-}"; shift 2 ;;
+    --mode=*) MODE="${1#--mode=}"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown arg: $1" >&2; exit 2 ;;
+    *) [ -z "$SLUG" ] || { echo "one space slug at a time" >&2; exit 2; }; SLUG="$1"; shift ;;
+  esac
+done
+[ -n "$SLUG" ] || { usage >&2; exit 2; }
+if [ -n "$MODE" ]; then
+  echo "[tdoc] --mode is ignored: who can comment is the space's own sharing (Share on tdoc)." >&2
+fi
+
+CONFIG_FILE="$HOME/.tdoc/published.json"
+TOKEN="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" upload_token || true)"
+BASE="$( [ -f "$CONFIG_FILE" ] && json_file_get "$CONFIG_FILE" base || true)"
+if [ -z "$TOKEN" ] || [ -z "$BASE" ]; then
+  echo "[tdoc] not signed in to hosted tdoc — run 'tdoc-publish --signin-only' first." >&2
+  exit 1
+fi
+BASE="${BASE%/}"
+
+fail() {
+  case "$(printf '%s' "$1" | json_get error)" in
+    forbidden) echo "[tdoc] only the space's owner can change its site binding." >&2 ;;
+    not_found) echo "[tdoc] no doc called $SLUG." >&2 ;;
+    invalid_origin) echo "[tdoc] not a site origin: $(printf '%s' "$1" | json_get origin) (use https://host[:port], no path)." >&2 ;;
+    origins_required) echo "[tdoc] name at least one --origin." >&2 ;;
+    too_many_origins) echo "[tdoc] at most $(printf '%s' "$1" | json_get limit) origins." >&2 ;;
+    sign_in_required) echo "[tdoc] the saved token was refused — run 'tdoc-publish --signin-only' again." >&2 ;;
+    *) echo "[tdoc] site binding failed: $1" >&2 ;;
+  esac
+  exit 1
+}
+
+post() {
+  curl -sS --connect-timeout 10 --max-time 30 -X POST "$BASE/api/feedback/site" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$1"
+}
+
+print_site() {
+  printf '%s' "$1" | node -e '
+    let s = ""; process.stdin.on("data", (d) => s += d).on("end", () => {
+      const b = JSON.parse(s);
+      if (!b.site) { console.log("not bound to a site"); return; }
+      console.log(`origins: ${b.site.origins.join(" ")}`);
+      const a = b.access || {};
+      console.log(`access:  ${a.visibility || "?"}, commenting ${a.commenting || "?"}${a.team ? " (team)" : ""} (change it in Share, like any doc)`);
+      if (b.snippet) { console.log("\nPaste into your site:\n"); console.log(b.snippet); }
+    });'
+}
+
+case "$CMD" in
+  show)
+    resp="$(curl -sS --connect-timeout 10 --max-time 30 "$BASE/api/feedback/site?slug=$SLUG" \
+      -H "Authorization: Bearer $TOKEN")" || { echo "[tdoc] no response" >&2; exit 1; }
+    [ "$(printf '%s' "$resp" | json_get ok)" = "true" ] || fail "$resp"
+    print_site "$resp"
+    ;;
+  off)
+    resp="$(post "{\"slug\":$(json_str "$SLUG"),\"off\":true}")" || { echo "[tdoc] no response" >&2; exit 1; }
+    [ "$(printf '%s' "$resp" | json_get ok)" = "true" ] || fail "$resp"
+    echo "[tdoc] $SLUG is no longer bound to a site."
+    ;;
+  bind)
+    [ "${#ORIGINS[@]}" -gt 0 ] || { echo "name at least one --origin" >&2; exit 2; }
+    ORIGINS_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${ORIGINS[@]}")"
+    resp="$(post "{\"slug\":$(json_str "$SLUG"),\"origins\":$ORIGINS_JSON}")" || { echo "[tdoc] no response" >&2; exit 1; }
+    [ "$(printf '%s' "$resp" | json_get ok)" = "true" ] || fail "$resp"
+    print_site "$resp"
+    ;;
+esac

@@ -153,15 +153,21 @@ export async function loadDraft(key, fallbackKey) {
 
 export async function patchDraft(key, patch) {
   const prev = (await readRecord(key)) || {};
-  const value = { ...prev, ...patch, updatedAt: Date.now() };
+  // readRecord may wait on IndexedDB while the next keystroke has already
+  // written localStorage. Merge against that latest synchronous copy so a
+  // pending mode change cannot replace the new body with an older record.
+  const local = readLocalRecord(key);
+  const current = recordStamp(local) >= recordStamp(prev) ? (local || {}) : prev;
+  const value = { ...current, ...patch, updatedAt: Math.max(Date.now(), recordStamp(current) + 1) };
   await writeRecord(key, value);
   return value;
 }
 
 export function saveDraft(key, bodyHtml, meta = {}) {
-  const now = Date.now();
+  const previous = readLocalRecord(key);
+  const now = Math.max(Date.now(), recordStamp(previous) + 1);
   const value = {
-    ...(readLocalRecord(key) || {}),
+    ...(previous || {}),
     bodyHtml,
     baseHash: meta.baseHash,
     baseVersion: meta.baseVersion,
@@ -172,12 +178,17 @@ export function saveDraft(key, bodyHtml, meta = {}) {
 }
 
 export async function saveDraftMode(key, mode) {
-  return patchDraft(key, { mode });
+  return patchDraft(key, { mode, modeExplicit: true });
 }
 
-export async function clearDraftBody(key) {
-  const prev = await readRecord(key);
+export async function clearDraftBody(key, expectedBodyHtml) {
+  const stored = await readRecord(key);
+  const local = readLocalRecord(key);
+  const prev = recordStamp(local) >= recordStamp(stored) ? local : stored;
   if (!prev) return;
+  // A clean-state snapshot can arrive after a later keystroke. It may clear
+  // only the body it observed, never the new draft the author just entered.
+  if (expectedBodyHtml !== undefined && prev.bodyHtml !== expectedBodyHtml) return;
   if (!prev.mode) {
     await deleteRecord(key);
     return;

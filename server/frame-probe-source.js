@@ -4,7 +4,17 @@ const path = require('path');
 // The injected frame script is markdown input rules + the probe, one nonce.
 // Local serve, the worker bundle, and test harnesses all have to agree.
 module.exports = function frameProbeSource() {
-  return fs.readFileSync(path.join(__dirname, 'edit-markdown.js'), 'utf8')
+  return fs.readFileSync(path.join(__dirname, 'table-layout.js'), 'utf8')
     + '\n'
-    + fs.readFileSync(path.join(__dirname, 'frame-probe.js'), 'utf8');
+    + fs.readFileSync(path.join(__dirname, 'edit-markdown.js'), 'utf8')
+    + '\n'
+    + fs.readFileSync(path.join(__dirname, 'frame-probe.js'), 'utf8')
+    + '\n'
+    + fs.readFileSync(path.join(__dirname, 'visual-viewer.js'), 'utf8')
+    + '\n'
+    + fs.readFileSync(path.join(__dirname, 'slides-viewer.js'), 'utf8')
+    + '\n'
+    + fs.readFileSync(path.join(__dirname, 'version-diff.js'), 'utf8')
+    + '\n'
+    + fs.readFileSync(path.join(__dirname, 'frame-compare.js'), 'utf8');
 };

@@ -1,0 +1,705 @@
+// Public /@<handle> profiles: hosted-only, claimed handle or GitHub login,
+// public + unlisted docs listed, private excluded. Same worker harness as
+// me-docs-experience.test.js.
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { webcrypto } = require('crypto');
+
+if (typeof globalThis.crypto === 'undefined') globalThis.crypto = webcrypto;
+
+if (typeof Response !== 'undefined' && !Response.json) {
+  Response.json = (body, init = {}) => new Response(JSON.stringify(body), {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+  });
+}
+
+let pass = 0, fail = 0;
+function ok(n) { console.log(`  ✓ ${n}`); pass++; }
+function bad(n, e) { console.log(`  ✗ ${n}\n    ${e && e.message ? e.message : e}`); fail++; }
+async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
+function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
+
+class FakeKV {
+  constructor() { this.map = new Map(); }
+  async get(k) { return this.map.has(k) ? this.map.get(k) : null; }
+  async put(k, v) { this.map.set(k, String(v)); }
+  async delete(k) { this.map.delete(k); }
+  async list({ prefix = '' } = {}) {
+    return {
+      keys: [...this.map.keys()].filter(k => k.startsWith(prefix)).map(name => ({ name })),
+      list_complete: true,
+    };
+  }
+}
+
+class FakeR2 {
+  constructor() { this.map = new Map(); }
+  async put(k, v) { this.map.set(k, String(v)); }
+  async get(k) {
+    if (!this.map.has(k)) return null;
+    const v = this.map.get(k);
+    return { text: async () => v };
+  }
+  async head(k) {
+    if (!this.map.has(k)) return null;
+    return { size: Buffer.byteLength(this.map.get(k)) };
+  }
+  async delete(k) { this.map.delete(k); }
+  async list({ prefix = '' } = {}) {
+    return {
+      objects: [...this.map.keys()].filter(k => k.startsWith(prefix)).map(key => ({ key })),
+      truncated: false,
+    };
+  }
+}
+
+class FakeStorage {
+  constructor() { this.map = new Map(); }
+  async transaction(fn) {
+    const txn = {
+      get: async (k) => this.map.get(k),
+      put: async (k, v) => { this.map.set(k, v); },
+      delete: async (k) => { this.map.delete(k); },
+    };
+    return fn(txn);
+  }
+}
+
+class FakeDurableNamespace {
+  constructor(env, StoreClass) {
+    this.env = env;
+    this.StoreClass = StoreClass;
+    this.states = new Map();
+  }
+  idFromName(name) { return name; }
+  stateFor(id) {
+    if (!this.states.has(id)) this.states.set(id, { storage: new FakeStorage() });
+    return this.states.get(id);
+  }
+  get(id) {
+    return {
+      fetch: async (url, init = {}) => {
+        const store = new this.StoreClass(this.stateFor(id), this.env);
+        return store.fetch(new Request(url, init));
+      },
+    };
+  }
+}
+
+async function loadWorker() {
+  const root = path.join(__dirname, '..');
+  let src = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
+  const readerCss = fs.readFileSync(path.join(root, 'server', 'reader.css'), 'utf8');
+  src = src.replace(
+    /const READER_CSS = `__TDOC_READER_CSS__`;/,
+    'const READER_CSS = ' + JSON.stringify(readerCss) + ';'
+  );
+  const shellMod = fs.readFileSync(path.join(root, 'server', 'shell.js'), 'utf8');
+  const probeJs = require(path.join(root, 'server', 'frame-probe-source.js'))();
+  src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
+  src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
+  const tmp = path.join(os.tmpdir(), `tdoc-worker-${Date.now()}-${Math.random().toString(16).slice(2)}.mjs`);
+  fs.writeFileSync(tmp, src);
+  const mod = await import(`file://${tmp}`);
+  try { fs.unlinkSync(tmp); } catch {}
+  return mod;
+}
+
+function makeEnv(StoreClass, extra = {}) {
+  const env = {
+    META: new FakeKV(),
+    DOCS: new FakeR2(),
+    TDOC_HOSTED_REGISTRATION: '1',
+    ...extra,
+  };
+  env.COMMENTS = new FakeDurableNamespace(env, StoreClass);
+  return env;
+}
+
+function req(pathname, { method = 'GET', host = 'tdoc.dev', accept = '', cookie = '', body = null } = {}) {
+  return new Request(`https://${host}${pathname}`, {
+    method,
+    headers: {
+      ...(accept ? { Accept: accept } : {}),
+      ...(cookie ? { Cookie: cookie.includes('=') ? cookie : `tdoc_sid=${cookie}` } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+async function putSession(env, { login = '', email = '', account_id = '' } = {}) {
+  const id = [...crypto.getRandomValues(new Uint8Array(16))]
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
+  await env.META.put(`session:${id}`, JSON.stringify({
+    ...(login ? { login } : {}),
+    ...(email ? { email } : {}),
+    ...(account_id ? { account_id } : {}),
+    name: login || email || 'user',
+    avatar_url: '',
+    created: new Date().toISOString(),
+  }));
+  return `tdoc_sid=${id}`;
+}
+
+async function seedAccount(env, login, accountId = `acct-${login}`) {
+  const norm = String(login).toLowerCase();
+  await env.META.put(`hosted-account:${norm}`, JSON.stringify({
+    account_id: accountId,
+    github_login: norm,
+    created: '2026-01-01T00:00:00.000Z',
+  }));
+  return accountId;
+}
+
+async function seedEmailAccount(env, email, accountId = `acct-email`) {
+  await env.META.put(`account-email:${email}`, JSON.stringify({
+    account_id: accountId,
+    email,
+    created: '2026-01-01T00:00:00.000Z',
+  }));
+  return accountId;
+}
+
+async function seedDoc(env, slug, { owner, accountId, created = '2026-01-01T00:00:00.000Z', versions, title, access } = {}) {
+  const vs = versions || [{ n: 1, created }];
+  const meta = { title: title || slug, slug, created, versions: vs };
+  if (owner) {
+    meta.hosted = {
+      account_id: accountId || `acct-${owner}`,
+      github_login: owner,
+    };
+  }
+  if (access) meta.access = access;
+  await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+  for (const v of vs) {
+    await env.DOCS.put(
+      `docs/${slug}/v${v.n}/index.html`,
+      `<h1>${title || slug}</h1><p>Opening paragraph about ${slug} for profile previews.</p>`
+        + `<img src="https://example.com/${slug}.png" alt="">`,
+    );
+  }
+}
+
+function bootData(html, name) {
+  const marker = `window.${name} = `;
+  const start = html.indexOf(marker);
+  assert(start >= 0, `${name} missing`);
+  const end = html.indexOf(';</script>', start);
+  assert(end >= 0, `${name} script is not terminated`);
+  return JSON.parse(html.slice(start + marker.length, end));
+}
+
+async function seedPins(env, accountId, pins, extra = {}) {
+  await env.META.put(`account-profile:${accountId}`, JSON.stringify({
+    account_id: accountId,
+    pins,
+    created: '2026-01-01T00:00:00.000Z',
+    ...extra,
+  }));
+}
+
+(async () => {
+  const mod = await loadWorker();
+  const worker = mod.default;
+  console.log('public @handle profiles');
+
+  await t('account menu profile API reads only the signed-in viewer without minting accounts', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const alice = await seedAccount(env, 'alice');
+    const bob = await seedAccount(env, 'bob');
+    await seedPins(env, alice, ['alice-doc'], { handle: 'alice-public' });
+    await seedPins(env, bob, ['bob-doc'], { handle: 'bob-public' });
+    const cookie = await putSession(env, { login: 'alice' });
+    const response = await worker.fetch(req('/api/me/profile?login=bob', { cookie }), env);
+    assert(response.status === 200, 'viewer profile available');
+    assert(response.headers.get('Cache-Control') === 'private, no-store', 'private metadata is not cached');
+    const data = await response.json();
+    assert(JSON.stringify(data) === JSON.stringify({ ok: true, profile: { handle: 'alice-public', suggested: 'alice-public' } }),
+      'returns only viewer handle and suggestion, never subject profile, pins or catalog');
+
+    const emailId = await seedEmailAccount(env, 'person@example.com');
+    await seedPins(env, emailId, [], { handle: 'email-person' });
+    const emailCookie = await putSession(env, { email: 'person@example.com' });
+    const emailResponse = await worker.fetch(req('/api/me/profile', { cookie: emailCookie }), env);
+    assert((await emailResponse.json()).profile.handle === 'email-person', 'email identity resolves its own profile');
+
+    const freshCookie = await putSession(env, { login: 'new-person' });
+    const before = [...env.META.map.entries()];
+    const unclaimed = await worker.fetch(req('/api/me/profile', { cookie: freshCookie }), env);
+    const unclaimedBody = await unclaimed.json();
+    assert(unclaimed.status === 200 && unclaimedBody.profile.handle === null && unclaimedBody.profile.suggested === 'new-person',
+      'accountless viewer gets claim entry data');
+    assert(JSON.stringify([...env.META.map.entries()]) === JSON.stringify(before), 'reading the menu does not create an account');
+    assert((await worker.fetch(req('/api/me/profile'), env)).status === 401, 'anonymous is rejected');
+    const byok = makeEnv(mod.CommentsStore, { TDOC_HOSTED_REGISTRATION: '0' });
+    assert((await worker.fetch(req('/api/me/profile', { host: 'byok.example' }), byok)).status === 404, 'BYOK stays hosted-only');
+  });
+
+  await t('profile header avatar is the subject, not the viewer', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'profile.jsx'), 'utf8');
+    // Regression: logged-in viewers used to see their own session avatar on
+    // every /@handle because ProfileAvatar preferred identity.avatar_url.
+    assert(!/avatarUrl=\{identity && identity\.avatar_url\}/.test(src),
+      'do not feed the viewer session avatar into the profile subject header');
+    assert(/githubLogin=\{githubLogin\}/.test(src),
+      'subject avatar must come from the profile github_login');
+  });
+
+  await t('/@alice lists only pinned readable docs', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const alice = await seedAccount(env, 'alice');
+    await seedAccount(env, 'bob');
+    await seedDoc(env, 'alice-open', {
+      owner: 'alice',
+      access: { visibility: 'public' },
+      versions: [{ n: 1, created: '2026-02-01T00:00:00.000Z' }],
+    });
+    await seedDoc(env, 'alice-link', {
+      owner: 'alice',
+      access: { visibility: 'unlisted' },
+      versions: [{ n: 1, created: '2026-03-01T00:00:00.000Z' }],
+    });
+    await seedDoc(env, 'alice-secret', {
+      owner: 'alice',
+      access: { visibility: 'private' },
+    });
+    await seedDoc(env, 'bob-open', {
+      owner: 'bob',
+      access: { visibility: 'public' },
+    });
+    // Pin order preserved; a profile is a public listing, so a private pin
+    // and an "anyone with the link" (unlisted) pin are both left off it.
+    await seedPins(env, alice, ['alice-link', 'alice-secret', 'alice-open', 'bob-open']);
+
+    const empty = await worker.fetch(req('/@bob'), env, {});
+    assert(empty.status === 200, `/@bob ${empty.status}`);
+    const emptyBoot = bootData(await empty.text(), '__TDOC_APP_BOOT__');
+    assert(emptyBoot.docs.length === 0, 'unpinned profile is empty');
+
+    const r = await worker.fetch(req('/@alice'), env, {});
+    assert(r.status === 200, `/@alice ${r.status}`);
+    const boot = bootData(await r.text(), '__TDOC_APP_BOOT__');
+    assert(boot.page === 'profile' && boot.login === 'alice', 'profile boot');
+    assert(boot.docs.map((d) => d.slug).join(',') === 'alice-open',
+      `expected pinned public only, got ${JSON.stringify(boot.docs)}`);
+    assert(boot.docs.every((d) => d.url && d.title), 'rows need url + title');
+  });
+
+  await t('/@Alice normalizes case; unknown handle 404s', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await seedAccount(env, 'alice');
+    await seedDoc(env, 'only', { owner: 'alice', access: { visibility: 'public' } });
+    const okRes = await worker.fetch(req('/@Alice'), env, {});
+    assert(okRes.status === 200, `case fold ${okRes.status}`);
+    const miss = await worker.fetch(req('/@nobody-here'), env, {});
+    assert(miss.status === 404, `unknown must 404, got ${miss.status}`);
+    const bad = await worker.fetch(req('/@not valid'), env, {});
+    assert(bad.status === 404, `invalid handle must 404, got ${bad.status}`);
+  });
+
+  await t('Accept: application/json returns pinned catalog', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const alice = await seedAccount(env, 'alice');
+    await seedDoc(env, 'pub', { owner: 'alice', access: { visibility: 'public' } });
+    await seedDoc(env, 'other', { owner: 'alice', access: { visibility: 'public' } });
+    await seedPins(env, alice, ['pub']);
+    const r = await worker.fetch(req('/@alice', { accept: 'application/json' }), env, {});
+    assert(r.status === 200, `json ${r.status}`);
+    const body = await r.json();
+    assert(body.ok && body.login === 'alice' && body.docs.length === 1 && body.docs[0].slug === 'pub',
+      `json body ${JSON.stringify(body)}`);
+  });
+
+  await t('BYOK host refuses profiles', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_REGISTRATION: '0' });
+    await seedAccount(env, 'alice');
+    const r = await worker.fetch(req('/@alice', { host: 'alice.workers.dev' }), env, {});
+    assert(r.status === 404, `BYOK must 404, got ${r.status}`);
+  });
+
+  await t('email account can claim handle and pin a doc', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedEmailAccount(env, 'sam@example.com', 'acct-sam');
+    await seedDoc(env, 'sam-open', {
+      accountId,
+      access: { visibility: 'public' },
+      versions: [{ n: 1, created: '2026-04-01T00:00:00.000Z' }],
+    });
+    // No github_login on meta — ownership is account_id only.
+    const meta = JSON.parse(await env.META.get('meta:sam-open'));
+    meta.hosted = { account_id: accountId };
+    await env.META.put('meta:sam-open', JSON.stringify(meta));
+
+    const before = await worker.fetch(req('/@sam'), env, {});
+    assert(before.status === 404, 'unclaimed must 404');
+
+    const cookie = await putSession(env, { email: 'sam@example.com', account_id: accountId });
+    const claim = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'sam' },
+    }), env, {});
+    assert(claim.status === 200, `claim ${claim.status} ${await claim.clone().text()}`);
+    const claimed = await claim.json();
+    assert(claimed.ok && claimed.handle === 'sam' && claimed.url === '/@sam', JSON.stringify(claimed));
+
+    const empty = await worker.fetch(req('/@sam'), env, {});
+    assert(empty.status === 200, `/@sam ${empty.status}`);
+    assert(bootData(await empty.text(), '__TDOC_APP_BOOT__').docs.length === 0, 'no pins yet');
+
+    const pin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug: 'sam-open', pinned: true },
+    }), env, {});
+    assert(pin.status === 200, `pin ${pin.status} ${await pin.clone().text()}`);
+    const metaAfter = JSON.parse(await env.META.get('meta:sam-open'));
+    assert(metaAfter.preview && /^Opening paragraph/.test(metaAfter.preview.excerpt),
+      `preview lead without h1: ${JSON.stringify(metaAfter.preview)}`);
+    assert(metaAfter.preview.image === '/tdoc_logo-v2.png', 'neutral fallback when test harness omits renderer');
+
+    const page = await worker.fetch(req('/@sam'), env, {});
+    assert(page.status === 200, `/@sam ${page.status}`);
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(boot.page === 'profile' && boot.handle === 'sam', 'claimed profile boot');
+    assert(boot.docs.map((d) => d.slug).join(',') === 'sam-open', `docs ${JSON.stringify(boot.docs)}`);
+    assert(/Opening paragraph/.test(boot.docs[0].excerpt || ''), 'boot carries excerpt from meta');
+    assert(boot.docs[0].image === '', 'no card yet: text-only, no placeholder');
+  });
+
+  await t('/@ shows a placeholder for old pins without generating a preview', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'backfill', 'acct-backfill');
+    await seedDoc(env, 'old-pin', {
+      owner: 'backfill',
+      accountId,
+      title: 'Old Pin Doc',
+      access: { visibility: 'public' },
+    });
+    // Claim + pin list without going through setProfilePin (no preview write).
+    const cookie = await putSession(env, { login: 'backfill', account_id: accountId });
+    await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'backfill' },
+    }), env, {});
+    await env.META.put(`account-profile:${accountId}`, JSON.stringify({
+      account_id: accountId,
+      handle: 'backfill',
+      pins: ['old-pin'],
+    }));
+    const metaBefore = JSON.parse(await env.META.get('meta:old-pin'));
+    assert(!metaBefore.preview, 'fixture must start without preview');
+
+    const page = await worker.fetch(req('/@backfill'), env, {});
+    assert(page.status === 200, `/@backfill ${page.status}`);
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(boot.docs.length === 1 && boot.docs[0].slug === 'old-pin', JSON.stringify(boot.docs));
+    assert(boot.docs[0].excerpt === '', 'no document read on profile page');
+    assert(boot.docs[0].image === '', 'old pin: text-only, no placeholder');
+    const metaAfter = JSON.parse(await env.META.get('meta:old-pin'));
+    assert(!metaAfter.preview, 'profile read does not mutate meta');
+  });
+
+  await t('curate forces public; take-down restores prior visibility', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'owner', 'acct-owner');
+    await seedDoc(env, 'secret', {
+      owner: 'owner',
+      accountId,
+      access: { visibility: 'private' },
+    });
+    const cookie = await putSession(env, { login: 'owner', account_id: accountId });
+    await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'owner' },
+    }), env, {});
+    const pin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug: 'secret', pinned: true },
+    }), env, {});
+    assert(pin.status === 200, `pin ${pin.status}`);
+    const pinnedBody = await pin.json();
+    assert(pinnedBody.visibility === 'public', `curate must publicize, got ${pinnedBody.visibility}`);
+    const metaPinned = JSON.parse(await env.META.get('meta:secret'));
+    assert(metaPinned.profile && metaPinned.profile.curated === true, 'curated flag');
+    assert(metaPinned.profile.restore_visibility === 'private', 'remember private');
+    assert(metaPinned.access.visibility === 'public', 'meta visibility public');
+
+    const asPublic = await worker.fetch(req('/@owner'), env, {});
+    const pubBoot = bootData(await asPublic.text(), '__TDOC_APP_BOOT__');
+    assert(pubBoot.docs.map((d) => d.slug).join(',') === 'secret',
+      `public must see curated doc, got ${JSON.stringify(pubBoot.docs)}`);
+
+    const unpin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug: 'secret', pinned: false },
+    }), env, {});
+    assert(unpin.status === 200, `unpin ${unpin.status}`);
+    const unpinnedBody = await unpin.json();
+    assert(unpinnedBody.visibility === 'private', `restore private, got ${unpinnedBody.visibility}`);
+    const metaRestored = JSON.parse(await env.META.get('meta:secret'));
+    assert(!metaRestored.profile, 'curated flag cleared');
+    assert(metaRestored.access.visibility === 'private', 'visibility restored');
+  });
+
+  // A pin can outlive the doc's ownership; the owner must still be able to
+  // take it down, and the picker must offer it.
+  async function pinnedOwner() {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'owner', 'acct-owner');
+    for (const slug of ['kept', 'moved', 'gone']) {
+      await seedDoc(env, slug, { owner: 'owner', accountId, access: { visibility: 'private' } });
+    }
+    const cookie = await putSession(env, { login: 'owner', account_id: accountId });
+    await worker.fetch(req('/api/me/handle', { method: 'POST', cookie, body: { handle: 'owner' } }), env, {});
+    for (const slug of ['gone', 'moved', 'kept']) {
+      const pin = await worker.fetch(req('/api/me/profile/pin', {
+        method: 'POST', cookie, body: { slug, pinned: true },
+      }), env, {});
+      assert(pin.status === 200, `pin ${slug} ${pin.status}`);
+    }
+    const unpin = (slug) => worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug, pinned: false },
+    }), env, {});
+    const pins = async () => JSON.parse(await env.META.get('account-profile:acct-owner')).pins;
+    return { env, cookie, unpin, pins };
+  }
+
+  await t('take-down of a pick whose doc moved to a team succeeds and leaves team access alone', async () => {
+    const { env, unpin, pins } = await pinnedOwner();
+    const meta = JSON.parse(await env.META.get('meta:moved'));
+    await env.META.put('meta:moved', JSON.stringify({ ...meta, workspace_id: 'team-1' }));
+    const r = await unpin('moved');
+    assert(r.status === 200, `unpin team-moved ${r.status} ${await r.clone().text()}`);
+    const body = await r.json();
+    assert(body.on_profile === false && !body.pins.includes('moved'), JSON.stringify(body));
+    assert((await pins()).join(',') === 'kept,gone', `pins ${await pins()}`);
+    const after = JSON.parse(await env.META.get('meta:moved'));
+    assert(after.access.visibility === 'public' && after.profile, 'team doc meta is not rewritten by a personal take-down');
+    const page = await worker.fetch(req('/@owner'), env, {});
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(!boot.docs.some((d) => d.slug === 'moved'), 'gone from the public profile');
+  });
+
+  await t('take-down of a pick whose doc was deleted succeeds', async () => {
+    const { env, unpin, pins } = await pinnedOwner();
+    await env.META.delete('meta:gone');
+    const r = await unpin('gone');
+    assert(r.status === 200, `unpin deleted ${r.status} ${await r.clone().text()}`);
+    const body = await r.json();
+    assert(body.visibility === null && body.on_profile === false, JSON.stringify(body));
+    assert((await pins()).join(',') === 'kept,moved', `pins ${await pins()}`);
+    assert(await env.META.get('meta:gone') === null, 'a deleted doc is not resurrected as meta');
+  });
+
+  await t('normal take-down restores the visibility the doc had before it was picked', async () => {
+    const { env, unpin, pins } = await pinnedOwner();
+    assert(JSON.parse(await env.META.get('meta:kept')).access.visibility === 'public', 'picked = public');
+    const r = await unpin('kept');
+    assert(r.status === 200, `unpin ${r.status}`);
+    assert((await r.json()).visibility === 'private', 'restored private');
+    const meta = JSON.parse(await env.META.get('meta:kept'));
+    assert(meta.access.visibility === 'private' && !meta.profile, JSON.stringify(meta));
+    assert((await pins()).join(',') === 'moved,gone', `pins ${await pins()}`);
+  });
+
+  await t('blocked docs that are not pinned still refuse take-down and pinning', async () => {
+    const { env, cookie, unpin } = await pinnedOwner();
+    await seedDoc(env, 'team-only', { owner: 'owner', accountId: 'acct-owner' });
+    const meta = JSON.parse(await env.META.get('meta:team-only'));
+    await env.META.put('meta:team-only', JSON.stringify({ ...meta, workspace_id: 'team-1' }));
+    assert((await unpin('team-only')).status === 409, 'unpinned team doc keeps 409');
+    assert((await unpin('never-existed')).status === 404, 'unknown slug keeps 404');
+    const moved = JSON.parse(await env.META.get('meta:moved'));
+    await env.META.put('meta:moved', JSON.stringify({ ...moved, workspace_id: 'team-1' }));
+    const repin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie, body: { slug: 'moved', pinned: true },
+    }), env, {});
+    assert(repin.status === 409, `pinning a team doc stays refused, got ${repin.status}`);
+  });
+
+  await t('another account cannot take down someone else\'s pick', async () => {
+    const { env } = await pinnedOwner();
+    await seedAccount(env, 'guest', 'acct-guest');
+    const guest = await putSession(env, { login: 'guest', account_id: 'acct-guest' });
+    const r = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie: guest, body: { slug: 'kept', pinned: false },
+    }), env, {});
+    assert(r.status === 403, `guest take-down must 403, got ${r.status}`);
+    assert(JSON.parse(await env.META.get('account-profile:acct-owner')).pins.includes('kept'), 'owner pin intact');
+  });
+
+  await t('the owner\'s picker lists every pin, including team-moved and deleted docs', async () => {
+    const { env, cookie } = await pinnedOwner();
+    const meta = JSON.parse(await env.META.get('meta:moved'));
+    await env.META.put('meta:moved', JSON.stringify({ ...meta, workspace_id: 'team-1' }));
+    await env.META.delete('meta:gone');
+    const r = await worker.fetch(req('/@owner', { cookie, accept: 'application/json' }), env, {});
+    const data = await r.json();
+    const bySlug = Object.fromEntries(data.catalog.map((row) => [row.slug, row]));
+    for (const slug of ['kept', 'moved', 'gone']) assert(bySlug[slug] && bySlug[slug].on_profile, `${slug} in picker: ${JSON.stringify(data.catalog)}`);
+    assert(bySlug.gone.status === 'deleted', JSON.stringify(bySlug.gone));
+  });
+
+  await t('a session on a linked, non-canonical account edits the canonical pins', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const canonical = await seedAccount(env, 'owner', 'acct-owner');
+    const group = JSON.stringify({ canonical, ids: [canonical, 'acct-alt'] });
+    await env.META.put(`account-group:${canonical}`, group);
+    await env.META.put('account-group:acct-alt', group);
+    await seedDoc(env, 'shared', { owner: 'owner', accountId: canonical, access: { visibility: 'unlisted' } });
+    await seedPins(env, canonical, ['shared'], { handle: 'owner' });
+    await seedPins(env, 'acct-alt', ['shared']);
+    await env.META.put('hosted-handle:owner', JSON.stringify({ account_id: canonical }));
+    const alt = await putSession(env, { login: 'owner', account_id: 'acct-alt' });
+    const r = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie: alt, body: { slug: 'shared', pinned: false },
+    }), env, {});
+    assert(r.status === 200, `linked take-down ${r.status} ${await r.clone().text()}`);
+    assert(JSON.parse(await env.META.get(`account-profile:${canonical}`)).pins.length === 0, 'canonical pin removed');
+    assert(JSON.parse(await env.META.get('account-profile:acct-alt')).pins.length === 0, 'member pin removed too');
+    const boot = bootData(await (await worker.fetch(req('/@owner'), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(boot.docs.length === 0, `profile empty after take-down: ${JSON.stringify(boot.docs)}`);
+  });
+
+  await t('non-author cannot curate', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const ownerId = await seedAccount(env, 'owner', 'acct-owner');
+    await seedAccount(env, 'guest', 'acct-guest');
+    await seedDoc(env, 'owners-doc', {
+      owner: 'owner',
+      accountId: ownerId,
+      access: { visibility: 'public' },
+    });
+    const guestCookie = await putSession(env, { login: 'guest', account_id: 'acct-guest' });
+    const pin = await worker.fetch(req('/api/me/profile/pin', {
+      method: 'POST', cookie: guestCookie, body: { slug: 'owners-doc', pinned: true },
+    }), env, {});
+    assert(pin.status === 403, `guest pin must 403, got ${pin.status}`);
+  });
+
+  await t('vanity claim works; github login still resolves', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'ghuser', 'acct-gh');
+    await seedDoc(env, 'pub', {
+      owner: 'ghuser',
+      accountId,
+      access: { visibility: 'public' },
+    });
+    const cookie = await putSession(env, { login: 'ghuser', account_id: accountId });
+    const claim = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'julie' },
+    }), env, {});
+    assert(claim.status === 200, `vanity claim ${claim.status}`);
+    const vanity = await worker.fetch(req('/@julie'), env, {});
+    assert(vanity.status === 200, `/@julie ${vanity.status}`);
+    const viaGh = await worker.fetch(req('/@ghuser'), env, {});
+    assert(viaGh.status === 200, 'github login fallback still works');
+  });
+
+  await t('cannot claim another account github login', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    await seedAccount(env, 'alice', 'acct-alice');
+    const cookie = await putSession(env, {
+      email: 'bob@example.com',
+      account_id: await seedEmailAccount(env, 'bob@example.com', 'acct-bob'),
+    });
+    const claim = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'alice' },
+    }), env, {});
+    assert(claim.status === 409, `must 409, got ${claim.status}`);
+  });
+
+  await t('owner can change handle; old @ frees', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const accountId = await seedAccount(env, 'mover', 'acct-mover');
+    const cookie = await putSession(env, { login: 'mover', account_id: accountId });
+    const first = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'first-name' },
+    }), env, {});
+    assert(first.status === 200, `first claim ${first.status}`);
+    const second = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'second-name' },
+    }), env, {});
+    assert(second.status === 200, `change ${second.status} ${await second.clone().text()}`);
+    const body = await second.json();
+    assert(body.handle === 'second-name' && body.changed === true, JSON.stringify(body));
+    assert((await worker.fetch(req('/@second-name'), env, {})).status === 200, 'new handle live');
+    assert((await worker.fetch(req('/@first-name'), env, {})).status === 404, 'old handle freed');
+  });
+
+  await t('signed-in without account_id still mints and claims', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    // Spectator session: GitHub login + idp, no account_id yet (sign-in does
+    // not mint until publish / claim).
+    const cookie = await putSession(env, {
+      login: 'newbie',
+      // putSession only stores login/email/account_id — write raw session.
+    });
+    const sid = cookie.replace('tdoc_sid=', '');
+    await env.META.put(`session:${sid}`, JSON.stringify({
+      login: 'newbie',
+      name: 'newbie',
+      avatar_url: '',
+      created: '2026-01-01T00:00:00.000Z',
+      idp: { provider: 'github', sub: '999001' },
+    }));
+    const claim = await worker.fetch(req('/api/me/handle', {
+      method: 'POST', cookie, body: { handle: 'julie' },
+    }), env, {});
+    assert(claim.status === 200, `mint+claim ${claim.status} ${await claim.clone().text()}`);
+    const body = await claim.json();
+    assert(body.ok && body.handle === 'julie', JSON.stringify(body));
+    const page = await worker.fetch(req('/@julie'), env, {});
+    assert(page.status === 200, `/@julie after mint ${page.status}`);
+    const sess = JSON.parse(await env.META.get(`session:${sid}`));
+    assert(sess.account_id, 'session should gain account_id');
+  });
+
+  await t('comment and reply avatars resolve current public handles without rewriting history', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const alice = await seedAccount(env, 'alice');
+    await seedAccount(env, 'bob');
+    const emailAccount = await seedEmailAccount(env, 'reader@example.com');
+    await seedDoc(env, 'profile-comments', { owner: 'alice', access: { visibility: 'public' } });
+    const author = (login, extra = {}) => ({ login, avatar_url: 'https://example.com/avatar.png', ...extra });
+    const legacy = [{
+      id: 'c_profile', version: 1, text: 'A comment', status: 'open',
+      anchor: { kind: 'text', text: 'Opening paragraph' },
+      created: '2026-01-01T00:00:00Z', author: author('alice'),
+      replies: [
+        { id: 'r_email', text: 'Email author', author: author('email:reader@example.com') },
+        { id: 'r_bob', text: 'GitHub fallback', author: author('bob') },
+        { id: 'r_none', text: 'No account', author: author('unregistered') },
+        { id: 'r_agent', text: 'Agent', author: author('alice', { kind: 'agent', profile_url: '/@bob' }) },
+        { id: 'r_system', text: 'System', author: author('bob', { kind: 'system' }) },
+      ].map(r => ({ ...r, parent_id: 'c_profile', created: '2026-01-01T01:00:00Z' })),
+    }];
+    await env.META.put('comments:profile-comments', JSON.stringify(legacy));
+    const claim = async (accountId, handle) => {
+      await seedPins(env, accountId, [], { handle });
+      await env.META.put(`hosted-handle:${handle}`, JSON.stringify({ account_id: accountId }));
+    };
+    await claim(alice, 'alice-public');
+    await claim(emailAccount, 'reader-public');
+    const get = async () => (await worker.fetch(req('/api/comments?slug=profile-comments&version=1'), env, {})).json();
+    const [comment] = await get();
+    assert(comment.author.profile_url === '/@alice-public', 'comment uses claimed handle');
+    assert(comment.replies[0].author.profile_url === '/@reader-public', 'email reply uses public handle');
+    assert(comment.replies[1].author.profile_url === '/@bob', 'GitHub fallback remains reachable');
+    for (const reply of comment.replies.slice(2)) assert(!reply.author.profile_url, 'no links for absent/system/agent profiles');
+    for (const person of [comment.author, ...comment.replies.map(r => r.author)]) {
+      if (person.profile_url) assert((await worker.fetch(req(person.profile_url), env, {})).status === 200, 'link resolves to a public page');
+    }
+    await env.META.delete('hosted-handle:alice-public');
+    await claim(alice, 'alice-renamed');
+    assert((await get())[0].author.profile_url === '/@alice-renamed', 'old comments follow current handle');
+    const history = await (await worker.fetch(req('/api/comments?slug=profile-comments&version=all'), env, {})).json();
+    assert(!history[0].author.profile_url, 'presentation metadata is not written to the event log');
+    assert(await env.META.get('comments:profile-comments') === JSON.stringify(legacy), 'legacy stored content remains untouched');
+    await env.META.put('hosted-handle:alice-renamed', JSON.stringify({ account_id: 'another-account' }));
+    assert(!(await get())[0].author.profile_url, 'never link an actor to another account');
+    const selfHosted = await worker.fetch(req('/api/comments?slug=profile-comments&version=1'),
+      { ...env, TDOC_HOSTED_REGISTRATION: '0' }, {});
+    assert(!(await selfHosted.json())[0].replies[1].author.profile_url, 'BYOK does not acquire broken hosted profile links');
+  });
+
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });

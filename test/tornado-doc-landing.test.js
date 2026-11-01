@@ -70,7 +70,7 @@ t('hero demo is a static mock, no iframe or author script', () => {
 });
 
 t('carries the SEO head', () => {
-  assert(/<title>[^<]*tdoc[^<]*<\/title>/i.test(html), 'title does not mention tdoc');
+  assert(/<title>[^<]*(tdoc|Tornado)[^<]*<\/title>/i.test(html), 'title does not name the product');
   // Upper bound is Google's snippet truncation (~160 chars) — a longer one is
   // not wrong, it just gets cut mid-sentence in results.
   const desc = metaContent('description');
@@ -96,8 +96,13 @@ t('names tdoc and tornado-doc', () => {
   assert(/tdoc/.test(html), 'does not mention tdoc');
   assert(html.includes('tornado-doc'), 'does not mention tornado-doc');
   assert(!html.includes('Tornado Dog'), 'old Tornado Dog name still present');
-  assert(meta.title === 'tornado-doc', `meta title was ${meta.title}`);
+  assert(meta.title === 'Tornado: AI Native Docs', `meta title was ${meta.title}`);
   assert(meta.slug === 'tornado-doc', `meta slug was ${meta.slug}`);
+  // Hero mark is Julie's square stroke, not the old filled tornado path.
+  assert(/class="brand-mark"[^>]*viewBox="0 0 436 436"/.test(html), 'brand-mark is not the square stroke');
+  assert(!/viewBox="201\.2 205\.2 597\.6 597\.6"/.test(html), 'old filled tornado mark still in landing');
+  assert(/<svg class="brand-mark"[^>]*aria-hidden="true"/.test(html),
+    'the decorative logo beside the wordmark must not offer visual expansion');
 });
 
 t('links to the GitHub repo and install path', () => {
@@ -110,6 +115,13 @@ t('links to the GitHub repo and install path', () => {
   assert(hrefs.some((h) => h === '/start'), 'primary CTA no longer opens onboarding');
   assert(!hrefs.some((h) => /github\.com\/.+\/blob\//.test(h)),
     'a CTA points at a raw GitHub file; that is a repo, not an onboarding');
+});
+
+t('has an entry to the feedback tool in a section of its own', () => {
+  // Feedback on your own app is a second way in; the homepage says so in
+  // its usual section head, and links to /feedback (the bookmark page).
+  assert(hrefs.includes('/feedback'), 'no link to /feedback');
+  assert(/<p class="eyebrow">Feedback<\/p>\s*<h2>[^<]+<\/h2>\s*<p>[^]*?href="\/feedback"/.test(html), 'the /feedback link is not in a section head');
 });
 
 t('demo doc and thread are siblings, not nested', () => {
@@ -268,7 +280,46 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Works with/.test(visible), 'trusted-by label should be Works with, not a borrowed user list');
+  assert(/Use tdoc in/.test(visible), 'the hero app picker should be "Use tdoc in", not a borrowed user list');
+});
+
+t('names the apps it runs in, each linked to its connect step', () => {
+  // Newcomers went to claude.ai and ChatGPT because the page showed those
+  // marks and said nothing to install, when tdoc ran only in Claude Code and
+  // Codex. The remote MCP server (/mcp) now puts it in those chats, so the
+  // page names them, and each mark is a link to that app's connect step.
+  const visible = html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ');
+  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Set up in a minute'));
+  assert(/Claude[\s\S]*ChatGPT[\s\S]*Grok[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI[\s\S]*Grok Bot/.test(hero), 'the hero picker does not name every app');
+  assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
+  const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
+  const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
+  assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
+  // The hero picker: one radio per app, the first checked, and each panel's way
+  // in works from the sandboxed frame (an https link or a line to copy).
+  const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
+  const radios = [...pick.matchAll(/<input type="radio" name="pick" id="pick-r-([a-z]+)"/g)].map((m) => m[1]);
+  assert(radios.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker radios: ${radios.join(' ')}`);
+  assert(/id="pick-r-claude" class="pick-radio" checked/.test(pick), 'Claude is not picked first');
+  for (const app of radios) {
+    const panel = pick.slice(pick.indexOf(`class="pick-panel pick-p-${app}"`));
+    const body = panel.slice(0, panel.indexOf('</div>', panel.indexOf('</p>')) + 6);
+    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} panel has no way in`);
+    assert(!/href="(cursor|vscode):/.test(body), `${app} panel links a custom scheme the frame cannot open`);
+  }
+  assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(pick), 'the picker shows company logos');
+  assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
+  const setup = html.slice(html.indexOf('<!-- ══ ONE PASTE ══'), html.indexOf('<!-- ══ FEATURES'));
+  // Setup shows every app the picker offers, each with its own mark: Claude
+  // Code is Claude's, not a generic terminal (ST1125, 2026-10-29).
+  const tiles = [...setup.matchAll(/class="apptile[^"]*" role="img" aria-label="([^"]+)"/g)].map((m) => m[1]);
+  assert(tiles.join('|') === 'Claude|ChatGPT|Grok|Cursor|VS Code|Claude Code|Codex|Gemini CLI|Grok Bot', `setup tiles: ${tiles.join('|')}`);
+  assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-claude"/.test(setup), 'Claude Code does not show the Claude mark');
+  assert(!/#i-terminal"|#i-code"/.test(setup + pick), 'a generic terminal or code icon stands in for an app');
+  assert(/sign in once/.test(setup), 'setup does not say you sign in once');
 });
 
 console.log('tdoc.dev / route');
@@ -302,7 +353,7 @@ t('homepage fails safe to the neutral page', () => {
 t('doc view and homepage share one render path', () => {
   // Regression guard: the /d/ route used to inline the whole render. If it
   // grows a second copy, the homepage and doc pages drift on access/CSP.
-  assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?\)/.test(worker), 'missing serveDocVersion');
+  assert(/async function serveDocVersion\(env, req, slug, version(, \w+)?(, \{[^)]*\})?\)/.test(worker), 'missing serveDocVersion');
   // One shared render call site: EVERYTHING (homepage included) renders as the
   // cross-origin shell — the overlay path is deleted. Access/CSP/version wiring
   // cannot drift because there is exactly one render.
@@ -341,8 +392,25 @@ t('homepage bar is site chrome, not a document toolbar', () => {
     'homepage bar must draw the GitHub mark itself');
   assert(/className="tdoc-gh-stars"/.test(toolbar) && /function starCount/.test(toolbar),
     'homepage bar must show the star count beside the mark');
-  assert(/config\.isLanding \? <LandingActions stars=\{config\.stars\} \/> : \(/.test(documentShell),
+  // The homepage bar: the demo's Ask AI (simulated, demo-agent.js) and
+  // GitHub; never the document's Share/Copy/Download actions.
+  const landingBar = documentShell.match(/actions=\{config\.isLanding \? <>([\s\S]*?)<\/> : \(/);
+  assert(landingBar && /<LandingActions stars=\{config\.stars\} \/>/.test(landingBar[1]),
     'homepage must not receive the document Share/Copy/Download actions');
+  assert(landingBar[1].replace(/\s+/g, ' ').trim() === '{askAiAction} <LandingActions stars={config.stars} />',
+    `homepage bar carries more than Ask AI + GitHub: ${landingBar[1]}`);
+  assert(/demo: !!config\.demoComments/.test(documentShell),
+    'homepage shell must wire demoComments into useComments');
+  assert(/Type a GitHub @/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
+    'demo composer placeholder should invite a GitHub @');
+  assert(/@email/.test(fs.readFileSync(path.join(root, 'shell', 'src', 'document', 'comment-composer.jsx'), 'utf8')),
+    'demo composer placeholder should also show email tagging');
+  assert(/elementComment: !config\.isLanding/.test(documentShell),
+    'landing must turn off block/artifact hover chrome');
+  assert(/var elementComment = true/.test(fs.readFileSync(path.join(root, 'server', 'frame-probe.js'), 'utf8')),
+    'frame probe must gate element/block hover');
+  assert(/tdoc-demo-chip/.test(fs.readFileSync(path.join(root, 'server', 'chrome.css'), 'utf8')),
+    'demo chip style must exist');
 });
 
 console.log('tdoc.dev / release payload');
@@ -392,7 +460,7 @@ t('bin/tdoc-landing-release writes a clean v1 with no review thread', () => {
 t('release payload carries the homepage access policy', () => {
   // /api/upload writes meta.access. Without it, tdoc-publish defaults a
   // brand-new access block to unlisted, and whoever publishes the homepage
-  // has to remember --visibility public --history owner --commenting signed_in.
+  // has to remember --visibility public --history owner --commenting off.
   // The payload states the policy so the flags are not load-bearing.
   const { execFileSync } = require('child_process');
   const script = path.join(root, 'bin', 'tdoc-landing-release');
@@ -406,8 +474,8 @@ t('release payload carries the homepage access policy', () => {
     `homepage must be public, got ${relMeta.access.visibility}`);
   assert(relMeta.access.history_visibility === 'owner',
     `homepage history must be owner-only, got ${relMeta.access.history_visibility}`);
-  assert(relMeta.access.commenting === 'signed_in',
-    `homepage commenting must be signed_in, got ${relMeta.access.commenting}`);
+  assert(relMeta.access.commenting === 'off',
+    `homepage commenting must be off (no KV writes; shell demo is in-memory), got ${relMeta.access.commenting}`);
   assert(Array.isArray(relMeta.access.allowed_users) && relMeta.access.allowed_users.length === 0,
     `homepage allowlist must be empty, got ${JSON.stringify(relMeta.access.allowed_users)}`);
 
@@ -429,6 +497,11 @@ t('release payload carries the homepage access policy', () => {
   const workerSrc = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   assert(/if \(incoming\.access\)/.test(workerSrc) && /incoming\.access = normalizeAccess\(validatedAccess\.access/.test(workerSrc),
     '/api/upload no longer applies incoming.access; the payload policy would be dropped');
+  // Shell opens the real sidebar on landing without enabling the API.
+  assert(/canComment: !!commentWritesEnabled \|\| !!isLanding/.test(workerSrc),
+    'landing must expose canComment for the in-memory demo');
+  assert(/demoComments: !!isLanding/.test(workerSrc),
+    'landing must set demoComments so the shell skips /api/comments');
 });
 
 t('shipping the homepage ships content, not just worker code', () => {

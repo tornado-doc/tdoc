@@ -21,7 +21,9 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
 function isolatedHome(slug = 'recovery-doc') {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-terminal-recovery-'));
   const docs = path.join(home, 'tdocs');
-  fs.mkdirSync(path.join(docs, slug), { recursive: true });
+  fs.mkdirSync(path.join(docs, slug, 'v1'), { recursive: true });
+  fs.writeFileSync(path.join(docs, slug, 'meta.json'), JSON.stringify({ title: 'Recovery', versions: [{ n: 1 }] }));
+  fs.writeFileSync(path.join(docs, slug, 'v1/index.html'), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div class="wrap"><p>Ready to publish.</p></div></body></html>');
   return { home, docs, slug };
 }
 

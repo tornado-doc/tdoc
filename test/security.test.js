@@ -46,9 +46,13 @@ vm.runInContext([
   // email-only identity can own its own words.
   sliceFn(workerSrc, 'normalizeEmail'),
   sliceFn(workerSrc, 'sessionPrincipal'),
+  sliceFn(workerSrc, 'sessionAccountIds'),
+  sliceFn(workerSrc, 'sessionOwnsAccount'),
   sliceFn(workerSrc, 'actorKey'),
+  sliceFn(workerSrc, 'actorKeys'),
   sliceFn(workerSrc, 'hostedGithubLogin'),
   sliceFn(workerSrc, 'isOwnerSession'),
+  sliceFn(workerSrc, 'tokenScopeAllows'),
   sliceFn(workerSrc, 'isDocOwnerSession'),
   sliceFn(workerSrc, 'canMutate'),
   sliceFn(workerSrc, 'isRecordAuthor'),
@@ -69,6 +73,36 @@ t('forHtmlComment neutralizes <!-- (cannot open a nested comment)', () => {
   const out = box.forHtmlComment('x <!-- y');
   assert(!out.includes('<!--'), 'output still contains a comment opener');
 });
+t('a browser that refuses storage does not blank the document', () => {
+  // Reading localStorage THROWS -- it does not return null -- in contexts a
+  // browser has decided should not have storage: third-party-cookie blocking,
+  // "prevent cross-site tracking", a profile with site data off. The exception
+  // is `Access to storage is not allowed from this context.`
+  //
+  // Three of the four unguarded reads were inside `useState(() => ...)`, which
+  // throws during the FIRST render, so React never mounts. What the reader
+  // gets is a working top bar with nothing under it: the document's own text
+  // never appears, and nothing says why. Seen on tdoc.dev's landing page in a
+  // browser configured that way, while the same page was perfect in a default
+  // profile.
+  const readSrc = (rel) => fs.readFileSync(path.join(__dirname, '..', ...rel.split('/')), 'utf8');
+  const src = readSrc('shell/src/safe-storage.js').replace(/export function/g, 'function')
+    + '\nmodule.exports = { readStored, writeStored };';
+  const mod = { exports: {} };
+  const refuse = () => { throw new Error('Access to storage is not allowed from this context.'); };
+  new Function('module', 'localStorage', src)(mod, { getItem: refuse, setItem: refuse });
+  assert(mod.exports.readStored('tdoc-theme') === null, 'a refused read must fall back, not throw');
+  assert(mod.exports.readStored('tdoc-theme', 'light') === 'light', 'and honour the fallback given');
+  assert(mod.exports.writeStored('tdoc-theme', 'dark') === false, 'a refused write must report, not throw');
+
+  // And no theme read may bypass it: those are the ones that run before mount.
+  for (const f of ['shell/src/top-bar.jsx', 'shell/src/document-shell.jsx']) {
+    const body = readSrc(f);
+    assert(!/localStorage\.getItem\('tdoc-theme'\)/.test(body), `${f} still reads the theme unguarded`);
+    assert(!/localStorage\.setItem\('tdoc-theme'/.test(body), `${f} still writes the theme unguarded`);
+  }
+});
+
 t('forHtmlComment survives input that REBUILDS the terminator', () => {
   // The original fix escaped one pass, and one pass can rebuild the thing it
   // removes: in `--->` the first pair becomes `-\\-`, and the leftover `-`
@@ -230,14 +264,17 @@ const cardSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'docu
 const layerSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'comment-layer.jsx'), 'utf8');
 const shellSrc = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document-shell.jsx'), 'utf8');
 
-// True when `needle` sits inside a `{canMutate ? ... : null}` block.
+// True when `needle` sits inside a conditional whose first gate is canMutate.
+// The condition can impose further restrictions, such as requiring an anchor.
 function gatedByCanMutate(src, needle) {
   const at = src.indexOf(needle);
   if (at === -1) throw new Error(`${needle} not found in comment-card.jsx`);
-  const open = src.lastIndexOf('{canMutate ? (', at);
+  const open = src.lastIndexOf('{canMutate', at);
   if (open === -1) return false;
+  const conditionEnd = src.indexOf('? (', open);
   const close = src.indexOf(') : null}', open);
-  return close !== -1 && close > at;
+  return conditionEnd !== -1 && conditionEnd < at && !src.slice(open, conditionEnd).includes('}')
+    && close !== -1 && close > at;
 }
 
 // The condition guarding EVERY occurrence of `needle`, in source order. A
@@ -260,7 +297,7 @@ t('comment card derives the mutate gate from the author login or doc owner', () 
   assert(decl.includes('isOwner'), 'mayMutate ignores the doc owner');
   assert(decl.includes('item.author?.login') && decl.includes('currentUser'),
     'mayMutate does not compare the author to the signed-in viewer');
-  assert(cardSrc.includes('const canMutate = mayMutate(comment, currentUser, isOwner);'),
+  assert(cardSrc.includes('const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);'),
     'the root comment no longer runs through mayMutate');
 });
 t('comment card renders delete for the author, and for the owner only on an agent record', () => {
@@ -302,14 +339,20 @@ t('the re-anchor gate is the only thing left that the doc owner unlocks', () => 
 });
 t('comment card renders the re-anchor button only for the author or the doc owner', () => {
   assert(gatedByCanMutate(cardSrc, 'tdoc-reanchor-btn'), 're-anchor action is not gated by canMutate');
+  assert(cardSrc.includes("canMutate && comment.anchor && comment.anchor.kind !== 'document'"),
+    'whole-document comments must not offer re-anchor');
 });
 t('both comment layers forward isOwner to the card', () => {
-  assert(layerSrc.split('isOwner={isOwner}').length === 3,
-    'desktop layer and mobile drawer must both pass isOwner to CommentCard');
+  const cards = [...layerSrc.matchAll(/<CommentCard\b([\s\S]*?)\/>/g)];
+  const sharedList = fs.readFileSync(path.join(__dirname, '..', 'shell', 'src', 'document', 'comment-thread-list.jsx'), 'utf8');
+  assert(cards.length === 1 && cards[0][1].includes('isOwner={isOwner}')
+    && layerSrc.includes('cardProps={{') && layerSrc.includes('currentUser, handoffViewer, isOwner, mentionable')
+    && sharedList.includes('<CommentCard') && sharedList.includes('{...cardProps}'),
+  'desktop layer and mobile drawer must both pass isOwner to CommentCard');
 });
 t('the document shell sources isOwner from the boot config', () => {
-  assert(shellSrc.split('isOwner={Boolean(config.isOwner)}').length === 3,
-    'both comment layers must receive config.isOwner');
+  assert(shellSrc.split('isOwner={Boolean(config.isOwner)}').length === 4,
+    'desktop pins, mobile drawer and document section must receive config.isOwner');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

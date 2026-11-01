@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { AppDialog } from './ui/dialog.jsx';
+import { AppButton } from './ui/button.jsx';
 import { pollDeviceSignIn, startDeviceSignIn } from './document/api.js';
 import { copyText } from './document/model.js';
 
@@ -13,14 +14,14 @@ function isGitHubUrl(value) {
   }
 }
 
-export function SignInDialog({ open, onOpenChange, onSuccess }) {
-  const [device, setDevice] = useState(null);
-  const [status, setStatus] = useState('Starting…');
+export function SignInDialog({ open, onOpenChange, onSuccess, preview = null }) {
+  const [device, setDevice] = useState(preview?.device || null);
+  const [status, setStatus] = useState(preview?.status || 'Starting…');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open || preview) return undefined;
     let cancelled = false;
     let timer;
     let interval = 5;
@@ -59,7 +60,7 @@ export function SignInDialog({ open, onOpenChange, onSuccess }) {
         if (cancelled) return;
         setDevice(result);
         interval = Math.max(5, Number(result.interval) || 5);
-        setStatus('Open GitHub to approve, then return to this tab.');
+        setStatus('Approve on GitHub, then return here.');
         copyText(result.user_code).then(setCopied);
         poll(result.device_code);
       } catch (startError) {
@@ -81,7 +82,7 @@ export function SignInDialog({ open, onOpenChange, onSuccess }) {
       open={open}
       onOpenChange={onOpenChange}
       title="Sign in with GitHub"
-      actions={<button type="button" onClick={() => onOpenChange(false)}>Cancel</button>}
+      actions={<AppButton onClick={() => onOpenChange(false)}>Cancel</AppButton>}
     >
       <div className="tds-step"><span className="tds-n">1</span><span>Copy this code:</span></div>
       <div className="tds-codewrap">
@@ -113,6 +114,7 @@ export function SignInDialog({ open, onOpenChange, onSuccess }) {
         <span className="tds-n">3</span>
         <span className={`tds-status${error ? ' tds-err' : ''}`}>{error || status}</span>
       </div>
+      <p className="manage-hint">Signing in as a different GitHub account? Sign out on github.com first; GitHub remembers the last one.</p>
     </AppDialog>
   );
 }

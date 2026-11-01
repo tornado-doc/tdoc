@@ -1,0 +1,175 @@
+/* /feedback (install) and /feedback/connect (the popup). They were static
+   worker pages with a stylesheet of their own; now they are app pages under
+   the shared top bar, and this is that stylesheet, scoped to them. */
+.tdoc-feedback-page {
+  --fb-ink: #1a1a1a;
+  --fb-muted: #6b6a66;
+  --fb-line: #e8e7e3;
+  --fb-tint: #e8eeff;
+  --fb-ring: rgba(22,82,240,.28);
+  --hand: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  color: var(--fb-ink);
+}
+.tdoc-feedback-page .fb-main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; box-sizing: border-box;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+.tdoc-feedback-page .fb-main.narrow { max-width: 32rem; padding-top: 2rem; }
+.tdoc-feedback-page h1 { color: var(--fb-ink); font-size: 1.7rem; line-height: 1.25; margin: 0 0 .75rem; letter-spacing: -0.02em; }
+.tdoc-feedback-page h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+.tdoc-feedback-page p { margin: 0 0 1rem; }
+.tdoc-feedback-page .fb-main a { color: var(--td-accent); }
+.tdoc-feedback-page pre,
+.tdoc-feedback-page code { background: #f3f3f6; border-radius: 6px; font: .88em ui-monospace, "SF Mono", Menlo, monospace; }
+.tdoc-feedback-page code { padding: .12em .35em; }
+.tdoc-feedback-page pre { padding: .8rem 1rem; overflow-x: auto; }
+.tdoc-feedback-page pre code { padding: 0; background: transparent; }
+.tdoc-feedback-page .muted { color: var(--fb-muted); }
+.tdoc-feedback-page .err { color: #b3261e; }
+.tdoc-feedback-page .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.tdoc-feedback-page .card { border: 1px solid var(--fb-line); border-radius: 10px; padding: 1rem 1.1rem; margin: 0 0 1rem; }
+/* The app's button: 6px corners, accent fill; secondary is outlined. */
+.tdoc-feedback-page .fb-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
+  height: 36px; padding: 0 14px; border: 1px solid var(--td-accent); border-radius: 6px; background: var(--td-accent);
+  color: #fff; font: 600 14px/1 -apple-system, system-ui, sans-serif; text-decoration: none; cursor: pointer; }
+.tdoc-feedback-page .fb-btn:hover { background: var(--td-accent-hover); border-color: var(--td-accent-hover); }
+.tdoc-feedback-page .fb-btn.secondary { background: #fff; color: var(--fb-ink); border-color: var(--fb-line); }
+.tdoc-feedback-page .fb-btn.secondary:hover { border-color: var(--td-accent); color: var(--td-accent); }
+.tdoc-feedback-page .fb-btn:disabled { opacity: .5; cursor: default; }
+.tdoc-feedback-page .fb-field { flex: 1; min-width: 14rem; height: 36px; box-sizing: border-box; padding: 0 .6rem;
+  border: 1px solid #d4d4dc; border-radius: 6px; font: inherit; }
+.tdoc-feedback-page details > summary { cursor: pointer; }
+
+.tdoc-feedback-page .demo { position: relative; margin: 0 0 .85rem; border: 1px solid #c7c7cc;
+  border-radius: 12px; background: #dee1e6; overflow: hidden;
+  box-shadow: 0 8px 24px rgba(16,18,26,.08); }
+.tdoc-feedback-page .demo-titlebar { display: flex; align-items: center; gap: .55rem; padding: .45rem .6rem .4rem;
+  background: linear-gradient(#f6f6f7, #e8eaed); border-bottom: 1px solid #c7c7cc; }
+.tdoc-feedback-page .demo-dots { display: flex; gap: .35rem; flex: 0 0 auto; padding-left: .15rem; }
+.tdoc-feedback-page .demo-dots i { display: block; width: .7rem; height: .7rem; border-radius: 50%; }
+.tdoc-feedback-page .demo-dots .r { background: #ff5f57; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.tdoc-feedback-page .demo-dots .y { background: #febc2e; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.tdoc-feedback-page .demo-dots .g { background: #28c840; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.tdoc-feedback-page .demo-omnibox { flex: 1 1 auto; height: 1.55rem; border-radius: 999px; background: #fff;
+  border: 1px solid #c7c7cc; color: #3c4043; font: 12px/1.55rem system-ui, -apple-system, sans-serif;
+  padding: 0 .75rem; overflow: hidden; white-space: nowrap; }
+.tdoc-feedback-page .demo-bookmarks { display: flex; align-items: center; gap: .15rem; height: 1.85rem;
+  padding: 0 .45rem; background: #fff; border-bottom: 1px solid #dadce0; font: 12px system-ui, sans-serif; }
+.tdoc-feedback-page .demo-bm { color: #3c4043; padding: .2rem .45rem; border-radius: 4px; white-space: nowrap; }
+.tdoc-feedback-page .demo-bm::before { content: ""; display: inline-block; width: .65rem; height: .65rem; margin-right: .3rem;
+  border-radius: 2px; background: #dadce0; vertical-align: -1px; }
+.tdoc-feedback-page .demo-slot { min-width: 6.5rem; height: 1.35rem; border-radius: 999px; border: 1.5px dashed var(--td-accent);
+  background: var(--fb-tint); box-sizing: border-box;
+  animation: demo-slot 3.4s ease-in-out infinite; }
+.tdoc-feedback-page .demo-page { position: relative; height: 7.2rem; background: #fff;
+  display: flex; align-items: center; justify-content: center; }
+.tdoc-feedback-page .demo-ghost { display: inline-block; background: var(--td-accent); color: #fff;
+  font: 650 15px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.01em;
+  padding: .75rem 1.35rem; border-radius: 999px; opacity: .2; pointer-events: none; }
+.tdoc-feedback-page .bookmarklet { display: inline-block; background: var(--td-accent); color: #fff !important; text-decoration: none;
+  font: 650 15px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: -.01em;
+  padding: .75rem 1.35rem; border-radius: 999px; cursor: grab;
+  box-shadow: 0 8px 20px var(--fb-ring); user-select: none; -webkit-user-drag: element;
+  position: absolute; left: 50%; top: 1.85rem; z-index: 2; white-space: nowrap;
+  transform: translateX(-50%); transform-origin: 50% 80%; transition: background .12s; }
+.tdoc-feedback-page .bookmarklet:hover { background: var(--td-accent-hover); }
+.tdoc-feedback-page .bookmarklet:active { cursor: grabbing; }
+.tdoc-feedback-page .bookmarklet.demo-fly {
+  animation: demo-drag 3.4s cubic-bezier(.2,.7,.2,1) infinite;
+  filter: drop-shadow(0 4px 10px rgba(22,82,240,.22));
+}
+.tdoc-feedback-page .demo:hover .bookmarklet.demo-fly,
+.tdoc-feedback-page .bookmarklet.demo-fly:focus-visible {
+  animation: wiggle 1.05s ease-in-out infinite;
+  top: 1.85rem;
+  opacity: 1;
+  filter: drop-shadow(0 10px 22px var(--fb-ring));
+}
+.tdoc-feedback-page .step-1 { position: absolute; left: calc(50% + 7.2rem); top: 1.95rem; z-index: 2;
+  font: 700 1.55rem/1.1 var(--hand); color: var(--td-accent); white-space: nowrap;
+  pointer-events: none; letter-spacing: .01em; transform: rotate(-6deg); }
+.tdoc-feedback-page .install-steps { margin: 0 0 1rem; padding-left: 1.25rem;
+  font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; }
+.tdoc-feedback-page .install-steps li { margin: 0 0 .4rem; }
+.tdoc-feedback-page .install-steps li strong { color: var(--td-accent); font-weight: 650; }
+.tdoc-feedback-page kbd { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; background: #f1f3f4;
+  border: 1px solid #dadce0; border-bottom-width: 2px; border-radius: 4px; padding: .05rem .35rem; }
+.tdoc-feedback-page .device-note { margin: 0 0 1rem; font-size: .92rem; }
+.tdoc-feedback-page .chrome-hint { margin: 0 0 1rem; color: var(--fb-muted); font-size: .92rem; }
+.tdoc-feedback-page .phone-only { display: none; margin: 0 0 1.25rem; padding: .85rem 1rem; border-radius: 12px;
+  background: var(--fb-tint); border: 1px solid color-mix(in srgb, var(--td-accent) 28%, white);
+  font: 500 15px/1.45 -apple-system, "SF Pro Text", system-ui, sans-serif; }
+.tdoc-feedback-page .phone-only strong { color: var(--td-accent); }
+.tdoc-feedback-page .script-path { margin: 2rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--fb-line);
+  border-radius: 12px; background: #fafafa; }
+.tdoc-feedback-page .script-path h2 { margin-top: 0; }
+/* A code snippet with its Copy button: one grey box, the code scrolls, the
+   button (the shared CopyPromptButton) stays put. */
+.tdoc-feedback-page .code-copy { display: flex; align-items: center; gap: .5rem; background: #f3f3f6; border-radius: 6px;
+  padding-right: .5rem; }
+.tdoc-feedback-page .code-copy pre { flex: 1 1 auto; min-width: 0; margin: 0; background: transparent; }
+@media (max-width: 720px) {
+  .tdoc-feedback-page .phone-only { display: block; }
+  .tdoc-feedback-page .install-desktop { display: none !important; }
+  .tdoc-feedback-page .fb-main { padding-top: 2rem; }
+}
+
+.tdoc-feedback-page .coach { position: fixed; inset: 0; z-index: 1000000; }
+.tdoc-feedback-page .coach-frost { position: absolute; inset: 0; background: rgba(16, 18, 28, 0.38);
+  backdrop-filter: blur(10px) saturate(1.2); -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  cursor: pointer; }
+.tdoc-feedback-page .coach-curve { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
+  overflow: visible; z-index: 1; }
+.tdoc-feedback-page .coach-copy { position: absolute; left: 50%; top: 18px; transform: translateX(-50%) rotate(-2deg); z-index: 1;
+  pointer-events: none; margin: 0; padding: .7rem 1.05rem; border-radius: 14px;
+  background: rgba(255,255,255,.96); color: var(--td-accent);
+  font: 700 1.45rem/1.25 var(--hand);
+  box-shadow: 0 8px 24px rgba(16,18,26,.14); text-align: left; min-width: 17rem; }
+.tdoc-feedback-page .coach-copy .n { display: inline-flex; align-items: center; justify-content: center;
+  width: 1.35rem; height: 1.35rem; margin-right: .45rem; border-radius: 50%;
+  background: var(--td-accent); color: #fff; font: 700 0.85rem/1 -apple-system, system-ui, sans-serif;
+  vertical-align: .05em; }
+.tdoc-feedback-page .coach-copy .line { display: block; white-space: nowrap; }
+.tdoc-feedback-page .coach-copy .line + .line { margin-top: .3rem; color: var(--fb-ink); }
+.tdoc-feedback-page .coach-copy .line + .line .n { background: var(--fb-tint); color: var(--td-accent); }
+
+/* Coaching lifts the demo above the frost (the top bar stays under it). */
+.tdoc-feedback-page.coaching .demo { position: relative; z-index: 1000001; overflow: visible;
+  background: transparent; border-color: transparent; box-shadow: none; }
+.tdoc-feedback-page.coaching .demo-titlebar,
+.tdoc-feedback-page.coaching .demo-bookmarks,
+.tdoc-feedback-page.coaching .demo-ghost { opacity: .18; }
+.tdoc-feedback-page.coaching .step-1 { visibility: hidden; }
+.tdoc-feedback-page.coaching .demo-page { background: transparent; }
+.tdoc-feedback-page.coaching .demo-slot { animation: none; opacity: .2; }
+.tdoc-feedback-page.coaching .bookmarklet {
+  z-index: 1000002; animation: wiggle 1.05s ease-in-out infinite !important;
+  top: 1.85rem; left: 50%;
+  box-shadow: 0 16px 40px var(--fb-ring), 0 0 0 6px var(--fb-tint);
+  filter: none;
+}
+.tdoc-feedback-page.coaching .install-steps { visibility: hidden; }
+
+@keyframes demo-drag {
+  0%, 10% { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1); }
+  42%, 58% { top: -2.75rem; opacity: 1; transform: translateX(calc(-50% - 2.8rem)) scale(.92); }
+  72%, 100% { top: -2.75rem; opacity: 0; transform: translateX(calc(-50% - 2.8rem)) scale(.92); }
+}
+@keyframes wiggle {
+  0%, 100% { transform: translateX(-50%) rotate(0deg) scale(1.06); }
+  20% { transform: translateX(-50%) rotate(-10deg) scale(1.06); }
+  40% { transform: translateX(-50%) rotate(10deg) scale(1.06); }
+  60% { transform: translateX(-50%) rotate(-7deg) scale(1.06); }
+  80% { transform: translateX(-50%) rotate(5deg) scale(1.06); }
+}
+@keyframes demo-slot {
+  0%, 35% { background: var(--fb-tint); border-color: var(--td-accent); }
+  42%, 62% { background: color-mix(in srgb, var(--td-accent) 22%, white); border-color: var(--td-accent-hover); }
+  78%, 100% { background: var(--fb-tint); border-color: var(--td-accent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tdoc-feedback-page .bookmarklet.demo-fly,
+  .tdoc-feedback-page .demo-slot,
+  .tdoc-feedback-page .demo:hover .bookmarklet.demo-fly,
+  .tdoc-feedback-page.coaching .bookmarklet { animation: none !important; }
+  .tdoc-feedback-page .bookmarklet.demo-fly,
+  .tdoc-feedback-page.coaching .bookmarklet { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1.06); }
+}

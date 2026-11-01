@@ -10,6 +10,7 @@
 //   TDOC_GENERATED_BY   provenance label (default: tdoc-bundle)
 //   TDOC_SOURCE_SHA     optional override for source_sha (CI passes github.sha)
 //   TDOC_PREVIEW=1      un-export CommentsStore so Cloudflare will mint preview URLs
+//   TDOC_BUNDLE_PLATFORM=vercel  inline binary assets for Node/Vercel's module loader
 
 const fs = require('fs');
 const path = require('path');
@@ -19,11 +20,15 @@ const cp = require('child_process');
 const skill = process.env.SKILL_DIR || path.join(__dirname, '..');
 const outDir = process.env.OUT_DIR || path.join(skill, 'worker');
 const generatedBy = process.env.TDOC_GENERATED_BY || 'tdoc-bundle';
+const vercelBundle = process.env.TDOC_BUNDLE_PLATFORM === 'vercel';
 
 const worker = fs.readFileSync(path.join(skill, 'worker/worker.js'), 'utf8');
 // The shell builder runs server-side in the worker; the framework-free probe is
 // injected into isolated author frames.
 const shellMod = fs.readFileSync(path.join(skill, 'server/shell.js'), 'utf8');
+// An ES module inlined into the worker module: its `export`s become plain
+// declarations there.
+const notificationText = fs.readFileSync(path.join(skill, 'shell/src/notification-text.js'), 'utf8').replace(/^export /gm, '');
 const frameProbe = require(path.join(skill, 'server/frame-probe-source.js'))();
 const readerCss = fs.readFileSync(path.join(skill, 'server/reader.css'), 'utf8');
 const runtimeManifest = JSON.parse(fs.readFileSync(path.join(skill, 'server/runtime/manifest.json'), 'utf8'));
@@ -36,6 +41,40 @@ const runtimeJsPath = '/' + runtimeEntry.file;
 const runtimeCssPath = '/' + runtimeEntry.css[0];
 const runtimeJs = fs.readFileSync(path.join(skill, 'server/runtime', runtimeEntry.file), 'utf8');
 const runtimeCss = fs.readFileSync(path.join(skill, 'server/runtime', runtimeEntry.css[0]), 'utf8');
+const runtimeAssets = require(path.join(skill, 'server/runtime-assets.js')).loadRuntimeAssets().all;
+const extraAssets = Object.fromEntries(runtimeAssets.filter((asset) => ![runtimeJsPath, runtimeCssPath].includes(asset.path)).map((asset) => {
+  const binary = asset.type === 'font/woff2';
+  return [asset.path, { type: asset.type, binary, body: fs.readFileSync(asset.file, binary ? 'base64' : 'utf8') }];
+}));
+// The in-page feedback client (feedback/), served whole at /feedback.js.
+const feedbackJsFile = path.join(skill, 'server/runtime/feedback.js');
+if (!fs.existsSync(feedbackJsFile)) {
+  console.error('bundle: server/runtime/feedback.js is missing; run npm run build:feedback');
+  process.exit(1);
+}
+const feedbackJs = fs.readFileSync(feedbackJsFile, 'utf8');
+// The push service worker (shell/src/push-sw.js), served whole at /tdoc-sw.js.
+const pushSwFile = path.join(skill, 'server/runtime/tdoc-sw.js');
+if (!fs.existsSync(pushSwFile)) {
+  console.error('bundle: server/runtime/tdoc-sw.js is missing; run npm run build:sw');
+  process.exit(1);
+}
+const pushSwJs = fs.readFileSync(pushSwFile, 'utf8');
+// Keep the renderer vendored. WASM and fonts are binary Worker modules: workerd
+// disallows compiling WASM bytes at runtime, and parsing base64 slows every cold start.
+const previewDir = path.join(skill, 'server/preview');
+const previewRendererJs = fs.readFileSync(path.join(previewDir, 'resvg.mjs'), 'utf8')
+  .replace(/export\s*\{\s*Resvg2 as Resvg,\s*initWasm\s*\};?\s*$/, 'return { Resvg: Resvg2, initWasm };');
+if (!previewRendererJs.includes('return { Resvg: Resvg2, initWasm };')) {
+  throw new Error('bundle: preview renderer exports changed');
+}
+const previewWasm = fs.readFileSync(path.join(previewDir, 'resvg.wasm'));
+const previewFonts = ['Regular', 'Bold'].map((weight) => fs.readFileSync(path.join(previewDir, `NotoSansSC-${weight}.ttf`)));
+const previewCoverage = JSON.parse(fs.readFileSync(path.join(previewDir, 'coverage.json'), 'utf8'));
+const previewValidator = fs.readFileSync(path.join(previewDir, 'validate-svg.js'), 'utf8');
+// The authoring guides, served to AI apps as MCP resources.
+const authoringGuides = require(path.join(skill, 'server/authoring-guides.js')).loadAuthoringGuides(skill);
+const bundlerSource = fs.readFileSync(__filename, 'utf8');
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const git = (...args) => {
   try {
@@ -50,7 +89,7 @@ const git = (...args) => {
 const sourceSha = (process.env.TDOC_SOURCE_SHA || git('rev-parse', '--short=12', 'HEAD') || '').slice(0, 12) || null;
 const sourceDirty = !!git('status', '--porcelain', '--untracked-files=no');
 // bundleSha covers every source the bundle inlines, including the Vite assets.
-const bundleSha = sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss].join('\0'));
+const bundleSha = sha(Buffer.concat([Buffer.from([bundlerSource, worker, shellMod, notificationText, frameProbe, readerCss, runtimeJs, runtimeCss, JSON.stringify(extraAssets), feedbackJs, pushSwJs, previewRendererJs, previewValidator, JSON.stringify(previewCoverage), JSON.stringify(authoringGuides)].join('\0')), previewWasm, ...previewFonts]));
 const build = {
   source_sha: sourceSha,
   source_dirty: sourceDirty,
@@ -72,12 +111,27 @@ function mustReplace(hay, needle, sub, label) {
   return out;
 }
 replaced = mustReplace(replaced, '/* __TDOC_SHELL_MODULE__ */', shellMod, 'SHELL_MODULE');
+replaced = mustReplace(replaced, '/* __TDOC_NOTIFICATION_TEXT__ */', notificationText, 'NOTIFICATION_TEXT');
 replaced = mustReplace(replaced, /const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(frameProbe) + ';', 'PROBE_JS');
 replaced = mustReplace(replaced, /const READER_CSS = `__TDOC_READER_CSS__`;/, 'const READER_CSS = ' + JSON.stringify(readerCss) + ';', 'READER_CSS');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_JS_PATH = "__TDOC_SHELL_RUNTIME_JS_PATH__";/, 'const SHELL_RUNTIME_JS_PATH = ' + JSON.stringify(runtimeJsPath) + ';', 'SHELL_RUNTIME_JS_PATH');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_JS = `__TDOC_SHELL_RUNTIME_JS__`;/, 'const SHELL_RUNTIME_JS = ' + JSON.stringify(runtimeJs) + ';', 'SHELL_RUNTIME_JS');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS_PATH = "__TDOC_SHELL_RUNTIME_CSS_PATH__";/, 'const SHELL_RUNTIME_CSS_PATH = ' + JSON.stringify(runtimeCssPath) + ';', 'SHELL_RUNTIME_CSS_PATH');
 replaced = mustReplace(replaced, /const SHELL_RUNTIME_CSS = `__TDOC_SHELL_RUNTIME_CSS__`;/, 'const SHELL_RUNTIME_CSS = ' + JSON.stringify(runtimeCss) + ';', 'SHELL_RUNTIME_CSS');
+replaced = mustReplace(replaced, /const FEEDBACK_JS = `__TDOC_FEEDBACK_JS__`;/, 'const FEEDBACK_JS = ' + JSON.stringify(feedbackJs) + ';', 'FEEDBACK_JS');
+replaced = mustReplace(replaced, /const PUSH_SW_JS = `__TDOC_PUSH_SW_JS__`;/, 'const PUSH_SW_JS = ' + JSON.stringify(pushSwJs) + ';', 'PUSH_SW_JS');
+
+replaced = mustReplace(replaced, /const SHELL_RUNTIME_EXTRA_ASSETS = "__TDOC_SHELL_RUNTIME_EXTRA_ASSETS__";/, 'const SHELL_RUNTIME_EXTRA_ASSETS = ' + JSON.stringify(extraAssets) + ';', 'SHELL_RUNTIME_EXTRA_ASSETS');
+replaced = mustReplace(replaced, /const PREVIEW_RENDERER = "__TDOC_PREVIEW_RENDERER__";/,
+  'const PREVIEW_RENDERER = (() => {\n' + previewRendererJs + '\n})();', 'PREVIEW_RENDERER');
+replaced = mustReplace(replaced, /const PREVIEW_WASM = "__TDOC_PREVIEW_WASM__";/,
+  vercelBundle ? 'const PREVIEW_WASM = ' + JSON.stringify(previewWasm.toString('base64')) + ';' : 'const PREVIEW_WASM = TDOC_PREVIEW_WASM;', 'PREVIEW_WASM');
+replaced = mustReplace(replaced, /const PREVIEW_FONTS = "__TDOC_PREVIEW_FONTS__";/,
+  vercelBundle ? 'const PREVIEW_FONTS = ' + JSON.stringify(previewFonts.map((font) => font.toString('base64'))) + ';' : 'const PREVIEW_FONTS = [TDOC_PREVIEW_FONT_REGULAR, TDOC_PREVIEW_FONT_BOLD];', 'PREVIEW_FONTS');
+replaced = mustReplace(replaced, /const PREVIEW_FONT_COVERAGE = "__TDOC_PREVIEW_FONT_COVERAGE__";/,
+  'const PREVIEW_FONT_COVERAGE = ' + JSON.stringify(previewCoverage) + ';', 'PREVIEW_FONT_COVERAGE');
+replaced = mustReplace(replaced, '/* __TDOC_PREVIEW_VALIDATOR__ */', previewValidator, 'PREVIEW_VALIDATOR');
+replaced = mustReplace(replaced, /const AUTHORING_GUIDES = "__TDOC_AUTHORING_GUIDES__";/, 'const AUTHORING_GUIDES = ' + JSON.stringify(authoringGuides) + ';', 'AUTHORING_GUIDES');
 
 let withBuild = replaced.replace(
   /const TDOC_BUILD_INFO = "__TDOC_BUILD_INFO__";/,
@@ -100,6 +154,12 @@ if (process.env.TDOC_PREVIEW === '1') {
 }
 
 fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(path.join(outDir, '_worker.bundled.js'), withBuild);
+const moduleImports = vercelBundle ? '' : 'import TDOC_PREVIEW_WASM from "./resvg.wasm";\nimport TDOC_PREVIEW_FONT_REGULAR from "./NotoSansSC-Regular.ttf";\nimport TDOC_PREVIEW_FONT_BOLD from "./NotoSansSC-Bold.ttf";\n';
+fs.writeFileSync(path.join(outDir, '_worker.bundled.js'), moduleImports + withBuild);
+if (!vercelBundle) {
+  fs.writeFileSync(path.join(outDir, 'resvg.wasm'), previewWasm);
+  fs.writeFileSync(path.join(outDir, 'NotoSansSC-Regular.ttf'), previewFonts[0]);
+  fs.writeFileSync(path.join(outDir, 'NotoSansSC-Bold.ttf'), previewFonts[1]);
+}
 fs.writeFileSync(path.join(outDir, '_worker.bundled.sha256'), bundleSha + '\n');
 console.log('bundled: ' + path.join(outDir, '_worker.bundled.js'));

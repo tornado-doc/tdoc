@@ -1,0 +1,54 @@
+[
+  {
+    "id": "on-second",
+    "version": 1,
+    "created_in": 1,
+    "text": "Make this a number.",
+    "author": {
+      "login": "preview-reviewer",
+      "name": "Reviewer"
+    },
+    "created": "2026-10-23T10:00:00Z",
+    "status": "open",
+    "anchor": {
+      "kind": "text",
+      "text": "Middle words.",
+      "context_before": "",
+      "context_after": ""
+    },
+    "replies": []
+  },
+  {
+    "id": "on-second-b",
+    "version": 1,
+    "created_in": 1,
+    "text": "And shorten the title.",
+    "author": {
+      "login": "preview-reviewer",
+      "name": "Reviewer"
+    },
+    "created": "2026-10-23T10:05:00Z",
+    "status": "open",
+    "anchor": {
+      "kind": "text",
+      "text": "Second slide",
+      "context_before": "",
+      "context_after": ""
+    },
+    "replies": []
+  },
+  {
+    "id": "on-document",
+    "version": 1,
+    "created_in": 1,
+    "text": "A note about the whole deck.",
+    "author": {
+      "login": "preview-reviewer",
+      "name": "Reviewer"
+    },
+    "created": "2026-10-23T10:10:00Z",
+    "status": "open",
+    "anchor": null,
+    "replies": []
+  }
+]

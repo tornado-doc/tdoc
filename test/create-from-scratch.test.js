@@ -134,16 +134,26 @@ t('the worker create route claims a slug, charges quota, and writes v1', () => {
   const route = worker.slice(start, worker.indexOf("if (p === '/api/doc/duplicate'", start));
   for (const needle of [
     "json({ error: 'sign_in_required' }, { status: 401 })",
-    'hostedAccountCopiesEnabled(env, req)',
-    'sessionLogin(session)\n        ? await hostedAccountForGithub(env, session.login, session && session.email',
-    'countHostedDocs(env, actor.account_id, limit)',
-    "kind: 'claim_owner'",
+    'createDocForSession(env, req, session, {',
     'blankDocHtml()',
-    'blankDocSlug(crypto.getRandomValues(new Uint8Array(8)))',
-    'prepareDocVersion(html)',
-    'env.META.put(`meta:${newSlug}`',
+    "created_from: 'blank'",
   ]) assert(route.includes(needle), `worker create route missing: ${needle}`);
   assert(route.includes('?edit=1'), 'the new doc must come back pointing at edit mode');
+  // The ownership, quota and slug rules live in the helper the route calls —
+  // shared with the feedback space (#564), so both births obey the same ones.
+  const helperStart = worker.indexOf('async function createDocForSession(');
+  assert(helperStart >= 0, 'createDocForSession missing from the worker');
+  const helper = worker.slice(helperStart, worker.indexOf('\nfunction ', helperStart + 1));
+  for (const needle of [
+    'hostedAccountCopiesEnabled(env, req)',
+    'sessionLogin(session)\n    ? await hostedAccountForGithub(env, session.login, session && session.email',
+    'countHostedDocs(env, actor.account_id)',
+    'quotaDocsPayload(env, limit, used)',
+    "kind: 'claim_owner'",
+    'blankDocSlug(crypto.getRandomValues(new Uint8Array(8)))',
+    'prepareDocVersion(html)',
+    'putDocMetaJson(env, newSlug, ',
+  ]) assert(helper.includes(needle), `createDocForSession missing: ${needle}`);
 });
 
 t('the local create route stages the doc where the hub cannot list it half-built', () => {

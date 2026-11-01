@@ -23,6 +23,11 @@ if ! printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
   echo "[tdoc] invalid slug '$SLUG' — must be lowercase kebab-case (a-z, 0-9, -)." >&2
   exit 1
 fi
+# Under the local agent daemon a run belongs to one doc: it may pull that one.
+if [ -n "${TDOC_DAEMON_SLUG:-}" ] && [ "$SLUG" != "$TDOC_DAEMON_SLUG" ]; then
+  echo "[tdoc] the daemon may only pull \"$TDOC_DAEMON_SLUG\"." >&2
+  exit 2
+fi
 
 CONFIG_FILE="$HOME/.tdoc/published.json"
 TDOC_DIR="${TDOC_DIR:-$HOME/tdocs}"

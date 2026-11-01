@@ -79,10 +79,22 @@ t('only the record moves the gate, and `paired` counts', () => {
   assert(gate.includes('const POLL_MS = 3000'), 'it asks the server, it does not wait for a reload');
 });
 
-t('the prompt names the command that pairs', () => {
-  // ONBOARDING.md only reaches the connection inside its first-doc step, which
-  // this page does not ask for — so the line has to name it.
-  assert(/signin-only/.test(gate), 'installing is not connecting');
+t('the prompt is the one line /start shows, and that line connects first', () => {
+  // One paste everywhere. FIRST-DOC.md signs the machine in (its Step 1b)
+  // before it reads anything, so the gate still sees the agent turn up early.
+  assert(gate.includes('export const SETUP_PROMPT = FIRST_DOC_LINE;'), '/setup has its own line again');
+  assert(copy.includes('export const FIRST_DOC_LINE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;'), 'the shared line drifted');
+  const firstDoc = read('FIRST-DOC.md');
+  const connect = firstDoc.indexOf('## Step 1b — connect first');
+  assert(connect > 0 && connect < firstDoc.indexOf('## The clock') && firstDoc.includes('--signin-only'), 'installing is not connecting');
+});
+
+t('works with: Claude Code and Codex only', () => {
+  assert(gate.includes('<span className="sg-sr">Claude Code and Codex</span>'), 'the screen-reader list still names other apps');
+  assert(!/ChatGPT|Grok/.test(gate.slice(gate.indexOf('function WorksWith'), gate.indexOf('function ChatWindow'))), 'works with still names ChatGPT or Grok');
+  const marks = read('shell/src/agent-marks.jsx');
+  const cluster = marks.slice(marks.indexOf('export function AgentMarks'));
+  assert(cluster.includes('<ClaudeMark') && cluster.includes('<OpenAIMark') && !cluster.includes('<GrokMark'), 'the cluster is not Claude Code + Codex');
 });
 
 t('a refused clipboard says so instead of doing nothing', () => {
@@ -95,7 +107,8 @@ t('the gate reuses the wizard’s copy, it does not fork it', () => {
 });
 
 t('the landing CTA is the door, and the pop-up stopped opening itself', () => {
-  assert(shell.includes("location.href = config.identity && done ? '/me' : '/setup';"), 'unconnected to the gate, connected to their docs');
+  assert(shell.includes("href === '/start' && !message.blank && config.identity)") && shell.includes("location.href = done ? '/me' : '/setup';"),
+    'signed in: unconnected to the gate, connected to their docs; signed out falls through to /start');
   assert(!/setOnboardingDoor\('own'\);\s*setOnboardingOpen\(true\)/.test(shell), 'no second journey beside the real one');
 });
 
@@ -106,7 +119,7 @@ t('nothing is put in their account for them', () => {
   // existence made "Create your first tdoc" tick on a doc we wrote.
   assert(!worker.includes('seedOnboardingDocFor') && !worker.includes('SEED_TEMPLATE_SLUG'), 'no seeder');
   assert(!worker.includes("SEED_FOLDER_NAME"), 'and no folder minted on their behalf');
-  const hubRoute = worker.slice(worker.indexOf("if (p === '/me' && method === 'GET')"), worker.indexOf("if (p === '/api/onboarding' && method === 'GET')"));
+  const hubRoute = worker.slice(worker.indexOf("if (p === '/me' && (method === 'GET' || method === 'HEAD'))"), worker.indexOf("if (p === '/api/onboarding' && method === 'GET')"));
   assert(!/seed/i.test(hubRoute), 'the docs page writes nothing when it is opened');
   // What the seeding was really for -- a first comment already on the page, so
   // row 3 is a reply and not a blank -- the publish path does anyway.
@@ -171,7 +184,7 @@ t('every thumbnail shows the thing its own step produces', () => {
   // Two of them run off the right edge rather than sitting in a box inside a
   // box, which is how Notion lets its calendar and its templates crop.
   assert(listCss.includes('right: -12px') && listCss.includes('right: -14px'), 'and two of them are cropped by the edge');
-  assert(listCss.includes('width: 100px; height: 62px;') && listCss.includes('grid-template-columns: 18px 1fr 100px;'),
+  assert(listCss.includes('width: 100px; height: 62px;') && listCss.includes('grid-template-columns: 1fr 100px;'),
     'the row reserves exactly what the thumbnail takes');
   // The picture sets the row's height, so the row adds almost nothing of its
   // own: one line of text beside four lines' worth of picture reads as a list
@@ -265,7 +278,10 @@ t('opening the gate is beginning, whatever the browser reports', () => {
   // person who selected the line and hit cmd-C connected their agent,
   // published, and then found no checklist on My docs at all -- it renders on
   // `started`. The door is the honest signal, and the server is standing in it.
-  assert(/const who = await sessionAccountId\(env, session\);\s*\n\s*if \(who\) await stampOnboardingFor\(env, who, 'started'\);/.test(worker),
+  // A sign-in that returns here for an account already connected goes to My
+  // docs first and stamps nothing (dev-mode.test.js runs it); every other
+  // signed-in visit still starts the journey.
+  assert(/const who = await sessionAccountId\(env, session\);[\s\S]{0,400}return new Response\(null, \{ status: 302, headers: \{ Location: '\/me' \} \}\);\s*\}\s*await stampOnboardingFor\(env, who, 'started'\);/.test(worker),
     'a signed-in visit to /setup starts the journey');
   // That fixed the half of the walk that goes through the door. The other half
   // never opens it -- agent connects and publishes over the CLI, /me is the
@@ -355,7 +371,7 @@ t('nothing is drawn before the server has answered once', () => {
   // An empty record reads as "not connected", so a page asked for the doc step
   // paints the connect step for a beat first. Same class of flicker as the one
   // the old wizard had: a guess rendered while the answer is in flight.
-  assert(gate.includes('const [loaded, setLoaded] = useState(false);') && gate.includes('if (!cancelled) setLoaded(true);'),
+  assert(gate.includes('const [loaded, setLoaded] = useState(Boolean(preview));') && gate.includes('preview = null') && gate.includes('if (!cancelled) setLoaded(true);'),
     'the first poll is what opens the page');
   assert(gate.includes("{signedIn && !loaded ? null : ("), 'the heading waits for it');
   assert(gate.includes("{signedIn && !loaded ? null : signedIn ? ("), 'and so does the column under it');
@@ -424,8 +440,12 @@ t('one record answers "have they commented", not two', () => {
   // they just wrote is inside it.
   assert(shell.includes('const markCommented = ()') && shell.includes('commented: new Date().toISOString()'),
     'a comment posted in this tab moves the record before the server is asked');
-  assert(shell.includes('markCommented();\n    closeComposer();') && shell.includes('{ markCommented(); reportMentions(value); }'),
-    'both ways of saying something -- a comment of their own, and the reply the seeded card asks for');
+  // Both the new-comment path and the reply path stamp the record. Shape may
+  // grow (e.g. @agent after a reply) but markCommented must still fire on each.
+  assert(shell.includes('markCommented();\n    closeComposer();'),
+    'a comment of their own stamps the record');
+  assert(/const replyTo = async[\s\S]*?markCommented\(\);[\s\S]*?reportMentions\(value\);/.test(shell),
+    'and so does the reply the seeded card asks for');
 });
 
 t('the hint is a wayfinder, never a second copy of the line', () => {
@@ -448,7 +468,7 @@ t('a row being watched stops being a button', () => {
   assert(hint.includes('{still ? null : ('), 'and neither a wait nor a tick offers a button');
   // The card already says these. Said twice in two voices, a reader starts to
   // wonder whether they are two different waits.
-  for (const line of ['Waiting for your agent…', 'Your agent is reading this', 'Still waiting — did you paste it into your agent?']) {
+  for (const line of ['Waiting for your agent…', 'Your agent is reading…', 'Check your agent’s window.']) {
     assert(hint.includes(line) && card.includes(line), `"${line}" is the card's own wording`);
   }
 });
@@ -515,7 +535,7 @@ t('the gesture is spelled out', () => {
   // "Highlight a sentence" names it in the product's own vocabulary, which is
   // no help to somebody who has not made a highlight yet. The literal version
   // says what to do with a mouse and what will happen when they do.
-  assert(hint.includes("comment: 'Select any sentence to comment on it.'"), 'the literal gesture, and what it produces');
+  assert(hint.includes("comment: 'Select a sentence to comment.'"), 'the literal gesture, and what it produces');
   // One label for both rows, because it is one behaviour: open the card that
   // carries the next thing. A button naming its destination would name two.
   assert(hint.includes("const GO = 'Show me';"), 'and one way in');
@@ -571,8 +591,10 @@ t('the checklist is for the middle of the journey', () => {
 t('internal state switching is allowlisted, narrow and server-built', () => {
   assert(worker.includes("await env.META.get('debug-accounts')"), 'the list is KV data, not build config');
   assert(worker.includes("if (p === '/api/onboarding/state' && method === 'POST')"), 'one route');
-  assert(/if \(!sameOrigin\(req, url\)\) return json\(\{ error: 'forbidden' \}, \{ status: 403 \}\);[\s\S]{0,400}isDebugAccount/.test(worker),
-    'same-origin and allowlisted');
+  assert(/if \(!sameOrigin\(req, url\)\) return json\(\{ error: 'forbidden' \}, \{ status: 403 \}\);[\s\S]{0,200}const dev = await devModeState\(env, session\);\s*if \(!dev\) return json\(\{ error: 'forbidden' \}, \{ status: 403 \}\);[\s\S]{0,300}if \(!dev\.on\) return json\(\{ error: 'dev_mode_off' \}/.test(worker),
+    'same-origin, allowlisted, and only while dev mode is on');
+  assert(/async function devModeState\(env, session\) \{\s*if \(!\(await isDebugAccount\(env, session\)\)\) return null;/.test(worker),
+    'dev mode exists only for the allow-list');
   assert(worker.includes('const next = debugRecord(state, new Date().toISOString(), doc);'),
     'the record is built server-side; the client names a state, never a field');
   // The built states have to stand on a doc this person actually owns: a reset
@@ -618,7 +640,7 @@ t('a session carries its account, so a new doc looks like theirs', () => {
   // Resolved once here rather than in each place that asks: the ownership test
   // is synchronous and cannot look it up, which is why it could only read what
   // the session already carried.
-  assert(worker.includes('const acct = session && session.account_id;'), 'the ownership test still reads it from the session');
+  assert(worker.includes('sessionOwnsAccount(session, docAcct)'), 'the ownership test still reads it from the session');
   assert((worker.match(/isDocOwnerSession\(/g) || []).length >= 8, 'and there are many askers, all now reading a filled-in value');
 });
 
@@ -687,13 +709,13 @@ t('a page offers only the states it can show', () => {
   assert(states('document') === "['published', 'commented', 'revised']", 'a doc shows its row: comment, handoff, gone');
   assert(states('hub') === 'DEBUG_STATES', 'and the checklist has a face for all six');
   // Each surface says which one it is.
-  assert(gate.includes("surface={step === 'doc' ? 'doc' : 'connect'}"), 'the gate names its step');
-  assert(shell.includes("surface={config.isLanding ? 'landing' : 'document'}"), 'a document names itself');
-  assert(hub.includes('surface="hub"') && worker.includes('debug: await isDebugAccount(env, s),'),
+  assert(gate.includes("surface: step === 'doc' ? 'doc' : 'connect'"), 'the gate names its step');
+  assert(shell.includes("surface: config.isLanding ? 'landing' : 'document'"), 'a document names itself');
+  assert(hub.includes("surface: 'hub'") && /devModeBoot\(env, s\),\n\s*\]\);[\s\S]{0,2000}?\bdebug: dev\.debug,/.test(worker),
     'and the hub, where the checklist is');
   // Whatever the page can show, the record's current value is always printed:
   // "you are at revised, and these are the ones this page can show you".
-  assert(bar.includes('record: {recordName(record)}'), 'the current state is always named');
+  assert(bar.includes('Current: {recordName(record)}'), 'the current state is always named');
 });
 
 t('letting a tester in does not need Cloudflare credentials', () => {
@@ -734,9 +756,9 @@ t('replay is new again, not just a blank record', () => {
   // and the gate (the call to action, the sign-in, the first sight of the
   // product) was untestable, and /setup stamps `started` on sight, so a replay
   // that landed there could never show what `new` looks like.
-  assert(shell.includes('{config.debug ? (') && shell.includes('<DebugBar'),
-    'the bar is on every document, the landing page included');
-  assert(worker.includes('debug: await isDebugAccount(env, session) }'),
+  assert(shell.includes('onboardingTest={config.debug ? {') && shell.includes("surface: config.isLanding ? 'landing' : 'document'"),
+    'the account menu has onboarding controls on every document, the landing page included');
+  assert(worker.includes('...(await devModeBoot(env, session)) }, pageUrl)'),
     'and the server tells the document who is allow-listed');
   assert(bar.includes('location.reload();'), 'a replay stays where it was pressed');
   // The credential is the one that matters: `account-terminal:` is a marker,
@@ -749,7 +771,7 @@ t('replay is new again, not just a blank record', () => {
   assert(worker.includes('meta.hosted.account_id === accountId'), 'and only one this account owns');
   // The product already knows how to delete a doc. A second, thinner version
   // is how one of them ends up leaving the DO populated.
-  assert(worker.includes('async function deleteDocEverywhere(env, slug) {')
+  assert(worker.includes('async function deleteDocEverywhere(env, slug')
     && (worker.match(/deleteDocEverywhere\(env, /g) || []).length >= 2,
     'both callers delete a doc the same way');
   // The dismissals live in the browser. Every key here is somebody saying
@@ -774,6 +796,8 @@ t('a config file is a claim, not a fact', () => {
   assert(worker.includes("p === '/api/hosted/whoami'"), 'a credential can be checked');
   assert(worker.includes("return json({ error: 'invalid_token' }, { status: 401 });"), 'and a dead one says so');
   assert(cli.includes('if [ -f "$CONFIG_FILE" ] && hosted_credential_valid; then'), 'signin-only checks before believing');
+  assert(cli.includes('c.upload_token || c.token'), 'validity reads the key write_hosted_config actually writes');
+  assert(cli.includes('[ -n "$base" ] && [ -n "$token" ] || return 1'), 'missing claim is invalid, not valid');
   assert(cli.includes('rm -f "$CONFIG_FILE"'), 'and a stale file is dropped rather than kept');
   // Being offline is not a revoked token: only a clear 401/403 may throw a
   // working credential away.
@@ -854,8 +878,36 @@ t('every replay is wound up before it is started', () => {
     assert(call.split(',').length >= 2, `${call} starts a clock with no length`);
   }
   assert(replay.includes('useClock(!reduced && !idle, REPLAY_MS)'), 'the connect replay runs for REPLAY_MS, and not at all with no line');
-  assert(replay.includes('useClock(!reduced, s.total, line)'),
-    'and the doc replay for as long as its own line takes, restarting on every keystroke');
+  // The doc replay is also gated on the reader having stopped typing: the
+  // composer mirrors the field keystroke for keystroke, and the take is held
+  // until the line settles. Sending on a timer posted a half-typed subject and
+  // published a doc about it mid-word.
+  assert(/useClock\(!reduced && settled, s\.total, line,/.test(replay),
+    'and the doc replay only once the line has stopped changing, restarting on every keystroke');
+  assert(/const SETTLE_MS = \d+;/.test(replay) && /setTimeout\(\(\) => setSettled\(true\), SETTLE_MS\)/.test(replay),
+    'settling is a timer on the line, not a beat in the script');
+  // And a line is not the same as a subject. Until one is typed the prompt is
+  // composed from the field's PLACEHOLDER -- a complete sentence nobody wrote
+  // -- and the take played it in full, publishing a doc about "what it should
+  // be about" while the field was still empty. The Copy button already refuses
+  // that same line.
+  assert(/if \(!line \|\| !ready\) return undefined;/.test(replay),
+    'no take until there is a subject, not merely a line');
+  assert(/<DocReplay prompt=\{prompt\} slug=\{replaySlug\} ready=\{promptReady\} \/>/.test(gate),
+    'and the gate passes the same readiness the Copy button uses');
+  assert(/typing=\{!ready \? null :/.test(replay),
+    'nor is the placeholder line typed into the composer');
+  // Nor left on screen from the clock's resting frame. A stopped clock parks
+  // at `total - 2200` -- the published-and-done still, which is right for
+  // `prefers-reduced-motion` and wrong for a take that has not started: it
+  // showed a finished document about the placeholder next to an empty field.
+  // The two stops mean opposite things, so the caller says where to rest.
+  assert(/useClock\(running, total, restart, restingAt\)/.test(replay), 'the clock takes a resting frame');
+  assert(/setT\(restingAt === undefined \? total - 2200 : restingAt\)/.test(replay),
+    'and uses it, defaulting to the finished still');
+  assert(/useClock\(!reduced && settled, s\.total, line, reduced \? undefined : 0\)/.test(replay),
+    'the doc take rests at the beginning unless motion is the thing being avoided');
+  assert(!/\btype: \[t0/.test(replay), 'and nothing re-types what the reader already typed');
 });
 
 t('the one button on the gate is never below the fold', () => {
@@ -874,8 +926,8 @@ t('the one button on the gate is never below the fold', () => {
     assert(gateCss.includes(`@media (max-height: ${h}px)`), `a step at ${h}px`);
   }
   const dbg = read('shell/src/debug-bar.css');
-  assert(/@media \(max-height: 710px\) \{ \.sg-split:has\(\.sg-debug\)/.test(dbg),
-    'and the internal strip yields too, rather than pushing the button off');
+  assert(dbg.includes('.tdoc-onboarding-test-status') && !dbg.includes('position: fixed'),
+    'onboarding test is in the menu and no longer floats over the gate');
 });
 
 t('the checklist shows up for a walk that never opened /setup', () => {

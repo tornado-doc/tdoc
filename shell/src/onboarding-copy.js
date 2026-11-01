@@ -6,6 +6,11 @@
 // in a dialog to get a string.
 
 export const RECIPE_URL = 'https://github.com/tornado-doc/tdoc/blob/main/FIRST-DOC.md';
+// The one line a newcomer pastes, and the same line on /start and /setup.
+// FIRST-DOC.md installs tdoc (via ONBOARDING.md), signs this machine in before
+// it reads anything (its Step 1b), then makes the first doc -- so one paste
+// does all three. Two different lines on two pages read as two jobs.
+export const FIRST_DOC_LINE = `Set up tdoc and make my first doc: ${RECIPE_URL}`;
 // The line for somebody who already has tdoc installed: FIRST-DOC.md would
 // only build the same portrait again. A sentence rather than a slash command,
 // because it is pasted into a conversation with an agent and the skill fires
@@ -17,8 +22,8 @@ export const ANOTHER_DOC_RECIPE = 'Use tdoc to write a doc about what it should 
 export const handoffLine = (docUrl) => `Read all comments on ${docUrl} and fix them`;
 export const AGENT_DEFINITION = 'An AI that runs on your computer and can read and write files.';
 export const AGENT_NAMES = 'Claude Code · Codex · Claude Cowork · ChatGPT Work';
-export const NOTHING_YET = 'Taking a while? Check your agent’s window.';
-export const COPY_FALLBACK = 'Copy the selected line by hand.';
+export const NOTHING_YET = 'Check your agent’s window.';
+export const COPY_FALLBACK = 'Copy the selected line.';
 
 // Select the text of an element, for the person to copy by hand when the
 // clipboard refused. Never throws.

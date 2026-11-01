@@ -50,6 +50,35 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(byokBody.error === 'hosted_registration_disabled', `unexpected ${JSON.stringify(byokBody)}`);
   });
 
+  await t('/me: BYOK non-owner gets clearer notice; forced registration opens workers.dev; HEAD ok', async () => {
+    const byok = makeEnv(mod.CommentsStore, {
+      TDOC_OWNER: 'julie',
+      TDOC_HOSTED_REGISTRATION: '',
+    });
+    const alice = await putSession(byok, 'alice');
+    const bounced = await worker.fetch(req('/me', {
+      cookie: alice, host: 'example.workers.dev',
+    }), byok, {});
+    assert(bounced.status === 302, `BYOK non-owner should bounce, got ${bounced.status}`);
+    assert(bounced.headers.get('Location') === '/?notice=me', `expected notice=me, got ${bounced.headers.get('Location')}`);
+    const landing = await worker.fetch(req('/?notice=me', { host: 'example.workers.dev' }), byok, {});
+    const boot = bootData(await landing.text(), '__TDOC_APP_BOOT__');
+    assert(/self-hosted/.test(boot.notice) && /tdoc\.dev/.test(boot.notice),
+      `notice should point BYOK users at tdoc.dev, got ${JSON.stringify(boot.notice)}`);
+
+    const hosted = makeEnv(mod.CommentsStore, { TDOC_HOSTED_REGISTRATION: '1', TDOC_OWNER: 'julie' });
+    const friend = await putSession(hosted, 'friend');
+    const me = await worker.fetch(req('/me', {
+      cookie: friend, host: 'tdoc.jyshi1107.workers.dev',
+    }), hosted, {});
+    assert(me.status === 200, `forced registration must open /me on workers.dev, got ${me.status}`);
+    const head = await worker.fetch(req('/me', {
+      method: 'HEAD', cookie: friend, host: 'tdoc.jyshi1107.workers.dev',
+    }), hosted, {});
+    assert(head.status === 200, `HEAD /me should 200, got ${head.status}`);
+    assert(!(await head.text()), 'HEAD /me must not return a body');
+  });
+
   await t('missing-meta hosted upload still persists owner; second token cannot overwrite', async () => {
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env, 'a');
@@ -69,6 +98,42 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(second.status === 403, `second token should be denied, got ${second.status}`);
     const doc = await env.DOCS.get('docs/owned-doc/v1/index.html');
     assert((await doc.text()).includes('A'), 'denied second upload overwrote document bytes');
+  });
+
+  await t('republish preserves web sharing; explicit access patch changes only requested fields', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'share-owner');
+    const stale = { title: 'Share doc', access: { visibility: 'private', commenting: 'invited', allowed_users: ['alice@example.com'] } };
+    const upload = async (version, patch) => worker.fetch(req('/api/upload', {
+      method: 'POST', token: owner.token,
+      body: { slug: 'shared-doc', version, html: `<p>v${version}</p>`, meta: stale, ...(patch ? { access_patch: patch } : {}) },
+    }), env, {});
+    assert((await upload(1)).status === 200, 'first upload failed');
+    const shared = await worker.fetch(req('/api/doc/access', {
+      method: 'PATCH', cookie: owner.cookie,
+      body: { slug: 'shared-doc', access: { allowed_users: ['alice@example.com', 'bob@example.com'] } },
+    }), env, {});
+    assert(shared.status === 200, `browser share ${shared.status}`);
+    assert((await upload(2)).status === 200, 'republish failed');
+    let access = JSON.parse(await env.META.get('meta:shared-doc')).access;
+    assert(access.allowed_users.includes('bob@example.com'), `browser guest was overwritten: ${JSON.stringify(access)}`);
+    // A pre-access_patch CLI sends only meta.access. It must still be able to
+    // tighten policy without replacing the current browser Share invitees.
+    const legacy = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: owner.token,
+      body: { slug: 'shared-doc', version: 3, html: '<p>legacy</p>',
+        meta: { title: 'Share doc', access: { visibility: 'private', commenting: 'owner', history_visibility: 'owner', allowed_users: ['alice@example.com'] } } },
+    }), env, {});
+    assert(legacy.status === 200, `legacy CLI upload ${legacy.status}`);
+    access = JSON.parse(await env.META.get('meta:shared-doc')).access;
+    assert(access.visibility === 'private' && access.commenting === 'owner' && access.history_visibility === 'owner'
+      && access.allowed_users.includes('bob@example.com'), `legacy policy ignored or Share invitees lost: ${JSON.stringify(access)}`);
+    assert((await upload(4, { visibility: 'unlisted', allowed_users_add: ['carol@example.com'] })).status === 200, 'explicit access patch failed');
+    access = JSON.parse(await env.META.get('meta:shared-doc')).access;
+    assert(access.visibility === 'unlisted' && access.commenting === 'owner'
+      && ['alice@example.com', 'bob@example.com', 'carol@example.com'].every((u) => access.allowed_users.includes(u)), JSON.stringify(access));
+    const invalid = await upload(5, { allowed_users_add: ['not an invite!'] });
+    assert(invalid.status === 400 && !(await env.DOCS.head('docs/shared-doc/v5/index.html')), 'invalid patch wrote document bytes');
   });
 
   await t('create against orphan R2 bytes (no hostedOwner) returns slug_taken 409', async () => {
@@ -101,6 +166,25 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(r.status === 503, `DO failure should be 503, got ${r.status}: ${await r.clone().text()}`);
     const body = await r.json();
     assert(body.error === 'hosted_owner_store_unavailable', `unexpected body ${JSON.stringify(body)}`);
+  });
+
+  await t('a preview without Durable Objects keeps owner rules in KV (signed-in publish works there)', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_PREVIEW: '1' });
+    const a = await issue(worker, env, 'preview-owner');
+    const b = await issue(worker, env, 'preview-other');
+    delete env.COMMENTS; // what preview.yml deploys
+    const up = (tok, v) => worker.fetch(req('/api/upload', { method: 'POST', token: tok.token, body: { slug: 'preview-doc', version: v, html: '<h1>x</h1>' } }), env, {});
+    const first = await up(a, 1);
+    assert(first.status === 200, `owner publish on preview: ${first.status} ${await first.clone().text()}`);
+    assert((await up(a, 2)).status === 200, 'owner publishes v2');
+    const other = await up(b, 3);
+    assert(other.status === 403, `another account may not write it: ${other.status}`);
+    // Production without the store still fails closed.
+    const prod = makeEnv(mod.CommentsStore);
+    const c = await issue(worker, prod, 'prod-no-do');
+    delete prod.COMMENTS;
+    const r = await worker.fetch(req('/api/upload', { method: 'POST', token: c.token, body: { slug: 'prod-doc', version: 1, html: '<h1>x</h1>' } }), prod, {});
+    assert(r.status === 503, `production without the store stays 503: ${r.status}`);
   });
 
   await t('invalid access on first hosted upload does not park the slug', async () => {
@@ -159,7 +243,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(repaired.hosted.account_id === tok.account_id, 'retry did not repair hosted ownership meta');
   });
 
-  await t('after delete, original owner can republish; second token cannot squat while owned', async () => {
+  await t('after delete forever, original owner can republish; second token cannot squat while owned or in Trash', async () => {
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env, 'owner');
     const b = await issue(worker, env, 'other');
@@ -177,8 +261,24 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
     const del = await worker.fetch(req('/api/doc?slug=reclaim-doc', { method: 'DELETE', token: a.token }), env, {});
     assert(del.status === 200, `delete ${del.status}: ${await del.text()}`);
+    // Delete moves it to Trash: the slug stays reserved, nobody writes it.
+    assert(env.COMMENTS.stateFor('reclaim-doc').storage.map.has('hostedOwner'), 'Trash must keep the slug reserved');
+    const squatInTrash = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: b.token,
+      body: { slug: 'reclaim-doc', version: 1, html: '<h1>stolen</h1>' },
+    }), env, {});
+    assert(squatInTrash.status === 403, `second token must not take a trashed slug, got ${squatInTrash.status}`);
+    const ownerInTrash = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token,
+      body: { slug: 'reclaim-doc', version: 2, html: '<h1>v2</h1>' },
+    }), env, {});
+    const ownerBody = await ownerInTrash.json();
+    assert(ownerInTrash.status === 409 && ownerBody.error === 'doc_in_trash' && /Restore it first/.test(ownerBody.message),
+      `owner publishing to a trashed slug must be told to restore, got ${ownerInTrash.status} ${JSON.stringify(ownerBody)}`);
+    const purge = await worker.fetch(req('/api/trash/purge', { method: 'POST', token: a.token, body: { slug: 'reclaim-doc' } }), env, {});
+    assert(purge.status === 200, `purge ${purge.status}: ${await purge.text()}`);
     assert(!env.COMMENTS.stateFor('reclaim-doc').storage.map.has('hostedOwner'),
-      'delete must release hostedOwner');
+      'delete forever must release hostedOwner');
     assert(!await env.META.get('meta:reclaim-doc'), 'delete must drop meta');
     assert(!await env.DOCS.head('docs/reclaim-doc/v1/index.html'), 'delete must drop R2 bytes');
 
@@ -220,10 +320,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       };
     };
 
-    const del = await worker.fetch(req('/api/doc?slug=parked-on-bad-release', {
+    const trash = await worker.fetch(req('/api/doc?slug=parked-on-bad-release', {
       method: 'DELETE', token: a.token,
     }), env, {});
-    assert(del.status !== 200, `DELETE must not succeed when release fails, got ${del.status}`);
+    assert(trash.status === 200, `move to Trash ${trash.status}`);
+    const del = await worker.fetch(req('/api/trash/purge', {
+      method: 'POST', token: a.token, body: { slug: 'parked-on-bad-release' },
+    }), env, {});
+    assert(del.status !== 200, `delete forever must not succeed when release fails, got ${del.status}`);
     const body = await del.json();
     assert(body.error === 'forced_release_fail' || body.error === 'owner_release_failed',
       `unexpected error body ${JSON.stringify(body)}`);
@@ -239,10 +343,14 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     }));
     await env.DOCS.put('docs/vercel-style/v1/index.html', '<h1>v1</h1>');
     delete env.COMMENTS;
-    const del = await worker.fetch(req('/api/doc?slug=vercel-style', {
+    const trash = await worker.fetch(req('/api/doc?slug=vercel-style', {
       method: 'DELETE', token: 'admin-token',
     }), env, {});
-    assert(del.status === 200, `Vercel-style delete should 200, got ${del.status}: ${await del.text()}`);
+    assert(trash.status === 200, `Vercel-style move to Trash should 200, got ${trash.status}: ${await trash.text()}`);
+    const del = await worker.fetch(req('/api/trash/purge', {
+      method: 'POST', token: 'admin-token', body: { slug: 'vercel-style' },
+    }), env, {});
+    assert(del.status === 200, `Vercel-style delete forever should 200, got ${del.status}: ${await del.text()}`);
     assert(!await env.META.get('meta:vercel-style'), 'meta should be wiped');
   });
 
@@ -369,11 +477,77 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
     assert(second.status === 403, `quota should 403, got ${second.status}`);
     const body = await second.json();
     assert(body.error === 'quota_docs', `expected quota_docs, got ${JSON.stringify(body)}`);
+    assert(body.bump && body.bump.endpoint === '/api/quota/bump', `quota_docs should teach the bump route, got ${JSON.stringify(body.bump)}`);
+    const bump = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token,
+      body: { reason: 'need room for a second draft' },
+    }), env, {});
+    assert(bump.status === 200, `bump should 200, got ${bump.status}: ${await bump.clone().text()}`);
+    const bumped = await bump.json();
+    assert(bumped.from === 1 && bumped.to === 100, `expected 1→100, got ${JSON.stringify(bumped)}`);
+    const afterBump = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: alice.token,
+      body: { slug: 'two', version: 1, html: '<h1>2</h1>' },
+    }), env, {});
+    assert(afterBump.status === 200, `upload after bump should work, got ${afterBump.status}: ${await afterBump.text()}`);
     const retry = await worker.fetch(req('/api/upload', {
       method: 'POST', token: alice.token,
       body: { slug: 'one', version: 2, html: '<h1>1b</h1>' },
     }), env, {});
     assert(retry.status === 200, `same-slug retry should not count as a new doc, got ${retry.status}: ${await retry.text()}`);
+  });
+
+  await t('quota bump requires a reason and caps self-serve at 200', async () => {
+    const env = makeEnv(mod.CommentsStore, { TDOC_HOSTED_MAX_DOCS: '50' });
+    const alice = await issue(worker, env, 'alice');
+    const missing = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token, body: { reason: '   ' },
+    }), env, {});
+    assert(missing.status === 400, `empty reason should 400, got ${missing.status}`);
+    assert((await missing.json()).error === 'reason_required', 'empty reason must be rejected');
+
+    const first = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token, body: { reason: 'shipping a batch of drafts' },
+    }), env, {});
+    assert(first.status === 200, `first bump ${first.status}`);
+    const once = await first.json();
+    assert(once.from === 50 && once.to === 100 && once.already === false, `first bump ${JSON.stringify(once)}`);
+
+    const second = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token, body: { reason: 'still need more for the series' },
+    }), env, {});
+    const twice = await second.json();
+    assert(second.status === 200 && twice.from === 100 && twice.to === 200, `second bump ${JSON.stringify(twice)}`);
+
+    const third = await worker.fetch(req('/api/quota/bump', {
+      method: 'POST', token: alice.token, body: { reason: 'please go higher' },
+    }), env, {});
+    const capped = await third.json();
+    assert(third.status === 200 && capped.already === true && capped.to === 200, `cap ${JSON.stringify(capped)}`);
+    const keys = [...env.META.map.keys()].filter((k) => k.startsWith('account-quota-bump:'));
+    assert(keys.length >= 3, `every ask should leave a log row, got ${keys.length}`);
+  });
+
+  await t('operator browser Create still hits the hosted doc quota', async () => {
+    // Regression: TDOC_OWNER used to become owner_session, skip quota, and
+    // leave new docs unstamped — so the site owner never saw the bump dialog.
+    const env = makeEnv(mod.CommentsStore, {
+      TDOC_HOSTED_MAX_DOCS: '1',
+      TDOC_OWNER: 'julie',
+      TDOC_HOSTED_REGISTRATION: '1',
+    });
+    const julie = await issue(worker, env, 'julie');
+    const first = await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie: julie.cookie, body: {},
+    }), env, {});
+    assert(first.status === 200, `first create ${first.status}: ${await first.clone().text()}`);
+    const second = await worker.fetch(req('/api/doc/create', {
+      method: 'POST', cookie: julie.cookie, body: {},
+    }), env, {});
+    assert(second.status === 403, `operator create should hit quota, got ${second.status}`);
+    const body = await second.json();
+    assert(body.error === 'quota_docs', `expected quota_docs, got ${JSON.stringify(body)}`);
+    assert(body.bump && body.bump.endpoint === '/api/quota/bump', 'operator must get the same bump teach-in');
   });
 
   await t('hosted upload rejects oversize html', async () => {

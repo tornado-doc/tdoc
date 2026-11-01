@@ -74,6 +74,35 @@ t('the page may report only the actions the funnel knows, and each maps to at mo
   assert(stepOf('') === undefined && stepOf('drop table') === undefined, 'unknown actions are rejected');
 });
 
+t('a person can tick a row themselves, beside the stamps and never as one', () => {
+  const check = lift(worker, 'checkOnboardingStep');
+  const stepOf = lift(worker, 'onboardingActionStep');
+  assert(stepOf('step_checked') === null && stepOf('step_unchecked') === null, 'a tick is logged but stamps no funnel step');
+  const base = { started: 'A', agent_connected: 'A' };
+  const ticked = check(base, 'comment', true, 'T1');
+  assert(ticked.checked.comment === 'T1' && !ticked.commented, 'the tick is the person\'s word, not the server stamp');
+  assert(base.checked === undefined, 'the record is copied, not mutated');
+  assert(check(ticked, 'comment', true, 'T2').checked.comment === 'T1', 'ticking twice keeps the first time');
+  const unticked = check(ticked, 'comment', false, 'T3');
+  assert(!('comment' in unticked.checked) && unticked.agent_connected === 'A', 'unticking takes back only the tick');
+  assert(check(base, 'commented', true, 'T') === null && check(base, '__proto__', true, 'T') === null, 'only the four rows can be ticked');
+  assert(check({ checked: ['x'] }, 'create', true, 'T').checked.create === 'T', 'a malformed map is replaced');
+  for (const host of [worker, read('server/server.js')]) {
+    assert(/action === 'step_checked' \|\| action === 'step_unchecked'/.test(host), 'both hosts write the tick');
+  }
+  const list = read('shell/src/docs-hub/onboarding-checklist.jsx');
+  const src = list.slice(list.indexOf('export function onboardingSteps'), list.indexOf("// Notion's rows carry a thumbnail"));
+  // eslint-disable-next-line no-new-func
+  const steps = new Function(`${src.replace('export ', '')}; return onboardingSteps;`)();
+  const rows = steps({ agent_connected: 'A', checked: { create: 'T', revise: 'T' } }, '/d/x');
+  const by = Object.fromEntries(rows.map((r) => [r.id, r]));
+  assert(by.connect.done && by.connect.auto, 'a stamped row is done by the server');
+  assert(by.create.done && !by.create.auto, 'a ticked row is done by the person');
+  assert(!by.comment.done && !by.comment.locked, 'and the next row opens after it');
+  assert(by.revise.done && !by.revise.auto, 'a row can be ticked out of order');
+  assert(list.includes('disabled={step.auto}'), 'a stamp cannot be unticked from the page');
+});
+
 t('the seed comment anchors to the first paragraph the reader can see', () => {
   const anchorFor = lift(worker, 'seedCommentAnchor');
   const a = anchorFor('<h1>Title</h1><p class="meta">A &amp; B &mdash; <b>bold</b> claim here</p><p>second</p>');
@@ -83,7 +112,8 @@ t('the seed comment anchors to the first paragraph the reader can see', () => {
   assert(anchorFor('<div>no paragraphs</div>') === null, 'no paragraph, no anchor — the comment still posts unanchored');
   assert(worker.includes("const SEED_COMMENT_TEXT = 'First reader here. Which claim on this page would you defend least? Highlight it and say so.'"),
     'the seed comment asks for the one gesture the page teaches');
-  assert(/SEED_COMMENT_AUTHOR = \{ login: 'tdoc', name: 'tdoc'/.test(worker), 'signed as tdoc, not as a person');
+  assert(/SEED_COMMENT_AUTHOR = \{ login: 'tdoc', name: 'tdoc', avatar_url: '\/tdoc_logo\.png', kind: 'system' \}/.test(worker),
+    'signed as tdoc with the global mark');
 });
 
 t('the three routes exist on both hosts', () => {
@@ -129,12 +159,21 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(tdocNew.includes('--first-doc)  FIRST_DOC=1; shift ;;') && tdocNew.includes('out["origin"] = "first-doc"') && tdocNew.includes('meta.get("origin") == "first-doc"'), 'tdoc-write --first-doc marks the meta, and the mark survives later versions');
   const firstDocRecipe = read('FIRST-DOC.md');
   assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-write" --first-doc --slug what-ai-knows-<name>'), 'FIRST-DOC.md tells the agent to mark it');
-  // Provably public, not public-by-default: access is sticky on both sides, so
-  // a flagless publish over a doc an earlier run locked stays locked.
-  assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-publish" --visibility public --history public what-ai-knows-<name>'), 'the first doc names public out loud');
-  assert(!/private/.test(firstDocRecipe.slice(firstDocRecipe.indexOf('## Step 7'), firstDocRecipe.indexOf('## If there is no history')).replace('`tdoc-publish --visibility private <slug>` makes it theirs alone', '')), 'step 7 mentions private only as the way to lock it');
-  assert(!/publish (it )?privately/i.test(firstDocRecipe), 'and no leftover instruction to publish privately');
-  assert(!/--visibility private --history owner/.test(read('bin/tdoc-publish')), 'the CLI comment no longer claims first docs publish private');
+  // Private, and said out loud: access is sticky on both sides, so naming the
+  // policy keeps every re-run and every -2 exactly as private as the first.
+  assert(firstDocRecipe.includes('bash "$SKILL_DIR/bin/tdoc-publish" --visibility private --history owner what-ai-knows-<name>'), 'the first doc names private out loud');
+  assert(!/--visibility public/.test(firstDocRecipe), 'no leftover instruction to publish the first doc public');
+  assert(/publish it private/i.test(firstDocRecipe) && /Publish it privately/.test(read('ONBOARDING.md')), 'FIRST-DOC.md and ONBOARDING.md agree: private');
+  // The loop closes on the page: the wrap-up names both ways, in plain words.
+  const wrap = firstDocRecipe.slice(firstDocRecipe.indexOf('### Close the loop'), firstDocRecipe.indexOf('## If there is no history'));
+  assert(/read the comments on <link>\s+> and fix them/.test(wrap) && /"Send to\s+> agent"/.test(wrap), 'wrap-up names both ways');
+  assert(/Settings → Agents/.test(wrap) && /tdoc-daemon install/.test(wrap), 'a decline says how to turn the helper on later');
+  assert(!/daemon/i.test(wrap.split('\n').filter((l) => l.startsWith('>')).join('\n').replace('`tdoc-daemon install`', '')), 'no "daemon" in what the human reads');
+  // One question, then install only on a yes.
+  const ask = firstDocRecipe.slice(firstDocRecipe.indexOf('## Step 1c'), firstDocRecipe.indexOf('## The clock'));
+  assert(/own Claude or Codex plan/.test(ask) && /Settings → Agents/.test(ask) && ask.includes('bash "$SKILL_DIR/bin/tdoc-daemon" install') && /Never install it without a yes/.test(ask), 'Step 1c asks once, in plain words, and installs only on yes');
+  assert(/says yes to the one question in FIRST-DOC\.md Step 1c/.test(read('SKILL.md')), 'SKILL.md allows the daemon only on that yes');
+  assert(read('ONBOARDING.md').includes('SKILL_DIR="$HOME/.codex/skills/tdoc"'), 'ONBOARDING.md installs into the Codex skill dir on Codex');
   assert(read('SKILL.md').includes('**Access only ever tightens by omission.**'), 'the access policy says why a publish that opens a doc must say so');
   assert(server.includes('function isFirstDocProductMeta(meta)') && server.includes('function adoptFirstDocLocal(slug)') && server.includes('if (marked && rec.first_doc !== marked.slug && !rec.shared) {'), 'the local twin adopts the marked doc too');
   assert(upload.indexOf("'published_first'") > upload.indexOf("productEvent(env, 'publish_succeeded'"), 'stamps happen after the write succeeded, never before');
@@ -146,20 +185,22 @@ t('the server stamps what the agent does: token, read, reply, publish', () => {
   assert(server.includes("if (url.searchParams.get('version') === 'all') { try { markAgentReadLocal(slug); } catch {} }"), 'local twin marks the read');
 });
 
-t('a visitor with no session still sees a way to comment, and it is the sign-in', () => {
-  assert(/cfg\.signInToComment = !identity && !isLanding && !!versionWritesEnabled\s*&& accessFromMeta\(docMeta \|\| \{\}\)\.commenting !== 'off'/.test(worker),
+t('a visitor with no session can enter Comment mode and signs in only when posting', () => {
+  assert(/cfg\.signInToComment = !identity && !isLanding\s*&& accessFromMeta\(docMeta \|\| \{\}\)\.commenting !== 'off'/.test(worker),
     'the flag is on when the doc takes comments and this visitor has no session');
   assert(server.includes('signInToComment: false'), 'local preview is anonymous by design and may always comment');
   assert(toolbar.includes("(option.value === 'comment' && (canComment || signInToComment))"), 'the Comment option shows for the visitor');
-  assert(toolbar.includes("? 'Sign in to comment'"), 'and says what it will do');
-  assert(toolbar.includes('? onSignIn?.()'), 'and opens the sign-in rather than the mode');
-  assert(shell.includes('signInToComment={Boolean(config.signInToComment)}') && shell.includes('onSignIn={signIn}'), 'the shell wires it');
+  assert(!toolbar.includes("? 'Sign in to comment'") && toolbar.includes('onClick={() => onChange(option.value)}'), 'Comment mode opens without signing in');
+  assert(shell.includes('if (!config.canComment && !config.signInToComment) {') && shell.includes('setComposer(selection);'), 'selection opens the composer for a visitor');
 });
 
 t('bridge 1 is read off the server, and a paired account is never asked for a code', () => {
   // The five-step pop-up that used to render this is gone. What it was reading
   // is not: the record, the pairing stamp, and the recipe the agent follows.
-  assert(worker.includes("paired = Boolean(await env.META.get(`account-terminal:${accountId}`));")
+  // Across the account's linked identities: the marker sits under whichever id
+  // the token was minted for (see dev-mode.test.js for the behaviour).
+  assert(worker.includes("const paired = await accountPaired(env, accountId);")
+    && worker.includes("if (await env.META.get(`account-terminal:${id}`)) return true;")
     && server.includes('const paired = Boolean(process.env.TDOC_E2E_PAIRED);'), 'both hosts say whether a terminal has connected');
   assert(gate.includes('const connected = Boolean(paired || record?.agent_connected || record?.published_first);'),
     'and the gate is done when any of the three says so');
@@ -218,7 +259,7 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes('const HANDOFF_POLL_MS = 3000'), '3s while waiting');
   assert(shell.includes("postOnboardingEvent('fix_copy_clicked', config.slug)"), 'copy is an event');
   assert(/setHandoff\(\(current\) => \(current\.state === 'waiting' \? \{ \.\.\.current, state: 'reading' \} : current\)\)/.test(shell), 'the read stamp flips waiting → reading');
-  assert(/latest > Number\(config\.version\)[\s\S]*location\.href = `\/d\/\$\{encodeURIComponent\(config\.slug\)\}\/v\/\$\{latest\}\?revised=1`/.test(shell), 'a new version moves the page, and says why it arrived');
+  assert(/latest > Number\(config\.version\)[\s\S]*location\.href = [\s\S]{0,120}`\/d\/\$\{encodeURIComponent\(config\.slug\)\}\/v\/\$\{latest\}\?revised=1`[\s\S]{0,80}`\/d\/\$\{encodeURIComponent\(config\.slug\)\}\?revised=1`/.test(shell), 'a new version moves the page (to the bare address when on it), and says why it arrived');
   assert(shell.includes("postOnboardingEvent('timeout_shown', config.slug)"), 'the timeout is logged');
   assert(shell.includes('const handoffEnabled = Boolean(config.isOwner && !config.isLanding && Number(config.version) === latestVersion)'), "only on the owner's own doc, and only its latest version");
   assert(card.includes("handoff = null,") && card.includes("className={handoff.open ? 'tdoc-handoff open' : 'tdoc-handoff'}"), 'the card renders it, open or closed');
@@ -227,10 +268,10 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(!/#1a73e8/i.test(read('server/chrome.css')), 'no second accent blue in the reader chrome');
   // Closed is one row — the name and Copy; the line and the sentence are behind the chevron.
   assert(card.includes('Let your agent fix it') && card.includes("{handoff.open ? (\n              <div className=\"tdoc-handoff-line\">\n                <code>{handoff.line}</code>\n                {copyButton}") && card.includes('{!handoff.open ? copyButton : null}'), 'the line shows only when open');
-  assert(card.includes("{handoff.open || handoff.state !== 'idle' ? (") && card.includes('Paste this into your agent. It reads all comments on this doc, replies to each, and publishes the next version.'), 'the sentence shows when open; the wait shows either way');
+  assert(card.includes("{handoff.open || handoff.state !== 'idle' ? (") && card.includes('Paste into your agent to address each comment and publish an update.'), 'the sentence shows when open; the wait shows either way');
   assert(shell.includes("const onboardingDoc = Boolean(onboardingRecord?.first_doc && onboardingRecord.first_doc === config.slug && !onboardingRecord.shared);") && shell.includes('const handoffOpen = handoffTouched ? handoffPref : (onboardingDoc || handoffPref);'), 'open on the onboarding doc; elsewhere the last choice holds');
   assert(shell.includes("localStorage.setItem(HANDOFF_OPEN_KEY, next ? '1' : '0')"), 'the choice is remembered');
-  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading this') && !card.includes("handoff.state === 'replied'") && card.includes('Still waiting — did you paste it into your agent?'), 'the four states — no doc-level "replied" on a thread');
+  assert(card.includes("Waiting for your agent…") && card.includes('Your agent is reading…') && !card.includes("handoff.state === 'replied'") && card.includes('Check your agent’s window.'), 'the four states — no doc-level "replied" on a thread');
   // Three conditions, and it used to have one. Without the first it arrived on
   // the seeded card that is still asking them to say something, carrying the
   // line for handing their answer to an agent above a Reply button they had not
@@ -252,19 +293,29 @@ t('bridge 2 lives on the card: the line, the copy, then what the server saw', ()
   assert(shell.includes('Number(config.version) === latestVersion'), 'only on the latest version');
   assert(shell.includes("if (value?.id) setOpenCommentId(value.id);"), 'a posted comment opens its card — the next instruction lives there');
   assert(shell.includes("v/${latest}?revised=1"), 'a new version is arrived at as one');
-  assert((layer.match(/handoff=\{handoff\}/g) || []).length === 2, 'threaded through both the desktop layer and the phone drawer');
+  const sharedList = read('shell/src/document/comment-thread-list.jsx');
+  assert(layer.includes('handoff={handoff}') && layer.includes('onReanchor, handoff, onResendHandoff,')
+    && sharedList.includes('{...cardProps}'),
+  'threaded through both the desktop layer and the phone drawer');
 });
 
 t('the exit is a line on a revised doc, owed until the link is copied', () => {
-  assert(/`Your agent answered \$\{answered\} \$\{answered === 1 \? 'comment' : 'comments'\} in v\$\{version\}\. Send it to a real reader:`/.test(shell), 'the line says what happened and what to do');
+  assert(/`Answered \$\{answered\} \$\{answered === 1 \? 'comment' : 'comments'\} in v\$\{version\}\. Share it\.`/.test(shell), 'the line says what happened and what to do');
   assert(!shell.includes('Now get a real one'), 'no line a stranger has to decode');
   assert(/\.tdoc-onboard-banner \{\s*position: relative;/.test(read('shell/src/ui/ui.css')), 'in the flow, never floating over the card');
-  assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started && \(!onboardingRecord\.shared \|\| sharedNow\)/.test(shell), 'v2+, journey started, not yet shared (or shared just now)');
+  assert(/handoffEnabled && Number\(config\.version\) >= 2\s*&& onboardingRecord && onboardingRecord\.started\s*&& onboardingRecord\.first_doc === config\.slug\s*&& \(!onboardingRecord\.shared \|\| sharedNow\)/.test(shell),
+    'v2+, journey started, THIS doc, not yet shared (or shared just now)');
   assert(shell.includes("postOnboardingEvent('share_link_copied', config.slug)"), 'copying is the stamp');
-  assert(shell.includes('(showExitBanner ? 36 : 0)'), 'the frame moves down under it');
+  // On the journey's own doc, and nowhere else. Without the slug check the
+  // tutorial's closing banner stood over ANY v2 document the account owned,
+  // telling its owner their agent had answered N comments on a page that had
+  // nothing to do with onboarding.
+  assert(/showExitBanner = Boolean\([\s\S]{0,240}?onboardingRecord\.first_doc === config\.slug/.test(shell),
+    'the closing banner belongs to the journey doc, not to every doc the account owns');
+  assert(shell.includes('(showExitBanner ? exitBannerHeight : 0)'), 'the frame follows the banner when tutorial copy wraps');
   // Round-4: copying the link used to unmount the banner, shift the frame and
   // close the card — the doc looked comment-free the moment it was shared.
-  assert(shell.includes("(!onboardingRecord.shared || sharedNow)") && shell.includes("'Link copied — send it to someone.'"), 'the banner stays as the confirmation');
+  assert(shell.includes("(!onboardingRecord.shared || sharedNow)") && shell.includes("'Link copied.'"), 'the banner stays as the confirmation');
   assert(shell.includes('className="tdoc-onboard-banner" role="status" onPointerDown={(event) => event.stopPropagation()}'), 'the banner does not close the card');
   // A reply on the seeded card is the gesture too; the answered thread that
   // opens on v2 is the person's own.
@@ -283,10 +334,10 @@ t('the two arrivals open the right card and say what happened', () => {
   // pop-up stopped opening, and the checklist rows land through `?step=`.
   assert(!shell.includes("params.get('welcome')"), 'the wizard arrival is gone');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
-  assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return true;"), 'with resolved threads shown, or v2 looks like nothing happened');
+  assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return 'all';"), 'with resolved threads shown, or v2 looks like nothing happened');
   // A version published without a resolved thread still arrived; the count
   // going to zero must not turn the arrival into a report of failure.
-  assert(shell.includes('`v${version} is published. Send it to a real reader:`'), 'the exit line drops the count rather than printing zero');
+  assert(shell.includes('`v${version} published. Share it.`'), 'the exit line drops the count rather than printing zero');
   assert(shell.includes('`Your agent published v${config.version}.`'), 'and so does the arrival toast');
   // No "Your doc →" pill in the landing's top bar: the way back is the hub
   // (the owner asked for it gone).
@@ -304,8 +355,8 @@ t('resuming reads the record, not localStorage', () => {
   // mid-journey — that is a second journey beside the real one.
   assert(!/OnboardingDialog|onboardingOpen|onboardingDoor/.test(shell),
     'there is no landing pop-up left to open itself');
-  assert(shell.includes("location.href = config.identity && done ? '/me' : '/setup';"),
-    'the landing CTA sends the unconnected to the gate and everyone else to their docs');
+  assert(shell.includes("href === '/start' && !message.blank && config.identity)") && shell.includes("location.href = done ? '/me' : '/setup';"),
+    'the landing CTA sends the signed-in unconnected to the gate, the connected to their docs, and a signed-out visitor to /start');
   assert(!shell.includes('setOnboardingResume') && !shell.includes('resume={onboardingResume}'), 'the shell never forces the question');
   assert(!shell.includes("get('onboard')"), 'and no URL can reopen one');
   // Coming back is not a question any more, because there is no jump to make:

@@ -103,18 +103,11 @@ t('tdoc_logo.svg is the vector SoT; PNG stays for Open Graph', () => {
   const svg = fs.readFileSync(svgPath, 'utf8');
   assert(/<svg[\s>]/.test(svg), 'not an SVG');
   assert(/<path[\s>]/.test(svg), 'SVG has no path');
-  assert(/currentColor/.test(svg), 'SVG must follow currentColor');
-  // The mark carries no background field. It used to sit on an opaque white
-  // rect, which stayed invisible in both themes because the page-level
-  // `filter: invert(1)` flips the rect and the page background together. That
-  // only holds while the mark sits on the page's own background: on a tinted
-  // surface, a favicon, or somebody else's README the white box shows. Line
-  // art in currentColor needs no field — it follows the text in light mode and
-  // inverts to white with it in dark.
-  assert(!/<rect[^>]*fill="#(fff|ffffff)"/i.test(svg), 'the mark must not carry a background field');
-  assert(svg.indexOf('fill="#ffffff"') < svg.indexOf('fill="currentColor"'),
-    'the field must be painted before the ink, or it covers the drawing');
-  assert(/fill-rule\s*=\s*["']evenodd["']/.test(svg), 'outline holes need evenodd');
+  assert(/stroke="currentColor"/.test(svg), 'SVG must follow currentColor');
+  // No background field: home-screen / OG rasters carry the square field;
+  // the vector mark inverts with the page via currentColor + dark invert.
+  assert(!/<rect[^>]*fill="#(fff|ffffff|000|000000)"/i.test(svg),
+    'the mark must not carry a background field');
   assert(!/<image[\s>]/i.test(svg), 'embedded <image> not allowed');
   assert(!/data:image\//i.test(svg), 'embedded bitmap not allowed');
   assert(!/<script[\s>]/i.test(svg), 'SVG must be inert');
@@ -122,11 +115,91 @@ t('tdoc_logo.svg is the vector SoT; PNG stays for Open Graph', () => {
   assert(fs.readFileSync(pngPath, { flag: 'r' })[0] === 0x89, 'not a PNG');
 });
 
+t('worker favicon + homescreen icons match assets (no stale embed)', () => {
+  // Tab SVG and Add-to-Home-Screen PNGs are both embedded in the worker.
+  // Updating only assets/ (or only the SVG const) left the phone icon on the
+  // old mark — pin all four so they cannot diverge again.
+  const fav = fs.readFileSync(path.join(__dirname, '..', 'assets', 'favicon.svg'), 'utf8');
+  const mFav = src.match(/const TDOC_FAVICON_SVG = `([\s\S]*?)`;/);
+  assert(mFav, 'TDOC_FAVICON_SVG missing');
+  assert(mFav[1] === fav, 'worker favicon SVG drifted from assets/favicon.svg');
+  assert(/rx="/.test(fav), 'favicon must be the rounded field');
+  const home = src.match(/const TDOC_HOME_ICONS = \{([\s\S]*?)\n\};/);
+  assert(home, 'TDOC_HOME_ICONS missing');
+  for (const name of [
+    'apple-touch-icon.png', 'apple-touch-icon-v3.png',
+    'icon-192.png', 'icon-192-v3.png',
+    'icon-512.png', 'icon-512-v3.png',
+  ]) {
+    const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', name));
+    const b64 = asset.toString('base64');
+    assert(home[1].includes(b64), `worker TDOC_HOME_ICONS drifted from assets/${name}`);
+  }
+  // Head links must point at the versioned apple-touch so iOS cannot keep a
+  // forever-cached /apple-touch-icon.png from an earlier mark.
+  const shell = fs.readFileSync(path.join(__dirname, '..', 'server/shell.js'), 'utf8');
+  assert(shell.includes('apple-touch-icon-v3.png'), 'shell head must cache-bust apple-touch');
+  assert(!/href="\/apple-touch-icon\.png"/.test(shell), 'unversioned apple-touch href left in shell');
+});
+
+t('every worker brand embed matches its asset (full rescan gate)', () => {
+  // Manual "full rescan" failed twice: SVG locked, OG PNG / other rasters did
+  // not. One table — if it is embedded, CI compares it to assets/.
+  const assetsDir = path.join(__dirname, '..', 'assets');
+  const svgConsts = [
+    ['TDOC_LOGO_SVG', 'tdoc_logo.svg'],
+    ['TDOC_FAVICON_SVG', 'favicon.svg'],
+    ['GROK_LOGO_SVG', 'grok_logo.svg'],
+  ];
+  for (const [name, file] of svgConsts) {
+    const asset = fs.readFileSync(path.join(assetsDir, file), 'utf8');
+    const m = src.match(new RegExp(`const ${name} = \`([\\s\\S]*?)\`;`));
+    assert(m, `${name} missing from worker.js`);
+    assert(m[1] === asset, `worker ${name} drifted from assets/${file}`);
+  }
+  const pngConsts = [
+    ['TDOC_LOGO_PNG_B64', 'tdoc_logo.png'],
+    ['TDOC_MAC_WALLPAPER', 'mac-wallpaper.jpg'],
+  ];
+  for (const [name, file] of pngConsts) {
+    const asset = fs.readFileSync(path.join(assetsDir, file));
+    const m = src.match(new RegExp(`const ${name} = '([^']+)'`));
+    assert(m, `${name} missing from worker.js`);
+    assert(Buffer.from(m[1], 'base64').equals(asset), `worker ${name} drifted from assets/${file}`);
+  }
+  const home = src.match(/const TDOC_HOME_ICONS = \{([\s\S]*?)\n\};/);
+  assert(home, 'TDOC_HOME_ICONS missing');
+  for (const name of [
+    'apple-touch-icon.png', 'apple-touch-icon-v3.png',
+    'icon-192.png', 'icon-192-v3.png',
+    'icon-512.png', 'icon-512-v3.png',
+  ]) {
+    const b64 = fs.readFileSync(path.join(assetsDir, name)).toString('base64');
+    assert(home[1].includes(b64), `TDOC_HOME_ICONS drifted from assets/${name}`);
+  }
+  const mac = src.match(/const TDOC_MAC_ICONS = \{([\s\S]*?)\n\};/);
+  assert(mac, 'TDOC_MAC_ICONS missing');
+  for (const name of [
+    'finder', 'safari', 'messages', 'trash', 'claude', 'codex', 'grok', 'downloads',
+  ]) {
+    const b64 = fs.readFileSync(path.join(assetsDir, `mac-${name}.png`)).toString('base64');
+    assert(mac[1].includes(b64), `TDOC_MAC_ICONS drifted from assets/mac-${name}.png`);
+  }
+});
+
 t('worker TDOC_LOGO_SVG matches assets/tdoc_logo.svg', () => {
   const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', 'tdoc_logo.svg'), 'utf8');
   const m = src.match(/const TDOC_LOGO_SVG = `([\s\S]*?)`;/);
   assert(m, 'TDOC_LOGO_SVG missing from worker.js');
   assert(m[1] === asset, 'worker SVG drifted from assets/tdoc_logo.svg');
+});
+
+t('worker TDOC_LOGO_PNG_B64 matches assets/tdoc_logo.png', () => {
+  const asset = fs.readFileSync(path.join(__dirname, '..', 'assets', 'tdoc_logo.png'));
+  const m = src.match(/const TDOC_LOGO_PNG_B64 = '([^']+)';/);
+  assert(m, 'TDOC_LOGO_PNG_B64 missing from worker.js');
+  assert(Buffer.from(m[1], 'base64').equals(asset), 'worker PNG drifted from assets/tdoc_logo.png');
+  assert(fs.existsSync(path.join(__dirname, '..', 'assets', 'tdoc_logo-v2.png')), 'assets/tdoc_logo-v2.png missing (OG cache-bust)');
 });
 
 t('worker GROK_LOGO_SVG matches assets/grok_logo.svg', () => {

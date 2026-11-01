@@ -123,11 +123,13 @@ function makeEnv(StoreClass, extra = {}) {
   return env;
 }
 
-function req(pathname, { method = 'GET', body = null, cookie = '', host = 'tdoc.dev' } = {}) {
+function req(pathname, { method = 'GET', body = null, cookie = '', host = 'tdoc.dev', token = '', accept = '' } = {}) {
   return new Request(`https://${host}${pathname}`, {
     method,
     headers: {
       ...(cookie ? { Cookie: cookie.includes('=') ? cookie : `tdoc_sid=${cookie}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(accept ? { Accept: accept } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -150,6 +152,11 @@ async function seedDoc(env, slug, { owner, created = '2026-01-01T00:00:00.000Z',
   if (access) meta.access = access;
   await env.META.put(`meta:${slug}`, JSON.stringify(meta));
   for (const v of vs) await env.DOCS.put(`docs/${slug}/v${v.n}/index.html`, `<h1>${slug}</h1>`);
+  // Written straight into KV, this doc models one from before the per-owner
+  // index existed: every built facet forgets it is built, so the next My
+  // docs scans the platform and indexes the doc, as the first My docs after
+  // the index shipped does for real data.
+  for (const key of [...env.META.map.keys()]) if (key.startsWith('docidx:built:')) await env.META.delete(key);
 }
 
 function bootData(html, name) {
@@ -199,6 +206,7 @@ function bootData(html, name) {
     const boot = bootData(await me.text(), '__TDOC_APP_BOOT__');
     assert(boot.recent.some((doc) => doc.slug === 'bobs-doc'), 'Recent data must list the visited doc');
     assert(boot.recent.find((doc) => doc.slug === 'bobs-doc').owner === 'bob', 'Recent row must identify whose doc it is');
+    assert(boot.recent.find((doc) => doc.slug === 'bobs-doc').workspace_id === '', 'personal recent row must name the personal workspace');
     // Not alice's doc — it must NOT appear in her own catalog list.
     assert(!boot.docs.some((doc) => doc.slug === 'bobs-doc'), "someone else's doc must stay out of My docs");
   });
@@ -271,7 +279,7 @@ function bootData(html, name) {
     assert(!boot.starred.some((doc) => doc.slug === 'was-open'), 'Starred must drop unreadable docs');
   });
 
-  await t('folders as places: folder row + count + crumbs; delete returns docs to root', async () => {
+  await t('folders as places: folder row + count + crumbs; delete takes the folder and its docs to Trash, restore brings them back', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'alice');
     await seedDoc(env, 'my-doc', { owner: 'alice' });
@@ -297,12 +305,22 @@ function bootData(html, name) {
     const bogus = await worker.fetch(req('/api/folders/move', { method: 'POST', cookie, body: { slugs: ['my-doc'], folder: 'f_nope' } }), env, {});
     assert(bogus.status === 404, `move to unknown folder should 404, got ${bogus.status}`);
 
-    const del = await worker.fetch(req('/api/folders?id=' + folder.id, { method: 'DELETE', cookie }), env, {});
+    const del = await worker.fetch(req('/api/folders?batch=1&id=' + folder.id, { method: 'DELETE', cookie }), env, {});
     assert(del.status === 200, `delete folder ${del.status}`);
+    assert((await del.clone().json()).docs.includes('my-doc'), 'the folder must take its doc to Trash');
     boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
-    assert(boot.docs.some((doc) => doc.slug === 'my-doc'), 'doc must survive folder deletion');
-    assert(boot.docs.find((doc) => doc.slug === 'my-doc').folder === '', 'doc must fall back to the root after its folder is deleted');
+    assert(!boot.docs.some((doc) => doc.slug === 'my-doc'), 'a doc in Trash must leave My docs');
     assert(!boot.folders.some((item) => item.id === folder.id), 'deleted folder must not remain in boot data');
+    const trash = await (await worker.fetch(req('/api/trash', { cookie }), env, {})).json();
+    assert(trash.items.length === 1 && trash.items[0].kind === 'folder' && trash.items[0].doc_count === 1 && trash.items[0].title === 'Work',
+      `Trash must list the folder once, with its doc inside: ${JSON.stringify(trash.items)}`);
+    const restore = await worker.fetch(req('/api/trash/restore', { method: 'POST', cookie, body: { folder: folder.id } }), env, {});
+    assert(restore.status === 200, `restore ${restore.status}: ${await restore.clone().text()}`);
+    boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(boot.folders.some((item) => item.id === folder.id && item.name === 'Work'), 'restore must bring the folder back');
+    assert(boot.docs.find((doc) => doc.slug === 'my-doc')?.folder === folder.id, 'and the doc back inside it ');
+    // Leave alice's folder tree as the next case expects to find it: empty.
+    await worker.fetch(req('/api/folders?batch=1&id=' + folder.id, { method: 'DELETE', cookie }), env, {});
   });
 
   await t('folders shelve only your own docs; rename works; state is per-login', async () => {
@@ -322,7 +340,7 @@ function bootData(html, name) {
     assert(stored.folders.length === 1 && stored.folders[0].name === 'Renamed', 'rename must persist');
   });
 
-  await t('folders nest: parent chain, sibling-scoped names, depth cap, delete moves contents up', async () => {
+  await t('folders nest: parent chain, sibling-scoped names, depth cap, delete takes the whole subtree to Trash', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'alice');
     await seedDoc(env, 'deep-doc', { owner: 'alice' });
@@ -345,17 +363,135 @@ function bootData(html, name) {
     assert(e.status === 400 && e.body.error === 'too_deep', `depth 5 must be rejected, got ${e.status}`);
     const mv = await worker.fetch(req('/api/folders/move', { method: 'POST', cookie, body: { slugs: ['deep-doc'], folder: b.body.folder.id } }), env, {});
     assert(mv.status === 200, 'move into nested folder failed');
-    const del = await worker.fetch(req('/api/folders?id=' + b.body.folder.id, { method: 'DELETE', cookie }), env, {});
+    const del = await worker.fetch(req('/api/folders?batch=1&id=' + b.body.folder.id, { method: 'DELETE', cookie }), env, {});
     assert(del.status === 200, 'delete nested folder failed');
-    const state = JSON.parse(await env.META.get('folders:alice'));
-    assert(state.docs['deep-doc'] === a.body.folder.id, "doc must move up to the deleted folder's parent, not to root");
-    const cRec = state.folders.find((f) => f.id === c.body.folder.id);
-    assert(cRec && cRec.parent === a.body.folder.id, "subfolder must reparent to the deleted folder's parent");
+    let state = JSON.parse(await env.META.get('folders:alice'));
+    assert(!state.docs['deep-doc'], 'the doc goes to Trash with its folder');
+    assert(!state.folders.some((f) => [b, c, d].some((x) => x.body.folder.id === f.id)), 'subfolders go with it');
+    assert(state.folders.some((f) => f.id === a.body.folder.id), 'the parent stays');
+    const restore = await worker.fetch(req('/api/trash/restore', { method: 'POST', cookie, body: { folder: b.body.folder.id } }), env, {});
+    assert(restore.status === 200, `restore ${restore.status}`);
     const boot = bootData(await (await worker.fetch(req('/me', { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
-    assert(boot.folders.some((folder) => folder.id === c.body.folder.id && folder.parent === a.body.folder.id),
-      'folder boot data must carry parent relationships');
-    assert(boot.docs.find((doc) => doc.slug === 'deep-doc')?.folder === a.body.folder.id,
-      'document boot data must carry its new parent');
+    assert(boot.folders.some((folder) => folder.id === c.body.folder.id && folder.parent === b.body.folder.id)
+      && boot.folders.some((folder) => folder.id === b.body.folder.id && folder.parent === a.body.folder.id),
+      'restore puts the tree back with its parent relationships');
+    assert(boot.docs.find((doc) => doc.slug === 'deep-doc')?.folder === b.body.folder.id,
+      'and the doc back where it was');
+  });
+
+  await t('/api/me: cookie and hosted Bearer see the same owned docs/folders', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const cookie = await putSession(env, 'alice');
+    await seedDoc(env, 'alice-owned', { owner: 'alice', access: { visibility: 'private' } });
+    await seedDoc(env, 'bob-owned', { owner: 'bob', access: { visibility: 'public' } });
+    const create = await worker.fetch(req('/api/folders', { method: 'POST', cookie, body: { name: 'Alice pack' } }), env, {});
+    assert(create.status === 200, `create folder ${create.status}`);
+    const folder = (await create.json()).folder;
+    await worker.fetch(req('/api/folders/move', {
+      method: 'POST', cookie, body: { slugs: ['alice-owned'], folder: folder.id },
+    }), env, {});
+
+    const viaCookie = await worker.fetch(req('/api/me', { cookie }), env, {});
+    assert(viaCookie.status === 200, `cookie /api/me ${viaCookie.status}`);
+    const cookieBody = await viaCookie.json();
+    assert(cookieBody.ok && cookieBody.docs.some((d) => d.slug === 'alice-owned' && d.folder === folder.id),
+      `cookie must list owned doc in folder, got ${JSON.stringify(cookieBody.docs)}`);
+    assert(!cookieBody.docs.some((d) => d.slug === 'bob-owned'), 'cookie must not list other accounts');
+    assert(cookieBody.folders.some((f) => f.id === folder.id && f.name === 'Alice pack'),
+      'cookie must list owned folders');
+
+    const tokRes = await worker.fetch(req('/api/hosted/token', {
+      method: 'POST', cookie, body: { label: 'alice-agent' },
+    }), env, {});
+    assert(tokRes.status === 200, `alice token ${tokRes.status}`);
+    const token = (await tokRes.json()).token;
+    const viaBearer = await worker.fetch(req('/api/me', { token }), env, {});
+    assert(viaBearer.status === 200, `bearer /api/me ${viaBearer.status}`);
+    const bearerBody = await viaBearer.json();
+    assert(bearerBody.docs.map((d) => d.slug).sort().join(',') === cookieBody.docs.map((d) => d.slug).sort().join(','),
+      'Bearer catalog must match cookie catalog');
+    assert(bearerBody.folders.map((f) => f.id).sort().join(',') === cookieBody.folders.map((f) => f.id).sort().join(','),
+      'Bearer folders must match cookie folders');
+
+    const anon = await worker.fetch(req('/api/me'), env, {});
+    assert(anon.status === 401, `anon /api/me must 401, got ${anon.status}`);
+  });
+
+  await t('folder share link: visibility mint, filtered listing, private revoke, bearer agent read', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const cookie = await putSession(env, 'alice');
+    await seedDoc(env, 'open-in-folder', { owner: 'alice', access: { visibility: 'unlisted' } });
+    await seedDoc(env, 'secret-in-folder', {
+      owner: 'alice',
+      access: { visibility: 'private', allowed_users: ['bob'] },
+    });
+    const create = await worker.fetch(req('/api/folders', { method: 'POST', cookie, body: { name: 'Shared pack' } }), env, {});
+    const folder = (await create.json()).folder;
+    assert(folder.visibility === 'private' && !folder.share_id, 'new folders start private with no share id');
+    await worker.fetch(req('/api/folders/move', {
+      method: 'POST', cookie, body: { slugs: ['open-in-folder', 'secret-in-folder'], folder: folder.id },
+    }), env, {});
+
+    const share = await worker.fetch(req('/api/folders', {
+      method: 'PATCH', cookie, body: { id: folder.id, visibility: 'unlisted' },
+    }), env, {});
+    assert(share.status === 200, `share patch ${share.status}`);
+    const shared = (await share.json()).folder;
+    assert(shared.visibility === 'unlisted' && shared.share_id, 'unlisted folder must mint a share id');
+    assert(await env.META.get(`folder-share:${shared.share_id}`), 'share index must exist');
+
+    const anon = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`), env, {});
+    assert(anon.status === 200, `anon shared api ${anon.status}`);
+    const anonBody = await anon.json();
+    assert(anonBody.docs.length === 1 && anonBody.docs[0].slug === 'open-in-folder',
+      `anon must see only link-readable docs, got ${JSON.stringify(anonBody.docs)}`);
+
+    const page = await worker.fetch(req(`/f/${shared.share_id}`), env, {});
+    assert(page.status === 200, `share page ${page.status}`);
+    const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+    assert(boot.page === 'folder-share' && boot.folder.name === 'Shared pack', 'share page boot');
+    assert(boot.docs.length === 1 && boot.docs[0].slug === 'open-in-folder', 'share page filters private docs');
+
+    const bobCookie = await putSession(env, 'bob');
+    const bobTok = await worker.fetch(req('/api/hosted/token', {
+      method: 'POST', cookie: bobCookie, body: { label: 'bob-agent' },
+    }), env, {});
+    assert(bobTok.status === 200, `bob token ${bobTok.status}`);
+    const bobToken = (await bobTok.json()).token;
+    const agent = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`, { token: bobToken }), env, {});
+    assert(agent.status === 200, `agent shared api ${agent.status}`);
+    const agentBody = await agent.json();
+    assert(agentBody.docs.map((d) => d.slug).sort().join(',') === 'open-in-folder,secret-in-folder',
+      `invitee agent must see allowlisted private doc too, got ${JSON.stringify(agentBody.docs)}`);
+
+    const privDoc = await worker.fetch(req('/d/secret-in-folder/v/1', { token: bobToken }), env, {});
+    assert(privDoc.status === 200, `invitee bearer must open private doc, got ${privDoc.status}`);
+
+    const invite = await worker.fetch(req('/api/folders', {
+      method: 'PATCH', cookie, body: {
+        id: folder.id,
+        visibility: 'private',
+        allowed_users: ['bob'],
+      },
+    }), env, {});
+    assert(invite.status === 200, `invite patch ${invite.status}`);
+    const invited = (await invite.json()).folder;
+    assert(invited.visibility === 'private' && invited.share_id === shared.share_id,
+      'private invite keeps the share id for Copy link');
+    assert(invited.allowed_users && invited.allowed_users.includes('bob'), 'allowed_users persisted');
+
+    const lockedAnon = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`), env, {});
+    assert(lockedAnon.status === 401, `private folder anon must 401, got ${lockedAnon.status}`);
+
+    const bobFolder = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`, { cookie: bobCookie }), env, {});
+    assert(bobFolder.status === 200, `invitee cookie must open private folder, got ${bobFolder.status}`);
+
+    const lock = await worker.fetch(req('/api/folders', {
+      method: 'PATCH', cookie, body: { id: folder.id, visibility: 'private', allowed_users: [] },
+    }), env, {});
+    assert(lock.status === 200, `lock ${lock.status}`);
+    const gone = await worker.fetch(req(`/api/folders/shared?id=${shared.share_id}`, { cookie: bobCookie }), env, {});
+    assert(gone.status === 404, `uninvited private folder share must 404, got ${gone.status}`);
   });
 
   await t('doc-page boot carries viewer star state for signed-in viewers only', async () => {

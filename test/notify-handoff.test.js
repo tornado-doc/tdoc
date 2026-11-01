@@ -1,0 +1,751 @@
+// Handing comments to an agent (P0 of the tdoc × Raft notification design).
+//
+// The rules this pins down, all of which came out of review rather than from
+// the first draft:
+//   - Driving an agent needs the doc owner's session or upload token. A reader
+//     who may comment still may not make somebody's agent do work, and that is
+//     structural (no token) rather than a policy we could get wrong.
+//   - A comment nobody handed over is a NOTE, not queued work.
+//   - A failed delivery is a recorded handoff with a marker, never a retry.
+//   - One handoff addresses one agent: handing the same batch to two agents
+//     forks two versions off one base and the merge lands back on the human.
+//
+// Run with: node test/notify-handoff.test.js
+
+const { loadWorker, makeEnv, req, putSession, issue } = require('./helpers/worker-harness');
+
+let pass = 0, fail = 0;
+function ok(n) { console.log(`  ✓ ${n}`); pass++; }
+function bad(n, e) { console.log(`  ✗ ${n}\n    ${e && e.message ? e.message : e}`); fail++; }
+async function t(n, fn) { try { await fn(); ok(n); } catch (e) { bad(n, e); } }
+function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
+
+(async () => {
+  const mod = await loadWorker();
+  const worker = mod.default;
+  console.log('handing comments to an agent');
+
+  async function seed(slug = 'notify-doc') {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug, version: 1, html: '<h1>doc</h1><p>a sentence to comment on</p>' },
+    }), env, {});
+    assert(up.status === 200, `upload ${up.status}`);
+    const reader = await putSession(env, 'reader');
+    env.__commentReaderCookie = reader;
+    const posted = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: reader,
+      body: { slug, version: 1, text: 'this is confusing', anchor: { kind: 'text', text: 'a sentence' } },
+    }), env, {});
+    const comment = await posted.json();
+    assert(posted.status === 200, `comment ${posted.status}`);
+    return { env, token: tok.token, reader, slug, commentId: comment.id };
+  }
+
+  const target = { provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', agent_name: 'xiaocc' };
+  const handoff = (env, slug, token, body) => worker.fetch(req('/api/notify/handoff', {
+    method: 'POST', token, body: { slug, ...body },
+  }), env, {});
+  const listComments = async (env, slug) => {
+    const r = await worker.fetch(req(`/api/comments?slug=${slug}&version=1`, { cookie: env.__commentReaderCookie }), env, {});
+    return r.json();
+  };
+
+  await t('an untouched comment is a note, not queued work', async () => {
+    const { env, slug } = await seed();
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_status === 'note', `expected note, got ${c.handoff_status}`);
+    assert(c.handoff_id === null, 'a note has no handoff');
+  });
+
+  await t('a reader who can comment cannot hand work to an agent', async () => {
+    const { env, slug, reader, commentId } = await seed();
+    const r = await worker.fetch(req('/api/notify/handoff', {
+      method: 'POST', cookie: reader,
+      body: { slug, comment_ids: [commentId], recipient: target },
+    }), env, {});
+    assert(r.status === 401 || r.status === 403, `reader got ${r.status}, expected a refusal`);
+  });
+
+  await t('the owner hands a comment over and it flips to sent', async () => {
+    const { env, slug, token, commentId } = await seed();
+    const r = await handoff(env, slug, token, { comment_ids: [commentId], recipient: target, instruction: 'fix it' });
+    const body = await r.json();
+    assert(r.status === 200 && body.ok, `handoff ${r.status}: ${JSON.stringify(body)}`);
+    assert(body.sent === 1, `sent ${body.sent}`);
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_status === 'sent', `expected sent, got ${c.handoff_status}`);
+    assert(c.handoff_id === body.handoff_id, 'comment carries its handoff id');
+  });
+
+  await t('a reply keeps the handoff provider mark when an older CLI sends no agent header', async () => {
+    const { env, slug, token, commentId } = await seed('provider-reply');
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: target });
+    const response = await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token,
+      body: { slug, parent_id: commentId, text: 'handled', status: 'answered', agent_login: 'claude' },
+    }), env, {});
+    const body = await response.json();
+    assert(body.author.provider === 'raft' && body.author.handle === '@xiaocc', JSON.stringify(body.author));
+  });
+
+  await t('an agent reply names the account whose token posted it, not one the agent claims', async () => {
+    const { env, slug, token, commentId } = await seed('owner-reply');
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: { ...target, server_slug: 'julie' } });
+    const response = await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token,
+      body: { slug, parent_id: commentId, text: 'handled', status: 'answered', agent_login: 'claude', owner: { key: 'mallory', display: 'mallory' } },
+    }), env, {});
+    const body = await response.json();
+    const a = body.author;
+    assert(a.owner && a.owner.key === 'owner' && a.owner.display === 'owner', JSON.stringify(a));
+    // The Raft server is where the agent runs, never who it acts for.
+    assert(a.location === 'julie' && a.scope === 'personal', JSON.stringify(a));
+    const [c] = await listComments(env, slug);
+    assert(c.replies[0].author.owner.display === 'owner', 'the owner is kept on the stored reply');
+  });
+
+  await t('an unconfigured provider fails the delivery but still records the handoff', async () => {
+    const { env, slug, token, commentId } = await seed();
+    const body = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    assert(body.delivery.status === 'failed', 'no Raft credentials configured, so it cannot have been delivered');
+    assert(body.delivery.error === 'provider_not_configured', `error was ${body.delivery.error}`);
+    const list = await (await worker.fetch(req(`/api/notify/handoffs?slug=${slug}`, { token }), env, {})).json();
+    assert(list.handoffs.length === 1, 'a failed delivery is still a handoff on the record');
+    assert(list.handoffs[0].delivery.status === 'failed', 'and it remembers that it failed');
+  });
+
+  await t('handing over with nobody bound is a recorded failure, not a crash', async () => {
+    const { env, slug, token, commentId } = await seed();
+    const body = await (await handoff(env, slug, token, { comment_ids: [commentId] })).json();
+    assert(body.ok === true, 'still a 200 — the handoff happened, the delivery did not');
+    assert(body.delivery.error === 'no_recipient', `error was ${body.delivery.error}`);
+  });
+
+  await t('an unknown provider is rejected rather than silently dropped', async () => {
+    const { env, slug, token, commentId } = await seed();
+    const body = await (await handoff(env, slug, token, {
+      comment_ids: [commentId], recipient: { provider: 'not-a-provider', server_id: 'S1', agent_sub: 'x' },
+    })).json();
+    assert(body.delivery.error === 'no_recipient', `expected the bad target to resolve to nobody, got ${body.delivery.error}`);
+  });
+
+  await t('the agent resolves the handoff and the comment stops being work', async () => {
+    const { env, slug, token, commentId } = await seed();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const r = await worker.fetch(req('/api/notify/resolve', {
+      method: 'POST', token, body: { slug, handoff_id: h.handoff_id, comment_ids: [commentId] },
+    }), env, {});
+    const body = await r.json();
+    assert(r.status === 200 && body.resolved === 1, `resolve ${r.status}: ${JSON.stringify(body)}`);
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_status === 'resolved', `expected resolved, got ${c.handoff_status}`);
+  });
+
+  await t('resolving only some of a batch leaves the rest sent', async () => {
+    const { env, slug, token, commentId, reader } = await seed();
+    const second = await (await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: reader,
+      body: { slug, version: 1, text: 'and this one too', anchor: { kind: 'text', text: 'to comment on' } },
+    }), env, {})).json();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId, second.id], recipient: target })).json();
+    assert(h.sent === 2, `sent ${h.sent}`);
+    await worker.fetch(req('/api/notify/resolve', {
+      method: 'POST', token, body: { slug, handoff_id: h.handoff_id, comment_ids: [commentId] },
+    }), env, {});
+    const list = await listComments(env, slug);
+    const first = list.find(c => c.id === commentId);
+    const rest = list.find(c => c.id === second.id);
+    assert(first.handoff_status === 'resolved', `first ${first.handoff_status}`);
+    assert(rest.handoff_status === 'sent', `second should still be waiting, got ${rest.handoff_status}`);
+  });
+
+  await t('a resend reuses the handoff id so the agent is not woken twice', async () => {
+    const { env, slug, token, commentId } = await seed();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const again = await (await worker.fetch(req('/api/notify/handoff/resend', {
+      method: 'POST', token, body: { slug, handoff_id: h.handoff_id },
+    }), env, {})).json();
+    assert(again.handoff_id === h.handoff_id, 'a resend is the same handoff, not a new one');
+    const list = await (await worker.fetch(req(`/api/notify/handoffs?slug=${slug}`, { token }), env, {})).json();
+    assert(list.handoffs.length === 1, 'and it does not pile up a second record');
+  });
+
+  await t('resending a handoff that does not exist is a 404', async () => {
+    const { env, slug, token } = await seed();
+    const r = await worker.fetch(req('/api/notify/handoff/resend', {
+      method: 'POST', token, body: { slug, handoff_id: 'h_nope' },
+    }), env, {});
+    assert(r.status === 404, `expected 404, got ${r.status}`);
+  });
+
+  // ---- linking an agent to an account ----
+  // The link code and the upload token are deliberately different credentials.
+  // These pin that neither one alone gets anywhere.
+  async function pendingLink(env, code = 'lk_test', body = {}) {
+    await env.META.put(`raft-link:${code}`, JSON.stringify({
+      provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', agent_name: 'xiaocc', ...body,
+    }));
+    return code;
+  }
+  const link = (env, token, body) => worker.fetch(req('/api/notify/link', { method: 'POST', token, body }), env, {});
+
+  await t('linking a second agent leaves an unrelated doc without a default', async () => {
+    const { env, token, slug } = await seed();
+    const code = await pendingLink(env);
+    const r = await link(env, token, { link_code: code });
+    const body = await r.json();
+    assert(r.status === 200 && body.ok, `link ${r.status}: ${JSON.stringify(body)}`);
+    assert(body.target.agent_sub === 'uuid-a', 'the bound target is the agent that signed in');
+    await link(env, token, { link_code: await pendingLink(env, 'lk_other', { agent_sub: 'uuid-b', agent_name: 'other' }) });
+    // Connection order alone does not choose between two agents.
+    const targets = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(targets.default === null && targets.candidates.some((t) => t.agent_sub === 'uuid-a'), `expected an offered agent, not a default: ${JSON.stringify(targets)}`);
+  });
+
+  await t('a link code alone is worthless without a token', async () => {
+    const { env } = await seed();
+    const code = await pendingLink(env);
+    const r = await worker.fetch(req('/api/notify/link', { method: 'POST', body: { link_code: code } }), env, {});
+    assert(r.status === 401, `expected 401 without a token, got ${r.status}`);
+    assert(await env.META.get(`raft-link:${code}`), 'a refused attempt must not burn the code');
+  });
+
+  await t('a token alone cannot invent an agent that never signed in', async () => {
+    const { env, token } = await seed();
+    const r = await link(env, token, { link_code: 'lk_never_issued' });
+    assert(r.status === 404, `expected 404 for an unissued code, got ${r.status}`);
+  });
+
+  await t('a link code is single use', async () => {
+    const { env, token } = await seed();
+    const code = await pendingLink(env);
+    assert((await link(env, token, { link_code: code })).status === 200, 'first redemption works');
+    const again = await link(env, token, { link_code: code });
+    assert(again.status === 404, `a redeemed code must not work twice, got ${again.status}`);
+  });
+
+  await t('relinking the same agent does not duplicate it', async () => {
+    const { env, token } = await seed();
+    await link(env, token, { link_code: await pendingLink(env, 'lk_a') });
+    const body = await (await link(env, token, { link_code: await pendingLink(env, 'lk_b') })).json();
+    assert(body.targets === 1, `expected one target, got ${body.targets}`);
+  });
+
+  // ---- the agent behaviour manifest ----
+  // Registered on the Raft App, so a 404 here means Login with Raft cannot
+  // work at all. It was missed in the first pass and the App was registered
+  // pointing at it, which is exactly the failure this test exists to catch.
+  await t('the manifest is served as JSON at the registered well-known path', async () => {
+    const env = makeEnv(mod.CommentsStore, { RAFT_CLIENT_ID: 'tdoc-7a927d' });
+    const r = await worker.fetch(req('/.well-known/raft-agent-manifest.json'), env, {});
+    assert(r.status === 200, `manifest ${r.status}`);
+    // The CLI refuses a manifest that is not application/json, so the
+    // content-type is part of the contract, not a detail.
+    assert(/application\/json/.test(r.headers.get('content-type') || ''), `content-type: ${r.headers.get('content-type')}`);
+    const m = await r.json();
+    assert(m.schema === 'raft-agent-manifest.v0', `schema: ${m.schema}`);
+    assert(m.auth && m.auth.type === 'login_with_raft', 'auth type');
+    assert(m.service === 'tdoc-7a927d', `service should follow the registered client key, got ${m.service}`);
+    assert(m.execution && m.execution.base_url === 'https://tdoc.dev', `base_url: ${m.execution && m.execution.base_url}`);
+    assert(Array.isArray(m.actions), 'actions must be an array even while empty');
+  });
+
+  await t('the manifest carries no credential', async () => {
+    const env = makeEnv(mod.CommentsStore, { RAFT_CLIENT_ID: 'tdoc-7a927d', RAFT_CLIENT_SECRET: 'super_secret_value' });
+    const body = await (await worker.fetch(req('/.well-known/raft-agent-manifest.json'), env, {})).text();
+    assert(!body.includes('super_secret_value'), 'the manifest is public — a secret must never reach it');
+  });
+
+  // ---- the agent session carries no authority ----
+  //
+  // Agent sign-in skips the OIDC state check, so this cookie can be issued to
+  // a browser that was walked onto the callback. That is only tolerable while
+  // holding it buys nothing. These are the tests that keep it worthless: if
+  // one of them starts failing because the cookie "works", the sign-in path
+  // has quietly become a login-CSRF hole.
+  const AGENT_COOKIE = 'tdoc_agent_sid=aa11bb22';
+  async function withAgentSession(env, body = {}) {
+    await env.META.put('agent-session:aa11bb22', JSON.stringify({
+      provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', agent_name: 'xiaocc', ...body,
+    }));
+    return AGENT_COOKIE;
+  }
+
+  await t('the agent cookie alone cannot hand comments to an agent', async () => {
+    const { env, slug, commentId } = await seed();
+    const cookie = await withAgentSession(env);
+    const r = await worker.fetch(req('/api/notify/handoff', {
+      method: 'POST', cookie, body: { slug, comment_ids: [commentId], recipient: target },
+    }), env, {});
+    assert(r.status === 401 || r.status === 403, `agent cookie drove a handoff (${r.status}) — it must carry no authority`);
+  });
+
+  await t('the agent cookie alone cannot bind itself to an account', async () => {
+    const { env } = await seed();
+    const cookie = await withAgentSession(env);
+    const r = await worker.fetch(req('/api/notify/link', { method: 'POST', cookie, body: {} }), env, {});
+    assert(r.status === 401, `linking without the upload token returned ${r.status}; both credentials are required`);
+  });
+
+  await t('the agent cookie alone cannot read a private doc', async () => {
+    const { env, token, slug } = await seed();
+    await worker.fetch(req('/api/doc/access', {
+      method: 'PATCH', token, body: { slug, access: { visibility: 'private' } },
+    }), env, {});
+    const cookie = await withAgentSession(env);
+    const r = await worker.fetch(req(`/d/${slug}/v/1`, { cookie }), env, {});
+    assert(r.status === 403 || r.status === 401 || r.status === 404,
+      `a private doc answered ${r.status} to a bare agent cookie`);
+  });
+
+  await t('with the upload token as well, the agent session does bind', async () => {
+    const { env, token, slug } = await seed();
+    const cookie = await withAgentSession(env);
+    const r = await worker.fetch(req('/api/notify/link', { method: 'POST', token, cookie, body: {} }), env, {});
+    const body = await r.json();
+    assert(r.status === 200 && body.ok, `link with both credentials failed: ${r.status} ${JSON.stringify(body)}`);
+    assert(body.target.agent_sub === 'uuid-a', 'bound the agent that signed in');
+    const targets = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(targets.default?.agent_sub === 'uuid-a', 'the author’s sole connected agent should be selected');
+  });
+
+  // ---- why the button is disabled ----
+  // The UI renders a sentence from `reason`, so a wrong reason is a wrong
+  // sentence shown to a person. Only report what is actually known.
+  await t('no recipient reports a reason the UI can render', async () => {
+    const { env, token, slug } = await seed();
+    const r = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(r.default === null, 'nobody is bound yet');
+    assert(r.reason === 'no_agent_bound', `reason: ${r.reason}`);
+  });
+
+  await t('a bound recipient reports no reason at all', async () => {
+    const { env, token, slug } = await seed();
+    await link(env, token, { link_code: await pendingLink(env, 'lk_reason') });
+    const r = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(r.default?.agent_sub === 'uuid-a' && r.reason === null, `expected the sole recipient and no reason, got ${JSON.stringify(r)}`);
+  });
+
+  // ---- the Raft wire format ----
+  //
+  // Every earlier test stubbed delivery out, so three wire-level bugs shipped
+  // and only surfaced against the live API: the request leg was addressed by
+  // server id instead of slug (404), the response was read as `request_id`
+  // when it is `requestId` (undefined sent onward), and the resource was built
+  // from our stored id rather than the one the API returns. These drive the
+  // provider against a recorded transcript so the shape is pinned.
+  const realFetch = globalThis.fetch;
+  function stubRaft(handler) {
+    const calls = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input && input.url ? input.url : input);
+      const body = init && init.body ? JSON.parse(init.body) : null;
+      calls.push({ url, body });
+      const r = handler(url, body);
+      return r || realFetch(input, init);
+    };
+    return calls;
+  }
+  const RAFT_ENV = { RAFT_CLIENT_ID: 'tdoc-7a927d', RAFT_CLIENT_SECRET: 'sec', RAFT_API_BASE: 'https://api.raft.test' };
+  const fullTarget = { provider: 'raft', server_id: 'srv-uuid', server_slug: 'acme', agent_sub: 'uuid-a', agent_name: 'xiaocc' };
+
+  async function seedWith(env) {
+    const tok = await issue(worker, env, 'owner');
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'wire-doc', version: 1, html: '<h1>d</h1><p>a sentence to comment on</p>' },
+    }), env, {});
+    const reader = await putSession(env, 'reader');
+    env.__commentReaderCookie = reader;
+    const c = await (await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: reader,
+      body: { slug: 'wire-doc', version: 1, text: 'x', anchor: { kind: 'text', text: 'a sentence' } },
+    }), env, {})).json();
+    return { token: tok.token, commentId: c.id, reader };
+  }
+
+  await t('the access request is addressed by server SLUG, not id', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    const calls = stubRaft((url) => {
+      if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq1', agent: { serverId: 'srv-uuid' } });
+      if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
+      if (url.endsWith('/api/oauth/agent-events')) return Response.json({ ok: true });
+      return null;
+    });
+    try {
+      const r = await (await worker.fetch(req('/api/notify/handoff', {
+        method: 'POST', token, body: { slug: 'wire-doc', comment_ids: [commentId], recipient: fullTarget },
+      }), env, {})).json();
+      assert(r.delivery.status === 'delivered', `delivery: ${JSON.stringify(r.delivery)}`);
+      const reqCall = calls.find(c => c.url.endsWith('/api/oauth/requests/agent'));
+      assert(reqCall.body.serverSlug === 'acme', `sent serverSlug=${reqCall.body.serverSlug}; the uuid here is a 404`);
+      assert(reqCall.body.scopes.includes('agent:notification:write'), 'scope');
+    } finally { globalThis.fetch = realFetch; }
+  });
+
+  await t('requestId is read camelCase and the resource uses the returned serverId', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    const calls = stubRaft((url) => {
+      // The API answers with a DIFFERENT serverId than we stored; the resource
+      // must follow the API, not our record.
+      if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq-real', agent: { serverId: 'srv-from-api' } });
+      if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
+      if (url.endsWith('/api/oauth/agent-events')) return Response.json({ ok: true });
+      return null;
+    });
+    try {
+      await worker.fetch(req('/api/notify/handoff', {
+        method: 'POST', token, body: { slug: 'wire-doc', comment_ids: [commentId], recipient: fullTarget },
+      }), env, {});
+      const tokCall = calls.find(c => c.url.endsWith('/api/oauth/token'));
+      assert(tokCall.body.request_id === 'rq-real', `request_id: ${tokCall.body.request_id}`);
+      assert(tokCall.body.resource === 'urn:raft:server:srv-from-api:agent-inbound', `resource: ${tokCall.body.resource}`);
+      assert(tokCall.body.grant_type === 'urn:slock:grant-type:agent_request', 'grant_type');
+    } finally { globalThis.fetch = realFetch; }
+  });
+
+  await t("Raft's event id, expiresAt and deduped are kept on the handoff's delivery", async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    let deduped = false;
+    stubRaft((url) => {
+      if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq1', agent: { serverId: 'srv-uuid' } });
+      if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
+      if (url.endsWith('/api/oauth/agent-events')) {
+        return Response.json({ id: 'evt_123', status: deduped ? 'duplicate' : 'queued', deduped, expiresAt: '2026-10-14T10:00:00.000Z' });
+      }
+      return null;
+    });
+    try {
+      const writes = [];
+      const put = env.META.put.bind(env.META);
+      env.META.put = (k, ...rest) => { writes.push(k); return put(k, ...rest); };
+      const r = await (await worker.fetch(req('/api/notify/handoff', {
+        method: 'POST', token, body: { slug: 'wire-doc', comment_ids: [commentId], recipient: fullTarget },
+      }), env, {})).json();
+      assert(r.delivery.status === 'delivered', `delivery: ${JSON.stringify(r.delivery)}`);
+      assert(writes.filter((k) => k === 'handoffs:wire-doc').length === 1, `handoff writes: ${writes.filter((k) => k.startsWith('handoffs:')).length}`);
+      const list = await (await worker.fetch(req('/api/notify/handoffs?slug=wire-doc', { token }), env, {})).json();
+      const d = list.handoffs[0].delivery;
+      assert(d.event_id === 'evt_123', `event_id: ${d.event_id}`);
+      assert(d.expires_at === '2026-10-14T10:00:00.000Z', `expires_at: ${d.expires_at}`);
+      assert(d.deduped === false, `deduped: ${d.deduped}`);
+      // The comment carries what the card needs: who, when, and the deadline.
+      const [c] = await (await worker.fetch(req('/api/comments?slug=wire-doc&version=1', { cookie: env.__commentReaderCookie }), env, {})).json();
+      assert(c.handoff_delivery.expires_at === '2026-10-14T10:00:00.000Z', `comment expires_at: ${JSON.stringify(c.handoff_delivery)}`);
+      assert(c.handoff_delivery.at, 'comment carries the delivery time');
+      assert(c.handoff_to && c.handoff_to.agent_name === 'xiaocc' && c.handoff_to.provider === 'raft', `handoff_to: ${JSON.stringify(c.handoff_to)}`);
+      // A resend Raft recognises is recorded as deduped.
+      deduped = true;
+      const again = await (await worker.fetch(req('/api/notify/handoff/resend', {
+        method: 'POST', token, body: { slug: 'wire-doc', handoff_id: r.handoff_id },
+      }), env, {})).json();
+      assert(again.delivery.deduped === true && again.delivery.event_id === 'evt_123', `resend: ${JSON.stringify(again.delivery)}`);
+    } finally { globalThis.fetch = realFetch; }
+  });
+
+  await t('a malformed Raft answer still counts as delivered and stores nothing extra', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    stubRaft((url) => {
+      if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq1', agent: { serverId: 'srv-uuid' } });
+      if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
+      if (url.endsWith('/api/oauth/agent-events')) return new Response('accepted', { status: 202 });
+      return null;
+    });
+    try {
+      const r = await (await worker.fetch(req('/api/notify/handoff', {
+        method: 'POST', token, body: { slug: 'wire-doc', comment_ids: [commentId], recipient: fullTarget },
+      }), env, {})).json();
+      assert(r.delivery.status === 'delivered', `delivery: ${JSON.stringify(r.delivery)}`);
+      assert(!('event_id' in r.delivery) && !('expires_at' in r.delivery), `extra: ${JSON.stringify(r.delivery)}`);
+    } finally { globalThis.fetch = realFetch; }
+  });
+
+  await t('a target with no slug fails clearly instead of 404-ing', async () => {
+    const env = makeEnv(mod.CommentsStore, RAFT_ENV);
+    const { token, commentId } = await seedWith(env);
+    const r = await (await worker.fetch(req('/api/notify/handoff', {
+      method: 'POST', token,
+      body: { slug: 'wire-doc', comment_ids: [commentId], recipient: { ...fullTarget, server_slug: undefined } },
+    }), env, {})).json();
+    assert(r.delivery.error === 'target_missing_server_slug', `error: ${r.delivery.error}`);
+  });
+
+  // ---- following a doc is earned, not configured ----
+  // touchDocAgent existed but nothing called it, so "the follow-up agent
+  // continues automatically" was true of the design and false of the build.
+  // These call the real routes with an agent session attached.
+  await t('publishing a version makes you the doc\'s follow-up agent', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    const cookie = await withAgentSession(env);
+    await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token, cookie,
+      body: { slug: 'follow-doc', version: 1, html: '<h1>d</h1><p>a sentence here</p>' },
+    }), env, {});
+    const t2 = await (await worker.fetch(req('/api/notify/targets?slug=follow-doc', { token: tok.token }), env, {})).json();
+    assert(t2.default && t2.default.source === 'doc', `expected a doc-level agent, got ${JSON.stringify(t2.default)}`);
+    assert(t2.default.agent_sub === 'uuid-a', `wrong agent: ${t2.default.agent_sub}`);
+    // Each row says whose connection it is, from the doc owner's record.
+    assert(t2.default.owner && t2.default.owner.display === 'owner', `owner: ${JSON.stringify(t2.default.owner)}`);
+  });
+
+  await t('answering a comment does the same', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const cookie = await withAgentSession(env);
+    await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token, cookie,
+      body: { slug, parent_id: commentId, text: 'done', status: 'applied', applied_in: 1, agent_login: 'claude' },
+    }), env, {});
+    const t2 = await (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token }), env, {})).json();
+    assert(t2.default?.source === 'doc' && !t2.default.last_writer, `a reply is doc activity, not an exact publisher claim: ${JSON.stringify(t2)}`);
+  });
+
+  await t('publishing without a Raft identity binds nobody and still succeeds', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    const up = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: tok.token,
+      body: { slug: 'plain-doc', version: 1, html: '<h1>d</h1><p>a sentence here</p>' },
+    }), env, {});
+    assert(up.status === 200, `publish must not depend on having a Raft identity: ${up.status}`);
+    const t2 = await (await worker.fetch(req('/api/notify/targets?slug=plain-doc', { token: tok.token }), env, {})).json();
+    assert(t2.default === null && t2.reason === 'no_agent_bound', `expected nobody bound, got ${JSON.stringify(t2)}`);
+  });
+
+  // ---- a sent comment must say WHEN, and whether it landed ----
+  // Julie: "if it's been sent and I see no response, should I be able to send
+  // again? should I see 'sent X min ago' and a resend?" — none of that was
+  // renderable: a comment carried only status + id.
+  await t('a sent comment carries its time and delivery outcome', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const before = Date.now();
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: target });
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_status === 'sent', `status ${c.handoff_status}`);
+    assert(c.handoff_at && Date.parse(c.handoff_at) >= before - 1000, `handoff_at missing/bogus: ${c.handoff_at}`);
+    // Delivery failed here (no provider configured) and the UI must be able to
+    // tell that apart from "delivered, agent has not answered yet".
+    assert(c.handoff_delivery && c.handoff_delivery.status === 'failed', `delivery: ${JSON.stringify(c.handoff_delivery)}`);
+    assert(c.handoff_delivery.error === 'provider_not_configured', `error: ${c.handoff_delivery.error}`);
+  });
+
+  await t('an untouched comment carries nulls, not stale values', async () => {
+    const { env, slug } = await seed();
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_at === null && c.handoff_delivery === null, `expected nulls, got ${JSON.stringify([c.handoff_at, c.handoff_delivery])}`);
+  });
+
+  await t('handing the same comment over again supersedes the earlier record', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const first = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const second = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    assert(first.handoff_id !== second.handoff_id, 'chasing a silent agent is a NEW handoff, not a resend of the old one');
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_id === second.handoff_id, `comment should point at the latest handoff, got ${c.handoff_id}`);
+    assert(c.handoff_status === 'sent', 'and still be sent');
+  });
+
+  // ---- ack: "I have picked this up" ----
+  // Delivery proves an event reached an inbox, nothing more. Without ack,
+  // "the agent died" and "the agent is thinking" are the same picture.
+  const ack = (env, token, body) => worker.fetch(req('/api/notify/ack', { method: 'POST', token, body }), env, {});
+
+  await t('an agent acks a handoff and the comment reports when work started', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const before = Date.now();
+    const r = await ack(env, token, { slug, handoff_id: h.handoff_id });
+    const body = await r.json();
+    assert(r.status === 200 && body.ok && body.already === false, `ack: ${r.status} ${JSON.stringify(body)}`);
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_acked_at && Date.parse(c.handoff_acked_at) >= before - 1000, `acked_at: ${c.handoff_acked_at}`);
+    assert(c.handoff_status === 'sent', 'acking is not resolving — still sent');
+  });
+
+  await t('re-acking does not move the clock forward', async () => {
+    const { env, token, slug, commentId } = await seed();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const first = await (await ack(env, token, { slug, handoff_id: h.handoff_id })).json();
+    const second = await (await ack(env, token, { slug, handoff_id: h.handoff_id })).json();
+    assert(second.already === true, 'a second ack reports itself as a no-op');
+    assert(second.acked_at === first.acked_at, `clock moved: ${first.acked_at} → ${second.acked_at}`);
+  });
+
+  await t('an un-acked handoff reports null, which means "not heard", not "not working"', async () => {
+    const { env, token, slug, commentId } = await seed();
+    await handoff(env, slug, token, { comment_ids: [commentId], recipient: target });
+    const [c] = await listComments(env, slug);
+    assert(c.handoff_acked_at === null, `expected null, got ${c.handoff_acked_at}`);
+  });
+
+  await t('acking a handoff that does not exist is a 404', async () => {
+    const { env, token, slug } = await seed();
+    const r = await ack(env, token, { slug, handoff_id: 'h_nope' });
+    assert(r.status === 404, `expected 404, got ${r.status}`);
+  });
+
+  await t('ack needs the token, not just a session', async () => {
+    const { env, token, slug, commentId, reader } = await seed();
+    const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
+    const r = await worker.fetch(req('/api/notify/ack', {
+      method: 'POST', cookie: reader, body: { slug, handoff_id: h.handoff_id },
+    }), env, {});
+    assert(r.status === 401, `a reader acked somebody else's handoff (${r.status})`);
+  });
+
+  // ---- self-reported agent identity -------------------------------------
+  // The CLI cannot carry the tdoc_agent_sid cookie (it holds only an upload
+  // token), so no CLI publish or reply could ever claim a doc's follow-up seat:
+  // every handoff fell to the account default. An agent may now SAY which Raft
+  // agent it is. The claim is honoured only for an agent already LINKED to this
+  // account -- linking needs the token AND a Raft-verified identity -- and the
+  // seat it earns only chooses who is pinged; it never grants access.
+  const LINKED = { provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', server_slug: 'julie', agent_name: 'xiaocc' };
+  async function seedLinked(slug = 'self-report-doc', second = false) {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    await env.META.put(`account-notify:${tok.account_id}`, JSON.stringify(second
+      ? [LINKED, { ...LINKED, agent_sub: 'uuid-b', agent_name: 'other' }]
+      : [LINKED]));
+    return { env, tok, slug };
+  }
+  const publishAs = (env, tok, slug, claim, version = 1) => worker.fetch(req('/api/upload', {
+    method: 'POST', token: tok.token,
+    headers: claim === null ? {} : { 'X-Tdoc-Raft-Agent': claim },
+    body: { slug, version, html: '<h1>doc</h1><p>a sentence to comment on</p>' },
+  }), env, {});
+  const targetsOf = async (env, tok, slug) =>
+    (await worker.fetch(req(`/api/notify/targets?slug=${slug}`, { token: tok.token }), env, {})).json();
+
+  await t('a linked agent that says who it is claims the doc it publishes', async () => {
+    const { env, tok, slug } = await seedLinked();
+    const up = await publishAs(env, tok, slug, 'S1/uuid-a');
+    assert(up.status === 200, `upload ${up.status}`);
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default && r.default.source === 'doc', `expected the doc seat, got ${JSON.stringify(r.default)}`);
+    assert(r.default.agent_name === 'xiaocc', `expected the linked agent, got ${r.default.agent_name}`);
+  });
+
+  await t('the latest version stores only the verified publisher, then falls back to this doc handoff', async () => {
+    const { env, tok, slug } = await seedLinked('publisher-choice');
+    const other = { ...LINKED, agent_sub: 'uuid-b', agent_name: 'other' };
+    await env.META.put(`account-notify:${tok.account_id}`, JSON.stringify([other, LINKED]));
+    const forged = { provider: 'raft', server_id: 'S1', agent_sub: 'forged' };
+    const first = await worker.fetch(req('/api/upload', { method: 'POST', token: tok.token,
+      headers: { 'X-Tdoc-Raft-Agent': 'S1/uuid-a' },
+      body: { slug, version: 1, html: '<h1>one</h1>', meta: { versions: [{ n: 1, publisher_agent: forged }] } },
+    }), env, {});
+    assert(first.status === 200, `publish ${first.status}`);
+    const stored = JSON.parse(await env.META.get(`meta:${slug}`));
+    assert(stored.versions[0].publisher_agent?.agent_sub === 'uuid-a', 'client publisher claim was stored');
+    const published = await targetsOf(env, tok, slug);
+    assert(published.default?.agent_sub === 'uuid-a' && published.default.last_writer, JSON.stringify(published));
+    // A newer upload without a verifiable agent identity must not silently
+    // keep the previous writer as the default.
+    const next = await publishAs(env, tok, slug, null, 2);
+    assert(next.status === 200, `second publish ${next.status}`);
+    const unknown = await targetsOf(env, tok, slug);
+    assert(unknown.default === null, `older doc activity became the default: ${JSON.stringify(unknown)}`);
+    await env.META.put(`handoffs:${slug}`, JSON.stringify([
+      { recipient: other, delivery: { status: 'failed' } },
+      { recipient: LINKED, delivery: { status: 'delivered' } },
+    ]));
+    const handed = await targetsOf(env, tok, slug);
+    assert(handed.default?.agent_sub === 'uuid-a', `latest successful doc handoff was ignored: ${JSON.stringify(handed)}`);
+  });
+
+  await t('an agent that is not linked to the account is ignored without inventing a default', async () => {
+    const { env, tok, slug } = await seedLinked('unlinked-agent', true);
+    await publishAs(env, tok, slug, 'S1/uuid-stranger');
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default === null && r.candidates.some((agent) => agent.agent_sub === 'uuid-a'),
+      `an unlinked claim took the seat: ${JSON.stringify(r.default)}`);
+  });
+
+  await t('the same agent on another Raft server does not match', async () => {
+    const { env, tok, slug } = await seedLinked('wrong-server-agent', true);
+    await publishAs(env, tok, slug, 'S2/uuid-a');
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default === null, `matched on agent id alone: ${JSON.stringify(r.default)}`);
+  });
+
+  await t('a malformed claim is ignored rather than trusted', async () => {
+    const { env, tok, slug } = await seedLinked('malformed-agent', true);
+    await publishAs(env, tok, slug, 'S1/uuid-a/extra; drop');
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default === null, `a malformed header was honoured: ${JSON.stringify(r.default)}`);
+  });
+
+  await t('an account-stamped older version with one linked agent defaults to that agent', async () => {
+    const { env, tok, slug } = await seedLinked();
+    await publishAs(env, tok, slug, null);
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default?.agent_sub === LINKED.agent_sub, `sole agent was not selected: ${JSON.stringify(r.default)}`);
+  });
+
+  await t('an account-stamped older version with multiple agents has no default', async () => {
+    const { env, tok, slug } = await seedLinked('ambiguous-older-doc', true);
+    await publishAs(env, tok, slug, null);
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default === null && r.candidates.length === 2, `ambiguous author was selected: ${JSON.stringify(r)}`);
+  });
+
+  await t('answering a comment claims the seat the same way publishing does', async () => {
+    const { env, tok, slug } = await seedLinked('self-report-reply', true);
+    await publishAs(env, tok, slug, null);
+    const reader = await putSession(env, 'reader');
+    const posted = await worker.fetch(req('/api/comments', {
+      method: 'POST', cookie: reader,
+      body: { slug, version: 1, text: 'why?', anchor: { kind: 'text', text: 'a sentence' } },
+    }), env, {});
+    const comment = await posted.json();
+    const r0 = await targetsOf(env, tok, slug);
+    assert(r0.default === null, 'precondition: nobody holds the seat yet');
+    const replied = await worker.fetch(req('/api/agent/reply', {
+      method: 'POST', token: tok.token, headers: { 'X-Tdoc-Raft-Agent': 'S1/uuid-a' },
+      body: { slug, parent_id: comment.id, text: 'because' },
+    }), env, {});
+    assert(replied.status === 200, `reply ${replied.status}`);
+    const r = await targetsOf(env, tok, slug);
+    assert(r.default === null && r.candidates.some((agent) => agent.agent_name === 'xiaocc'),
+      `a reply should rank the agent without silently choosing it: ${JSON.stringify(r)}`);
+  });
+
+  await t('a handoff drops threads where an agent already has the last word', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    await worker.fetch(req('/api/upload', { method: 'POST', token: tok.token, body: { slug: 'lw', version: 1, html: '<h1>d</h1><p>one two</p>' } }), env, {});
+    const reader = await putSession(env, 'reader');
+    const mk = async (t) => (await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: reader, body: { slug: 'lw', version: 1, text: t, anchor: { kind: 'text', text: 'one' } } }), env, {})).json()).id;
+    const a = await mk('answered already'); const b = await mk('still waiting');
+    await worker.fetch(req('/api/agent/reply', { method: 'POST', token: tok.token, body: { slug: 'lw', parent_id: a, text: 'done', status: 'answered' } }), env, {});
+    const r = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', token: tok.token, body: { slug: 'lw', comment_ids: [a, b] } }), env, {})).json();
+    assert(r.sent === 1 && Array.isArray(r.skipped) && r.skipped[0] === a, `handoff: ${JSON.stringify(r)}`);
+    const only = await (await worker.fetch(req('/api/notify/handoff', { method: 'POST', token: tok.token, body: { slug: 'lw', comment_ids: [a] } }), env, {})).json();
+    assert(only.sent === 0 && only.reason === 'agent_has_last_word', `all skipped: ${JSON.stringify(only)}`);
+  });
+
+  await t('an "answered" reply is stored as answered and leaves the comment open', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const tok = await issue(worker, env, 'owner');
+    await worker.fetch(req('/api/upload', { method: 'POST', token: tok.token, body: { slug: 'ans', version: 1, html: '<h1>d</h1><p>numbers here</p>' } }), env, {});
+    const reader = await putSession(env, 'reader');
+    const c = await (await worker.fetch(req('/api/comments', { method: 'POST', cookie: reader, body: { slug: 'ans', version: 1, text: 'what does -20% mean?', anchor: { kind: 'text', text: 'numbers' } } }), env, {})).json();
+    const r = await worker.fetch(req('/api/agent/reply', { method: 'POST', token: tok.token, body: { slug: 'ans', parent_id: c.id, text: 'It is vs the 7-day average.', status: 'answered' } }), env, {});
+    const b = await r.json();
+    assert(r.status === 200 && b.agent_status === 'answered', `reply: ${r.status} ${JSON.stringify(b)}`);
+    const list = await (await worker.fetch(req('/api/comments?slug=ans&version=1', { cookie: reader }), env, {})).json();
+    assert(list[0].status !== 'applied', 'answered must not resolve the comment');
+    assert(Object.keys(list[0].reactions || {}).length === 0, 'answered added an automatic reaction');
+  });
+
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})();

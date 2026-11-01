@@ -1,0 +1,82 @@
+[
+  {
+    "id": "resolved",
+    "status": "applied",
+    "anchor": {
+      "kind": "text",
+      "text": "Some prose so the article column has real height for layout tests."
+    },
+    "version": 2,
+    "text": "resolved thread \u2014 toggle Resolved to check visibility.",
+    "author": {
+      "login": "preview-reviewer"
+    },
+    "created": "2026-01-02T00:00:00Z",
+    "replies": [],
+    "applied_in": 2
+  },
+  {
+    "id": "open",
+    "status": "open",
+    "anchor": {
+      "kind": "text",
+      "text": "A second section with its own heading"
+    },
+    "version": 2,
+    "text": "open thread \u2014 toggle Resolved to check visibility.",
+    "author": {
+      "login": "preview-reviewer"
+    },
+    "created": "2026-01-02T00:00:00Z",
+    "replies": []
+  },
+  {
+    "id": "moved",
+    "status": "applied",
+    "anchor": {
+      "kind": "text",
+      "text": "This sentence was replaced.",
+      "context_before": "Section Three",
+      "context_after": "A commentable blockquote"
+    },
+    "version": 2,
+    "text": "moved thread \u2014 toggle Resolved to check visibility.",
+    "author": {
+      "login": "preview-reviewer"
+    },
+    "created": "2026-01-02T00:00:00Z",
+    "replies": [],
+    "applied_in": 2
+  },
+  {
+    "id": "element",
+    "status": "applied",
+    "anchor": {
+      "kind": "element",
+      "selector": "figure"
+    },
+    "version": 2,
+    "text": "element thread \u2014 toggle Resolved to check visibility.",
+    "author": {
+      "login": "preview-reviewer"
+    },
+    "created": "2026-01-02T00:00:00Z",
+    "replies": [],
+    "applied_in": 2
+  },
+  {
+    "id": "lost",
+    "status": "applied",
+    "anchor": {
+      "kind": "none"
+    },
+    "version": 2,
+    "text": "lost thread \u2014 toggle Resolved to check visibility.",
+    "author": {
+      "login": "preview-reviewer"
+    },
+    "created": "2026-01-02T00:00:00Z",
+    "replies": [],
+    "applied_in": 2
+  }
+]

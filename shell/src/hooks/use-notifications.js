@@ -1,29 +1,71 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  answerAccessRequest as answerAccessRequestApi,
+  getEmailNotifications,
   getUnreadNotificationCount,
   listNotifications,
+  markAllNotificationsRead,
   markNotificationsRead,
+  setEmailNotifications,
 } from '../document/api.js';
+import { notificationLabel, notificationTarget } from '../notifications-dialog.jsx';
+import {
+  alertNewNotifications,
+  browserNotificationMode,
+  browserNotificationPromptEligible,
+  browserNotificationPermission,
+  browserNotificationsEnabled,
+  ensureWebPush,
+  setBrowserNotifications,
+  snoozeBrowserNotificationPrompt,
+  webPushSupported,
+} from './browser-notifications.js';
 
 export function useNotifications(enabled) {
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [, setPromptRevision] = useState(0);
+  const [browserAlerts, setBrowserAlerts] = useState(() => ({
+    on: browserNotificationsEnabled(),
+    permission: browserNotificationPermission(),
+    mode: browserNotificationMode(),
+    pushable: webPushSupported(),
+  }));
 
+  // With desktop alerts on, any unread at all fetches the newest page and
+  // alerts for events not alerted before. Watching only for a rise in the
+  // count missed a new reply that arrived as another was read (same total)
+  // and a reply folded into an already-unread row (count unchanged). A
+  // hidden tab keeps polling, since that is exactly when an alert matters.
   const refreshUnread = useCallback(async () => {
-    if (!enabled || document.hidden) return;
+    if (!enabled) return;
+    const alerting = browserNotificationsEnabled();
+    if (document.hidden && !alerting) return;
     try {
       const result = await getUnreadNotificationCount();
-      setUnread(Number(result.unread) || 0);
+      const count = Number(result.unread) || 0;
+      setUnread(count);
+      if (alerting && count > 0) {
+        const page = await listNotifications(0);
+        alertNewNotifications(page.items || [], {
+          label: notificationLabel,
+          open: (item) => { window.location.href = notificationTarget(item); },
+        });
+      }
     } catch {
       // The identity may have expired. The next navigation will refresh it.
     }
   }, [enabled]);
 
+  // { available, on } from the server; null until the dialog first opens.
+  const [emailAlerts, setEmailAlertsState] = useState(null);
+
   const load = useCallback(async ({ append = false } = {}) => {
     if (!enabled) return;
     setLoading(true);
+    if (!append) getEmailNotifications().then(setEmailAlertsState).catch(() => {});
     try {
       const offset = append ? items.length : 0;
       const result = await listNotifications(offset);
@@ -43,15 +85,66 @@ export function useNotifications(enabled) {
     await markNotificationsRead([item.id]);
   }, []);
 
+  const answerAccessRequest = useCallback(async (item, action) => {
+    const result = await answerAccessRequestApi({ slug: item.slug, requester: item.requester || item.actor?.login, action });
+    setItems((current) => current.map((row) => (
+      row.id === item.id ? { ...row, read: true, resolved: result.resolved } : row
+    )));
+    setUnread((current) => Math.max(0, current - (item.read ? 0 : 1)));
+  }, []);
+
+  const markAllRead = useCallback(async () => {
+    setItems((current) => current.map((row) => ({ ...row, read: true })));
+    setUnread(0);
+    await markAllNotificationsRead();
+  }, []);
+
+  const setAlerts = useCallback(async (on) => {
+    const permission = await setBrowserNotifications(on, items);
+    setBrowserAlerts({ on: on && permission === 'granted', permission, mode: browserNotificationMode(), pushable: webPushSupported() });
+    setPromptRevision((value) => value + 1);
+    return permission;
+  }, [items]);
+
+  const setEmailAlerts = useCallback(async (on) => {
+    setEmailAlertsState((current) => (current ? { ...current, on } : current));
+    try { setEmailAlertsState(await setEmailNotifications(on)); } catch { /* the next open re-reads it */ }
+  }, []);
+
+  const dismissAlertsPrompt = useCallback(() => {
+    snoozeBrowserNotificationPrompt();
+    setPromptRevision((value) => value + 1);
+  }, []);
+
+  // With alerts on, re-confirm this browser's push subscription once per
+  // page: it follows a sign-in as someone else and a rotated server key.
+  useEffect(() => {
+    if (!enabled || !browserNotificationsEnabled()) return undefined;
+    let live = true;
+    ensureWebPush().then(() => {
+      if (live) setBrowserAlerts((current) => ({ ...current, mode: browserNotificationMode() }));
+    });
+    return () => { live = false; };
+  }, [enabled]);
+
+  // A push for this person just arrived: refresh the bell now.
+  useEffect(() => {
+    if (!enabled || typeof navigator === 'undefined' || !navigator.serviceWorker) return undefined;
+    const onMessage = (event) => { if (event.data?.type === 'tdoc-push') refreshUnread(); };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [enabled, refreshUnread]);
+
   useEffect(() => {
     refreshUnread();
     const timer = window.setInterval(() => {
       const active = document.activeElement;
       const typing = active?.matches?.('input, textarea, [contenteditable="true"]');
       if (!typing) refreshUnread();
-    }, 30_000);
+    }, (typeof window !== 'undefined' && window.__TDOC_NOTIFY_POLL_MS) || 30_000);
     return () => window.clearInterval(timer);
   }, [refreshUnread]);
 
-  return { items, unread, hasMore, loading, load, markRead };
+  const browserPrompt = browserNotificationPromptEligible(unread);
+  return { items, unread, hasMore, loading, load, markRead, markAllRead, answerAccessRequest, browserAlerts, browserPrompt, setAlerts, dismissAlertsPrompt, emailAlerts, setEmailAlerts };
 }

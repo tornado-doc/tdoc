@@ -18,14 +18,14 @@ const bundler = read('bin/tdoc-bundle');
 (async () => {
   console.log('React worker shell architecture\n');
 
-  await t('bundle embeds only the shell builder, frame probe, reader CSS, and Vite runtime', async () => {
-    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__']) {
+  await t('bundle embeds the shell, runtime and preview renderer assets', async () => {
+    for (const marker of ['/* __TDOC_SHELL_MODULE__ */', '__TDOC_PROBE_JS__', '__TDOC_READER_CSS__', '__TDOC_SHELL_RUNTIME_JS__', '__TDOC_SHELL_RUNTIME_CSS__', '__TDOC_FEEDBACK_JS__', '__TDOC_PUSH_SW_JS__', '__TDOC_NOTIFICATION_TEXT__', '__TDOC_PREVIEW_RENDERER__', '__TDOC_PREVIEW_WASM__', '__TDOC_PREVIEW_FONTS__', '__TDOC_PREVIEW_FONT_COVERAGE__', '__TDOC_PREVIEW_VALIDATOR__']) {
       if (!bundler.includes(marker)) throw new Error(`missing ${marker}`);
     }
     for (const retired of ['CHROME_MODULE', 'CHROME_JS', 'MANAGE_JS', 'SIGNIN_JS', 'ONBOARD_JS']) {
       if (bundler.includes(retired)) throw new Error(`legacy bundle input remains: ${retired}`);
     }
-    if (!bundler.includes('sha([worker, shellMod, frameProbe, readerCss, runtimeJs, runtimeCss]')) {
+    if (!bundler.includes('previewRendererJs, previewValidator, JSON.stringify(previewCoverage)') || !bundler.includes('previewWasm, ...previewFonts')) {
       throw new Error('bundle hash does not cover the complete runtime input set');
     }
   });
@@ -53,6 +53,84 @@ const bundler = read('bin/tdoc-bundle');
     if (!doc.includes('window.__TDOC_SHELL_BOOT__')) throw new Error('page boot missing');
     if (!doc.includes('type="module" src="/shell.abc.js" nonce="abc"')) throw new Error('Vite module missing');
     if (/<iframe|class="tdoc-bar"/.test(doc)) throw new Error('server still renders provider UI');
+  });
+
+  await t('shell HTML carries Open Graph / Twitter Card meta for share previews', async () => {
+    const shell = require(path.join(ROOT, 'server/shell.js'));
+    const excerpt = shell.excerptFromHtml(
+      '<html><body><h1>Hello</h1><script>x()</script><p>World of share cards and SEO.</p></body></html>',
+      80,
+    );
+    if (!/^Hello World of share cards/.test(excerpt) || /x\(\)/.test(excerpt)) {
+      throw new Error(`excerptFromHtml failed: ${JSON.stringify(excerpt)}`);
+    }
+    const preview = shell.previewFromHtml(
+      '<h1>Demo Doc</h1><p>Lead copy for the card.</p><img src="/ignore-favicon.ico"><img src="https://cdn.example/hero.png" alt="hero">',
+      { slug: 'demo', version: 2, title: 'Demo Doc' },
+    );
+    if (!/^Lead copy/.test(preview.excerpt) || /Demo Doc/.test(preview.excerpt)
+        || preview.image !== 'https://cdn.example/hero.png') {
+      throw new Error(`previewFromHtml failed: ${JSON.stringify(preview)}`);
+    }
+    const fromSvg = shell.previewFromHtml(
+      '<h1>Chart</h1>'
+      + '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 5"/></svg>'
+      + '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 672 236" role="img">'
+      + '<rect width="672" height="236" fill="#e8eeff"/><text x="20" y="40">diagram</text></svg>'
+      + '<p>Lead.</p>',
+      { slug: 'chart', version: 1, title: 'Chart' },
+    );
+    if (!/^data:image\/svg\+xml/.test(fromSvg.image || '') || !/672/.test(decodeURIComponent(fromSvg.image))) {
+      throw new Error(`inline svg preview failed: ${JSON.stringify(fromSvg).slice(0, 200)}`);
+    }
+    if (/M3 8\.5l3\.5/.test(decodeURIComponent(fromSvg.image))) {
+      throw new Error('checkbox svg must not be chosen as preview');
+    }
+    const relative = shell.previewFromHtml(
+      '<img src="./shot.jpg"><p>Relative art.</p>',
+      { slug: 'demo', version: 3 },
+    );
+    if (relative.image !== '/d/demo/v/3/shot.jpg') {
+      throw new Error(`relative image resolve failed: ${relative.image}`);
+    }
+    const doc = shell.shellHtml({
+      title: 'Jev brief',
+      nonceAttr: ' nonce="abc"',
+      cfgJson: '{}',
+      bootJson: '{}',
+      runtimeJsPath: '/shell.abc.js',
+      runtimeCssPath: '/shell.abc.css',
+      seo: {
+        title: 'Jev brief',
+        description: 'A model that returns decisions.',
+        url: 'https://tdoc.dev/d/jev-model-brief/v/3',
+        image: 'https://tdoc.dev/tdoc_logo.png',
+        type: 'article',
+      },
+    });
+    for (const needle of [
+      'rel="canonical" href="https://tdoc.dev/d/jev-model-brief/v/3"',
+      'property="og:title" content="Jev brief"',
+      'property="og:description" content="A model that returns decisions."',
+      'property="og:image" content="https://tdoc.dev/tdoc_logo.png"',
+      'name="twitter:card" content="summary"',
+      'name="twitter:title" content="Jev brief"',
+      '<noscript>',
+      '<h1>Jev brief</h1>',
+    ]) {
+      if (!doc.includes(needle)) throw new Error(`SEO shell missing ${needle}`);
+    }
+    const large = shell.shellHtml({
+      title: 'Jev brief', nonceAttr: '', cfgJson: '{}', bootJson: '{}',
+      runtimeJsPath: '/shell.abc.js', runtimeCssPath: '/shell.abc.css',
+      seo: {
+        title: 'Jev brief', url: 'https://tdoc.dev/d/jev-model-brief/v/3',
+        image: 'https://tdoc.dev/d/jev-model-brief/preview/v3-abc.png', image_large: true, type: 'article',
+      },
+    });
+    if (!large.includes('name="twitter:card" content="summary_large_image"')) {
+      throw new Error('a 1200x630 preview card must use summary_large_image');
+    }
   });
 
   await t('document entry renders React components and never starts a legacy engine', async () => {
@@ -84,6 +162,17 @@ const bundler = read('bin/tdoc-bundle');
     if (!csp.includes('sandbox allow-scripts') || !csp.includes("frame-ancestors 'self'")) throw new Error('frame CSP weakened');
   });
 
+  await t('site pages frame with ?tdoc_site=1: no fullscreen chrome, Google credits the text to the page', async () => {
+    if (!worker.includes("/frame${isLanding ? '?tdoc_site=1' : ''}")) throw new Error('landing frameSrc lacks tdoc_site=1');
+    if (!worker.includes("'X-Robots-Tag': 'noindex, indexifembedded'")) throw new Error('site frame robots header missing');
+    if (!read('server/visual-viewer.js').includes("get('tdoc_site') === '1') return;")) throw new Error('visual viewer still runs on site pages');
+    const probe = read('server/frame-probe.js');
+    if (!probe.includes('if (SITE && !reanchorMode) return false;')) throw new Error('bare click still comments on site pages');
+    const shell = require(path.join(ROOT, 'server/shell.js'));
+    const links = shell.linksFromHtml('<a href="/pricing">Pricing</a><a href="javascript:x">x</a><a href="/pricing">again</a><a href="https://e.x/"><b>Out</b></a>');
+    if (JSON.stringify(links) !== JSON.stringify([['Pricing', '/pricing'], ['Out', 'https://e.x/']])) throw new Error('linksFromHtml: ' + JSON.stringify(links));
+  });
+
   await t('all documents, including landing docs, use the same React shell response', async () => {
     const start = worker.indexOf('async function serveDocVersion(');
     const block = worker.slice(start, worker.indexOf('async function landingResponse', start));
@@ -95,7 +184,7 @@ const bundler = read('bin/tdoc-bundle');
   await t('bundle is importable and registers the shell builder', async () => {
     const out = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-react-shell-'));
     cp.execFileSync(process.execPath, [path.join(ROOT, 'bin/tdoc-bundle')], {
-      env: { ...process.env, OUT_DIR: out },
+      env: { ...process.env, OUT_DIR: out, TDOC_BUNDLE_PLATFORM: 'vercel' },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     const modulePath = path.join(out, '_worker.bundled.mjs');

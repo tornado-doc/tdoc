@@ -153,7 +153,15 @@
   background: rgba(255, 255, 255, .9);
 }
 
-.rp-cursor { position: absolute; left: 0; top: 0; z-index: 40; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); transition: transform .1s linear; }
+/* No transition. The pointer's position is computed every frame from the
+   clock, so a CSS transition is a second animation interpolating between
+   frames the first one already placed -- the two disagree by up to 100ms and
+   the arrow smears. Same fault the dock had. */
+.rp-cursor {
+  position: absolute; left: 0; top: 0; z-index: 40;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .35));
+  will-change: transform;
+}
 
 /* -------------------------------------------------------------- the approval */
 .rp-sheet {
@@ -185,7 +193,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .rp-caret, .rp-spin { animation: none; }
-  .rp-app, .rp-cursor, .rp-approve { transition: none; }
+  .rp-app, .rp-approve { transition: none; }
 }
 
 /* The window's own wrapper: it scales from the dock as it opens, so the

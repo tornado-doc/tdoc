@@ -6,7 +6,15 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const expected =
   'Remote storage is source of truth. Local HTML is disposable. Local skill is authoring/scaffold.\n' +
-  'Published reader invariants are provider-enforced in overlay/worker code and tests, not left only to author HTML or prompts.\n';
+  'Published reader invariants are provider-enforced in overlay/worker code and tests, not left only to author HTML or prompts.\n' +
+  '\n' +
+  'Shell / product UI: reuse the existing design language. Prefer AppDialog (HubDialog / NameDialog), docs-hub.css classes (page-hd, toolbar, new-folder-btn, loc-hint, manage-hint, field, tabs, doc-row), and chrome.css modal rules. Do not invent one-off panes, inline layout styles, or a parallel component kit for /me, /@, or other shell surfaces.\n' +
+  '\n' +
+  'UI primitives are mandatory. Use shell/src/ui/ (AppButton, AppDialog, AppMenu, AppSelect, SegmentedControl, Switch, CopyPromptButton, CodeBlock); never a native <select>, whose open list the OS draws, and never a hand-sized button: AppButton owns button sizes (test/ui-primitives.test.js). If none fits, add one there. Match the page\'s margins, type scale and button hierarchy. Dialog styles go in ui.css or chrome.css (the feedback overlay loads only those). A UI change is done only after screenshots at desktop and phone width plus a browser regression; test/ui-primitives.test.js enforces the source rules.\n' +
+  '\n' +
+  'Comment surfaces are shared: anything that shows a comment, reply, AI/agent answer, agent picker or handoff status reuses CommentCard, the composer agent pill and its menu, handoff-status-line and comment-area (doc page, feedback layer and Ask AI alike). Colors come only from the --td-* tokens; desktop and phone are one design: same components, icons, colors and wording; phone only adapts size and placement (a drawer instead of a popover, a hidden label). Review rejects an unexplained parallel version. A new component or pattern is allowed only with a written why in the PR: what the existing one can\'t do and what was tried.\n' +
+  '\n' +
+  'New or uncertain features ship behind a flag in shell/src/feature-flags.js, visible only in dev mode; flip default to true when approved; remove the flag after it\'s stable.\n';
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }

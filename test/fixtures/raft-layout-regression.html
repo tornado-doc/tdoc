@@ -1,0 +1,215 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Reduced from tdoc.dev/d/tdoc-raft-connected-app-design/v/3. Keep the original CSS and content geometry. -->
+<style>
+/* technical style — LIGHT ONLY; dark is the overlay's invert. */
+body  { background:#fff; }
+.wrap { color:rgba(10,10,10,.92); font:16px/1.62 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+.wrap h1 { color:#0a0a0a; font-size:clamp(28px,3.6vw,36px); font-weight:500; letter-spacing:-.9px; line-height:1.25; }
+.wrap h2 { color:#0a0a0a; font-size:24px; font-weight:500; margin-top:34px; }
+.muted   { color:#737373; }
+.wrap a  { color:#737373; text-decoration:underline; }
+.tag     { font:13px ui-monospace,"SF Mono",Menlo,monospace; background:#f5f5f5; color:#171717; border-radius:4px; padding:1px 6px; }
+code     { font:.85em ui-monospace,"SF Mono",Menlo,monospace; background:#f0f0f0; color:#171717; padding:1px 5px; border-radius:3px; }
+pre      { font:13px/1.5 ui-monospace,"SF Mono",Menlo,monospace; background:#f0f0f0; color:#171717; padding:12px 14px; border-left:2px solid #d4d4d4; overflow-x:auto; }
+pre code { background:none; padding:0; }
+.callout { border-left:3px solid #ff4b2e; background:#fff5f3; padding:12px 16px; margin:16px 0; }
+/* table: one ruled card, nothing filled, square corners (components.md) */
+.tdoc-table-scroll { overflow-x:auto; }
+.wrap table { border-collapse:separate; border-spacing:0; width:100%; border:1px solid #d4d4d4; }
+.wrap th { color:#737373; text-align:left; font:600 11px/1 ui-monospace,Menlo,monospace; letter-spacing:.04em; text-transform:uppercase; padding:9px 10px; border-bottom:1px solid #0a0a0a; }
+.wrap th, .wrap td { background:transparent; border-radius:0; }
+.wrap td { color:#171717; padding:9px 10px; border-bottom:1px solid #d4d4d4; vertical-align:top; }
+.wrap tr:last-child td { border-bottom:0; }
+.num { font-variant-numeric:tabular-nums; }
+/* figures */
+.diagram-box { overflow-x:auto; border:1px solid #d4d4d4; padding:12px; margin:18px 0; }
+.diagram-box svg { display:block; width:100%; height:auto; min-width:680px; }
+.cap { color:#737373; font-size:13px; margin:8px 0 0; }
+.kv { display:grid; grid-template-columns:max-content 1fr; gap:4px 14px; font-size:15px; }
+.kv b { font-weight:500; color:#0a0a0a; }
+</style><style id="tdoc-reader" data-tdoc-template="794db095">/* tdoc READER CSS — the reading column, typography, tables, code blocks.
+   All :where() zero-specificity, INCLUDING the token block below: author CSS
+   always wins. A bare `:root` is (0,1,0), and this file is stamped immediately
+   before </head> — after any author <style> in head — so unwrapped tokens would
+   OVERRIDE an author's own --td-* values instead of losing to them. That
+   invariant is what lets the frame supply this template to a document that
+   styles itself without changing how it renders. Single source of truth
+   (extracted from overlay.js). Consumed by: tdoc-bake (creation-time bake),
+   /frame fallback, /export.
+
+   Two rules are deliberately not zero-specificity, and neither competes with
+   an author for a property they would set: `.tdoc-table-scroll` names tdoc's
+   own wrapper class, and the `@media print` block below only applies to
+   printing. Everything an author might style is inside :where(). */
+:where(:root) {
+    --td-accent: #1652f0;
+    --td-accent-hover: #1245d0;
+    --td-accent-ring: rgba(22,82,240,0.35);
+    --td-accent-ring-soft: rgba(22,82,240,0.18);
+    --td-accent-wash: rgba(22,82,240,0.06);
+    --td-accent-tint: #e8eeff;
+    --td-danger: #b42318;
+    --td-danger-hover: #931c14;
+    --td-danger-tint: #fdeceb;
+    --td-ground: #fff;
+    --td-ink: #1a1a1a;
+    --td-heading: #1a1a1a;
+    --td-muted: #6b6a66;
+    --td-line: #e8e7e3;
+    --td-surface: #f0f0ee;
+    --td-surface-2: #f7f7f5;
+    --td-pre-ink: #1a1a1a;
+    --td-th-bg: #f0f0ee;
+    --td-th-ink: #1a1a1a;
+    --td-check: #1a1a1a;
+    --td-font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --td-h2-rule: transparent;
+    --td-selection: #cfe0ff;
+    --td-quote: #d9d8d3;
+  }
+  /* Default template ("Classic" = original tdoc look), all colors via tokens. */
+  :where(body) {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--td-ink);
+    background: var(--td-ground);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  :where(body h1) { font-family: var(--td-font-display); font-size: clamp(28px, 3.6vw, 36px); line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 20px; color: var(--td-heading); }
+  :where(body h2) { font-family: var(--td-font-display); font-size: 27px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 44px 0 14px; color: var(--td-heading); padding-bottom: 6px; border-bottom: 1px solid var(--td-h2-rule); }
+  :where(body h3) { font-family: var(--td-font-display); font-size: 21px; line-height: 1.35; font-weight: 700; margin: 32px 0 10px; color: var(--td-heading); }
+  :where(body h4) { font-size: 17px; font-weight: 700; margin: 22px 0 6px; color: var(--td-heading); }
+  :where(body h5, body h6) { font-size: 14px; font-weight: 600; margin: 16px 0 4px; color: var(--td-heading); text-transform: uppercase; letter-spacing: 0.06em; }
+  :where(body p) { margin: 0 0 16px; }
+  :where(body a) { color: var(--td-accent); text-decoration: underline; text-underline-offset: 2px; }
+  :where(body a:hover) { text-decoration-thickness: 2px; }
+  :where(body ul, body ol) { margin: 0 0 18px; padding-left: 26px; }
+  :where(body li) { margin: 8px 0; }
+  :where(body blockquote) { margin: 20px 0; padding: 2px 0 2px 20px; border-left: 3px solid var(--td-quote); color: var(--td-muted); }
+  :where(body code) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; background: var(--td-surface); padding: 2px 6px; border-radius: 6px; }
+  :where(body pre) { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14.5px; line-height: 1.6; background: var(--td-surface-2); color: var(--td-pre-ink); border: 1px solid var(--td-line); border-radius: 10px; padding: 16px 18px; margin: 20px 0; overflow-x: auto; }
+  :where(body pre code) { background: transparent; color: inherit; padding: 0; border-radius: 0; }
+  :where(body hr) { border: 0; border-top: 1px solid var(--td-line); margin: 36px 0; }
+  /* Tables: rounded cells with gutters — header tint comes from the theme.
+     No negative horizontal margin: that clips the first column inside any
+     overflow-x:auto wrapper (author skill tells agents to wrap tables). */
+  :where(body table) { border-collapse: separate; border-spacing: 3px; margin: 0 0 18px; font-size: 16px; }
+  :where(body th, body td) { padding: 10px 14px; background: var(--td-surface); border-radius: 8px; border: 0; text-align: left; }
+  :where(body th) { font-weight: 600; color: var(--td-th-ink); background: var(--td-th-bg); }
+  :where(body figcaption) { font-size: 13px; color: var(--td-muted); margin-top: 6px; text-align: center; }
+  :where(body) ::selection { background: var(--td-selection); }
+  /* Task lists: circle checkboxes, Claude Code style. Works for raw
+     <input type=checkbox> in lists and markdown-converted .task-list-item. */
+  :where(body li:has(> input[type="checkbox"]), body li.task-list-item) { list-style: none; margin-left: -26px; }
+  :where(body input[type="checkbox"]) {
+    appearance: none; -webkit-appearance: none;
+    width: 17px; height: 17px;
+    border: 1.5px solid #c9c8c3; border-radius: 50%;
+    vertical-align: -3px; margin: 0 8px 0 0;
+    background: var(--td-ground); cursor: default;
+  }
+  :where(body input[type="checkbox"]:checked) {
+    background: var(--td-check) center / 11px no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" data-tdoc-aid="29hzhbm8hhf"><path d="M3 8.5l3.5 3.5L13 5" stroke="white" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    border-color: var(--td-check);
+  }
+  /* Doc imagery only — exclude overlay UI so icons inside the bar / chips /
+     buttons / cards keep their inline layout instead of stacking to 16px tall. */
+  :where(body img, body svg, body canvas, body video):not(.tdoc-bar *):not(.tdoc-margin-comment *):not(.tdoc-popup *):not(.tdoc-modal-bg *):not(.tdoc-chip *):not(.tdoc-fab *):not(.tdo *):not(.tds *):not(#tdoc-comment-layer *):not(#tdoc-pin-layer *):not(.tdoc-cluster-pop *):not(.tdoc-footer *) { display: block; margin: 16px auto; border-radius: 6px; overflow: visible; }
+  /* Reading column INVARIANT (JUL-21): doc content is always a centered 720px
+     column, wrapper or not. Two halves: (a) recognized wrappers get max-width
+     AND margin:auto (previously margin was missing, so wrapped docs without
+     their own margin rule sat left-aligned); (b) docs with no wrapper at all
+     get the same column applied to body itself via :has(). :where() keeps both
+     at zero specificity so a doc that truly wants full-bleed can override. */
+  :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 56px 24px 80px;
+    box-sizing: border-box;
+  }
+  :where(body:not(:has(> .wrap, > main, > article, > .content, > .container))) {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 56px 24px 80px;
+    box-sizing: border-box;
+  }
+  /* End default template. ====================================================== */
+
+  /* Defensive responsive defaults for artifacts. Docs sometimes hardcode pixel
+     widths (e.g. <canvas width="640" data-tdoc-aid="1euymumtidr">) that overflow on phones. These rules
+     constrain every artifact to its container width without changing its
+     aspect ratio. Wrapped in :where() so the doc's own CSS wins if specified. */
+  :where(body img, body video, body iframe, body svg, body canvas) {
+    max-width: 100% !important;
+    height: auto;
+    box-sizing: border-box;
+  }
+  /* Canvas needs special handling: scaling its CSS size doesn't change its
+     drawing-buffer size, but at least the box won't overflow. */
+  :where(body canvas) { display: block; }
+  /* Wide tables: keep TRUE table layout always — display:block on a table
+     discards real table layout for anonymous-box fixup (uneven row heights).
+     Scroll a wrapper instead of the table element. NOTE: no backticks in
+     comments here — this CSS lives inside a JS template literal. */
+  :where(body table) { max-width: 100%; }
+  .tdoc-table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tdoc-table-scroll > table { max-width: none; }
+
+  /* Tables are wrapped in .tdoc-table-scroll at serve time now, so the rules
+     above are all they need. The display:block experiment that lived here made
+     the table its own scroller and left thead and tbody sizing independently —
+     the header stopped lining up with the body. */
+  /* Pre/code blocks scroll horizontally instead of breaking the layout. */
+  :where(body pre) { max-width: 100%; overflow-x: auto; }
+  @media print {
+    .tdoc-bar, .tdoc-fab, .tdoc-footer, .tdoc-oldver-strip,
+    #tdoc-comment-layer, #tdoc-pin-layer, .tdoc-cluster-pop,
+    .tdoc-popup, .tdoc-modal-bg, .tdoc-hover-outline,
+    .tdoc-comment-pill, .tdoc-drag-marquee, .tdoc-emoji-picker,
+    .tdoc-reanchor-banner { display: none !important; }
+    body { padding-top: 0 !important; padding-right: 0 !important; padding-left: 0 !important; }
+    :where(body > .wrap, body > main, body > article, body > .content, body > .container) {
+      padding-top: 24px;
+    }
+    @page { margin: 14mm; }
+  }
+</style></head><body><div class="wrap"><div class="tdoc-table-scroll"><table data-tdoc-aid="1msd85xoojb">
+<tr><th>层</th><th>存在哪</th><th>怎么来的</th><th>覆盖谁</th></tr>
+<tr><td>doc 级 <code>meta.notify_agents[]</code></td><td>每篇 doc 的 meta</td><td><b>发布时自动写入</b>：<code>tdoc-publish</code> 从 <code>TDOC_AGENT_LOGIN</code>（agent 工作区已有的环境变量，<code>/api/agent/reply</code> 今天就在用它）带上发布者的 Raft 身份；也可在 /me 或 action <code>set_doc_agents</code> 手改</td><td>这一篇</td></tr>
+<tr><td>账号级 <code>account.notify_targets[]</code></td><td>账号记录</td><td>agent 用 Raft 登录 tdoc 后调 <code>link_notification_target(upload_token)</code></td><td>该账号所有没设 doc 级的 doc</td></tr>
+<tr><td>都没有</td><td></td><td></td><td>只写 tdoc 内部 inbox，等 <code>tdoc-pull</code>（= 现状）</td></tr>
+</table></div><div class="diagram-box"><svg viewBox="0 0 900 380" role="img" aria-label="阅读页上的 Send to agent 按钮、交接面板和评论状态标签的线框" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="12" data-tdoc-aid="2gji19jf1y0">
+  <defs><marker id="k" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0a0a0a"/></marker></defs>
+  <!-- reader frame -->
+  <rect x="20" y="20" width="540" height="340" fill="none" stroke="#d4d4d4"/>
+  <rect x="20" y="20" width="540" height="34" fill="#fafafa" stroke="#d4d4d4"/>
+  <text x="32" y="42" font-size="11" fill="#737373">tdoc · sierra-moat-research · v2</text>
+  <rect x="420" y="27" width="130" height="20" fill="#fff5f3" stroke="#ff4b2e"/>
+  <text x="432" y="41" fill="#ff4b2e" font-size="11" font-weight="500">Send to agent (3)</text>
+  <!-- doc body lines -->
+  <g stroke="#e5e5e5" stroke-width="6"><line x1="40" y1="80" x2="380" y2="80"/><line x1="40" y1="100" x2="330" y2="100"/><line x1="40" y1="120" x2="360" y2="120"/><line x1="40" y1="160" x2="340" y2="160"/><line x1="40" y1="180" x2="370" y2="180"/><line x1="40" y1="220" x2="320" y2="220"/><line x1="40" y1="240" x2="360" y2="240"/><line x1="40" y1="280" x2="350" y2="280"/></g>
+  <!-- comment chips in margin -->
+  <rect x="400" y="72" width="150" height="34" fill="#fafafa" stroke="#0a0a0a"/><text x="408" y="86" font-size="10.5">这里数字过时了</text><text x="408" y="100" font-family="ui-monospace,Menlo,monospace" font-size="9.5" fill="#737373">open · ☑ 选中</text>
+  <rect x="400" y="152" width="150" height="34" fill="#fafafa" stroke="#0a0a0a"/><text x="408" y="166" font-size="10.5">@小cc 把 Fin 改成已收购</text><text x="408" y="180" font-family="ui-monospace,Menlo,monospace" font-size="9.5" fill="#ff4b2e">sent · 立即派发</text>
+  <rect x="400" y="212" width="150" height="34" fill="#fafafa" stroke="#a3a3a3" stroke-dasharray="3 3"/><text x="408" y="226" font-size="10.5" fill="#737373">给 Ryan 看的备注</text><text x="408" y="240" font-family="ui-monospace,Menlo,monospace" font-size="9.5" fill="#737373">note · 不派发</text>
+  <rect x="400" y="272" width="150" height="34" fill="#fafafa" stroke="#0a0a0a"/><text x="408" y="286" font-size="10.5">第 4 节结论改一下</text><text x="408" y="300" font-family="ui-monospace,Menlo,monospace" font-size="9.5" fill="#737373">resolved · 小cc 01:32</text>
+  <!-- panel -->
+  <rect x="600" y="60" width="280" height="200" fill="#fafafa" stroke="#0a0a0a"/>
+  <text x="612" y="82" font-weight="500">Send to agent</text>
+  <text x="612" y="104" font-size="11">收件人：<tspan font-family="ui-monospace,Menlo,monospace">小cc ▾</tspan>  <tspan fill="#737373">(doc 的跟进 agent)</tspan></text>
+  <text x="612" y="126" font-size="11">评论：☑ 3 条 open  ☐ 含 note</text>
+  <rect x="612" y="140" width="256" height="40" fill="#fff" stroke="#d4d4d4"/><text x="620" y="164" font-size="11" fill="#737373">指令：先按评论改一版，别动 §2 的图</text>
+  <rect x="612" y="196" width="110" height="24" fill="#fff5f3" stroke="#ff4b2e"/><text x="624" y="212" fill="#ff4b2e" font-size="11" font-weight="500">发送 → 1 条事件</text>
+  <text x="612" y="244" font-size="10.5" fill="#737373">发出后：3 条评论标 sent · doc 顶部显示「已交给 小cc 01:30」</text>
+  <line x1="560" y1="37" x2="600" y2="70" stroke="#0a0a0a" stroke-width="1.2" marker-end="url(#k)"/>
+  <!-- agent side -->
+  <rect x="600" y="290" width="280" height="60" fill="#fafafa" stroke="#0a0a0a"/>
+  <text x="612" y="310" font-weight="500">小cc 的 App inbox</text>
+  <text x="612" y="327" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#171717">tdoc handoff h_… · sierra-moat · 3 comments</text>
+  <text x="612" y="342" font-size="10.5" fill="#737373">→ tdoc-pull → 一次改完 → resolve_comments</text>
+  <line x1="740" y1="260" x2="740" y2="290" stroke="#0a0a0a" stroke-width="1.2" marker-end="url(#k)"/>
+</svg></div></div></body></html>

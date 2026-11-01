@@ -5,10 +5,14 @@ import {
   renameDocument,
   deleteDocument,
   deleteFolder as deleteFolderRequest,
+  restoreFromTrash,
   moveDocsToFolder,
   renameFolder,
+  updateFolderAccess,
   setDocumentStar,
 } from '../document/api.js';
+import { rememberTrashed } from '../recent-trash.js';
+import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs } from '../docs-hub/search.js';
 
 const plural = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`;
 
@@ -33,17 +37,26 @@ export function useDocsHub({ boot, onUnauthorized }) {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 3500);
+    // A toast that offers Undo stays long enough to reach for it.
+    const timer = window.setTimeout(() => setToast(null), toast.action ? 8000 : 3500);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
   useEffect(() => {
-    const next = folder ? `?folder=${encodeURIComponent(folder)}` : location.pathname;
-    history.replaceState(null, '', next);
+    const url = new URL(location.href);
+    // Team folders are owned by the workspace view, not this personal-docs
+    // hook. Preserve the unified view parameter instead of erasing it.
+    if (!url.searchParams.has('team')) {
+      if (folder) url.searchParams.set('folder', folder);
+      else url.searchParams.delete('folder');
+      url.searchParams.delete('tab');
+      history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }
     setSelected(new Set());
   }, [folder]);
 
-  const notify = useCallback((message, error = false) => setToast({ message, error }), []);
+  // `action`: { label, run } -- one button on the toast (Undo after a delete).
+  const notify = useCallback((message, error = false, action = null) => setToast({ message, error, action }), []);
 
   const run = useCallback(async (operation, success) => {
     try {
@@ -73,25 +86,18 @@ export function useDocsHub({ boot, onUnauthorized }) {
   }, [folder, folderById]);
 
   const shownDocs = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return docs
-      .filter((doc) => doc.folder === folder)
-      .filter((doc) => `${doc.title} ${doc.slug}`.toLowerCase().includes(needle))
-      .sort((a, b) => {
-        if (sort === 'title') return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
-        return String(b[sort]).localeCompare(String(a[sort]));
-      });
-  }, [docs, folder, query, sort]);
+    const searching = Boolean(query.trim());
+    return sortCatalogDocs(docs
+      .filter((doc) => searching || doc.folder === folder)
+      .filter((doc) => matchesCatalogQuery(doc, folderPathLabel(doc.folder, folderById), query)), sort);
+  }, [docs, folder, folderById, query, sort]);
 
   const shownFolders = useMemo(() => folders
+    .filter(() => !query.trim())
     .filter((item) => item.parent === folder)
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })), [folders, folder]);
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })), [folders, folder, query]);
 
-  const folderCounts = useMemo(() => {
-    const counts = {};
-    for (const doc of docs) counts[doc.folder] = (counts[doc.folder] || 0) + 1;
-    return counts;
-  }, [docs]);
+  const folderCounts = useMemo(() => folderContents(folders, docs), [folders, docs]);
 
   const toggleSelected = useCallback((slug) => setSelected((current) => {
     const next = new Set(current);
@@ -118,15 +124,27 @@ export function useDocsHub({ boot, onUnauthorized }) {
   }, [docs, recent]);
 
   // Start from scratch. On success the browser leaves for the new document, so
-  // there is no success toast to raise — only a failure keeps us on /me, and
-  // `run` has already turned that into one.
-  const createDoc = useCallback(async () => {
-    let created = null;
-    const ok = await run(async () => { created = await createDocument(); });
-    if (!ok || !created || !created.url) return false;
-    location.href = created.url;
-    return true;
-  }, [run]);
+  // there is no success toast to raise — only a failure keeps us on /me.
+  // Quota hits return `{ quota }` so the page can open the bump dialog instead
+  // of a toast that leaves the person stuck.
+  const createDoc = useCallback(async (team) => {
+    try {
+      const created = await createDocument(team);
+      if (!created || !created.url) return false;
+      location.href = created.url;
+      return true;
+    } catch (error) {
+      if (error.status === 401 && onUnauthorized) {
+        onUnauthorized();
+        return false;
+      }
+      if (error.body?.error === 'quota_docs') {
+        return { quota: error.body };
+      }
+      notify(error.message || 'Request failed', true);
+      return false;
+    }
+  }, [notify, onUnauthorized]);
 
   // Renaming from the list, the same metadata edit the document bar performs.
   // The row updates from the title the server echoes back rather than the one
@@ -161,29 +179,51 @@ export function useDocsHub({ boot, onUnauthorized }) {
   }, [paintStar, run]);
 
   const moveDocs = useCallback(async (slugs, destination) => {
+    const moved = new Set(slugs);
+    const previous = docs.filter((item) => moved.has(item.slug));
+    setDocs((items) => items.map((item) => (moved.has(item.slug) ? { ...item, folder: destination } : item)));
     const ok = await run(
       () => moveDocsToFolder(slugs, destination),
       `Moved ${plural(slugs.length, 'doc')}`,
     );
-    if (!ok) return false;
-    setDocs((items) => items.map((item) => (slugs.includes(item.slug) ? { ...item, folder: destination } : item)));
+    if (!ok) {
+      const bySlug = new Map(previous.map((item) => [item.slug, item]));
+      setDocs((items) => items.map((item) => bySlug.get(item.slug) || item));
+      return false;
+    }
     setSelected(new Set());
     return true;
-  }, [run]);
+  }, [docs, run]);
 
+  // Delete moves the docs to Trash; the toast's Undo takes them straight back
+  // out, rows and all, without a reload.
   const deleteDocs = useCallback(async (slugs) => {
-    const ok = await run(
-      () => Promise.all(slugs.map((slug) => deleteDocument(slug))),
-      `Deleted ${plural(slugs.length, 'doc')}`,
-    );
+    const ok = await run(() => Promise.all(slugs.map((slug) => deleteDocument(slug))));
     if (!ok) return false;
-    const keep = (items) => items.filter((item) => !slugs.includes(item.slug));
+    slugs.forEach((slug) => rememberTrashed({ slug }));
+    const gone = new Set(slugs);
+    const before = { docs, recent, starred };
+    const keep = (items) => items.filter((item) => !gone.has(item.slug));
     setDocs(keep);
     setRecent(keep);
     setStarred(keep);
     setSelected(new Set());
+    notify(`Moved ${plural(slugs.length, 'doc')} to Trash`, false, {
+      label: 'Undo',
+      run: async () => {
+        const back = await run(
+          () => Promise.all(slugs.map((slug) => restoreFromTrash({ slug }))),
+          `Restored ${plural(slugs.length, 'doc')}`,
+        );
+        if (!back) return;
+        const putBack = (list, items) => [...list.filter((item) => gone.has(item.slug)), ...keep(items)];
+        setDocs((items) => putBack(before.docs, items));
+        setRecent((items) => putBack(before.recent, items));
+        setStarred((items) => putBack(before.starred, items));
+      },
+    });
     return true;
-  }, [run]);
+  }, [docs, recent, starred, notify, run]);
 
   const saveFolder = useCallback(async ({ id, name }) => {
     const trimmed = String(name || '').trim();
@@ -192,7 +232,7 @@ export function useDocsHub({ boot, onUnauthorized }) {
       let saved;
       const ok = await run(async () => { saved = (await renameFolder(id, trimmed)).folder; });
       if (!ok) return false;
-      setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, name: saved.name } : item)));
+      setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)));
       return true;
     }
     let created;
@@ -202,22 +242,59 @@ export function useDocsHub({ boot, onUnauthorized }) {
     return true;
   }, [folder, run]);
 
+  const setFolderAccess = useCallback(async (id, patch) => {
+    let saved;
+    const ok = await run(async () => { saved = (await updateFolderAccess(id, patch)).folder; });
+    if (!ok) return null;
+    // share_id spelled out: after "Stop sharing" the reply has none.
+    setFolders((items) => items.map((item) => (item.id === saved.id ? { ...item, ...saved, share_id: saved.share_id } : item)));
+    return saved;
+  }, [run]);
+
+  // A folder goes to Trash with its subfolders and the docs in them; Undo
+  // brings the whole tree back.
   const deleteFolder = useCallback(async (item) => {
-    const ok = await run(() => deleteFolderRequest(item.id));
+    let result;
+    const ok = await run(async () => { result = await deleteFolderRequest(item.id); });
     if (!ok) return false;
-    setFolders((items) => items
-      .filter((candidate) => candidate.id !== item.id)
-      .map((candidate) => (candidate.parent === item.id ? { ...candidate, parent: item.parent } : candidate)));
-    setDocs((items) => items.map((doc) => (doc.folder === item.id ? { ...doc, folder: item.parent } : doc)));
-    if (folder === item.id) setFolder(item.parent);
+    rememberTrashed({ folder: item.id });
+    const before = { docs, folders, recent, starred };
+    const tree = new Set([item.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const candidate of folders) if (tree.has(candidate.parent) && !tree.has(candidate.id)) { tree.add(candidate.id); grew = true; }
+    }
+    const trashed = new Set((result && result.docs) || []);
+    const keep = (items) => items.filter((doc) => !trashed.has(doc.slug));
+    setFolders((items) => items.filter((candidate) => !tree.has(candidate.id)));
+    // Whatever stayed behind (docs it could not delete) moves up a level.
+    setDocs((items) => keep(items).map((doc) => (tree.has(doc.folder) ? { ...doc, folder: item.parent } : doc)));
+    setRecent(keep);
+    setStarred(keep);
+    if (tree.has(folder)) setFolder(item.parent);
+    notify(`Moved “${item.name}”${trashed.size ? ` and ${plural(trashed.size, 'doc')}` : ''} to Trash`, false, {
+      label: 'Undo',
+      run: async () => {
+        const back = await run(() => restoreFromTrash({ folder: item.id }), `Restored “${item.name}”`);
+        if (!back) return;
+        setFolders(before.folders);
+        setDocs(before.docs);
+        setRecent(before.recent);
+        setStarred(before.starred);
+      },
+    });
     return true;
-  }, [folder, run]);
+  }, [docs, folders, recent, starred, folder, notify, run]);
 
   return {
     docs,
+    setDocs,
     recent,
+    setRecent,
     starred,
+    setStarred,
     folders,
+    setFolders,
     folder,
     setFolder,
     folderById,
@@ -225,20 +302,25 @@ export function useDocsHub({ boot, onUnauthorized }) {
     shownDocs,
     shownFolders,
     folderCounts,
+    pathForDoc: (doc) => folderPathLabel(doc.folder, folderById),
     query,
     setQuery,
     sort,
     setSort,
     selected,
+    setSelected,
     toggleSelected,
     selectAll,
     toast,
+    notify,
+    dismissToast: () => setToast(null),
     createDoc,
     renameDoc,
     toggleStar,
     moveDocs,
     deleteDocs,
     saveFolder,
+    setFolderAccess,
     deleteFolder,
   };
 }

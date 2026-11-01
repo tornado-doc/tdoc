@@ -54,11 +54,11 @@ export function docStep(record, slug, canHandoff = true) {
 // which is no help to somebody who has not made a highlight yet. The literal
 // version says what to do with a mouse and what will happen when they do.
 const LINES = {
-  comment: 'Select any sentence to comment on it.',
-  handoff: 'Now tell your agent to fix it.',
+  comment: 'Select a sentence to comment.',
+  handoff: 'Ask your agent to fix it.',
   waiting: 'Waiting for your agent…',
-  reading: 'Your agent is reading this',
-  stuck: 'Still waiting — did you paste it into your agent?',
+  reading: 'Your agent is reading…',
+  stuck: 'Check your agent’s window.',
 };
 // What a row says once it is behind them. Present tense would be a lie by the
 // time it is struck through.
@@ -147,7 +147,16 @@ export function DocStepHint({ step, agentState = 'idle', banner = false, justFin
         <span className="sh-text">{ticking ? DONE_LINES[finished] : LINES[key]}</span>
         {still ? null : (
           <>
-            <button type="button" className="sh-go" onClick={onGo}>{GO}</button>
+            {/* Only when there is somewhere to go. This row opens the card that
+                carries the next thing, and on the comment step that card is
+                tdoc's seeded one -- which a CLI-first publisher never gets,
+                because seeding is deliberately reserved for somebody who came
+                through /setup. The button stayed anyway and did nothing at all:
+                measured on tdoc.dev, cards 0 -> 0, scroll 0 -> 0.
+                The sentence is the whole instruction on its own. A button that
+                does nothing is worse than no button, and worst of all on the
+                one step whose job is to teach a gesture. */}
+            {onGo ? <button type="button" className="sh-go" onClick={onGo}>{GO}</button> : null}
             <button type="button" className="sh-x" aria-label="Hide" onClick={() => { setGone(true); rememberHidden(); }}>
               <X size={15} />
             </button>

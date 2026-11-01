@@ -1,6 +1,9 @@
 .ui-dialog-backdrop {
   position: fixed;
   inset: 0;
+  /* Cover the large viewport too: on a phone the dynamic toolbar collapsing
+     left a white strip under an inset-only backdrop. */
+  min-height: 100lvh;
   z-index: 1000000;
   background: rgba(0, 0, 0, 0.55);
 }
@@ -21,8 +24,22 @@
 .ui-dialog-popup {
   box-sizing: border-box;
   max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
   overflow: auto;
   outline: none;
+}
+
+/* A tall dialog (backup setup on a phone) scrolls its body; the title and
+   the action row stay on screen instead of being cut off below the fold. */
+.ui-dialog-popup:not(.ui-dialog-side-popup) { display: flex; flex-direction: column; }
+.ui-dialog-popup:not(.ui-dialog-side-popup) > * { flex: none; }
+.ui-dialog-popup:not(.ui-dialog-side-popup) > .ui-dialog-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* room for focus rings at the scroll edge */
+  margin: 0 -4px;
+  padding: 0 4px;
 }
 
 .ui-dialog-popup .ui-dialog-description {
@@ -37,6 +54,10 @@
 .ui-dialog-popup .status {
   margin-top: 10px;
 }
+
+/* CopyPromptButton is a quiet small AppButton (sizes in .ui-btn below); the
+   copied state keeps its green word and tick. */
+.ui-btn.tdoc-copy-prompt.is-copied, .ui-btn.tdoc-copy-prompt.is-copied:hover:not(:disabled) { color: #137044; }
 
 /* Buttons inside the reader chrome that read as text (the legacy markup used
    spans): keep the semantics, drop the UA button box. */
@@ -148,10 +169,19 @@ button.tdoc-cluster-row {
   cursor: pointer;
   flex: none;
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
 }
 
 .tdoc-popup .head button.x:hover {
   color: #fff;
+}
+
+.tdoc-popup .foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 button.tdoc-pin {
@@ -179,10 +209,13 @@ button.tdoc-pin {
 }
 
 .ui-menu-positioner {
-  /* Menus are portalled to body and may overlap the shell's old-version
-     strip (999998) and top bar (999999). Keep them above reader chrome while
-     leaving dialogs (1000001) as the top interactive layer. */
-  z-index: 1000000;
+  /* Menus are portalled to body, each in its own layer. A menu is opened
+     from something already on screen -- the top bar, a dialog, the Ask AI
+     popover or the phone comment drawer (all up to 1000001) -- so it sits
+     above all of them, as AppSelect's list does. A submenu (More agents)
+     shares this layer and, mounted later, lands on top of its parent; it
+     used to sit at 1000000, behind the very popover it opened from. */
+  z-index: 1000002;
 }
 
 .ui-menu-popup {
@@ -207,14 +240,18 @@ button.tdoc-pin {
   border: none;
 }
 
+/* One menu row everywhere (⋯ menus, mode, agent picker, @ list): 32px tall,
+   a grey highlight. The agent and mention rows in chrome.css match it. */
 .ui-menu-item {
   display: block;
+  box-sizing: border-box;
+  min-height: 32px;
   padding: 7px 10px;
   border-radius: 4px;
   outline: none;
   cursor: pointer;
   color: #1a1a1a;
-  font: 13px system-ui, sans-serif;
+  font: 13px/18px system-ui, sans-serif;
   white-space: nowrap;
 }
 
@@ -236,6 +273,13 @@ button.tdoc-pin {
 }
 
 .tdoc-submenu-chevron { color: #98989f; }
+
+.tdoc-dev-mode-flags {
+  padding: 0 10px 6px;
+  color: #8a8a8a;
+  font: 12px system-ui, sans-serif;
+}
+.tdoc-action-menu-item + .tdoc-dev-mode-flags { padding-left: 34px; }
 
 .ui-menu-popup.tdoc-version-submenu {
   min-width: 164px;
@@ -275,6 +319,95 @@ button.tdoc-pin {
   background: #f0f1f4;
 }
 
+/* Menu rows that are links (AppMenuLinkItem): no underline or link colour,
+   and while their page loads, a small spinner at the row's end. */
+a.ui-menu-item,
+a.ui-menu-item:visited {
+  color: #1a1a1a;
+  text-decoration: none;
+}
+.ui-menu-item.ui-menu-link-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ui-menu-item.ui-menu-link-item.tdoc-action-menu-item { gap: 9px; }
+.ui-menu-item[data-pending] { cursor: progress; }
+.ui-menu-item-spinner {
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: ui-menu-item-spin 0.7s linear infinite;
+}
+@keyframes ui-menu-item-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ui-menu-item-spinner { animation-duration: 2s; }
+}
+
+/* AppSelect (ui/select.jsx): the closed box is chrome.css .tdoc-select; the
+   open list is the menu popup, as wide as the box and above dialogs, since a
+   dropdown inside a modal opens over it. */
+.ui-select-positioner { z-index: 1000002; }
+.ui-select-popup {
+  min-width: var(--anchor-width);
+  max-height: min(50vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+}
+.ui-select-trigger { display: flex; align-items: center; text-align: left; }
+.ui-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-select-item { overflow: hidden; text-overflow: ellipsis; }
+.ui-select-item[data-selected] { color: var(--td-accent); font-weight: 600; }
+
+/* AppCombobox (ui/combobox.jsx): the same box as AppSelect, but a text field
+   you can type in; the arrow is a real button over the box's own chevron. */
+.ui-combo { position: relative; display: block; min-width: 0; }
+.ui-combo-input.tdoc-select { cursor: text; text-overflow: ellipsis; }
+/* Doubled class and the modal prefix so dialog button rules (border, fill,
+   44px minimums) never turn the invisible arrow target into a white box. */
+.ui-combo-trigger.ui-combo-trigger, .tdoc-modal button.ui-combo-trigger {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 32px; height: auto;
+  min-width: 0; min-height: 0; margin: 0; padding: 0;
+  border: 0; border-radius: 0 6px 6px 0; background: transparent; box-shadow: none; cursor: pointer;
+}
+.ui-combo-item { display: flex; align-items: baseline; gap: 12px; }
+.ui-combo-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ui-combo-hint { margin-left: auto; flex: none; font-size: 12px; font-weight: 400; color: var(--td-muted); }
+.ui-combo-empty:empty { display: none; }
+.ui-combo-empty { padding: 7px 10px; font: 13px system-ui, sans-serif; color: var(--td-muted); }
+
+.tdoc-modal .status.tdoc-notify-error, .tdoc-notify-error { color: var(--td-danger); }
+
+/* A secondary way out that must not compete with the primary button: muted
+   13px text, no box, right under the form. Beats the modal's button rules. */
+.tdoc-modal button.tdoc-quiet-link, button.tdoc-quiet-link {
+  display: inline-block; margin: 10px 0 0; padding: 2px 0; min-width: 0; min-height: 0;
+  border: 0; background: none; box-shadow: none; color: var(--td-muted);
+  font-family: inherit; font-weight: 400; font-size: 13px; line-height: 1.4; cursor: pointer;
+}
+.tdoc-modal button.tdoc-quiet-link:hover, button.tdoc-quiet-link:hover { color: var(--td-ink); text-decoration: underline; background: none; }
+
+/* Choosing an agent (RaftFallbackForm). Here, not docs-hub.css, because the
+   form also renders in the document's Send to agent dialog and the feedback
+   overlay, which load only chrome.css and ui.css. */
+/* Choosing an agent: the field(s) take the row, Save keeps
+   its own width at the end of it — on a card, in a modal and on a phone. The
+   labels, inputs and 34px controls are the connector form's. */
+.tdoc-conn-pick { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.tdoc-conn-pick > label { flex: 1 1 160px; min-width: 0; display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: var(--td-muted); }
+.tdoc-conn-pick > button { flex: none; height: 34px; }
+.tdoc-conn-pick > .status, .tdoc-conn-pick > .tdoc-conn-pick-note { flex-basis: 100%; margin: 0; }
+.tdoc-conn-pick input { font-family: inherit; font-weight: 400; font-size: 14px; line-height: 1.2; height: 34px; padding: 0 10px; border: 1px solid var(--td-line); border-radius: 6px; background: var(--td-bg, #fff); color: var(--td-ink); }
+.tdoc-conn-pick .tdoc-select { height: 34px; padding-top: 0; padding-bottom: 0; font-size: 14px; font-weight: 400; color: var(--td-ink); border-color: var(--td-line); }
+.tdoc-conn-pick--card { padding-left: 52px; max-width: 572px; box-sizing: border-box; }
+
 .ui-menu-item[data-disabled] {
   opacity: 0.5;
 }
@@ -287,28 +420,57 @@ button.tdoc-pin {
   background: var(--td-danger-tint);
 }
 
-.tdoc-notification-list {
-  display: grid;
-  gap: 2px;
+/* Delivery preferences stay behind Settings so the inbox opens on activity. */
+.tdoc-notif-settings { margin: 2px 0 14px; border: 1px solid var(--td-line); border-radius: 12px; background: var(--td-surface-2, #f7f7f5); overflow: hidden; }
+.tdoc-notif-setting { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 14px; box-sizing: border-box; }
+.tdoc-notif-setting + .tdoc-notif-setting { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-ink) 9%, transparent); }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch { flex: 1; flex-direction: row-reverse; justify-content: space-between; height: 48px; margin: 0 -14px; padding: 0 14px; border: 0; border-radius: 0; }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch:hover { border-color: transparent; background: none; }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch-label, .tdoc-notif-settings .tdoc-notif-setting > .tdoc-switch-label { font-size: 15px; color: var(--td-ink); }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch-track { width: 40px; height: 24px; }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch-thumb { top: 2px; left: 2px; width: 20px; height: 20px; }
+.tdoc-notif-settings .tdoc-notif-setting .tdoc-switch-track[data-checked] .tdoc-switch-thumb { transform: translateX(16px); }
+.tdoc-notif-setting-value { font-size: 15px; color: var(--td-muted); }
+.tdoc-notif-prompt {
+  position: fixed; top: 58px; right: 18px; z-index: 1000001;
+  display: grid; gap: 14px; width: min(380px, calc(100vw - 24px)); box-sizing: border-box;
+  padding: 16px; border: 1px solid var(--td-line); border-radius: 12px;
+  background: var(--td-surface, #fff); box-shadow: 0 14px 40px rgb(15 23 42 / 18%);
+  color: var(--td-ink); font-family: var(--td-font-display);
 }
-
-.tdoc-notification-list .tdoc-cluster-row {
-  width: 100%;
-  /* The row is a grid item, so its automatic minimum size is its content: the
-     track grows to the longest notification and the dialog scrolls sideways
-     instead of the text truncating. min-width:0 lets the track hold the
-     column, which is what makes the snip's ellipsis reachable. */
-  min-width: 0;
+.tdoc-notif-prompt-copy { display: grid; gap: 4px; }
+.tdoc-notif-prompt-copy strong { font-size: 14px; }
+.tdoc-notif-prompt-copy span { color: var(--td-muted); font-size: 13px; line-height: 1.45; }
+.tdoc-notif-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.tdoc-notif-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 3px 0 12px; }
+.tdoc-notif-count { font-size: 12px; font-weight: 600; color: var(--td-muted); }
+.tdoc-notif-head-actions { display: inline-flex; align-items: center; gap: 14px; }
+.tdoc-notif-head .tdoc-quiet-link, .tdoc-modal .tdoc-notif-head button.tdoc-quiet-link { margin: 0; font-size: 12px; }
+.tdoc-notification-list { display: grid; max-height: min(56vh, 460px); overflow-y: auto; border: 1px solid var(--td-line); border-radius: 12px; }
+.tdoc-notification-list:empty { display: none; }
+.tdoc-notif-row + .tdoc-notif-row { border-top: 1px solid var(--td-line); }
+.tdoc-notif-row.unread { background: var(--td-accent-wash, rgba(22, 82, 240, .06)); }
+.tdoc-modal button.tdoc-notif-open, button.tdoc-notif-open {
+  appearance: none; display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; min-height: 0;
+  margin: 0; padding: 13px 12px; border: 0; border-radius: 0; background: none; box-shadow: none;
+  color: var(--td-ink); font-family: inherit; font-size: 14px; font-weight: 400; line-height: 1.4; text-align: left; cursor: pointer;
 }
+.tdoc-modal button.tdoc-notif-open:hover, button.tdoc-notif-open:hover { background: var(--td-surface-2, #f7f7f5); }
+.tdoc-notif-row.unread button.tdoc-notif-open:hover { background: color-mix(in srgb, var(--td-accent) 10%, transparent); }
+.tdoc-notif-actions { display: flex; gap: 8px; padding: 0 12px 12px 50px; }
+.tdoc-notif-avatar { flex: none; width: 30px; height: 30px; border-radius: 50%; object-fit: cover; }
+.tdoc-notif-avatar--anon { display: grid; place-items: center; background: #8a93a2; color: #fff; font-size: 12px; font-weight: 600; }
+.tdoc-notif-main { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.tdoc-notif-line { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.tdoc-notif-line strong { font-weight: 600; }
+.tdoc-notif-doc { color: var(--td-ink); font-weight: 500; }
+.tdoc-notif-preview { color: var(--td-muted); font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.tdoc-notif-time { flex: none; display: flex; align-items: center; gap: 6px; color: var(--td-muted); font-size: 12px; white-space: nowrap; padding-top: 1px; }
+.tdoc-notif-row.unread .tdoc-notif-time::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--td-accent); }
 
-.tdoc-notification-list .tdoc-cluster-row.unread {
-  background: #eef2ff;
-}
-
-.tdoc-notification-list .tdoc-cluster-row > .muted {
-  flex-shrink: 0;
-  white-space: nowrap;
-  font-size: 12px;
+@media (max-width: 700px) {
+  .tdoc-notif-prompt { top: 54px; right: 12px; }
+  .tdoc-notif-prompt-actions { flex-direction: column; }
 }
 
 .tdoc-modal .tds-step { display: flex; gap: 9px; align-items: flex-start; margin: 0 0 10px; font-size: 14px; color: #5b6070; }
@@ -345,6 +507,7 @@ button.tdoc-pin {
    under the button that asked. A modal to choose between two things is a room
    built for a sentence. */
 .ui-menu-item.mk-item {
+  line-height: normal;
   /* The base item is `display: block` with `nowrap`; this one is a row with a
      sentence in it, so it needs both overridden or the icon stacks above the
      title and the description refuses to wrap. */
@@ -531,6 +694,10 @@ button.tdoc-pin {
     min-width: 44px;
     min-height: 44px;
   }
+  /* The searchable picker is a field, not a button, but sits beside one: the
+     same touch height, and its arrow button fills the field instead. */
+  .tdoc-modal .ui-combo-input { min-height: 44px; }
+  .tdoc-modal button.ui-combo-trigger { min-width: 0; min-height: 0; }
 
   .tdoc-onboarding-details summary,
   .tdoc-onboarding-link {
@@ -588,7 +755,8 @@ button.tdoc-pin {
 
 .tdoc-neutral-notice {
   position: fixed;
-  top: 16px;
+  /* Below the top bar, not over the account chip. */
+  top: 60px;
   right: 16px;
   max-width: min(360px, calc(100vw - 32px));
   padding: 10px 12px;
@@ -598,13 +766,32 @@ button.tdoc-pin {
   font-size: 13px;
 }
 
+/* Edge pages (status, neutral landing, team join, activate) sit under the
+   shared top bar; the centred card fills the rest of the window. */
+.tdoc-edge-page { min-height: 100vh; background: #fff; }
+.tdoc-edge-page > .tdoc-status-page,
+.tdoc-edge-page > .tdoc-neutral-page {
+  min-height: calc(100vh - 48px);
+  min-height: calc(100dvh - 48px);
+}
+
+.tdoc-neutral-page > .tdoc-neutral-primary {
+  margin-top: 10px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--td-accent);
+  color: #fff;
+  font: 650 14px var(--td-font-display);
+}
+.tdoc-neutral-page > .tdoc-neutral-primary.is-pending { visibility: hidden; }
+
 .tdoc-status-page {
   display: grid;
   min-height: 100vh;
   box-sizing: border-box;
   place-content: center;
   justify-items: center;
-  gap: 8px;
+  gap: 12px;
   padding: 24px;
   color: var(--td-ink);
   font-family: var(--td-font-display);
@@ -615,6 +802,9 @@ button.tdoc-pin {
 .tdoc-status-page p {
   margin: 0;
 }
+
+.tdoc-status-page > p { line-height: 1.6; }
+.tdoc-status-page > .tdoc-status-actions { margin-top: 8px; }
 
 .tdoc-status-page h1 {
   font-size: 22px;
@@ -649,7 +839,11 @@ button.tdoc-pin {
   align-items: center;
   justify-content: center;
   min-height: 40px;
-  padding: 8px 20px;
+  /* A link and a button side by side must be the same box. */
+  box-sizing: border-box;
+  height: 40px;
+  line-height: 1.2;
+  padding: 0 20px;
   border-radius: 8px;
   font: inherit;
   font-weight: 600;
@@ -783,12 +977,16 @@ button.tdoc-pin {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  height: 36px;
-  padding: 0 12px;
+  min-height: 36px;
+  padding: 8px 12px;
   background: var(--td-accent);
   color: #fff;
   font-size: 13px;
+  line-height: 1.5;
 }
+
+.tdoc-onboard-banner > button,
+.tdoc-onboard-banner > a { flex-shrink: 0; white-space: nowrap; }
 
 .tdoc-onboard-banner button {
   appearance: none;
@@ -818,14 +1016,17 @@ button.tdoc-pin {
    mark, the heading and the account line are one thing; the code is what you
    came to check; the two buttons are one choice. Tight inside a group, open
    between them. */
-.tdoc-activate-page { padding: 32px 24px; }
+.tdoc-activate-page { width: 100%; grid-template-columns: minmax(0, 1fr); padding: 32px 24px; }
 .tdoc-activate-stack {
   width: 320px; max-width: 100%;
   display: flex; flex-direction: column; align-items: stretch; gap: 0;
   text-align: center;
 }
 .tdoc-activate-stack > img { align-self: center; }
-.tdoc-activate-stack > h1 { margin: 20px 0 0; font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; }
+.tdoc-activate-signin { width: 100%; }
+.tdoc-activate-signin > .tdoc-activate-hint { align-self: center; }
+.tdoc-activate-signin > button.primary { max-width: 320px; align-self: center; }
+.tdoc-activate-stack > h1 { margin: 12px 0 0; font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; }
 .tdoc-activate-page .tdoc-activate-grant { margin: 8px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--td-muted, #6b6a66); }
 .tdoc-activate-page .tdoc-activate-grant b { color: var(--td-ink, #1a1a1a); font-weight: 600; }
 
@@ -867,3 +1068,233 @@ button.tdoc-pin {
 .tdoc-activate-page button.secondary:hover { background: var(--td-surface, #f4f4f2); }
 .tdoc-activate-page .tdoc-activate-error { margin: 22px 0 0; font-size: 14px; line-height: 1.5; }
 .tdoc-activate-page .tdoc-activate-hint { margin: 12px 0 0; font-size: 13px; line-height: 1.5; }
+
+/* The workspaces an agent connection reaches (workspace-checklist.jsx): one
+   quiet bordered list, a whole row per checkbox so a thumb can hit it. Used
+   on the Allow page and in the Settings > Agents dialog. */
+.tdoc-ws-pick { margin: 0; padding: 0; border: 1px solid var(--td-line, #e8e7e3); border-radius: 12px; overflow: hidden; text-align: left; }
+.tdoc-ws-option {
+  display: flex; align-items: center; gap: 10px; min-height: 46px; box-sizing: border-box;
+  padding: 10px 14px; cursor: pointer; font-size: 14.5px; line-height: 1.3; color: var(--td-ink, #1a1a1a);
+}
+.tdoc-ws-option + .tdoc-ws-option { border-top: 1px solid var(--td-line, #e8e7e3); }
+.tdoc-ws-option:hover { background: var(--td-surface-2, #f7f7f5); }
+.tdoc-ws-option input { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; accent-color: var(--td-accent, #1652f0); cursor: pointer; }
+.tdoc-ws-name { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-ws-kind { flex: 0 0 auto; color: var(--td-muted, #6b6a66); font-size: 12.5px; }
+.tdoc-ws-pick:disabled .tdoc-ws-option { cursor: default; opacity: .6; }
+.tdoc-activate-workspaces { margin: 20px 0 0; }
+.tdoc-activate-page .tdoc-activate-ask { margin: 0 0 8px; font-size: 14px; line-height: 1.5; color: var(--td-ink, #1a1a1a); text-align: left; }
+.tdoc-activate-workspaces .tdoc-activate-hint { text-align: left; }
+
+/* Onboarding spacing: keep the existing UI and group its content with air. */
+.tdoc-activate-stack > h1 + p { margin-top: 12px; }
+.tdoc-activate-stack > p { line-height: 1.6; overflow-wrap: anywhere; }
+.tdoc-activate-stack .tdoc-status-actions { margin-top: 20px; }
+.tdoc-activate-stack .tdoc-status-actions a.primary { margin-top: 0; }
+.tdoc-activate-page .tdoc-activate-hint { margin-top: 20px; line-height: 1.6; }
+.tdoc-activate-page .tdoc-activate-grant { margin-top: 12px; line-height: 1.6; }
+.tdoc-activate-page button.secondary { line-height: 1.5; }
+.tdoc-modal .tds-step { gap: 12px; margin-bottom: 16px; line-height: 1.5; }
+.tdoc-modal .tds-codewrap { margin: 0 0 20px 31px; }
+.tdoc-modal .tds-code { padding-top: 18px; padding-bottom: 52px; }
+.tdoc-modal .tds-step:has(.tds-open) { align-items: center; }
+.tdoc-modal .tds-open { margin-top: 0; }
+.tdoc-modal .tds-status { line-height: 1.6; }
+@media (max-width: 380px) {
+  .tdoc-modal .tds-codewrap { margin-left: 0; }
+}
+
+/* Send to agent: one column of fields, 16px apart, labelled like the Agents
+   page form (12px, muted, 600). Here, not chrome.css-only, so the feedback
+   overlay gets the same dialog. */
+.tdoc-send { display: grid; gap: 16px; margin-top: 4px; }
+.tdoc-send-field { display: grid; gap: 6px; min-width: 0; }
+.tdoc-modal .tdoc-send-label { display: block; margin: 0; font-size: 12px; font-weight: 600; color: var(--td-muted); }
+.tdoc-send-label span { margin-left: 4px; font-weight: 400; }
+.tdoc-modal .tdoc-send-hint { margin: 0; font-size: 12px; line-height: 1.45; color: var(--td-muted); }
+.tdoc-modal .tdoc-send-notice, .tdoc-modal .tdoc-send-result { margin: 0; font-size: 13px; line-height: 1.45; color: var(--td-muted); }
+.tdoc-modal .tdoc-send-notice.tdoc-notify-error, .tdoc-modal .tdoc-send-result.tdoc-notify-error { color: var(--td-danger); }
+.tdoc-modal .tdoc-send-result.is-ok { color: #1a7340; font-weight: 600; }
+.tdoc-send-notice .text-btn { margin-left: 6px; }
+.tdoc-modal .tdoc-send-notice.tdoc-send-warn { color: #7a5b12; }
+.tdoc-modal .tdoc-send textarea.tdoc-notify-instruction {
+  resize: none; min-height: 0; font-size: 14px; line-height: 1.45;
+  border-color: var(--td-line); font-family: inherit;
+}
+.tdoc-modal .tdoc-send .tdoc-notify-recipient { padding: 2px 0; }
+
+/* Under a Share link: the link always opens the newest version; this exact
+   version is the quiet second choice. */
+.tdoc-share-version { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--td-muted); }
+.tdoc-modal .tdoc-share-version button.tdoc-quiet-link { margin: 0; color: var(--td-accent); }
+
+/* Top-bar workspace switcher (workspace-switcher.jsx): one text-first control
+   on every page. */
+.tdoc-bar .tdoc-space-trigger { padding: 5px 10px 5px 12px; gap: 6px; max-width: 220px; }
+.tdoc-bar .tdoc-space-trigger .tdoc-space-name { display: inline; }
+.tdoc-bar .tdoc-space-trigger .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-space-item-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tdoc-space-check { margin-left: auto; color: var(--td-accent); }
+/* On a phone the chip gives its room to ⋯ (#tdoc-more-btn), which carries
+   Show resolved, Share and Versions: the same rows are a "Switch space"
+   submenu there. ⋯ never shrinks out of the bar. */
+.tdoc-space-submenu-current { margin-left: auto; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a8a8a; font-size: 12px; }
+@media (max-width: 700px) {
+  .tdoc-bar .tdoc-space-trigger { display: none; }
+  .tdoc-bar #tdoc-more-btn { flex-shrink: 0; }
+}
+
+/* AppDialog `side`: a panel docked under the top bar at the right edge. The
+   viewport lets clicks through so the document stays readable and scrollable
+   beside it; on a phone it is a bottom sheet. */
+.ui-dialog-viewport.ui-dialog-side {
+  inset: 48px 0 0 auto;
+  width: min(380px, 100vw);
+  padding: 12px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.ui-dialog-popup.ui-dialog-side-popup {
+  pointer-events: auto;
+  width: 100%;
+  max-height: calc(100vh - 48px - 24px);
+  padding: 18px 18px 14px;
+  border: 1px solid var(--td-line, #e5e5e7);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+}
+.ui-dialog-popup.ui-dialog-side-popup h3 { font-size: 16px; }
+.ui-dialog-popup.ui-dialog-side-popup .actions { margin-top: 10px; }
+@media (max-width: 700px) {
+  .ui-dialog-viewport.ui-dialog-side {
+    inset: auto 0 0 0;
+    width: 100%;
+    padding: 0;
+    align-items: flex-end;
+  }
+  .ui-dialog-popup.ui-dialog-side-popup {
+    border-radius: 14px 14px 0 0;
+    max-height: 75dvh;
+    padding: 16px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* AppCheckbox (ui/checkbox.jsx): a 14px box, the accent when checked. The
+   comment composer is dark, so the label takes its colour from the parent. */
+.ui-checkbox { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; min-width: 0; color: inherit; font: 12px system-ui, -apple-system, sans-serif; }
+.ui-checkbox.is-disabled { cursor: default; }
+.ui-checkbox-box { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; min-width: 0; min-height: 0; padding: 0; border: 1.5px solid #9a9aa2; border-radius: 3px; background: transparent; box-shadow: none; cursor: inherit; }
+.ui-checkbox-box[data-checked] { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); color: #fff; }
+.ui-checkbox-box[data-disabled] { opacity: .75; }
+.ui-checkbox-box:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
+.ui-checkbox-indicator { display: inline-flex; }
+.ui-checkbox-label { white-space: nowrap; }
+.ui-checkbox-hint { color: #8a8a8a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* AppButton (shell/src/ui/button.jsx): the only button sizes. Surfaces may
+   recolour a variant, never resize it (test/ui-primitives.test.js). The
+   doubled class (.ui-btn.ui-btn-m) outranks container rules such as
+   `.tdoc-modal button` or `.tm-settings-actions button`, so a button looks
+   the same in every dialog, card and page. */
+.ui-btn.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: 500 13px system-ui, -apple-system, sans-serif;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ui-btn.ui-btn-m { height: 32px; min-height: 32px; padding: 0 14px; font-size: 13px; }
+.ui-btn.ui-btn-s { height: 28px; min-height: 28px; padding: 0 10px; font-size: 12px; }
+.ui-btn.ui-btn-primary { background: var(--td-accent, #1652f0); border-color: var(--td-accent, #1652f0); color: #fff; }
+.ui-btn.ui-btn-primary:hover:not(:disabled) { background: var(--td-accent-hover, #1146c8); border-color: var(--td-accent-hover, #1146c8); color: #fff; }
+.ui-btn.ui-btn-secondary { background: var(--td-ground, #fff); color: var(--td-ink, #1a1a1a); border-color: var(--td-line, #e8e7e3); }
+.ui-btn.ui-btn-secondary:hover:not(:disabled) { background: var(--td-surface-2, #f7f7f5); }
+.ui-btn.ui-btn-danger { background: var(--td-danger, #b42318); border-color: var(--td-danger, #b42318); color: #fff; }
+.ui-btn.ui-btn-danger:hover:not(:disabled) { background: var(--td-danger-hover, #931c14); border-color: var(--td-danger-hover, #931c14); color: #fff; }
+.ui-btn.ui-btn-quiet { height: auto; min-height: 0; padding: 2px 0; border: 0; background: none; color: var(--td-muted, #6b6a66); }
+.ui-btn.ui-btn-quiet:hover:not(:disabled) { color: var(--td-ink, #1a1a1a); background: none; }
+.ui-btn.ui-btn-icon { width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; background: none; color: var(--td-muted, #6b6a66); }
+.ui-btn.ui-btn-icon:hover:not(:disabled) { background: var(--td-surface-2, #f7f7f5); color: var(--td-ink, #1a1a1a); }
+.ui-btn.ui-btn:disabled { opacity: .5; cursor: default; }
+.ui-btn.ui-btn:focus-visible { outline: 2px solid var(--td-accent, #1652f0); outline-offset: 2px; }
+/* Phone: dialogs and app pages keep their 44px touch height; the comment
+   surfaces on the document keep 32 so the composer stays compact. */
+@media (max-width: 700px) {
+  .tdoc-modal .ui-btn.ui-btn-m, .docs-hub .ui-btn.ui-btn-m, .tdoc-notif-prompt .ui-btn.ui-btn-m { height: auto; min-height: 44px; }
+  .tdoc-modal .ui-btn.ui-btn-icon, .docs-hub .ui-btn.ui-btn-icon { width: 44px; height: 44px; }
+}
+
+/* CodeBlock (shell/src/ui/code-block.jsx). Selectors are doubled so the
+   generic `.tdoc-modal code` / `.tdoc-connector code` chips never restyle it. */
+.ui-code-block.ui-code-block { position: relative; box-sizing: border-box; min-width: 0; max-width: 100%; margin: 0; }
+.ui-code-block.ui-code-block > pre {
+  box-sizing: border-box; margin: 0; padding: 10px 12px; max-width: 100%;
+  border: 1px solid var(--td-line, #e8e7e3); border-radius: 8px;
+  background: var(--td-surface-2, #f7f7f5); color: var(--td-ink, #1a1a1a);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: normal; overflow-wrap: normal; overflow-x: auto;
+  user-select: text;
+}
+.ui-code-block.ui-code-block.no-wrap > pre { white-space: pre; }
+.ui-code-block.ui-code-block code { display: inline; padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; white-space: inherit; }
+.ui-code-block.ui-code-block .ui-code-copy { float: right; position: sticky; right: 0; margin: 0 0 4px 12px; white-space: nowrap; user-select: none; }
+/* A no-wrap script scrolls sideways, so nothing can flow around the button:
+   it sits in a strip above the first line instead. */
+.ui-code-block.ui-code-block.no-wrap.has-copy > pre { padding-top: 34px; }
+.ui-code-block.ui-code-block.no-wrap .ui-code-copy { float: none; position: absolute; top: 8px; right: 12px; margin: 0; }
+
+/* ShareLinkRow (document-dialogs.jsx): the link in a light, readable field
+   and Copy link as the primary button on its row; stacked on a phone. */
+.tdoc-share-link-row { display: flex; align-items: stretch; gap: 8px; min-width: 0; margin: 0 0 8px; }
+.tdoc-share-link-row .tdoc-share-link-field {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; box-sizing: border-box;
+  padding: 6px 12px; border: 1px solid var(--td-line, #e8e7e3); border-radius: 6px;
+  background: var(--td-surface-2, #f7f7f5); color: var(--td-ink, #1a1a1a);
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap; overflow-x: auto; user-select: all;
+}
+.tdoc-share-link-row .tdoc-share-link-field[id="tdoc-share-url"] { cursor: copy; }
+@media (max-width: 700px) {
+  .tdoc-share-link-row { flex-direction: column; }
+  .tdoc-share-link-row .tdoc-share-copy { width: 100%; }
+}
+
+/* "Connect in one click" (connect-ai-apps.jsx): AI apps through the remote
+   MCP server. One row per app: what it does on the left, its one action on
+   the right; the server URL and the CLI line under them. Settings, /setup
+   and the /start dialog draw the same rows. */
+.tdoc-connect-apps { display: grid; gap: 14px; min-width: 0; }
+.tdoc-connect-apps-list { list-style: none; margin: 0; padding: 0; display: grid; border-top: 1px solid var(--td-line); }
+.tdoc-connect-app { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--td-line); }
+.tdoc-connect-app-text { display: grid; gap: 2px; min-width: 0; font-size: 14px; line-height: 1.45; color: var(--td-ink); }
+.tdoc-connect-app-text > span { color: var(--td-muted); font-size: 13px; }
+.tdoc-connect-app > .ui-btn { flex: none; }
+.tdoc-connect-apps-url, .tdoc-connect-apps-cli { display: grid; gap: 6px; font-size: 13px; line-height: 1.45; color: var(--td-muted); }
+.tdoc-connect-apps-cli { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.tdoc-connect-apps-section > h2 { margin: 0; font-size: 16px; line-height: 1.3; color: var(--td-ink); }
+.tdoc-connect-apps-section > p { margin: 4px 0 12px; font-size: 13px; color: var(--td-muted); }
+.sg-connect-apps { margin: 20px 0 4px; }
+.tdoc-oauth-actions { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
+.tdoc-oauth-consent .tdoc-oauth-return b { color: var(--td-ink); font-weight: 600; }
+/* /start: in the flow under the top bar, like the old-version strip. */
+.tdoc-connect-strip {
+  display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
+  box-sizing: border-box; width: 100%; padding: 8px 12px;
+  background: var(--td-accent-tint); color: var(--td-ink); font-size: 13px; line-height: 1.5;
+  border-bottom: 1px solid var(--td-line);
+}
+.tdoc-connect-dialog { max-width: 560px; }
+@media (max-width: 560px) {
+  .tdoc-connect-app { flex-direction: column; align-items: stretch; gap: 8px; }
+  .tdoc-connect-apps-cli { grid-template-columns: minmax(0, 1fr); }
+}
