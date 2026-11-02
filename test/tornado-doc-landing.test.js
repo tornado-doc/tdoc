@@ -105,11 +105,13 @@ t('names tdoc and tornado-doc', () => {
     'the decorative logo beside the wordmark must not offer visual expansion');
 });
 
-t('the closing CTA goes back to the connect card, not a second way in', () => {
-  assert(/<div class="pick" id="get-started">/.test(html), 'the connect card has no anchor');
-  const end = html.slice(html.indexOf('FINAL CTA'));
-  assert(/href="#get-started"/.test(end), 'the closing CTA does not jump to the connect card');
-  assert(!/Create a free doc/.test(end), 'the closing CTA still says Create a free doc');
+t('the closing CTA is the same prompt card, not a button', () => {
+  const end = html.slice(html.indexOf('FINAL CTA'), html.indexOf('<footer'));
+  assert(/<div class="pick pick-end">/.test(end), 'the closing CTA has no prompt card');
+  assert(/<code id="pick-prompt-end">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt-end"/.test(end), 'the closing card has no prompt with Copy');
+  const sends = [...end.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt-end"/g)].map((m) => m[1]);
+  assert(sends.join(' ') === 'claudecode claudeai chatgpt codex cursor grok', `closing quick send: ${sends.join(' ')}`);
+  assert(!/Create a free doc|Get started|browse the looks|btn-primary/.test(end), 'the closing CTA still has the old button');
 });
 
 t('site pages keep the comment cursor; links and buttons still point', () => {
@@ -293,7 +295,7 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  // The hero connect card, after glasser.ai: one sentence, the setup prompt,
+  // The hero connect card: one sentence, the setup prompt,
   // one row of quick connect.
   assert(/Send your agent this prompt to get started\.[\s\S]*set up https:\/\/tdoc\.dev\/SKILL\.md[\s\S]*Quick connect/.test(visible), 'the hero connect card is not sentence, prompt, quick connect');
 });
@@ -310,7 +312,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const hero = visible.slice(visible.indexOf('Send your agent this prompt'), visible.indexOf('Set up in a minute'));
   // The connect card is the hero's one action: no second "Create a free doc" above it.
   assert(!/Create a free doc/.test(visible.slice(0, visible.indexOf('Send your agent this prompt'))), 'the hero still has a Create a free doc button');
-  for (const app of ['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'Grok', 'VS Code', 'Gemini CLI', 'Grok Bot']) assert(hero.includes(app), `the hero picker does not name ${app}`);
+  for (const app of ['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'Grok', 'VS Code', 'Gemini CLI', 'Grok Bot', 'Raft']) assert(hero.includes(app), `the hero picker does not name ${app}`);
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   // No "What's an agent?" line under the card (removed on request, 2026-11-02).
   assert(!/What's an agent\?/.test(visible), 'the agent definition line is back');
@@ -323,21 +325,27 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
   // Claude Code (desktop app), Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
   const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
-  assert(quickApps.join(' ') === 'grokbot more', `quick connect popovers: ${quickApps.join(' ')}`);
+  assert(quickApps.join(' ') === 'grokbot raft more', `quick connect popovers: ${quickApps.join(' ')}`);
   const sends = [...quick.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt"/g)].map((m) => m[1]);
-  assert(sends.join(' ') === 'claudecode codex cursor claudeai chatgpt grok', `quick send: ${sends.join(' ')}`);
+  assert(sends.join(' ') === 'claudecode claudeai chatgpt codex cursor grok', `quick send: ${sends.join(' ')}`);
   assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
-  // The quick buttons open desktop apps; someone in a terminal pastes the prompt instead.
-  assert(/<p class="pick-tui">Using an agent in a terminal \(Claude Code, Codex, Cursor, Gemini CLI or another\)\? Paste the prompt there\.<\/p>/.test(pick), 'no line for terminal users');
   // No by-hand backups for the quick-send apps: the fallback is copying the prompt.
   assert(!/by hand/.test(pick), 'More still has by-hand backups');
   // More holds only the two apps with neither a quick send nor a bot: VS Code and Gemini CLI.
   const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'), pick.indexOf('<div class="pick-pop pick-p-vscode"'));
   const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
   assert(moreApps.join(' ') === 'vscode gemini', `More: ${moreApps.join(' ')}`);
-  assert(/href="\/me\?view=settings#agents" style="color:inherit">Add a webhook/.test(pick), 'no bot line to the Agents page');
   assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
-  const apps = ['grokbot', ...moreApps];
+  const apps = ['grokbot', 'raft', ...moreApps];
+  // One row grouped by brand: Claude (Claude Code, Claude.ai), ChatGPT (ChatGPT, Codex), Cursor, Grok (Grok, Grok Bot), Raft, More.
+  const brands = [...quick.matchAll(/<button type="button" class="pick-pill pick-brand"[^>]*>[\s\S]*?<span>([^<]+)<\/span>/g)].map((m) => m[1]);
+  assert(brands.join(' ') === 'Claude ChatGPT Grok', `brand groups: ${brands.join(' ')}`);
+  const menus = [...quick.matchAll(/<div class="pick-menu">([\s\S]*?)<\/div><\/div>/g)].map((m) => [...m[1].matchAll(/(?:data-tdoc-send|popovertarget)="(?:pick-pop-)?([a-z]+)"/g)].map((x) => x[1]).join('+'));
+  assert(menus.join(' ') === 'claudecode+claudeai chatgpt+codex grok+grokbot', `brand menus: ${menus.join(' ')}`);
+  assert(/\.pick-grp:hover \.pick-menu, \.pick-grp:focus-within \.pick-menu \{ display:flex; \}/.test(html), 'brand menus do not open on hover and focus');
+  // One short line under the buttons: ask for a missing app.
+  assert(/Don't see your app\? <a href="https:\/\/github\.com\/tornado-doc\/tdoc\/issues\/new"/.test(pick) && !/Add a webhook|Paste the prompt there/.test(pick), 'the line under the buttons is not the short ask-for-an-app line');
+  assert(/set up https:\/\/tdoc\.dev\/SKILL\.md/.test(pick.slice(pick.indexOf('id="pick-pop-raft"'))) && /Register App/.test(pick), 'Raft popover lacks the agent prompt or the MCP App step');
   const popOf = (app) => {
     const i = pick.indexOf(`<div class="pick-pop pick-p-${app}" id="pick-pop-${app}" popover>`);
     assert(i >= 0, `${app}: no popover`);
@@ -367,7 +375,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   // Setup shows every app the picker offers, each with its own mark: Claude
   // Code is Claude's, not a generic terminal (ST1125, 2026-10-29).
   const tiles = [...setup.matchAll(/class="apptile[^"]*" role="img" aria-label="([^"]+)"/g)].map((m) => m[1]);
-  assert(tiles.join('|') === 'Claude|ChatGPT|Grok|Cursor|VS Code|Claude Code|Codex|Gemini CLI|Grok Bot', `setup tiles: ${tiles.join('|')}`);
+  assert(tiles.join('|') === 'Claude|ChatGPT|Grok|Cursor|VS Code|Claude Code|Codex|Gemini CLI|Grok Bot|Raft', `setup tiles: ${tiles.join('|')}`);
   assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-claude"/.test(setup), 'Claude Code does not show the Claude mark');
   assert(!/#i-terminal"|#i-code"/.test(setup + pick), 'a generic terminal or code icon stands in for an app');
   assert(/sign in once/.test(setup), 'setup does not say you sign in once');

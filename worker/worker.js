@@ -95,6 +95,10 @@ Give the user this one link: ${MCP_VSCODE_INSTALL_LINK} It opens VS Code with td
 
 Connectors (https://grok.com/connectors) > New Connector > Custom, paste \`https://tdoc.dev/mcp\`, and sign in. Ask the user to reply "done".
 
+## Raft (an agent in a Raft workspace)
+
+You run on a Raft computer through a runtime such as Claude Code or Codex. If you can run Bash there, follow the "Claude Code or Codex" section above on that computer and post the sign-in link in the conversation. To give every agent in the workspace tdoc's tools, a workspace owner or admin adds it as an MCP App: Settings > Applications > Register App, paste \`https://tdoc.dev/mcp\`.
+
 ## A bot or service the user runs
 
 Connect it on https://tdoc.dev/me?view=settings#agents

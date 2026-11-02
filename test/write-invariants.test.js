@@ -152,8 +152,9 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     // One section per app, so the agent gives only its own app's steps (ChatGPT read the
     // whole file as a skill to install and listed Codex and Claude Code paths instead).
     assert(/not a skill to save or install/.test(steps) && /give the user only that section/.test(steps), 'setup must say: pick your app, give only its steps');
-    for (const h of ['## ChatGPT', '## Claude.ai', '## Claude Code or Codex', '## Cursor', '## VS Code', '## Gemini CLI', '## Grok']) assert(steps.includes(h), `no section ${h}`);
+    for (const h of ['## ChatGPT', '## Claude.ai', '## Claude Code or Codex', '## Cursor', '## VS Code', '## Gemini CLI', '## Grok', '## Raft']) assert(steps.includes(h), `no section ${h}`);
     // Apps with a prefilled install link get the link, not menu steps (Claude.ai answered with Customize > Plugins > Add marketplace).
+    assert(/Register App, paste `https:\/\/tdoc\.dev\/mcp`/.test(steps), 'Raft section lacks the MCP App step');
     const claude = steps.slice(steps.indexOf('## Claude.ai'), steps.indexOf('## Claude Code or Codex'));
     assert(claude.includes('connectorUrl=') && !/Add marketplace|Customize >/.test(claude), `Claude.ai section must be the one-click link: ${claude}`);
     assert(/give the user that link to click/.test(steps), 'setup must prefer links over manual steps');
