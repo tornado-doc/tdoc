@@ -329,8 +329,9 @@ t('names the apps it runs in, each linked to its connect step', () => {
   assert(sends.join(' ') === 'claudecode codex cursor claudeai chatgpt', `quick send: ${sends.join(' ')}`);
   assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
   // The quick buttons open desktop apps; someone in a terminal pastes the prompt instead.
-  assert(/<p class="pick-tui">Running Claude Code, Codex or Cursor in a terminal\? Paste the prompt there\.<\/p>/.test(pick), 'no line for terminal users');
-  assert(/Claude Code in Terminal/.test(pick) && /Codex in Terminal/.test(pick), 'More has no terminal steps for Claude Code and Codex');
+  assert(/<p class="pick-tui">Using an agent in a terminal \(Claude Code, Codex, Cursor, Gemini CLI or another\)\? Paste the prompt there\.<\/p>/.test(pick), 'no line for terminal users');
+  assert(/Claude Code by hand/.test(pick) && /Codex by hand/.test(pick), 'More has no by-hand steps for Claude Code and Codex');
+  assert(/installs the tdoc CLI for Claude Code/.test(pick) && /installs the tdoc CLI for Codex/.test(pick), 'the by-hand popovers do not say they install the CLI');
   const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'));
   const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
   assert(moreApps.join(' ') === 'grok vscode gemini grokbot claudecode claude cursor codex chatgpt', `More: ${moreApps.join(' ')}`);
