@@ -30,7 +30,7 @@ const path = require('path');
     for (const app of ['javascript:alert(1)', 'https://evil.example', 'toString', '__proto__', '', undefined]) {
       assert.equal(sendToAppLink(app, prompt), null, String(app));
     }
-    assert.deepEqual(Object.keys(SEND_APPS).sort(), ['chatgpt', 'chatgptwork', 'claude', 'claudeai', 'claudecode', 'codex', 'cowork', 'cursor', 'grok']);
+    assert.deepEqual(Object.keys(SEND_APPS).sort(), ['chatgpt', 'claude', 'claudeai', 'claudecode', 'codex', 'cowork', 'cursor', 'grok']);
   });
 
   t('the prompt cannot break out of its parameter', () => {

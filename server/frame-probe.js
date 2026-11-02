@@ -790,7 +790,7 @@
 
   // --- data-tdoc-send: copy a prompt and ask the shell to open an agent app
   //     with it (tdoc's own site pages only; the shell checks). The element
-  //     names the app, never a URL: data-tdoc-send="claudecode|cowork|codex|cursor|claude|claudeai|chatgpt|chatgptwork|grok",
+  //     names the app, never a URL: data-tdoc-send="claudecode|cowork|codex|cursor|claude|claudeai|chatgpt|grok",
   //     data-tdoc-send-text="#id" holds the prompt. The label is left alone. ---
   document.addEventListener('click', function (e) {
     var trigger = e.target.closest && e.target.closest('[data-tdoc-send]');
