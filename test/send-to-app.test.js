@@ -17,7 +17,6 @@ const path = require('path');
   t('each app gets its documented deep link with the prompt encoded', () => {
     assert.equal(sendToAppLink('grok', prompt).href, `https://grok.com/?q=${encodeURIComponent(prompt)}`);
     assert.equal(sendToAppLink('claudecode', prompt).href, `claude://code/new?q=${encodeURIComponent(prompt)}`);
-    assert.equal(sendToAppLink('cowork', prompt).href, `claude://cowork/new?q=${encodeURIComponent(prompt)}`);
     assert.equal(sendToAppLink('codex', prompt).href, `codex://new?prompt=${encodeURIComponent(prompt)}`);
     assert.equal(sendToAppLink('cursor', prompt).href, `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(prompt)}`);
     assert.equal(sendToAppLink('claude', prompt).href, `claude://claude.ai/new?q=${encodeURIComponent(prompt)}`);
@@ -30,7 +29,7 @@ const path = require('path');
     for (const app of ['javascript:alert(1)', 'https://evil.example', 'toString', '__proto__', '', undefined]) {
       assert.equal(sendToAppLink(app, prompt), null, String(app));
     }
-    assert.deepEqual(Object.keys(SEND_APPS).sort(), ['chatgpt', 'claude', 'claudeai', 'claudecode', 'codex', 'cowork', 'cursor', 'grok']);
+    assert.deepEqual(Object.keys(SEND_APPS).sort(), ['chatgpt', 'claude', 'claudeai', 'claudecode', 'codex', 'cursor', 'grok']);
   });
 
   t('the prompt cannot break out of its parameter', () => {
