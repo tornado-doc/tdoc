@@ -310,7 +310,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const hero = visible.slice(visible.indexOf('Send your agent this prompt'), visible.indexOf('Set up in a minute'));
   // The connect card is the hero's one action: no second "Create a free doc" above it.
   assert(!/Create a free doc/.test(visible.slice(0, visible.indexOf('Send your agent this prompt'))), 'the hero still has a Create a free doc button');
-  assert(/Claude[\s\S]*ChatGPT[\s\S]*Grok[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI[\s\S]*Grok Bot/.test(hero), 'the hero picker does not name every app');
+  for (const app of ['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'Grok', 'VS Code', 'Gemini CLI', 'Grok Bot']) assert(hero.includes(app), `the hero picker does not name ${app}`);
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
@@ -322,18 +322,23 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const pick = html.slice(html.indexOf('<div class="pick" id="get-started">'), html.indexOf('class="pick-note"'));
   assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
-  // Claude Code opens its popover; Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
+  // Claude Code (desktop app), Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
   const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
-  assert(quickApps.join(' ') === 'claudecode more', `quick connect popovers: ${quickApps.join(' ')}`);
+  assert(quickApps.join(' ') === 'grokbot more', `quick connect popovers: ${quickApps.join(' ')}`);
   const sends = [...quick.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt"/g)].map((m) => m[1]);
-  assert(sends.join(' ') === 'codex cursor claudeai chatgpt', `quick send: ${sends.join(' ')}`);
+  assert(sends.join(' ') === 'claudecode codex cursor claudeai chatgpt grok', `quick send: ${sends.join(' ')}`);
   assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
-  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'));
+  // The quick buttons open desktop apps; someone in a terminal pastes the prompt instead.
+  assert(/<p class="pick-tui">Using an agent in a terminal \(Claude Code, Codex, Cursor, Gemini CLI or another\)\? Paste the prompt there\.<\/p>/.test(pick), 'no line for terminal users');
+  // No by-hand backups for the quick-send apps: the fallback is copying the prompt.
+  assert(!/by hand/.test(pick), 'More still has by-hand backups');
+  // More holds only the two apps with neither a quick send nor a bot: VS Code and Gemini CLI.
+  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'), pick.indexOf('<div class="pick-pop pick-p-vscode"'));
   const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
-  assert(moreApps.join(' ') === 'grok vscode gemini grokbot claude cursor codex chatgpt', `More: ${moreApps.join(' ')}`);
-  assert(/href="\/me\?view=settings#agents">Add a webhook/.test(moreBody), 'More has no bot line to the Agents page');
+  assert(moreApps.join(' ') === 'vscode gemini', `More: ${moreApps.join(' ')}`);
+  assert(/href="\/me\?view=settings#agents" style="color:inherit">Add a webhook/.test(pick), 'no bot line to the Agents page');
   assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
-  const apps = ['claudecode', ...moreApps];
+  const apps = ['grokbot', ...moreApps];
   const popOf = (app) => {
     const i = pick.indexOf(`<div class="pick-pop pick-p-${app}" id="pick-pop-${app}" popover>`);
     assert(i >= 0, `${app}: no popover`);
@@ -346,19 +351,12 @@ t('names the apps it runs in, each linked to its connect step', () => {
     assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} popover has no way in`);
     assert(!/href="(cursor|vscode):/.test(body), `${app} popover links a custom scheme the frame cannot open`);
   }
-  // CLI first (docs/design/onboarding.md): Claude Code and Codex lead with the
-  // local tdoc plugin; the MCP line comes second.
-  for (const app of ['claudecode', 'codex']) {
-    const body = popOf(app);
-    const codes = [...body.matchAll(/<code id="[^"]+">([^<]+)<\/code>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
-    assert(/plugin (install|add) tdoc@tornado-tdoc$/.test(codes[0]) && / mcp add /.test(codes[1]), `${app}: local plugin first, then MCP: ${codes.join(' | ')}`);
-  }
   // Every command a popover offers is a row of plugins/README.md's install
   // table, the one place commands change.
   const readme = fs.readFileSync(path.join(root, 'plugins', 'README.md'), 'utf8');
   const table = readme.slice(readme.indexOf('## Install tdoc in your AI app'), readme.indexOf('\n---'));
   const known = new Set([...table.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
-  for (const id of ['pick-claudecode', 'pick-claudecode-mcp', 'pick-codex', 'pick-codex-mcp', 'pick-gemini']) {
+  for (const id of ['pick-gemini']) {
     const m = pick.match(new RegExp(`<code id="${id}">([^<]+)</code>`));
     assert(m, `no ${id}`);
     const cmd = m[1].replace(/&amp;/g, '&');
