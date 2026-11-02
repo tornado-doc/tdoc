@@ -226,6 +226,29 @@ function interleaveRead(env, key, during) {
     assert(byId.created === false && byId.slug === d.slug, JSON.stringify(byId));
   });
 
+  // Owner report, 2026-11-01: a team's feedback space appeared only in its
+  // maker's personal list, never with the team.
+  await t('team: its feedback spaces are listed with the team for every member (kind feedback), never for outsiders', async () => {
+    const me = async (who) => (await call('/api/me', { cookie: who.cookie })).body;
+    for (const who of [julie, bob]) {
+      const row = ((await me(who)).team_docs || []).find((d) => d.slug === teamSpace);
+      assert(row && row.team === team.id && row.kind === 'feedback' && row.origin === 'https://acme.example', `${who.login}: ${JSON.stringify(row)}`);
+      const fb = await call(`/api/me/feedback?team=${team.id}`, { cookie: who.cookie });
+      const space = (fb.body.spaces || []).find((x) => x.slug === teamSpace);
+      assert(fb.status === 200 && space && typeof space.open === 'number', `${who.login} team feedback ${fb.status} ${fb.text}`);
+      assert(Boolean(space.can_manage) === (who === julie), `${who.login} can_manage ${space.can_manage}`);
+    }
+    // Personal spaces stay out of team_docs; strangers see nothing.
+    assert(!((await me(julie)).team_docs || []).some((d) => d.slug === personal), 'a personal space listed with the team');
+    assert(!((await me(carl)).team_docs || []).some((d) => d.slug === teamSpace), 'outsider sees the team space');
+    const carlFb = await call(`/api/me/feedback?team=${team.id}`, { cookie: carl.cookie });
+    assert(carlFb.status === 200 && !(carlFb.body.spaces || []).length, `outsider team feedback ${carlFb.status} ${carlFb.text}`);
+    assert((await call('/api/me/feedback?team=nope!', { cookie: julie.cookie })).status === 404, 'bad team id');
+    // An agent's list_docs (the same /api/me rows) finds it with the team.
+    const listed = await mcp(julieOauth, 'tools/call', { name: 'list_docs', arguments: { space: 'Acme' } });
+    assert(JSON.stringify(listed.body.result).includes(teamSpace), `list_docs: ${JSON.stringify(listed.body.result).slice(0, 400)}`);
+  });
+
   await t('team: a member who is not an admin is refused, and nothing is made', async () => {
     const before = [...env.META.map.keys()].filter((k) => k.startsWith('meta:')).length;
     const res = await tool(bob.token, { origins: ['https://bob.example'], team: 'Acme' });
