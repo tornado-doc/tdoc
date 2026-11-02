@@ -17,8 +17,6 @@ first use; no API key to paste).
 | ChatGPT | **Plugins > + > Add custom MCP server**, URL `https://tdoc.dev/mcp` |
 | Cursor | [`cursor://anysphere.cursor-deeplink/mcp/install?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9`](https://cursor.com/install-mcp?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9) |
 | VS Code (Copilot) | `code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'` |
-| Gemini CLI | `git clone --depth 1 https://github.com/tornado-doc/tdoc && gemini extensions install ./tdoc/plugins/gemini` |
-| Gemini CLI, MCP only | `gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp` (then `/mcp auth tdoc` in Gemini CLI) |
 
 The older two-step Claude Code form also works:
 `claude plugin marketplace add tornado-doc/tdoc`, then
@@ -28,13 +26,7 @@ CLI). Install one of the two, not both: both carry a skill named `tdoc`.
 Codex uses the same two names: `tdoc-cloud@tornado-tdoc` is the remote MCP
 plugin, `tdoc@tornado-tdoc` the local CLI plugin.
 
-Gemini CLI has no option to install from a folder inside a repo:
-`gemini extensions install https://github.com/tornado-doc/tdoc` fails with
-"Configuration file not found ... gemini-extension.json" (tested with
-gemini-cli 0.66.0). It will work once the latest GitHub release carries
-`tdoc-gemini.tar.gz` as its only asset; see `SUBMITTING.md`.
-
-Directory listings (Claude, ChatGPT/Codex, Cursor, Cline, Gemini gallery) are
+Directory listings (Claude, ChatGPT/Codex, Cursor, Cline) are
 not live yet. `SUBMITTING.md` is the kit for submitting them, and
 `sh plugins/pack.sh` builds the upload files into `dist/plugins/`.
 
@@ -47,18 +39,18 @@ Each folder here installs the tdoc remote MCP server, `https://tdoc.dev/mcp`
 that cannot do OAuth can send an existing tdoc account token as
 `Authorization: Bearer tdoc_...`. No package here stores a token.
 
-The skill file `skills/tdoc/SKILL.md` is the same in `claude/`, `codex/`,
-`cursor/` and `gemini/`. Its `description` is copied verbatim from the repo's
+The skill file `skills/tdoc/SKILL.md` is the same in `claude/`, `codex/`
+and `cursor/`. Its `description` is copied verbatim from the repo's
 `SKILL.md`. Edit one copy, then copy it to the others.
 
 Version in every manifest: `0.9.0`, the content of `VERSION`.
 
 Logos: Claude, Codex and Cursor require the logo path to be inside the plugin
 folder (no `..`), so each plugin carries a copy of `assets/icon-512-v3.png` as
-`assets/logo.png`. The Gemini and VS Code configs have no logo field.
+`assets/logo.png`. The VS Code config has no logo field.
 
 Privacy policy: `https://tdoc.dev/privacy`, set as `privacyPolicyUrl` (Claude)
-and `interface.privacyPolicyURL` (Codex). The Cursor, Gemini and VS Code
+and `interface.privacyPolicyURL` (Codex). The Cursor and VS Code
 manifests document no privacy field.
 
 Docs were read on 2026-10-28. "Verified" means the field or step appears in
@@ -338,53 +330,6 @@ hands sign-in back to the desktop app. The https one is accepted. tdoc accepts l
 the https one, so Cursor desktop sign-in must go through the web callback.
 UNVERIFIED that Cursor desktop handles that. Cursor uses authorization code + PKCE, reads
 RFC 9728 protected resource metadata, and registers as a public client.
-
----
-
-## Gemini CLI
-
-Files:
-
-- `gemini/gemini-extension.json`: `name`, `version`, `description`,
-  `mcpServers.tdoc.httpUrl`, `contextFileName: "GEMINI.md"`
-- `gemini/GEMINI.md`: short context pointing at the tools
-- `gemini/skills/tdoc/SKILL.md`
-
-Install: `gemini extensions install` takes a GitHub repo URL or a local path,
-with the manifest at the root. There is no documented subdirectory flag, so
-install from a checkout, `gemini extensions install ./plugins/gemini`, or link
-it for development with `gemini extensions link ./plugins/gemini`. Tested
-with gemini-cli 0.66.0 in a throwaway `HOME`: the local install asks to trust
-the folder, then `gemini extensions list` shows `tdoc (0.9.0)` with the `tdoc`
-MCP server, `GEMINI.md` and the `tdoc` skill. Install by URL
-(`https://github.com/tornado-doc/tdoc`) fails today: no `gemini-extension.json`
-at the repo root.
-
-Install by URL can work without moving files: gemini-cli first downloads the
-repo's **Latest** GitHub release and, when that release has exactly one asset
-whose name has no `darwin`/`linux`/`win32`, installs that archive (the
-manifest at its root, or inside one folder). Read in the gemini-cli 0.66.0
-bundle (`findReleaseAsset`, `downloadFromGitHubRelease`) and in
-https://github.com/google-gemini/gemini-cli/blob/main/docs/extensions/releasing.md;
-not tested end to end. So attaching `dist/plugins/tdoc-gemini.tar.gz` (from
-`plugins/pack.sh`) as the only asset of each release makes
-`gemini extensions install https://github.com/tornado-doc/tdoc` work.
-
-Verified:
-
-- Manifest fields `name`, `version`, `description`, `mcpServers`,
-  `contextFileName`; agent skills in `skills/<name>/SKILL.md`; install
-  command. https://geminicli.com/docs/extensions/reference/
-- `httpUrl` is Streamable HTTP; `url` is SSE. OAuth is discovered on a 401,
-  with dynamic client registration. The default redirect URI is
-  `http://localhost:<random-port>/oauth/callback`. UNVERIFIED for tdoc: the
-  server accepts loopback only as `127.0.0.1` / `[::1]`, so Gemini CLI sign-in
-  may need a `127.0.0.1` redirect setting or the `tdoc_` Bearer header.
-  https://geminicli.com/docs/tools/mcp-server/
-
-Note: the extension reference page carries a banner saying Gemini CLI was
-replaced by Antigravity CLI for unpaid and Google One users on 2026-06-18.
-Whether Antigravity CLI loads Gemini extensions was not checked.
 
 ---
 

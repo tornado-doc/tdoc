@@ -63,7 +63,6 @@ Do this when the user pastes this link or asks you to set up tdoc. Stop at the f
    - ChatGPT (paid plans, on the web): Plugins (https://chatgpt.com/plugins) > + > Add custom MCP server, URL \`https://tdoc.dev/mcp\`, and sign in. The tools never reach the chat they were added from, so end your reply with exactly: "Then open a new chat, pick tdoc from +, and say: use tdoc to write my first doc." (every new chat needs tdoc picked).
    - Cursor: ${MCP_CURSOR_INSTALL_LINK}
    - VS Code: \`code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'\`
-   - Gemini CLI: \`git clone --depth 1 https://github.com/tornado-doc/tdoc && gemini extensions install ./tdoc/plugins/gemini\`
    - A bot or service the user runs: https://tdoc.dev/me?view=settings#agents
    - Anything else: steps for each app are at https://tdoc.dev/llms.txt
    Except in ChatGPT, ask the user to reply "done".
@@ -143,7 +142,6 @@ How to publish through it: an agent that can run shell commands writes the docum
 - VS Code (Copilot): \`code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'\`
 - Codex CLI: \`codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc\` (MCP only: \`codex mcp add tdoc --url https://tdoc.dev/mcp\`)
 - Claude Code: \`claude plugin install tdoc-cloud --marketplace tornado-doc/tdoc\`, or in a session \`/plugin marketplace add tornado-doc/tdoc\`, then \`/plugin install tdoc-cloud@tornado-tdoc\` (MCP only: \`claude mcp add --transport http tdoc https://tdoc.dev/mcp\`)
-- Gemini CLI: \`git clone --depth 1 https://github.com/tornado-doc/tdoc && gemini extensions install ./tdoc/plugins/gemini\`
 - Server card: https://tdoc.dev/mcp/server-card (also listed in https://tdoc.dev/.well-known/ai-catalog.json)
 - In a browser: https://tdoc.dev/start?connect=1
 
@@ -269,7 +267,7 @@ function docAgentView({ origin, slug, version, head, title, author, rawHtml, acc
       intro: [
         'This is the home page of tdoc (https://tdoc.dev). tdoc publishes HTML documents at shareable links. People comment on any part of a document in the browser; their own AI (Claude, ChatGPT, Grok, Cursor, VS Code, Claude Code, Codex, Gemini CLI or Grok Bot) reads the comments and publishes the next version.',
         mcp
-          ? `How to start: connect your AI to the tdoc MCP server ${origin}/mcp and sign in once. Claude: add it as a custom connector. ChatGPT: Plugins, Add, Add custom MCP server (step by step: ${origin}/d/connect-chatgpt). Grok: Connectors, New Connector, Custom. Cursor and VS Code: add it as an MCP server. Claude Code: claude mcp add --transport http tdoc ${origin}/mcp. Codex: codex mcp add tdoc --url ${origin}/mcp. Gemini CLI: gemini mcp add --transport http tdoc ${origin}/mcp, then /mcp auth tdoc. Grok Bot: ask it to connect ${origin}/mcp. Steps per app: ${origin}/llms.txt. To also let tdoc update docs while the AI is closed, connect a computer from ${origin}/start.`
+          ? `How to start: connect your AI to the tdoc MCP server ${origin}/mcp and sign in once. Claude: add it as a custom connector. ChatGPT: Plugins, Add, Add custom MCP server (step by step: ${origin}/d/connect-chatgpt). Grok: Connectors, New Connector, Custom. Cursor and VS Code: add it as an MCP server. Claude Code: claude mcp add --transport http tdoc ${origin}/mcp. Codex: codex mcp add tdoc --url ${origin}/mcp. Grok Bot: ask it to connect ${origin}/mcp. Steps per app: ${origin}/llms.txt. To also let tdoc update docs while the AI is closed, connect a computer from ${origin}/start.`
           : `How to start: open ${origin}/start in a browser, or ask your agent to install tdoc and make a first document. In Claude Code: /plugin marketplace add tornado-doc/tdoc, then /plugin install tdoc@tornado-tdoc. Any other agent: follow ${TDOC_ONBOARDING_URL}.`,
         `Pricing: free for your own docs, and for a team up to ${TEAM_FREE_DOCS} team docs with any number of members. The Team plan is $${TEAM_SEAT_PRICE_USD.month} per member a month or $${TEAM_SEAT_PRICE_USD.year} a year, for unlimited team docs and backup to storage the team owns. Agents never take a seat, and tdoc sends no AI bill: the writing runs on the Claude, ChatGPT, Claude Code or Codex plan you already have. Details: ${origin}/pricing.`,
         `For agents: ${origin}/llms.txt (short), ${origin}/llms-full.txt (everything), ${origin}/SKILL.md (how to read, comment and publish). Any tdoc document URL also answers Accept: text/markdown with its text and comments.`,
@@ -16851,7 +16849,7 @@ async function handleAgentAsk(env, req, action) {
 
 // ───────────────── Remote MCP server + OAuth 2.1 (AI apps) ─────────────────
 // tdoc for AI apps that have no terminal: Claude (connectors and plugins),
-// ChatGPT / Codex, Cursor, VS Code, Gemini CLI. One endpoint, /mcp, speaks
+// ChatGPT / Codex, Cursor, VS Code. One endpoint, /mcp, speaks
 // the Model Context Protocol over Streamable HTTP; the tools on it are thin
 // adapters that call this worker's own HTTP routes (/api/upload,
 // /api/comments, /api/agent/reply, ...) in process, with the caller's own

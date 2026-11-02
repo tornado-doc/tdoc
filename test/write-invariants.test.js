@@ -145,7 +145,7 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     assert(setup > 0 && read > setup, `setup ${setup}, read ${read}`);
     const steps = a.slice(setup, read);
     for (const s of ['ONBOARDING.md', 'tornado-doc/tdoc', 'tdoc Cloud', 'connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp',
-      'https://tdoc.dev/mcp', 'cursor.com/install-mcp', 'code --add-mcp', 'gemini extensions install', '#agents',
+      'https://tdoc.dev/mcp', 'cursor.com/install-mcp', 'code --add-mcp', '#agents',
       'get_writing_guide', 'tdoc-daemon install', 'same tdoc account']) {
       assert(steps.includes(s), `setup steps lack ${s}`);
     }
