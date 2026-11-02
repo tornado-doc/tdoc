@@ -105,6 +105,13 @@ t('names tdoc and tornado-doc', () => {
     'the decorative logo beside the wordmark must not offer visual expansion');
 });
 
+t('the closing CTA goes back to the connect card, not a second way in', () => {
+  assert(/<div class="pick" id="get-started">/.test(html), 'the connect card has no anchor');
+  const end = html.slice(html.indexOf('FINAL CTA'));
+  assert(/href="#get-started"/.test(end), 'the closing CTA does not jump to the connect card');
+  assert(!/Create a free doc/.test(end), 'the closing CTA still says Create a free doc');
+});
+
 t('links to the GitHub repo and install path', () => {
   assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc'), 'missing GitHub repo href');
   // v40: the primary CTA opens onboarding. It used to point at ONBOARDING.md,
@@ -306,7 +313,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   // and More, every app in a popover of its own (the HTML popover attribute,
   // so it works with no script). Each popover's way in works from the
   // sandboxed frame (an https link or a line to copy).
-  const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
+  const pick = html.slice(html.indexOf('<div class="pick" id="get-started">'), html.indexOf('class="pick-note"'));
   assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
   // Claude Code opens its popover; Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
