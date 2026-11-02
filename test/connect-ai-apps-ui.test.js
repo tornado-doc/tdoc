@@ -226,7 +226,7 @@ async function startServer(worker, env) {
         await pick.scrollIntoViewIfNeeded();
         assert((await pick.locator('#pick-prompt').innerText()).trim() === 'set up https://tdoc.dev/SKILL.md', 'setup prompt');
         const quick = await pick.locator('.pick-quick .pick-pill').evaluateAll((els) => els.map((l) => l.textContent.replace(/\u2197/g, '').trim()));
-        assert(JSON.stringify(quick) === JSON.stringify(['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'Grok', 'VS Code', 'Gemini CLI', 'Grok Bot']), JSON.stringify(quick));
+        assert(JSON.stringify(quick) === JSON.stringify(['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'Grok', 'Grok Bot', 'More']), JSON.stringify(quick));
         if (width > 560) {
           const rows = await pick.locator('.pick-quick > *').evaluateAll((els) => new Set(els.map((e) => { const r = e.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2 / 10); })).size);
           assert(rows <= 2, `quick connect wraps onto ${rows} lines at ${label}`);
@@ -260,9 +260,19 @@ async function startServer(worker, env) {
           grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp',
         };
         assert(await pick.getByRole('link', { name: /Add a webhook/ }).getAttribute('href') === '/me?view=settings#agents', 'bot line on the card');
+        const inMore = ['vscode', 'gemini'];
         for (const [app, needle] of Object.entries(expect)) {
-          await pick.locator(`.pick-quick .pick-pill[popovertarget="pick-pop-${app}"]`).click();
-          assert(JSON.stringify(await openPops()) === JSON.stringify([`pick-pop-${app}`]), `${app}: ${JSON.stringify(await openPops())}`);
+          if (inMore.includes(app)) {
+            await pick.locator('.pick-quick .pick-more').click();
+            assert(JSON.stringify(await openPops()) === '["pick-pop-more"]', `More: ${await openPops()}`);
+            if (app === 'vscode') await shot(page, `${label}-home-pop-more`);
+            await pick.locator(`#pick-pop-more .pick-pill[popovertarget="pick-pop-${app}"]`).click();
+          } else {
+            await pick.locator(`.pick-quick .pick-pill[popovertarget="pick-pop-${app}"]`).click();
+          }
+          // Opened from More, the app's popover stacks on top of the list; closing it goes back to the list.
+          const want = inMore.includes(app) ? [`pick-pop-${app}`, 'pick-pop-more'] : [`pick-pop-${app}`];
+          assert(JSON.stringify((await openPops()).sort()) === JSON.stringify(want.sort()), `${app}: ${JSON.stringify(await openPops())}`);
           const pop = pick.locator(`#pick-pop-${app}`);
           const text = await pop.evaluate((el) => [...el.querySelectorAll('a.pick-go')].map((a) => a.getAttribute('href')).concat([...el.querySelectorAll('code')].map((c) => c.textContent)).join(' '));
           assert(text.includes(needle), `${app}: ${text}`);
@@ -272,6 +282,10 @@ async function startServer(worker, env) {
           if (app === 'gemini') await shot(page, `${label}-home-pop-${app}`);
           if (app === 'gemini') await page.keyboard.press('Escape');
           else await pop.locator('.pick-close').click();
+          if (inMore.includes(app)) {
+            assert(JSON.stringify(await openPops()) === '["pick-pop-more"]', `${app}: closing did not go back to More: ${await openPops()}`);
+            await pick.locator('#pick-pop-more .pick-close').click();
+          }
           assert(JSON.stringify(await openPops()) === '[]', `${app}: still open ${await openPops()}`);
         }
         await context.close();

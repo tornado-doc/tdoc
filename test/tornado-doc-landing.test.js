@@ -324,7 +324,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
   // Claude Code (desktop app), Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
   const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
-  assert(quickApps.join(' ') === 'vscode gemini grokbot', `quick connect popovers: ${quickApps.join(' ')}`);
+  assert(quickApps.join(' ') === 'grokbot more', `quick connect popovers: ${quickApps.join(' ')}`);
   const sends = [...quick.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt"/g)].map((m) => m[1]);
   assert(sends.join(' ') === 'claudecode codex cursor claudeai chatgpt grok', `quick send: ${sends.join(' ')}`);
   assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
@@ -332,11 +332,13 @@ t('names the apps it runs in, each linked to its connect step', () => {
   assert(/<p class="pick-tui">Using an agent in a terminal \(Claude Code, Codex, Cursor, Gemini CLI or another\)\? Paste the prompt there\.<\/p>/.test(pick), 'no line for terminal users');
   // No by-hand backups for the quick-send apps: the fallback is copying the prompt.
   assert(!/by hand/.test(pick), 'More still has by-hand backups');
-  // Every app is on the card itself: no More list. The bot line goes to the Agents page.
-  assert(!/pick-pop-more|pick-more/.test(pick), 'the More list is back');
+  // More holds only the two apps with neither a quick send nor a bot: VS Code and Gemini CLI.
+  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'), pick.indexOf('<div class="pick-pop pick-p-vscode"'));
+  const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(moreApps.join(' ') === 'vscode gemini', `More: ${moreApps.join(' ')}`);
   assert(/href="\/me\?view=settings#agents" style="color:inherit">Add a webhook/.test(pick), 'no bot line to the Agents page');
   assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
-  const apps = quickApps;
+  const apps = ['grokbot', ...moreApps];
   const popOf = (app) => {
     const i = pick.indexOf(`<div class="pick-pop pick-p-${app}" id="pick-pop-${app}" popover>`);
     assert(i >= 0, `${app}: no popover`);
