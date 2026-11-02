@@ -144,7 +144,7 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     const read = a.indexOf('# tdoc remote document access');
     assert(setup > 0 && read > setup, `setup ${setup}, read ${read}`);
     const steps = a.slice(setup, read);
-    for (const s of ['ONBOARDING.md', 'tornado-doc/tdoc', 'tdoc Cloud', 'connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp',
+    for (const s of ['ONBOARDING.md', 'connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp', 'vscode.dev/redirect/mcp/install',
       'https://tdoc.dev/mcp', 'cursor.com/install-mcp', 'code --add-mcp', 'gemini extensions install', '#agents',
       'get_writing_guide', 'tdoc-daemon install', 'same tdoc account']) {
       assert(steps.includes(s), `setup steps lack ${s}`);
@@ -153,6 +153,10 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     // whole file as a skill to install and listed Codex and Claude Code paths instead).
     assert(/not a skill to save or install/.test(steps) && /give the user only that section/.test(steps), 'setup must say: pick your app, give only its steps');
     for (const h of ['## ChatGPT', '## Claude.ai', '## Claude Code or Codex', '## Cursor', '## VS Code', '## Gemini CLI', '## Grok']) assert(steps.includes(h), `no section ${h}`);
+    // Apps with a prefilled install link get the link, not menu steps (Claude.ai answered with Customize > Plugins > Add marketplace).
+    const claude = steps.slice(steps.indexOf('## Claude.ai'), steps.indexOf('## Claude Code or Codex'));
+    assert(claude.includes('connectorUrl=') && !/Add marketplace|Customize >/.test(claude), `Claude.ai section must be the one-click link: ${claude}`);
+    assert(/give the user that link to click/.test(steps), 'setup must prefer links over manual steps');
     const chatgpt = steps.slice(steps.indexOf('## ChatGPT'), steps.indexOf('## Claude.ai'));
     assert(chatgpt.includes('Add custom MCP server') && chatgpt.includes('paid ChatGPT plan') && chatgpt.includes('sign in first')
       && chatgpt.includes('open a new chat, pick tdoc from +') && chatgpt.includes('do not ask the user to reply "done"') && !chatgpt.includes('ONBOARDING'),
