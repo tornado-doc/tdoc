@@ -314,14 +314,13 @@ t('names the apps it runs in, each linked to its connect step', () => {
   assert(!/Create a free doc/.test(visible.slice(0, visible.indexOf('Send your agent this prompt'))), 'the hero still has a Create a free doc button');
   for (const app of ['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'Grok', 'VS Code', 'Gemini CLI', 'Grok Bot', 'Raft']) assert(hero.includes(app), `the hero picker does not name ${app}`);
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
-  const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
-  const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
-  assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
+  // No "What's an agent?" line under the card (removed on request, 2026-11-02).
+  assert(!/What's an agent\?/.test(visible), 'the agent definition line is back');
   // The hero card: the setup prompt with Copy, four quick-connect buttons
   // and More, every app in a popover of its own (the HTML popover attribute,
   // so it works with no script). Each popover's way in works from the
   // sandboxed frame (an https link or a line to copy).
-  const pick = html.slice(html.indexOf('<div class="pick" id="get-started">'), html.indexOf('class="pick-note"'));
+  const pick = html.slice(html.indexOf('<div class="pick" id="get-started">'), html.indexOf('<!-- tdoc demo'));
   assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
   // Claude Code (desktop app), Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
