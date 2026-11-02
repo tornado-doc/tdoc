@@ -37,4 +37,4 @@ user's documents (an empty list for a new account).
 ## Other apps
 
 See `plugins/README.md` in this repository for Claude, ChatGPT, Codex,
-Cursor and VS Code.
+Cursor, VS Code and Gemini CLI.
