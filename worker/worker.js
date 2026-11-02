@@ -59,7 +59,7 @@ Do this when the user pastes this link or asks you to set up tdoc. These are set
 
 **Already set up?** If you have tools named \`get_writing_guide\`, \`create_doc\` and \`get_comments\` (tdoc's MCP server), or a tdoc skill with \`bin/tdoc-doctor\`, skip to "First document".
 
-## ChatGPT (chatgpt.com or the ChatGPT app)
+## ChatGPT or ChatGPT Work (chatgpt.com or the ChatGPT app)
 
 Nothing can be installed from this chat. The user adds tdoc as a custom plugin, which needs a paid ChatGPT plan, on the web. Not signed in? Ask them to sign in first. Give them these steps:
 

@@ -246,7 +246,7 @@ async function startServer(worker, env) {
         if (SHOTS) await pick.screenshot({ path: path.join(SHOTS, `${label}-home-pick.png`) });
         // Quick send: Claude Code, Codex, Cursor, Claude.ai, ChatGPT and Grok copy the prompt and hand it to the app, filled in.
         const prompt = encodeURIComponent('set up https://tdoc.dev/SKILL.md');
-        for (const [app, href] of [['claudecode', `claude://code/new?q=${prompt}`], ['codex', `codex://new?prompt=${prompt}`], ['cursor', `cursor://anysphere.cursor-deeplink/prompt?text=${prompt}`], ['claudeai', `https://claude.ai/new?q=${prompt}`], ['chatgpt', `https://chatgpt.com/?q=${prompt}`], ['grok', `https://grok.com/?q=${prompt}`]]) {
+        for (const [app, href] of [['claudecode', `claude://code/new?q=${prompt}`], ['cowork', `claude://cowork/new?q=${prompt}`], ['codex', `codex://new?prompt=${prompt}`], ['chatgptwork', `https://chatgpt.com/?q=${prompt}`], ['cursor', `cursor://anysphere.cursor-deeplink/prompt?text=${prompt}`], ['claudeai', `https://claude.ai/new?q=${prompt}`], ['chatgpt', `https://chatgpt.com/?q=${prompt}`], ['grok', `https://grok.com/?q=${prompt}`]]) {
           // Grouped by brand: tap the brand (hover does the same on desktop), then pick the app from its menu.
           const item = pick.locator(`.pick-quick .pick-pill[data-tdoc-send="${app}"]`);
           const grp = pick.locator(`.pick-quick > .pick-grp:has([data-tdoc-send="${app}"])`);
@@ -257,7 +257,7 @@ async function startServer(worker, env) {
           }
           await item.click();
           await page.waitForFunction((h) => window.__appOpened.includes(h), href);
-          await page.getByText(/Prompt copied\. Opening (Claude Code|Codex|Cursor|Claude|ChatGPT|Grok)/).first().waitFor();
+          await page.getByText(/Prompt copied\. Opening (Claude Code|Cowork|Codex|Cursor|Claude|ChatGPT|Grok)/).first().waitFor();
         }
         if (SHOTS) await shot(page, `${label}-home-quick-send`);
         const openPops = async () => pick.locator('.pick-pop:popover-open').evaluateAll((els) => els.map((e) => e.id));
