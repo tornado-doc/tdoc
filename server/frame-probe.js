@@ -158,7 +158,6 @@
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
-      'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
       'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
       'html[data-tdoc-site] [data-tdoc-diagram-tools]{display:none!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
