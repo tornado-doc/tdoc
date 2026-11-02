@@ -3332,7 +3332,7 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     nonceAttr,
     cfgJson: safeJsonForScript(cfg),
     bootJson: safeJsonForScript({
-      frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame${isLanding ? '?tdoc_site=1' : ''}`,
+      frameSrc: `/d/${encodeURIComponent(slug)}/v/${version}/frame${isLanding ? `?tdoc_site=1${slug === LANDING_SLUG ? '&tdoc_demo=1' : ''}` : ''}`,
       oldVersion,
     }),
     runtimeJsPath: SHELL_RUNTIME_JS_PATH,
