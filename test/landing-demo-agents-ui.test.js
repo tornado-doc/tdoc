@@ -571,9 +571,9 @@ async function touchSelect(page, phrase) {
       // The plain handoff path; the scripted rewrite (demoEditRewrite) has its own tests.
       const { context, page, shot, noWrites } = await open('desktop', { viewport: { width: 1280, height: 800 } }, { demoEditRewrite: false });
       // A plain comment: ready to send.
-      await dragSelect(page, 'An AI that runs on your computer');
+      await dragSelect(page, 'or endless formatting');
       const pop = page.locator('.tdoc-popup');
-      await pop.locator('textarea').fill('Say what an agent is in fewer words');
+      await pop.locator('textarea').fill('Say this in fewer words');
       await pop.getByRole('button', { name: 'Comment', exact: true }).click();
       await pop.waitFor({ state: 'detached' });
       await page.locator('#tdoc-send-agent-btn').click();
@@ -601,9 +601,9 @@ async function touchSelect(page, phrase) {
       await page.locator('[data-comment-id] .tdoc-handoff-chip, .tdoc-pin').first().waitFor();
       await page.locator('#tdoc-send-agent-btn').click();
       await panel.getByRole('button', { name: /Agent activity/ }).click();
-      await panel.getByText(/Say what an agent is/).first().waitFor({ timeout: 5000 });
-      await panel.getByText(/Say what an agent is/).first().click();
-      const card = page.locator('[data-comment-id]').filter({ hasText: 'Say what an agent is' }).first();
+      await panel.getByText(/Say this in fewer words/).first().waitFor({ timeout: 5000 });
+      await panel.getByText(/Say this in fewer words/).first().click();
+      const card = page.locator('[data-comment-id]').filter({ hasText: 'Say this in fewer words' }).first();
       await card.locator('.tdoc-handoff-chip[data-handoff-state="answered"]').waitFor({ timeout: 8000 });
       await card.locator('.tdoc-replies-toggle').click();
       await card.getByText(/^Demo reply:/).waitFor();

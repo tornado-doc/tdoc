@@ -144,14 +144,24 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     const read = a.indexOf('# tdoc remote document access');
     assert(setup > 0 && read > setup, `setup ${setup}, read ${read}`);
     const steps = a.slice(setup, read);
-    for (const s of ['ONBOARDING.md', 'tornado-doc/tdoc', 'tdoc Cloud', 'connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp',
+    for (const s of ['ONBOARDING.md', 'connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp', 'vscode.dev/redirect/mcp/install',
       'https://tdoc.dev/mcp', 'cursor.com/install-mcp', 'code --add-mcp', 'gemini extensions install', '#agents',
       'get_writing_guide', 'tdoc-daemon install', 'same tdoc account']) {
       assert(steps.includes(s), `setup steps lack ${s}`);
     }
-    const chatgpt = steps.split('\n').find((l) => l.includes('- ChatGPT'));
-    assert(chatgpt && chatgpt.includes('open a new chat, pick tdoc from +') && chatgpt.includes('write my first doc') && steps.includes('Except in ChatGPT, ask the user to reply "done"'),
-      `ChatGPT step must send the user to a new chat, not ask for "done": ${chatgpt}`);
+    // One section per app, so the agent gives only its own app's steps (ChatGPT read the
+    // whole file as a skill to install and listed Codex and Claude Code paths instead).
+    assert(/not a skill to save or install/.test(steps) && /give the user only that section/.test(steps), 'setup must say: pick your app, give only its steps');
+    for (const h of ['## ChatGPT', '## Claude.ai', '## Claude Code or Codex', '## Cursor', '## VS Code', '## Gemini CLI', '## Grok', '## Raft']) assert(steps.includes(h), `no section ${h}`);
+    // Apps with a prefilled install link get the link, not menu steps (Claude.ai answered with Customize > Plugins > Add marketplace).
+    assert(/Register App, paste `https:\/\/tdoc\.dev\/mcp`/.test(steps), 'Raft section lacks the MCP App step');
+    const claude = steps.slice(steps.indexOf('## Claude.ai'), steps.indexOf('## Claude Code or Codex'));
+    assert(claude.includes('connectorUrl=') && !/Add marketplace|Customize >/.test(claude), `Claude.ai section must be the one-click link: ${claude}`);
+    assert(/give the user that link to click/.test(steps), 'setup must prefer links over manual steps');
+    const chatgpt = steps.slice(steps.indexOf('## ChatGPT'), steps.indexOf('## Claude.ai'));
+    assert(chatgpt.includes('Add custom MCP server') && chatgpt.includes('paid ChatGPT plan') && chatgpt.includes('sign in first')
+      && chatgpt.includes('open a new chat, pick tdoc from +') && chatgpt.includes('do not ask the user to reply "done"') && !chatgpt.includes('ONBOARDING'),
+      `ChatGPT section must walk through the custom plugin and send the user to a new chat: ${chatgpt}`);
     assert(/^name: tdoc$/m.test(a) && /description: Set up tdoc/.test(a), 'frontmatter names setup');
   });
 

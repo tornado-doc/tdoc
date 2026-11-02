@@ -1,16 +1,20 @@
 // "Quick send to" on tdoc's own site pages (the homepage connect card): a
 // button marked data-tdoc-send copies the setup prompt and opens the agent's
-// app with it filled in, the way glasser.ai does. The page names the app;
+// app with it filled in. The page names the app;
 // the URL is built here from this list, never taken from the page, and only
 // site pages may ask (document-shell checks config.isLanding): any other
 // document could otherwise prefill a reader's agent with its own words.
 export const SEND_APPS = Object.freeze({
+  // Claude's desktop app: a new Claude Code session with the prompt filled in (not sent).
+  claudecode: { name: 'Claude Code', url: (t) => `claude://code/new?q=${encodeURIComponent(t)}` },
   codex: { name: 'Codex', url: (t) => `codex://new?prompt=${encodeURIComponent(t)}` },
   cursor: { name: 'Cursor', url: (t) => `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(t)}` },
   claude: { name: 'Claude', url: (t) => `claude://claude.ai/new?q=${encodeURIComponent(t)}` },
   claudeai: { name: 'Claude', url: (t) => `https://claude.ai/new?q=${encodeURIComponent(t)}` },
   // Sends at once (not just filled in), and works signed out.
   chatgpt: { name: 'ChatGPT', url: (t) => `https://chatgpt.com/?q=${encodeURIComponent(t)}` },
+  // Grok asks "Send this message?" before sending the filled-in prompt.
+  grok: { name: 'Grok', url: (t) => `https://grok.com/?q=${encodeURIComponent(t)}` },
 });
 
 const MAX_PROMPT = 500;

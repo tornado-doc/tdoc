@@ -165,7 +165,7 @@
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
       'html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
-      'html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
+      'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
       'html[data-tdoc-site] [data-tdoc-diagram-tools]{display:none!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]:focus{box-shadow:inset 0 0 0 1px rgba(22,82,240,.18);}';
@@ -790,7 +790,7 @@
 
   // --- data-tdoc-send: copy a prompt and ask the shell to open an agent app
   //     with it (tdoc's own site pages only; the shell checks). The element
-  //     names the app, never a URL: data-tdoc-send="codex|cursor|claude|claudeai",
+  //     names the app, never a URL: data-tdoc-send="claudecode|codex|cursor|claude|claudeai|chatgpt|grok",
   //     data-tdoc-send-text="#id" holds the prompt. The label is left alone. ---
   document.addEventListener('click', function (e) {
     var trigger = e.target.closest && e.target.closest('[data-tdoc-send]');
