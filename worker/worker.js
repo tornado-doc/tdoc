@@ -46,6 +46,7 @@ const TDOC_ONBOARDING_URL = 'https://github.com/tornado-doc/tdoc/blob/main/ONBOA
 // lists them (the web forms, so they work from a plain-text file).
 const MCP_CLAUDE_CONNECTOR_LINK = 'https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=tdoc&connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp';
 const MCP_CURSOR_INSTALL_LINK = 'https://cursor.com/install-mcp?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9';
+const MCP_VSCODE_INSTALL_LINK = 'https://vscode.dev/redirect/mcp/install?name=tdoc&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A//tdoc.dev/mcp%22%7D';
 
 // Setup comes first so that "set up https://tdoc.dev/SKILL.md" works as the
 // one-line install prompt in any agent (docs/design/onboarding.md). It routes:
@@ -54,7 +55,7 @@ const MCP_CURSOR_INSTALL_LINK = 'https://cursor.com/install-mcp?name=tdoc&config
 // unchanged, and /llms.txt keeps only that part (it has its own Connect list).
 const REMOTE_SKILL_SETUP_MD = `# Set up tdoc
 
-Do this when the user pastes this link or asks you to set up tdoc. These are setup steps, not a skill to save or install. Work out which app you are running in, find its section below, and give the user only that section, in your own words. Do not list the steps for other apps.
+Do this when the user pastes this link or asks you to set up tdoc. These are setup steps, not a skill to save or install. Work out which app you are running in, find its section below, and give the user only that section, in your own words. Do not list the steps for other apps. Where a section has a link, give the user that link to click instead of steps to follow by hand.
 
 **Already set up?** If you have tools named \`get_writing_guide\`, \`create_doc\` and \`get_comments\` (tdoc's MCP server), or a tdoc skill with \`bin/tdoc-doctor\`, skip to "First document".
 
@@ -70,7 +71,7 @@ The tools never reach the chat they were added from, so do not ask the user to r
 
 ## Claude.ai, Claude Desktop or Cowork
 
-Customize > Plugins > Add > Add marketplace > \`tornado-doc/tdoc\`, install **tdoc Cloud** (not "tdoc", which needs a terminal), then Connect tdoc on its Connectors tab. It then reaches Claude Code too. No "Add marketplace"? Add the connector alone: ${MCP_CLAUDE_CONNECTOR_LINK}
+Give the user this one link and nothing else to do by hand: ${MCP_CLAUDE_CONNECTOR_LINK} It opens Add custom connector with tdoc filled in; they click Add, then Connect, and sign in to tdoc.
 
 Ask the user to reply "done", then go to "First document".
 
@@ -80,11 +81,11 @@ Follow ${TDOC_ONBOARDING_URL} end to end. It installs the local plugin, signs in
 
 ## Cursor
 
-Give the user this link: ${MCP_CURSOR_INSTALL_LINK} Ask them to reply "done".
+Give the user this one link: ${MCP_CURSOR_INSTALL_LINK} It opens Cursor with tdoc filled in; they click Install and sign in. Ask them to reply "done".
 
 ## VS Code (Copilot)
 
-Run or give the user: \`code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'\`. Ask them to reply "done".
+Give the user this one link: ${MCP_VSCODE_INSTALL_LINK} It opens VS Code with tdoc filled in; they click Install and sign in. (In a terminal: \`code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'\`.) Ask them to reply "done".
 
 ## Gemini CLI
 
