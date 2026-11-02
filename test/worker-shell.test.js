@@ -163,11 +163,12 @@ const bundler = read('bin/tdoc-bundle');
   });
 
   await t('site pages frame with ?tdoc_site=1: no fullscreen chrome, Google credits the text to the page', async () => {
-    if (!worker.includes("/frame${isLanding ? '?tdoc_site=1' : ''}")) throw new Error('landing frameSrc lacks tdoc_site=1');
+    if (!worker.includes("/frame${isLanding ? `?tdoc_site=1${slug === LANDING_SLUG ? '&tdoc_demo=1' : ''}` : ''}")) throw new Error('landing frameSrc lacks tdoc_site=1 / home tdoc_demo=1');
     if (!worker.includes("'X-Robots-Tag': 'noindex, indexifembedded'")) throw new Error('site frame robots header missing');
     if (!read('server/visual-viewer.js').includes("get('tdoc_site') === '1') return;")) throw new Error('visual viewer still runs on site pages');
     const probe = read('server/frame-probe.js');
-    if (!probe.includes('if (SITE && !reanchorMode) return false;')) throw new Error('bare click still comments on site pages');
+    if (!probe.includes('if (SITE && !SITE_DEMO && !reanchorMode) return false;')) throw new Error('bare click still comments on plain site pages');
+    if (!/data-tdoc-site-plain\]\[data-tdoc-interaction-mode="comment"\] body/.test(probe)) throw new Error('the home page lost its comment cursor or plain pages gained it');
     const shell = require(path.join(ROOT, 'server/shell.js'));
     const links = shell.linksFromHtml('<a href="/pricing">Pricing</a><a href="javascript:x">x</a><a href="/pricing">again</a><a href="https://e.x/"><b>Out</b></a>');
     if (JSON.stringify(links) !== JSON.stringify([['Pricing', '/pricing'], ['Out', 'https://e.x/']])) throw new Error('linksFromHtml: ' + JSON.stringify(links));
