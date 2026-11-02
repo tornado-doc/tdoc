@@ -20,6 +20,12 @@
 //   team agent    asking it in Ask shows, before Send, that its answer is a
 //                 comment everyone sees; the question is posted and the
 //                 question goes to the agent in that thread. No error.
+//   one draft     the text typed in Ask stays when switching to Edit and
+//                 back, again and again, with focus and the caret where they
+//                 were; Edit's comment selection ("1 of 3 comments included")
+//                 survives the switches too; and both survive closing and
+//                 reopening the panel. Desktop 1280 and phone 390, Chromium
+//                 and WebKit.
 // Run with: node test/ask-send-switch-ui.test.js
 
 const fs = require('fs');
@@ -28,7 +34,7 @@ const { requirePlaywrightOrSkip } = require('./helpers/fixture-server');
 const { loadWorker, makeEnv, issue } = require('./helpers/worker-harness');
 const { loadRuntimeAssets } = require('../server/runtime-assets');
 
-const { chromium, devices } = requirePlaywrightOrSkip('ask-send-switch-ui.test.js');
+const { chromium, webkit, devices } = requirePlaywrightOrSkip('ask-send-switch-ui.test.js');
 const SHOTS = process.env.TDOC_UI_SHOTS || '';
 const MODEL = 'https://model.invalid/v1';
 const SLUG = 'team-plan';
@@ -103,8 +109,8 @@ async function startServer(worker, env) {
   const browser = await chromium.launch({ headless: true });
   const DESKTOP = { viewport: { width: 1280, height: 800 } };
   const PHONE = { ...devices['iPhone 13'], viewport: { width: 390, height: 844 }, defaultBrowserType: undefined };
-  const open = async (who, opts, context = null) => {
-    const ctx = context || await browser.newContext(opts);
+  const open = async (who, opts, context = null, engine = browser) => {
+    const ctx = context || await engine.newContext(opts);
     if (!context) await ctx.addCookies([{ name: 'tdoc_sid', value: who.cookie.split('=')[1], domain: '127.0.0.1', path: '/' }]);
     // The homepage demo's scripted Edit is pinned on: a real doc must still
     // get no ready request and no rewrite message to its frame.
@@ -458,6 +464,79 @@ async function startServer(worker, env) {
         await context.close();
       });
     }
+
+    // One draft across Ask and Edit: switching never erases what was typed.
+    let webkitBrowser = null;
+    for (const engine of ['chromium', 'webkit']) for (const phone of [false, true]) {
+      const width = phone ? 390 : 1280;
+      await t(`${phone ? 'phone' : 'desktop'} ${width} ${engine}: the typed text, the caret and the comment selection stay across Ask ↔ Edit switches and closing the panel`, async () => {
+        const b = engine === 'webkit' ? (webkitBrowser ||= await webkit.launch({ headless: true })) : browser;
+        for (const text of [`${engine} ${width}: one`, `${engine} ${width}: two`]) await post(text);
+        const { page, context, errors } = await open(bob, phone ? PHONE : DESKTOP, null, b);
+        let panel = await askAi(page, phone);
+        if (!(await modeIs(panel, 'Ask'))) await pickMode(page, panel, 'Ask');
+        const askBox = () => panel.getByRole('textbox', { name: 'Ask about this document' });
+        const editBox = () => panel.getByRole('textbox', { name: 'What should the agent change?' });
+        await askBox().click();
+        await page.keyboard.type('Why does billing ship first');
+        for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowLeft');
+        let want = 'Why does billing ship first';
+        let at = want.length - 5;
+        const holds = async (box, where) => {
+          await box.waitFor();
+          const got = await box.evaluate((el) => ({ value: el.value, focused: el === document.activeElement, start: el.selectionStart, end: el.selectionEnd }));
+          if (got.value !== want) throw new Error(`${where}: the text is ${JSON.stringify(got.value)}, not ${JSON.stringify(want)}`);
+          if (!got.focused) throw new Error(`${where}: the input is not focused`);
+          if (got.start !== at || got.end !== at) throw new Error(`${where}: the caret is at ${got.start}-${got.end}, not ${at}`);
+        };
+        await pickMode(page, panel, 'Edit');
+        await holds(editBox(), 'Ask → Edit');
+        // Uncheck one pending comment: "k-1 of k comments included".
+        const summary = panel.locator('.tdoc-ask-send-summary');
+        await summary.waitFor();
+        const total = Number((await summary.innerText()).match(/(\d+) comments? included/)[1]);
+        await summary.getByRole('button', { name: 'Choose' }).click();
+        await panel.getByRole('checkbox', { name: new RegExp(`${engine} ${width}: one`) }).click();
+        await summary.getByRole('button', { name: 'Done' }).click();
+        const picked = `${total - 1} of ${total} comments included · Choose`;
+        await summary.filter({ hasText: picked }).waitFor();
+        // Typing in Edit is the same draft.
+        await editBox().click();
+        await editBox().evaluate((el, p) => el.setSelectionRange(p, p), at);
+        await page.keyboard.type('really ');
+        want = `${want.slice(0, at)}really ${want.slice(at)}`;
+        at += 'really '.length;
+        await shot(page, `one-draft-edit-${width}-${engine}.png`);
+        for (let round = 1; round <= 2; round++) {
+          await pickMode(page, panel, 'Ask');
+          await holds(askBox(), `Edit → Ask (${round})`);
+          await pickMode(page, panel, 'Edit');
+          await holds(editBox(), `Ask → Edit (${round})`);
+          await summary.filter({ hasText: picked }).waitFor({ timeout: 3000 });
+          if (await panel.getByRole('checkbox').count()) throw new Error('the Choose list reopened');
+        }
+        await pickMode(page, panel, 'Ask');
+        await holds(askBox(), 'Edit → Ask (last)');
+        await shot(page, `one-draft-ask-${width}-${engine}.png`);
+        // Close the panel and open it again: the draft is still there; Edit
+        // keeps the selection.
+        if (phone) await page.getByRole('button', { name: 'Close comments' }).click();
+        else await page.keyboard.press('Escape');
+        await panel.waitFor({ state: 'detached', timeout: 5000 });
+        panel = await askAi(page, phone);
+        at = want.length;
+        if (!(await modeIs(panel, 'Ask'))) throw new Error('reopened not in Ask');
+        if ((await askBox().inputValue()) !== want) throw new Error(`reopened: the text is ${JSON.stringify(await askBox().inputValue())}`);
+        await pickMode(page, panel, 'Edit');
+        await holds(editBox(), 'reopened, Ask → Edit');
+        await panel.locator('.tdoc-ask-send-summary').filter({ hasText: picked }).waitFor({ timeout: 3000 });
+        const layout = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
+        if (layout.scrollWidth > layout.width + 1) throw new Error(JSON.stringify(layout));
+        if (errors.length) throw new Error(errors.join('\n'));
+        await context.close();
+      });
+    }
+    if (webkitBrowser) await webkitBrowser.close();
   } finally {
     await browser.close();
     server.close();

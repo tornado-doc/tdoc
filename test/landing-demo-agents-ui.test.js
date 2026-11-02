@@ -17,6 +17,9 @@
 //     430 and 390) the drawer gives way to a slim "Editing…" bar that
 //     becomes the call to action, and the paragraph stays fully above it;
 //     reduced motion swaps the text at once; flag off, Edit opens empty;
+//     what the visitor typed in Ask is kept: Edit shows the fixed request,
+//     back in Ask their own text is there (desktop 1280 and phone 390,
+//     Chromium and WebKit);
 //   - no request reaches /api/comments, /api/notify or /api/docs/*, and
 //     nothing but GETs reaches /api at all.
 // Desktop 1280/1440 and phone 390/430. Screenshots: TDOC_UI_SHOTS (default
@@ -363,6 +366,44 @@ async function touchSelect(page, phrase) {
     // A different instruction (plain demo reply, no rewrite) is covered by
     // tornado-doc-landing.test.js against the backend: the visitor can no
     // longer type one.
+    for (const engine of ['chromium', 'webkit']) for (const width of [1280, 390]) {
+      await t(`${width === 390 ? 'phone' : 'desktop'} ${width} ${engine}: Edit shows the fixed request; back in Ask, the visitor's own text is still there`, async () => {
+        const phone = width === 390;
+        const opts = phone ? { ...devices['iPhone 13'], defaultBrowserType: undefined, viewport: { width, height: 844 } } : { viewport: { width, height: 800 } };
+        const { context, page, shot, noWrites } = await open(`keep-${width}-${engine}`, opts, REWRITE_ON, engine);
+        let panel;
+        if (phone) {
+          await page.locator('.tdoc-fab').click();
+          panel = page.locator('#tdoc-comment-layer .tdoc-ask-panel');
+          for (let i = 0; i < 3; i++) {
+            await page.locator('.tdoc-drawer-tabs').getByText('Ask AI').click();
+            try { await panel.getByRole('button', { name: /^Mode:/ }).waitFor({ timeout: 4000 }); break; } catch (e) { if (i === 2) throw e; }
+          }
+        } else {
+          await page.locator('#tdoc-send-agent-btn').click();
+          panel = page.locator('.tdoc-ask-panel');
+        }
+        const ask = panel.getByRole('textbox', { name: 'Ask about this document' });
+        const mine = 'What does tdoc do for my team?';
+        await ask.click();
+        await page.keyboard.type(mine);
+        for (let round = 1; round <= 2; round++) {
+          const box = await pickEdit(page, panel);
+          if ((await box.inputValue()) !== script.prompt) throw new Error(`Edit (${round}): ${JSON.stringify(await box.inputValue())}`);
+          if ((await box.getAttribute('readonly')) === null) throw new Error(`Edit (${round}): the request is not read-only`);
+          if (round === 1) await shot(`keep-edit-${width}-${engine}.png`);
+          await panel.getByRole('button', { name: /^Mode:/ }).click();
+          await page.getByRole('menuitem', { name: /^Ask/ }).click();
+          await ask.waitFor();
+          if ((await ask.inputValue()) !== mine) throw new Error(`back in Ask (${round}): ${JSON.stringify(await ask.inputValue())}`);
+          if (!(await ask.evaluate((el) => el === document.activeElement))) throw new Error(`back in Ask (${round}): not focused`);
+        }
+        await shot(`keep-ask-${width}-${engine}.png`);
+        noWrites();
+        await context.close();
+      });
+    }
+
     await t('desktop: the request can\'t be changed or emptied; flag off, Edit opens empty and editable', async () => {
       const { context, page, noWrites } = await open('desktop-fixed', { viewport: { width: 1280, height: 800 } }, REWRITE_ON);
       await page.locator('#tdoc-send-agent-btn').click();
