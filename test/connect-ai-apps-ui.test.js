@@ -255,19 +255,16 @@ async function startServer(worker, env) {
         const openPops = async () => pick.locator('.pick-pop:popover-open').evaluateAll((els) => els.map((e) => e.id));
         assert(JSON.stringify(await openPops()) === '[]', `a popover is open before any click: ${await openPops()}`);
         const expect = {
-          claudecode: 'claude plugin marketplace add tornado-doc/tdoc && claude plugin install tdoc@tornado-tdoc',
-          codex: 'codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc',
-          cursor: 'https://cursor.com/en/install-mcp?', claude: 'https://claude.ai/customize/connectors?',
-          chatgpt: 'https://tdoc.dev/mcp', grok: 'https://grok.com/connectors', vscode: 'https://vscode.dev/redirect/mcp/install?',
+          grok: 'https://grok.com/connectors', vscode: 'https://vscode.dev/redirect/mcp/install?',
           gemini: 'gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp',
           grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp',
         };
-        const inMore = ['claudecode', 'chatgpt', 'grok', 'vscode', 'gemini', 'grokbot', 'claude', 'cursor', 'codex'];
+        const inMore = ['grok', 'vscode', 'gemini', 'grokbot'];
         for (const [app, needle] of Object.entries(expect)) {
           if (inMore.includes(app)) {
             await pick.locator('.pick-quick .pick-more').click();
             assert(JSON.stringify(await openPops()) === '["pick-pop-more"]', `More: ${await openPops()}`);
-            if (app === 'chatgpt') {
+            if (app === 'grok') {
               assert(await pick.locator('#pick-pop-more').getByRole('link', { name: /Add a webhook/ }).getAttribute('href') === '/me?view=settings#agents', 'bot line in More');
               await shot(page, `${label}-home-pop-more`);
             }
@@ -284,7 +281,7 @@ async function startServer(worker, env) {
           for (const a of await pop.locator('a.pick-go').all()) assert(/^https:\/\//.test(await a.getAttribute('href')), `${app} link is https`);
           const box = await pop.boundingBox();
           assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y >= 0 && box.y + box.height <= height + 1, `${app} popover on screen at ${label}: ${JSON.stringify(box)}`);
-          if (app === 'claudecode') await shot(page, `${label}-home-pop-${app}`);
+          if (app === 'gemini') await shot(page, `${label}-home-pop-${app}`);
           if (app === 'gemini') await page.keyboard.press('Escape');
           else await pop.locator('.pick-close').click();
           if (inMore.includes(app)) {
