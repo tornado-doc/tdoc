@@ -112,6 +112,12 @@ t('the closing CTA goes back to the connect card, not a second way in', () => {
   assert(!/Create a free doc/.test(end), 'the closing CTA still says Create a free doc');
 });
 
+t('site pages keep the comment cursor; links and buttons still point', () => {
+  const probe = fs.readFileSync(path.join(__dirname, '..', 'server', 'frame-probe.js'), 'utf8');
+  assert(!/data-tdoc-site\]\[data-tdoc-interaction-mode="comment"\] body \*\{cursor:auto/.test(probe), 'site pages hide the comment cursor again');
+  assert(/data-tdoc-site\]\[data-tdoc-interaction-mode="comment"\] button/.test(probe), 'site-page buttons lost their pointer');
+});
+
 t('links to the GitHub repo and install path', () => {
   assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc'), 'missing GitHub repo href');
   // v40: the primary CTA opens onboarding. It used to point at ONBOARDING.md,
