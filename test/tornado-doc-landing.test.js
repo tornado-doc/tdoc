@@ -110,7 +110,7 @@ t('the closing CTA is the same prompt card, not a button', () => {
   assert(/<div class="pick pick-end">/.test(end), 'the closing CTA has no prompt card');
   assert(/<code id="pick-prompt-end">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt-end"/.test(end), 'the closing card has no prompt with Copy');
   const sends = [...end.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt-end"/g)].map((m) => m[1]);
-  assert(sends.join(' ') === 'claudeai cowork claudecode chatgpt chatgptwork codex cursor grok', `closing quick send: ${sends.join(' ')}`);
+  assert(sends.join(' ') === 'claudecode cowork claudeai codex chatgptwork chatgpt cursor grok', `closing quick send: ${sends.join(' ')}`);
   assert(!/Create a free doc|Get started|browse the looks|btn-primary/.test(end), 'the closing CTA still has the old button');
 });
 
@@ -327,7 +327,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
   assert(quickApps.join(' ') === 'grokbot raft more', `quick connect popovers: ${quickApps.join(' ')}`);
   const sends = [...quick.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt"/g)].map((m) => m[1]);
-  assert(sends.join(' ') === 'claudeai cowork claudecode chatgpt chatgptwork codex cursor grok', `quick send: ${sends.join(' ')}`);
+  assert(sends.join(' ') === 'claudecode cowork claudeai codex chatgptwork chatgpt cursor grok', `quick send: ${sends.join(' ')}`);
   assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
   // No by-hand backups for the quick-send apps: the fallback is copying the prompt.
   assert(!/by hand/.test(pick), 'More still has by-hand backups');
@@ -337,11 +337,11 @@ t('names the apps it runs in, each linked to its connect step', () => {
   assert(moreApps.join(' ') === 'vscode gemini', `More: ${moreApps.join(' ')}`);
   assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
   const apps = ['grokbot', 'raft', ...moreApps];
-  // One row grouped by brand: Claude and ChatGPT (Chat, Work, Code), Cursor, Grok (Grok, Grok Bot), Raft, More.
+  // One row grouped by brand: Claude and ChatGPT (Code, Work, Chat), Cursor, Grok (Grok, Grok Bot), Raft, More.
   const brands = [...quick.matchAll(/<button type="button" class="pick-pill pick-brand"[^>]*>[\s\S]*?<span>([^<]+)<\/span>/g)].map((m) => m[1]);
   assert(brands.join(' ') === 'Claude ChatGPT Grok', `brand groups: ${brands.join(' ')}`);
   const menus = [...quick.matchAll(/<div class="pick-menu">([\s\S]*?)<\/div><\/div>/g)].map((m) => [...m[1].matchAll(/(?:data-tdoc-send|popovertarget)="(?:pick-pop-)?([a-z]+)"/g)].map((x) => x[1]).join('+'));
-  assert(menus.join(' ') === 'claudeai+cowork+claudecode chatgpt+chatgptwork+codex grok+grokbot', `brand menus: ${menus.join(' ')}`);
+  assert(menus.join(' ') === 'claudecode+cowork+claudeai codex+chatgptwork+chatgpt grok+grokbot', `brand menus: ${menus.join(' ')}`);
   assert(/\.pick-grp:hover \.pick-menu, \.pick-grp:focus-within \.pick-menu \{ display:flex; \}/.test(html), 'brand menus do not open on hover and focus');
   assert(/\.pick-quick:has\(\.pick-grp:hover\) \.pick-grp:not\(:hover\) \.pick-menu \{ display:none; \}/.test(html), 'two brand menus can be open at once');
   // One short line under the buttons: ask for a missing app.
