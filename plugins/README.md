@@ -26,8 +26,6 @@ CLI). Install one of the two, not both: both carry a skill named `tdoc`.
 Codex uses the same two names: `tdoc-cloud@tornado-tdoc` is the remote MCP
 plugin, `tdoc@tornado-tdoc` the local CLI plugin.
 
-Directory listings (Claude, ChatGPT/Codex, Cursor, Cline) are
-not live yet. `SUBMITTING.md` is the kit for submitting them, and
 `sh plugins/pack.sh` builds the upload files into `dist/plugins/`.
 
 ---

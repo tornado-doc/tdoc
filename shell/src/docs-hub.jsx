@@ -270,10 +270,34 @@ function DocsToolbar({ query, onQuery, sort, onSort, children }) {
 
 // Feedback spaces: one row per app, with where its comments stand. The row
 // opens the space's own page (the comment list), not a document.
-function FeedbackList({ spaces: initial }) {
+function FeedbackList({ spaces: initial, teams = [] }) {
   // Counts cost a comment read per space, so they load when the tab opens.
   const [spaces, setSpaces] = useState(initial);
   const [embedding, setEmbedding] = useState(null);
+  const [teamFirst, setTeamFirst] = useState(null);
+  // Site mode lets many people comment into one space, and many people's
+  // work belongs to a team. A personal space whose owner runs a team is
+  // offered the move first (the doc picker and /api/team/move), with one
+  // click to stay personal. Only teams this person admins: a team doc is
+  // managed by its admins, so a member's move would lose them the setting.
+  const adminTeams = (teams || []).filter((team) => team.role === 'admin');
+  const addToSite = (space) => {
+    if (!space.site && !space.workspace_id && adminTeams.length) setTeamFirst({ space, busy: false, error: '' });
+    else setEmbedding(space);
+  };
+  const moveFirst = async (team) => {
+    const { space } = teamFirst;
+    setTeamFirst((current) => ({ ...current, busy: true, error: '' }));
+    try {
+      await moveDocsToTeam([space.slug], team.id);
+      const moved = { ...space, workspace_id: team.id };
+      setSpaces((list) => list.map((s) => (s.slug === space.slug ? moved : s)));
+      setTeamFirst(null);
+      setEmbedding(moved);
+    } catch (err) {
+      setTeamFirst((current) => ({ ...current, busy: false, error: err.message || 'Could not move this space.' }));
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     fetch('/api/me/feedback', { credentials: 'same-origin' })
@@ -317,7 +341,7 @@ function FeedbackList({ spaces: initial }) {
               </div>
             </a>
             {space.mine ? (
-              <AppButton className="tdoc-fb-embed-btn" onClick={() => setEmbedding(space)}>
+              <AppButton className="tdoc-fb-embed-btn" onClick={() => addToSite(space)}>
                 {space.site ? 'Site settings' : 'Add to your site'}
               </AppButton>
             ) : null}
@@ -325,6 +349,20 @@ function FeedbackList({ spaces: initial }) {
         );
       })}
     </div>
+    {teamFirst ? (
+      <MoveToTeamDialog
+        title="Move it to a team first?"
+        intro="Comments from your site's visitors are team work: in a team, its members see them and its admins decide who else can comment."
+        teams={adminTeams}
+        count={1}
+        busy={teamFirst.busy}
+        error={teamFirst.error}
+        skipLabel="Keep it personal"
+        onSkip={() => { const { space } = teamFirst; setTeamFirst(null); setEmbedding(space); }}
+        onClose={() => { if (!teamFirst.busy) setTeamFirst(null); }}
+        onMove={moveFirst}
+      />
+    ) : null}
     {embedding ? (
       <SiteEmbedDialog
         space={embedding}
@@ -384,7 +422,7 @@ function SiteEmbedDialog({ space, onClose, onSaved }) {
           <label className="tdoc-send-label" htmlFor="tdoc-site-origins">Site addresses <span>one per line</span></label>
           <textarea id="tdoc-site-origins" className="tdoc-notify-instruction" rows={2} value={origins} onChange={(e) => setOrigins(e.target.value)} placeholder="https://example.com" />
         </div>
-        <p className="tdoc-send-hint">Who can comment follows this space's <a href={`/d/${encodeURIComponent(space.slug)}?doc=1&share=1`}>Share settings</a>, like any doc.</p>
+        <p className="tdoc-send-hint">Who can comment follows this space's <a href={`/d/${encodeURIComponent(space.slug)}?share=1`}>Share settings</a>, like any doc.</p>
         {snippet ? (
           <div className="tdoc-send-field">
             <span className="tdoc-send-label">Paste this into your site</span>
@@ -1176,7 +1214,7 @@ export function DocsHub({ boot }) {
 
         {view === 'comments' ? (
           <section className="pane" id="pane-feedback">
-            <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} />
+            <FeedbackList spaces={Array.isArray(boot.feedback) ? boot.feedback : []} teams={teams} />
           </section>
         ) : null}
         {view === 'trash' ? (
