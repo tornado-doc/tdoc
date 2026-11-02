@@ -72,6 +72,9 @@ const OFFLINE = [
   'operator-fallback.test.js',  // TDOC_OWNER owns only ownerless docs, not email accounts' docs
   'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
+  'feedback-space-mcp.test.js', // create_feedback_space: agent-made site space, team-admin rule, dedupe; site binding vs Share race
+  'cli-mcp-parity.test.js',     // AGENTS.md: every MCP tool maps to an HTTP route and a CLI command (or a stated exception)
+
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
   'local-agent.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
   'team-agent.test.js',         // team agents: admin adds, members call, one team's reach, survives the adder, revoke
@@ -115,6 +118,7 @@ const OFFLINE = [
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'resolve-a-thread.test.js',
   'onboarding-journey.test.js',
+  'send-to-app.test.js', // homepage quick send: allowlisted app deep links, site pages only
   'feature-flags.test.js', // flag registry: dev-mode-only until default flips; unknown names off
   'dev-mode.test.js', // Dev mode switch (allow-list only, per account) + onboarding never returns on re-login
   'setup-gate.test.js', // the journey: two doors, three server-driven bridges, no daemon // #357 a person can resolve; resolved threads leave the margin
@@ -208,7 +212,7 @@ const BROWSER = [
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
-  'ask-send-switch-ui.test.js', // Ask AI: Ask | Send to agent switch (sends ready comments, 0 ready disabled, mode remembered), one row per team agent, team agent answers in public; no phone paper-plane
+  'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
   'phone-ask-ai-scroll-ui.test.js', // WebKit + Chromium phone: a long Ask AI answer scrolls to its end in the drawer, the document scrolls after closing
   'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, mode switch in the bar, comments filter) and the composer's @agent pill / Answers only / Only me, desktop + phone, team docs

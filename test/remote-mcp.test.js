@@ -383,7 +383,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const up = await call('/api/upload', { method: 'POST', token: julieConn.access_token, body: { slug: 'direct', version: 1, html: '<p>x</p>' } });
     assert(up.status === 403, `upload ${up.status}`);
     const ok = await mcp(julieConn.access_token, 'tools/list');
-    assert(ok.status === 200 && ok.body.result.tools.length === 13, ok.text.slice(0, 200));
+    assert(ok.status === 200 && ok.body.result.tools.length === 14, ok.text.slice(0, 200));
   });
 
   await t('expired or wrong-audience OAuth tokens get 401', async () => {
@@ -548,7 +548,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
   await t('tools/list carries annotations and the authoring contract; resources and prompts serve the guides', async () => {
     const tools = (await mcp(julieConn.access_token, 'tools/list')).body.result.tools;
     const names = tools.map((x) => x.name).sort().join(',');
-    assert(names === 'answer_question,commit_upload,create_doc,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', names);
+    assert(names === 'answer_question,commit_upload,create_doc,create_feedback_space,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', names);
     const create = tools.find((x) => x.name === 'create_doc');
     // The contract lives in one resource; the write tools point at it.
     for (const name of ['create_doc', 'update_doc']) assert(tools.find((x) => x.name === name).description.includes('Call get_writing_guide first, then write.'), `${name} points at get_writing_guide`);
@@ -559,7 +559,8 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     // Every client pays for tools/list on each connection: keep it small.
     const listed = await mcp(julieConn.access_token, 'tools/list', {}, { legacy: true });
     const bytes = Buffer.byteLength(listed.text);
-    assert(bytes <= 8000, `tools/list is ${bytes} bytes; the budget is 8000 (move guidance into tdoc://authoring/essentials.md)`);
+    // 8000 for the first 13 tools; create_feedback_space added ~550.
+    assert(bytes <= 8600, `tools/list is ${bytes} bytes; the budget is 8600 (move guidance into tdoc://authoring/essentials.md)`);
     for (const x of tools) assert(x.description.length <= 400, `${x.name} description is ${x.description.length} chars`);
     assert(tools.find((x) => x.name === 'get_doc').annotations.readOnlyHint === true && create.annotations.readOnlyHint === false, 'annotations');
     assert(tools.find((x) => x.name === 'share_doc').annotations.destructiveHint === true, 'share_doc is destructive: hosts ask before it runs');
@@ -706,6 +707,21 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(c.status === 200 && c.body.id, c.text);
     const list = await tool(julieConn.access_token, 'get_comments', { slug: julieSlug });
     assert(list.structuredContent.comments.some((x) => x.id === c.body.id && x.anchor === 'one click'), JSON.stringify(list.structuredContent).slice(0, 300));
+    // An area left on an app: the agent gets the page, the container's
+    // selector, the box inside it and what is under it.
+    const areaAnchor = { kind: 'product', url: 'https://app.example.com/reports?tab=2', selector: '#signups-card', tag: 'section', text: 'March',
+      label: 'Area 120×60 · “March”', rect: { x: 40, y: 300, width: 120, height: 60 }, viewport: { width: 1200, height: 800, device_pixel_ratio: 2 },
+      region: { container_text: 'Signups March', rel: { x: 20, y: 10, width: 120, height: 60 }, frac: { x: 0.08, y: 0.1, width: 0.5, height: 0.6 },
+        scroll: { x: 0, y: 200 }, elements: [{ selector: '#signups-chart', tag: 'canvas' }] } };
+    const onArea = await call('/api/comments', { method: 'POST', cookie: carl.cookie, headers: origin, body: { slug: julieSlug, version: 1, text: 'The March bar looks wrong', anchor: areaAnchor } });
+    assert(onArea.status === 200 && onArea.body.id, onArea.text);
+    const withArea = await tool(julieConn.access_token, 'get_comments', { slug: julieSlug });
+    const area = withArea.structuredContent.comments.find((x) => x.id === onArea.body.id);
+    assert(area && area.anchor === 'March' && area.where && area.where.selector === '#signups-card' && area.where.url === areaAnchor.url, JSON.stringify(area));
+    assert(area.where.area.rel.width === 120 && area.where.area.frac.width === 0.5 && area.where.area.elements[0].selector === '#signups-chart' && area.where.area.text === 'March', JSON.stringify(area.where));
+    assert(withArea.content[0].text.includes('[page /reports?tab=2 · #signups-card · area 120×60 at (20, 10) inside it]'), withArea.content[0].text);
+    const removed = await call(`/api/comments?slug=${julieSlug}&version=1&id=${onArea.body.id}`, { method: 'DELETE', cookie: carl.cookie, headers: origin });
+    assert(removed.status === 200, removed.text);
     const early = await tool(julieConn.access_token, 'reply_to_comment', { slug: julieSlug, comment_id: c.body.id, text: 'Done', status: 'applied', applied_in: 2 });
     assert(!early.isError && early.structuredContent.status === 'answered' && early.structuredContent.downgraded_from === 'applied', 'applied without a new version is recorded as answered');
     await call('/api/comments', { method: 'POST', cookie: carl.cookie, headers: origin, body: { slug: julieSlug, version: 1, parent_id: c.body.id, text: 'Please change the doc' } });

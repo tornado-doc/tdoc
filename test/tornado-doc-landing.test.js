@@ -280,7 +280,9 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Use tdoc in/.test(visible), 'the hero app picker should be "Use tdoc in", not a borrowed user list');
+  // The hero connect card, after glasser.ai: one sentence, the setup prompt,
+  // one row of quick connect.
+  assert(/Send your agent this prompt to get started\.[\s\S]*set up https:\/\/tdoc\.dev\/SKILL\.md[\s\S]*Quick connect/.test(visible), 'the hero connect card is not sentence, prompt, quick connect');
 });
 
 t('names the apps it runs in, each linked to its connect step', () => {
@@ -292,23 +294,62 @@ t('names the apps it runs in, each linked to its connect step', () => {
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
-  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Set up in a minute'));
+  const hero = visible.slice(visible.indexOf('Send your agent this prompt'), visible.indexOf('Set up in a minute'));
+  // The connect card is the hero's one action: no second "Create a free doc" above it.
+  assert(!/Create a free doc/.test(visible.slice(0, visible.indexOf('Send your agent this prompt'))), 'the hero still has a Create a free doc button');
   assert(/Claude[\s\S]*ChatGPT[\s\S]*Grok[\s\S]*Cursor[\s\S]*VS Code[\s\S]*Claude Code[\s\S]*Codex[\s\S]*Gemini CLI[\s\S]*Grok Bot/.test(hero), 'the hero picker does not name every app');
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
   const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
   assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
-  // The hero picker: one radio per app, the first checked, and each panel's way
-  // in works from the sandboxed frame (an https link or a line to copy).
+  // The hero card: the setup prompt with Copy, four quick-connect buttons
+  // and More, every app in a popover of its own (the HTML popover attribute,
+  // so it works with no script). Each popover's way in works from the
+  // sandboxed frame (an https link or a line to copy).
   const pick = html.slice(html.indexOf('<div class="pick">'), html.indexOf('class="pick-note"'));
-  const radios = [...pick.matchAll(/<input type="radio" name="pick" id="pick-r-([a-z]+)"/g)].map((m) => m[1]);
-  assert(radios.join(' ') === 'claude chatgpt grok cursor vscode claudecode codex gemini grokbot', `picker radios: ${radios.join(' ')}`);
-  assert(/id="pick-r-claude" class="pick-radio" checked/.test(pick), 'Claude is not picked first');
-  for (const app of radios) {
-    const panel = pick.slice(pick.indexOf(`class="pick-panel pick-p-${app}"`));
-    const body = panel.slice(0, panel.indexOf('</div>', panel.indexOf('</p>')) + 6);
-    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} panel has no way in`);
-    assert(!/href="(cursor|vscode):/.test(body), `${app} panel links a custom scheme the frame cannot open`);
+  assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
+  const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
+  // Claude Code opens its popover; Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
+  const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(quickApps.join(' ') === 'claudecode more', `quick connect popovers: ${quickApps.join(' ')}`);
+  const sends = [...quick.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt"/g)].map((m) => m[1]);
+  assert(sends.join(' ') === 'codex cursor claudeai chatgpt', `quick send: ${sends.join(' ')}`);
+  assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
+  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'));
+  const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(moreApps.join(' ') === 'grok vscode gemini grokbot claude cursor codex chatgpt', `More: ${moreApps.join(' ')}`);
+  assert(/href="\/me\?view=settings#agents">Add a webhook/.test(moreBody), 'More has no bot line to the Agents page');
+  assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
+  const apps = ['claudecode', ...moreApps];
+  const popOf = (app) => {
+    const i = pick.indexOf(`<div class="pick-pop pick-p-${app}" id="pick-pop-${app}" popover>`);
+    assert(i >= 0, `${app}: no popover`);
+    const j = pick.indexOf('<div class="pick-pop pick-p-', i + 1);
+    return pick.slice(i, j < 0 ? undefined : j);
+  };
+  for (const app of apps) {
+    const body = popOf(app);
+    assert(body.includes(`popovertarget="pick-pop-${app}" popovertargetaction="hide"`), `${app}: no close button`);
+    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} popover has no way in`);
+    assert(!/href="(cursor|vscode):/.test(body), `${app} popover links a custom scheme the frame cannot open`);
+  }
+  // CLI first (docs/design/onboarding.md): Claude Code and Codex lead with the
+  // local tdoc plugin; the MCP line comes second.
+  for (const app of ['claudecode', 'codex']) {
+    const body = popOf(app);
+    const codes = [...body.matchAll(/<code id="[^"]+">([^<]+)<\/code>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+    assert(/plugin (install|add) tdoc@tornado-tdoc$/.test(codes[0]) && / mcp add /.test(codes[1]), `${app}: local plugin first, then MCP: ${codes.join(' | ')}`);
+  }
+  // Every command a popover offers is a row of plugins/README.md's install
+  // table, the one place commands change.
+  const readme = fs.readFileSync(path.join(root, 'plugins', 'README.md'), 'utf8');
+  const table = readme.slice(readme.indexOf('## Install tdoc in your AI app'), readme.indexOf('\n---'));
+  const known = new Set([...table.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  for (const id of ['pick-claudecode', 'pick-claudecode-mcp', 'pick-codex', 'pick-codex-mcp', 'pick-gemini']) {
+    const m = pick.match(new RegExp(`<code id="${id}">([^<]+)</code>`));
+    assert(m, `no ${id}`);
+    const cmd = m[1].replace(/&amp;/g, '&');
+    assert(known.has(cmd), `${id} is not in plugins/README.md: ${cmd}`);
   }
   assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(pick), 'the picker shows company logos');
   assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
@@ -563,5 +604,73 @@ t('shipping the homepage ships content, not just worker code', () => {
     'the automatic workflow_run path must not rotate TDOC_UPLOAD_TOKEN');
 });
 
-console.log(`\n${pass} passed, ${fail} failed.`);
-process.exit(fail ? 1 : 0);
+// The homepage demo's scripted Edit (demo-agent.js DEMO_REWRITES, flag
+// demoEditRewrite): its paragraph must still be on the homepage, word for
+// word, or the demo silently falls back to the plain reply.
+function loadDemoAgent() {
+  const src = fs.readFileSync(path.join(root, 'shell/src/document/demo-agent.js'), 'utf8')
+    .replace(/^import .*$/m, 'const TDOC_AI = { tdoc_ai: true };')
+    .replace(/^export /gm, '');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src}\nreturn { DEMO_REWRITES, DEMO_EDIT_REPLY, createDemoBackend };`)();
+}
+const demoAgent = loadDemoAgent();
+const visibleText = (h) => h.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/g, '')
+  .replace(/<[^>]+>/g, ' ').replace(/&#8209;/g, '\u2011').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+
+t('scripted Edit: the paragraph it rewrites is on the homepage, once, as a plain <p>', () => {
+  const script = demoAgent.DEMO_REWRITES['tornado-doc'];
+  assert(script, 'no DEMO_REWRITES entry for tornado-doc');
+  const plain = html.match(/<p>([^<]*)<\/p>/g).map((p) => p.slice(3, -4).replace(/\s+/g, ' ').trim());
+  assert(plain.filter((p) => p === script.before).length === 1, `"${script.before}" is not one plain <p> on v${latest}`);
+  assert(visibleText(html).includes('Many people, many agents'), 'the prompt names a heading that is gone');
+  assert(script.after.split(/\s+/).length < script.before.split(/\s+/).length, 'the rewrite is not shorter');
+  assert(/\b19 words now, down from 28\b/.test(script.reply), `reply: ${script.reply}`);
+});
+
+t('scripted Edit: behind demoEditRewrite (off in production, on in PR previews); the probe swaps at once under reduced motion', () => {
+  const flags = fs.readFileSync(path.join(root, 'shell/src/feature-flags.js'), 'utf8');
+  assert(/demoEditRewrite: Object\.freeze\(\{[^}]*default: true, preview: true/.test(flags), 'flag demoEditRewrite');
+  const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
+  assert(/demoAgents && isFeatureOn\('demoEditRewrite'\)\s*\? DEMO_REWRITES\[config\.slug\]/.test(shell), 'the scripted Edit must be demo-only and per landing slug');
+  const probe = fs.readFileSync(path.join(root, 'server/frame-probe.js'), 'utf8');
+  assert(/d\.type === 'tdoc:demoRewrite'\) runDemoRewrite\(d\)/.test(probe), 'probe handler');
+  assert(/prefers-reduced-motion: reduce[\s\S]{0,2000}if \(reduce\) \{ done\(\); return; \}/.test(probe), 'reduced motion must jump to the end state');
+});
+
+async function asyncTests() {
+  const at = async (n, fn) => { try { await fn(); ok(n); } catch (e) { bad(n, e.message); } };
+  const backend = (played) => {
+    let list = [{ id: 'c1', text: 'x', replies: [] }];
+    const b = demoAgent.createDemoBackend({
+      update: (fn) => { list = fn(list); },
+      delays: { answer: 1, ack: 5, reply: 10 },
+      rewrite: { ...demoAgent.DEMO_REWRITES['tornado-doc'], play: async () => { played.push('play'); return true; }, onDone: (ok2) => played.push(ok2 ? 'done' : 'fail') },
+    });
+    return { b, list: () => list };
+  };
+  await at('scripted Edit: the prompt plays the rewrite, then the agent replies with what changed', async () => {
+    const played = [];
+    const { b, list } = backend(played);
+    b.markScripted('c1', demoAgent.DEMO_REWRITES['tornado-doc'].prompt);
+    await b.postNotifyHandoff({ comment_ids: ['c1'], recipient: null, instruction: 'Handle 1 comment' });
+    await new Promise((r) => setTimeout(r, 60));
+    assert(played.join(',') === 'play,done', `played: ${played}`);
+    const reply = list()[0].replies[0];
+    assert(reply && reply.text === demoAgent.DEMO_REWRITES['tornado-doc'].reply, `reply: ${JSON.stringify(reply)}`);
+  });
+  await at('scripted Edit: any other instruction gets the plain demo reply and no rewrite', async () => {
+    const played = [];
+    const { b, list } = backend(played);
+    b.markScripted('c1', 'Translate it to French');
+    await b.postNotifyHandoff({ comment_ids: ['c1'], recipient: null, instruction: 'Translate it to French' });
+    await new Promise((r) => setTimeout(r, 60));
+    assert(!played.length, `played: ${played}`);
+    assert(list()[0].replies[0]?.text === demoAgent.DEMO_EDIT_REPLY, 'plain demo reply');
+  });
+}
+
+asyncTests().then(() => {
+  console.log(`\n${pass} passed, ${fail} failed.`);
+  process.exit(fail ? 1 : 0);
+});
