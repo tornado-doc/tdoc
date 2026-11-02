@@ -312,7 +312,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const hero = visible.slice(visible.indexOf('Send your agent this prompt'), visible.indexOf('Set up in a minute'));
   // The connect card is the hero's one action: no second "Create a free doc" above it.
   assert(!/Create a free doc/.test(visible.slice(0, visible.indexOf('Send your agent this prompt'))), 'the hero still has a Create a free doc button');
-  for (const app of ['Claude', 'Chat', 'Cowork', 'Code', 'Codex', 'Work', 'Cursor', 'ChatGPT', 'Grok', 'VS Code', 'Gemini CLI', 'Grok Bot', 'Raft']) assert(hero.includes(app), `the hero picker does not name ${app}`);
+  for (const app of ['Claude', 'Chat', 'Work', 'Code', 'Cursor', 'ChatGPT', 'Grok', 'VS Code', 'Gemini CLI', 'Grok Bot', 'Raft']) assert(hero.includes(app), `the hero picker does not name ${app}`);
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
   // No "What's an agent?" line under the card (removed on request, 2026-11-02).
   assert(!/What's an agent\?/.test(visible), 'the agent definition line is back');
@@ -337,7 +337,7 @@ t('names the apps it runs in, each linked to its connect step', () => {
   assert(moreApps.join(' ') === 'vscode gemini', `More: ${moreApps.join(' ')}`);
   assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
   const apps = ['grokbot', 'raft', ...moreApps];
-  // One row grouped by brand: Claude (Chat, Cowork, Code), ChatGPT (Chat, Work, Codex), Cursor, Grok (Grok, Grok Bot), Raft, More.
+  // One row grouped by brand: Claude and ChatGPT (Chat, Work, Code), Cursor, Grok (Grok, Grok Bot), Raft, More.
   const brands = [...quick.matchAll(/<button type="button" class="pick-pill pick-brand"[^>]*>[\s\S]*?<span>([^<]+)<\/span>/g)].map((m) => m[1]);
   assert(brands.join(' ') === 'Claude ChatGPT Grok', `brand groups: ${brands.join(' ')}`);
   const menus = [...quick.matchAll(/<div class="pick-menu">([\s\S]*?)<\/div><\/div>/g)].map((m) => [...m[1].matchAll(/(?:data-tdoc-send|popovertarget)="(?:pick-pop-)?([a-z]+)"/g)].map((x) => x[1]).join('+'));
