@@ -89,8 +89,14 @@
   // ?tdoc_site=1. They read as an ordinary website: a normal cursor, no
   // document chrome on visuals, and no comment on a bare click. Selecting text
   // still opens a comment -- that is the demo.
-  var SITE = new URLSearchParams(location.search).get('tdoc_site') === '1';
+  // The home page adds &tdoc_demo=1: it IS the demo, so it keeps the blue
+  // comment cursor and click-a-word-to-comment (Julie, 2026-11-02). Only the
+  // fullscreen and diagram chrome stays off there.
+  var SITE_PARAMS = new URLSearchParams(location.search);
+  var SITE = SITE_PARAMS.get('tdoc_site') === '1';
+  var SITE_DEMO = SITE && SITE_PARAMS.get('tdoc_demo') === '1';
   if (SITE) document.documentElement.setAttribute('data-tdoc-site', '');
+  if (SITE && !SITE_DEMO) document.documentElement.setAttribute('data-tdoc-site-plain', '');
   function visualViewerOpen() { return document.documentElement.hasAttribute('data-tdoc-visual-open'); }
   // Block/artifact hover outline. Off on the homepage — landing sections are
   // huge commentable boxes and the dashed chrome gets in the way. Text
@@ -158,8 +164,8 @@
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
-      'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
-      'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
+      'html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
+      'html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
       'html[data-tdoc-site] [data-tdoc-diagram-tools]{display:none!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]:focus{box-shadow:inset 0 0 0 1px rgba(22,82,240,.18);}';
@@ -423,7 +429,7 @@
   }
   function reportPointSelection(event) {
     if (interactionMode !== 'comment' || event.button !== 0) return false;
-    if (SITE && !reanchorMode) return false;
+    if (SITE && !SITE_DEMO && !reanchorMode) return false;
     if (event.target && event.target.closest && event.target.closest('a,button,input,label,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
     var current = window.getSelection();
     if (current && !current.isCollapsed) return false; // a drag selection owns this click
