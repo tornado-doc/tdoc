@@ -22,6 +22,8 @@ plugin.
   `reply_to_comment`, `resolve_comment`)
 - Answer a reader's question about a document (`answer_question`)
 - Change who can open a document (`share_doc`)
+- Set up product feedback on a website: a private comment space and the one
+  `<script>` line to embed (`create_feedback_space`)
 
 New documents are private until you share them.
 

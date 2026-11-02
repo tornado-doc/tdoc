@@ -147,11 +147,15 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       const r = await register({ redirect_uris: [uri] });
       assert(r.status === 201 && /^mcpc_/.test(r.body.client_id), `${uri} -> ${r.status} ${r.text}`);
     }
-    // localhost resolves by name: refused alone, dropped beside a usable URI.
-    const alone = await register({ redirect_uris: ['http://localhost:8787/callback'] });
-    assert(alone.status === 400 && alone.body.error === 'invalid_redirect_uri', `localhost alone: ${alone.status}`);
+    // localhost loopback is accepted (Gemini CLI and Cursor desktop send it); https localhost lookalikes are not loopback.
+    const gemini = await register({ redirect_uris: ['http://localhost:7777/oauth/callback'] });
+    assert(gemini.status === 201 && /^mcpc_/.test(gemini.body.client_id), `localhost alone: ${gemini.status} ${gemini.text}`);
     const cursor = await register({ redirect_uris: ['http://localhost:8787/callback', 'https://www.cursor.com/agents/mcp/oauth/callback'] });
-    assert(cursor.status === 201 && JSON.stringify(cursor.body.redirect_uris) === '["https://www.cursor.com/agents/mcp/oauth/callback"]', cursor.text);
+    assert(cursor.status === 201 && JSON.stringify(cursor.body.redirect_uris) === '["http://localhost:8787/callback","https://www.cursor.com/agents/mcp/oauth/callback"]', cursor.text);
+    for (const uri of ['http://localhost.evil.example/cb', 'http://evil.localhost/cb', 'http://user@localhost:1/cb']) {
+      const r = await register({ redirect_uris: [uri] });
+      assert(r.status === 400 && r.body.error === 'invalid_redirect_uri', `${uri} -> ${r.status}`);
+    }
     const noArr = await register({ redirect_uris: 'https://claude.ai/cb' });
     assert(noArr.status === 400, 'string, not array');
     const implicit = await register({ response_types: ['token'] });
@@ -192,6 +196,17 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(new URL(ok.body.redirect).port === '50999', ok.body.redirect);
     const wrongPort = await form('/oauth/token', { grant_type: 'authorization_code', code, code_verifier: p.verifier, redirect_uri: 'http://127.0.0.1:33418/callback', client_id: client.client_id });
     assert(wrongPort.status === 400, 'the token request must repeat the port it was given');
+  });
+
+  await t('a localhost redirect (Gemini CLI) also matches on any port, and stays apart from 127.0.0.1', async () => {
+    const client = (await register({ redirect_uris: ['http://localhost:7777/oauth/callback'], token_endpoint_auth_method: 'none' })).body;
+    const p = pkce();
+    const q = (redirect) => `/oauth/authorize?${new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: redirect, code_challenge: p.challenge, code_challenge_method: 'S256', state: 's' })}`;
+    // Its own network address, so these requests leave the per-IP authorize budget of the tests below alone.
+    const opts = { cookie: julie.cookie, headers: { 'cf-connecting-ip': '203.0.113.77' } };
+    assert((await call(q('http://localhost:61234/oauth/callback'), opts)).status === 200, 'another port');
+    assert((await call(q('http://localhost:61234/other'), opts)).status === 400, 'another path');
+    assert((await call(q('http://127.0.0.1:61234/oauth/callback'), opts)).status === 400, 'registered localhost does not stand in for 127.0.0.1');
   });
 
   await t('authorize: PKCE S256 required, scope and resource checked; malformed requests get an error page, not a redirect', async () => {
@@ -267,6 +282,23 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const page = await call(authorizeUrl(client, p), { cookie: julie.cookie });
     const boot = bootData(page.text, '__TDOC_APP_BOOT__');
     assert(boot.request_id && boot.csrf && boot.client.name === 'Claude' && boot.client.redirect_host === 'claude.ai', JSON.stringify(boot.client));
+    assert(boot.client.app === 'claude', `code goes to https://claude.ai: Claude's logo (${boot.client.app})`);
+    // Each product's own https site gets its mark, by address alone. From
+    // their own address, so the later tests keep the authorize rate budget.
+    const logoIp = { 'cf-connecting-ip': '198.51.100.7' };
+    // Each product's own https site gets its mark, by address alone.
+    for (const [uri, app] of [['https://chatgpt.com/connector_platform_oauth_redirect', 'chatgpt'], ['https://vscode.dev/redirect', 'copilot'], ['https://cursor.com/oauth/cb', 'cursor'], ['https://gemini.google.com/cb', 'gemini']]) {
+      const c = (await register({ client_name: 'Some app', redirect_uris: [uri] })).body;
+      const cb = bootData((await call(authorizeUrl(c, pkce(), { redirect_uri: uri }), { cookie: julie.cookie, headers: logoIp })).text, '__TDOC_APP_BOOT__');
+      assert(cb.client && cb.client.app === app, `${uri}: ${JSON.stringify(cb.client)}`);
+    }
+    // The same name with any other return address gets no logo.
+    for (const uri of ['https://claude.ai.evil.example/cb', 'https://example.com/cb']) {
+      const fake = (await register({ redirect_uris: [uri] })).body;
+      const fp = await call(authorizeUrl(fake, pkce(), { redirect_uri: uri }), { cookie: julie.cookie, headers: logoIp });
+      const fb = bootData(fp.text, '__TDOC_APP_BOOT__');
+      assert(fb.client && fb.client.name === 'Claude' && fb.client.app === '', `${uri}: ${JSON.stringify(fb.client)}`);
+    }
     const body = { request_id: boot.request_id, csrf: boot.csrf, decision: 'allow' };
     const noOrigin = await call('/api/oauth/approve', { method: 'POST', cookie: julie.cookie, body });
     assert(noOrigin.status === 403, `no Origin ${noOrigin.status}`);
@@ -366,7 +398,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     const up = await call('/api/upload', { method: 'POST', token: julieConn.access_token, body: { slug: 'direct', version: 1, html: '<p>x</p>' } });
     assert(up.status === 403, `upload ${up.status}`);
     const ok = await mcp(julieConn.access_token, 'tools/list');
-    assert(ok.status === 200 && ok.body.result.tools.length === 13, ok.text.slice(0, 200));
+    assert(ok.status === 200 && ok.body.result.tools.length === 14, ok.text.slice(0, 200));
   });
 
   await t('expired or wrong-audience OAuth tokens get 401', async () => {
@@ -531,7 +563,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
   await t('tools/list carries annotations and the authoring contract; resources and prompts serve the guides', async () => {
     const tools = (await mcp(julieConn.access_token, 'tools/list')).body.result.tools;
     const names = tools.map((x) => x.name).sort().join(',');
-    assert(names === 'answer_question,commit_upload,create_doc,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', names);
+    assert(names === 'answer_question,commit_upload,create_doc,create_feedback_space,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', names);
     const create = tools.find((x) => x.name === 'create_doc');
     // The contract lives in one resource; the write tools point at it.
     for (const name of ['create_doc', 'update_doc']) assert(tools.find((x) => x.name === name).description.includes('Call get_writing_guide first, then write.'), `${name} points at get_writing_guide`);
@@ -542,7 +574,8 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     // Every client pays for tools/list on each connection: keep it small.
     const listed = await mcp(julieConn.access_token, 'tools/list', {}, { legacy: true });
     const bytes = Buffer.byteLength(listed.text);
-    assert(bytes <= 8000, `tools/list is ${bytes} bytes; the budget is 8000 (move guidance into tdoc://authoring/essentials.md)`);
+    // 8000 for the first 13 tools; create_feedback_space added ~550.
+    assert(bytes <= 8600, `tools/list is ${bytes} bytes; the budget is 8600 (move guidance into tdoc://authoring/essentials.md)`);
     for (const x of tools) assert(x.description.length <= 400, `${x.name} description is ${x.description.length} chars`);
     assert(tools.find((x) => x.name === 'get_doc').annotations.readOnlyHint === true && create.annotations.readOnlyHint === false, 'annotations');
     assert(tools.find((x) => x.name === 'share_doc').annotations.destructiveHint === true, 'share_doc is destructive: hosts ask before it runs');
@@ -689,6 +722,21 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(c.status === 200 && c.body.id, c.text);
     const list = await tool(julieConn.access_token, 'get_comments', { slug: julieSlug });
     assert(list.structuredContent.comments.some((x) => x.id === c.body.id && x.anchor === 'one click'), JSON.stringify(list.structuredContent).slice(0, 300));
+    // An area left on an app: the agent gets the page, the container's
+    // selector, the box inside it and what is under it.
+    const areaAnchor = { kind: 'product', url: 'https://app.example.com/reports?tab=2', selector: '#signups-card', tag: 'section', text: 'March',
+      label: 'Area 120×60 · “March”', rect: { x: 40, y: 300, width: 120, height: 60 }, viewport: { width: 1200, height: 800, device_pixel_ratio: 2 },
+      region: { container_text: 'Signups March', rel: { x: 20, y: 10, width: 120, height: 60 }, frac: { x: 0.08, y: 0.1, width: 0.5, height: 0.6 },
+        scroll: { x: 0, y: 200 }, elements: [{ selector: '#signups-chart', tag: 'canvas' }] } };
+    const onArea = await call('/api/comments', { method: 'POST', cookie: carl.cookie, headers: origin, body: { slug: julieSlug, version: 1, text: 'The March bar looks wrong', anchor: areaAnchor } });
+    assert(onArea.status === 200 && onArea.body.id, onArea.text);
+    const withArea = await tool(julieConn.access_token, 'get_comments', { slug: julieSlug });
+    const area = withArea.structuredContent.comments.find((x) => x.id === onArea.body.id);
+    assert(area && area.anchor === 'March' && area.where && area.where.selector === '#signups-card' && area.where.url === areaAnchor.url, JSON.stringify(area));
+    assert(area.where.area.rel.width === 120 && area.where.area.frac.width === 0.5 && area.where.area.elements[0].selector === '#signups-chart' && area.where.area.text === 'March', JSON.stringify(area.where));
+    assert(withArea.content[0].text.includes('[page /reports?tab=2 · #signups-card · area 120×60 at (20, 10) inside it]'), withArea.content[0].text);
+    const removed = await call(`/api/comments?slug=${julieSlug}&version=1&id=${onArea.body.id}`, { method: 'DELETE', cookie: carl.cookie, headers: origin });
+    assert(removed.status === 200, removed.text);
     const early = await tool(julieConn.access_token, 'reply_to_comment', { slug: julieSlug, comment_id: c.body.id, text: 'Done', status: 'applied', applied_in: 2 });
     assert(!early.isError && early.structuredContent.status === 'answered' && early.structuredContent.downgraded_from === 'applied', 'applied without a new version is recorded as answered');
     await call('/api/comments', { method: 'POST', cookie: carl.cookie, headers: origin, body: { slug: julieSlug, version: 1, parent_id: c.body.id, text: 'Please change the doc' } });

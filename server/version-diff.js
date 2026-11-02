@@ -66,5 +66,10 @@
     });
     return parts;
   }
-  return { align: align, textParts: textParts };
+  // How a changed word reads wherever the reader shows a change in the doc
+  // itself: the version compare (frame-compare.js) and the homepage demo's
+  // scripted Edit (frame-probe.js). One rule, so both mark it the same way.
+  var markCss = '.tdoc-diff-ins{text-decoration:none;background:rgba(37,168,91,.16)!important;padding:1px 2px}'
+    + '.tdoc-diff-del{text-decoration:line-through;background:rgba(219,58,75,.13)!important;padding:1px 2px;margin-inline-end:.15em}';
+  return { align: align, textParts: textParts, markCss: markCss };
 });

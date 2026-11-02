@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { loadWorker, makeEnv, req, putSession, bootData } = require('./helpers/worker-harness');
+const { loadWorker, makeEnv, req, putSession, bootData, issue } = require('./helpers/worker-harness');
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
@@ -183,7 +183,7 @@ const APP = 'http://localhost:3000';
     const julie = await putSession(env, 'julie');
     const { body: space } = await connect(env, julie);
     // Share is the space doc's own Share dialog, as on any doc.
-    assert(space.share_url === `https://tdoc.dev/d/${space.slug}?doc=1&share=1` && !space.invite_url, `share_url ${space.share_url}`);
+    assert(space.share_url === `https://tdoc.dev/d/${space.slug}?share=1` && !space.invite_url, `share_url ${space.share_url}`);
     assert(space.origin === APP, `origin ${space.origin}`);
     const can = await putSession(env, 'can');
     // One link: the space's own page lists the comments and offers Join.
@@ -269,6 +269,31 @@ const APP = 'http://localhost:3000';
     assert(notOwner.status === 401 || notOwner.status === 403, `a joiner drives the owner's agent: ${notOwner.status}`);
   });
 
+  // The widget shows Send to agent from these two answers: the owner always,
+  // a member of the space's team once the team has an agent (as the doc page).
+  await t('Send to agent: the session says the host can notify; mentions names the owner and the team members', async () => {
+    const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev' });
+    const origin = { Origin: 'https://tdoc.dev' };
+    const julie = await issue(worker, env, 'julie');
+    const bob = await issue(worker, env, 'bob');
+    const { body: space } = await connect(env, julie.cookie);
+    assert(space.notify === true && space.is_owner === true, `connect: ${JSON.stringify({ notify: space.notify, is_owner: space.is_owner })}`);
+    const session = await (await worker.fetch(req('/api/feedback/session', { token: space.token }), env, {})).json();
+    assert(session.notify === true, 'the refreshed session dropped notify');
+    const mentions = async (opts) => (await worker.fetch(req(`/api/mentions?slug=${space.slug}`, opts), env, {})).json();
+    const own = await mentions({ token: space.token });
+    assert(own.is_owner === true && own.team_member === false, `personal space owner: ${JSON.stringify(own)}`);
+
+    const team = (await (await worker.fetch(req('/api/teams', { method: 'POST', cookie: julie.cookie, headers: origin, body: { name: 'Acme' } }), env, {})).json()).team;
+    await worker.fetch(req('/api/team/join', { method: 'POST', cookie: bob.cookie, body: { token: team.invite_url.split('/').pop() } }), env, {});
+    const moved = await worker.fetch(req('/api/team/move', { method: 'POST', cookie: julie.cookie, headers: origin, body: { team: team.id, slugs: [space.slug] } }), env, {});
+    assert(moved.status === 200, `move into team: ${moved.status} ${await moved.text()}`);
+    const admin = await mentions({ cookie: julie.cookie });
+    assert(admin.is_owner === true && admin.team_member === true, `team admin: ${JSON.stringify({ is_owner: admin.is_owner, team_member: admin.team_member })}`);
+    const member = await mentions({ cookie: bob.cookie });
+    assert(member.is_owner === false && member.team_member === true, `team member: ${JSON.stringify(member)}`);
+  });
+
   await t('My docs lists feedback spaces you own or joined, with open/replied counts', async () => {
     const env = makeEnv(mod.CommentsStore);
     const julie = await putSession(env, 'julie');
@@ -324,6 +349,88 @@ const APP = 'http://localhost:3000';
         body: { slug: space.slug, version: 1, id, anchor: anchor(url) } }), env, {});
       assert(re.status === (url.startsWith('https:') ? 200 : 400), `re-anchor ${url}: ${re.status}`);
     }
+  });
+
+  // Share on a space is the doc's Share (Julie, 2026-10-30: "feedback spaces
+  // are just like docs"): the page carries the same owner-only manage data a
+  // doc page does, and moving into a team is the doc move, with its rules.
+  const HOME = { Origin: 'https://tdoc.dev' };
+  const call = async (env, p, opts) => {
+    const r = await worker.fetch(req(p, opts), env, {});
+    let body = null; try { body = await r.json(); } catch {}
+    return { status: r.status, body };
+  };
+  const spaceBoot = async (env, cookie, slug) => bootData(await (await worker.fetch(req(`/d/${slug}`, { cookie }), env, {})).text(), '__TDOC_APP_BOOT__');
+
+  await t('the space page carries Share: owner manage data for the owner, a copy link for everyone else', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'julie');
+    const { body: space } = await connect(env, owner.cookie);
+    const own = await spaceBoot(env, owner.cookie, space.slug);
+    assert(own.page === 'feedback-space' && own.isOwner === true, `owner boot ${JSON.stringify(own)}`);
+    assert(own.shareUrl === `https://tdoc.dev/d/${space.slug}`, `copy link ${own.shareUrl}`);
+    assert(own.ownerManage && own.ownerManage.access.visibility === 'unlisted', `ownerManage ${JSON.stringify(own.ownerManage)}`);
+    assert(own.workspaceId === null && own.teamManage === null, 'a personal space names no team');
+    const can = await issue(worker, env, 'can');
+    const theirs = await spaceBoot(env, can.cookie, space.slug);
+    assert(theirs.isOwner === false && theirs.ownerManage === null, `non-owner got manage data ${JSON.stringify(theirs.ownerManage)}`);
+    const anon = bootData(await (await worker.fetch(req(`/d/${space.slug}`), env, {})).text(), '__TDOC_APP_BOOT__');
+    assert(anon.ownerManage === null && anon.teamManage === null, 'anonymous got manage data');
+    const src = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-space.jsx'), 'utf8');
+    assert(src.includes('<OwnerAccessDialog') && src.includes('<ShareDialog') && src.includes('<MoveToTeamDialog'), 'space Share is not the doc Share dialog and move picker');
+    assert(src.includes('moveDocsToTeam([slug], target.id)'), 'space move is not the doc move');
+    const widget = fs.readFileSync(path.join(ROOT, 'feedback/src/main.jsx'), 'utf8');
+    assert(/className="tdoc-fb-share" href=\{shareUrl\}/.test(widget), 'the widget lost its Share entry');
+  });
+
+  await t('moving a space into a team: only its owner, only into a team they belong to; admins then manage it', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const owner = await issue(worker, env, 'julie');
+    const can = await issue(worker, env, 'can');
+    const mate = await issue(worker, env, 'mate');
+    const { body: space } = await connect(env, owner.cookie);
+    const acme = (await call(env, '/api/teams', { method: 'POST', cookie: owner.cookie, headers: HOME, body: { name: 'Acme', invites: ['mate'] } })).body.team;
+    assert(acme && acme.id, 'team');
+    assert((await call(env, '/api/team/accept-invite', { method: 'POST', cookie: mate.cookie, headers: HOME, body: { id: acme.id } })).status === 200, 'mate joins');
+    const other = (await call(env, '/api/teams', { method: 'POST', cookie: can.cookie, headers: HOME, body: { name: 'Elsewhere' } })).body.team;
+    // A commenter who joined the space does not own it.
+    await worker.fetch(joinReq(can.cookie, space.slug), env, {});
+    const notOwner = await call(env, '/api/team/move', { method: 'POST', cookie: can.cookie, headers: HOME, body: { slugs: [space.slug], team: other.id } });
+    assert(notOwner.status === 403 && notOwner.body.error === 'not_owner', `non-owner move ${notOwner.status} ${JSON.stringify(notOwner.body)}`);
+    // The owner cannot put it in a team they are not in.
+    const notMember = await call(env, '/api/team/move', { method: 'POST', cookie: owner.cookie, headers: HOME, body: { slugs: [space.slug], team: other.id } });
+    assert(notMember.status === 404 && notMember.body.error === 'team_not_found', `non-member move ${notMember.status} ${JSON.stringify(notMember.body)}`);
+    let meta = JSON.parse(await env.META.get(`meta:${space.slug}`));
+    assert(!meta.workspace_id, 'a refused move changed the space');
+    const moved = await call(env, '/api/team/move', { method: 'POST', cookie: owner.cookie, headers: HOME, body: { slugs: [space.slug], team: acme.id } });
+    assert(moved.status === 200, `owner move ${moved.status} ${JSON.stringify(moved.body)}`);
+    meta = JSON.parse(await env.META.get(`meta:${space.slug}`));
+    assert(meta.workspace_id === acme.id && meta.access.team === true && meta.created_from === 'feedback', `moved meta ${JSON.stringify(meta)}`);
+    // The team's admin manages it on its page, a member sees the team and no manage data.
+    const own = await spaceBoot(env, owner.cookie, space.slug);
+    assert(own.isOwner === true && own.workspaceId === acme.id && own.teamManage && own.teamManage.canManage === true && own.teamManage.team.name === 'Acme', `admin boot ${JSON.stringify(own.teamManage)}`);
+    const member = await spaceBoot(env, mate.cookie, space.slug);
+    assert(member.isOwner === false && member.ownerManage === null && member.teamManage && member.teamManage.canManage === false, `member boot ${JSON.stringify(member.teamManage)}`);
+    // A member cannot move it back out, nor bind it to a site.
+    const out = await call(env, '/api/team/move', { method: 'POST', cookie: mate.cookie, headers: HOME, body: { slugs: [space.slug], team: null } });
+    assert(out.status === 403 && out.body.error === 'not_owner', `member move-out ${out.status}`);
+    const bind = await call(env, '/api/feedback/site', { method: 'POST', cookie: mate.cookie, headers: HOME, body: { slug: space.slug, origins: [APP] } });
+    assert(bind.status === 403, `member bound the site ${bind.status}`);
+    const adminBind = await call(env, '/api/feedback/site', { method: 'POST', cookie: owner.cookie, headers: HOME, body: { slug: space.slug, origins: [APP] } });
+    assert(adminBind.status === 200 && adminBind.body.snippet.includes(`data-tdoc-space="${space.slug}"`), `admin bind ${adminBind.status}`);
+    // Still the owner's space for this app, and still on their Feedback tab.
+    const again = await connect(env, owner.cookie);
+    assert(again.body.slug === space.slug && again.body.is_owner === true, 'the owner lost their space after the move');
+    const me = await (await worker.fetch(req('/api/me', { cookie: owner.cookie }), env, {})).json();
+    const row = (me.feedback || []).find((x) => x.slug === space.slug);
+    assert(row && row.mine === true && row.workspace_id === acme.id, `feedback row ${JSON.stringify(me.feedback)}`);
+  });
+
+  await t('site mode on a personal space offers the move to a team first, with one click to stay personal', async () => {
+    const hub = fs.readFileSync(path.join(ROOT, 'shell/src/docs-hub.jsx'), 'utf8');
+    assert(/if \(!space\.site && !space\.workspace_id && adminTeams\.length\) setTeamFirst/.test(hub), 'no team-first prompt before site mode');
+    assert(hub.includes("(teams || []).filter((team) => team.role === 'admin')"), 'the prompt offers teams the person does not admin');
+    assert(hub.includes('skipLabel="Keep it personal"') && hub.includes('moveDocsToTeam([space.slug], team.id)'), 'no stay-personal choice, or not the doc move');
   });
 
   await t('/feedback is an app page under the shared top bar: no hand-rolled bar, the real avatar', async () => {
@@ -383,6 +490,122 @@ const APP = 'http://localhost:3000';
     const bad = await worker.fetch(req('/feedback/connect?origin=nope'), env, {});
     assert(bad.status === 400 && bootData(await bad.text(), '__TDOC_APP_BOOT__').error, `bad origin: ${bad.status}`);
   });
+
+  // Signing in sends the popup through Cross-Origin-Opener-Policy pages,
+  // which cut it off from the app: its postMessage never arrives. The popup
+  // also files the session under a claim the app collects (owner report,
+  // app.hustlefree.ai, 2026-11-01).
+  {
+    const HOME = { Origin: 'https://tdoc.dev' };
+    const claimCookieOf = (r) => {
+      const all = (r.headers.getSetCookie ? r.headers.getSetCookie() : [r.headers.get('set-cookie') || '']).join('\n');
+      const m = /(__Host-tdoc_fb_claim_[a-f0-9]{16})=([a-f0-9]*);[^\n]*/.exec(all);
+      return m ? { name: m[1], value: m[2], line: m[0], pair: `${m[1]}=${m[2]}` } : null;
+    };
+    // The connect page asking for a claim (it does so while it has an opener).
+    const newClaim = async (env, { origin = APP, space = '', headers = HOME, cookie = '' } = {}) => {
+      const r = await worker.fetch(req('/api/feedback/connect/claim/new', { method: 'POST', cookie, headers, body: { origin, ...(space ? { space } : {}) } }), env, {});
+      const body = await r.json();
+      return { status: r.status, claim: body.claim, set: claimCookieOf(r), body };
+    };
+    const poll = async (env, claim, origin = APP) => {
+      const r = await worker.fetch(req('/api/feedback/connect/claim', { method: 'POST', body: { claim }, headers: origin ? { Origin: origin } : {} }), env, {});
+      return { status: r.status, body: await r.json() };
+    };
+    const connectWith = async (env, cookie, body, headers = HOME) => {
+      const r = await worker.fetch(req('/api/feedback/connect', { method: 'POST', cookie, headers, body: { origin: APP, handoff: 'claim', ...body } }), env, {});
+      return { r, body: await r.json() };
+    };
+
+    await t('claim: only our own page can start one; 256 bits, in a __Host- HttpOnly cookie per app and space', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const made = await newClaim(env);
+      assert(made.status === 200 && /^[a-f0-9]{64}$/.test(made.claim || ''), `claim ${made.status} ${JSON.stringify(made.body)}`);
+      assert(made.set && made.set.value === made.claim, 'claim cookie not set');
+      assert(/; Path=\/;/.test(made.set.line) && /HttpOnly/.test(made.set.line) && /Secure/.test(made.set.line) && /SameSite=Lax/.test(made.set.line) && /Max-Age=600/.test(made.set.line) && !/Domain=/i.test(made.set.line), `cookie flags ${made.set.line}`);
+      // A claim still pending in this browser is handed out again, not replaced.
+      const again = await newClaim(env, { cookie: made.set.pair });
+      assert(again.claim === made.claim && !again.set, 'a pending claim was replaced');
+      const other = await newClaim(env, { origin: 'http://localhost:5173' });
+      assert(other.set.name !== made.set.name, 'one cookie name for two apps');
+      const spaced = await newClaim(env, { space: 'd-abc' });
+      assert(spaced.set.name !== made.set.name, 'one cookie name for an app and its site space');
+      for (const headers of [{}, { Origin: 'https://evil.example' }, { Origin: APP }]) {
+        const r = await newClaim(env, { headers });
+        assert(r.status === 403 && !r.claim && !r.set, `cross-origin claim/new ${JSON.stringify(headers)}: ${r.status}`);
+      }
+      assert((await newClaim(env, { origin: 'nope' })).status === 400, 'bad origin');
+      // The page itself no longer writes anything: no claim in a GET.
+      const page = await worker.fetch(req(`/feedback/connect?origin=${encodeURIComponent(APP)}`), env, {});
+      const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+      assert(!boot.claim && !claimCookieOf(page), 'GET made a claim');
+      assert(/no-store/.test(page.headers.get('Cache-Control') || '') && page.headers.get('Referrer-Policy') === 'no-referrer', 'popup page headers');
+      const src = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-connect.jsx'), 'utf8');
+      assert(src.includes("window.opener.postMessage({ type: 'tdoc-feedback-claim', origin, claim: b.claim }, origin)"), 'popup does not tell the opener (only on its origin) the claim');
+      assert(src.includes("hasOpener() ? {} : { handoff: 'claim' }"), 'popup asks for the claim handoff even with an opener');
+    });
+
+    await t('claim: Connect without an opener files the session; the app collects it once, from its own origin only', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const sid = await putSession(env, 'julie');
+      const { claim, set } = await newClaim(env);
+      assert((await poll(env, claim)).body.status === 'pending', 'unfilled claim is not pending');
+      const made = await connectWith(env, `${sid}; ${set.pair}`, {});
+      assert(made.r.status === 200 && made.body.token && made.body.claim_filed === true, `connect ${made.r.status} ${JSON.stringify(made.body)}`);
+      const cleared = claimCookieOf(made.r);
+      assert(cleared && cleared.name === set.name && cleared.value === '' && /Max-Age=0/.test(cleared.line), 'claim cookie not cleared after filing');
+      for (const origin of ['', 'https://evil.example', 'http://localhost:3001', 'null']) {
+        const r = await poll(env, claim, origin);
+        assert(r.status === 404 && !r.body.session, `origin ${origin || '(none)'} got ${r.status} ${JSON.stringify(r.body)}`);
+      }
+      const got = await poll(env, claim);
+      assert(got.status === 200 && got.body.status === 'connected' && got.body.session.token === made.body.token && got.body.session.slug === made.body.slug, `collect ${JSON.stringify(got)}`);
+      assert((await poll(env, claim)).status === 404, 'claim answered twice');
+      const session = await worker.fetch(req('/api/feedback/session', { token: got.body.session.token }), env, {});
+      assert(session.status === 200, `collected token refused: ${session.status}`);
+      assert((await poll(env, 'abc')).status === 400 && (await poll(env, 'g'.repeat(64))).status === 400, 'malformed claim accepted');
+      // With its opener the page posts the token itself: nothing is filed.
+      const second = await newClaim(env);
+      const direct = await connectWith(env, `${sid}; ${second.set.pair}`, { handoff: undefined });
+      assert(direct.body.token && !direct.body.claim_filed, 'filed although the page could post the token');
+      assert((await poll(env, second.claim)).body.status === 'pending', 'claim filled without handoff');
+    });
+
+    await t('claim: no token for a claim made elsewhere, for another app or space, or from a cross-site request', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const sid = await putSession(env, 'julie');
+      // The attacker starts a claim (forging Origin from a script) and
+      // learns it. The victim's browser does not hold its cookie, so the
+      // victim's Connect files nothing under it.
+      const mine = await newClaim(env);
+      const victim = await newClaim(env);
+      const c1 = await connectWith(env, `${sid}; ${victim.set.pair}`, {});
+      assert(c1.body.claim_filed, 'own claim not filed');
+      assert((await poll(env, mine.claim)).body.status === 'pending', 'attacker claim was filled');
+      // A cookie under another app's name, or a planted value for this app's
+      // name naming another app's claim, fills nothing.
+      const forOther = await newClaim(env, { origin: 'http://localhost:5173' });
+      const wrongApp = await connectWith(env, `${sid}; ${forOther.set.pair}`, {});
+      assert(wrongApp.body.token && !wrongApp.body.claim_filed, 'claim for one origin filled by another');
+      const planted = await connectWith(env, `${sid}; ${mine.set.name}=${forOther.claim}`, {});
+      assert(!planted.body.claim_filed && (await poll(env, forOther.claim, 'http://localhost:5173')).body.status === 'pending', 'origin-mismatched claim filled');
+      // A site-space claim is not filled by a personal connect.
+      const forSpace = await newClaim(env, { space: 'd-someone-else' });
+      const personal = await connectWith(env, `${sid}; ${forSpace.set.name.replace(/_[a-f0-9]{16}$/, '')}=x; ${forSpace.set.pair}`, {});
+      assert(personal.body.token && !personal.body.claim_filed, 'space claim filled by a personal connect');
+      // A cross-site POST (CSRF) or one with no Origin fills nothing.
+      const fresh = await newClaim(env);
+      for (const headers of [{ Origin: 'https://evil.example' }, {}]) {
+        const r = await connectWith(env, `${sid}; ${fresh.set.pair}`, {}, headers);
+        assert(!r.body.claim_filed, `filled from ${JSON.stringify(headers)}`);
+      }
+      assert((await poll(env, fresh.claim)).body.status === 'pending', 'cross-site connect filled a claim');
+      // No session: nothing minted or filed.
+      const anon = await connectWith(env, fresh.set.pair, {});
+      assert(anon.r.status === 401, `anon connect ${anon.r.status}`);
+      assert((await poll(env, fresh.claim)).body.status === 'pending', 'anonymous connect filled a claim');
+    });
+  }
 
   await t('a bad /feedback/join link is the ordinary status page, not a page of its own', async () => {
     const env = makeEnv(mod.CommentsStore);
