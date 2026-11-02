@@ -452,13 +452,14 @@
        open them from the frame (custom schemes cannot leave it). */
     /* One popover per app (the HTML popover attribute: no script, Esc and a
        click outside close it). */
-    /* The connect card, after glasser.ai's: one sentence and the agents'
+    /* The connect card: one sentence and the agents'
        marks, the setup prompt in a dark box with a square Copy, one row of
        quick connect. Copy is the reader's data-tdoc-copy, which swaps the
        button's text, so its icon is a background and the done mark is text.
        A button with ↗ is data-tdoc-send: the shell copies the prompt and opens
        that app with it filled in; the rest open a popover. */
     .pick { box-sizing:border-box; margin:30px 0 0; max-width:880px; padding:24px 26px 22px; border-radius:20px; background:#fffdfa; box-shadow:0 1px 0 rgba(16,18,26,.04), 0 18px 44px rgba(16,18,26,.08); }
+    .pick-end { margin:0 auto; text-align:left; }
     .pick-hd { display:flex; align-items:center; flex-wrap:wrap; gap:10px 14px; margin:0 0 16px; }
     .pick-title { margin:0; font-size:18px; font-weight:700; letter-spacing:-.01em; color:var(--ink); }
     .pick-marks { display:inline-flex; align-items:center; gap:10px; }
@@ -1188,9 +1189,12 @@
       <h2>Send the next review as a tdoc.</h2>
       <p><span>Ask your AI to make a tdoc. It hands you a link.</span><span>Whoever you send it to comments like it's a Google Doc, with nothing to install.</span></p>
     </div>
-    <div class="cta" style="justify-content:center">
-      <a class="btn btn-primary" href="#get-started"><span class="btn-in">Get started</span></a>
-      <p style="margin:10px 0 0;font-size:14px;color:#767c8b">or <a href="/templates" style="color:inherit">browse the looks</a> first.</p>
+    <div class="pick pick-end">
+      <div class="pick-hd"><p class="pick-title">Send your agent this prompt to get started.</p><span class="pick-marks" aria-hidden="true"><svg style="color:#D97757" aria-hidden="true"><use href="#i-claude"/></svg><svg aria-hidden="true"><use href="#i-openai"/></svg><svg aria-hidden="true"><use href="#i-cursor"/></svg><svg style="color:#3186FF" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="gem-g2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4796E3"/><stop offset=".55" stop-color="#9177C7"/><stop offset="1" stop-color="#CA6673"/></linearGradient></defs><path fill="url(#gem-g2)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg><svg aria-hidden="true"><use href="#i-grok"/></svg><svg style="color:#007ACC" aria-hidden="true"><use href="#i-vscode"/></svg></span></div>
+      <div class="pick-prompt"><code id="pick-prompt-end">set up https://tdoc.dev/SKILL.md</code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt-end" data-tdoc-copy-done="&#10003;" aria-label="Copy prompt"></button></div>
+      <div class="pick-quick" role="group" aria-label="Quick connect (end of page)"><span class="pick-quick-label">Quick connect</span><button type="button" class="pick-pill" data-tdoc-send="claudecode" data-tdoc-send-text="#pick-prompt-end"><svg style="color:#D97757" aria-hidden="true"><use href="#i-claude"/></svg><span>Claude Code</span><span class="pick-arrow" aria-hidden="true">&#8599;</span></button><button type="button" class="pick-pill" data-tdoc-send="codex" data-tdoc-send-text="#pick-prompt-end"><svg aria-hidden="true"><use href="#i-openai"/></svg><span>Codex</span><span class="pick-arrow" aria-hidden="true">&#8599;</span></button><button type="button" class="pick-pill" data-tdoc-send="cursor" data-tdoc-send-text="#pick-prompt-end"><svg aria-hidden="true"><use href="#i-cursor"/></svg><span>Cursor</span><span class="pick-arrow" aria-hidden="true">&#8599;</span></button><button type="button" class="pick-pill" data-tdoc-send="claudeai" data-tdoc-send-text="#pick-prompt-end"><svg style="color:#D97757" aria-hidden="true"><use href="#i-claude"/></svg><span>Claude.ai</span><span class="pick-arrow" aria-hidden="true">&#8599;</span></button><button type="button" class="pick-pill" data-tdoc-send="chatgpt" data-tdoc-send-text="#pick-prompt-end"><svg aria-hidden="true"><use href="#i-openai"/></svg><span>ChatGPT</span><span class="pick-arrow" aria-hidden="true">&#8599;</span></button><button type="button" class="pick-pill" data-tdoc-send="grok" data-tdoc-send-text="#pick-prompt-end"><svg aria-hidden="true"><use href="#i-grok"/></svg><span>Grok</span><span class="pick-arrow" aria-hidden="true">&#8599;</span></button><button type="button" class="pick-pill" popovertarget="pick-pop-grokbot"><svg aria-hidden="true"><use href="#i-grok"/></svg><span>Grok Bot</span></button><button type="button" class="pick-pill pick-more" popovertarget="pick-pop-more"><span>More</span></button></div>
+      <p class="pick-tui">Using an agent in a terminal (Claude Code, Codex, Cursor, Gemini CLI or another)? Paste the prompt there.</p>
+      <p class="pick-tui">Your agent runs as a bot or service? <a href="/me?view=settings#agents" style="color:inherit">Add a webhook &#8594;</a></p>
     </div>
   </section>
 

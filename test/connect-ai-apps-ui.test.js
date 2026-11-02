@@ -220,7 +220,7 @@ async function startServer(worker, env) {
         const { context, page } = await open(width, height, { signedIn: false });
         await page.goto(`${base}/`);
         const frame = page.frameLocator('iframe.tdoc-doc-frame');
-        const pick = frame.locator('.pick');
+        const pick = frame.locator('#get-started');
         await pick.locator('.pick-quick .pick-pill').first().waitFor();
         await shot(page, `${label}-home`);
         await pick.scrollIntoViewIfNeeded();
@@ -288,6 +288,15 @@ async function startServer(worker, env) {
           }
           assert(JSON.stringify(await openPops()) === '[]', `${app}: still open ${await openPops()}`);
         }
+        // The closing card at the end of the page works the same: its quick send and its More.
+        const end = frame.locator('.pick-end');
+        await end.scrollIntoViewIfNeeded();
+        if (SHOTS) await end.screenshot({ path: path.join(SHOTS, `${label}-home-pick-end.png`) });
+        await end.locator('.pick-pill[data-tdoc-send="codex"]').click();
+        await page.waitForFunction((n) => window.__appOpened.filter((h) => h.startsWith('codex://')).length >= n, 2);
+        await end.locator('.pick-more').click();
+        assert(JSON.stringify(await openPops()) === '["pick-pop-more"]', `closing card More: ${await openPops()}`);
+        await pick.locator('#pick-pop-more .pick-close').click();
         await context.close();
       });
 

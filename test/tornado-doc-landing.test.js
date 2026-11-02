@@ -105,11 +105,13 @@ t('names tdoc and tornado-doc', () => {
     'the decorative logo beside the wordmark must not offer visual expansion');
 });
 
-t('the closing CTA goes back to the connect card, not a second way in', () => {
-  assert(/<div class="pick" id="get-started">/.test(html), 'the connect card has no anchor');
-  const end = html.slice(html.indexOf('FINAL CTA'));
-  assert(/href="#get-started"/.test(end), 'the closing CTA does not jump to the connect card');
-  assert(!/Create a free doc/.test(end), 'the closing CTA still says Create a free doc');
+t('the closing CTA is the same prompt card, not a button', () => {
+  const end = html.slice(html.indexOf('FINAL CTA'), html.indexOf('<footer'));
+  assert(/<div class="pick pick-end">/.test(end), 'the closing CTA has no prompt card');
+  assert(/<code id="pick-prompt-end">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt-end"/.test(end), 'the closing card has no prompt with Copy');
+  const sends = [...end.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt-end"/g)].map((m) => m[1]);
+  assert(sends.join(' ') === 'claudecode codex cursor claudeai chatgpt grok', `closing quick send: ${sends.join(' ')}`);
+  assert(!/Create a free doc|Get started|browse the looks|btn-primary/.test(end), 'the closing CTA still has the old button');
 });
 
 t('site pages keep the comment cursor; links and buttons still point', () => {
@@ -293,7 +295,7 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  // The hero connect card, after glasser.ai: one sentence, the setup prompt,
+  // The hero connect card: one sentence, the setup prompt,
   // one row of quick connect.
   assert(/Send your agent this prompt to get started\.[\s\S]*set up https:\/\/tdoc\.dev\/SKILL\.md[\s\S]*Quick connect/.test(visible), 'the hero connect card is not sentence, prompt, quick connect');
 });

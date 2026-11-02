@@ -1,6 +1,6 @@
 // "Quick send to" on tdoc's own site pages (the homepage connect card): a
 // button marked data-tdoc-send copies the setup prompt and opens the agent's
-// app with it filled in, the way glasser.ai does. The page names the app;
+// app with it filled in. The page names the app;
 // the URL is built here from this list, never taken from the page, and only
 // site pages may ask (document-shell checks config.isLanding): any other
 // document could otherwise prefill a reader's agent with its own words.
