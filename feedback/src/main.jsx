@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw } from 'lucide-react';
+import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw, SquareDashed } from 'lucide-react';
+import { FLAGS, isPreviewHostname } from '../../shell/src/feature-flags.js';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentThreadList } from '../../shell/src/document/comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from '../../shell/src/document/comment-pin.jsx';
@@ -182,6 +183,36 @@ ${uiCss}
     #tdoc-feedback-root :is(.ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu) {
       z-index: 2147483647 !important;
     }
+    /* Picking: a transparent sheet over the whole page takes every press, so
+       the app gets no click, drag or outside-press while someone points at
+       it (iframes and disabled controls included). Pins, dock and banner sit
+       above it. */
+    #tdoc-feedback-root .tdoc-fb-shield {
+      position: fixed; inset: 0; z-index: 2147483640; pointer-events: auto; background: transparent;
+      cursor: crosshair; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #tdoc-feedback-root .tdoc-fb-shield[hidden] { display: none; }
+    #tdoc-feedback-root .tdoc-drag-marquee { position: fixed; z-index: 2147483641; border-radius: 4px; }
+    #tdoc-feedback-root .tdoc-fb-area-tag {
+      position: absolute; left: -1.5px; bottom: 100%; margin-bottom: 4px; padding: 3px 7px; border-radius: 6px;
+      background: var(--td-accent); color: var(--td-ground); font: 600 11.5px/1.2 system-ui, -apple-system, sans-serif; white-space: nowrap;
+    }
+    #tdoc-feedback-root .tdoc-fb-area-tag.below { bottom: auto; top: 100%; margin: 4px 0 0; }
+    /* The box keeps a ground-colored hairline so it shows on accent-colored
+       content (a blue chart) as well as on white. */
+    #tdoc-feedback-root .tdoc-drag-marquee { box-shadow: 0 0 0 1px var(--td-ground); }
+    #tdoc-feedback-root .tdoc-fb-area-label { display: none; }
+    #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area { padding: 7px; }
+    @media (min-width: 701px) {
+      #tdoc-feedback-root .tdoc-fb-area-label { display: inline; }
+      #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area { padding: 7px 11px; }
+    }
+    /* A small phone: the dock's buttons sit closer so the row stays on screen. */
+    @media (max-width: 400px) {
+      #tdoc-feedback-root .tdoc-feedback-dock { right: 8px; gap: 2px; }
+      #tdoc-feedback-root .tdoc-feedback-dock button.primary { padding: 7px 9px; }
+    }
   `;
   const host = document.createElement('div');
   host.id = 'tdoc-feedback-root';
@@ -192,6 +223,11 @@ ${uiCss}
   const feedbackRoot = document.createElement('div');
   feedbackRoot.id = 'tdoc-feedback-root';
   shadow.append(style, feedbackRoot);
+  const shield = document.createElement('div');
+  shield.className = 'tdoc-fb-shield';
+  shield.hidden = true;
+  feedbackRoot.append(shield);
+  const isOurs = (node) => node === host || host.contains(node);
   host.style.cssText = 'position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;margin:0!important;padding:0!important;border:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;visibility:visible!important;font:13px/1.45 system-ui,-apple-system,sans-serif!important;color:#1a1a1a!important;text-transform:none!important;direction:ltr!important;text-align:left!important;letter-spacing:normal!important;word-spacing:normal!important;white-space:normal!important;line-height:1.45!important';
   document.documentElement.appendChild(host);
 
@@ -317,6 +353,52 @@ ${uiCss}
     place();
   })();
 
+  // The layer's presses and focus never reach the app. Following the modal
+  // (above) only helps with modals that say they are one; a hand-written
+  // overlay, a dropdown menu or a focus trap without aria-modal still runs
+  // its capture-phase "press outside" check on document, sees our host as the
+  // target, and closes (or swallows the click) before our bubble listeners
+  // run. So in window capture, which runs before any document listener, the
+  // app's copy of the event stops and a copy that cannot leave the shadow
+  // tree (composed: false) is sent to the same target for our own React
+  // handlers. Not copied: a link's click (the browser's own, trusted one
+  // opens it) and a press on our own dialog's backdrop, which Base UI closes
+  // from document. The capture sheet handles its own events below.
+  (function isolateLayerEvents() {
+    const KEYS = ['bubbles', 'cancelable', 'view', 'detail', 'screenX', 'screenY', 'clientX', 'clientY',
+      'ctrlKey', 'shiftKey', 'altKey', 'metaKey', 'button', 'buttons', 'relatedTarget', 'pointerId', 'width',
+      'height', 'pressure', 'tangentialPressure', 'tiltX', 'tiltY', 'twist', 'pointerType', 'isPrimary'];
+    let lastFocus = null;
+    shadow.addEventListener('focusin', (e) => { lastFocus = e.composedPath()[0] || null; }, true);
+    const copy = (e) => {
+      const init = { composed: false };
+      for (const key of KEYS) if (key in e) init[key] = e[key];
+      if (e.type === 'focusin' && init.relatedTarget === host) init.relatedTarget = lastFocus && lastFocus.isConnected ? lastFocus : null;
+      if ('touches' in e) {
+        init.touches = [...e.touches]; init.targetTouches = [...e.targetTouches]; init.changedTouches = [...e.changedTouches];
+      }
+      return new e.constructor(e.type, init);
+    };
+    const relay = (e) => {
+      const path = e.composedPath();
+      const inner = path[0];
+      if (!(inner instanceof Node) || inner === host || inner === shield || !path.includes(host)) return;
+      if (inner instanceof Element && inner.matches('.ui-dialog-backdrop, .ui-dialog-viewport')) return;
+      if (e.type === 'click' && path.some((n) => n instanceof Element && n.localName === 'a' && n.hasAttribute('href'))) return;
+      let event;
+      try { event = copy(e); } catch (_) { return; }
+      e.stopImmediatePropagation();
+      // The copy carries the click's activation (a checkbox, a submit), so
+      // the original must not do it a second time.
+      if (e.type === 'click') e.preventDefault();
+      inner.dispatchEvent(event);
+      if (event.defaultPrevented && e.cancelable && e.type !== 'click') e.preventDefault();
+    };
+    for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'focusin']) window.addEventListener(type, relay, true);
+    for (const type of ['touchstart', 'touchend']) window.addEventListener(type, relay, { capture: true, passive: true });
+  })();
+
+
   // Where we came from is where the comments go: the worker that served this
   // script. The bookmarklet and the one-line install both load it by URL.
   const base = (() => {
@@ -336,6 +418,27 @@ ${uiCss}
     return /^[a-z0-9][a-z0-9-]{0,80}$/.test(String(raw)) ? String(raw) : '';
   })();
   const storageKey = space ? `tdoc-feedback:${base}:${space}` : `tdoc-feedback:${base}`;
+
+  // The click that follows a pick (see onPointerUp in FeedbackApp).
+  let swallowClickUntil = 0;
+  window.addEventListener('click', (event) => {
+    if (Date.now() > swallowClickUntil || isOurs(event.composedPath()[0])) return;
+    swallowClickUntil = 0;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+
+  // Comment on an area: drag a box, the dock's Area tool, C, and long-press
+  // then drag on a phone (shell/src/feature-flags.js feedbackAreaSelect). The
+  // flag is read for the tdoc origin that served this script.
+  const areaSelectOn = (() => {
+    const pinned = window.__TDOC_FLAGS__ && window.__TDOC_FLAGS__.feedbackAreaSelect;
+    if (typeof pinned === 'boolean') return pinned;
+    const flag = FLAGS.feedbackAreaSelect;
+    if (!flag) return false;
+    if (flag.default === true) return true;
+    try { return flag.preview === true && isPreviewHostname(new URL(base).hostname); } catch (_) { return false; }
+  })();
 
   // The connect popup mints a token that stands in for our missing cookie
   // (see getSession in the worker). It lives with the app's origin: one per
@@ -554,7 +657,9 @@ ${uiCss}
   function elementFor(comment) {
     const anchor = comment && comment.anchor;
     if (!anchor) return null;
-    const want = norm(anchor.text);
+    // An area's `text` is what was under the box; its element is the
+    // container, found by the container's own text.
+    const want = norm(anchor.region ? anchor.region.container_text : anchor.text);
     const cached = found.get(comment.id);
     if (cached && cached.isConnected) return cached;
     let bySelector = null;
@@ -572,6 +677,163 @@ ${uiCss}
     if (!el && bySelector && (!anchor.tag || bySelector.localName === anchor.tag)) el = bySelector;
     if (el) found.set(comment.id, el); else found.delete(comment.id);
     return el;
+  }
+
+  // ---- Areas ---------------------------------------------------------------
+  // What is on the page at a point, under the capture sheet: the sheet and the
+  // rest of the layer are skipped. Iframes, canvases and disabled controls
+  // come back as themselves (they never get a click of their own).
+  function underPoint(x, y) {
+    let list = [];
+    try { list = document.elementsFromPoint(x, y); } catch (_) { list = []; }
+    return list.find((el) => !isOurs(el) && el !== document.documentElement) || null;
+  }
+
+  // A press that starts on text: the caret position at the point lies in a
+  // text node whose glyphs cover the point. Blank space, images, canvases and
+  // charts are not text.
+  function startsOnText(x, y) {
+    const before = shield.style.pointerEvents;
+    shield.style.pointerEvents = 'none';
+    try {
+      let node = null;
+      if (document.caretPositionFromPoint) node = document.caretPositionFromPoint(x, y)?.offsetNode || null;
+      else if (document.caretRangeFromPoint) node = document.caretRangeFromPoint(x, y)?.startContainer || null;
+      if (!node || node.nodeType !== 3 || !node.textContent.trim() || isOurs(node.parentNode)) return false;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return [...range.getClientRects()].some((r) => x >= r.left - 1 && x <= r.right + 1 && y >= r.top - 1 && y <= r.bottom + 1);
+    } catch (_) {
+      return false;
+    } finally {
+      shield.style.pointerEvents = before;
+    }
+  }
+
+  const canScroll = (el, dx, dy) => {
+    if (!(el instanceof Element)) return false;
+    const css = getComputedStyle(el);
+    const y = /(auto|scroll|overlay)/.test(css.overflowY) && el.scrollHeight > el.clientHeight
+      && (dy < 0 ? el.scrollTop > 0 : dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : true);
+    const x = /(auto|scroll|overlay)/.test(css.overflowX) && el.scrollWidth > el.clientWidth
+      && (dx < 0 ? el.scrollLeft > 0 : dx > 0 ? el.scrollLeft + el.clientWidth < el.scrollWidth - 1 : true);
+    return (dy && y) || (dx && x);
+  };
+  // The scrolling box under a point that is not the page itself (a modal's
+  // body, a list). The sheet would otherwise only ever scroll the page.
+  function innerScroller(x, y, dx, dy) {
+    for (let el = underPoint(x, y); el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      if (canScroll(el, dx, dy)) return el;
+    }
+    return null;
+  }
+
+  const contains = (outer, inner, slack = 2) => inner.left >= outer.left - slack && inner.top >= outer.top - slack
+    && inner.right <= outer.right + slack && inner.bottom <= outer.bottom + slack;
+  const toRect = ({ left, top, width, height }) => ({ left, top, width, height, right: left + width, bottom: top + height });
+  const overlap = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
+    * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+
+  // The smallest element on the page that holds the whole box: from what is
+  // under its middle, up. Inside a modal that is the modal (or a part of it).
+  function enclosingFor(box) {
+    let el = underPoint(box.left + box.width / 2, box.top + box.height / 2);
+    for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      if (!isOurs(el) && contains(el.getBoundingClientRect(), box)) return el;
+    }
+    return document.body;
+  }
+
+  const visibleText = (node) => {
+    const el = node.parentElement;
+    if (!el || isOurs(el) || el.closest('script,style,noscript,template')) return false;
+    return Boolean(node.textContent.trim());
+  };
+  // The words the box covers, in reading order.
+  function textUnder(box, container) {
+    const out = [];
+    let length = 0;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    for (let node = walker.nextNode(); node && length < 500; node = walker.nextNode()) {
+      if (!visibleText(node)) continue;
+      range.selectNodeContents(node);
+      if (![...range.getClientRects()].some((r) => overlap(toRect(r), box) > 0)) continue;
+      const words = node.textContent.replace(/\s+/g, ' ').trim();
+      out.push(words); length += words.length + 1;
+    }
+    return out.join(' ').slice(0, 500);
+  }
+
+  // The named things mostly inside the box: what an agent can look for in
+  // the code (a button, a chart canvas, an iframe), nearest the box first.
+  const MEANINGFUL = 'a,button,input,select,textarea,label,img,svg,canvas,video,iframe,h1,h2,h3,h4,h5,h6,li,td,th,[role],[id],[aria-label],[data-testid]';
+  function elementsUnder(box, container) {
+    const out = [];
+    const seen = new Set();
+    const nodes = [container, ...container.querySelectorAll(MEANINGFUL)].slice(0, 3000);
+    for (const el of nodes) {
+      if (out.length >= 8) break;
+      if (isOurs(el) || (el.closest && el.closest('svg') && el.localName !== 'svg')) continue;
+      const r = el.getBoundingClientRect();
+      const area = r.width * r.height;
+      if (!area || el === container) continue;
+      if (overlap(toRect(r), box) / area < 0.6) continue;
+      if ([...seen].some((parent) => parent.contains(el))) continue;
+      seen.add(el);
+      const text = norm(el.innerText || el.textContent).slice(0, 80);
+      out.push({
+        selector: selectorFor(el), tag: el.localName,
+        ...(text ? { text } : {}),
+        ...((el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title')) ? { name: (el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title')).slice(0, 80) } : {}),
+      });
+    }
+    return out;
+  }
+
+  const round4 = (n) => Math.round(n * 10000) / 10000;
+  // A comment on an area: the container's own anchor (selector, its text to
+  // find it again, the page state), the box relative to the container, in
+  // pixels and as fractions of its size (the container can be resized),
+  // where the page was scrolled, and a description of what is under the box.
+  // `text` is the text under the box: what every reader of an anchor shows.
+  function regionContext(box, container = enclosingFor(box)) {
+    const base = contextFor(container);
+    const c = container.getBoundingClientRect();
+    const text = textUnder(box, container);
+    const elements = elementsUnder(box, container);
+    const rel = { x: Math.round(box.left - c.left), y: Math.round(box.top - c.top), width: Math.round(box.width), height: Math.round(box.height) };
+    const frac = c.width && c.height
+      ? { x: round4((box.left - c.left) / c.width), y: round4((box.top - c.top) / c.height), width: round4(box.width / c.width), height: round4(box.height / c.height) }
+      : null;
+    const what = text
+      ? `“${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”`
+      : (elements[0] ? (elements[0].name || elements[0].tag) : (base.accessible_name || base.tag));
+    return {
+      ...base,
+      text,
+      label: `Area ${rel.width}×${rel.height} · ${what}`,
+      rect: { x: Math.round(box.left + scrollX), y: Math.round(box.top + scrollY), width: rel.width, height: rel.height },
+      region: {
+        container_text: base.text,
+        container_rect: base.rect,
+        rel, frac,
+        scroll: { x: Math.round(scrollX), y: Math.round(scrollY) },
+        elements,
+      },
+    };
+  }
+
+  // Where an area is on screen now: its fractions of the container's box.
+  function regionRect(anchor, el) {
+    const region = anchor && anchor.region;
+    if (!region || !el) return null;
+    const c = el.getBoundingClientRect();
+    if (region.frac) {
+      return toRect({ left: c.left + region.frac.x * c.width, top: c.top + region.frac.y * c.height, width: region.frac.width * c.width, height: region.frac.height * c.height });
+    }
+    const rel = region.rel || {};
+    return toRect({ left: c.left + (rel.x || 0), top: c.top + (rel.y || 0), width: rel.width || 0, height: rel.height || 0 });
   }
 
   async function loadSurface(session) {
@@ -674,6 +936,7 @@ ${uiCss}
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
     const a = anchor || {};
+    if (a.region) return a.label || 'Area';
     const text = String(a.text || '').trim();
     return a.accessible_name || (text ? `${a.tag || 'element'} · “${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”` : (a.selector || 'element'));
   };
@@ -687,7 +950,7 @@ ${uiCss}
     return parts.join(' · ');
   };
 
-  function Dock({ session, openCount, unreadCount = 0, panelOpen, picking, onList, onPick, onHide, sendCount, onSend }) {
+  function Dock({ session, openCount, unreadCount = 0, panelOpen, picking, areaMode, onArea, onList, onPick, onHide, sendCount, onSend }) {
     // Share opens the space's page on tdoc with the doc Share dialog open,
     // as on any doc: who can comment here is whoever it lets in, and the
     // owner moves the space into a team from there. The dialog is not drawn
@@ -703,6 +966,13 @@ ${uiCss}
         <button type="button" className={`primary${picking ? ' on' : ''}`} onClick={onPick} title="Click anything on the page to comment on it">
           <Plus aria-hidden="true" /> Comment
         </button>
+        {onArea ? (
+          // Same toggle as Comment, but every drag draws a box (no element
+          // or text guess). Icon only on a phone, as Share.
+          <button type="button" className={`tdoc-fb-area${picking && areaMode ? ' on' : ''}`} onClick={onArea} aria-pressed={picking && areaMode ? 'true' : 'false'} title="Drag a box around an area to comment on it" aria-label="Area">
+            <SquareDashed aria-hidden="true" /><span className="tdoc-fb-area-label">Area</span>
+          </button>
+        ) : null}
         {onSend ? (
           // The doc page's Send to agent: same icon, same count (comments
           // never sent, or with a human word since the last handoff).
@@ -787,6 +1057,13 @@ ${uiCss}
     const [session, setSession] = useState(() => readSession());
     const [hovered, setHovered] = useState(null);
     const [selected, setSelected] = useState(null);
+    // A box being commented on: fractions of `selected` (its container).
+    const [areaSel, setAreaSel] = useState(null);
+    // The dock's Area tool: every drag draws a box.
+    const [areaMode, setAreaMode] = useState(false);
+    // The box while it is being drawn, in viewport pixels.
+    const [drag, setDrag] = useState(null);
+    const pressRef = useRef(null);
     const [openId, setOpenId] = useState(null);
     const [notice, setNotice] = useState(null);
     const [toast, setToast] = useState(null);
@@ -845,7 +1122,7 @@ ${uiCss}
     const hide = useCallback(() => {
       try { localStorage.setItem(hiddenKey, '1'); } catch (_) {}
       setShown(false); setPicking(false); setPanelOpen(false);
-      setSelected(null); setOpenId(null); setHovered(null); setReanchorId(null);
+      setSelected(null); setAreaSel(null); setOpenId(null); setHovered(null); setReanchorId(null);
     }, [hiddenKey]);
 
     const toggle = useCallback(() => { if (shown) hide(); else show({ intent: 'bookmark' }); }, [shown, hide, show]);
@@ -925,23 +1202,35 @@ ${uiCss}
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Picking: the only mode that takes over the page's clicks. Browsing
-    // leaves the app fully usable with the pins on top.
+    // Picking: the only mode that takes over the page. A transparent sheet
+    // covers it, so the app sees no press at all (no button fires, no modal
+    // closes on an outside press, no slider or drag-and-drop starts). One
+    // gesture, decided where it starts:
+    //   - a click (moved < 8px) picks the element under it;
+    //   - a drag that starts on text picks the element holding the text
+    //     (product anchors have no text ranges yet);
+    //   - a drag that starts anywhere else (blank, image, canvas, chart,
+    //     iframe), with Option/Alt held, or with the Area tool on, draws a box;
+    //   - on a touch screen a tap picks, a long press then drag draws a box,
+    //     and a plain swipe still scrolls.
     useEffect(() => {
-      if (!picking && !reanchorId) return undefined;
+      if (!picking && !reanchorId) { shield.hidden = true; return undefined; }
+      shield.hidden = Boolean(selected);
+      if (selected) return undefined;
       const priorCursor = document.documentElement.style.cursor;
       document.documentElement.style.cursor = 'crosshair';
-      const isTdocUi = (target) => target.closest?.('#tdoc-feedback-root');
-      const move = (event) => {
-        if (selected || isTdocUi(event.target)) return;
-        setHovered(event.target instanceof Element ? event.target : null);
+      const THRESHOLD = 8;
+      const LONG_PRESS_MS = 450;
+      const fromShield = (event) => event.composedPath()[0] === shield;
+      const pickable = (el) => el && el !== document.body && el !== document.documentElement && !isOurs(el);
+      const boxOf = (p, x, y) => toRect({ left: Math.min(p.x, x), top: Math.min(p.y, y), width: Math.abs(x - p.x), height: Math.abs(y - p.y) });
+      const commonAncestor = (a, b) => {
+        if (!a || !b) return a || b;
+        for (let el = a; el; el = el.parentElement) if (el.contains(b)) return el;
+        return a;
       };
-      const click = async (event) => {
-        if (selected || isTdocUi(event.target)) return;
-        const element = event.target instanceof Element ? event.target : null;
-        if (!element || element === document.body || element === document.documentElement) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
+      const pickElement = async (element) => {
+        if (!pickable(element)) return;
         if (reanchorId) {
           const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: contextFor(element) });
           if (apply(result)) setReanchorId(null);
@@ -949,24 +1238,160 @@ ${uiCss}
           return;
         }
         setOpenId(null);
+        setAreaSel(null);
         setSelected(element);
         setHovered(null);
       };
-      document.addEventListener('mousemove', move, true);
-      document.addEventListener('click', click, true);
-      return () => {
-        document.documentElement.style.cursor = priorCursor;
-        document.removeEventListener('mousemove', move, true);
-        document.removeEventListener('click', click, true);
+      const pickArea = async (box) => {
+        const container = enclosingFor(box);
+        if (reanchorId) {
+          const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: regionContext(box, container) });
+          if (apply(result)) setReanchorId(null);
+          setHovered(null);
+          return;
+        }
+        const c = container.getBoundingClientRect();
+        setOpenId(null);
+        setAreaSel(c.width && c.height
+          ? { x: (box.left - c.left) / c.width, y: (box.top - c.top) / c.height, width: box.width / c.width, height: box.height / c.height, label: regionContext(box, container).label }
+          : null);
+        setSelected(container);
+        setHovered(null);
       };
-    }, [picking, reanchorId, selected, apply]);
+      const reset = () => {
+        const p = pressRef.current;
+        if (p && p.timer) clearTimeout(p.timer);
+        pressRef.current = null;
+        setDrag(null);
+      };
+      let frame = 0;
+      const hoverAt = (x, y) => {
+        if (frame) return;
+        frame = requestAnimationFrame(() => { frame = 0; const el = underPoint(x, y); setHovered(pickable(el) ? el : null); });
+      };
+      const onPointerDown = (event) => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        if (event.pointerType === 'mouse') event.preventDefault();
+        reset();
+        const x = event.clientX, y = event.clientY;
+        const start = underPoint(x, y);
+        const forced = areaSelectOn && (areaMode || event.altKey);
+        const p = {
+          id: event.pointerId, touch: event.pointerType !== 'mouse', x, y, lastX: x, lastY: y, start,
+          mode: 'pending', onText: !forced && startsOnText(x, y), forced, timer: 0, scroller: undefined,
+        };
+        if (p.touch && areaSelectOn) {
+          // Hold still, then drag: a box. Moving first is a scroll.
+          p.timer = setTimeout(() => {
+            if (pressRef.current !== p || p.mode !== 'pending') return;
+            p.mode = 'area';
+            try { navigator.vibrate && navigator.vibrate(8); } catch (_) {}
+            setHovered(null);
+            setDrag(boxOf(p, p.lastX, p.lastY));
+          }, LONG_PRESS_MS);
+        }
+        if (!p.touch) { try { shield.setPointerCapture(event.pointerId); } catch (_) {} }
+        pressRef.current = p;
+      };
+      const onPointerMove = (event) => {
+        const p = pressRef.current;
+        const x = event.clientX, y = event.clientY;
+        if (!p) { if (event.pointerType === 'mouse') hoverAt(x, y); return; }
+        if (event.pointerId !== p.id) return;
+        p.lastX = x; p.lastY = y;
+        const far = Math.hypot(x - p.x, y - p.y) >= THRESHOLD;
+        if (p.mode === 'pending' && far) {
+          if (p.touch) { p.mode = 'scroll'; clearTimeout(p.timer); return; }
+          p.mode = !areaSelectOn ? 'element' : (p.forced || !p.onText ? 'area' : 'text');
+        }
+        if (p.mode === 'area') { setHovered(null); setDrag(boxOf(p, x, y)); }
+        else if (p.mode === 'text') setHovered(commonAncestor(p.start, underPoint(x, y)));
+      };
+      const onPointerUp = (event) => {
+        const p = pressRef.current;
+        if (!p || event.pointerId !== p.id) return;
+        reset();
+        // The sheet goes away under the composer before this press's click
+        // is sent: that click must not land on the app.
+        swallowClickUntil = Date.now() + 400;
+        const x = event.clientX, y = event.clientY;
+        if (p.mode === 'scroll') return;
+        if (p.mode === 'area') {
+          const box = boxOf(p, x, y);
+          // Smaller than the click threshold both ways: it was a click.
+          if (box.width >= THRESHOLD || box.height >= THRESHOLD) { pickArea(box); return; }
+        }
+        if (p.mode === 'text') { pickElement(commonAncestor(p.start, underPoint(x, y))); return; }
+        pickElement(p.start || underPoint(x, y));
+      };
+      // A finger that scrolls a modal's body: the sheet is not inside it,
+      // so move that box ourselves. Once a long press made a box, the finger
+      // draws instead of scrolling.
+      const onTouchMove = (event) => {
+        const p = pressRef.current;
+        if (!p) return;
+        const t = event.touches[0];
+        if (!t) return;
+        if (p.mode === 'area') { if (event.cancelable) event.preventDefault(); return; }
+        const dx = p.lastTouchX == null ? 0 : p.lastTouchX - t.clientX;
+        const dy = p.lastTouchY == null ? 0 : p.lastTouchY - t.clientY;
+        p.lastTouchX = t.clientX; p.lastTouchY = t.clientY;
+        if (p.scroller === undefined && (dx || dy)) p.scroller = innerScroller(p.x, p.y, dx, dy);
+        if (p.scroller && event.cancelable) { event.preventDefault(); p.scroller.scrollBy(dx, dy); }
+      };
+      const onWheel = (event) => {
+        const scroller = innerScroller(event.clientX, event.clientY, event.deltaX, event.deltaY);
+        if (!scroller) return;
+        event.preventDefault();
+        scroller.scrollBy(event.deltaX, event.deltaY);
+      };
+      const handlers = {
+        pointerdown: onPointerDown, pointermove: onPointerMove, pointerup: onPointerUp,
+        pointercancel: () => { if (pressRef.current && pressRef.current.mode !== 'area') reset(); },
+        touchmove: onTouchMove, wheel: onWheel,
+        // The browser's own reactions to a press on the sheet: a touch's
+        // follow-up mouse events and click, a long press's menu.
+        touchend: (event) => { if (event.cancelable) event.preventDefault(); },
+        contextmenu: (event) => event.preventDefault(),
+      };
+      const types = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'mousedown', 'mousemove', 'mouseup',
+        'click', 'dblclick', 'auxclick', 'contextmenu', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'wheel'];
+      // Window capture runs before every listener of the app.
+      const listener = (event) => {
+        if (!fromShield(event)) return;
+        event.stopImmediatePropagation();
+        if (handlers[event.type]) handlers[event.type](event);
+      };
+      const options = { capture: true, passive: false };
+      for (const type of types) window.addEventListener(type, listener, options);
+      // A press on the pins, the dock or the banner is not a pick, and a
+      // pointer that leaves the window ends a drag.
+      const away = () => { if (pressRef.current && !pressRef.current.touch) reset(); };
+      window.addEventListener('blur', away);
+      return () => {
+        if (frame) cancelAnimationFrame(frame);
+        reset();
+        shield.hidden = true;
+        document.documentElement.style.cursor = priorCursor;
+        for (const type of types) window.removeEventListener(type, listener, options);
+        window.removeEventListener('blur', away);
+      };
+    }, [picking, reanchorId, selected, apply, areaMode]);
+
+    // Leaving pick mode puts the Area tool away.
+    useEffect(() => { if (!picking && !reanchorId) setAreaMode(false); }, [picking, reanchorId]);
 
     // Esc steps back one level: composer → picking → card → list → hidden.
     useEffect(() => {
       if (!shown) return undefined;
       const keydown = (event) => {
         if (event.key !== 'Escape') return;
-        if (selected) setSelected(null);
+        if (pressRef.current) {
+          const p = pressRef.current;
+          if (p.timer) clearTimeout(p.timer);
+          pressRef.current = null;
+          setDrag(null); setHovered(null);
+        } else if (selected) { setSelected(null); setAreaSel(null); }
         else if (picking || reanchorId) { setPicking(false); setReanchorId(null); setHovered(null); }
         else if (openId) setOpenId(null);
         else if (panelOpen) setPanelOpen(false);
@@ -991,6 +1416,26 @@ ${uiCss}
       document.addEventListener('keydown', keydown, true);
       return () => document.removeEventListener('keydown', keydown, true);
     }, [surface, load]);
+
+    // C: Comment (pick mode) while the layer is shown, unless someone is
+    // typing (in the app or in our composer) or holds a modifier. The app
+    // does not get that C.
+    useEffect(() => {
+      if (!areaSelectOn || !shown) return undefined;
+      const keydown = (event) => {
+        if (event.key !== 'c' && event.key !== 'C') return;
+        if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+        const target = event.composedPath()[0];
+        if (target instanceof Element && (target.matches('input,textarea,select,[contenteditable=""],[contenteditable="true"]') || target.isContentEditable)) return;
+        if (selected || notifyIds) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setOpenId(null); setPanelOpen(false);
+        setPicking((p) => !p);
+      };
+      window.addEventListener('keydown', keydown, true);
+      return () => window.removeEventListener('keydown', keydown, true);
+    }, [shown, selected, notifyIds]);
 
     // Hash-route navigation is a new page: reload which comments are here.
     useEffect(() => {
@@ -1089,11 +1534,36 @@ ${uiCss}
       );
     }
 
-    const hoverRect = (picking || reanchorId) ? hovered?.getBoundingClientRect() : null;
+    const hoverRect = (picking || reanchorId) && !drag ? hovered?.getBoundingClientRect() : null;
+    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    const bannerText = !areaSelectOn
+      ? (reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it')
+      : areaMode
+        ? (coarse ? 'Hold, then drag a box around the area' : 'Drag a box around the area')
+        : reanchorId
+          ? (coarse ? 'Tap the element, or hold and drag a box' : 'Click the element, or drag a box, this comment should point at')
+          : (coarse ? 'Tap an element, or hold and drag a box' : 'Click an element, or drag a box around an area');
+    // A box on screen: one being drawn, one being commented on, the open
+    // comment's area.
+    const marquee = (box, tag) => box ? (
+      <div className="tdoc-drag-marquee" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
+        {tag ? <span className={`tdoc-fb-area-tag${box.top < 30 ? ' below' : ''}`}>{tag}</span> : null}
+      </div>
+    ) : null;
     const rightInset = panelOpen ? Math.min(PANEL_WIDTH, innerWidth) : 0;
-    const composerRect = selected?.getBoundingClientRect();
-    const placeCard = (element) => {
-      const rect = element?.getBoundingClientRect();
+    // The box being commented on, where it is now (it follows a scroll).
+    const areaBox = (() => {
+      if (!selected || !areaSel) return null;
+      const c = selected.getBoundingClientRect();
+      return toRect({ left: c.left + areaSel.x * c.width, top: c.top + areaSel.y * c.height, width: areaSel.width * c.width, height: areaSel.height * c.height });
+    })();
+    const composerRect = areaBox || selected?.getBoundingClientRect();
+    // Where a comment points on screen: its area, or its element.
+    const spotOf = (comment, element) => (comment.anchor && comment.anchor.region ? regionRect(comment.anchor, element) : null)
+      || element?.getBoundingClientRect();
+    const openSpot = openComment && openComment.anchor && openComment.anchor.region ? regionRect(openComment.anchor, elementFor(openComment)) : null;
+    const placeCard = (element, comment) => {
+      const rect = element ? spotOf(comment || {}, element) : null;
       const width = innerWidth - rightInset;
       if (!rect) return { top: 60, left: Math.max(8, width - 300) };
       const left = rect.right + 294 < width ? rect.right + 10 : Math.max(8, Math.min(rect.left - 290, width - 300));
@@ -1123,14 +1593,17 @@ ${uiCss}
       <AgentButtonsContext.Provider value={!canSendToAgent}>
         {(picking || reanchorId) && !selected ? (
           <div className="tdoc-fb-banner" role="status">
-            {reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it'}
+            {bannerText}
             <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
           </div>
         ) : null}
         {hoverRect ? <div className="tdoc-hover-outline" style={{ left: hoverRect.left, top: hoverRect.top, width: hoverRect.width, height: hoverRect.height }} /> : null}
+        {marquee(drag, 'Comment on this area')}
+        {marquee(areaBox)}
+        {!selected ? marquee(openSpot) : null}
         {pins.map(({ comment, element }) => {
           if (!element) return null;
-          const rect = element.getBoundingClientRect();
+          const rect = spotOf(comment, element);
           if (rect.bottom < 0 || rect.top > innerHeight) return null;
           const pinState = commentPinState(comment, { seenMap: area.seenMap, handoffViewer, isOwner: owner });
           return (
@@ -1152,7 +1625,7 @@ ${uiCss}
           /* The shared composer adds the document shell's 48px bar. Feedback
              already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
-            selection={{ kind: 'element', label: labelOf(contextFor(selected)), rect: {
+            selection={{ kind: 'element', label: areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)), rect: {
               top: composerRect.top - TOP_BAR_HEIGHT,
               bottom: composerRect.bottom - TOP_BAR_HEIGHT,
               left: Math.min(composerRect.left, Math.max(8, innerWidth - rightInset - COMPOSER_WIDTH - 8)),
@@ -1161,11 +1634,11 @@ ${uiCss}
             canSendToAgent={canSendToAgent}
             connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
             agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
-            onClose={() => setSelected(null)}
+            onClose={() => { setSelected(null); setAreaSel(null); }}
             onSubmit={async (text, opts = {}) => {
-              const anchor = contextFor(selected);
+              const anchor = areaBox ? regionContext(areaBox, selected) : contextFor(selected);
               const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient });
-              if (apply(result)) { setSelected(null); setPicking(false); }
+              if (apply(result)) { setSelected(null); setAreaSel(null); setPicking(false); }
             }}
           />
         ) : null}
@@ -1176,7 +1649,7 @@ ${uiCss}
             comment={openComment}
             unanchored={!elementFor(openComment) && !stateLabel(openComment.anchor)}
             floating
-            position={placeCard(elementFor(openComment))}
+            position={placeCard(elementFor(openComment), openComment)}
           />
         ) : null}
 
@@ -1219,8 +1692,13 @@ ${uiCss}
           unreadCount={unreadComments.length}
           panelOpen={panelOpen}
           picking={picking}
+          areaMode={areaMode}
+          onArea={areaSelectOn ? () => {
+            setOpenId(null); setSelected(null); setAreaSel(null); setPanelOpen(false);
+            if (!picking) { setPicking(true); setAreaMode(true); } else setAreaMode((v) => !v);
+          } : null}
           onList={() => setPanelOpen((v) => !v)}
-          onPick={() => { setOpenId(null); setSelected(null); setPanelOpen(false); setPicking((v) => !v); }}
+          onPick={() => { setOpenId(null); setSelected(null); setAreaSel(null); setPanelOpen(false); setAreaMode(false); setPicking((v) => !v); }}
           onHide={hide}
           sendCount={ready.length}
           onSend={showSend ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
