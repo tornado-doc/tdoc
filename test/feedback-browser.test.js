@@ -11,7 +11,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const esbuild = require('esbuild');
 const { requirePlaywrightOrSkip, reservePort } = require('./helpers/fixture-server');
-const { chromium } = requirePlaywrightOrSkip('feedback-browser.test.js');
+const { chromium, webkit } = requirePlaywrightOrSkip('feedback-browser.test.js');
 
 let pass = 0, fail = 0;
 function ok(name) { console.log(`  ✓ ${name}`); pass++; }
@@ -74,7 +74,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
     }
     if (req.url === '/libraries') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<!doctype html><meta charset="utf-8"><style>body{font:16px system-ui}.modal-overlay{position:fixed;inset:0;background:#0005}.modal-content{position:fixed;top:18%;left:20%;min-width:400px;padding:24px;background:white;z-index:30}#custom-headless-panel{transition:opacity 1s}#custom-headless-panel[data-closed]{opacity:0}</style><div id="host-app"></div><script src="/libraries.js"></script>');
+      res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font:16px system-ui}.modal-overlay{position:fixed;inset:0;background:#0005}.modal-content{position:fixed;top:18%;left:20%;min-width:400px;padding:24px;background:white;z-index:30}#custom-headless-panel{transition:opacity 1s}#custom-headless-panel[data-closed]{opacity:0}.overlay-backdrop{position:fixed;inset:0;background:#0006;z-index:1000;display:flex;align-items:center;justify-content:center}.overlay-box{background:#fff;padding:24px;border-radius:8px}.menu-anchor{position:relative;display:inline-block}.menu{position:absolute;top:100%;left:0;z-index:50;display:flex;flex-direction:column;background:#fff;border:1px solid #ccc;padding:4px;min-width:160px}#page-chart-card{margin:16px 0}</style><div id="host-app"></div><script src="/libraries.js"></script>');
       return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -136,7 +136,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
     });
 
     await test('clicking an element opens the real tdoc composer; posting leaves a pin', async () => {
-      await page.locator('#invite').click();
+      await page.locator('#invite').click({ force: true });
       const composer = page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]');
       await composer.first().waitFor({ timeout: 5000 });
       await composer.first().fill('This button does nothing when clicked');
@@ -296,7 +296,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       });
       assert(feedbackWins.overlaps && feedbackWins.rootZ > feedbackWins.navZ,
         `feedback chrome is not above the host top bar: ${JSON.stringify(feedbackWins)}`);
-      await page.locator('#invite').click();
+      await page.locator('#invite').click({ force: true });
       assert((await page.evaluate(() => window.__clicked)) === 1, 'picking let the click through to the app');
       await page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]').first().waitFor({ timeout: 3000 });
       await page.keyboard.press('Escape');
@@ -376,7 +376,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         document.body.appendChild(d);
       });
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
-      await page.locator('#save').click();
+      await page.locator('#save').click({ force: true });
       const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]');
       await c.first().fill('Save is disabled');
       const countBeforeSave = await page.locator('#tdoc-feedback-root .tdoc-pin').count();
@@ -414,7 +414,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       await page.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'nd');
       const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
       if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
-      await page.locator('#nd h2').click();
+      await page.locator('#nd h2').click({ force: true });
       const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]').first();
       await c.click();
       await page.keyboard.type('Share title is vague');
@@ -446,7 +446,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       assert(layout.dockHit && (await dockAt()) === dockBefore, `dock moved or is covered inside the dialog: ${JSON.stringify(layout)} vs ${dockBefore}`);
       const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
       if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
-      await page.locator('#td h2').click();
+      await page.locator('#td h2').click({ force: true });
       const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
       await c.click();
       await page.keyboard.type('Heading is vague');
@@ -487,7 +487,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         assert(await page.evaluate(() => window.__transformedAction === 1), 'feedback layer blocked a host modal button');
         const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
         if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
-        await page.locator('#transformed-target').click();
+        await page.locator('#transformed-target').click({ force: true });
         const composer = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
         await composer.fill('The modal heading needs context');
         assert(await composer.inputValue() === 'The modal heading needs context', 'composer clipped by transformed script modal');
@@ -517,7 +517,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         d.querySelector('input').focus();
       });
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
-      await page.locator('#sm h2').click();
+      await page.locator('#sm h2').click({ force: true });
       const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
       await c.click();
       await page.keyboard.type('Say who gets access');
@@ -553,7 +553,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
         if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
         assert(await page.locator('#capture-modal').isVisible(), 'opening feedback closed the modal');
-        await page.locator('#capture-modal h2').click();
+        await page.locator('#capture-modal h2').click({ force: true });
         const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
         await c.fill('Show the billing period');
         assert(await page.locator('#capture-modal').isVisible(), 'typing in feedback closed the modal');
@@ -626,7 +626,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await pick.click(); // also clears any composer left by the previous case
         if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
         await page.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
-        await page.locator('#event-target').click();
+        await page.locator('#event-target').click({ force: true });
         const textarea = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
         const debugState = await page.evaluate(() => ({ parent: document.getElementById('tdoc-feedback-root').parentElement.id, picking: window.__fb('.tdoc-feedback-dock button.primary')?.className, banner: !!window.__fb('.tdoc-fb-banner'), selected: !!window.__fb('.tdoc-popup') }));
         assert(debugState.selected, `click did not open composer: ${JSON.stringify(debugState)}`);
@@ -674,7 +674,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         const pick = foreign.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
         if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
         await foreign.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
-        await foreign.locator('#css-modal h2').click();
+        await foreign.locator('#css-modal h2').click({ force: true });
         const accent = await foreign.evaluate(() => ({
           button: getComputedStyle(window.__fb('.tdoc-popup button.submit')).backgroundColor,
           textarea: getComputedStyle(window.__fb('.tdoc-popup textarea')).borderTopColor,
@@ -712,7 +712,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
         // The dialog uses the same classes as the layer's own dialogs; it is
         // still the page, so a click on it starts a comment.
-        await dialog.locator('h3').click();
+        await dialog.locator('h3').click({ force: true });
         const c = me.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
         await c.waitFor({ timeout: 4000 });
         await c.click();
@@ -722,7 +722,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await me.keyboard.press('Escape');
         await me.locator('#tdoc-feedback-root .tdoc-popup').waitFor({ state: 'detached' });
         assert(await dialog.isVisible(), 'Escape in the composer also closed the Rename dialog');
-        await dialog.locator('h3').click();
+        await dialog.locator('h3').click({ force: true });
         await c.waitFor();
         await c.fill('Rename title is vague');
         await me.locator('#tdoc-feedback-root .tdoc-popup button.submit').click();
@@ -753,7 +753,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
           await me.screenshot({ path: path.join(os.tmpdir(), `tdoc-feedback-panel-${width}.png`) });
           await panel.locator('.tdoc-fb-add').click();
           await panel.waitFor({ state: 'detached' });
-          await me.locator('h1').first().click();
+          await me.locator('h1').first().click({ force: true });
           const composer = me.locator('#tdoc-feedback-root .tdoc-popup');
           await composer.waitFor();
           const box = await composer.boundingBox();
@@ -777,7 +777,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
     await test('a comment follows its element when the page is rebuilt with a card above it', async () => {
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
       const heading = page.locator('main > section.card h2', { hasText: 'Weekly active users' });
-      await heading.click();
+      await heading.click({ force: true });
       const c = page.locator('#tdoc-feedback-root .tdoc-popup textarea, #tdoc-feedback-root .tdoc-popup [contenteditable]');
       await c.first().fill('Rename this metric');
       await page.locator('#tdoc-feedback-root .tdoc-popup button.submit').last().click();
@@ -798,7 +798,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
       if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
       await page.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
-      await page.locator('main h2').first().click();
+      await page.locator('main h2').first().click({ force: true });
       const draft = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
       await draft.fill('Please keep this draft');
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
@@ -855,7 +855,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         const pick = dock.locator('button.primary');
         await pick.click();
         await libs.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
-        await libs.locator('#radix-target').click();
+        await libs.locator('#radix-target').click({ force: true });
         const radixDraft = libs.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
         await radixDraft.fill('Radix modal feedback');
         await radixDraft.press('Enter');
@@ -873,7 +873,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
           'Radix no-Overlay fixture did not exercise modal pointer isolation');
         await libs.waitForFunction(() => document.getElementById('tdoc-feedback-root').parentElement.id === 'radix-no-overlay-content');
         if (!(await pick.evaluate((button) => button.classList.contains('on')))) await pick.click();
-        await libs.locator('#radix-no-overlay-target').click();
+        await libs.locator('#radix-no-overlay-target').click({ force: true });
         await libs.locator('#tdoc-feedback-root .tdoc-popup textarea').first().fill('Feedback on a dialog without an overlay');
         assert(await libs.locator('#radix-no-overlay-content').isVisible(), 'feedback closed a Radix Dialog without Overlay');
         await libs.locator('#tdoc-feedback-root .tdoc-popup button.submit').click();
@@ -912,7 +912,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
           `feedback was not inside the Headless UI panel during entry: ${JSON.stringify(entryClick)}`);
         assert(await libs.locator('#custom-headless-panel').isVisible(), 'clicking feedback during Headless UI entry closed the dialog');
         await libs.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor();
-        await libs.locator('#headless-target').click();
+        await libs.locator('#headless-target').click({ force: true });
         const headlessDraft = libs.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
         await headlessDraft.fill('Headless modal feedback');
         await headlessDraft.press('Enter');
@@ -928,6 +928,356 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await libs.close();
       }
     });
+
+    // ---- Comment on an area (feedbackAreaSelect) and picking inside modals.
+    // The libraries page has a canvas chart on the page and one in every kind
+    // of modal; the flag is pinned on for these pages.
+    const areaPage = async (width = 1200, height = 800) => {
+      const p = await context.newPage();
+      await p.setViewportSize({ width, height });
+      await p.addInitScript(() => { window.__TDOC_FLAGS__ = { feedbackAreaSelect: true }; });
+      p.on('pageerror', (error) => consoleErrors.push(error.message));
+      await p.goto(`${appBase}/libraries`);
+      await p.addScriptTag({ url: `${tdocBase}/feedback.js` });
+      await p.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor({ timeout: 5000 });
+      return p;
+    };
+    const boxOf = async (p, selector) => p.locator(selector).first().boundingBox();
+    const mouseDrag = async (p, from, to, { alt = false, beforeUp = null } = {}) => {
+      if (alt) await p.keyboard.down('Alt');
+      await p.mouse.move(from[0], from[1]);
+      await p.mouse.down();
+      await p.mouse.move((from[0] + to[0]) / 2, (from[1] + to[1]) / 2, { steps: 4 });
+      await p.mouse.move(to[0], to[1], { steps: 4 });
+      if (beforeUp) await beforeUp();
+      await p.mouse.up();
+      if (alt) await p.keyboard.up('Alt');
+    };
+    const startPicking = async (p) => {
+      const pick = p.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+      if (!(await pick.evaluate((b) => b.classList.contains('on')))) await pick.click();
+      await p.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor({ timeout: 3000 });
+    };
+    const composerLabel = async (p) => {
+      const head = p.locator('#tdoc-feedback-root .tdoc-popup .head .h').first();
+      await head.waitFor({ timeout: 3000 });
+      return head.innerText();
+    };
+    const postDraft = async (p, text) => {
+      const draft = p.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
+      await draft.fill(text);
+      await p.locator('#tdoc-feedback-root .tdoc-popup button.submit').first().click();
+      await p.locator('#tdoc-feedback-root .tdoc-popup').waitFor({ state: 'detached', timeout: 5000 });
+    };
+    const storedComments = async () => {
+      const slug = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).slug, `tdoc-feedback:${tdocBase}`);
+      return JSON.parse(fs.readFileSync(path.join(root, slug, 'comments.json'), 'utf8'));
+    };
+    const shot = async (p, name) => { if (process.env.TDOC_UI_SHOTS) await p.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, `area-${name}.png`) }); };
+
+    // The cases below add a dozen comments; the later cases expect the
+    // space as it was, so it is put back after them.
+    const commentsFile = path.join(root, await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).slug, `tdoc-feedback:${tdocBase}`), 'comments.json');
+    const commentsBeforeAreas = fs.readFileSync(commentsFile, 'utf8');
+
+    await test('without the flag there is no Area tool and a drag still picks the element it started on', async () => {
+      assert((await page.locator('#tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area').count()) === 0, 'Area tool shown with the flag off');
+    });
+
+    let areaId = null;
+    let areaExpected = null;
+    await test('a drag across a chart comments on that area: a live box, then the box, its container and what is under it are stored', async () => {
+      const p = await areaPage();
+      try {
+        await startPicking(p);
+        const chart = await boxOf(p, '#page-chart');
+        const from = [chart.x + 30, chart.y + 15];
+        const to = [chart.x + 150, chart.y + 75];
+        let live = null;
+        await mouseDrag(p, from, to, { beforeUp: async () => {
+          live = await p.evaluate(() => {
+            const box = document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-drag-marquee');
+            return box ? { rect: box.getBoundingClientRect().toJSON(), tag: box.innerText } : null;
+          });
+          await shot(p, 'drag-live');
+        } });
+        assert(live && live.tag === 'Comment on this area', `no live box while dragging: ${JSON.stringify(live)}`);
+        assert(Math.abs(live.rect.width - 120) <= 2 && Math.abs(live.rect.height - 60) <= 2, `live box size ${JSON.stringify(live.rect)}`);
+        assert((await composerLabel(p)).startsWith('Area 120×60'), `composer is not for an area: ${await composerLabel(p)}`);
+        await shot(p, 'composer');
+        await postDraft(p, 'The third bar looks too short');
+        const made = (await storedComments()).find((c) => c.text === 'The third bar looks too short');
+        assert(made, 'area comment not stored');
+        const a = made.anchor;
+        assert(a.kind === 'product' && a.region, `not an area anchor: ${JSON.stringify(a)}`);
+        // The smallest element holding the whole box: the chart itself.
+        assert(a.selector === '#page-chart' && a.tag === 'canvas', `container selector ${a.selector}`);
+        const container = await p.evaluate((sel) => document.querySelector(sel).getBoundingClientRect().toJSON(), a.selector);
+        assert(a.region.rel.width === 120 && a.region.rel.height === 60
+          && Math.abs(a.region.rel.x - Math.round(from[0] - container.x)) <= 1 && Math.abs(a.region.rel.y - Math.round(from[1] - container.y)) <= 1,
+        `stored box ${JSON.stringify(a.region.rel)} vs container ${JSON.stringify(container)}`);
+        assert(a.region.frac && a.region.frac.width > 0 && a.region.frac.width <= 1, `no fractions: ${JSON.stringify(a.region)}`);
+        assert(a.rect.width === 120 && a.viewport.width === 1200 && a.region.scroll, `page box / viewport / scroll missing: ${JSON.stringify(a)}`);
+        assert(a.label.startsWith('Area 120×60'), `label ${a.label}`);
+        areaId = made.id;
+        areaExpected = { left: from[0] - chart.x, top: from[1] - chart.y };
+        assert(!(await p.locator('#tdoc-feedback-root .tdoc-fb-banner').count()), 'pick mode did not end with the comment');
+      } finally { await p.close(); }
+    });
+
+    await test('the area is drawn again in the same place after a reload', async () => {
+      assert(areaId, 'no area comment from the previous case');
+      const p = await areaPage();
+      try {
+        const pin = p.locator(`#tdoc-feedback-root .tdoc-pin[data-id="${areaId}"]`);
+        await pin.waitFor({ timeout: 5000 });
+        await pin.click();
+        await p.locator('#tdoc-feedback-root .tdoc-margin-comment').waitFor({ timeout: 3000 });
+        const drawn = await p.evaluate(() => document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-drag-marquee')?.getBoundingClientRect().toJSON());
+        const chart = await boxOf(p, '#page-chart');
+        assert(drawn && Math.abs(drawn.x - (chart.x + areaExpected.left)) <= 2 && Math.abs(drawn.y - (chart.y + areaExpected.top)) <= 2
+          && Math.abs(drawn.width - 120) <= 2 && Math.abs(drawn.height - 60) <= 2, `area drawn at ${JSON.stringify(drawn)}, chart ${JSON.stringify(chart)}`);
+        const pinBox = await pin.boundingBox();
+        assert(Math.abs(pinBox.x + 14 - (drawn.x + drawn.width)) <= 4, `pin is not on the area's corner: ${JSON.stringify(pinBox)} / ${JSON.stringify(drawn)}`);
+        assert((await p.locator('#tdoc-feedback-root .tdoc-margin-comment').innerText()).includes('Area 120×60'), 'card does not say it is on an area');
+        await shot(p, 'reload');
+      } finally { await p.close(); }
+    });
+
+    await test('a click still picks an element; a drag that starts on text picks the element holding it', async () => {
+      const p = await areaPage();
+      try {
+        await p.evaluate(() => { window.__hostClicks = 0; document.addEventListener('click', () => window.__hostClicks++, true); });
+        await startPicking(p);
+        const h3 = await boxOf(p, '#page-chart-card h3');
+        await p.mouse.click(h3.x + 10, h3.y + h3.height / 2);
+        assert((await composerLabel(p)) === 'h3 · “Signups”', `click did not pick the heading: ${await composerLabel(p)}`);
+        await p.keyboard.press('Escape');
+        // 5px is under the threshold: still a click.
+        await mouseDrag(p, [h3.x + 10, h3.y + h3.height / 2], [h3.x + 14, h3.y + h3.height / 2 + 3]);
+        assert((await composerLabel(p)) === 'h3 · “Signups”', `a 5px wobble was not a click: ${await composerLabel(p)}`);
+        await p.keyboard.press('Escape');
+        const h1 = await boxOf(p, 'h1');
+        await mouseDrag(p, [h1.x + 5, h1.y + h1.height / 2], [h1.x + 140, h1.y + h1.height / 2 + 2]);
+        assert((await composerLabel(p)) === 'h1 · “Real modal libraries”', `a drag on text did not pick its element: ${await composerLabel(p)}`);
+        await p.keyboard.press('Escape');
+        assert(await p.evaluate(() => window.__hostClicks === 0), 'the app got a click while picking');
+      } finally { await p.close(); }
+    });
+
+    await test('Option-drag and the dock Area tool draw a box even over text', async () => {
+      const p = await areaPage();
+      try {
+        await startPicking(p);
+        const h1 = await boxOf(p, 'h1');
+        await mouseDrag(p, [h1.x + 5, h1.y + 4], [h1.x + 140, h1.y + h1.height - 4], { alt: true });
+        assert((await composerLabel(p)).startsWith('Area 135×'), `Option-drag did not draw a box: ${await composerLabel(p)}`);
+        await p.keyboard.press('Escape');
+        await p.keyboard.press('Escape');
+        const tool = p.locator('#tdoc-feedback-root .tdoc-feedback-dock button.tdoc-fb-area');
+        await tool.click();
+        assert((await tool.getAttribute('aria-pressed')) === 'true', 'Area tool did not turn on');
+        assert((await p.locator('#tdoc-feedback-root .tdoc-fb-banner').innerText()).startsWith('Drag a box around the area'), 'banner does not say Area mode');
+        await shot(p, 'tool');
+        await mouseDrag(p, [h1.x + 5, h1.y + 4], [h1.x + 100, h1.y + h1.height - 4]);
+        const label = await composerLabel(p);
+        assert(label.startsWith('Area 95×') && label.includes('Real modal'), `Area tool drag: ${label}`);
+        await p.keyboard.press('Escape');
+        await p.keyboard.press('Escape');
+        assert((await tool.getAttribute('aria-pressed')) === 'false', 'Area tool stayed on after pick mode ended');
+      } finally { await p.close(); }
+    });
+
+    await test('Escape cancels a drag in progress, then pick mode', async () => {
+      const p = await areaPage();
+      try {
+        await startPicking(p);
+        const chart = await boxOf(p, '#page-chart');
+        await p.mouse.move(chart.x + 10, chart.y + 10);
+        await p.mouse.down();
+        await p.mouse.move(chart.x + 120, chart.y + 60, { steps: 5 });
+        assert(await p.locator('#tdoc-feedback-root .tdoc-drag-marquee').count() === 1, 'no box while dragging');
+        await p.keyboard.press('Escape');
+        assert(await p.locator('#tdoc-feedback-root .tdoc-drag-marquee').count() === 0, 'Escape left the box');
+        await p.mouse.move(chart.x + 150, chart.y + 70, { steps: 2 });
+        await p.mouse.up();
+        await p.waitForTimeout(200);
+        assert(await p.locator('#tdoc-feedback-root .tdoc-popup').count() === 0, 'a cancelled drag opened the composer');
+        assert(await p.locator('#tdoc-feedback-root .tdoc-fb-banner').isVisible(), 'Escape on a drag also left pick mode');
+        await p.keyboard.press('Escape');
+        await p.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor({ state: 'detached', timeout: 2000 });
+      } finally { await p.close(); }
+    });
+
+    await test('C starts and stops picking, but never while typing in the app', async () => {
+      const p = await areaPage();
+      try {
+        await p.evaluate(() => { const i = document.createElement('input'); i.id = 'host-input'; document.querySelector('main').prepend(i); window.__hostKeys = 0; document.addEventListener('keydown', () => window.__hostKeys++); });
+        await p.locator('h1').click();
+        await p.keyboard.press('c');
+        await p.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor({ timeout: 2000 });
+        await p.keyboard.press('c');
+        await p.locator('#tdoc-feedback-root .tdoc-fb-banner').waitFor({ state: 'detached', timeout: 2000 });
+        assert(await p.evaluate(() => window.__hostKeys === 0), 'the app also got the C');
+        await p.locator('#host-input').click();
+        await p.keyboard.type('cc');
+        assert((await p.locator('#host-input').inputValue()) === 'cc', 'C was taken from a text field');
+        assert(await p.locator('#tdoc-feedback-root .tdoc-fb-banner').count() === 0, 'typing c in the app started picking');
+      } finally { await p.close(); }
+    });
+
+    await test('inside every kind of modal a click and a drag both comment, and the modal stays open', async () => {
+      const p = await areaPage();
+      const cases = [
+        ['native <dialog>.showModal()', '#native-open', '#native-target', '#native-dialog', '#native-chart'],
+        ['Radix Dialog', '#radix-open', '#radix-target', '#radix-content', '#radix-chart'],
+        ['Radix Dialog without Overlay', '#radix-no-overlay-open', '#radix-no-overlay-target', '#radix-no-overlay-content', '#radix-no-overlay-chart'],
+        ['MUI Dialog (focus trap)', '#mui-open', '#mui-target', '.MuiDialog-paper', '#mui-chart'],
+        ['fixed overlay with a backdrop', '#overlay-open', '#overlay-target', '#overlay-modal', '#overlay-chart'],
+        ['dropdown menu', '#menu-open', '#menu-rename', '#menu', '#menu'],
+        ['Radix Popover', '#popover-open', '#radix-popover', '#radix-popover', '#radix-popover'],
+      ];
+      try {
+        for (const [name, open, target, box, chart] of cases) {
+          await p.goto(`${appBase}/libraries`);
+          await p.addScriptTag({ url: `${tdocBase}/feedback.js` });
+          await p.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor({ timeout: 5000 });
+          await p.locator(open).click();
+          await p.locator(target).waitFor({ timeout: 3000 });
+          await p.waitForTimeout(250);
+          await startPicking(p);
+          assert(await p.locator(box).isVisible(), `${name}: pressing Comment closed it`);
+          const t = await boxOf(p, target);
+          await p.mouse.click(t.x + Math.min(20, t.width / 2), t.y + t.height / 2);
+          const clicked = await composerLabel(p);
+          assert(!clicked.startsWith('Area'), `${name}: click made ${clicked}`);
+          assert(await p.locator(box).isVisible(), `${name}: picking closed it`);
+          await p.keyboard.press('Escape');
+          assert(await p.locator(box).isVisible(), `${name}: Escape on the composer closed it`);
+          const c = await boxOf(p, chart);
+          await mouseDrag(p, [c.x + 4, c.y + 4], [c.x + Math.min(c.width - 4, 100), c.y + Math.min(c.height - 4, 50)], { alt: true });
+          assert((await composerLabel(p)).startsWith('Area'), `${name}: drag did not make an area`);
+          if (name === 'fixed overlay with a backdrop') await shot(p, 'modal-overlay');
+          if (name === 'Radix Dialog') await shot(p, 'modal-radix');
+          await postDraft(p, `Area in ${name}`);
+          assert(await p.locator(box).isVisible(), `${name}: posting closed it`);
+          const events = await p.evaluate(() => window.__libraryEvents);
+          assert(!events.overlayCloses && !events.menuCloses && !events.nativeCloses && !events.menuChosen,
+            `${name}: the app reacted to feedback: ${JSON.stringify(events)}`);
+          const stored = (await storedComments()).find((x) => x.text === `Area in ${name}`);
+          assert(stored && stored.anchor.region && stored.anchor.region.rel.width > 0, `${name}: area not stored`);
+        }
+        const stored = await storedComments();
+        const native = stored.find((x) => x.text === 'Area in native <dialog>.showModal()');
+        assert(native.anchor.selector === '#native-chart', `native dialog area is not on its chart: ${native.anchor.selector}`);
+        assert(native.anchor.state && native.anchor.state.dialog, `native dialog state not recorded: ${JSON.stringify(native.anchor.state)}`);
+      } finally { await p.close(); }
+    });
+
+    await test('a disabled button and an iframe can be picked; the app never sees the press', async () => {
+      const p = await areaPage();
+      try {
+        await p.locator('#overlay-open').click();
+        await p.evaluate(() => {
+          const frame = document.createElement('iframe');
+          frame.id = 'embed'; frame.style.cssText = 'width:200px;height:60px;border:1px solid #ccc;display:block';
+          frame.srcdoc = '<p>Embedded widget</p>';
+          document.getElementById('overlay-modal').append(frame);
+        });
+        await startPicking(p);
+        const d = await boxOf(p, '#overlay-disabled');
+        await p.mouse.click(d.x + d.width / 2, d.y + d.height / 2);
+        assert((await composerLabel(p)) === 'button · “Disabled save”', `disabled button not picked: ${await composerLabel(p)}`);
+        await p.keyboard.press('Escape');
+        const f = await boxOf(p, '#embed');
+        await p.mouse.click(f.x + 40, f.y + 20);
+        assert((await composerLabel(p)) === '#embed', `iframe not picked: ${await composerLabel(p)}`);
+        await p.keyboard.press('Escape');
+        // A box over both: the area lists them for whoever fixes it.
+        await mouseDrag(p, [d.x - 3, d.y - 3], [f.x + f.width + 3, f.y + f.height + 3], { alt: true });
+        assert((await composerLabel(p)).startsWith('Area'), 'no area over the disabled button and the iframe');
+        await postDraft(p, 'Save stays disabled next to the embed');
+        const stored = (await storedComments()).find((x) => x.text === 'Save stays disabled next to the embed');
+        const listed = stored.anchor.region.elements.map((e) => e.selector);
+        assert(listed.includes('#overlay-disabled') && listed.includes('#embed'), `elements under the box: ${JSON.stringify(stored.anchor.region.elements)}`);
+        assert(stored.anchor.text.includes('Disabled save'), `text under the box: ${stored.anchor.text}`);
+        await startPicking(p);
+        assert(await p.locator('#overlay-modal').isVisible() && !(await p.evaluate(() => window.__libraryEvents.overlayCloses)), 'the overlay closed');
+      } finally { await p.close(); }
+    });
+
+    // Phones: a tap picks, a long press then drag draws a box, a swipe
+    // scrolls. Chromium gets real touch input (CDP); WebKit gets the same
+    // pointer and touch events dispatched on the page.
+    for (const [engineName, engine] of [['Chromium', chromium], ['WebKit', webkit]]) {
+      await test(`phone 390 (${engineName}): tap picks an element, long-press then drag comments on an area`, async () => {
+        const session = await page.evaluate((key) => localStorage.getItem(key), `tdoc-feedback:${tdocBase}`);
+        const b = engine === chromium ? browser : await webkit.launch();
+        const phone = await b.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: engine === chromium, deviceScaleFactor: 2 });
+        try {
+          await phone.addInitScript(([key, value]) => { localStorage.setItem(key, value); window.__TDOC_FLAGS__ = { feedbackAreaSelect: true }; }, [`tdoc-feedback:${tdocBase}`, session]);
+          const p = await phone.newPage();
+          await p.goto(`${appBase}/libraries`);
+          await p.addScriptTag({ url: `${tdocBase}/feedback.js` });
+          await p.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor({ timeout: 5000 });
+          const tool = p.locator('#tdoc-feedback-root .tdoc-feedback-dock button.tdoc-fb-area');
+          assert(await tool.isVisible() && !(await tool.locator('.tdoc-fb-area-label').isVisible()), 'phone Area tool should be icon only');
+          const dock = await p.locator('#tdoc-feedback-root .tdoc-feedback-dock').boundingBox();
+          assert(dock.x >= 0 && dock.x + dock.width <= 390, `dock with the Area tool runs off a 390 screen: ${JSON.stringify(dock)}`);
+          await p.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').tap();
+          const banner = p.locator('#tdoc-feedback-root .tdoc-fb-banner');
+          await banner.waitFor({ timeout: 3000 });
+          assert((await banner.innerText()).startsWith('Tap an element, or hold and drag a box'), `phone banner: ${await banner.innerText()}`);
+          const h3 = await p.locator('#page-chart-card h3').boundingBox();
+          await p.touchscreen.tap(h3.x + 10, h3.y + h3.height / 2);
+          const head = p.locator('#tdoc-feedback-root .tdoc-popup .head .h').first();
+          await head.waitFor({ timeout: 3000 });
+          assert((await head.innerText()) === 'h3 · “Signups”', `tap picked ${await head.innerText()}`);
+          await p.locator('#tdoc-feedback-root .tdoc-popup button.x').first().tap();
+          await p.locator('#tdoc-feedback-root .tdoc-popup').waitFor({ state: 'detached', timeout: 2000 });
+          const chart = await p.locator('#page-chart').boundingBox();
+          const from = [chart.x + 20, chart.y + 10];
+          const to = [chart.x + 140, chart.y + 70];
+          if (engine === chromium) {
+            const cdp = await phone.newCDPSession(p);
+            const touch = (type, [x, y]) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+            await touch('touchStart', from);
+            await p.waitForTimeout(650);
+            for (let i = 1; i <= 6; i++) await touch('touchMove', [from[0] + (to[0] - from[0]) * i / 6, from[1] + (to[1] - from[1]) * i / 6]);
+            assert(await p.locator('#tdoc-feedback-root .tdoc-drag-marquee').count() === 1, 'no box while the finger drags');
+            await touch('touchEnd', to);
+          } else {
+            await p.evaluate(async ([from, to]) => {
+              const shield = document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-fb-shield');
+              const fire = (type, [x, y]) => shield.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 7, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y }));
+              fire('pointerdown', from);
+              await new Promise((r) => setTimeout(r, 650));
+              for (let i = 1; i <= 6; i++) fire('pointermove', [from[0] + (to[0] - from[0]) * i / 6, from[1] + (to[1] - from[1]) * i / 6]);
+              fire('pointerup', to);
+            }, [from, to]);
+          }
+          await head.waitFor({ timeout: 3000 });
+          const label = await head.innerText();
+          assert(label.startsWith('Area 120×60'), `long-press drag made ${label}`);
+          if (process.env.TDOC_UI_SHOTS) await p.screenshot({ path: path.join(process.env.TDOC_UI_SHOTS, `area-phone-${engineName.toLowerCase()}.png`) });
+          await p.locator('#tdoc-feedback-root .tdoc-popup button.x').first().tap();
+          if (engine === chromium) {
+            // A quick swipe is a scroll, not a box.
+            const cdp = await phone.newCDPSession(p);
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: from[0], y: from[1] }] });
+            for (let i = 1; i <= 4; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from[0] + 30 * i, y: from[1] }] });
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await p.waitForTimeout(700);
+            assert(await p.locator('#tdoc-feedback-root .tdoc-popup').count() === 0, 'a swipe opened the composer');
+          }
+        } finally {
+          await phone.close();
+          if (b !== browser) await b.close();
+        }
+      });
+    }
+
+    fs.writeFileSync(commentsFile, commentsBeforeAreas);
 
     await test('the same agent thread renders alike in the document and the real host app at 390/1440', async () => {
       const session = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), `tdoc-feedback:${tdocBase}`);
@@ -982,8 +1332,10 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await host.evaluate(() => window.tdocFeedback.open());
         await host.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor();
         const panel = host.locator('#tdoc-feedback-root .tdoc-fb-panel');
-        await host.waitForTimeout(300);
-        if (!(await panel.isVisible())) await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+        // open() shows the list once the comments are loaded; open it by hand
+        // only if that does not happen (a toggle would close it again).
+        await panel.waitFor({ state: 'visible', timeout: 4000 })
+          .catch(() => host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click());
         await panel.waitFor({ state: 'visible' });
         await panel.getByRole('button', { name: 'All', exact: true }).click();
         const fbCard = host.locator('#tdoc-feedback-root .tdoc-fb-item article[data-comment-id="c_feedback_parity"]');
@@ -1049,7 +1401,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
           'feedback reply box is missing the shared agent tag control');
         await panel.locator('button.x').click();
         await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary').click();
-        await host.locator('#invite').click();
+        await host.locator('#invite').click({ force: true });
         const composer = host.locator('#tdoc-feedback-root .tdoc-popup');
         await composer.locator('button.tdoc-composer-agent').click();
         assert((await composer.locator('textarea').inputValue()).includes('Helper'), 'the feedback composer did not insert the shared agent tag');
@@ -1062,6 +1414,13 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await host.close();
         await doc.close();
         fs.writeFileSync(file, original);
+        // The fixture's notify lives in the shared localStorage; the app page
+        // that stays open would otherwise ask this local host for agents.
+        await page.evaluate((key) => {
+          const stored = JSON.parse(localStorage.getItem(key));
+          delete stored.notify;
+          localStorage.setItem(key, JSON.stringify(stored));
+        }, `tdoc-feedback:${tdocBase}`);
       }
     });
 
@@ -1102,6 +1461,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         // comments; only click the dock if it did not.
         await panel.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
         if (!(await panel.isVisible())) await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
+        await host.waitForTimeout(1500); await host.screenshot({ path: `/tmp/fb-drag-work/parity-debug-${Date.now()}.png` }); console.log('DEBUG', await host.evaluate(() => ({ panel: !!document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-fb-panel'), w: innerWidth, notice: document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-feedback-notice')?.innerText })));
         await panel.waitFor({ state: 'visible' });
         await panel.getByRole('button', { name: 'All', exact: true }).click();
         const card = (id) => panel.locator(`article[data-comment-id="${id}"]`);

@@ -690,6 +690,21 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(c.status === 200 && c.body.id, c.text);
     const list = await tool(julieConn.access_token, 'get_comments', { slug: julieSlug });
     assert(list.structuredContent.comments.some((x) => x.id === c.body.id && x.anchor === 'one click'), JSON.stringify(list.structuredContent).slice(0, 300));
+    // An area left on an app: the agent gets the page, the container's
+    // selector, the box inside it and what is under it.
+    const areaAnchor = { kind: 'product', url: 'https://app.example.com/reports?tab=2', selector: '#signups-card', tag: 'section', text: 'March',
+      label: 'Area 120×60 · “March”', rect: { x: 40, y: 300, width: 120, height: 60 }, viewport: { width: 1200, height: 800, device_pixel_ratio: 2 },
+      region: { container_text: 'Signups March', rel: { x: 20, y: 10, width: 120, height: 60 }, frac: { x: 0.08, y: 0.1, width: 0.5, height: 0.6 },
+        scroll: { x: 0, y: 200 }, elements: [{ selector: '#signups-chart', tag: 'canvas' }] } };
+    const onArea = await call('/api/comments', { method: 'POST', cookie: carl.cookie, headers: origin, body: { slug: julieSlug, version: 1, text: 'The March bar looks wrong', anchor: areaAnchor } });
+    assert(onArea.status === 200 && onArea.body.id, onArea.text);
+    const withArea = await tool(julieConn.access_token, 'get_comments', { slug: julieSlug });
+    const area = withArea.structuredContent.comments.find((x) => x.id === onArea.body.id);
+    assert(area && area.anchor === 'March' && area.where && area.where.selector === '#signups-card' && area.where.url === areaAnchor.url, JSON.stringify(area));
+    assert(area.where.area.rel.width === 120 && area.where.area.frac.width === 0.5 && area.where.area.elements[0].selector === '#signups-chart' && area.where.area.text === 'March', JSON.stringify(area.where));
+    assert(withArea.content[0].text.includes('[page /reports?tab=2 · #signups-card · area 120×60 at (20, 10) inside it]'), withArea.content[0].text);
+    const removed = await call(`/api/comments?slug=${julieSlug}&version=1&id=${onArea.body.id}`, { method: 'DELETE', cookie: carl.cookie, headers: origin });
+    assert(removed.status === 200, removed.text);
     const early = await tool(julieConn.access_token, 'reply_to_comment', { slug: julieSlug, comment_id: c.body.id, text: 'Done', status: 'applied', applied_in: 2 });
     assert(!early.isError && early.structuredContent.status === 'answered' && early.structuredContent.downgraded_from === 'applied', 'applied without a new version is recorded as answered');
     await call('/api/comments', { method: 'POST', cookie: carl.cookie, headers: origin, body: { slug: julieSlug, version: 1, parent_id: c.body.id, text: 'Please change the doc' } });
