@@ -149,9 +149,14 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
       'get_writing_guide', 'tdoc-daemon install', 'same tdoc account']) {
       assert(steps.includes(s), `setup steps lack ${s}`);
     }
-    const chatgpt = steps.split('\n').find((l) => l.includes('- ChatGPT'));
-    assert(chatgpt && chatgpt.includes('open a new chat, pick tdoc from +') && chatgpt.includes('write my first doc') && steps.includes('Except in ChatGPT, ask the user to reply "done"'),
-      `ChatGPT step must send the user to a new chat, not ask for "done": ${chatgpt}`);
+    // One section per app, so the agent gives only its own app's steps (ChatGPT read the
+    // whole file as a skill to install and listed Codex and Claude Code paths instead).
+    assert(/not a skill to save or install/.test(steps) && /give the user only that section/.test(steps), 'setup must say: pick your app, give only its steps');
+    for (const h of ['## ChatGPT', '## Claude.ai', '## Claude Code or Codex', '## Cursor', '## VS Code', '## Gemini CLI', '## Grok']) assert(steps.includes(h), `no section ${h}`);
+    const chatgpt = steps.slice(steps.indexOf('## ChatGPT'), steps.indexOf('## Claude.ai'));
+    assert(chatgpt.includes('Add custom MCP server') && chatgpt.includes('paid ChatGPT plan') && chatgpt.includes('sign in first')
+      && chatgpt.includes('open a new chat, pick tdoc from +') && chatgpt.includes('do not ask the user to reply "done"') && !chatgpt.includes('ONBOARDING'),
+      `ChatGPT section must walk through the custom plugin and send the user to a new chat: ${chatgpt}`);
     assert(/^name: tdoc$/m.test(a) && /description: Set up tdoc/.test(a), 'frontmatter names setup');
   });
 
