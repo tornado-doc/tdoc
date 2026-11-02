@@ -64,6 +64,7 @@ import { SignInDialog } from './sign-in-dialog.jsx';
 import { handoffLine, selectContents } from './onboarding-copy.js';
 import { DocStepHint, docStep, STEP_HINT_HEIGHT } from './document/step-hint.jsx';
 import { ConnectAiAppsStrip } from './connect-ai-apps.jsx';
+import { openAppLink, sendToAppLink } from './document/send-to-app.js';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, HandoffSendTransport, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
@@ -522,6 +523,14 @@ export function DocumentShell({ boot, config }) {
     'tdoc:editSnapshot': (message) => editorRef.current?.frameHandlers.editSnapshot(message),
     'tdoc:editDocument': (message) => editorRef.current?.frameHandlers.editDocument(message),
     'tdoc:copyText': (message) => copyText(message.text || ''),
+    'tdoc:sendToApp': (message) => {
+      if (!config.isLanding) return;
+      const link = sendToAppLink(message.app, message.text);
+      if (!link) return;
+      copyText(message.text);
+      showToast(`Prompt copied. Opening ${link.name}…`);
+      openAppLink(link.href);
+    },
     'tdoc:docMarkdown': (message) => {
       copyText(message.markdown || '').then((copied) => {
         showToast(copied ? 'Copied as Markdown' : 'Copy failed', !copied);

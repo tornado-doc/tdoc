@@ -60,11 +60,8 @@ t('Cursor: .cursor-plugin/plugin.json + mcp.json (url)', () => {
   assert(json('cursor/mcp.json').mcpServers.tdoc.url === URL_, 'url');
 });
 
-t('Gemini CLI: gemini-extension.json (httpUrl = Streamable HTTP) + context file', () => {
-  const p = json('gemini/gemini-extension.json');
-  assert(p.name === 'tdoc' && p.version === VERSION, `${p.name} ${p.version}`);
-  assert(p.mcpServers.tdoc.httpUrl === URL_ && !p.mcpServers.tdoc.url, 'httpUrl, not url (SSE)');
-  assert(fs.existsSync(path.join(dir, 'gemini', p.contextFileName)), 'context file exists');
+t('no Gemini CLI package', () => {
+  assert(!fs.existsSync(path.join(dir, 'gemini')), 'plugins/gemini is gone');
 });
 
 t('VS Code: servers.tdoc type http', () => {
@@ -73,7 +70,7 @@ t('VS Code: servers.tdoc type http', () => {
 });
 
 t('one skill, identical in every plugin, with SKILL.md\'s description verbatim and no Bash', () => {
-  const copies = ['claude', 'codex', 'cursor', 'gemini'].map((p) => read(`${p}/skills/tdoc/SKILL.md`));
+  const copies = ['claude', 'codex', 'cursor'].map((p) => read(`${p}/skills/tdoc/SKILL.md`));
   assert(copies.every((c) => c === copies[0]), 'the plugin skills differ; copy one over the others');
   const main = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
   assert(frontDescription(copies[0]) === frontDescription(main), 'description drifted from SKILL.md');
@@ -97,10 +94,15 @@ t('README cites sources and marks unverified fields', () => {
   assert(/UNVERIFIED/.test(r), 'marks unverified');
 });
 
-t('SKILL.md prefers the MCP tools when they are connected; CLI stays the fallback', () => {
+t('SKILL.md puts the CLI first (it is what the daemon runs); MCP only without a CLI', () => {
   const main = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
-  const section = main.slice(main.indexOf('## When the tdoc MCP tools are available'), main.indexOf('## Document routing'));
-  assert(section.length > 200 && /prefer them to the CLI/.test(section) && /CLI stays\s+the fallback/.test(section), 'section missing');
+  const section = main.slice(main.indexOf('## The CLI first; the tdoc MCP tools when there is no CLI'), main.indexOf('## Document routing'));
+  assert(section.length > 200, 'section missing');
+  assert(/Use it even when tdoc's MCP tools/.test(section) && /daemon/.test(section), 'CLI-first rule missing');
+  assert(/MCP tools only when the CLI cannot run here/.test(section), 'MCP fallback missing');
+  assert(/same tdoc account/.test(section), 'one-account rule missing');
+  const cloud = read('claude/skills/tdoc/SKILL.md');
+  assert(/use that one instead of these tools/.test(cloud), 'tdoc Cloud skill does not defer to the local skill');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

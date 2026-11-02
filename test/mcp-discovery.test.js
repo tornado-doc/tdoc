@@ -54,12 +54,11 @@ async function seed(env, slug) {
         'https://cursor.com/install-mcp?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9',
         'https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=tdoc&connectorUrl=https%3A%2F%2Ftdoc.dev%2Fmcp',
         'Add custom MCP server', 'Bearer tdoc_', 'OAuth',
-        'gemini extensions install ./tdoc/plugins/gemini',
         'https://tdoc.dev/mcp/server-card', 'fallback',
       ]) assert(body.includes(want), `${p} lacks ${want}`);
     }
     // The commands are the README's, not a copy that drifted.
-    for (const cmd of ['claude plugin install tdoc-cloud --marketplace tornado-doc/tdoc', 'codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc', 'gemini extensions install ./tdoc/plugins/gemini']) {
+    for (const cmd of ['claude plugin install tdoc-cloud --marketplace tornado-doc/tdoc', 'codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc']) {
       assert(readme.includes(cmd), `plugins/README.md no longer says ${cmd}`);
     }
   });
