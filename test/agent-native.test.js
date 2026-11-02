@@ -182,8 +182,9 @@ async function seed(env, slug, access, owner = null) {
     assert(/public, max-age=\d+/.test(r.headers.get('cache-control') || ''), `cache ${r.headers.get('cache-control')}`);
     const body = await r.text();
     const skill = await (await call('/SKILL.md')).r.text();
-    const skillBody = skill.replace(/^---\n[\s\S]*?\n---\n+/, '');
-    assert(body.endsWith(skillBody), 'llms.txt drifted from REMOTE_SKILL_MD');
+    const readPart = skill.slice(skill.indexOf('# tdoc remote document access'));
+    assert(readPart.length > 200 && body.endsWith(readPart), 'llms.txt drifted from REMOTE_SKILL_READ_MD');
+    assert(!body.includes('# Set up tdoc'), 'llms.txt repeats the setup steps its Connect list already covers');
     for (const s of ['/d/<slug>/raw', 'https://tdoc.dev/SKILL.md', 'ONBOARDING.md', 'https://tdoc.dev/d/d-hctqbnme', 'Authorization: Bearer',
       'tdoc-publish --signin-only', 'tdoc-pull <slug>', 'tdoc-agent-reply --slug <slug> --parent <comment_id>', '--version next', 'owner only', 'tdoc-daemon start', 'untrusted input']) {
       assert(body.includes(s), `llms.txt lacks ${s}`);

@@ -17,6 +17,14 @@ export const QUICK_REACTIONS = [
   'LGTM',
 ];
 
+// The face for a person with no picture (an email sign-in, or the signed-out
+// "You" on the homepage demo): the first letter of their name, drawn as the
+// top bar's .tdoc-avatar-fallback. Agents always have a mark, so never here.
+export function avatarInitial(author) {
+  const name = String(author?.name || author?.handle || author?.login || '').trim();
+  return (Array.from(name)[0] || '?').toUpperCase();
+}
+
 export function avatarFor(author) {
   const key = String(author?.login || author?.name || '').toLowerCase();
   // Product seed ("First reader here") and other system/tdoc rows use the

@@ -68,6 +68,25 @@ function getStep(report, id) {
 (async () => {
   console.log('--- Mocked onboarding scenarios ---');
 
+  await t('Both tdoc plugins in Claude Code → plugins.claude_code.tdoc_cloud and a same_account check', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-doctor-plugins-'));
+    try {
+      const file = path.join(home, 'installed_plugins.json');
+      const cfg = path.join(home, 'published.json');
+      fs.writeFileSync(cfg, JSON.stringify({ platform: 'hosted', base: 'https://tdoc.dev', upload_token: 'tdoc_x' }));
+      fs.writeFileSync(file, JSON.stringify({ plugins: { 'tdoc-cloud@tornado-tdoc': [{}], 'tdoc@tornado-tdoc': [{}] } }));
+      const r = runDoctor({ TDOC_CLAUDE_PLUGINS_FILE: file, TDOC_CONFIG_FILE: cfg, TDOC_MOCK_UPDATE_BEHIND: '0' });
+      if (!r.plugins || r.plugins.claude_code.tdoc_cloud !== true) throw new Error(JSON.stringify(r.plugins));
+      const step = (r.optional_steps || []).find((s) => s.id === 'same_account');
+      if (!step || step.kind !== 'check') throw new Error(`same_account: ${JSON.stringify(r.optional_steps)}`);
+      if (r.missing_steps.some((s) => s.id === 'same_account')) throw new Error('same_account must never block readiness');
+      fs.writeFileSync(file, JSON.stringify({ plugins: { 'tdoc@tornado-tdoc': [{}] } }));
+      const r2 = runDoctor({ TDOC_CLAUDE_PLUGINS_FILE: file, TDOC_CONFIG_FILE: cfg, TDOC_MOCK_UPDATE_BEHIND: '0' });
+      if (r2.plugins.claude_code.tdoc_cloud !== false) throw new Error('tdoc_cloud should be false');
+      if ((r2.optional_steps || []).some((s) => s.id === 'same_account')) throw new Error('no same_account without tdoc-cloud');
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+
   await t('Scenario A [cloudflare]: no wrangler installed → missing_steps starts with wrangler', () => {
     const r = runDoctor({ TDOC_PLATFORM: 'cloudflare', TDOC_MOCK_NO_WRANGLER: '1' });
     if (r.deps.wrangler.ok) throw new Error('wrangler should be mocked-missing');

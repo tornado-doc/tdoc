@@ -158,7 +158,6 @@
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
-      'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
       'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
       'html[data-tdoc-site] [data-tdoc-diagram-tools]{display:none!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
@@ -780,6 +779,24 @@
     post({ type: 'tdoc:copyText', text: text });
     tdocFallbackCopy(text);
     flashCopy(trigger);
+  }, true);
+
+  // --- data-tdoc-send: copy a prompt and ask the shell to open an agent app
+  //     with it (tdoc's own site pages only; the shell checks). The element
+  //     names the app, never a URL: data-tdoc-send="claudecode|codex|cursor|claude|claudeai|chatgpt|grok",
+  //     data-tdoc-send-text="#id" holds the prompt. The label is left alone. ---
+  document.addEventListener('click', function (e) {
+    var trigger = e.target.closest && e.target.closest('[data-tdoc-send]');
+    if (!trigger) return;
+    e.preventDefault(); e.stopPropagation();
+    var raw = trigger.getAttribute('data-tdoc-send-text') || '', text = raw;
+    if (raw.charAt(0) === '#') { var src = document.getElementById(raw.slice(1)); text = src ? (src.innerText || src.textContent || '').replace(/\u00a0/g, ' ').trim() : ''; }
+    if (!text) return;
+    tdocFallbackCopy(text);
+    post({ type: 'tdoc:sendToApp', app: trigger.getAttribute('data-tdoc-send') || '', text: text });
+    trigger.classList.add('tdoc-sent');
+    clearTimeout(trigger._tdocSentTimer);
+    trigger._tdocSentTimer = setTimeout(function () { trigger.classList.remove('tdoc-sent'); }, 1600);
   }, true);
 
   // --- anchor resolution (faithful port of overlay.js collectTextNodes/
@@ -1674,6 +1691,111 @@
     return '<!doctype html>\n' + clone.outerHTML;
   }
 
+  // --- the homepage demo's scripted Edit -----------------------------------
+  // Only the shell's demo (shell/src/document/demo-agent.js DEMO_REWRITES,
+  // the signed-out landing doc) sends these; no real doc ever gets one. The
+  // shell names one paragraph by its text and the canned rewrite. The old
+  // words are struck, the new ones typed in after them, then the struck words
+  // fold away and the new text stays marked as the version compare marks an
+  // insertion (version-diff.js markCss). Reduced motion: the end state at
+  // once. Only this page's DOM changes; nothing is saved, and Undo (or a
+  // reload) brings the paragraph back.
+  //   { type:'tdoc:demoRewrite', id, before, after, view:{ top, bottom } }
+  //     (view: the band of this frame the visitor can see, in its viewport)
+  //     → { type:'tdoc:demoRewriteDone', id, ok }
+  //   { type:'tdoc:demoRewriteShow', view } (bring the rewritten paragraph
+  //     into a new band: a phone's drawer has reopened over the page)
+  //   { type:'tdoc:demoRewriteUndo' }
+  var demoRewrite = null; // { el, html, timers }
+  function demoRewriteCss() {
+    if (document.getElementById('tdoc-provider-demo-rewrite-style')) return;
+    var st = document.createElement('style');
+    st.id = 'tdoc-provider-demo-rewrite-style';
+    st.setAttribute('data-tdoc-provider', '');
+    st.textContent = ((window.TdocVersionDiff && window.TdocVersionDiff.markCss) || '') +
+      '[data-tdoc-demo-rewrite] .tdoc-diff-del{transition:opacity .3s ease}' +
+      '[data-tdoc-demo-rewrite="striking"] .tdoc-diff-del{animation:tdoc-demo-strike .45s ease both}' +
+      '[data-tdoc-demo-rewrite="typing"] .tdoc-diff-del{opacity:.55}' +
+      '[data-tdoc-demo-rewrite="folding"] .tdoc-diff-del{opacity:0}' +
+      '[data-tdoc-demo-rewrite="typing"] .tdoc-diff-ins{box-shadow:inset -2px 0 currentColor;animation:tdoc-demo-caret .8s steps(1) infinite}' +
+      '@keyframes tdoc-demo-strike{from{text-decoration-color:transparent;background-color:transparent}}' +
+      '@keyframes tdoc-demo-caret{50%{box-shadow:none}}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+  function findDemoParagraph(text) {
+    var want = normalizeNeedle(text);
+    if (!want) return null;
+    var list = document.body ? document.body.querySelectorAll('p, li, blockquote, figcaption, h1, h2, h3') : [];
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (!el.closest('[data-tdoc-provider]') && normalizeNeedle(el.textContent) === want) return el;
+    }
+    return null;
+  }
+  function undoDemoRewrite() {
+    if (!demoRewrite) return;
+    demoRewrite.timers.forEach(clearTimeout);
+    demoRewrite.el.innerHTML = demoRewrite.html;
+    demoRewrite.el.removeAttribute('data-tdoc-demo-rewrite');
+    demoRewrite = null;
+    rereportPins();
+  }
+  // Bring the paragraph into the band the visitor can see (under the shell's
+  // bar; on a phone the whole page while the drawer is closed, then the part
+  // above it once it reopens): centred, or its top near the band's when it
+  // is taller than the band.
+  function showDemoParagraph(el, view, reduce) {
+    var r = el.getBoundingClientRect();
+    var band = view || {};
+    var bandTop = Math.max(0, Number(band.top) || 0);
+    var bandBottom = Math.min(window.innerHeight, Number(band.bottom) || window.innerHeight);
+    if (bandBottom - bandTop < 60) { bandTop = 0; bandBottom = window.innerHeight; }
+    var slack = bandBottom - bandTop - r.height;
+    var y = (window.scrollY || 0) + r.top - bandTop - (slack > 16 ? slack / 2 : 8);
+    try { window.scrollTo({ top: Math.max(0, y), behavior: reduce ? 'auto' : 'smooth' }); } catch (x) { window.scrollTo(0, Math.max(0, y)); }
+  }
+  function runDemoRewrite(d) {
+    undoDemoRewrite();
+    var el = findDemoParagraph(d.before);
+    var after = String(d.after || '');
+    if (!el || !after) { post({ type: 'tdoc:demoRewriteDone', id: d.id, ok: false }); return; }
+    demoRewriteCss();
+    var reduce = false;
+    try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (x) {}
+    var run = demoRewrite = { el: el, html: el.innerHTML, timers: [] };
+    var later = function (ms, fn) { run.timers.push(setTimeout(fn, ms)); };
+    showDemoParagraph(el, d.view, reduce);
+    var del = document.createElement('del');
+    del.className = 'tdoc-diff-del';
+    del.textContent = normalizeNeedle(el.textContent);
+    var ins = document.createElement('ins');
+    ins.className = 'tdoc-diff-ins';
+    var done = function () {
+      if (del.parentNode) del.parentNode.removeChild(del);
+      ins.textContent = after;
+      el.setAttribute('data-tdoc-demo-rewrite', 'done');
+      rereportPins();
+      post({ type: 'tdoc:demoRewriteDone', id: d.id, ok: true });
+    };
+    el.textContent = '';
+    el.appendChild(del);
+    el.appendChild(ins);
+    if (reduce) { done(); return; }
+    el.setAttribute('data-tdoc-demo-rewrite', 'striking');
+    var words = after.match(/\S+\s*/g) || [after];
+    var step = 70;
+    later(700, function () {
+      el.setAttribute('data-tdoc-demo-rewrite', 'typing');
+      words.forEach(function (_, i) {
+        later(step * (i + 1), function () { ins.textContent = words.slice(0, i + 1).join(''); });
+      });
+      later(step * words.length + 500, function () {
+        el.setAttribute('data-tdoc-demo-rewrite', 'folding');
+        later(320, done);
+      });
+    });
+  }
+
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || d.source !== 'tdoc-shell') return;
@@ -1717,6 +1839,15 @@
     else if (d.type === 'tdoc:editSerialize') {
       post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument() });
     }
+    else if (d.type === 'tdoc:demoRewrite') runDemoRewrite(d);
+    else if (d.type === 'tdoc:demoRewriteShow') {
+      if (demoRewrite) {
+        var reduceShow = false;
+        try { reduceShow = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (x) {}
+        showDemoParagraph(demoRewrite.el, d.view, reduceShow);
+      }
+    }
+    else if (d.type === 'tdoc:demoRewriteUndo') undoDemoRewrite();
     else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:scrollBy') { try { window.scrollBy(0, Number(d.deltaY) || 0); } catch (x) {} }
