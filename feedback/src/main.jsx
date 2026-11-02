@@ -494,6 +494,20 @@ ${uiCss}
 
   // First run on an app: a small window on the worker's origin, where the
   // cookie is, signs the person in if needed and posts the token back here.
+  //
+  // Signing in visits pages that send Cross-Origin-Opener-Policy: same-origin
+  // (the sign-in page and the check in front of it). From then on the popup
+  // has no window.opener, its message never arrives, and popup.closed reads
+  // true here while the person is still signing in. So the popup's first page
+  // tells us a claim id (posted only to this origin), and once the window
+  // reads closed we collect the connection from tdoc under that claim
+  // instead of giving up. See "Connecting when the popup loses its opener"
+  // in the worker.
+  const CLAIM_RE = /^[a-f0-9]{64}$/;
+  const CLAIM_WAIT_MS = 180_000;
+  const CLAIM_POLL_MS = 1500;
+  // The overlay's "Finish signing in in the tdoc window…" line; set by the app.
+  let connectWaiting = () => {};
   let connecting = null;
   function connect() {
     if (connecting) return connecting;
@@ -501,26 +515,80 @@ ${uiCss}
       const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}${space ? `&space=${encodeURIComponent(space)}` : ''}`;
       let popup = null;
       let watch = null;
+      let poll = null;
+      let deadline = 0;
+      let settled = false;
+      const claims = new Set();
       const done = (fn) => (value) => {
+        if (settled) return;
+        settled = true;
         window.removeEventListener('message', onMessage);
         clearInterval(watch);
+        clearTimeout(poll);
+        connectWaiting(null);
         fn(value);
       };
-      const finish = done(resolve);
+      const finish = done((session) => { writeSession(session); resolve(session); });
       const fail = done(reject);
+      const failWith = (message, extra = {}) => { const error = new Error(message); error.status = 0; Object.assign(error, extra); fail(error); };
       const onMessage = (event) => {
-        if (event.origin !== base || !event.data || event.data.type !== 'tdoc-feedback-connected') return;
-        if (event.data.origin !== location.origin) return;
+        if (event.origin !== base || !event.data || event.data.origin !== location.origin) return;
+        if (event.data.type === 'tdoc-feedback-claim') {
+          if (CLAIM_RE.test(String(event.data.claim || ''))) claims.add(event.data.claim);
+          return;
+        }
+        if (event.data.type !== 'tdoc-feedback-connected') return;
         const session = event.data.session;
         if (!session || !session.token) return;
-        writeSession(session);
         finish(session);
+      };
+      const collect = async () => {
+        for (const claim of [...claims]) {
+          if (settled) return;
+          try {
+            const response = await fetch(`${base}/api/feedback/connect/claim`, {
+              method: 'POST', credentials: 'omit',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ claim }),
+            });
+            const body = await response.json().catch(() => null);
+            if (response.ok && body && body.status === 'connected' && body.session && body.session.token) { finish(body.session); return; }
+            if (response.status === 400 || response.status === 404) claims.delete(claim);
+          } catch (_) {}
+        }
+        if (settled) return;
+        if (!claims.size) { failWith('The tdoc window was closed before connecting.'); return; }
+        if (Date.now() > deadline) { failWith('Signing in took too long.', { timedOut: true }); return; }
+        poll = setTimeout(collect, CLAIM_POLL_MS);
+      };
+      const openPopup = () => window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+      const controls = {
+        // A new window makes a new claim; the old ones are still collected.
+        reopen: () => {
+          const next = openPopup();
+          if (next) { popup = next; deadline = Date.now() + CLAIM_WAIT_MS; }
+          return Boolean(next);
+        },
+        cancel: () => failWith('Not connected.', { cancelled: true }),
+      };
+      const watchPopup = () => {
+        watch = setInterval(() => {
+          if (!popup.closed) return;
+          clearInterval(watch);
+          // Closed before its first page could name a claim: really closed.
+          if (!claims.size) { failWith('The tdoc window was closed before connecting.'); return; }
+          // Maybe closed, maybe only cut off by signing in: keep collecting.
+          deadline = Date.now() + CLAIM_WAIT_MS;
+          connectWaiting(controls);
+          collect();
+        }, 500);
       };
       // Listen before opening. A signed-in popup can answer immediately, and
       // registering afterwards leaves the app waiting for a message it missed.
       window.addEventListener('message', onMessage);
-      popup = window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+      popup = openPopup();
       if (!popup) {
+        settled = true;
         window.removeEventListener('message', onMessage);
         const error = new Error('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.');
         error.status = 0;
@@ -528,13 +596,7 @@ ${uiCss}
         reject(error);
         return;
       }
-      watch = setInterval(() => {
-        if (popup.closed) {
-          const error = new Error('The tdoc window was closed before connecting.');
-          error.status = 0;
-          fail(error);
-        }
-      }, 500);
+      watchPopup();
     });
     // Every attempt, including a browser-blocked popup, must release the
     // single-flight slot. Otherwise the first rejected Promise is cached and
@@ -545,6 +607,16 @@ ${uiCss}
     );
     return connecting;
   }
+
+  // A comment written before the connection exists is kept until it posts:
+  // connecting can be blocked, cancelled or fail, and the person retries
+  // (the tab can even reload). It is posted by the first call that has a
+  // session, then dropped.
+  const draftKey = `${storageKey}:draft`;
+  const readDraft = () => { try { return JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch (_) { return null; } };
+  const writeDraft = (draft) => {
+    try { if (draft) sessionStorage.setItem(draftKey, JSON.stringify(draft)); else sessionStorage.removeItem(draftKey); } catch (_) {}
+  };
 
   // A stored token that the worker no longer honours is dropped, not retried.
   async function ensureSession() {
@@ -883,20 +955,40 @@ ${uiCss}
   // Every action: do the thing, then hand back the page's fresh surface. A
   // failure comes back as { ok: false, status, error } so the UI can say why.
   async function call(message) {
+    if (message.type === 'tdoc-feedback-submit') {
+      writeDraft({ text: message.text, anchor: message.anchor, sendToAgent: Boolean(message.sendToAgent), recipient: message.recipient || null });
+    }
+    // Connect again: drop the token first, then the one connect below.
+    if (message.type === 'tdoc-feedback-signin') writeSession(null);
     try {
       const session = await ensureSession();
       const { slug, version } = session;
       const body = (fields) => ({ slug, version, ...fields });
       let handoff = null;
+      let postedDraft = false;
+      const draft = readDraft();
+      if (draft && draft.text && draft.anchor) {
+        // Taken before posting, so two calls at once cannot post it twice.
+        writeDraft(null);
+        let made;
+        try {
+          made = await createComment(body({ text: draft.text, anchor: draft.anchor }));
+        } catch (error) {
+          // Kept for the next try, unless refused for a reason connecting
+          // again will not fix (an open composer still has the words).
+          if ((!error.status || error.status === 401) && !readDraft()) writeDraft(draft);
+          throw error;
+        }
+        postedDraft = message.type !== 'tdoc-feedback-submit';
+        emit('comment', { id: made && made.id, text: draft.text });
+        if (draft.sendToAgent && made && made.id) handoff = await sendToAgent(slug, made.id, draft.recipient);
+      }
       switch (message.type) {
         case 'tdoc-feedback-load':
+        case 'tdoc-feedback-signin':
+        case 'tdoc-feedback-submit':
+          // Posted above, as the draft it was saved as.
           break;
-        case 'tdoc-feedback-submit': {
-          const made = await createComment(body({ text: message.text, anchor: message.anchor }));
-          emit('comment', { id: made && made.id, text: message.text });
-          if (message.sendToAgent && made && made.id) handoff = await sendToAgent(slug, made.id, message.recipient);
-          break;
-        }
         case 'tdoc-feedback-reply': {
           const made = await createComment(body({ text: message.text, parent_id: message.parentId }));
           emit('comment', { id: made && made.id, text: message.text, parentId: message.parentId });
@@ -920,17 +1012,18 @@ ${uiCss}
         case 'tdoc-feedback-react':
           await toggleReaction(body({ comment_id: message.id, emoji: message.emoji }));
           break;
-        case 'tdoc-feedback-signin':
-          writeSession(null);
-          await connect();
-          break;
         default:
           return { ok: false, error: 'Unknown feedback action' };
       }
       const surface = await loadSurface(session);
-      return handoff ? { ...surface, handoff } : surface;
+      return { ...surface, ...(handoff ? { handoff } : {}), ...(postedDraft ? { postedDraft: true } : {}) };
     } catch (error) {
-      return { ok: false, status: error.status || 0, blocked: Boolean(error.blocked), error: String(error && error.message || error) };
+      const kept = Boolean(readDraft());
+      const why = String(error && error.message || error);
+      return {
+        ok: false, status: error.status || 0, blocked: Boolean(error.blocked), draftKept: kept,
+        error: kept && !error.status ? `${why} Your comment is kept: connect to post it.` : why,
+      };
     }
   }
 
@@ -1069,6 +1162,9 @@ ${uiCss}
     const pressRef = useRef(null);
     const [openId, setOpenId] = useState(null);
     const [notice, setNotice] = useState(null);
+    // Connecting, with the tdoc window cut off from us by signing in.
+    const [waiting, setWaiting] = useState(null);
+    useEffect(() => { connectWaiting = setWaiting; return () => { connectWaiting = () => {}; }; }, []);
     const [toast, setToast] = useState(null);
     const [refreshing, setRefreshing] = useState(false);
     const refreshingRef = useRef(false);
@@ -1088,6 +1184,8 @@ ${uiCss}
         if (result.config) setSession((prev) => ({ ...(prev || {}), ...result.config, token: (prev && prev.token) || result.config.token }));
         setNotice(result.signedIn === false ? { status: 401, error: 'Connect your tdoc account to comment here.' } : null);
         if (result.handoff) say(result.handoff.message, !result.handoff.ok);
+        // The comment held while connecting has posted: its composer is done.
+        if (result.postedDraft) { setSelected(null); setAreaSel(null); setPicking(false); if (!result.handoff) say('Comment posted'); }
         return true;
       }
       setNotice(result || { error: 'Could not load tdoc comments' });
@@ -1637,7 +1735,7 @@ ${uiCss}
             canSendToAgent={canSendToAgent}
             connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
             agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
-            onClose={() => { setSelected(null); setAreaSel(null); }}
+            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); }}
             onSubmit={async (text, opts = {}) => {
               const anchor = areaBox ? regionContext(areaBox, selected) : contextFor(selected);
               const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient });
@@ -1682,8 +1780,19 @@ ${uiCss}
               // This button is the continuation of "leave a comment", not a
               // standalone account setting. After a successful first connect,
               // put the person back where they were headed: picking an element.
-              if (apply(result)) setPicking(true);
+              if (apply(result) && !result.postedDraft) setPicking(true);
             }}>Connect tdoc</button></div>
+          </section>
+        ) : null}
+
+        {waiting && !notice ? (
+          <section className="tdoc-popup tdoc-feedback-notice tdoc-feedback-waiting" role="status" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
+            <div className="head"><span className="h">Connecting to tdoc</span></div>
+            <p>Finish signing in in the tdoc window… {readDraft() ? 'Your comment posts as soon as you are connected.' : ''}</p>
+            <div className="foot">
+              <button className="ui-btn ui-btn-secondary ui-btn-m" type="button" onClick={() => waiting.cancel()}>Cancel</button>
+              <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => { if (!waiting.reopen()) say('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.', true); }}>Open the tdoc window again</button>
+            </div>
           </section>
         ) : null}
 

@@ -135,13 +135,17 @@ export function FeedbackSpace({ boot }) {
   return (
     <AgentMentionContext.Provider value={agentMentions}>
     <div className="tdoc-app docs-hub tdoc-fbspace">
-      <TopBar identity={identity} />
+      {/* The space's workspace, as on a doc page: a team's space shows the
+          team in the switcher, not whatever space was open last. */}
+      <TopBar identity={identity} space={boot.teamManage?.team?.id || ''} currentTeam={boot.teamManage?.team || null} />
       <main className="wrap">
         <div className="page-hd">
           <h1>{title}</h1>
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
-          Comments left on <a href={origin} target="_blank" rel="noopener noreferrer">{host}</a> · {openCount} open · {repliedCount} replied
+          Comments left on <a href={origin} target="_blank" rel="noopener noreferrer">{host}</a>
+          {boot.teamManage?.team && !boot.teamManage.guest ? <> · <span className="tdoc-fbspace-team">In <a href={`/me?team=${encodeURIComponent(boot.teamManage.team.id)}&view=comments`}>{boot.teamManage.team.name}</a></span></> : null}
+          {' '}· {openCount} open · {repliedCount} replied
         </p>
         <div className="tdoc-fbspace-actions">
           <a className="ui-btn ui-btn-secondary ui-btn-m" href={origin} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open the app</a>
