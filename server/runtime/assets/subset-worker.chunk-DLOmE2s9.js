@@ -1,5 +1,0 @@
-<<<<<<<< HEAD:server/runtime/assets/subset-worker.chunk-DWO0qYgO.js
-import{Commands as t,subsetToBinary as e}from"./subset-shared.chunk-C8DKJWh6.js";import"./percentages-BXMCSKIN-CZ7-19TX.js";import"../shell.DQUpgTyC.js";var i=import.meta.url?new URL(import.meta.url):void 0;typeof window>"u"&&typeof self<"u"&&(self.onmessage=async a=>{switch(a.data.command){case t.Subset:let s=await e(a.data.arrayBuffer,a.data.codePoints);self.postMessage(s,{transfer:[s]});break}});export{i as WorkerUrl};
-========
-import{Commands as t,subsetToBinary as e}from"./subset-shared.chunk-DtR6cOjh.js";import"./percentages-BXMCSKIN-BzQ73y9B.js";import"../shell.B5W-xPWO.js";var i=import.meta.url?new URL(import.meta.url):void 0;typeof window>"u"&&typeof self<"u"&&(self.onmessage=async a=>{switch(a.data.command){case t.Subset:let s=await e(a.data.arrayBuffer,a.data.codePoints);self.postMessage(s,{transfer:[s]});break}});export{i as WorkerUrl};
->>>>>>>> origin/main:server/runtime/assets/subset-worker.chunk-DLOmE2s9.js
