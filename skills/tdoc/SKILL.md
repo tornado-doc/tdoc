@@ -28,15 +28,22 @@ artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
 sharing, with a one-time sign-in (email, Google, or GitHub) gating comments.
 
-## When the tdoc MCP tools are available, use them
+## The CLI first; the tdoc MCP tools when there is no CLI
 
-If your tools include tdoc's MCP server (`get_writing_guide`, `create_doc`, `update_doc`,
-`edit_doc`, `create_upload`, `commit_upload`,
-`get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
+This skill's CLI (`bin/`) is the main path wherever it runs: it publishes,
+previews locally, handles folders, Trash, widgets and preview cards, and it
+is what the local agent daemon runs when someone sends a comment to this
+computer ("Send to agent"). Use it even when tdoc's MCP tools
+(`get_writing_guide`, `create_doc`, `update_doc`, `edit_doc`, `create_upload`,
+`commit_upload`, `get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
 `resolve_comment`, `answer_question`, `share_doc`, `create_feedback_space`, from
-`https://tdoc.dev/mcp`, connected as a Claude/ChatGPT/Cursor connector or
-plugin), prefer them to the CLI below: they need no terminal, no local files
-and no sign-in step, and the server applies the same rules (write access,
+`https://tdoc.dev/mcp`,
+e.g. the tdoc Cloud plugin synced from claude.ai) are also connected, so one
+session does not switch between the two. Both must be the same tdoc account:
+`bin/tdoc-doctor` flags it when tdoc Cloud is installed next to this skill.
+
+Use the MCP tools only when the CLI cannot run here (no Bash, no Node, or
+`bin/` is missing); the server applies the same rules (write access,
 authorship, answer-only locks, workspace scope). The mapping:
 
 | CLI | MCP tool |
@@ -54,10 +61,9 @@ The authoring guides are the MCP resources `tdoc://authoring/<path>.md`
 (`essentials.md` first, then `voice.md`, `visuals.md`, `structure/components.md`, `style/*.md`); every
 rule in this file about voice, visuals, styles and comment statuses still
 applies. The refusals arrive as tool errors with the same codes
-(`answer_only_run`, `agent_not_author_editor`, `token_scope`). The CLI stays
-the fallback: use it when the MCP tools are not connected, and for what has
-no tool yet (local preview, folders, Trash, widgets, preview cards, the
-local agent daemon).
+(`answer_only_run`, `agent_not_author_editor`, `token_scope`). Local
+preview, folders, Trash, widgets, preview cards and the local agent daemon
+have no MCP tool.
 
 To connect them: the server is `https://tdoc.dev/mcp` (OAuth sign-in). The
 one-line install for Claude, ChatGPT, Cursor, VS Code, Codex, Claude Code
@@ -184,11 +190,17 @@ tdoc_resolve_skill_dir() {
     for d in "$HOME/.claude/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
       [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    d="$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${d%/}/SKILL.md" ] && { printf '%s\n' "${d%/}"; return; }
     printf '%s\n' "$HOME/.claude/skills/tdoc"
   elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${OPENAI_CODEX:-}${CODEX_HOME:-}${CODEX_SHELL:-}" ]; then
     for d in "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc"; do
       [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    d="$(ls -1d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${d%/}/SKILL.md" ] && { printf '%s\n' "${d%/}"; return; }
     printf '%s\n' "$HOME/.codex/skills/tdoc"
   else
     for d in "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
@@ -1565,11 +1577,17 @@ tdoc_resolve_skill_dir() {
     for _d in "$HOME/.claude/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
       [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    _d="$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${_d%/}/SKILL.md" ] && { printf '%s\n' "${_d%/}"; return; }
     printf '%s\n' "$HOME/.claude/skills/tdoc"
   elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${OPENAI_CODEX:-}${CODEX_HOME:-}${CODEX_SHELL:-}" ]; then
     for _d in "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc"; do
       [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    _d="$(ls -1d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${_d%/}/SKILL.md" ] && { printf '%s\n' "${_d%/}"; return; }
     printf '%s\n' "$HOME/.codex/skills/tdoc"
   else
     for _d in "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do

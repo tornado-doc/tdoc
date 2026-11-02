@@ -41,9 +41,9 @@ t('Claude: plugin.json + .mcp.json (type http)', () => {
 
 t('Codex / ChatGPT: plugin.json + mcp.json (streamable-http)', () => {
   const p = json('codex/plugin.json');
-  assert(p.name === 'tdoc' && p.version === VERSION, `${p.name} ${p.version}`);
+  assert(p.name === 'tdoc-cloud' && p.version === VERSION, `${p.name} ${p.version}`);
   const ui = p.extensions && p.extensions['com.openai'] && p.extensions['com.openai'].interface;
-  assert(ui && ui.displayName === 'tdoc', 'OpenAI interface block');
+  assert(ui && ui.displayName === 'tdoc Cloud', 'OpenAI interface block');
   // OpenAI portal limits (https://developers.openai.com/plugins/deploy/submission)
   assert(ui.displayName.length <= 30 && ui.shortDescription.length <= 30, 'displayName / shortDescription <= 30 chars');
   assert(ui.longDescription.length <= 4000 && ui.developerName.length <= 80, 'longDescription <= 4000, developerName <= 80');
@@ -97,10 +97,15 @@ t('README cites sources and marks unverified fields', () => {
   assert(/UNVERIFIED/.test(r), 'marks unverified');
 });
 
-t('SKILL.md prefers the MCP tools when they are connected; CLI stays the fallback', () => {
+t('SKILL.md puts the CLI first (it is what the daemon runs); MCP only without a CLI', () => {
   const main = fs.readFileSync(path.join(root, 'SKILL.md'), 'utf8');
-  const section = main.slice(main.indexOf('## When the tdoc MCP tools are available'), main.indexOf('## Document routing'));
-  assert(section.length > 200 && /prefer them to the CLI/.test(section) && /CLI stays\s+the fallback/.test(section), 'section missing');
+  const section = main.slice(main.indexOf('## The CLI first; the tdoc MCP tools when there is no CLI'), main.indexOf('## Document routing'));
+  assert(section.length > 200, 'section missing');
+  assert(/Use it even when tdoc's MCP tools/.test(section) && /daemon/.test(section), 'CLI-first rule missing');
+  assert(/MCP tools only when the CLI cannot run here/.test(section), 'MCP fallback missing');
+  assert(/same tdoc account/.test(section), 'one-account rule missing');
+  const cloud = read('claude/skills/tdoc/SKILL.md');
+  assert(/use that one instead of these tools/.test(cloud), 'tdoc Cloud skill does not defer to the local skill');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
