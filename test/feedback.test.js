@@ -491,6 +491,122 @@ const APP = 'http://localhost:3000';
     assert(bad.status === 400 && bootData(await bad.text(), '__TDOC_APP_BOOT__').error, `bad origin: ${bad.status}`);
   });
 
+  // Signing in sends the popup through Cross-Origin-Opener-Policy pages,
+  // which cut it off from the app: its postMessage never arrives. The popup
+  // also files the session under a claim the app collects (owner report,
+  // app.hustlefree.ai, 2026-11-01).
+  {
+    const HOME = { Origin: 'https://tdoc.dev' };
+    const claimCookieOf = (r) => {
+      const all = (r.headers.getSetCookie ? r.headers.getSetCookie() : [r.headers.get('set-cookie') || '']).join('\n');
+      const m = /(__Host-tdoc_fb_claim_[a-f0-9]{16})=([a-f0-9]*);[^\n]*/.exec(all);
+      return m ? { name: m[1], value: m[2], line: m[0], pair: `${m[1]}=${m[2]}` } : null;
+    };
+    // The connect page asking for a claim (it does so while it has an opener).
+    const newClaim = async (env, { origin = APP, space = '', headers = HOME, cookie = '' } = {}) => {
+      const r = await worker.fetch(req('/api/feedback/connect/claim/new', { method: 'POST', cookie, headers, body: { origin, ...(space ? { space } : {}) } }), env, {});
+      const body = await r.json();
+      return { status: r.status, claim: body.claim, set: claimCookieOf(r), body };
+    };
+    const poll = async (env, claim, origin = APP) => {
+      const r = await worker.fetch(req('/api/feedback/connect/claim', { method: 'POST', body: { claim }, headers: origin ? { Origin: origin } : {} }), env, {});
+      return { status: r.status, body: await r.json() };
+    };
+    const connectWith = async (env, cookie, body, headers = HOME) => {
+      const r = await worker.fetch(req('/api/feedback/connect', { method: 'POST', cookie, headers, body: { origin: APP, handoff: 'claim', ...body } }), env, {});
+      return { r, body: await r.json() };
+    };
+
+    await t('claim: only our own page can start one; 256 bits, in a __Host- HttpOnly cookie per app and space', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const made = await newClaim(env);
+      assert(made.status === 200 && /^[a-f0-9]{64}$/.test(made.claim || ''), `claim ${made.status} ${JSON.stringify(made.body)}`);
+      assert(made.set && made.set.value === made.claim, 'claim cookie not set');
+      assert(/; Path=\/;/.test(made.set.line) && /HttpOnly/.test(made.set.line) && /Secure/.test(made.set.line) && /SameSite=Lax/.test(made.set.line) && /Max-Age=600/.test(made.set.line) && !/Domain=/i.test(made.set.line), `cookie flags ${made.set.line}`);
+      // A claim still pending in this browser is handed out again, not replaced.
+      const again = await newClaim(env, { cookie: made.set.pair });
+      assert(again.claim === made.claim && !again.set, 'a pending claim was replaced');
+      const other = await newClaim(env, { origin: 'http://localhost:5173' });
+      assert(other.set.name !== made.set.name, 'one cookie name for two apps');
+      const spaced = await newClaim(env, { space: 'd-abc' });
+      assert(spaced.set.name !== made.set.name, 'one cookie name for an app and its site space');
+      for (const headers of [{}, { Origin: 'https://evil.example' }, { Origin: APP }]) {
+        const r = await newClaim(env, { headers });
+        assert(r.status === 403 && !r.claim && !r.set, `cross-origin claim/new ${JSON.stringify(headers)}: ${r.status}`);
+      }
+      assert((await newClaim(env, { origin: 'nope' })).status === 400, 'bad origin');
+      // The page itself no longer writes anything: no claim in a GET.
+      const page = await worker.fetch(req(`/feedback/connect?origin=${encodeURIComponent(APP)}`), env, {});
+      const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+      assert(!boot.claim && !claimCookieOf(page), 'GET made a claim');
+      assert(/no-store/.test(page.headers.get('Cache-Control') || '') && page.headers.get('Referrer-Policy') === 'no-referrer', 'popup page headers');
+      const src = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-connect.jsx'), 'utf8');
+      assert(src.includes("window.opener.postMessage({ type: 'tdoc-feedback-claim', origin, claim: b.claim }, origin)"), 'popup does not tell the opener (only on its origin) the claim');
+      assert(src.includes("hasOpener() ? {} : { handoff: 'claim' }"), 'popup asks for the claim handoff even with an opener');
+    });
+
+    await t('claim: Connect without an opener files the session; the app collects it once, from its own origin only', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const sid = await putSession(env, 'julie');
+      const { claim, set } = await newClaim(env);
+      assert((await poll(env, claim)).body.status === 'pending', 'unfilled claim is not pending');
+      const made = await connectWith(env, `${sid}; ${set.pair}`, {});
+      assert(made.r.status === 200 && made.body.token && made.body.claim_filed === true, `connect ${made.r.status} ${JSON.stringify(made.body)}`);
+      const cleared = claimCookieOf(made.r);
+      assert(cleared && cleared.name === set.name && cleared.value === '' && /Max-Age=0/.test(cleared.line), 'claim cookie not cleared after filing');
+      for (const origin of ['', 'https://evil.example', 'http://localhost:3001', 'null']) {
+        const r = await poll(env, claim, origin);
+        assert(r.status === 404 && !r.body.session, `origin ${origin || '(none)'} got ${r.status} ${JSON.stringify(r.body)}`);
+      }
+      const got = await poll(env, claim);
+      assert(got.status === 200 && got.body.status === 'connected' && got.body.session.token === made.body.token && got.body.session.slug === made.body.slug, `collect ${JSON.stringify(got)}`);
+      assert((await poll(env, claim)).status === 404, 'claim answered twice');
+      const session = await worker.fetch(req('/api/feedback/session', { token: got.body.session.token }), env, {});
+      assert(session.status === 200, `collected token refused: ${session.status}`);
+      assert((await poll(env, 'abc')).status === 400 && (await poll(env, 'g'.repeat(64))).status === 400, 'malformed claim accepted');
+      // With its opener the page posts the token itself: nothing is filed.
+      const second = await newClaim(env);
+      const direct = await connectWith(env, `${sid}; ${second.set.pair}`, { handoff: undefined });
+      assert(direct.body.token && !direct.body.claim_filed, 'filed although the page could post the token');
+      assert((await poll(env, second.claim)).body.status === 'pending', 'claim filled without handoff');
+    });
+
+    await t('claim: no token for a claim made elsewhere, for another app or space, or from a cross-site request', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const sid = await putSession(env, 'julie');
+      // The attacker starts a claim (forging Origin from a script) and
+      // learns it. The victim's browser does not hold its cookie, so the
+      // victim's Connect files nothing under it.
+      const mine = await newClaim(env);
+      const victim = await newClaim(env);
+      const c1 = await connectWith(env, `${sid}; ${victim.set.pair}`, {});
+      assert(c1.body.claim_filed, 'own claim not filed');
+      assert((await poll(env, mine.claim)).body.status === 'pending', 'attacker claim was filled');
+      // A cookie under another app's name, or a planted value for this app's
+      // name naming another app's claim, fills nothing.
+      const forOther = await newClaim(env, { origin: 'http://localhost:5173' });
+      const wrongApp = await connectWith(env, `${sid}; ${forOther.set.pair}`, {});
+      assert(wrongApp.body.token && !wrongApp.body.claim_filed, 'claim for one origin filled by another');
+      const planted = await connectWith(env, `${sid}; ${mine.set.name}=${forOther.claim}`, {});
+      assert(!planted.body.claim_filed && (await poll(env, forOther.claim, 'http://localhost:5173')).body.status === 'pending', 'origin-mismatched claim filled');
+      // A site-space claim is not filled by a personal connect.
+      const forSpace = await newClaim(env, { space: 'd-someone-else' });
+      const personal = await connectWith(env, `${sid}; ${forSpace.set.name.replace(/_[a-f0-9]{16}$/, '')}=x; ${forSpace.set.pair}`, {});
+      assert(personal.body.token && !personal.body.claim_filed, 'space claim filled by a personal connect');
+      // A cross-site POST (CSRF) or one with no Origin fills nothing.
+      const fresh = await newClaim(env);
+      for (const headers of [{ Origin: 'https://evil.example' }, {}]) {
+        const r = await connectWith(env, `${sid}; ${fresh.set.pair}`, {}, headers);
+        assert(!r.body.claim_filed, `filled from ${JSON.stringify(headers)}`);
+      }
+      assert((await poll(env, fresh.claim)).body.status === 'pending', 'cross-site connect filled a claim');
+      // No session: nothing minted or filed.
+      const anon = await connectWith(env, fresh.set.pair, {});
+      assert(anon.r.status === 401, `anon connect ${anon.r.status}`);
+      assert((await poll(env, fresh.claim)).body.status === 'pending', 'anonymous connect filled a claim');
+    });
+  }
+
   await t('a bad /feedback/join link is the ordinary status page, not a page of its own', async () => {
     const env = makeEnv(mod.CommentsStore);
     const r = await worker.fetch(req('/feedback/join/no-such-space'), env, {});
