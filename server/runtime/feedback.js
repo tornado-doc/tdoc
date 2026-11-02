@@ -257,7 +257,10 @@ ${G6}
       background: #1a1a1a; color: #fff; font: 600 13px/1.2 system-ui, -apple-system, sans-serif;
       box-shadow: 0 8px 28px rgba(0,0,0,.22);
     }
+    /* A phone wraps the words, never the Cancel button. */
+    #tdoc-feedback-root .tdoc-fb-banner { width: max-content; max-width: calc(100vw - 24px); }
     #tdoc-feedback-root .tdoc-fb-banner button {
+      flex: none; white-space: nowrap;
       appearance: none; border: 0; cursor: pointer; pointer-events: auto; border-radius: 999px; padding: 5px 10px;
       background: rgba(255,255,255,.14); color: #fff; font: inherit;
     }
