@@ -105,6 +105,21 @@ t('names tdoc and tornado-doc', () => {
     'the decorative logo beside the wordmark must not offer visual expansion');
 });
 
+t('the closing CTA is the same prompt card, not a button', () => {
+  const end = html.slice(html.indexOf('FINAL CTA'), html.indexOf('<footer'));
+  assert(/<div class="pick pick-end">/.test(end), 'the closing CTA has no prompt card');
+  assert(/<code id="pick-prompt-end">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt-end"/.test(end), 'the closing card has no prompt with Copy');
+  const sends = [...end.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt-end"/g)].map((m) => m[1]);
+  assert(sends.join(' ') === 'claudecode claudeai chatgpt codex cursor grok', `closing quick send: ${sends.join(' ')}`);
+  assert(!/Create a free doc|Get started|browse the looks|btn-primary/.test(end), 'the closing CTA still has the old button');
+});
+
+t('site pages keep the comment cursor; links and buttons still point', () => {
+  const probe = fs.readFileSync(path.join(__dirname, '..', 'server', 'frame-probe.js'), 'utf8');
+  assert(!/data-tdoc-site\]\[data-tdoc-interaction-mode="comment"\] body \*\{cursor:auto/.test(probe), 'site pages hide the comment cursor again');
+  assert(/data-tdoc-site\]\[data-tdoc-interaction-mode="comment"\] button/.test(probe), 'site-page buttons lost their pointer');
+});
+
 t('links to the GitHub repo and install path', () => {
   assert(hrefs.some((h) => h === 'https://github.com/tornado-doc/tdoc'), 'missing GitHub repo href');
   // v40: the primary CTA opens onboarding. It used to point at ONBOARDING.md,
@@ -115,6 +130,13 @@ t('links to the GitHub repo and install path', () => {
   assert(hrefs.some((h) => h === '/start'), 'primary CTA no longer opens onboarding');
   assert(!hrefs.some((h) => /github\.com\/.+\/blob\//.test(h)),
     'a CTA points at a raw GitHub file; that is a repo, not an onboarding');
+});
+
+t('has an entry to the feedback tool in a section of its own', () => {
+  // Feedback on your own app is a second way in; the homepage says so in
+  // its usual section head, and links to /feedback (the bookmark page).
+  assert(hrefs.includes('/feedback'), 'no link to /feedback');
+  assert(/<p class="eyebrow">Feedback<\/p>\s*<h2>[^<]+<\/h2>\s*<p>[^]*?href="\/feedback"/.test(html), 'the /feedback link is not in a section head');
 });
 
 t('demo doc and thread are siblings, not nested', () => {
@@ -273,7 +295,9 @@ t('carries no unfinished placeholder content', () => {
   // The social-proof wall was removed; the OpenTag trusted-by leftovers must
   // stay gone regardless.
   assert(!/Coinbase|ByteDance|GUAZI/i.test(visible), 'OpenTag trusted-by leftovers still visible');
-  assert(/Use tdoc in your AI app/.test(visible), 'the apps row should be "Use tdoc in your AI app", not a borrowed user list');
+  // The hero connect card: one sentence, the setup prompt,
+  // one row of quick connect.
+  assert(/Send your agent this prompt to get started\.[\s\S]*set up https:\/\/tdoc\.dev\/SKILL\.md[\s\S]*Quick connect/.test(visible), 'the hero connect card is not sentence, prompt, quick connect');
 });
 
 t('names the apps it runs in, each linked to its connect step', () => {
@@ -285,21 +309,75 @@ t('names the apps it runs in, each linked to its connect step', () => {
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<[^>]+>/g, ' ');
-  const hero = visible.slice(visible.indexOf('Create a free doc'), visible.indexOf('Use tdoc in your AI app'));
-  assert(/Claude[\s\S]*ChatGPT[\s\S]*Cursor[\s\S]*VS Code/.test(hero), 'the hero does not name the connector apps');
-  assert(/Claude Code\s+or\s+Codex\s+on your computer/.test(hero), 'the hero does not name Claude Code and Codex');
+  const hero = visible.slice(visible.indexOf('Send your agent this prompt'), visible.indexOf('Set up in a minute'));
+  // The connect card is the hero's one action: no second "Create a free doc" above it.
+  assert(!/Create a free doc/.test(visible.slice(0, visible.indexOf('Send your agent this prompt'))), 'the hero still has a Create a free doc button');
+  for (const app of ['Claude Code', 'Codex', 'Cursor', 'Claude.ai', 'ChatGPT', 'Grok', 'VS Code', 'Gemini CLI', 'Grok Bot', 'Raft']) assert(hero.includes(app), `the hero picker does not name ${app}`);
   assert(!/Not yet in the/.test(visible), 'the page still says the chats are unsupported');
-  const copy = fs.readFileSync(path.join(root, 'shell', 'src', 'onboarding-copy.js'), 'utf8');
-  const definition = copy.match(/AGENT_DEFINITION = '([^']+)'/)[1];
-  assert(hero.includes(definition), 'AGENT_DEFINITION is not shown near the first "agent"');
-  const strip = html.slice(html.indexOf('<p class="trust-label">Use tdoc in your AI app</p>'), html.indexOf('<!-- ══ THE LOOP ══ -->'));
-  const apps = [...strip.matchAll(/<a class="aiapp" href="([^"]+)">[\s\S]*?<\/svg>([^<]+)<\/a>/g)].map((m) => `${m[2]}=${m[1]}`);
-  assert(apps.join(' ') === 'Claude=/start?connect=claude ChatGPT=/start?connect=chatgpt Cursor=/start?connect=cursor VS Code=/start?connect=vscode Codex=/start?connect=codex Gemini CLI=/start?connect=gemini', `apps row: ${apps.join(' ')}`);
-  assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(strip), 'the apps row shows company logos');
+  // No "What's an agent?" line under the card (removed on request, 2026-11-02).
+  assert(!/What's an agent\?/.test(visible), 'the agent definition line is back');
+  // The hero card: the setup prompt with Copy, four quick-connect buttons
+  // and More, every app in a popover of its own (the HTML popover attribute,
+  // so it works with no script). Each popover's way in works from the
+  // sandboxed frame (an https link or a line to copy).
+  const pick = html.slice(html.indexOf('<div class="pick" id="get-started">'), html.indexOf('<!-- tdoc demo'));
+  assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
+  const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
+  // Claude Code (desktop app), Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
+  const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(quickApps.join(' ') === 'grokbot raft more', `quick connect popovers: ${quickApps.join(' ')}`);
+  const sends = [...quick.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt"/g)].map((m) => m[1]);
+  assert(sends.join(' ') === 'claudecode claudeai chatgpt codex cursor grok', `quick send: ${sends.join(' ')}`);
+  assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
+  // No by-hand backups for the quick-send apps: the fallback is copying the prompt.
+  assert(!/by hand/.test(pick), 'More still has by-hand backups');
+  // More holds only the two apps with neither a quick send nor a bot: VS Code and Gemini CLI.
+  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'), pick.indexOf('<div class="pick-pop pick-p-vscode"'));
+  const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
+  assert(moreApps.join(' ') === 'vscode gemini', `More: ${moreApps.join(' ')}`);
+  assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
+  const apps = ['grokbot', 'raft', ...moreApps];
+  // One row grouped by brand: Claude (Claude Code, Claude.ai), ChatGPT (ChatGPT, Codex), Cursor, Grok (Grok, Grok Bot), Raft, More.
+  const brands = [...quick.matchAll(/<button type="button" class="pick-pill pick-brand"[^>]*>[\s\S]*?<span>([^<]+)<\/span>/g)].map((m) => m[1]);
+  assert(brands.join(' ') === 'Claude ChatGPT Grok', `brand groups: ${brands.join(' ')}`);
+  const menus = [...quick.matchAll(/<div class="pick-menu">([\s\S]*?)<\/div><\/div>/g)].map((m) => [...m[1].matchAll(/(?:data-tdoc-send|popovertarget)="(?:pick-pop-)?([a-z]+)"/g)].map((x) => x[1]).join('+'));
+  assert(menus.join(' ') === 'claudecode+claudeai chatgpt+codex grok+grokbot', `brand menus: ${menus.join(' ')}`);
+  assert(/\.pick-grp:hover \.pick-menu, \.pick-grp:focus-within \.pick-menu \{ display:flex; \}/.test(html), 'brand menus do not open on hover and focus');
+  // One short line under the buttons: ask for a missing app.
+  assert(/Don't see your app\? <a href="https:\/\/github\.com\/tornado-doc\/tdoc\/issues\/new"/.test(pick) && !/Add a webhook|Paste the prompt there/.test(pick), 'the line under the buttons is not the short ask-for-an-app line');
+  assert(/set up https:\/\/tdoc\.dev\/SKILL\.md/.test(pick.slice(pick.indexOf('id="pick-pop-raft"'))) && /Register App/.test(pick), 'Raft popover lacks the agent prompt or the MCP App step');
+  const popOf = (app) => {
+    const i = pick.indexOf(`<div class="pick-pop pick-p-${app}" id="pick-pop-${app}" popover>`);
+    assert(i >= 0, `${app}: no popover`);
+    const j = pick.indexOf('<div class="pick-pop pick-p-', i + 1);
+    return pick.slice(i, j < 0 ? undefined : j);
+  };
+  for (const app of apps) {
+    const body = popOf(app);
+    assert(body.includes(`popovertarget="pick-pop-${app}" popovertargetaction="hide"`), `${app}: no close button`);
+    assert(/class="pick-go" href="https:\/\//.test(body) || /data-tdoc-copy=/.test(body), `${app} popover has no way in`);
+    assert(!/href="(cursor|vscode):/.test(body), `${app} popover links a custom scheme the frame cannot open`);
+  }
+  // Every command a popover offers is a row of plugins/README.md's install
+  // table, the one place commands change.
+  const readme = fs.readFileSync(path.join(root, 'plugins', 'README.md'), 'utf8');
+  const table = readme.slice(readme.indexOf('## Install tdoc in your AI app'), readme.indexOf('\n---'));
+  const known = new Set([...table.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  for (const id of ['pick-gemini']) {
+    const m = pick.match(new RegExp(`<code id="${id}">([^<]+)</code>`));
+    assert(m, `no ${id}`);
+    const cmd = m[1].replace(/&amp;/g, '&');
+    assert(known.has(cmd), `${id} is not in plugins/README.md: ${cmd}`);
+  }
+  assert(!/#i-(google|cloudflare)"|Berkeley|tlogo-img|class="marquee"/.test(pick), 'the picker shows company logos');
   assert(!/Nothing to install, no account, no key/.test(visible), 'the false no-setup promise is back');
   const setup = html.slice(html.indexOf('<!-- ══ ONE PASTE ══'), html.indexOf('<!-- ══ FEATURES'));
-  assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-terminal/.test(setup), 'Claude Code is not drawn as a terminal');
-  assert(!/#i-claude"|#i-grok"|#i-cursor"/.test(setup), 'setup shows apps tdoc does not install into');
+  // Setup shows every app the picker offers, each with its own mark: Claude
+  // Code is Claude's, not a generic terminal (ST1125, 2026-10-29).
+  const tiles = [...setup.matchAll(/class="apptile[^"]*" role="img" aria-label="([^"]+)"/g)].map((m) => m[1]);
+  assert(tiles.join('|') === 'Claude|ChatGPT|Grok|Cursor|VS Code|Claude Code|Codex|Gemini CLI|Grok Bot|Raft', `setup tiles: ${tiles.join('|')}`);
+  assert(/aria-label="Claude Code"[^>]*>[\s\S]*?#i-claude"/.test(setup), 'Claude Code does not show the Claude mark');
+  assert(!/#i-terminal"|#i-code"/.test(setup + pick), 'a generic terminal or code icon stands in for an app');
   assert(/sign in once/.test(setup), 'setup does not say you sign in once');
 });
 
@@ -544,5 +622,73 @@ t('shipping the homepage ships content, not just worker code', () => {
     'the automatic workflow_run path must not rotate TDOC_UPLOAD_TOKEN');
 });
 
-console.log(`\n${pass} passed, ${fail} failed.`);
-process.exit(fail ? 1 : 0);
+// The homepage demo's scripted Edit (demo-agent.js DEMO_REWRITES, flag
+// demoEditRewrite): its paragraph must still be on the homepage, word for
+// word, or the demo silently falls back to the plain reply.
+function loadDemoAgent() {
+  const src = fs.readFileSync(path.join(root, 'shell/src/document/demo-agent.js'), 'utf8')
+    .replace(/^import .*$/m, 'const TDOC_AI = { tdoc_ai: true };')
+    .replace(/^export /gm, '');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src}\nreturn { DEMO_REWRITES, DEMO_EDIT_REPLY, createDemoBackend };`)();
+}
+const demoAgent = loadDemoAgent();
+const visibleText = (h) => h.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/g, '')
+  .replace(/<[^>]+>/g, ' ').replace(/&#8209;/g, '\u2011').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+
+t('scripted Edit: the paragraph it rewrites is on the homepage, once, as a plain <p>', () => {
+  const script = demoAgent.DEMO_REWRITES['tornado-doc'];
+  assert(script, 'no DEMO_REWRITES entry for tornado-doc');
+  const plain = html.match(/<p>([^<]*)<\/p>/g).map((p) => p.slice(3, -4).replace(/\s+/g, ' ').trim());
+  assert(plain.filter((p) => p === script.before).length === 1, `"${script.before}" is not one plain <p> on v${latest}`);
+  assert(visibleText(html).includes('Many people, many agents'), 'the prompt names a heading that is gone');
+  assert(script.after.split(/\s+/).length < script.before.split(/\s+/).length, 'the rewrite is not shorter');
+  assert(/\b19 words now, down from 28\b/.test(script.reply), `reply: ${script.reply}`);
+});
+
+t('scripted Edit: behind demoEditRewrite (off in production, on in PR previews); the probe swaps at once under reduced motion', () => {
+  const flags = fs.readFileSync(path.join(root, 'shell/src/feature-flags.js'), 'utf8');
+  assert(/demoEditRewrite: Object\.freeze\(\{[^}]*default: true, preview: true/.test(flags), 'flag demoEditRewrite');
+  const shell = fs.readFileSync(path.join(root, 'shell/src/document-shell.jsx'), 'utf8');
+  assert(/demoAgents && isFeatureOn\('demoEditRewrite'\)\s*\? DEMO_REWRITES\[config\.slug\]/.test(shell), 'the scripted Edit must be demo-only and per landing slug');
+  const probe = fs.readFileSync(path.join(root, 'server/frame-probe.js'), 'utf8');
+  assert(/d\.type === 'tdoc:demoRewrite'\) runDemoRewrite\(d\)/.test(probe), 'probe handler');
+  assert(/prefers-reduced-motion: reduce[\s\S]{0,2000}if \(reduce\) \{ done\(\); return; \}/.test(probe), 'reduced motion must jump to the end state');
+});
+
+async function asyncTests() {
+  const at = async (n, fn) => { try { await fn(); ok(n); } catch (e) { bad(n, e.message); } };
+  const backend = (played) => {
+    let list = [{ id: 'c1', text: 'x', replies: [] }];
+    const b = demoAgent.createDemoBackend({
+      update: (fn) => { list = fn(list); },
+      delays: { answer: 1, ack: 5, reply: 10 },
+      rewrite: { ...demoAgent.DEMO_REWRITES['tornado-doc'], play: async () => { played.push('play'); return true; }, onDone: (ok2) => played.push(ok2 ? 'done' : 'fail') },
+    });
+    return { b, list: () => list };
+  };
+  await at('scripted Edit: the prompt plays the rewrite, then the agent replies with what changed', async () => {
+    const played = [];
+    const { b, list } = backend(played);
+    b.markScripted('c1', demoAgent.DEMO_REWRITES['tornado-doc'].prompt);
+    await b.postNotifyHandoff({ comment_ids: ['c1'], recipient: null, instruction: 'Handle 1 comment' });
+    await new Promise((r) => setTimeout(r, 60));
+    assert(played.join(',') === 'play,done', `played: ${played}`);
+    const reply = list()[0].replies[0];
+    assert(reply && reply.text === demoAgent.DEMO_REWRITES['tornado-doc'].reply, `reply: ${JSON.stringify(reply)}`);
+  });
+  await at('scripted Edit: any other instruction gets the plain demo reply and no rewrite', async () => {
+    const played = [];
+    const { b, list } = backend(played);
+    b.markScripted('c1', 'Translate it to French');
+    await b.postNotifyHandoff({ comment_ids: ['c1'], recipient: null, instruction: 'Translate it to French' });
+    await new Promise((r) => setTimeout(r, 60));
+    assert(!played.length, `played: ${played}`);
+    assert(list()[0].replies[0]?.text === demoAgent.DEMO_EDIT_REPLY, 'plain demo reply');
+  });
+}
+
+asyncTests().then(() => {
+  console.log(`\n${pass} passed, ${fail} failed.`);
+  process.exit(fail ? 1 : 0);
+});

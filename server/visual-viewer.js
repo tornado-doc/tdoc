@@ -7,6 +7,8 @@
   // Historical comparison panes have their own synchronized navigation and
   // cannot use the reader shell's fullscreen bridge.
   if (new URLSearchParams(location.search).get('tdoc_compare') === '1') return;
+  // Site pages read as a website, not a document: no fullscreen buttons.
+  if (new URLSearchParams(location.search).get('tdoc_site') === '1') return;
   var SELECTOR = 'img,svg,canvas,video,iframe[src],figure,[data-tdoc-artifact],[class~="tdoc-artifact"]';
   var CONTROL = 'a,button,input,textarea,select,label,summary,[contenteditable="true"],[data-tdoc-copy]';
   var entries = [], active = null, scheduled = false;

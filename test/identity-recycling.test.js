@@ -357,7 +357,7 @@ async function claimAccount(worker, env, cookie) {
     }));
     const teamId = 't_1234567890abcdef';
     env.META.map.set(`team:${teamId}`, JSON.stringify({
-      id: teamId, name: 'Tinyfish', members: [{ account_id: emailClaim.account_id, role: 'admin', name: 'Claire' }],
+      id: teamId, name: 'Tinyfish', members: [{ account_id: 'acct-founder', role: 'admin', name: 'Founder' }, { account_id: emailClaim.account_id, role: 'admin', name: 'Claire' }],
     }));
     env.META.map.set(`account-teams:${emailClaim.account_id}`, JSON.stringify([teamId]));
 
@@ -391,6 +391,13 @@ async function claimAccount(worker, env, cookie) {
       && migratedProfile.pins.includes('claire-email-doc'), 'profile did not migrate');
     assert(migratedTeam && migratedTeam.members.some((member) => member.account_id === githubClaim.account_id
       && member.role === 'admin'), 'team membership did not migrate');
+    // Once merged, a later sign-in leaves the team alone: re-saving the copy
+    // it read could undo an admin's concurrent change (a removed member).
+    const teamPuts = [];
+    const origPut = env.META.put.bind(env.META);
+    env.META.put = async (k, ...rest) => { if (k === `team:${teamId}`) teamPuts.push(k); return origPut(k, ...rest); };
+    try { await oidcSignIn(worker, env); } finally { env.META.put = origPut; }
+    assert(!teamPuts.length, 'a sign-in with nothing to merge re-saved the team');
 
     const page = await worker.fetch(req('/d/claire-old-doc/v/1', {
       cookie: `tdoc_sid=${linked.sid}`,
