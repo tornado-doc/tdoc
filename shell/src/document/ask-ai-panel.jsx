@@ -78,22 +78,22 @@ function PendingComments({ comments, chosen, onToggle }) {
 //   instruction only        posted as the viewer's whole-document comment,
 //                           then that comment is handed off; the agent
 //                           replies under it as usual
-function EditForm({ send, modePicker }) {
+// The instruction is the panel's one draft (Ask's question too), and the
+// comment selection lives with the page: switching Ask / Edit either way
+// keeps both, and the caret where it was.
+function EditForm({ send, modePicker, draft: instruction, onDraft: setInstruction, focusInput, onCaret }) {
   const { slug, choices, preselected, readyIds, ready = [], createDocumentComment, onSent, fixed = '', fixedBusy = false } = send;
   const [picked, setPicked] = useState(null);
-  const [instruction, setInstruction] = useState('');
   const [posting, setPosting] = useState(false);
   const sending = useHandoffSend(slug, onSent);
   const input = useRef(null);
   // The homepage demo's request (demo-agent.js DEMO_REWRITES) is fixed: shown
   // read-only, so the visitor only presses Send (and can't send something
   // the demo can't act out). Not focused then: no caret, no phone keyboard.
+  // The visitor's own typing stays the draft, back in Ask.
   const value = fixed || instruction;
   useEffect(() => {
-    const el = input.current;
-    if (!el || fixed) return;
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
+    if (input.current && !fixed) focusInput(input.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -107,8 +107,9 @@ function EditForm({ send, modePicker }) {
   const to = recipient ? agentMentionName(recipient, choices) : '';
   // The Send to agent dialog's selection: comment ids, kept only while
   // still ready (as Agent activity's Ready to send). Tracked as unchecked
-  // ids so every comment -- and one arriving later -- starts checked.
-  const [unchecked, setUnchecked] = useState([]);
+  // ids so every comment -- and one arriving later -- starts checked. Kept
+  // by the page (send.unchecked), so it outlives a switch to Ask.
+  const { unchecked = [], onUnchecked: setUnchecked } = send;
   const chosen = readyIds.filter((id) => !unchecked.includes(id));
   const toggle = (id, on) => setUnchecked((ids) => (on ? ids.filter((x) => x !== id) : [...ids, id]));
   const text = value.trim();
@@ -129,13 +130,13 @@ function EditForm({ send, modePicker }) {
         sending.setResult({ ok: false, text: `Not sent to ${to}: ${err.message || 'something went wrong'}.` });
       } finally { setPosting(false); }
       if (!comment?.id) return;
-      setInstruction('');
+      if (!fixed) setInstruction('');
       commentIds = [comment.id];
       sentText = `Sent to ${to} ✓`;
     }
     const body = await sending.send({ commentIds, recipient, sentText,
       instruction: chosen.length && text ? text : defaultInstruction(commentIds) });
-    if (body) { setInstruction(''); setUnchecked([]); }
+    if (body) { if (!fixed) setInstruction(''); setUnchecked([]); }
   };
   const label = sending.busy || posting ? 'Sending…' : sending.result && !sending.result.ok ? 'Retry' : recipient ? `Send to ${to}` : 'Send';
   return <>
@@ -143,7 +144,8 @@ function EditForm({ send, modePicker }) {
     <form className={`tdoc-ask-form tdoc-ask-send-form${fixed ? ' is-fixed' : ''}`} onSubmit={submit}>
       <textarea ref={input} aria-label="What should the agent change?" placeholder="What should the agent change?"
         rows={2} maxLength={2000} value={value} readOnly={Boolean(fixed)}
-        onChange={(event) => { if (!fixed) setInstruction(event.target.value); }} />
+        onChange={(event) => { if (!fixed) setInstruction(event.target.value); }}
+        onSelect={fixed ? undefined : onCaret} />
       <div className="tdoc-ask-form-bottom">
         <div className="tdoc-ask-form-pills">
           {modePicker}
@@ -213,8 +215,19 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
     setPickedMode(next);
     if (send) writeStored(modeKey(send.slug), next);
   };
+  // Where the caret was in the draft, so a switch between Ask and Edit
+  // (each its own textarea) puts it back; at the end otherwise.
+  const caret = useRef(null);
+  const onCaret = (event) => { caret.current = [event.target.selectionStart, event.target.selectionEnd]; };
+  const focusInput = (el) => {
+    el.focus();
+    const end = el.value.length;
+    const [a, b] = caret.current || [end, end];
+    el.setSelectionRange(Math.min(a, end), Math.min(b, end));
+  };
   useEffect(() => {
-    if (open && !activityOpen && mode === 'ask') input.current?.focus();
+    if (open && !activityOpen && mode === 'ask' && input.current) focusInput(input.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, activityOpen, mode]);
   useEffect(() => {
     if (!input.current) return;
@@ -231,10 +244,11 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   const modePicker = send ? <ModePicker mode={mode} onPick={pickMode} /> : null;
   return <div className="tdoc-ask-panel">
     <h2>Ask AI</h2>
-    {mode === 'edit' ? <EditForm key={send.resetKey || 0} send={send} modePicker={modePicker} /> : <>
+    {mode === 'edit' ? <EditForm key={send.resetKey || 0} send={send} modePicker={modePicker}
+      draft={draft} onDraft={onDraft} focusInput={focusInput} onCaret={onCaret} /> : <>
     <form className="tdoc-ask-form" onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
       <textarea ref={input} aria-label="Ask about this document" placeholder={latest ? 'Ask a follow-up…' : 'Ask about this document…'}
-        rows={2} value={draft} onChange={(event) => onDraft(event.target.value)}
+        rows={2} value={draft} onChange={(event) => onDraft(event.target.value)} onSelect={onCaret}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); onAsk(); } }} />
       <div className="tdoc-ask-form-bottom">
         <div className="tdoc-ask-form-pills">
