@@ -13,7 +13,7 @@ import { isFeatureOn } from './feature-flags.js';
 //   ChatGPT  Plugins -> + -> Add custom MCP server, with the URL to paste
 //   Cursor   its MCP install deeplink
 //   VS Code  its MCP install link
-//   others   the server URL (Codex, Gemini CLI)
+//   others   the server URL (Codex)
 // The CLI line stays at the bottom as the fallback. Behind the remoteMcp
 // flag (on by default). /start?connect=<app> opens the panel with that app's
 // button focused: the homepage's "Use tdoc in your AI app" row links there.
@@ -81,7 +81,7 @@ export function ConnectAiApps({ showCli = true }) {
         </li>
       </ul>
       <div className="tdoc-connect-apps-url" data-app="other">
-        <span>Codex, Gemini CLI or any other app that takes an MCP server URL:</span>
+        <span>Codex or any other app that takes an MCP server URL:</span>
         <CodeBlock text={url} />
       </div>
       {showCli ? (
@@ -110,7 +110,7 @@ export function ConnectAiAppsSection({ title = 'Connect an AI app', blurb = 'Use
 // /start: a strip under the top bar and the panel in a dialog, so the
 // tutorial document itself stays author HTML with no script.
 // The app a /start?connect=<app> link asks for, or null. Any value opens the
-// panel; one with no button of its own (codex, gemini) lands on the URL.
+// panel; one with no button of its own (codex) lands on the URL.
 export function requestedConnectApp(search = typeof location !== 'undefined' ? location.search : '') {
   const v = new URLSearchParams(search).get('connect');
   if (v === null) return null;
