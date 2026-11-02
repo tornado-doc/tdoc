@@ -322,18 +322,21 @@ t('names the apps it runs in, each linked to its connect step', () => {
   const pick = html.slice(html.indexOf('<div class="pick" id="get-started">'), html.indexOf('class="pick-note"'));
   assert(/<code id="pick-prompt">set up https:\/\/tdoc\.dev\/SKILL\.md<\/code><button type="button" class="pick-promptcopy" data-tdoc-copy="#pick-prompt"/.test(pick), 'the setup prompt has no Copy');
   const quick = pick.slice(pick.indexOf('class="pick-quick"'), pick.indexOf('<div class="pick-pop'));
-  // Claude Code opens its popover; Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
+  // Claude Code (desktop app), Codex, Cursor, Claude.ai and ChatGPT hand the prompt to the app (data-tdoc-send, the shell builds the link).
   const quickApps = [...quick.matchAll(/popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
-  assert(quickApps.join(' ') === 'claudecode more', `quick connect popovers: ${quickApps.join(' ')}`);
+  assert(quickApps.join(' ') === 'more', `quick connect popovers: ${quickApps.join(' ')}`);
   const sends = [...quick.matchAll(/data-tdoc-send="([a-z]+)" data-tdoc-send-text="#pick-prompt"/g)].map((m) => m[1]);
-  assert(sends.join(' ') === 'codex cursor claudeai chatgpt', `quick send: ${sends.join(' ')}`);
+  assert(sends.join(' ') === 'claudecode codex cursor claudeai chatgpt', `quick send: ${sends.join(' ')}`);
   assert(!/href="(codex|cursor|claude):/.test(pick), 'the page carries an app link itself');
+  // The quick buttons open desktop apps; someone in a terminal pastes the prompt instead.
+  assert(/<p class="pick-tui">Running Claude Code, Codex or Cursor in a terminal\? Paste the prompt there\.<\/p>/.test(pick), 'no line for terminal users');
+  assert(/Claude Code in Terminal/.test(pick) && /Codex in Terminal/.test(pick), 'More has no terminal steps for Claude Code and Codex');
   const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'));
   const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
-  assert(moreApps.join(' ') === 'grok vscode gemini grokbot claude cursor codex chatgpt', `More: ${moreApps.join(' ')}`);
+  assert(moreApps.join(' ') === 'grok vscode gemini grokbot claudecode claude cursor codex chatgpt', `More: ${moreApps.join(' ')}`);
   assert(/href="\/me\?view=settings#agents">Add a webhook/.test(moreBody), 'More has no bot line to the Agents page');
   assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
-  const apps = ['claudecode', ...moreApps];
+  const apps = moreApps;
   const popOf = (app) => {
     const i = pick.indexOf(`<div class="pick-pop pick-p-${app}" id="pick-pop-${app}" popover>`);
     assert(i >= 0, `${app}: no popover`);

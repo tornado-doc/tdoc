@@ -244,12 +244,12 @@ async function startServer(worker, env) {
         await page.waitForTimeout(1800);
         assert((await copy.innerText()).trim() === '', `copy button text after: ${await copy.innerText()}`);
         if (SHOTS) await pick.screenshot({ path: path.join(SHOTS, `${label}-home-pick.png`) });
-        // Quick send: Codex, Cursor, Claude.ai and ChatGPT copy the prompt and hand it to the app, filled in.
+        // Quick send: Claude Code, Codex, Cursor, Claude.ai and ChatGPT copy the prompt and hand it to the app, filled in.
         const prompt = encodeURIComponent('set up https://tdoc.dev/SKILL.md');
-        for (const [label2, href] of [['Codex', `codex://new?prompt=${prompt}`], ['Cursor', `cursor://anysphere.cursor-deeplink/prompt?text=${prompt}`], ['Claude.ai', `https://claude.ai/new?q=${prompt}`], ['ChatGPT', `https://chatgpt.com/?q=${prompt}`]]) {
+        for (const [label2, href] of [['Claude Code', `claude://code/new?q=${prompt}`], ['Codex', `codex://new?prompt=${prompt}`], ['Cursor', `cursor://anysphere.cursor-deeplink/prompt?text=${prompt}`], ['Claude.ai', `https://claude.ai/new?q=${prompt}`], ['ChatGPT', `https://chatgpt.com/?q=${prompt}`]]) {
           await pick.locator('.pick-quick .pick-pill', { hasText: label2 }).click();
           await page.waitForFunction((h) => window.__appOpened.includes(h), href);
-          await page.getByText(/Prompt copied\. Opening (Codex|Cursor|Claude|ChatGPT)/).first().waitFor();
+          await page.getByText(/Prompt copied\. Opening (Claude Code|Codex|Cursor|Claude|ChatGPT)/).first().waitFor();
         }
         if (SHOTS) await shot(page, `${label}-home-quick-send`);
         const openPops = async () => pick.locator('.pick-pop:popover-open').evaluateAll((els) => els.map((e) => e.id));
@@ -262,7 +262,7 @@ async function startServer(worker, env) {
           gemini: 'gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp',
           grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp',
         };
-        const inMore = ['chatgpt', 'grok', 'vscode', 'gemini', 'grokbot', 'claude', 'cursor', 'codex'];
+        const inMore = ['claudecode', 'chatgpt', 'grok', 'vscode', 'gemini', 'grokbot', 'claude', 'cursor', 'codex'];
         for (const [app, needle] of Object.entries(expect)) {
           if (inMore.includes(app)) {
             await pick.locator('.pick-quick .pick-more').click();

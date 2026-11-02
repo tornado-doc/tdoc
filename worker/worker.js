@@ -75,11 +75,11 @@ Give the user this one link and nothing else to do by hand: ${MCP_CLAUDE_CONNECT
 
 Ask the user to reply "done", then go to "First document".
 
-## Claude Code or Codex (you can run Bash on the user's computer)
+## Claude Code or Codex (desktop app or terminal: you can run Bash on the user's computer)
 
 Follow ${TDOC_ONBOARDING_URL} end to end. It installs the local plugin, signs in, runs the doctor and makes the first document. Then go to "Comments back to you".
 
-## Cursor
+## Cursor (the editor, or the Cursor agent in a terminal)
 
 Give the user this one link: ${MCP_CURSOR_INSTALL_LINK} It opens Cursor with tdoc filled in; they click Install and sign in. Ask them to reply "done".
 

@@ -5,6 +5,8 @@
 // site pages may ask (document-shell checks config.isLanding): any other
 // document could otherwise prefill a reader's agent with its own words.
 export const SEND_APPS = Object.freeze({
+  // Claude's desktop app: a new Claude Code session with the prompt filled in (not sent).
+  claudecode: { name: 'Claude Code', url: (t) => `claude://code/new?q=${encodeURIComponent(t)}` },
   codex: { name: 'Codex', url: (t) => `codex://new?prompt=${encodeURIComponent(t)}` },
   cursor: { name: 'Cursor', url: (t) => `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(t)}` },
   claude: { name: 'Claude', url: (t) => `claude://claude.ai/new?q=${encodeURIComponent(t)}` },
