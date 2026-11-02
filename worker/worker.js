@@ -6757,6 +6757,20 @@ function docReadableBy(env, session, meta) {
 
 // The feedback spaces a person owns or has joined. With counts, also where
 // each stands: open = a person spoke last, replied = an agent did.
+// Where a space's comments stand: open = a person spoke last, replied = an
+// agent did. One comment read.
+async function feedbackSpaceCounts(env, slug) {
+  let open = 0, replied = 0;
+  try {
+    for (const c of snapshotList(await readComments(env, slug), Infinity)) {
+      if (!c || c.deleted || c.status === 'applied') continue;
+      const last = (c.replies || []).filter((r) => r && !r.deleted).slice(-1)[0];
+      if (last && last.author && last.author.kind === 'agent') replied++; else open++;
+    }
+  } catch {}
+  return { open, replied };
+}
+
 async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
   if (!session) return [];
   const out = await Promise.all(rows.map(async (row) => {
@@ -6771,17 +6785,7 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
     if (!docReadableBy(env, session, row.meta)) return null;
     const site = owned ? await loadSiteBinding(env, row.slug, row.meta) : null;
     const item = { ...toPublic(row), origin, mine: owned, ...(site ? { site } : {}) };
-    if (withCounts) {
-      let open = 0, replied = 0;
-      try {
-        for (const c of snapshotList(await readComments(env, row.slug), Infinity)) {
-          if (!c || c.deleted || c.status === 'applied') continue;
-          const last = (c.replies || []).filter((r) => r && !r.deleted).slice(-1)[0];
-          if (last && last.author && last.author.kind === 'agent') replied++; else open++;
-        }
-      } catch {}
-      Object.assign(item, { open, replied });
-    }
+    if (withCounts) Object.assign(item, await feedbackSpaceCounts(env, row.slug));
     return item;
   }));
   return out.filter(Boolean).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
@@ -7899,8 +7903,12 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
   const teamRecords = teamLoads.map((t) => t.team);
   const teamById = new Map(teamRecords.map((team) => [team.id, team]));
   const teamFolderStates = new Map(teamLoads.map((t) => [t.team.id, t.folders]));
+  // A team's feedback spaces are team docs: every member who may read them
+  // finds them with the team (marked kind: 'feedback', with the app's
+  // origin), not only in the personal list of whoever made them.
   const teamDocs = catalog.filter((row) => {
-    if (isFeedbackSpace(row.meta) || !row.meta || !teamById.has(row.meta.workspace_id)) return false;
+    if (!row.meta || !teamById.has(row.meta.workspace_id)) return false;
+    if (isFeedbackSpace(row.meta) && !feedbackOrigin(row.meta.feedback && row.meta.feedback.origin)) return false;
     return docReadableBy(env, session, row.meta);
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
   const teamDocRow = (row) => {
@@ -7908,6 +7916,7 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
     const author = teamMember(team, row.meta.hosted && row.meta.hosted.account_id);
     return {
       ...publicRow(row),
+      ...(isFeedbackSpace(row.meta) ? { kind: 'feedback', origin: row.meta.feedback.origin } : {}),
       team: team.id,
       author: author ? author.name : ownerDisplay(row),
       former_member: !author,
@@ -9232,6 +9241,68 @@ async function mintFeedbackToken(env, session, slug, origin, { site = false } = 
     sid: session.id, slug, origin, created: new Date().toISOString(), ...(site ? { site: true } : {}),
   }), { expirationTtl: FEEDBACK_TOKEN_TTL_SECONDS });
   return token;
+}
+
+// ── Connecting when the popup loses its opener ───────────────────────────
+// The connect popup hands the token to the app with postMessage, which needs
+// window.opener. Signing in takes the popup through pages that send
+// Cross-Origin-Opener-Policy: same-origin (the Clerk sign-in page, and the
+// Cloudflare check in front of it): the browser moves the popup into a new
+// browsing context group, window.opener becomes null for good, and the app
+// reads popup.closed === true while the person is still signing in. The
+// app then gave up ("closed before connecting") and the comment in hand was
+// never posted (owner report on app.hustlefree.ai, 2026-11-01).
+//
+// So the popup can also leave the token with the server, for the app to
+// collect: a claim.
+//   1. The popup's page, while it still has its opener, asks for a claim
+//      (POST /api/feedback/connect/claim/new, same-origin only): 256 random
+//      bits, stored with {origin, space} for ten minutes, set in an HttpOnly
+//      __Host- cookie named for that origin and space, and posted by the page
+//      to window.opener with targetOrigin = origin. Only a window on that
+//      origin receives it.
+//   2. Back from sign-in, the cookie still names the claim. Connect (the
+//      consent click, a same-origin POST) mints the token as always and, when
+//      the page has lost its opener, files the session under the claim.
+//   3. The app polls POST /api/feedback/connect/claim with the id. The answer
+//      is given once (the record is deleted) and only to a request whose
+//      Origin is the claim's origin.
+// Why a third-party page cannot use this to get someone's token: the id is
+// never in a URL and is only ever handed to a window on the bound origin; a
+// claim made elsewhere (by calling the API itself) cannot be filled, because
+// the victim's browser does not hold its cookie (__Host-: no other host can
+// plant one) and only a same-origin Connect fills; and nothing is filled
+// without the signed-in person's Connect click on a page that names the app.
+const FEEDBACK_CLAIM_TTL_SECONDS = 600;
+const FEEDBACK_CLAIM_RE = /^[a-f0-9]{64}$/;
+const feedbackClaimKey = async (claim) => `feedback:claim:${await sha256Hex(claim)}`;
+// One cookie per (app, space): a second connect window for another app does
+// not overwrite the claim of one that is mid sign-in.
+const feedbackClaimCookieName = async (origin, space) => `__Host-tdoc_fb_claim_${(await sha256Hex(`${origin}|${space || ''}`)).slice(0, 16)}`;
+async function feedbackClaimFromCookie(req, origin, space) {
+  const name = await feedbackClaimCookieName(origin, space);
+  const m = (req.headers.get('cookie') || '').match(new RegExp(`(?:^|;\\s*)${name}=([a-f0-9]{64})(?:;|$)`));
+  return m ? m[1] : null;
+}
+const feedbackClaimCookie = async (origin, space, claim, maxAge = FEEDBACK_CLAIM_TTL_SECONDS) => `${await feedbackClaimCookieName(origin, space)}=${claim}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+async function readFeedbackClaim(env, claim) {
+  if (!FEEDBACK_CLAIM_RE.test(String(claim || ''))) return null;
+  try { return JSON.parse((await env.META.get(await feedbackClaimKey(claim))) || 'null'); } catch { return null; }
+}
+async function newFeedbackClaim(env, origin, space) {
+  const claim = rand(32);
+  await env.META.put(await feedbackClaimKey(claim), JSON.stringify({ origin, space: space || null, created: new Date().toISOString() }), { expirationTtl: FEEDBACK_CLAIM_TTL_SECONDS });
+  return claim;
+}
+// The Connect click: file the session under this browser's claim for the
+// same app and space, if it is still empty.
+async function fillFeedbackClaim(env, req, origin, space, payload) {
+  const claim = await feedbackClaimFromCookie(req, origin, space);
+  if (!claim) return false;
+  const rec = await readFeedbackClaim(env, claim);
+  if (!rec || rec.session || rec.origin !== origin || (rec.space || null) !== (space || null)) return false;
+  await env.META.put(await feedbackClaimKey(claim), JSON.stringify({ ...rec, session: payload, filled: new Date().toISOString() }), { expirationTtl: FEEDBACK_CLAIM_TTL_SECONDS });
+  return true;
 }
 
 // ── A site's own comment space (the SDK) ─────────────────────────────────
@@ -20516,6 +20587,18 @@ const tdocHandlers = {
       const s = await getSession(env, req);
       if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
       const data = await indexData(env, s, url.origin);
+      // ?team=<id>: that team's feedback spaces (its members see them on the
+      // team page), counted the same way.
+      const teamId = url.searchParams.get('team');
+      if (teamId) {
+        if (!validTeamId(teamId) || (s.scope && !s.scope.teams.includes(teamId))) return json({ error: 'not_found' }, { status: 404 });
+        const rows = (data.team_docs || []).filter((row) => row.team === teamId && row.kind === 'feedback');
+        const spaces = await Promise.all(rows.map(async (row) => {
+          const site = row.can_manage ? await loadSiteBinding(env, row.slug, await loadDocMeta(env, row.slug)) : null;
+          return { ...row, ...(site ? { site } : {}), ...(await feedbackSpaceCounts(env, row.slug)) };
+        }));
+        return json({ ok: true, spaces }, { headers: { 'Cache-Control': 'private, no-store' } });
+      }
       const slugs = new Set((data.feedback || []).map((x) => x.slug));
       const metas = await Promise.all([...slugs].map(async (slug) => ({ slug, meta: await loadDocMeta(env, slug) })));
       const bySlug = new Map((data.feedback || []).map((x) => [x.slug, x]));
@@ -21783,7 +21866,47 @@ const tdocHandlers = {
           doors: { oidc: !!oidc, oidcLabel: (oidc && oidc.label) || '', web: githubDirectSignIn(env) },
           ...(origin ? {} : { error: 'Open this window from the tdoc button inside your app.' }),
         }),
-      }), { status: origin ? 200 : 400, headers: { 'Content-Security-Policy': cspHeader(nonce) } });
+      }), { status: origin ? 200 : 400, headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
+    }
+    // The connect page, while it still has its opener, starts a claim (see
+    // "Connecting when the popup loses its opener"). Same-origin only: the
+    // claim goes into this browser's cookie and back to that page alone.
+    if (p === '/api/feedback/connect/claim/new' && method === 'POST') {
+      if (req.headers.get('origin') !== url.origin) return json({ error: 'cross_origin' }, { status: 403 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const origin = feedbackOrigin(body.origin);
+      if (!origin) return json({ error: 'invalid_origin' }, { status: 400 });
+      const space = body.space ? (isValidSlug(body.space) ? body.space : null) : null;
+      if (body.space && !space) return json({ error: 'invalid_space' }, { status: 400 });
+      // A claim still waiting in this browser (its window is mid sign-in) is
+      // handed out again, not replaced: another connect window for the same
+      // app must not strand it.
+      const held = await feedbackClaimFromCookie(req, origin, space);
+      const heldRec = held ? await readFeedbackClaim(env, held) : null;
+      if (heldRec && !heldRec.session && heldRec.origin === origin && (heldRec.space || null) === (space || null)) {
+        return json({ claim: held }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (await rateLimited(env, `fbclaim:${clientIp(req)}`, 60, 600)) return json({ error: 'rate_limited' }, { status: 429 });
+      const claim = await newFeedbackClaim(env, origin, space);
+      const out = json({ claim }, { headers: { 'Cache-Control': 'no-store' } });
+      out.headers.append('Set-Cookie', await feedbackClaimCookie(origin, space, claim));
+      return out;
+    }
+    // The app collecting a session the popup filed under its claim. Once, and
+    // only for the origin the claim was made for; anything else is 404, so
+    // the answer says nothing about a claim the caller does not own.
+    if (p === '/api/feedback/connect/claim' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const claim = String((body && body.claim) || '');
+      if (!FEEDBACK_CLAIM_RE.test(claim)) return json({ error: 'invalid_claim' }, { status: 400 });
+      const rec = await readFeedbackClaim(env, claim);
+      const from = req.headers.get('origin') || '';
+      if (!rec || !from || rec.origin !== from) return json({ error: 'claim_not_found' }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+      if (!rec.session) return json({ status: 'pending' }, { headers: { 'Cache-Control': 'no-store' } });
+      await env.META.delete(await feedbackClaimKey(claim));
+      return json({ status: 'connected', session: rec.session }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (p === '/api/feedback/connect' && method === 'POST') {
       const s = await getSession(env, req);
@@ -21792,6 +21915,16 @@ const tdocHandlers = {
       try { body = await req.json(); } catch {}
       const origin = feedbackOrigin(body.origin);
       if (!origin) return json({ error: 'invalid_origin' }, { status: 400 });
+      // A page that has lost its opener (COOP on the way through sign-in)
+      // files the session under its claim for the app to collect. Only from
+      // our own page: a cross-site request must not be able to fill one.
+      const feedbackConnected = async (payload, claimSpace) => {
+        const wantsClaim = body.handoff === 'claim' && req.headers.get('origin') === url.origin;
+        const filed = wantsClaim && await fillFeedbackClaim(env, req, origin, claimSpace, payload);
+        const out = json(filed ? { ...payload, claim_filed: true } : payload);
+        if (filed) out.headers.append('Set-Cookie', await feedbackClaimCookie(origin, claimSpace, '', 0));
+        return out;
+      };
       let slug;
       let meta;
       if (body.space) {
@@ -21822,7 +21955,7 @@ const tdocHandlers = {
           return json({ error: 'not_invited', message: 'This site\'s comments are not shared with you. Ask its owner to share them with you.' }, { status: 403 });
         }
         const token = await mintFeedbackToken(env, s, body.space, origin, { site: true });
-        return json({ ...feedbackSessionPayload(env, url.origin, s, body.space, meta), token, site: true });
+        return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, body.space, meta), token, site: true }, body.space);
       }
       if (body.slug) {
         // "Use an existing doc": any doc this person may comment on.
@@ -21841,7 +21974,7 @@ const tdocHandlers = {
         meta = space.meta;
       }
       const token = await mintFeedbackToken(env, s, slug, origin);
-      return json({ ...feedbackSessionPayload(env, url.origin, s, slug, meta), token });
+      return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, slug, meta), token }, null);
     }
     // The client's first call with a stored token: still valid, still allowed,
     // and where the doc is now.

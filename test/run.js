@@ -241,6 +241,7 @@ const EXTENDED_BROWSER = [
   'anchor-scenarios.test.js', // #387 everything selectable can carry a comment
   'browser-editing.test.js', // playwright: Read/Comment/Edit + explicit snapshot save/conflict
   'feedback-browser.test.js', // playwright: #564 bookmarklet on a localhost app → connect popup → pin → doc
+  'feedback-connect-coop-ui.test.js', // playwright: sign-in through a COOP page cuts the popup off; the claim still connects and the held comment posts; blocked / cancelled keep it
   'mobile-comment-nav.test.js', // playwright phone: highlight ↔ comment, iOS bare tap
 ];
 
