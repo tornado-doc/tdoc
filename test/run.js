@@ -33,6 +33,7 @@ const OFFLINE = [
   'security.test.js',         // injection / authz / CSRF / path-traversal
   'access.test.js',           // JUL-31 access policy (public/unlisted/private)
   'link-sharing.test.js',     // anyone with the link: noindex everywhere, unlisted by default, require sign-in, public->link migration
+  'seo.test.js',              // sitemap + robots Sitemap line, /@handle SSR, description dedupe, JSON-LD: Public docs only, escaped
   'resolution-actor.test.js', // who resolved: human vs agent, kept as a fact
   'token-inventory.test.js',  // /me/tokens: list + revoke one terminal credential, browser-only
   'connectors.test.js',       // webhook connector, test send, disconnect, boundaries
@@ -62,6 +63,7 @@ const OFFLINE = [
   'inline-media.test.js',       // base64 video/audio refused at publish: link it instead
   'catalog-index.test.js',      // My docs costs what the viewer owns, not the platform (1102)
   'doc-index.test.js',          // per-owner/team doc index, invite index, one-pass frame bake + per-version cache (1102)
+  'scan-backfill-race.test.js', // index scans never write back a record they read: an owner's private/withdraw survives a racing scan
   'trash.test.js',              // Delete moves to Trash: gone on every path, restore, 30-day purge, folders, permissions
   'account-delete.test.js',     // Settings -> Delete account: blockers, browser-only, sessions/tokens end, fresh re-signup, 30-day purge, operator restore
   'trash-hardening.test.js',    // #815 review: resumable purge, restore quota, batched folder delete, bounded reads, write race, old CLIs, --forever
@@ -70,6 +72,9 @@ const OFFLINE = [
   'operator-fallback.test.js',  // TDOC_OWNER owns only ownerless docs, not email accounts' docs
   'version-catch-up.test.js',   // an orphaned version no longer wedges later publishes
   'site-space.test.js',         // SDK: a site's own comment space, origins + invited/public
+  'feedback-space-mcp.test.js', // create_feedback_space: agent-made site space, team-admin rule, dedupe; site binding vs Share race
+  'cli-mcp-parity.test.js',     // AGENTS.md: every MCP tool maps to an HTTP route and a CLI command (or a stated exception)
+
   'pull-acks-handoff.test.js',  // agent pulling comments marks the handoff received
   'local-agent.test.js',        // local CLI agents (tdoc-daemon): queued provider, pending index, KV write budget
   'team-agent.test.js',         // team agents: admin adds, members call, one team's reach, survives the adder, revoke
@@ -113,6 +118,7 @@ const OFFLINE = [
   'rename-from-the-bar.test.js', // #383 renaming is metadata; only blank docs follow their heading
   'resolve-a-thread.test.js',
   'onboarding-journey.test.js',
+  'send-to-app.test.js', // homepage quick send: allowlisted app deep links, site pages only
   'feature-flags.test.js', // flag registry: dev-mode-only until default flips; unknown names off
   'dev-mode.test.js', // Dev mode switch (allow-list only, per account) + onboarding never returns on re-login
   'setup-gate.test.js', // the journey: two doors, three server-driven bridges, no daemon // #357 a person can resolve; resolved threads leave the margin
@@ -206,7 +212,7 @@ const BROWSER = [
   'notify-handoff-ui.test.js', // Send to agent dialog: no dead button, reassign, Sending… → named result / Retry
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
-  'ask-send-switch-ui.test.js', // Ask AI: Ask | Send to agent switch (sends ready comments, 0 ready disabled, mode remembered), one row per team agent, team agent answers in public; no phone paper-plane
+  'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
   'phone-ask-ai-scroll-ui.test.js', // WebKit + Chromium phone: a long Ask AI answer scrolls to its end in the drawer, the document scrolls after closing
   'doc-bar-composer-ui.test.js', // the doc bar (title, space chip, Edited, quiet Share, mode switch in the bar, comments filter) and the composer's @agent pill / Answers only / Only me, desktop + phone, team docs
@@ -223,6 +229,7 @@ const BROWSER = [
   'nav-menu-links-ui.test.js', // My docs / Agents / logo are real links that show progress at once (landing, doc, /me)
   'dev-mode-ui.test.js', // account menu Dev mode on/off and nested onboarding controls; two-press exit/replay, refused off the list, re-login skips the gate; desktop + phone
   'ui-fonts-ui.test.js', // no serif in product controls: doc page (bar, card, composer, menus, drawer, Ask AI, Agent activity), /me, account + team settings, /feedback; settings hints muted, /me views fit a phone; desktop + phone
+  'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
 ];
 

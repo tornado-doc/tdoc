@@ -53,7 +53,7 @@ function Pin({
       onPointerDown={(event) => event.stopPropagation()}
       onClick={() => single ? onOpenComment(single.id) : onOpenCluster(cluster.key)}
     >
-      <CommentPinFace comment={single} state={state} clusterCount={cluster.items.length} />
+      <CommentPinFace comment={single} author={live?.author} state={state} clusterCount={cluster.items.length} />
     </button>
   );
 }

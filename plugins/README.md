@@ -9,28 +9,28 @@ first use; no API key to paste).
 | --- | --- |
 | Claude Code | `claude plugin install tdoc-cloud --marketplace tornado-doc/tdoc` (in a session: `/plugin install tdoc-cloud --marketplace tornado-doc/tdoc`) |
 | Claude Code, MCP only | `claude mcp add --transport http tdoc https://tdoc.dev/mcp` |
+| Claude Code, local CLI | `claude plugin marketplace add tornado-doc/tdoc && claude plugin install tdoc@tornado-tdoc` |
 | claude.ai / Claude Desktop | **Customize > Connectors > Add custom connector**, URL `https://tdoc.dev/mcp` |
-| Codex CLI | `codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc` |
+| Codex CLI | `codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc-cloud@tornado-tdoc` |
 | Codex CLI, MCP only | `codex mcp add tdoc --url https://tdoc.dev/mcp` |
+| Codex CLI, local CLI | `codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc` |
 | ChatGPT | **Plugins > + > Add custom MCP server**, URL `https://tdoc.dev/mcp` |
 | Cursor | [`cursor://anysphere.cursor-deeplink/mcp/install?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9`](https://cursor.com/install-mcp?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9) |
 | VS Code (Copilot) | `code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'` |
 | Gemini CLI | `git clone --depth 1 https://github.com/tornado-doc/tdoc && gemini extensions install ./tdoc/plugins/gemini` |
+| Gemini CLI, MCP only | `gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp` (then `/mcp auth tdoc` in Gemini CLI) |
 
 The older two-step Claude Code form also works:
 `claude plugin marketplace add tornado-doc/tdoc`, then
 `claude plugin install tdoc-cloud@tornado-tdoc`. The same marketplace also
 lists `tdoc@tornado-tdoc`, the local CLI plugin (needs Bash and the `tdoc`
 CLI). Install one of the two, not both: both carry a skill named `tdoc`.
+Codex uses the same two names: `tdoc-cloud@tornado-tdoc` is the remote MCP
+plugin, `tdoc@tornado-tdoc` the local CLI plugin.
 
-Gemini CLI has no option to install from a folder inside a repo:
-`gemini extensions install https://github.com/tornado-doc/tdoc` fails with
-"Configuration file not found ... gemini-extension.json" (tested with
-gemini-cli 0.66.0). It will work once the latest GitHub release carries
-`tdoc-gemini.tar.gz` as its only asset; see `SUBMITTING.md`.
+Gemini CLI installs from the latest GitHub release, which must carry
+`tdoc-gemini.tar.gz` (built by `sh plugins/pack.sh`) as its only asset.
 
-Directory listings (Claude, ChatGPT/Codex, Cursor, Cline, Gemini gallery) are
-not live yet. `SUBMITTING.md` is the kit for submitting them, and
 `sh plugins/pack.sh` builds the upload files into `dist/plugins/`.
 
 ---
@@ -173,16 +173,23 @@ when root `extensions.com.openai` is absent.
 Install:
 
 - Repo marketplace: `.agents/plugins/marketplace.json` at the repo root
-  (marketplace `tornado-tdoc`, one entry `tdoc` with source
+  (marketplace `tornado-tdoc`, entry `tdoc-cloud` with source
   `./plugins/codex`, `policy.installation: AVAILABLE`,
-  `policy.authentication: ON_INSTALL`, `category: Productivity`). Codex also
+  `policy.authentication: ON_INSTALL`, `category: Productivity`; and entry
+  `tdoc`, the local CLI plugin, with source `./`, the same names as in
+  Claude Code). Codex copies the whole source folder into
+  `$CODEX_HOME/plugins/cache/tornado-tdoc/<name>/<version>/`, `bin/` with
+  its executable bits, and SKILL.md's setup check finds it there (codex-cli
+  0.165.0, throwaway `CODEX_HOME`: both entries installed side by side). Codex also
   reads `.claude-plugin/marketplace.json` as a legacy marketplace; with both
   present it used `.agents/plugins/marketplace.json` (codex-cli 0.160.1,
   throwaway `CODEX_HOME`: `codex plugin marketplace add ./`, then
-  `codex plugin add tdoc@tornado-tdoc` installed 0.9.0 and `codex mcp list`
+  `codex plugin add tdoc@tornado-tdoc` (now `tdoc-cloud@tornado-tdoc`)
+  installed 0.9.0 and `codex mcp list`
   showed `tdoc  https://tdoc.dev/mcp  Not logged in`).
 - Codex CLI: `codex plugin marketplace add tornado-doc/tdoc`, then
-  `codex plugin add tdoc@tornado-tdoc` or `/plugins` in a session. Start a new
+  `codex plugin add tdoc-cloud@tornado-tdoc` (or `tdoc@tornado-tdoc` for the
+  local CLI) or `/plugins` in a session. Start a new
   session to load it.
 - ChatGPT: open the **Plugins** tab, find the plugin, select the plus button.
   For a personal marketplace (`~/.agents/plugins/marketplace.json`), restart
@@ -409,9 +416,11 @@ Verified:
   `https://vscode.dev/redirect`. Both are accepted by our rule.
   https://code.visualstudio.com/api/extension-guides/ai/mcp
 
-UNVERIFIED: GitHub Markdown does not link `vscode:` URLs. Third-party READMEs
-use an `https://insiders.vscode.dev/redirect/mcp/install?name=...&config=...`
-wrapper, which Microsoft does not document. It is not used here. The
+GitHub Markdown does not link `vscode:` URLs. A web page can use
+`https://vscode.dev/redirect/mcp/install?name=tdoc&config=...` instead (the
+homepage does): on 2026-10-30 it answered 302 to
+`vscode:mcp/install?{"type":"http","url":"https://tdoc.dev/mcp","name":"tdoc"}`.
+Microsoft does not document the wrapper. The
 "use MCP servers" page
 (https://code.visualstudio.com/docs/copilot/customization/mcp-servers) says the
 guided flow labels workspace `.vscode/mcp.json` as deprecated. The

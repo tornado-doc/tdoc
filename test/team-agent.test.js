@@ -574,8 +574,15 @@ bash "$TDOC_SKILL_DIR/bin/tdoc-agent-reply" --slug "$slug" --parent "$ids" --tex
       await env2.META.put(`team:${crew.id}`, JSON.stringify(t2));
       const list = await call2(`/api/team/agents?id=${crew.id}`, { cookie: ann.cookie });
       assert(!list.text.includes('never'), list.text);
-      assert(!teamNow().agents.some((x) => x.id === a.agent.id), 'still stored');
       assert((await connect(a.setup_code)).status === 404, 'expired code still connects');
+      // A read never saves the team (a copy read then could undo an admin's
+      // write); the admin's next write stores the drop and frees the slot.
+      assert(teamNow().agents.some((x) => x.id === a.agent.id), 'a GET wrote the team');
+      const next = await add('next');
+      assert(next && next.agent, `add after expiry: ${JSON.stringify(next)}`);
+      assert(!teamNow().agents.some((x) => x.id === a.agent.id), 'still stored after an admin write');
+      const del = await call2('/api/team/agents', { method: 'DELETE', cookie: ann.cookie, headers: origin, body: { id: crew.id, agent: next.agent.id } });
+      assert(del.status === 200, `cleanup ${del.status}`);
     });
 
     await t('(7) --team names its own team; the person-shaped catalog and team feed are refused, not 401', async () => {

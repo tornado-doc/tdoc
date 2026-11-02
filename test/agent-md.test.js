@@ -14,7 +14,9 @@ const expected =
   '\n' +
   'Comment surfaces are shared: anything that shows a comment, reply, AI/agent answer, agent picker or handoff status reuses CommentCard, the composer agent pill and its menu, handoff-status-line and comment-area (doc page, feedback layer and Ask AI alike). Colors come only from the --td-* tokens; desktop and phone are one design: same components, icons, colors and wording; phone only adapts size and placement (a drawer instead of a popover, a hidden label). Review rejects an unexplained parallel version. A new component or pattern is allowed only with a written why in the PR: what the existing one can\'t do and what was tried.\n' +
   '\n' +
-  'New or uncertain features ship behind a flag in shell/src/feature-flags.js, visible only in dev mode; flip default to true when approved; remove the flag after it\'s stable.\n';
+  'New or uncertain features ship behind a flag in shell/src/feature-flags.js, visible only in dev mode; flip default to true when approved; remove the flag after it\'s stable.\n' +
+  '\n' +
+  'CLI + MCP parity: every capability is implemented once, server-side, as an HTTP endpoint in worker/worker.js. MCP tools (MCP_TOOLS, calling it in process through mcpApi) and CLI commands (bin/tdoc-*) are thin wrappers over that endpoint: argument parsing and output formatting only, no logic in only one of them. A new MCP tool or CLI command names its endpoint and its counterpart in test/cli-mcp-parity.test.js (or a stated exception).\n';
 
 let pass = 0, fail = 0;
 function ok(n) { console.log(`  ✓ ${n}`); pass++; }
