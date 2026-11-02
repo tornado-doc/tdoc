@@ -6813,6 +6813,41 @@ function teamCommentAnchor(anchor) {
   return (text || label || selector).replace(/\s+/g, ' ').slice(0, 240);
 }
 
+// A comment left on an app through the feedback layer points at a page, an
+// element on it and, for an area, a box inside that element. An agent fixing
+// it needs all of that, not just the words under it: get_comments passes it
+// on as `where` (the HTTP API already returns the whole anchor).
+function productAnchorWhere(anchor) {
+  if (!anchor || typeof anchor !== 'object' || anchor.kind !== 'product') return null;
+  const str = (value, max) => (typeof value === 'string' && value ? value.slice(0, max) : undefined);
+  const where = { url: str(anchor.url, 2000), selector: str(anchor.selector, 500), tag: str(anchor.tag, 40) };
+  if (anchor.state && typeof anchor.state === 'object') where.state = anchor.state;
+  const region = anchor.region && typeof anchor.region === 'object' ? anchor.region : null;
+  if (region) {
+    where.area = {
+      // rel: pixels from the selector's element's top-left corner; frac: the
+      // same box as fractions of that element's size.
+      rel: region.rel || null,
+      frac: region.frac || null,
+      page_rect: anchor.rect || null,
+      scroll: region.scroll || null,
+      viewport: anchor.viewport || null,
+      text: str(anchor.text, 500) || '',
+      elements: Array.isArray(region.elements) ? region.elements.slice(0, 8) : [],
+    };
+  }
+  return where;
+}
+
+function productAnchorLine(where) {
+  if (!where) return '';
+  let path = where.url || '';
+  try { const u = new URL(where.url); path = `${u.pathname}${u.search}${u.hash}`; } catch {}
+  const rel = where.area && where.area.rel;
+  const area = rel ? ` · area ${rel.width}×${rel.height} at (${rel.x}, ${rel.y}) inside it` : '';
+  return ` [page ${path}${where.selector ? ` · ${where.selector}` : ''}${area}]`;
+}
+
 function teamCommentRows(slug, meta, list) {
   ensureMigrated(list);
   const title = String((meta && meta.title) || slug);
@@ -19736,6 +19771,7 @@ const MCP_TOOLS = {
         author: who(c.author),
         text: c.text,
         anchor: c.anchor ? (c.anchor.text || c.anchor.label || c.anchor.kind || '') : '',
+        ...(productAnchorWhere(c.anchor) ? { where: productAnchorWhere(c.anchor) } : {}),
         status: c.status || 'open',
         resolved: !!c.resolved,
         version: c.created_in || c.version || null,
@@ -19743,7 +19779,7 @@ const MCP_TOOLS = {
         replies: (Array.isArray(c.replies) ? c.replies : []).map((rep) => ({ id: rep.id, author: who(rep.author), text: rep.text, agent_status: rep.agent_status || null })),
       }));
       const shown = args.include_resolved ? all : all.filter((c) => c.status !== 'applied' && !c.resolved);
-      const lines = shown.map((c) => `[${c.id}] ${c.author}${c.anchor ? ` on "${String(c.anchor).slice(0, 120)}"` : ''} (${c.status}${c.handoff ? `, handed to agent: ${c.handoff.status}` : ''}): ${c.text}${c.replies.length ? `\n${c.replies.map((rep) => `    ↳ ${rep.author}${rep.agent_status ? ` [${rep.agent_status}]` : ''}: ${rep.text}`).join('\n')}` : ''}`);
+      const lines = shown.map((c) => `[${c.id}] ${c.author}${c.anchor ? ` on "${String(c.anchor).slice(0, 120)}"` : ''}${productAnchorLine(c.where)} (${c.status}${c.handoff ? `, handed to agent: ${c.handoff.status}` : ''}): ${c.text}${c.replies.length ? `\n${c.replies.map((rep) => `    ↳ ${rep.author}${rep.agent_status ? ` [${rep.agent_status}]` : ''}: ${rep.text}`).join('\n')}` : ''}`);
       return mcpToolResult(shown.length ? lines.join('\n') : 'No open comments.', { ok: true, slug: ref.slug, comments: shown, total: all.length });
     },
   },

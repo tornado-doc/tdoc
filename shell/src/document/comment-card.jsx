@@ -656,7 +656,8 @@ function ProductWhere({ anchor, origin }) {
   let path = webUrl ? 'Page outside this site' : 'Invalid page link';
   if (safeUrl) { const u = new URL(safeUrl); path = `${u.host}${u.pathname}${u.search}`; }
   const text = String(anchor.text || '').trim();
-  const what = anchor.accessible_name || (text ? `${anchor.tag || 'element'} “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”` : anchor.tag || '');
+  // An area (a box dragged on the app) says so, with what was under it.
+  const what = anchor.region ? (anchor.label || 'Area') : anchor.accessible_name || (text ? `${anchor.tag || 'element'} “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”` : anchor.tag || '');
   const st = anchor.state || {};
   const inState = [
     st.dialog ? `in dialog “${st.dialog}”` : (st.layer ? `in “${st.layer}”` : ''),
