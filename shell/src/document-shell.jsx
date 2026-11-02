@@ -253,7 +253,11 @@ export function DocumentShell({ boot, config }) {
   const [privateAsk, setPrivateAsk] = useState(null);
   const [handoffDetailsOpen, setHandoffDetailsOpen] = useState(false);
   const [agentActivityOpen, setAgentActivityOpen] = useState(false);
+  // Ask AI's one draft, Ask's question and Edit's instruction alike: it
+  // outlives switching mode and closing the panel.
   const [askAiDraft, setAskAiDraft] = useState('');
+  // Edit's unchecked pending comments, kept here for the same reason.
+  const [askAiUnchecked, setAskAiUnchecked] = useState([]);
   const [askAiTargetKey, setAskAiTargetKey] = useState('');
   const [askAiTurns, setAskAiTurns] = useState([]);
   const [askAiBusy, setAskAiBusy] = useState(false);
@@ -1748,6 +1752,8 @@ export function DocumentShell({ boot, config }) {
         fixed: demoRewrite ? demoRewrite.prompt : '',
         fixedBusy: demoRewriteState !== 'idle',
         resetKey: demoRewriteResets,
+        unchecked: askAiUnchecked,
+        onUnchecked: setAskAiUnchecked,
       } : null}
       cta={demoRewrite && demoRewriteState === 'done' ? <DemoRewriteCta onUndo={undoDemoRewrite} /> : null}
       activityOpen={agentActivityOpen}
