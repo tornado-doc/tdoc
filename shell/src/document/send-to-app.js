@@ -7,12 +7,16 @@
 export const SEND_APPS = Object.freeze({
   // Claude's desktop app: a new Claude Code session with the prompt filled in (not sent).
   claudecode: { name: 'Claude Code', url: (t) => `claude://code/new?q=${encodeURIComponent(t)}` },
+  // Claude's desktop app: a new Cowork task with the prompt filled in.
+  cowork: { name: 'Cowork', url: (t) => `claude://cowork/new?q=${encodeURIComponent(t)}` },
   codex: { name: 'Codex', url: (t) => `codex://new?prompt=${encodeURIComponent(t)}` },
   cursor: { name: 'Cursor', url: (t) => `cursor://anysphere.cursor-deeplink/prompt?text=${encodeURIComponent(t)}` },
   claude: { name: 'Claude', url: (t) => `claude://claude.ai/new?q=${encodeURIComponent(t)}` },
   claudeai: { name: 'Claude', url: (t) => `https://claude.ai/new?q=${encodeURIComponent(t)}` },
   // Sends at once (not just filled in), and works signed out.
   chatgpt: { name: 'ChatGPT', url: (t) => `https://chatgpt.com/?q=${encodeURIComponent(t)}` },
+  // ChatGPT Work has no prefill link of its own: the prompt goes to ChatGPT, which adds tdoc for the account.
+  chatgptwork: { name: 'ChatGPT', url: (t) => `https://chatgpt.com/?q=${encodeURIComponent(t)}` },
   // Grok asks "Send this message?" before sending the filled-in prompt.
   grok: { name: 'Grok', url: (t) => `https://grok.com/?q=${encodeURIComponent(t)}` },
 });
