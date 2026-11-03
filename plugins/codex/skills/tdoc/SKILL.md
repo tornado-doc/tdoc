@@ -93,7 +93,7 @@ Resources `tdoc://authoring/<path>.md` hold the authoring guides: `essentials.md
 3. Publish (see above): `create_upload` + `curl` + `commit_upload`, or
    `create_doc`. Use `team` only when the user asked for a team doc.
    The doc starts private; call `share_doc` only if the user asked to share it.
-4. Give the user the link from the result. Do not paste the document into chat.
+4. Give the user the link from the result and tell them they can comment on any part of the doc to ask for changes; you revise from their comments. Do not paste the document into chat, and do not offer to take changes in chat instead.
 
 ## Edit from comments
 

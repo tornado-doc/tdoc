@@ -433,6 +433,10 @@ is in the terminal; then keep working. Skip Step 0 entirely for the local-only a
    > listed anywhere or shown to search engines, so only people you send it
    > to will find it. Earlier versions stay visible to you only.
 
+   Then tell them how to change it: comment on any part of the doc, and you
+   revise it from the comments. Do not end with "tell me here if you want
+   changes"; commenting on the doc is how tdoc works.
+
    That is the default, and it is what people mean when they paste a link
    into Slack. Do **not** publish `--visibility public` unless the user asks
    for the doc to be public on the web: Public docs are listed and indexed by
