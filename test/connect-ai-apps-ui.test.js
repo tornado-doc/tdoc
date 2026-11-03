@@ -354,11 +354,11 @@ async function startServer(worker, env) {
         Object.assign(env, { GITHUB_CLIENT_ID: 'test-id', GITHUB_CLIENT_SECRET: 'test-secret' });
         const { context, page } = await open(width, height, { signedIn: false });
         try { await page.goto(`${base}/oauth/authorize?${q}`); } finally { delete env.GITHUB_CLIENT_ID; delete env.GITHUB_CLIENT_SECRET; }
-        await page.getByRole('heading', { name: 'Gemini CLI wants to use your tdoc' }).waitFor();
-        assert((await page.locator('.tdoc-consent-from').innerText()) === 'from 127.0.0.1:55905', 'address shown as is');
+        await page.getByRole('heading', { name: 'Connect Gemini CLI to tdoc' }).waitFor();
+        assert((await page.locator('.tdoc-consent-from').innerText()) === 'Access goes to 127.0.0.1:55905', 'address shown as is');
         assert((await page.locator('.tdoc-consent-initial').innerText()) === 'G', 'neutral initial, not a brand mark');
         assert((await page.locator('.tdoc-consent-brand').count()) === 0, 'a localhost return address gets no logo');
-        assert((await page.locator('.tdoc-consent-can li').count()) === 1, 'what it can do, in one line');
+        assert((await page.locator('.tdoc-consent-can li').count()) === 3, 'what it can do, the password, and how to remove it');
         const card = await page.locator('.tdoc-consent-card').boundingBox();
         assert(card && card.x >= 0 && card.x + card.width <= width + 1, `card fits at ${label}: ${JSON.stringify(card)}`);
         const btn = await page.getByRole('button', { name: 'Sign in to continue' }).boundingBox();
@@ -376,8 +376,9 @@ async function startServer(worker, env) {
         let landed = '';
         await context.route('https://claude.ai/**', (route) => { landed = route.request().url(); route.fulfill({ status: 200, body: 'ok' }); });
         await page.goto(`${base}/oauth/authorize?${q}`);
-        await page.getByRole('heading', { name: 'Claude wants to use your tdoc' }).waitFor();
-        assert((await page.locator('.tdoc-consent-from').innerText()) === 'from claude.ai · as julie', 'return host and account in one line');
+        await page.getByRole('heading', { name: 'Connect Claude to tdoc' }).waitFor();
+        assert((await page.locator('.tdoc-consent-sub').innerText()) === 'Let Claude use your tdoc as julie', 'the account in the line under the title');
+        assert((await page.locator('.tdoc-consent-from').innerText()) === 'Access goes to claude.ai', 'the return host in the small line');
         assert((await page.locator('.tdoc-oauth-return').innerText()) === "Didn't start this? Cancel", 'one short cancel line');
         assert((await page.locator('.tdoc-consent-brand svg').count()) === 1, 'code goes to https://claude.ai: Claude\'s logo');
         assert((await page.locator('.tdoc-consent-card .ui-btn').count()) === 1, 'signed in with one workspace: Allow is the only button');
