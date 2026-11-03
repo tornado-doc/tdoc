@@ -43,6 +43,7 @@ import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs }
 import { TextSearchResults, useTextSearch } from './docs-hub/text-search.jsx';
 import { isFeatureOn } from './feature-flags.js';
 import { markShareAfterNav } from './profile-posters.js';
+import { AgentTip } from './agent-tip-card.jsx';
 import './docs-hub.css';
 
 const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['trash', 'Trash'], ['settings', 'Settings']];
@@ -270,7 +271,9 @@ function DocsToolbar({ query, onQuery, sort, onSort, children }) {
 
 // Feedback spaces: one row per app, with where its comments stand. The row
 // opens the space's own page (the comment list), not a document.
-function FeedbackList({ spaces: initial, teams = [] }) {
+// With `team`, that team's spaces (every member sees them; its managers get
+// the site settings).
+function FeedbackList({ spaces: initial, teams = [], team = null }) {
   // Counts cost a comment read per space, so they load when the tab opens.
   const [spaces, setSpaces] = useState(initial);
   const [embedding, setEmbedding] = useState(null);
@@ -300,12 +303,13 @@ function FeedbackList({ spaces: initial, teams = [] }) {
   };
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/me/feedback', { credentials: 'same-origin' })
+    fetch(team ? `/api/me/feedback?team=${encodeURIComponent(team.id)}` : '/api/me/feedback', { credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : null))
       .then((b) => { if (!cancelled && b && Array.isArray(b.spaces)) setSpaces(b.spaces); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [team && team.id]);
+  if (!spaces.length && team) return null;
   if (!spaces.length) {
     // The first visit to this tab is usually someone who has not tried it:
     // say what it is and how to start, rather than "nothing here".
@@ -332,15 +336,18 @@ function FeedbackList({ spaces: initial, teams = [] }) {
       {spaces.map((space) => {
         let host = space.origin;
         try { host = new URL(space.origin).host; } catch (_) {}
+        // In a team's list: whoever may manage the space (its admins, its
+        // maker) gets the site settings; "joined" means nothing there.
+        const manages = team ? Boolean(space.can_manage) : space.mine;
         return (
           <div key={space.slug} className="doc-row flat-row tdoc-fb-row">
             <a className="doc-info" href={`/d/${encodeURIComponent(space.slug)}`}>
               <span className="doc-title">{host}</span>
               <div className="doc-meta">
-                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, space.mine ? null : 'joined', space.site ? 'on the site' : null, `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
+                {[space.open == null ? null : `${space.open} open`, space.replied ? `${space.replied} replied` : null, team || space.mine ? null : 'joined', space.site ? 'on the site' : null, `updated ${day(space.updated)}`].filter(Boolean).join(' · ')}
               </div>
             </a>
-            {space.mine ? (
+            {manages ? (
               <AppButton className="tdoc-fb-embed-btn" onClick={() => addToSite(space)}>
                 {space.site ? 'Site settings' : 'Add to your site'}
               </AppButton>
@@ -428,6 +435,7 @@ function SiteEmbedDialog({ space, onClose, onSaved }) {
             <span className="tdoc-send-label">Paste this into your site</span>
             <code className="tdoc-site-snippet">{snippet}</code>
             <CopyPromptButton text={snippet} />
+            <p className="tdoc-send-hint">If your site sends a Content-Security-Policy, add <code>{(snippet.match(/src="(https?:\/\/[^/"]+)\/feedback\.js"/) || [])[1] || location.origin}</code> to <code>script-src</code>, <code>connect-src</code> and <code>img-src</code>. Nothing else is needed.</p>
           </div>
         ) : null}
         {error ? <p className="tdoc-send-result tdoc-notify-error" role="status">{error}</p> : null}
@@ -649,7 +657,10 @@ export function DocsHub({ boot }) {
   const teamFolderById = new Map(spaceFolders.map((item) => [item.id, item]));
   const teamPath = [];
   for (let cur = teamFolderById.get(teamFolder); cur && teamPath.length < 8; cur = teamFolderById.get(cur.parent)) teamPath.unshift(cur);
-  const allTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id) : [];
+  // A team's feedback spaces come with its docs but, as in My docs, are
+  // listed under Comments rather than among the documents.
+  const allTeamDocs = team ? teamDocs.filter((doc) => doc.team === team.id && doc.kind !== 'feedback') : [];
+  const teamFeedback = team ? teamDocs.filter((doc) => doc.team === team.id && doc.kind === 'feedback') : [];
   const inActiveWorkspace = (doc) => (team ? doc.workspace_id === team.id : !doc.workspace_id);
   const scopedRecent = hub.recent.filter(inActiveWorkspace);
   const scopedStarred = hub.starred.filter(inActiveWorkspace);
@@ -1054,7 +1065,14 @@ export function DocsHub({ boot }) {
         ) : team ? (
           <>
             {view === 'comments' ? (
-              <TeamCommentsPane team={team} />
+              <>
+                {teamFeedback.length ? (
+                  <section className="pane tm-feedback-pane" id="pane-team-feedback" aria-label="Feedback spaces">
+                    <FeedbackList key={team.id} team={team} spaces={teamFeedback} teams={teams} />
+                  </section>
+                ) : null}
+                <TeamCommentsPane team={team} />
+              </>
             ) : view === 'trash' ? (
               <TrashPane
                 team={team}
@@ -1443,6 +1461,7 @@ export function DocsHub({ boot }) {
           ) : null}
         </div>
       ) : null}
+      <AgentTip enabled={Boolean(boot.identity) && view !== 'settings'} />
     </div>
   );
 }

@@ -81,14 +81,17 @@ async function startServer(worker, env) {
     return { status: r.status, body };
   };
   // A fresh world per run: julie owns a personal space for her app and is
-  // the admin of Acme; can joined the space to comment.
+  // the admin of Acme; can was invited and joined the space to comment.
   const world = async () => {
     const env = makeEnv(mod.CommentsStore);
     const julie = await issue(worker, env, 'julie');
     const can = await issue(worker, env, 'can');
     const space = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: julie.cookie, headers: HOME, body: { origin: 'http://localhost:3000' } })).body;
     const team = (await call(env, '/api/teams', { method: 'POST', cookie: julie.cookie, headers: HOME, body: { name: 'Acme' } })).body.team;
-    await call(env, '/api/feedback/join', { method: 'POST', cookie: can.cookie, headers: HOME, body: { slug: space.slug } });
+    // A bookmarklet space is private; julie invites can in Share, then can joins.
+    await call(env, '/api/doc/access', { method: 'PATCH', cookie: julie.cookie, headers: HOME, body: { slug: space.slug, access: { allowed_users: ['can'] } } });
+    const joined = await call(env, '/api/feedback/join', { method: 'POST', cookie: can.cookie, headers: HOME, body: { slug: space.slug } });
+    assert.equal(joined.status, 200, `can joins: ${JSON.stringify(joined.body)}`);
     const { server, base } = await startServer(worker, env);
     return { env, julie, can, slug: space.slug, team, server, base };
   };
@@ -218,6 +221,64 @@ async function startServer(worker, env) {
             await page.locator('.tdoc-fb-embed-btn').first().click();
             await page.getByRole('dialog', { name: 'Comments on your site' }).waitFor();
             assert.equal(await page.getByRole('dialog', { name: 'Move it to a team first?' }).count(), 0);
+          } finally {
+            await context.close();
+            w.server.close();
+          }
+        });
+
+        // Owner report, 2026-11-01: a team's feedback space read "My docs" in
+        // the top bar, and the team page did not list it. A team doc's page
+        // shows its team; the space's page now does the same, and names it.
+        await t(`${tag}: a team's space shows the team in the switcher and its header; the team's Comments lists it`, async () => {
+          const w = await world();
+          const context = await browser.newContext({ viewport: { width, height: 900 } });
+          try {
+            const moved = await call(w.env, '/api/team/move', { method: 'POST', cookie: w.julie.cookie, headers: HOME, body: { slugs: [w.slug], team: w.team.id } });
+            assert.equal(moved.status, 200, JSON.stringify(moved.body));
+            const doc = await call(w.env, '/api/doc/create', { method: 'POST', cookie: w.julie.cookie, headers: HOME, body: { team: w.team.id } });
+            assert.equal(doc.status, 200, JSON.stringify(doc.body));
+            await context.addCookies([{ name: 'tdoc_sid', value: sid(w.julie.cookie), url: w.base }]);
+            const page = await context.newPage();
+            const errors = [];
+            page.on('pageerror', (e) => errors.push(e.message));
+            const spaceLabel = async () => {
+              if (width > 700) return (await page.locator('.tdoc-bar .tdoc-space-trigger .tdoc-space-name').innerText()).trim();
+              await page.locator('#tdoc-more-btn').click();
+              const label = (await page.locator('.tdoc-space-submenu-current').innerText()).trim();
+              await page.keyboard.press('Escape');
+              return label;
+            };
+            // The regular team doc, for comparison.
+            await page.goto(`${w.base}/d/${doc.body.slug}/v/1`);
+            await page.locator('.tdoc-bar').first().waitFor();
+            await page.waitForFunction(() => document.body.dataset.tdocReady === '1', null, { timeout: 8000 }).catch(() => {});
+            assert.equal(await spaceLabel(), 'Acme', 'a team doc page shows its team');
+            await page.goto(`${w.base}/d/${w.slug}`);
+            await page.locator('#tdoc-fbspace-share').waitFor();
+            assert.equal(await spaceLabel(), 'Acme', 'the team space page shows My docs');
+            const line = page.locator('.tdoc-fbspace-team');
+            assert.equal((await line.innerText()).trim(), 'In Acme');
+            assert.equal(await line.locator('a').getAttribute('href'), `/me?team=${w.team.id}&view=comments`);
+            await noSideways(page);
+            await shot(page, `${tag}-team-space-page`);
+            await line.locator('a').click();
+            const pane = page.locator('#pane-team-feedback');
+            await pane.waitFor();
+            const row = pane.locator('.tdoc-fb-row', { hasText: 'localhost:3000' });
+            await row.waitFor();
+            await row.locator('.doc-meta').getByText(/\d+ open/).waitFor();
+            assert.equal(await row.locator('a.doc-info').getAttribute('href'), `/d/${w.slug}`);
+            assert.equal(await page.locator('#pane-team-comments').count(), 1, 'the team comment stream is still there');
+            // Not among the team's documents, as in My docs.
+            await page.getByRole('tab', { name: 'Docs' }).click();
+            await page.locator('.tm-loc').waitFor();
+            assert.equal(await page.locator(`a[href^="/d/${w.slug}"]`).count(), 0, 'the space is listed among the team docs');
+            await page.getByRole('tab', { name: 'Comments' }).click();
+            await pane.waitFor();
+            await noSideways(page);
+            await shot(page, `${tag}-team-comments-feedback`);
+            assert.deepEqual(errors, []);
           } finally {
             await context.close();
             w.server.close();

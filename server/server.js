@@ -992,7 +992,7 @@ function shellDocument(slug, version, nonce, reqUrl) {
   const ident = e2eIdentity();
   const isOwner = !!(ident && E2E_OWNER && ident.login.toLowerCase() === E2E_OWNER.toLowerCase());
   const isLanding = slug === 'tornado-doc';
-  const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame${isLanding ? '?tdoc_site=1' : ''}`;
+  const frameSrc = `/d/${encodeURIComponent(slug)}/v/${version}/frame${isLanding ? '?tdoc_site=1&tdoc_demo=1' : ''}`;
   const cfgJson = safeJsonForScript({
     slug,
     title,

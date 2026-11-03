@@ -28,15 +28,22 @@ artifacts (images, SVG, canvas, video) and are used to regenerate the next
 version. Each user publishes to their own Cloudflare Worker for free always-on
 sharing, with a one-time sign-in (email, Google, or GitHub) gating comments.
 
-## When the tdoc MCP tools are available, use them
+## The CLI first; the tdoc MCP tools when there is no CLI
 
-If your tools include tdoc's MCP server (`get_writing_guide`, `create_doc`, `update_doc`,
-`edit_doc`, `create_upload`, `commit_upload`,
-`get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
-`resolve_comment`, `answer_question`, `share_doc`, from
-`https://tdoc.dev/mcp`, connected as a Claude/ChatGPT/Cursor connector or
-plugin), prefer them to the CLI below: they need no terminal, no local files
-and no sign-in step, and the server applies the same rules (write access,
+This skill's CLI (`bin/`) is the main path wherever it runs: it publishes,
+previews locally, handles folders, Trash, widgets and preview cards, and it
+is what the local agent daemon runs when someone sends a comment to this
+computer ("Send to agent"). Use it even when tdoc's MCP tools
+(`get_writing_guide`, `create_doc`, `update_doc`, `edit_doc`, `create_upload`,
+`commit_upload`, `get_doc`, `list_docs`, `get_comments`, `reply_to_comment`,
+`resolve_comment`, `answer_question`, `share_doc`, `create_feedback_space`, from
+`https://tdoc.dev/mcp`,
+e.g. the tdoc Cloud plugin synced from claude.ai) are also connected, so one
+session does not switch between the two. Both must be the same tdoc account:
+`bin/tdoc-doctor` flags it when tdoc Cloud is installed next to this skill.
+
+Use the MCP tools only when the CLI cannot run here (no Bash, no Node, or
+`bin/` is missing); the server applies the same rules (write access,
 authorship, answer-only locks, workspace scope). The mapping:
 
 | CLI | MCP tool |
@@ -48,15 +55,15 @@ authorship, answer-only locks, workspace scope). The mapping:
 | `tdoc-agent-reply --status ...` | `reply_to_comment` (same statuses and `applied_in` rules) |
 | `tdoc-agent-reply --ask <ask_id>` | `answer_question` |
 | `tdoc-publish --visibility` / `--allow-user` | `share_doc` |
+| My docs → Feedback → Add to your site (a website's comment space + embed line) | `create_feedback_space` (`origins`, optional `team` you admin, `title`; private; returns the `<script>` line, or the space you already have for that origin) |
 
 The authoring guides are the MCP resources `tdoc://authoring/<path>.md`
 (`essentials.md` first, then `voice.md`, `visuals.md`, `structure/components.md`, `style/*.md`); every
 rule in this file about voice, visuals, styles and comment statuses still
 applies. The refusals arrive as tool errors with the same codes
-(`answer_only_run`, `agent_not_author_editor`, `token_scope`). The CLI stays
-the fallback: use it when the MCP tools are not connected, and for what has
-no tool yet (local preview, folders, Trash, widgets, preview cards, the
-local agent daemon).
+(`answer_only_run`, `agent_not_author_editor`, `token_scope`). Local
+preview, folders, Trash, widgets, preview cards and the local agent daemon
+have no MCP tool.
 
 To connect them: the server is `https://tdoc.dev/mcp` (OAuth sign-in). The
 one-line install for Claude, ChatGPT, Cursor, VS Code, Codex, Claude Code
@@ -183,11 +190,17 @@ tdoc_resolve_skill_dir() {
     for d in "$HOME/.claude/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
       [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    d="$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${d%/}/SKILL.md" ] && { printf '%s\n' "${d%/}"; return; }
     printf '%s\n' "$HOME/.claude/skills/tdoc"
   elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${OPENAI_CODEX:-}${CODEX_HOME:-}${CODEX_SHELL:-}" ]; then
     for d in "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc"; do
       [ -f "$d/SKILL.md" ] && { printf '%s\n' "$d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    d="$(ls -1d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${d%/}/SKILL.md" ] && { printf '%s\n' "${d%/}"; return; }
     printf '%s\n' "$HOME/.codex/skills/tdoc"
   else
     for d in "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
@@ -236,6 +249,7 @@ Three files are required reading before you write doc HTML, on every
 | `$SKILL_DIR/authoring/voice.md` | how the prose reads | No. A floor — no switch, no doc exempt. |
 | `$SKILL_DIR/authoring/visuals.md` | how much of the doc is a picture | No. A floor — be visual-first, many visuals, varied types. |
 | `$SKILL_DIR/authoring/structure/components.md` | what the parts are | No. The parts are the same in every style. |
+| `$SKILL_DIR/authoring/structure/diagrams.md` | **SVG you can paste** — sized to the column, plus the four rules that keep a figure from rendering wrong | No. Read it before hand-building any figure. |
 | `$SKILL_DIR/authoring/style/<picked>.md` | what those parts look like | Yes — you pick the entry that fits the content. |
 
 `$SKILL_DIR` is the installed skill directory resolved in "Setup check"
@@ -348,7 +362,7 @@ typed on github.com. Tell the user in one line what opened and that the code
 is in the terminal; then keep working. Skip Step 0 entirely for the local-only and self-host destinations.
 
 1. Pick a slug from the prompt (kebab-case, ≤4 words).
-2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, `$SKILL_DIR/authoring/structure/components.md`, and the `$SKILL_DIR/authoring/style/` entry you picked.**
+2. **Read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md`, `$SKILL_DIR/authoring/structure/components.md`, `$SKILL_DIR/authoring/structure/diagrams.md`, and the `$SKILL_DIR/authoring/style/` entry you picked.**
    Voice constrains the prose as you generate it, not as a later cleanup
    pass. The style tells you which components to reach for and its palette —
    apply it unless the user named another entry in `$SKILL_DIR/authoring/style/`.
@@ -562,7 +576,7 @@ silently is the #1 source of regression complaints.
    - **Unreachable** → use the local copy, and say so in your reply: the edit
      is based on a possibly-stale cache.
 
-   Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`.
+   Then re-read `$SKILL_DIR/authoring/voice.md`, `$SKILL_DIR/authoring/visuals.md` and `$SKILL_DIR/authoring/structure/components.md`, `$SKILL_DIR/authoring/structure/diagrams.md`.
    Review the new version using the same content and responsive-style checks
    as `/tdoc new`, including image review for changed SVG charts.
    A regeneration writes new prose, so the contract applies here exactly as
@@ -776,6 +790,32 @@ also reaches their own daemon: the prompt then asks for an answer through
 and no edit. That run is claude only, with a smaller
 allow-list (read the doc folder, `tdoc-pull` and `tdoc-agent-reply`; no Edit,
 no `tdoc-write` / `tdoc-publish`, which refuse under `TDOC_DAEMON_ASK`).
+
+### `tdoc-feedback` — add tdoc feedback to a project
+
+When the person says "add tdoc feedback to my project" (comments on their own
+web app or site), make the site's feedback space and add the embed line, in
+one step. MCP: `create_feedback_space`. CLI:
+
+```bash
+bash "$SKILL_DIR/bin/tdoc-feedback" init --site https://app.example.com --site http://localhost:3000 \
+  [--team <id|handle|name>] [--title <title>] [--write path/to/index.html] [--env]
+```
+
+Name every origin the app runs on (production, preview, local dev). It prints
+the `<script src=".../feedback.js" data-tdoc-space="<slug>" async></script>`
+line; `--write` puts it before `</head>` in the project's HTML entry (running
+it again leaves one tag); `--env` prints `TDOC_FEEDBACK_SPACE=<slug>` for an
+app that reads the id from its environment. If the site sends a
+Content-Security-Policy, it must allow the tdoc origin (`https://tdoc.dev`) in
+`script-src`, `connect-src` and `img-src`, and nothing else: the widget, its
+API calls and every face it shows come from there. If it sends
+Cross-Origin-Opener-Policy, that must be `same-origin-allow-popups`, not
+`same-origin`, or signing in from the widget cannot finish. The space is private: the person
+and the people they invite, or with `--team` (team admins only) the team's
+members. Asking again for an origin returns the same space. Comments left on
+the site come back through `tdoc-pull <slug>` like any doc. Same endpoint as
+the MCP tool: `POST /api/feedback/spaces`.
 
 ### `tdoc-site` — make the person's own website commentable
 
@@ -1542,11 +1582,17 @@ tdoc_resolve_skill_dir() {
     for _d in "$HOME/.claude/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.codex/skills/tdoc"; do
       [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    _d="$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${_d%/}/SKILL.md" ] && { printf '%s\n' "${_d%/}"; return; }
     printf '%s\n' "$HOME/.claude/skills/tdoc"
   elif [ -n "${CODEX_SESSION_ID:-}${CODEX_CLI:-}${OPENAI_CODEX:-}${CODEX_HOME:-}${CODEX_SHELL:-}" ]; then
     for _d in "$HOME/.codex/skills/tdoc" "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc"; do
       [ -f "$_d/SKILL.md" ] && { printf '%s\n' "$_d"; return; }
     done
+    # Installed as the tdoc plugin (tdoc@tornado-tdoc): the host's plugin cache.
+    _d="$(ls -1d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/tornado-tdoc/tdoc/*/ 2>/dev/null | sort -V | tail -n 1)"
+    [ -f "${_d%/}/SKILL.md" ] && { printf '%s\n' "${_d%/}"; return; }
     printf '%s\n' "$HOME/.codex/skills/tdoc"
   else
     for _d in "$HOME/.agents/skills/tdoc" "$HOME/.claude/skills/tdoc" "$HOME/.codex/skills/tdoc"; do

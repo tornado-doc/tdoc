@@ -1,5 +1,6 @@
 import React from 'react';
 import { avatarFor, avatarInitial } from './model.js';
+import { AuthorFace } from './author-face.jsx';
 import { canSeeHandoff, handoffPinBadge, handoffWaitState, isHandoffInFlight } from './handoff-state.js';
 import { isThreadUnread } from './thread-seen.js';
 
@@ -25,9 +26,9 @@ export function CommentPinFace({ comment, author = null, state, clusterCount = n
   const who = author || comment.author || comment;
   const avatar = avatarFor(who);
   return <>
-    {avatar ? <img src={avatar} alt="" width="24" height="24" style={PIN_FACE_SIZE} />
-      : who.login || who.name ? <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(who)}</span>
-        : <span className="tdoc-pin-anon" />}
+    <AuthorFace src={avatar} style={PIN_FACE_SIZE} fallback={who.login || who.name
+      ? <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(who)}</span>
+      : <span className="tdoc-pin-anon" />} />
     {state?.badge ? <span className={`tdoc-pin-handoff-badge is-${state.badge}`} aria-hidden="true">{BADGE_TEXT[state.badge]}</span> : null}
     {state?.unread ? <span className="tdoc-pin-unread-dot" aria-hidden="true" /> : null}
   </>;

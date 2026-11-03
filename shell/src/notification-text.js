@@ -15,12 +15,13 @@ export function notificationAction(item) {
   if (item.kind === 'access_request') return 'asked for access to';
   if (item.kind === 'team_join_request') return 'asked to join';
   if (item.kind === 'access_granted') return 'gave you access to';
+  if (item.kind === 'feedback_invite') return 'invited you to comment on';
   return `commented${count > 1 ? ` and ${count - 1} more commented` : ''}`;
 }
 
 // One line, for a desktop alert's title.
 export function joiner(item) {
-  return item.kind === 'access_request' || item.kind === 'access_granted' || item.kind === 'team_join_request' ? '' : ' on';
+  return item.kind === 'access_request' || item.kind === 'access_granted' || item.kind === 'team_join_request' || item.kind === 'feedback_invite' ? '' : ' on';
 }
 
 export function notificationLabel(item) {
@@ -29,6 +30,9 @@ export function notificationLabel(item) {
 
 export function notificationTarget(item) {
   if (!item?.slug) return '';
+  // An invite to comment on a site leads to the site (or the page that
+  // sets the bookmark up first), with the invite in the link.
+  if (item.kind === 'feedback_invite') return /^https?:\/\//.test(String(item.link || '')) ? item.link : '';
   if (item.kind === 'team_join_request' && item.team_id) return `/me?team=${encodeURIComponent(item.team_id)}&view=settings`;
   // Access is about the document, not a comment: open its latest version.
   if (item.kind === 'access_request' || item.kind === 'access_granted') return `/d/${encodeURIComponent(item.slug)}`;

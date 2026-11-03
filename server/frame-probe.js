@@ -89,8 +89,14 @@
   // ?tdoc_site=1. They read as an ordinary website: a normal cursor, no
   // document chrome on visuals, and no comment on a bare click. Selecting text
   // still opens a comment -- that is the demo.
-  var SITE = new URLSearchParams(location.search).get('tdoc_site') === '1';
+  // The home page adds &tdoc_demo=1: it IS the demo, so it keeps the blue
+  // comment cursor and click-a-word-to-comment (Julie, 2026-11-02). Only the
+  // fullscreen and diagram chrome stays off there.
+  var SITE_PARAMS = new URLSearchParams(location.search);
+  var SITE = SITE_PARAMS.get('tdoc_site') === '1';
+  var SITE_DEMO = SITE && SITE_PARAMS.get('tdoc_demo') === '1';
   if (SITE) document.documentElement.setAttribute('data-tdoc-site', '');
+  if (SITE && !SITE_DEMO) document.documentElement.setAttribute('data-tdoc-site-plain', '');
   function visualViewerOpen() { return document.documentElement.hasAttribute('data-tdoc-visual-open'); }
   // Block/artifact hover outline. Off on the homepage — landing sections are
   // huge commentable boxes and the dashed chrome gets in the way. Text
@@ -158,7 +164,7 @@
       'html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body,html[data-tdoc-interaction-mode="comment"][data-tdoc-selecting] body *{cursor:text!important;}' +
       'html[data-tdoc-interaction-mode="comment"] body ::selection{background:rgba(22,82,240,.32)!important;color:inherit!important;}' +
       'html[data-tdoc-interaction-mode="comment"] .tdoc-comment-pill{cursor:pointer!important;}' +
-      'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
+      'html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] body,html[data-tdoc-site-plain][data-tdoc-interaction-mode="comment"] body *{cursor:auto!important;}' +
       'html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href],html[data-tdoc-site][data-tdoc-interaction-mode="comment"] a[href] *,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] button,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] label,html[data-tdoc-site][data-tdoc-interaction-mode="comment"] summary{cursor:pointer!important;}' +
       'html[data-tdoc-site] [data-tdoc-diagram-tools]{display:none!important;}' +
       'html[data-tdoc-editing] [data-tdoc-editor-root]{outline:none;caret-color:#1652f0;}' +
@@ -423,7 +429,7 @@
   }
   function reportPointSelection(event) {
     if (interactionMode !== 'comment' || event.button !== 0) return false;
-    if (SITE && !reanchorMode) return false;
+    if (SITE && !SITE_DEMO && !reanchorMode) return false;
     if (event.target && event.target.closest && event.target.closest('a,button,input,label,textarea,select,summary,[contenteditable],.tdoc-comment-pill')) return false;
     var current = window.getSelection();
     if (current && !current.isCollapsed) return false; // a drag selection owns this click
@@ -793,6 +799,24 @@
     post({ type: 'tdoc:copyText', text: text });
     tdocFallbackCopy(text);
     flashCopy(trigger);
+  }, true);
+
+  // --- data-tdoc-send: copy a prompt and ask the shell to open an agent app
+  //     with it (tdoc's own site pages only; the shell checks). The element
+  //     names the app, never a URL: data-tdoc-send="claudecode|codex|cursor|claude|claudeai|chatgpt|grok",
+  //     data-tdoc-send-text="#id" holds the prompt. The label is left alone. ---
+  document.addEventListener('click', function (e) {
+    var trigger = e.target.closest && e.target.closest('[data-tdoc-send]');
+    if (!trigger) return;
+    e.preventDefault(); e.stopPropagation();
+    var raw = trigger.getAttribute('data-tdoc-send-text') || '', text = raw;
+    if (raw.charAt(0) === '#') { var src = document.getElementById(raw.slice(1)); text = src ? (src.innerText || src.textContent || '').replace(/\u00a0/g, ' ').trim() : ''; }
+    if (!text) return;
+    tdocFallbackCopy(text);
+    post({ type: 'tdoc:sendToApp', app: trigger.getAttribute('data-tdoc-send') || '', text: text });
+    trigger.classList.add('tdoc-sent');
+    clearTimeout(trigger._tdocSentTimer);
+    trigger._tdocSentTimer = setTimeout(function () { trigger.classList.remove('tdoc-sent'); }, 1600);
   }, true);
 
   // --- anchor resolution (faithful port of overlay.js collectTextNodes/
@@ -1687,6 +1711,382 @@
     return '<!doctype html>\n' + clone.outerHTML;
   }
 
+  // --- the homepage demo's scripted Edit -----------------------------------
+  // Only the shell's demo (shell/src/document/demo-agent.js DEMO_REWRITES,
+  // the signed-out landing doc) sends these; no real doc ever gets one. The
+  // shell names one paragraph by its text and the canned rewrite. The old
+  // words are struck, the new ones typed in after them, then the struck words
+  // fold away and the new text stays marked as the version compare marks an
+  // insertion (version-diff.js markCss). Reduced motion: the end state at
+  // once. Only this page's DOM changes; nothing is saved, and Undo (or a
+  // reload) brings the paragraph back.
+  //   { type:'tdoc:demoRewrite', id, before, after, view:{ top, bottom } }
+  //     (view: the band of this frame the visitor can see, in its viewport)
+  //     → { type:'tdoc:demoRewriteDone', id, ok }
+  //   { type:'tdoc:demoRewriteShow', view } (bring the rewritten paragraph
+  //     into a new band: a phone's drawer has reopened over the page)
+  //   { type:'tdoc:demoRewriteUndo' }
+  var demoRewrite = null; // { el, html, timers }
+  function demoRewriteCss() {
+    if (document.getElementById('tdoc-provider-demo-rewrite-style')) return;
+    var st = document.createElement('style');
+    st.id = 'tdoc-provider-demo-rewrite-style';
+    st.setAttribute('data-tdoc-provider', '');
+    st.textContent = ((window.TdocVersionDiff && window.TdocVersionDiff.markCss) || '') +
+      '[data-tdoc-demo-rewrite] .tdoc-diff-del{transition:opacity .3s ease}' +
+      '[data-tdoc-demo-rewrite="striking"] .tdoc-diff-del{animation:tdoc-demo-strike .45s ease both}' +
+      '[data-tdoc-demo-rewrite="typing"] .tdoc-diff-del{opacity:.55}' +
+      '[data-tdoc-demo-rewrite="folding"] .tdoc-diff-del{opacity:0}' +
+      '[data-tdoc-demo-rewrite="typing"] .tdoc-diff-ins{box-shadow:inset -2px 0 currentColor;animation:tdoc-demo-caret .8s steps(1) infinite}' +
+      '@keyframes tdoc-demo-strike{from{text-decoration-color:transparent;background-color:transparent}}' +
+      '@keyframes tdoc-demo-caret{50%{box-shadow:none}}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+  function findDemoParagraph(text) {
+    var want = normalizeNeedle(text);
+    if (!want) return null;
+    var list = document.body ? document.body.querySelectorAll('p, li, blockquote, figcaption, h1, h2, h3') : [];
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (!el.closest('[data-tdoc-provider]') && normalizeNeedle(el.textContent) === want) return el;
+    }
+    return null;
+  }
+  function undoDemoRewrite() {
+    if (!demoRewrite) return;
+    demoRewrite.timers.forEach(clearTimeout);
+    demoRewrite.el.innerHTML = demoRewrite.html;
+    demoRewrite.el.removeAttribute('data-tdoc-demo-rewrite');
+    demoRewrite = null;
+    rereportPins();
+  }
+  // Bring the paragraph into the band the visitor can see (under the shell's
+  // bar; on a phone the whole page while the drawer is closed, then the part
+  // above it once it reopens): centred, or its top near the band's when it
+  // is taller than the band.
+  function showDemoParagraph(el, view, reduce) {
+    var r = el.getBoundingClientRect();
+    var band = view || {};
+    var bandTop = Math.max(0, Number(band.top) || 0);
+    var bandBottom = Math.min(window.innerHeight, Number(band.bottom) || window.innerHeight);
+    if (bandBottom - bandTop < 60) { bandTop = 0; bandBottom = window.innerHeight; }
+    var slack = bandBottom - bandTop - r.height;
+    var y = (window.scrollY || 0) + r.top - bandTop - (slack > 16 ? slack / 2 : 8);
+    try { window.scrollTo({ top: Math.max(0, y), behavior: reduce ? 'auto' : 'smooth' }); } catch (x) { window.scrollTo(0, Math.max(0, y)); }
+  }
+  function runDemoRewrite(d) {
+    undoDemoRewrite();
+    var el = findDemoParagraph(d.before);
+    var after = String(d.after || '');
+    if (!el || !after) { post({ type: 'tdoc:demoRewriteDone', id: d.id, ok: false }); return; }
+    demoRewriteCss();
+    var reduce = false;
+    try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (x) {}
+    var run = demoRewrite = { el: el, html: el.innerHTML, timers: [] };
+    var later = function (ms, fn) { run.timers.push(setTimeout(fn, ms)); };
+    showDemoParagraph(el, d.view, reduce);
+    var del = document.createElement('del');
+    del.className = 'tdoc-diff-del';
+    del.textContent = normalizeNeedle(el.textContent);
+    var ins = document.createElement('ins');
+    ins.className = 'tdoc-diff-ins';
+    var done = function () {
+      if (del.parentNode) del.parentNode.removeChild(del);
+      ins.textContent = after;
+      el.setAttribute('data-tdoc-demo-rewrite', 'done');
+      rereportPins();
+      post({ type: 'tdoc:demoRewriteDone', id: d.id, ok: true });
+    };
+    el.textContent = '';
+    el.appendChild(del);
+    el.appendChild(ins);
+    if (reduce) { done(); return; }
+    el.setAttribute('data-tdoc-demo-rewrite', 'striking');
+    var words = after.match(/\S+\s*/g) || [after];
+    var step = 70;
+    later(700, function () {
+      el.setAttribute('data-tdoc-demo-rewrite', 'typing');
+      words.forEach(function (_, i) {
+        later(step * (i + 1), function () { ins.textContent = words.slice(0, i + 1).join(''); });
+      });
+      later(step * words.length + 500, function () {
+        el.setAttribute('data-tdoc-demo-rewrite', 'folding');
+        later(320, done);
+      });
+    });
+  }
+
+  // --- AI suggestions in the text (Ask/Edit v2, flag askEditV2) -------------
+  // The shell sends edits the server has validated ({ id, find, replace }:
+  // find is visible text, matched as the worker matches it -- whitespace
+  // runs as one space, never across a block); each shows in place as the
+  // version compare marks a change (version-diff.js textParts + markCss):
+  // struck old words, new words after them. Only this page's DOM changes;
+  // nothing here saves. Accept/reject go to the shell, which asks the
+  // server, then tells the frame to settle the marks.
+  //   { type:'tdoc:suggestShow', items:[{ id, find, replace, label }] }
+  //     → { type:'tdoc:suggestShown', results:[{ id, ok, docY }] }
+  //   { type:'tdoc:suggestClear', ids? }       put the original text back
+  //   { type:'tdoc:suggestSettle', id, accepted } accepted: keep the new text
+  //   { type:'tdoc:suggestFocus', id, scroll }  the one the review bar is on
+  //   { type:'tdoc:suggestBusy', text, label }  shimmer + status pill on the
+  //     passage being worked on (text null: the whole doc); label '' clears
+  //   frame → shell: { type:'tdoc:suggestAction', id, action:'focus' } (a click on one)
+  //                  { type:'tdoc:suggestRect', id, docY, left, right } (where it ends)
+  // The same elements the worker never edits (SUGGEST_SKIP_TAGS), and
+  // anything outside the HTML namespace.
+  var SUGG_SKIP = { HEAD: 1, SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, TEXTAREA: 1, TITLE: 1, SVG: 1, MATH: 1, IFRAME: 1, OBJECT: 1, CANVAS: 1, SELECT: 1, OPTION: 1, XMP: 1, NOEMBED: 1, NOFRAMES: 1, PLAINTEXT: 1 };
+  var SUGG_BLOCK = {};
+  'address article aside blockquote body br caption dd details dialog div dl dt fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr html img li main nav ol p pre section summary table tbody td tfoot th thead tr ul button input label legend'
+    .split(' ').forEach(function (t) { SUGG_BLOCK[t.toUpperCase()] = 1; });
+  var suggs = {}; // id -> { kind:'one'|'many', els:[...], original, replace }
+  var suggActive = null;
+  var suggOn = false; // the shell has the feature on (it sent tdoc:suggestShow)
+  function suggCss() {
+    if (document.getElementById('tdoc-provider-sugg-style')) return;
+    var st = document.createElement('style');
+    st.id = 'tdoc-provider-sugg-style';
+    st.setAttribute('data-tdoc-provider', '');
+    st.textContent = ((window.TdocVersionDiff && window.TdocVersionDiff.markCss) || '') +
+      '[data-tdoc-sugg]{cursor:pointer;border-radius:2px}' +
+      '[data-tdoc-sugg-active] .tdoc-diff-ins,[data-tdoc-sugg-active] .tdoc-diff-del,.tdoc-diff-ins[data-tdoc-sugg-active],.tdoc-diff-del[data-tdoc-sugg-active]{outline:2px solid rgba(22,82,240,.45);outline-offset:1px}' +
+      '[data-tdoc-sugg-busy]{background:linear-gradient(90deg,rgba(22,82,240,0) 0%,rgba(22,82,240,.10) 50%,rgba(22,82,240,0) 100%);background-size:200% 100%;animation:tdoc-sugg-shimmer 1.4s linear infinite;border-radius:4px}' +
+      '@keyframes tdoc-sugg-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}' +
+      '@media (prefers-reduced-motion: reduce){[data-tdoc-sugg-busy]{animation:none;background:rgba(22,82,240,.07)}}' +
+      '.tdoc-sugg-pill{position:absolute;z-index:2147483645;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:#fff;border:1px solid #dedee3;color:#1f2328;font:500 12px/1.3 system-ui,sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.06),0 3px 10px rgba(0,0,0,.08);pointer-events:none;max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.tdoc-sugg-pill::before{content:"";width:7px;height:7px;border-radius:50%;background:#1652f0;animation:tdoc-sugg-dot 1s ease-in-out infinite alternate}' +
+      '@keyframes tdoc-sugg-dot{to{opacity:.3}}';
+    (document.head || document.documentElement).appendChild(st);
+  }
+  function suggTextMap() {
+    var chars = [];
+    var last = function () { return chars[chars.length - 1]; };
+    var brk = function () {
+      var l = last();
+      if (!l || l.c === '\n') return;
+      if (l.c === ' ') { l.c = '\n'; l.node = null; return; }
+      chars.push({ c: '\n', node: null });
+    };
+    var put = function (c, node, off) {
+      if (/\s/.test(c)) {
+        var l = last();
+        if (!l || l.c === '\n') return;
+        if (l.c === ' ') { if (l.node === node) l.end = off + 1; return; }
+        chars.push({ c: ' ', node: node, off: off, end: off + 1 });
+        return;
+      }
+      chars.push({ c: c, node: node, off: off, end: off + 1 });
+    };
+    var walk = function (el) {
+      for (var n = el.firstChild; n; n = n.nextSibling) {
+        if (n.nodeType === 3) { var t = n.data; for (var i = 0; i < t.length; i++) put(t[i], n, i); }
+        else if (n.nodeType === 1) {
+          if (n.hasAttribute('data-tdoc-provider')) continue;
+          var tag = String(n.tagName).toUpperCase();
+          if (SUGG_SKIP[tag] || (n.namespaceURI && n.namespaceURI !== 'http://www.w3.org/1999/xhtml')) { brk(); continue; }
+          var block = SUGG_BLOCK[tag];
+          if (block) brk();
+          walk(n);
+          if (block) brk();
+        }
+      }
+    };
+    if (document.body) walk(document.body);
+    return { chars: chars, text: chars.map(function (x) { return x.c; }).join('') };
+  }
+  function suggFind(map, text, unique) {
+    var want = normalizeNeedle(text);
+    if (!want) return null;
+    var at = map.text.indexOf(want);
+    if (at < 0) return null;
+    if (unique && map.text.indexOf(want, at + 1) >= 0) return null;
+    var runs = [];
+    for (var k = at; k < at + want.length; k++) {
+      var ch = map.chars[k];
+      if (!ch.node) continue;
+      var r = runs[runs.length - 1];
+      if (r && r.node === ch.node) r.end = Math.max(r.end, ch.end);
+      else runs.push({ node: ch.node, start: ch.off, end: ch.end });
+    }
+    return runs.length ? { at: at, runs: runs } : null;
+  }
+  function suggMark(tag, cls, id, text) {
+    var el = document.createElement(tag);
+    el.className = cls;
+    el.setAttribute('data-tdoc-sugg', id);
+    el.textContent = text;
+    return el;
+  }
+  function suggRender(item, hit) {
+    var id = String(item.id);
+    var replace = String(item.replace || '');
+    if (hit.runs.length === 1) {
+      var run = hit.runs[0];
+      var node = run.node;
+      var mid = node.splitText(run.start);
+      mid.splitText(run.end - run.start);
+      var original = mid.data;
+      var wrap = document.createElement('span');
+      wrap.setAttribute('data-tdoc-sugg', id);
+      var diff = window.TdocVersionDiff && window.TdocVersionDiff.textParts;
+      var parts = diff ? diff(original, replace) : [{ kind: 'replace', before: original, after: replace }];
+      parts.forEach(function (p) {
+        if (p.kind === 'equal') wrap.appendChild(document.createTextNode(p.before));
+        else {
+          if (p.before) wrap.appendChild(suggMark('del', 'tdoc-diff-del', id, p.before));
+          if (p.after) wrap.appendChild(suggMark('ins', 'tdoc-diff-ins', id, p.after));
+        }
+      });
+      mid.parentNode.replaceChild(wrap, mid);
+      suggs[id] = { kind: 'one', els: [wrap], original: original, replace: replace };
+      return wrap;
+    }
+    var els = [];
+    hit.runs.forEach(function (r) {
+      var m = r.node.splitText(r.start);
+      m.splitText(r.end - r.start);
+      var del = suggMark('del', 'tdoc-diff-del', id, m.data);
+      m.parentNode.replaceChild(del, m);
+      els.push(del);
+    });
+    var ins = suggMark('ins', 'tdoc-diff-ins', id, replace);
+    var lastDel = els[els.length - 1];
+    lastDel.parentNode.insertBefore(ins, lastDel.nextSibling);
+    els.push(ins);
+    suggs[id] = { kind: 'many', els: els, replace: replace };
+    return els[0];
+  }
+  function suggControlsOff() {
+    Array.prototype.forEach.call(document.querySelectorAll('.tdoc-sugg-ctl'), function (n) { n.remove(); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tdoc-sugg-active]'), function (n) { n.removeAttribute('data-tdoc-sugg-active'); });
+  }
+  function suggSettle(id, accepted) {
+    var s = suggs[id];
+    if (!s) return;
+    if (suggActive === id) { suggControlsOff(); suggActive = null; }
+    if (s.kind === 'one') {
+      var el = s.els[0];
+      if (el.parentNode) el.parentNode.replaceChild(document.createTextNode(accepted ? s.replace : s.original), el);
+    } else {
+      s.els.forEach(function (el) {
+        if (!el.parentNode) return;
+        if (el.tagName === 'INS') { if (accepted) el.parentNode.replaceChild(document.createTextNode(el.textContent), el); else el.remove(); }
+        else if (accepted) el.remove();
+        else el.parentNode.replaceChild(document.createTextNode(el.textContent), el);
+      });
+    }
+    delete suggs[id];
+  }
+  function suggClear(ids) {
+    Object.keys(suggs).forEach(function (id) { if (!ids || ids.indexOf(id) >= 0) suggSettle(id, false); });
+  }
+  function suggDocY(el) {
+    var r = el.getBoundingClientRect();
+    return r.top + (window.scrollY || 0);
+  }
+  function suggShow(items) {
+    suggOn = true;
+    suggClear();
+    suggCss();
+    var map = suggTextMap();
+    var hits = [];
+    var results = [];
+    (items || []).forEach(function (item) {
+      var hit = suggFind(map, item.find, true);
+      if (hit) hits.push({ item: item, hit: hit });
+      else results.push({ id: String(item.id), ok: false });
+    });
+    // Last in the text first: splitting a text node keeps the offsets before it.
+    hits.sort(function (a, b) { return b.hit.at - a.hit.at; });
+    var shown = [];
+    hits.forEach(function (h) {
+      try { shown.push({ id: String(h.item.id), el: suggRender(h.item, h.hit) }); } catch (x) { results.push({ id: String(h.item.id), ok: false }); }
+    });
+    // Text nobody can see (display:none, a closed details) is not offered for
+    // review: Accept all must not accept what the person never saw.
+    shown.forEach(function (s) {
+      var seen = s.el.getClientRects().length > 0;
+      if (!seen) suggSettle(s.id, false);
+      results.push({ id: s.id, ok: seen, docY: seen ? suggDocY(s.el) : 0 });
+    });
+    rereportPins();
+    post({ type: 'tdoc:suggestShown', results: results });
+  }
+  function suggFocus(id, scroll) {
+    suggControlsOff();
+    suggActive = null;
+    var s = suggs[id];
+    if (!s) return;
+    suggActive = id;
+    s.els.forEach(function (el) { el.setAttribute('data-tdoc-sugg-active', ''); });
+    // Accept / Reject are the shell's (its chip and review bar): a click
+    // in here could be the page's own script posting as this probe.
+    var lastRect = s.els[s.els.length - 1].getBoundingClientRect();
+    post({ type: 'tdoc:suggestRect', id: id, docY: lastRect.bottom + (window.scrollY || 0), left: lastRect.left, right: lastRect.right });
+    if (scroll) {
+      var r = s.els[0].getBoundingClientRect();
+      if (r.top < 70 || r.bottom > window.innerHeight - 90) {
+        try { window.scrollTo({ top: Math.max(0, (window.scrollY || 0) + r.top - window.innerHeight / 3), behavior: 'smooth' }); } catch (x) { window.scrollTo(0, Math.max(0, (window.scrollY || 0) + r.top - 120)); }
+      }
+    }
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest ? e.target.closest('[data-tdoc-sugg]') : null;
+    if (!t) return;
+    var sel = window.getSelection && window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    var id = t.getAttribute('data-tdoc-sugg');
+    if (!suggs[id]) return;
+    suggFocus(id, false);
+    post({ type: 'tdoc:suggestAction', id: id, action: 'focus' });
+  }, true);
+  // ⌘K opens Ask AI (the shell decides; only where the flag is on). ⌘↵ and
+  // Esc are the shell's: it takes focus when a suggestion is picked here.
+  document.addEventListener('keydown', function (e) {
+    if (!suggOn || interactionMode === 'edit') return;
+    var mod = e.metaKey || e.ctrlKey;
+    var key = String(e.key || '');
+    if (mod && !e.shiftKey && !e.altKey && key.toLowerCase() === 'k') { post({ type: 'tdoc:suggestKey', key: 'k' }); e.preventDefault(); return; }
+  }, true);
+  var suggBusyEl = null;
+  var suggPill = null;
+  function suggBusy(text, label) {
+    if (suggBusyEl) { suggBusyEl.removeAttribute('data-tdoc-sugg-busy'); suggBusyEl = null; }
+    if (suggPill) { suggPill.remove(); suggPill = null; }
+    if (!label) return;
+    suggCss();
+    var target = null;
+    if (text) {
+      var hit = suggFind(suggTextMap(), String(text).slice(0, 400), false);
+      if (hit) {
+        var n = hit.runs[0].node.parentElement;
+        while (n && n !== document.body && !SUGG_BLOCK[String(n.tagName).toUpperCase()]) n = n.parentElement;
+        target = n && n !== document.body ? n : hit.runs[0].node.parentElement;
+      }
+    }
+    suggPill = document.createElement('div');
+    suggPill.className = 'tdoc-sugg-pill';
+    suggPill.setAttribute('data-tdoc-provider', '');
+    suggPill.setAttribute('role', 'status');
+    suggPill.textContent = String(label).slice(0, 120);
+    document.body.appendChild(suggPill);
+    if (target) {
+      suggBusyEl = target;
+      target.setAttribute('data-tdoc-sugg-busy', '');
+      var r = target.getBoundingClientRect();
+      suggPill.style.top = Math.max(0, r.top + (window.scrollY || 0) - 30) + 'px';
+      suggPill.style.left = Math.max(8, r.left + (window.scrollX || 0)) + 'px';
+      if (r.top < 60 || r.bottom > window.innerHeight) {
+        try { window.scrollTo({ top: Math.max(0, (window.scrollY || 0) + r.top - 120), behavior: 'smooth' }); } catch (x) {}
+      }
+    } else {
+      suggPill.style.position = 'fixed';
+      suggPill.style.top = '12px';
+      suggPill.style.left = '50%';
+      suggPill.style.transform = 'translateX(-50%)';
+    }
+  }
+
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent) return;
     var d = e.data; if (!d || d.source !== 'tdoc-shell') return;
@@ -1730,6 +2130,20 @@
     else if (d.type === 'tdoc:editSerialize') {
       post({ type: 'tdoc:editDocument', requestId: d.requestId, html: serializeDocument() });
     }
+    else if (d.type === 'tdoc:demoRewrite') runDemoRewrite(d);
+    else if (d.type === 'tdoc:demoRewriteShow') {
+      if (demoRewrite) {
+        var reduceShow = false;
+        try { reduceShow = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (x) {}
+        showDemoParagraph(demoRewrite.el, d.view, reduceShow);
+      }
+    }
+    else if (d.type === 'tdoc:demoRewriteUndo') undoDemoRewrite();
+    else if (d.type === 'tdoc:suggestShow') suggShow(d.items);
+    else if (d.type === 'tdoc:suggestClear') { suggClear(Array.isArray(d.ids) ? d.ids.map(String) : null); rereportPins(); }
+    else if (d.type === 'tdoc:suggestSettle') { suggSettle(String(d.id), d.accepted === true); rereportPins(); }
+    else if (d.type === 'tdoc:suggestFocus') suggFocus(String(d.id), d.scroll !== false);
+    else if (d.type === 'tdoc:suggestBusy') suggBusy(typeof d.text === 'string' ? d.text : null, typeof d.label === 'string' ? d.label : '');
     else if (d.type === 'tdoc:focusAnchor') setActiveAnchor(d.id, !!d.scroll);
     else if (d.type === 'tdoc:scrollTo') { try { window.scrollTo(0, Math.max(0, (d.docY || 0) - 80)); } catch (x) {} }
     else if (d.type === 'tdoc:scrollBy') { try { window.scrollBy(0, Number(d.deltaY) || 0); } catch (x) {} }

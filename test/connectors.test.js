@@ -103,6 +103,23 @@ const post = (path, cookie, body, origin = 'https://tdoc.dev') => new Request(`h
     assert(posts[0].headers['X-Tdoc-Signature'] === expect, 'signature does not verify');
   });
 
+  await t('a webhook with a key sends it as a Bearer header and never shows it back', async () => {
+    const { env, owner, commentId } = await seed();
+    const made = await (await worker.fetch(post('/api/me/connectors/webhook', owner.cookie, { url: 'https://hooks.example/a', label: 'Grok Bot', auth_key: 'Authorization: Bearer gb_abc123' }), env, {})).json();
+    assert(made.ok && !JSON.stringify(made).includes('gb_abc123'), JSON.stringify(made));
+    posts.length = 0;
+    await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug: 'cdoc', comment_ids: [commentId], recipient: made.target } }), env, {});
+    assert(posts.length === 1 && posts[0].headers.Authorization === 'Bearer gb_abc123', JSON.stringify(posts[0] && posts[0].headers));
+    const list = await (await worker.fetch(req('/api/me/connectors', { cookie: owner.cookie }), env, {})).text();
+    assert(!list.includes('gb_abc123'), 'the key is shown back');
+    const bad = await worker.fetch(post('/api/me/connectors/webhook', owner.cookie, { url: 'https://hooks.example/b', auth_key: 'two words' }), env, {});
+    assert(bad.status === 400, `bad key status ${bad.status}`);
+    const plain = await addHook(env, owner.cookie, 'https://hooks.example/c');
+    posts.length = 0;
+    await worker.fetch(req('/api/notify/handoff', { method: 'POST', cookie: owner.cookie, body: { slug: 'cdoc', comment_ids: [commentId], recipient: plain.target } }), env, {});
+    assert(posts.length === 1 && !('Authorization' in posts[0].headers), 'a keyless webhook sent an Authorization header');
+  });
+
   await t('Send test reaches the connector and reports a failure honestly', async () => {
     const { env, owner } = await seed();
     const good = await addHook(env, owner.cookie);

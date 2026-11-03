@@ -65,6 +65,11 @@ if [ -n "${TDOC_DAEMON_ASK:-}" ]; then
   echo "[tdoc] a question run cannot write a document; answer with tdoc-agent-reply --ask." >&2
   exit 2
 fi
+# A suggestions run (TDOC_DAEMON_SUGGEST) only suggests, with tdoc-propose.
+if [ -n "${TDOC_DAEMON_SUGGEST:-}" ]; then
+  echo "[tdoc] a suggestions run cannot write a document; send the edits with tdoc-propose." >&2
+  exit 2
+fi
 
 # ─────────────────────────────── arg parsing ──────────────────────────────
 SLUG=""

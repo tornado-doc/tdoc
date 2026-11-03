@@ -40,7 +40,7 @@ const APP = 'http://localhost:3000';
     }
   });
 
-  await t('first connect creates an unlisted, sign-in-to-comment space named after the app', async () => {
+  await t('first connect creates a private space of the person\'s own, named after the app', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'julie');
     const r = await connect(env, cookie);
@@ -52,7 +52,7 @@ const APP = 'http://localhost:3000';
     const meta = JSON.parse(await env.META.get(`meta:${r.body.slug}`));
     assert(meta.title === 'Feedback · localhost:3000', `title ${meta.title}`);
     assert(meta.created_from === 'feedback' && meta.feedback.origin === APP, 'meta names the app');
-    assert(meta.access.visibility === 'unlisted' && meta.access.commenting === 'signed_in', `access ${JSON.stringify(meta.access)}`);
+    assert(meta.access.visibility === 'private' && meta.access.commenting === 'signed_in', `access ${JSON.stringify(meta.access)}`);
     assert(meta.hosted && meta.hosted.github_login === 'julie', 'hosted ownership stamped');
     const html = await (await env.DOCS.get(`docs/${r.body.slug}/v1/index.html`)).text();
     assert(html.includes('Feedback · localhost:3000') && html.includes('/feedback.js'), 'space doc explains itself');
@@ -86,7 +86,7 @@ const APP = 'http://localhost:3000';
     assert(b.status === 200 && b.body.slug !== a.body.slug, 'dangling index was followed');
   });
 
-  await t('"use an existing doc" needs a doc this person may comment on', async () => {
+  await t('"use an existing doc" needs a doc this person owns or was invited to, not just one they hold the link of', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'julie');
     await env.META.put('meta:private-plan', JSON.stringify({
@@ -99,6 +99,12 @@ const APP = 'http://localhost:3000';
     await env.META.put('meta:open-plan', JSON.stringify({
       title: 'Open', versions: [{ n: 1 }, { n: 2 }], hosted: { github_login: 'bob' },
       access: { visibility: 'unlisted', commenting: 'signed_in' },
+    }));
+    const linkOnly = await connect(env, cookie, { slug: 'open-plan' });
+    assert(linkOnly.status === 403 && linkOnly.body.error === 'not_invited', `link-only doc: ${linkOnly.status} ${JSON.stringify(linkOnly.body)}`);
+    await env.META.put('meta:open-plan', JSON.stringify({
+      title: 'Open', versions: [{ n: 1 }, { n: 2 }], hosted: { github_login: 'bob' },
+      access: { visibility: 'unlisted', commenting: 'signed_in', allowed_users: ['julie'] },
     }));
     const okr = await connect(env, cookie, { slug: 'open-plan' });
     assert(okr.status === 200 && okr.body.slug === 'open-plan' && okr.body.version === 2, `existing doc: ${okr.status} ${JSON.stringify(okr.body)}`);
@@ -177,8 +183,15 @@ const APP = 'http://localhost:3000';
     headers: { 'Content-Type': 'application/json', Cookie: cookie, ...(origin ? { Origin: origin } : {}) },
     body: JSON.stringify({ slug }),
   });
+  // The owner's Share: invite people by name, or open the space to its link.
+  const shareSpace = async (env, slug, patch) => {
+    const meta = JSON.parse(await env.META.get(`meta:${slug}`));
+    meta.access = { ...meta.access, ...patch };
+    await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+  };
+  const invite = (env, slug, ...logins) => shareSpace(env, slug, { allowed_users: logins });
 
-  await t('a shared link puts a teammate in the same space: their next connect lands there', async () => {
+  await t('an invited teammate joins the same space: their next connect lands there', async () => {
     const env = makeEnv(mod.CommentsStore);
     const julie = await putSession(env, 'julie');
     const { body: space } = await connect(env, julie);
@@ -186,11 +199,17 @@ const APP = 'http://localhost:3000';
     assert(space.share_url === `https://tdoc.dev/d/${space.slug}?share=1` && !space.invite_url, `share_url ${space.share_url}`);
     assert(space.origin === APP, `origin ${space.origin}`);
     const can = await putSession(env, 'can');
+    // Private until the owner invites: the link alone shows nothing.
+    const shut = await worker.fetch(req(`/d/${space.slug}/v/1`, { cookie: can }), env, {});
+    assert(shut.status !== 200 || !(await shut.text()).includes('"page":"feedback-space"'), `uninvited saw the space: ${shut.status}`);
+    const refused = await worker.fetch(joinReq(can, space.slug), env, {});
+    assert(refused.status === 403, `uninvited join: ${refused.status}`);
+    await invite(env, space.slug, 'can');
     // One link: the space's own page lists the comments and offers Join.
     const page = await worker.fetch(req(`/d/${space.slug}/v/1`, { cookie: can }), env, {});
     const html = await page.text();
     assert(page.status === 200 && html.includes('"page":"feedback-space"'), `space page: ${page.status}`);
-    assert(html.includes('"joined":false') && html.includes('"isOwner":false'), 'invitee should be offered Join');
+    assert(html.includes('"joined":false') && html.includes('"canJoin":true') && html.includes('"isOwner":false'), 'invitee should be offered Join');
     const own = await (await worker.fetch(req(`/d/${space.slug}/v/1`, { cookie: julie }), env, {})).text();
     assert(own.includes('"isOwner":true') && own.includes('"joined":true'), 'owner page flags');
     const asDoc = await (await worker.fetch(req(`/d/${space.slug}/v/1?doc=1`, { cookie: julie }), env, {})).text();
@@ -217,10 +236,138 @@ const APP = 'http://localhost:3000';
     const can = await putSession(env, 'can');
     const { body: own } = await connect(env, can);
     assert(own.slug !== space.slug, 'precondition: can had a space of their own');
+    await invite(env, space.slug, 'can');
     await worker.fetch(joinReq(can, space.slug), env, {});
     const r = await worker.fetch(req('/api/feedback/session', { token: own.token }), env, {});
     const b = await r.json();
     assert(r.status === 409 && b.error === 'space_moved' && b.slug === space.slug, `stale token: ${r.status} ${JSON.stringify(b)}`);
+  });
+
+  // Julie, 2026-11-03: the bookmarklet gives each person their own space per
+  // origin; another person's space is joined only on an explicit invite.
+  await t('bookmarklet: two people on the same origin get separate spaces, even holding the other\'s link', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    // A space opened to its link (every space before this change was).
+    await shareSpace(env, hers.slug, { visibility: 'unlisted', commenting: 'signed_in' });
+    const page = await (await worker.fetch(req(`/d/${hers.slug}`, { cookie: julie }), env, {})).text();
+    const boot = bootData(page, '__TDOC_APP_BOOT__');
+    assert(boot.page === 'feedback-space' && boot.joined === false && boot.canJoin === false, `link holder boot ${JSON.stringify({ joined: boot.joined, canJoin: boot.canJoin })}`);
+    const join = await worker.fetch(joinReq(julie, hers.slug), env, {});
+    const jb = await join.json();
+    assert(join.status === 403 && jb.error === 'not_invited' && /invite/i.test(jb.message), `link-only join: ${join.status} ${JSON.stringify(jb)}`);
+    const viaDoc = await connect(env, julie, { slug: hers.slug });
+    assert(viaDoc.status === 403 && viaDoc.body.error === 'not_invited', `link-only "existing doc": ${viaDoc.status}`);
+    const { body: mine } = await connect(env, julie);
+    assert(mine.slug !== hers.slug && mine.is_owner === true && !mine.moved, `julie got ${mine.slug} (serena's is ${hers.slug})`);
+    assert(await env.META.get(`feedback:space:julie:${APP}`) === mine.slug, 'julie\'s index');
+    assert(await env.META.get(`feedback:space:serena:${APP}`) === hers.slug, 'serena\'s index moved');
+    // Each one's comments stay private to them.
+    const anchor = { kind: 'product', url: `${APP}/`, selector: '#x', tag: 'div', text: 'x' };
+    await worker.fetch(req('/api/comments', { method: 'POST', token: mine.token, body: { slug: mine.slug, version: 1, text: 'julie only', anchor } }), env, {});
+    const peek = await worker.fetch(req(`/api/comments?slug=${mine.slug}&version=1`, { cookie: serena }), env, {});
+    assert(peek.status === 403 || peek.status === 404, `serena read julie's space: ${peek.status}`);
+  });
+
+  await t('a mis-joined bookmarklet mapping moves to the person\'s own space on the next connect; nothing is deleted', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    await shareSpace(env, hers.slug, { visibility: 'unlisted', commenting: 'signed_in' });
+    // What the old join (any link holder) left behind: julie filed into
+    // serena's space, with a live token and a comment there.
+    await env.META.put(`feedback:space:julie:${APP}`, hers.slug);
+    const oldToken = `fb_${'a'.repeat(48)}`;
+    await env.META.put(`feedback:token:${oldToken}`, JSON.stringify({ sid: julie.split('=')[1], slug: hers.slug, origin: APP, created: new Date().toISOString() }));
+    const anchor = { kind: 'product', url: `${APP}/`, selector: '#x', tag: 'div', text: 'x' };
+    await worker.fetch(req('/api/comments', { method: 'POST', cookie: julie, headers: { Origin: 'https://tdoc.dev' }, body: { slug: hers.slug, version: 1, text: 'left before', anchor } }), env, {});
+    const metaBefore = await env.META.get(`meta:${hers.slug}`);
+    // The widget's first call: the old token is told to reconnect.
+    const stale = await worker.fetch(req('/api/feedback/session', { token: oldToken }), env, {});
+    const sb = await stale.json();
+    assert(stale.status === 409 && sb.error === 'space_moved', `old token: ${stale.status} ${JSON.stringify(sb)}`);
+    const { status, body: mine } = await connect(env, julie);
+    assert(status === 200 && mine.slug !== hers.slug && mine.is_owner === true, `reconnect: ${status} ${mine.slug}`);
+    assert(mine.moved === true && !JSON.stringify(mine).includes(hers.slug), `moved ${mine.moved}`);
+    assert(await env.META.get(`feedback:space:julie:${APP}`) === mine.slug, 'index not switched');
+    const meta = JSON.parse(await env.META.get(`meta:${mine.slug}`));
+    assert(meta.access.visibility === 'private' && meta.hosted.github_login === 'julie', `own space ${JSON.stringify(meta.access)}`);
+    // Serena's space, its record and julie's old comment are untouched.
+    assert(await env.META.get(`meta:${hers.slug}`) === metaBefore, 'serena\'s space was changed');
+    assert(await env.META.get(`feedback:space:serena:${APP}`) === hers.slug, 'serena\'s index moved');
+    const left = await (await worker.fetch(req(`/api/comments?slug=${hers.slug}&version=1`, { cookie: serena }), env, {})).json();
+    assert(left.some((c) => c.text === 'left before'), 'old comment gone');
+    const fresh = await worker.fetch(req('/api/feedback/session', { token: mine.token }), env, {});
+    assert(fresh.status === 200, `new token: ${fresh.status}`);
+    // Stable: the connect after that stays in julie's own space.
+    const again = await connect(env, julie);
+    assert(again.body.slug === mine.slug && !again.body.moved, 'second connect moved again');
+  });
+
+  await t('a mapping to a space the person was invited to is kept', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    await invite(env, hers.slug, 'julie');
+    await env.META.put(`feedback:space:julie:${APP}`, hers.slug);
+    const { body } = await connect(env, julie);
+    assert(body.slug === hers.slug && !body.moved, `invited mapping lost: ${body.slug}`);
+    // Uninvited later: the next connect gives julie her own.
+    await invite(env, hers.slug);
+    const after = await connect(env, julie);
+    assert(after.body.slug !== hers.slug && after.body.moved === true, `still in serena's: ${after.body.slug}`);
+  });
+
+  await t('commenting turned off does not move the owner out; /me hides a space joined only by its link', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    await shareSpace(env, hers.slug, { commenting: 'off' });
+    const s = await worker.fetch(req('/api/feedback/session', { token: hers.token }), env, {});
+    const sb = await s.json();
+    assert(s.status === 200 && sb.can_comment === false, `owner session with commenting off: ${s.status} ${JSON.stringify(sb)}`);
+    const again = await connect(env, serena);
+    assert(again.body.slug === hers.slug && !again.body.moved, 'owner was moved out of their own space');
+    await shareSpace(env, hers.slug, { commenting: 'signed_in', visibility: 'unlisted' });
+    await env.META.put(`feedback:space:julie:${APP}`, hers.slug);
+    const me = await (await worker.fetch(req('/api/me', { cookie: julie }), env, {})).json();
+    assert(!(me.feedback || []).some((x) => x.slug === hers.slug), `link-only space listed: ${JSON.stringify(me.feedback)}`);
+  });
+
+  await t('a mis-joined person who already owns a site space for the origin goes back to it', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    await shareSpace(env, hers.slug, { visibility: 'unlisted' });
+    const { body: own } = await connect(env, julie);
+    await env.META.put(`feedback:sitespace:julie:${APP}`, own.slug);
+    await env.META.put(`feedback:space:julie:${APP}`, hers.slug);
+    const back = await connect(env, julie);
+    assert(back.body.slug === own.slug && back.body.moved === true, `got ${back.body.slug}, own ${own.slug}`);
+    assert(await env.META.get(`feedback:space:julie:${APP}`) === own.slug, 'index not switched back');
+  });
+
+  await t('SDK: a site\'s own space (data-tdoc-space) stays one shared space for everyone it admits', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: site } = await connect(env, serena);
+    await env.META.put(`site:${site.slug}`, JSON.stringify({ origins: [APP] }));
+    await shareSpace(env, site.slug, { visibility: 'unlisted', commenting: 'signed_in' });
+    const a = await connect(env, serena, { space: site.slug });
+    const b = await connect(env, julie, { space: site.slug });
+    assert(a.status === 200 && b.status === 200 && a.body.slug === site.slug && b.body.slug === site.slug && b.body.site === true, `site: ${a.status} ${b.status} ${b.body.slug}`);
+    const s = await worker.fetch(req('/api/feedback/session', { token: b.body.token }), env, {});
+    assert(s.status === 200, `site token session: ${s.status}`);
+    // And julie's bookmarklet on the same origin is still her own.
+    const own = await connect(env, julie);
+    assert(own.body.slug !== site.slug && own.body.is_owner === true, 'bookmarklet joined the site space');
   });
 
   await t('join refuses cross-site posts, non-feedback docs, and anonymous callers', async () => {
@@ -263,10 +410,121 @@ const APP = 'http://localhost:3000';
     const rec = (list.handoffs || [])[0] || {};
     assert(!rec.recipient || rec.recipient.agent_sub !== 'evil', 'page-supplied recipient was honoured');
     const can = await putSession(env, 'can');
+    await invite(env, space.slug, 'can');
     await worker.fetch(joinReq(can, space.slug), env, {});
     const { body: theirs } = await connect(env, can);
+    assert(theirs.slug === space.slug, 'the invited joiner was not in the space');
     const notOwner = await worker.fetch(req(`/api/notify/targets?slug=${space.slug}`, { token: theirs.token }), env, {});
     assert(notOwner.status === 401 || notOwner.status === 403, `a joiner drives the owner's agent: ${notOwner.status}`);
+  });
+
+  // A joiner's widget reaches THEIR OWN agents (answer only, in the thread)
+  // through /api/docs/<slug>/my-agent, and only where the token cannot have
+  // been read by another site's scripts: the bookmarklet on tdoc's own pages.
+  await t('a joiner\'s widget token asks only their own agents, only on tdoc\'s own origin', async () => {
+    const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev' });
+    const TDOC = 'https://tdoc.dev';
+    const home = { Origin: TDOC };
+    const raft = (sub, name, server) => ({ provider: 'raft', server_id: `srv-${server}`, agent_sub: sub, server_slug: server, agent_name: name, last_touched: new Date().toISOString() });
+    const serena = await issue(worker, env, 'serena');
+    const julie = await issue(worker, env, 'julie');
+    await env.META.put(`account-notify:${serena.account_id}`, JSON.stringify([raft('s1', 'serena-codex', 'stan')]));
+    await env.META.put(`account-notify:${julie.account_id}`, JSON.stringify([raft('j1', 'julie-claw', 'julie'), raft('j2', 'bencher', 'raft')]));
+    const serenaAgent = raft('s1', 'serena-codex', 'stan');
+    const julieAgent = raft('j2', 'bencher', 'raft');
+    // Serena's space for tdoc.dev itself; Julie joins and connects her bookmarklet there.
+    const { body: space } = await connect(env, serena.cookie, { origin: TDOC });
+    assert(space.is_owner === true && space.own_agent === true, `owner connect ${JSON.stringify({ is_owner: space.is_owner, own_agent: space.own_agent })}`);
+    await invite(env, space.slug, 'julie');
+    assert((await worker.fetch(joinReq(julie.cookie, space.slug), env, {})).status === 200, 'julie joins');
+    const { body: mine } = await connect(env, julie.cookie, { origin: TDOC });
+    assert(mine.slug === space.slug && mine.is_owner === false && mine.own_agent === true, `joiner connect ${JSON.stringify({ slug: mine.slug, is_owner: mine.is_owner, own_agent: mine.own_agent })}`);
+    const refreshed = await (await worker.fetch(req('/api/feedback/session', { token: mine.token }), env, {})).json();
+    assert(refreshed.own_agent === true, `session own_agent ${refreshed.own_agent}`);
+    const anchor = { kind: 'product', url: `${TDOC}/me`, selector: '#x', tag: 'div', text: 'x' };
+    const post = async (token, text) => (await (await worker.fetch(req('/api/comments', { method: 'POST', token, body: { slug: space.slug, version: 1, text, anchor } }), env, {})).json()).id;
+    const julieComment = await post(mine.token, 'why is this here?');
+    const serenaComment = await post(space.token, 'owner note');
+    const call = async (_env, p, opts) => {
+      const r = await worker.fetch(req(p, opts), env, {});
+      let body = null; try { body = await r.json(); } catch {}
+      return { status: r.status, body };
+    };
+    const myAgent = (opts, slug = space.slug) => call(env, `/api/docs/${slug}/my-agent`, { headers: home, ...opts });
+
+    // Allowed: GET lists Julie's own agents only; POST asks one about her comment.
+    const got = await myAgent({ token: mine.token });
+    assert(got.status === 200, `GET ${got.status} ${JSON.stringify(got.body)}`);
+    assert(JSON.stringify(got.body.agents.map((a) => a.agent_name).sort()) === '["bencher","julie-claw"]', `agents ${JSON.stringify(got.body.agents)}`);
+    assert(!got.body.team_agents.length && got.body.tdoc_ai === false && !got.body.disabled_team_agents.length, `extras ${JSON.stringify(got.body)}`);
+    const asked = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: julieComment, recipient: julieAgent } });
+    assert(asked.status === 200 && asked.body.ask.comment_id === julieComment && asked.body.ask.recipient.agent_sub === 'j2', `POST ${asked.status} ${JSON.stringify(asked.body)}`);
+
+    // A private question asked from the page (cookie) stays out of the token's view.
+    const priv = await myAgent({ cookie: julie.cookie, method: 'POST', body: { question: 'private one', recipient: julieAgent } });
+    assert(priv.status === 200, `cookie private ask ${priv.status} ${JSON.stringify(priv.body)}`);
+    const seen = (await myAgent({ token: mine.token })).body.asks.map((a) => a.ask_id);
+    assert(seen.includes(asked.body.ask.ask_id) && !seen.includes(priv.body.ask.ask_id), `token sees ${JSON.stringify(seen)}`);
+    assert((await myAgent({ cookie: julie.cookie })).body.asks.some((a) => a.ask_id === priv.body.ask.ask_id), 'the page lost its private ask');
+
+    // Refused: the owner's agent, a comment Julie did not write, no comment.
+    const theirAgent = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: julieComment, recipient: serenaAgent } });
+    assert(theirAgent.status === 403 && theirAgent.body.error === 'not_your_agent', `owner's agent ${theirAgent.status} ${JSON.stringify(theirAgent.body)}`);
+    const teamAgent = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: julieComment, recipient: { ...julieAgent, team_agent: { id: 'ta_x', name: 'x' } } } });
+    assert(teamAgent.status === 403 && teamAgent.body.error === 'not_your_agent', `team agent ${teamAgent.status} ${JSON.stringify(teamAgent.body)}`);
+    const notHers = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: serenaComment, recipient: julieAgent } });
+    assert(notHers.status === 403 && notHers.body.error === 'not_your_comment', `not her comment ${notHers.status} ${JSON.stringify(notHers.body)}`);
+    const free = await myAgent({ token: mine.token, method: 'POST', body: { question: 'anything', recipient: julieAgent } });
+    assert(free.status === 400 && free.body.error === 'comment_id_required', `no comment ${free.status} ${JSON.stringify(free.body)}`);
+    const crossSite = await myAgent({ token: mine.token, method: 'POST', headers: { Origin: 'https://evil.example' }, body: { comment_id: julieComment } });
+    assert(crossSite.status === 403, `cross-site POST ${crossSite.status}`);
+    // Only the token's own session: a cookie riding along is not it.
+    const both = await myAgent({ token: mine.token, cookie: serena.cookie });
+    assert(both.status === 401, `cookie + token ${both.status} ${JSON.stringify(both.body)}`);
+    // Only the plain my-agent route: not cancel, not publish.
+    for (const tail of ['cancel', 'publish']) {
+      const r = await call(env, `/api/docs/${space.slug}/my-agent/${tail}`, { method: 'POST', token: mine.token, headers: home, body: { ask_id: asked.body.ask.ask_id, comment_id: julieComment } });
+      assert(r.status === 403 && r.body.error === 'feedback_token_scope', `${tail}: ${r.status} ${JSON.stringify(r.body)}`);
+    }
+
+    // Refused: another slug than the token's.
+    const { body: elsewhere } = await connect(env, julie.cookie, { origin: 'http://localhost:5173' });
+    const otherSlug = await myAgent({ token: mine.token }, elsewhere.slug);
+    assert(otherSlug.status === 403 && otherSlug.body.error === 'feedback_token_scope', `other slug ${otherSlug.status} ${JSON.stringify(otherSlug.body)}`);
+
+    // Refused: a site (SDK) token, even for tdoc's own origin.
+    const rec = JSON.parse(await env.META.get(`feedback:token:${mine.token}`));
+    const siteToken = `fb_${'ab'.repeat(24)}`;
+    await env.META.put(`feedback:token:${siteToken}`, JSON.stringify({ ...rec, site: true }));
+    const site = await myAgent({ token: siteToken });
+    assert(site.status === 403 && site.body.error === 'feedback_token_scope', `site token ${site.status} ${JSON.stringify(site.body)}`);
+    const siteAsk = await myAgent({ token: siteToken, method: 'POST', body: { comment_id: julieComment } });
+    assert(siteAsk.status === 403, `site token POST ${siteAsk.status}`);
+
+    // Refused: a third-party app's space. Its page could read the token.
+    const { body: appSpace } = await connect(env, serena.cookie);
+    await invite(env, appSpace.slug, 'julie');
+    await worker.fetch(joinReq(julie.cookie, appSpace.slug), env, {});
+    const { body: appMine } = await connect(env, julie.cookie);
+    assert(appMine.slug === appSpace.slug && appMine.own_agent === false, `third-party connect ${JSON.stringify({ slug: appMine.slug, own_agent: appMine.own_agent })}`);
+    const appComment = (await (await worker.fetch(req('/api/comments', { method: 'POST', token: appMine.token, body: { slug: appSpace.slug, version: 1, text: 'q', anchor: { ...anchor, url: `${APP}/` } } }), env, {})).json()).id;
+    for (const opts of [{}, { method: 'POST', body: { comment_id: appComment, recipient: julieAgent } }]) {
+      const r = await myAgent({ token: appMine.token, ...opts, headers: { Origin: APP } }, appSpace.slug);
+      assert(r.status === 403, `third-party ${opts.method || 'GET'} ${r.status} ${JSON.stringify(r.body)}`);
+      const home2 = await myAgent({ token: appMine.token, ...opts }, appSpace.slug);
+      assert(home2.status === 403 && home2.body.error === 'feedback_token_scope', `third-party token from tdoc ${opts.method || 'GET'} ${home2.status} ${JSON.stringify(home2.body)}`);
+    }
+    // ...and a tdoc-origin token pointed at that third-party space ("use an existing doc").
+    const { body: pointed } = await connect(env, julie.cookie, { origin: TDOC, slug: appSpace.slug });
+    assert(pointed.slug === appSpace.slug && pointed.own_agent === false, `pointed connect ${JSON.stringify({ slug: pointed.slug, own_agent: pointed.own_agent })}`);
+    const pointedGet = await myAgent({ token: pointed.token }, appSpace.slug);
+    assert(pointedGet.status === 403 && pointedGet.body.error === 'feedback_token_scope', `pointed ${pointedGet.status}`);
+
+    // The owner's agents stay out of a joiner's reach from the widget.
+    const targets = await worker.fetch(req(`/api/notify/targets?slug=${space.slug}`, { token: mine.token }), env, {});
+    assert(targets.status === 401 || targets.status === 403, `joiner reads owner targets ${targets.status}`);
+    const handoff = await worker.fetch(req('/api/notify/handoff', { method: 'POST', token: mine.token, body: { slug: space.slug, comment_ids: [julieComment] } }), env, {});
+    assert(handoff.status === 401 || handoff.status === 403, `joiner hands off to owner's agent ${handoff.status}`);
   });
 
   // The widget shows Send to agent from these two answers: the owner always,
@@ -312,6 +570,7 @@ const APP = 'http://localhost:3000';
     const can = await putSession(env, 'can');
     const before = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
     assert(!(before.feedback || []).length, 'a stranger sees the space');
+    await invite(env, space.slug, 'can');
     await worker.fetch(joinReq(can, space.slug), env, {});
     const after = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
     const theirs = (after.feedback || []).find((x) => x.slug === space.slug);
@@ -369,8 +628,10 @@ const APP = 'http://localhost:3000';
     const own = await spaceBoot(env, owner.cookie, space.slug);
     assert(own.page === 'feedback-space' && own.isOwner === true, `owner boot ${JSON.stringify(own)}`);
     assert(own.shareUrl === `https://tdoc.dev/d/${space.slug}`, `copy link ${own.shareUrl}`);
-    assert(own.ownerManage && own.ownerManage.access.visibility === 'unlisted', `ownerManage ${JSON.stringify(own.ownerManage)}`);
+    assert(own.ownerManage && own.ownerManage.access.visibility === 'private', `ownerManage ${JSON.stringify(own.ownerManage)}`);
     assert(own.workspaceId === null && own.teamManage === null, 'a personal space names no team');
+    // The owner opens it to its link in Share; others then see the page.
+    await shareSpace(env, space.slug, { visibility: 'unlisted' });
     const can = await issue(worker, env, 'can');
     const theirs = await spaceBoot(env, can.cookie, space.slug);
     assert(theirs.isOwner === false && theirs.ownerManage === null, `non-owner got manage data ${JSON.stringify(theirs.ownerManage)}`);
@@ -380,7 +641,9 @@ const APP = 'http://localhost:3000';
     assert(src.includes('<OwnerAccessDialog') && src.includes('<ShareDialog') && src.includes('<MoveToTeamDialog'), 'space Share is not the doc Share dialog and move picker');
     assert(src.includes('moveDocsToTeam([slug], target.id)'), 'space move is not the doc move');
     const widget = fs.readFileSync(path.join(ROOT, 'feedback/src/main.jsx'), 'utf8');
-    assert(/className="tdoc-fb-share" href=\{shareUrl\}/.test(widget), 'the widget lost its Share entry');
+    // Share in the widget (feedbackInvites); with the flag off, the old link to this page.
+    assert(/className="tdoc-fb-share" onClick=\{onShare\}/.test(widget), 'the widget lost its Share entry');
+    assert(/className="tdoc-fb-share" href=\{shareUrl\}/.test(widget), 'the widget lost its Share link (flag off)');
   });
 
   await t('moving a space into a team: only its owner, only into a team they belong to; admins then manage it', async () => {
@@ -490,6 +753,122 @@ const APP = 'http://localhost:3000';
     const bad = await worker.fetch(req('/feedback/connect?origin=nope'), env, {});
     assert(bad.status === 400 && bootData(await bad.text(), '__TDOC_APP_BOOT__').error, `bad origin: ${bad.status}`);
   });
+
+  // Signing in sends the popup through Cross-Origin-Opener-Policy pages,
+  // which cut it off from the app: its postMessage never arrives. The popup
+  // also files the session under a claim the app collects (owner report,
+  // app.hustlefree.ai, 2026-11-01).
+  {
+    const HOME = { Origin: 'https://tdoc.dev' };
+    const claimCookieOf = (r) => {
+      const all = (r.headers.getSetCookie ? r.headers.getSetCookie() : [r.headers.get('set-cookie') || '']).join('\n');
+      const m = /(__Host-tdoc_fb_claim_[a-f0-9]{16})=([a-f0-9]*);[^\n]*/.exec(all);
+      return m ? { name: m[1], value: m[2], line: m[0], pair: `${m[1]}=${m[2]}` } : null;
+    };
+    // The connect page asking for a claim (it does so while it has an opener).
+    const newClaim = async (env, { origin = APP, space = '', headers = HOME, cookie = '' } = {}) => {
+      const r = await worker.fetch(req('/api/feedback/connect/claim/new', { method: 'POST', cookie, headers, body: { origin, ...(space ? { space } : {}) } }), env, {});
+      const body = await r.json();
+      return { status: r.status, claim: body.claim, set: claimCookieOf(r), body };
+    };
+    const poll = async (env, claim, origin = APP) => {
+      const r = await worker.fetch(req('/api/feedback/connect/claim', { method: 'POST', body: { claim }, headers: origin ? { Origin: origin } : {} }), env, {});
+      return { status: r.status, body: await r.json() };
+    };
+    const connectWith = async (env, cookie, body, headers = HOME) => {
+      const r = await worker.fetch(req('/api/feedback/connect', { method: 'POST', cookie, headers, body: { origin: APP, handoff: 'claim', ...body } }), env, {});
+      return { r, body: await r.json() };
+    };
+
+    await t('claim: only our own page can start one; 256 bits, in a __Host- HttpOnly cookie per app and space', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const made = await newClaim(env);
+      assert(made.status === 200 && /^[a-f0-9]{64}$/.test(made.claim || ''), `claim ${made.status} ${JSON.stringify(made.body)}`);
+      assert(made.set && made.set.value === made.claim, 'claim cookie not set');
+      assert(/; Path=\/;/.test(made.set.line) && /HttpOnly/.test(made.set.line) && /Secure/.test(made.set.line) && /SameSite=Lax/.test(made.set.line) && /Max-Age=600/.test(made.set.line) && !/Domain=/i.test(made.set.line), `cookie flags ${made.set.line}`);
+      // A claim still pending in this browser is handed out again, not replaced.
+      const again = await newClaim(env, { cookie: made.set.pair });
+      assert(again.claim === made.claim && !again.set, 'a pending claim was replaced');
+      const other = await newClaim(env, { origin: 'http://localhost:5173' });
+      assert(other.set.name !== made.set.name, 'one cookie name for two apps');
+      const spaced = await newClaim(env, { space: 'd-abc' });
+      assert(spaced.set.name !== made.set.name, 'one cookie name for an app and its site space');
+      for (const headers of [{}, { Origin: 'https://evil.example' }, { Origin: APP }]) {
+        const r = await newClaim(env, { headers });
+        assert(r.status === 403 && !r.claim && !r.set, `cross-origin claim/new ${JSON.stringify(headers)}: ${r.status}`);
+      }
+      assert((await newClaim(env, { origin: 'nope' })).status === 400, 'bad origin');
+      // The page itself no longer writes anything: no claim in a GET.
+      const page = await worker.fetch(req(`/feedback/connect?origin=${encodeURIComponent(APP)}`), env, {});
+      const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
+      assert(!boot.claim && !claimCookieOf(page), 'GET made a claim');
+      assert(/no-store/.test(page.headers.get('Cache-Control') || '') && page.headers.get('Referrer-Policy') === 'no-referrer', 'popup page headers');
+      const src = fs.readFileSync(path.join(ROOT, 'shell/src/feedback-connect.jsx'), 'utf8');
+      assert(src.includes("window.opener.postMessage({ type: 'tdoc-feedback-claim', origin, claim: b.claim }, origin)"), 'popup does not tell the opener (only on its origin) the claim');
+      assert(src.includes("hasOpener() ? {} : { handoff: 'claim' }"), 'popup asks for the claim handoff even with an opener');
+    });
+
+    await t('claim: Connect without an opener files the session; the app collects it once, from its own origin only', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const sid = await putSession(env, 'julie');
+      const { claim, set } = await newClaim(env);
+      assert((await poll(env, claim)).body.status === 'pending', 'unfilled claim is not pending');
+      const made = await connectWith(env, `${sid}; ${set.pair}`, {});
+      assert(made.r.status === 200 && made.body.token && made.body.claim_filed === true, `connect ${made.r.status} ${JSON.stringify(made.body)}`);
+      const cleared = claimCookieOf(made.r);
+      assert(cleared && cleared.name === set.name && cleared.value === '' && /Max-Age=0/.test(cleared.line), 'claim cookie not cleared after filing');
+      for (const origin of ['', 'https://evil.example', 'http://localhost:3001', 'null']) {
+        const r = await poll(env, claim, origin);
+        assert(r.status === 404 && !r.body.session, `origin ${origin || '(none)'} got ${r.status} ${JSON.stringify(r.body)}`);
+      }
+      const got = await poll(env, claim);
+      assert(got.status === 200 && got.body.status === 'connected' && got.body.session.token === made.body.token && got.body.session.slug === made.body.slug, `collect ${JSON.stringify(got)}`);
+      assert((await poll(env, claim)).status === 404, 'claim answered twice');
+      const session = await worker.fetch(req('/api/feedback/session', { token: got.body.session.token }), env, {});
+      assert(session.status === 200, `collected token refused: ${session.status}`);
+      assert((await poll(env, 'abc')).status === 400 && (await poll(env, 'g'.repeat(64))).status === 400, 'malformed claim accepted');
+      // With its opener the page posts the token itself: nothing is filed.
+      const second = await newClaim(env);
+      const direct = await connectWith(env, `${sid}; ${second.set.pair}`, { handoff: undefined });
+      assert(direct.body.token && !direct.body.claim_filed, 'filed although the page could post the token');
+      assert((await poll(env, second.claim)).body.status === 'pending', 'claim filled without handoff');
+    });
+
+    await t('claim: no token for a claim made elsewhere, for another app or space, or from a cross-site request', async () => {
+      const env = makeEnv(mod.CommentsStore);
+      const sid = await putSession(env, 'julie');
+      // The attacker starts a claim (forging Origin from a script) and
+      // learns it. The victim's browser does not hold its cookie, so the
+      // victim's Connect files nothing under it.
+      const mine = await newClaim(env);
+      const victim = await newClaim(env);
+      const c1 = await connectWith(env, `${sid}; ${victim.set.pair}`, {});
+      assert(c1.body.claim_filed, 'own claim not filed');
+      assert((await poll(env, mine.claim)).body.status === 'pending', 'attacker claim was filled');
+      // A cookie under another app's name, or a planted value for this app's
+      // name naming another app's claim, fills nothing.
+      const forOther = await newClaim(env, { origin: 'http://localhost:5173' });
+      const wrongApp = await connectWith(env, `${sid}; ${forOther.set.pair}`, {});
+      assert(wrongApp.body.token && !wrongApp.body.claim_filed, 'claim for one origin filled by another');
+      const planted = await connectWith(env, `${sid}; ${mine.set.name}=${forOther.claim}`, {});
+      assert(!planted.body.claim_filed && (await poll(env, forOther.claim, 'http://localhost:5173')).body.status === 'pending', 'origin-mismatched claim filled');
+      // A site-space claim is not filled by a personal connect.
+      const forSpace = await newClaim(env, { space: 'd-someone-else' });
+      const personal = await connectWith(env, `${sid}; ${forSpace.set.name.replace(/_[a-f0-9]{16}$/, '')}=x; ${forSpace.set.pair}`, {});
+      assert(personal.body.token && !personal.body.claim_filed, 'space claim filled by a personal connect');
+      // A cross-site POST (CSRF) or one with no Origin fills nothing.
+      const fresh = await newClaim(env);
+      for (const headers of [{ Origin: 'https://evil.example' }, {}]) {
+        const r = await connectWith(env, `${sid}; ${fresh.set.pair}`, {}, headers);
+        assert(!r.body.claim_filed, `filled from ${JSON.stringify(headers)}`);
+      }
+      assert((await poll(env, fresh.claim)).body.status === 'pending', 'cross-site connect filled a claim');
+      // No session: nothing minted or filed.
+      const anon = await connectWith(env, fresh.set.pair, {});
+      assert(anon.r.status === 401, `anon connect ${anon.r.status}`);
+      assert((await poll(env, fresh.claim)).body.status === 'pending', 'anonymous connect filled a claim');
+    });
+  }
 
   await t('a bad /feedback/join link is the ordinary status page, not a page of its own', async () => {
     const env = makeEnv(mod.CommentsStore);

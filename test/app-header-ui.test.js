@@ -39,6 +39,8 @@ async function seed(worker, env) {
   }), env, { waitUntil() {} })).json();
   assert.equal((await call('/api/me/handle', { handle: 'julie' })).ok, true);
   const space = await call('/api/feedback/connect', { origin: 'http://localhost:3000' });
+  // Opened to its link in Share, so a signed-out visitor sees the space page.
+  await call('/api/doc/access', { slug: space.slug, access: { visibility: 'unlisted' } }, 'PATCH');
   const folder = await call('/api/folders', { name: 'Specs' });
   const shared = await call('/api/folders', { id: folder.folder.id, visibility: 'unlisted' }, 'PATCH');
   return { space: space.slug, share: shared.folder.share_id };

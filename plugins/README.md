@@ -9,19 +9,24 @@ first use; no API key to paste).
 | --- | --- |
 | Claude Code | `claude plugin install tdoc-cloud --marketplace tornado-doc/tdoc` (in a session: `/plugin install tdoc-cloud --marketplace tornado-doc/tdoc`) |
 | Claude Code, MCP only | `claude mcp add --transport http tdoc https://tdoc.dev/mcp` |
+| Claude Code, local CLI | `claude plugin marketplace add tornado-doc/tdoc && claude plugin install tdoc@tornado-tdoc` |
 | claude.ai / Claude Desktop | **Customize > Connectors > Add custom connector**, URL `https://tdoc.dev/mcp` |
-| Codex CLI | `codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc` |
+| Codex CLI | `codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc-cloud@tornado-tdoc` |
 | Codex CLI, MCP only | `codex mcp add tdoc --url https://tdoc.dev/mcp` |
+| Codex CLI, local CLI | `codex plugin marketplace add tornado-doc/tdoc && codex plugin add tdoc@tornado-tdoc` |
 | ChatGPT | **Plugins > + > Add custom MCP server**, URL `https://tdoc.dev/mcp` |
 | Cursor | [`cursor://anysphere.cursor-deeplink/mcp/install?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9`](https://cursor.com/install-mcp?name=tdoc&config=eyJ1cmwiOiJodHRwczovL3Rkb2MuZGV2L21jcCJ9) |
 | VS Code (Copilot) | `code --add-mcp '{"name":"tdoc","type":"http","url":"https://tdoc.dev/mcp"}'` |
 | Gemini CLI | `git clone --depth 1 https://github.com/tornado-doc/tdoc && gemini extensions install ./tdoc/plugins/gemini` |
+| Gemini CLI, MCP only | `gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp` (then `/mcp auth tdoc` in Gemini CLI) |
 
 The older two-step Claude Code form also works:
 `claude plugin marketplace add tornado-doc/tdoc`, then
 `claude plugin install tdoc-cloud@tornado-tdoc`. The same marketplace also
 lists `tdoc@tornado-tdoc`, the local CLI plugin (needs Bash and the `tdoc`
 CLI). Install one of the two, not both: both carry a skill named `tdoc`.
+Codex uses the same two names: `tdoc-cloud@tornado-tdoc` is the remote MCP
+plugin, `tdoc@tornado-tdoc` the local CLI plugin.
 
 Gemini CLI installs from the latest GitHub release, which must carry
 `tdoc-gemini.tar.gz` (built by `sh plugins/pack.sh`) as its only asset.
@@ -109,8 +114,8 @@ Verified:
   three; upload as `.zip`. https://claude.com/docs/plugins/overview
 - Claude's OAuth redirect URIs: `https://claude.ai/api/mcp/auth_callback`
   (web, desktop, mobile, Cowork) and a loopback `http://localhost:<port>/callback`
-  (refused by tdoc, which takes only `127.0.0.1` / `[::1]`)
-  or `http://127.0.0.1:<port>/callback` on any port (Claude Code). Claude
+  or `http://127.0.0.1:<port>/callback` on any port (Claude Code); tdoc
+  accepts http loopback as `127.0.0.1`, `[::1]` or `localhost`. Claude
   prefers CIMD only when the authorization server metadata advertises
   `client_id_metadata_document_supported: true` and `none` in
   `token_endpoint_auth_methods_supported`. Otherwise it uses DCR.
@@ -168,16 +173,23 @@ when root `extensions.com.openai` is absent.
 Install:
 
 - Repo marketplace: `.agents/plugins/marketplace.json` at the repo root
-  (marketplace `tornado-tdoc`, one entry `tdoc` with source
+  (marketplace `tornado-tdoc`, entry `tdoc-cloud` with source
   `./plugins/codex`, `policy.installation: AVAILABLE`,
-  `policy.authentication: ON_INSTALL`, `category: Productivity`). Codex also
+  `policy.authentication: ON_INSTALL`, `category: Productivity`; and entry
+  `tdoc`, the local CLI plugin, with source `./`, the same names as in
+  Claude Code). Codex copies the whole source folder into
+  `$CODEX_HOME/plugins/cache/tornado-tdoc/<name>/<version>/`, `bin/` with
+  its executable bits, and SKILL.md's setup check finds it there (codex-cli
+  0.165.0, throwaway `CODEX_HOME`: both entries installed side by side). Codex also
   reads `.claude-plugin/marketplace.json` as a legacy marketplace; with both
   present it used `.agents/plugins/marketplace.json` (codex-cli 0.160.1,
   throwaway `CODEX_HOME`: `codex plugin marketplace add ./`, then
-  `codex plugin add tdoc@tornado-tdoc` installed 0.9.0 and `codex mcp list`
+  `codex plugin add tdoc@tornado-tdoc` (now `tdoc-cloud@tornado-tdoc`)
+  installed 0.9.0 and `codex mcp list`
   showed `tdoc  https://tdoc.dev/mcp  Not logged in`).
 - Codex CLI: `codex plugin marketplace add tornado-doc/tdoc`, then
-  `codex plugin add tdoc@tornado-tdoc` or `/plugins` in a session. Start a new
+  `codex plugin add tdoc-cloud@tornado-tdoc` (or `tdoc@tornado-tdoc` for the
+  local CLI) or `/plugins` in a session. Start a new
   session to load it.
 - ChatGPT: open the **Plugins** tab, find the plugin, select the plus button.
   For a personal marketplace (`~/.agents/plugins/marketplace.json`), restart
@@ -316,10 +328,8 @@ redirect URL"):
 - Web and Cursor Agents: `https://www.cursor.com/agents/mcp/oauth/callback`
 
 With DCR, the desktop app registers both and may send the web callback, which
-hands sign-in back to the desktop app. The https one is accepted. tdoc accepts loopback only as `127.0.0.1` / `[::1]`
-(any port), not `localhost`: registration drops the localhost URI and keeps
-the https one, so Cursor desktop sign-in must go through the web callback.
-UNVERIFIED that Cursor desktop handles that. Cursor uses authorization code + PKCE, reads
+hands sign-in back to the desktop app. tdoc accepts both: http loopback as
+`127.0.0.1`, `[::1]` or `localhost` (any port), and the https callback. Cursor uses authorization code + PKCE, reads
 RFC 9728 protected resource metadata, and registers as a public client.
 
 ---
@@ -360,9 +370,10 @@ Verified:
   command. https://geminicli.com/docs/extensions/reference/
 - `httpUrl` is Streamable HTTP; `url` is SSE. OAuth is discovered on a 401,
   with dynamic client registration. The default redirect URI is
-  `http://localhost:<random-port>/oauth/callback`. UNVERIFIED for tdoc: the
-  server accepts loopback only as `127.0.0.1` / `[::1]`, so Gemini CLI sign-in
-  may need a `127.0.0.1` redirect setting or the `tdoc_` Bearer header.
+  `http://localhost:<random-port>/oauth/callback` (gemini-cli 0.66.0,
+  `getRedirectUri`); tdoc accepts http loopback on `localhost` too, any port.
+  `gemini mcp add` writes project settings by default and refuses in a folder
+  Gemini does not trust yet; add `--scope user`.
   https://geminicli.com/docs/tools/mcp-server/
 
 Note: the extension reference page carries a banner saying Gemini CLI was
@@ -405,9 +416,11 @@ Verified:
   `https://vscode.dev/redirect`. Both are accepted by our rule.
   https://code.visualstudio.com/api/extension-guides/ai/mcp
 
-UNVERIFIED: GitHub Markdown does not link `vscode:` URLs. Third-party READMEs
-use an `https://insiders.vscode.dev/redirect/mcp/install?name=...&config=...`
-wrapper, which Microsoft does not document. It is not used here. The
+GitHub Markdown does not link `vscode:` URLs. A web page can use
+`https://vscode.dev/redirect/mcp/install?name=tdoc&config=...` instead (the
+homepage does): on 2026-10-30 it answered 302 to
+`vscode:mcp/install?{"type":"http","url":"https://tdoc.dev/mcp","name":"tdoc"}`.
+Microsoft does not document the wrapper. The
 "use MCP servers" page
 (https://code.visualstudio.com/docs/copilot/customization/mcp-servers) says the
 guided flow labels workspace `.vscode/mcp.json` as deprecated. The

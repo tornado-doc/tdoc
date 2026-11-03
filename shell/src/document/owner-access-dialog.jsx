@@ -21,7 +21,7 @@ function normalizeInvitee(raw) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
 }
 const isEmailInvite = (entry) => String(entry).includes('@');
-import { copyText } from './model.js';
+import { avatarFor, copyText } from './model.js';
 
 const COMMENTING_OPTIONS = [
   { value: 'signed_in', label: 'Signed in' },
@@ -68,13 +68,16 @@ const HISTORY_OPTIONS = [
   { value: 'public', label: 'Everyone' },
 ];
 
-export function InviteField({ users, onChange }) {
+// `search: false` where only tdoc may be reached (the feedback widget, on
+// someone's site): no GitHub search; faces come through avatarFor, which
+// there asks tdoc for them.
+export function InviteField({ users, onChange, search = true, placeholder = 'Add an email or GitHub username…' }) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   // Same GitHub search the @ picker uses — see github-user-search.js.
   // An address is not a GitHub query — stop hitting the search API the moment
   // one is being typed.
-  const suggestions = useGithubUserSearch(value, { enabled: !value.includes('@') });
+  const suggestions = useGithubUserSearch(value, { enabled: search && !value.includes('@') });
 
   const add = (rawValue) => {
     const login = normalizeInvitee(rawValue);
@@ -91,7 +94,7 @@ export function InviteField({ users, onChange }) {
             {isEmailInvite(login) ? (
               <span className="tdoc-token-initial" aria-hidden="true">{login.slice(0, 1).toUpperCase()}</span>
             ) : (
-              <img src={`https://github.com/${encodeURIComponent(login)}.png?size=48`} alt="" />
+              <img src={avatarFor({ login, avatar_url: `https://github.com/${encodeURIComponent(login)}.png?size=48` })} alt="" />
             )}
             <span>{login}</span>
             <button
@@ -109,7 +112,7 @@ export function InviteField({ users, onChange }) {
           value={value}
           autoComplete="off"
           spellCheck="false"
-          placeholder="Add an email or GitHub username…"
+          placeholder={placeholder}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onChange={(event) => setValue(event.target.value)}

@@ -2,13 +2,18 @@ import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, 
 import { createPortal } from 'react-dom';
 import { usePortalContainer } from '../ui/portal.js';
 import { useGithubUserSearch } from './github-user-search.js';
-import { AGENT_TAG_JOINER, agentDisplayName, agentFacts, agentMentionName, matchAgentChoices, taggedAgentSpan, targetKey } from './agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, byRelevance, agentFacts, agentMentionName, matchAgentChoices, taggedAgentSpan, targetKey } from './agent-choices.js';
 import { ChevronDown } from 'lucide-react';
 import { AppMenu } from '../ui/menu.jsx';
-import { AGENT_GROUPS, AgentMenuItems, agentTag, whose } from './agent-menu.jsx';
+import { AgentMenuItems, agentTag } from './agent-menu.jsx';
 import { ProviderMark, recipientOption } from './notify-handoff.jsx';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
 import { parseRichText } from './rich-text.js';
+import { avatarFor, tdocUrl } from './model.js';
+
+// A person's face in the list: their picture, from tdoc when the composer is
+// in the feedback widget (see avatarFor). Only people are listed here.
+const personFace = (person) => avatarFor({ login: person.login, avatar_url: person.avatar_url });
 
 // A textarea that offers people after `@`. Both composers use it, so mentioning
 // works the same whether you are starting a thread or answering one.
@@ -61,10 +66,10 @@ export function MentionField({
   // tdoc AI (always last) and the team agent from anyone with two agents of
   // their own.
   const agentMatches = query
-    ? matchAgentChoices(agentsOnOffer.choices, query.query, {
+    ? matchAgentChoices(byRelevance(agentsOnOffer.choices), query.query, {
       limit: Infinity,
       labelOf: (t) => recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices).label,
-    }).map((t, i) => ({ t, i })).sort((a, b) => (AGENT_GROUPS.indexOf(whose(a.t)) - AGENT_GROUPS.indexOf(whose(b.t))) || (a.i - b.i)).map(({ t }) => {
+    }).map((t) => {
       const option = recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices);
       return {
         agent: t,
@@ -291,7 +296,7 @@ export function MentionField({
           {disabledAgentMatches.length && agentsOnOffer.guestAction ? <button type="button" className="tdoc-mention-connect"
             onMouseDown={(event) => event.preventDefault()} onClick={agentsOnOffer.guestAction.onClick}>{agentsOnOffer.guestAction.label}</button> : null}
           {agentMatches.some((row) => row.agent.tdoc_ai) ? (
-            <a className="tdoc-mention-connect" href="/start" onMouseDown={(event) => event.preventDefault()}>Connect my agent</a>
+            <a className="tdoc-mention-connect" href={tdocUrl('/start')} onMouseDown={(event) => event.preventDefault()}>Connect my agent</a>
           ) : null}
           {agentMatches.length && matches.length ? <div className="tdoc-mention-group" role="presentation">People</div> : null}
           {matches.map((person, i) => {
@@ -308,7 +313,7 @@ export function MentionField({
                 onMouseEnter={() => setActive(index)}
                 onClick={() => pick(person)}
               >
-                {person.avatar_url ? <img src={person.avatar_url} alt="" /> : <span className="tdoc-mention-anon" />}
+                {personFace(person) ? <img src={personFace(person)} alt="" /> : <span className="tdoc-mention-anon" />}
                 <span className="tdoc-mention-login">@{String(person.login).startsWith('email:') ? String(person.login).slice(6) : person.login}</span>
                 {person.name && person.name.toLowerCase() !== person.login ? (
                   <span className="tdoc-mention-name">{person.name}</span>
@@ -382,7 +387,7 @@ function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, disabledChoi
           </span>
         )}
       >
-        <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
+        <AgentMenuItems choices={byRelevance(choices)} preserveOrder disabledChoices={disabledChoices} guestAction={guestAction} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
       </AppMenu>
       <span aria-hidden="true">{`${value.slice(pill.end)}\u200b`}</span>
     </div>

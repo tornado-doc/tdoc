@@ -1,7 +1,8 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
-import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
+import { Check, ChevronRight, MoreHorizontal, SmilePlus, Sparkles } from 'lucide-react';
+import { SuggestContext } from './suggestions.js';
 import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
@@ -11,7 +12,8 @@ import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } f
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
-import { avatarFor, avatarInitial, QUICK_REACTIONS } from './model.js';
+import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
+import { AuthorFace } from './author-face.jsx';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
 import { productPageUrl } from './product-url.js';
@@ -19,7 +21,7 @@ import { observeVisibleRead } from './visible-read.js';
 
 const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };
 
-function authorLine(author) {
+export function authorLine(author) {
   if (!author) return 'anonymous';
   if (author.kind === 'agent') {
     // Brand stays on the avatar; the text line is name · owner, the owner
@@ -73,10 +75,13 @@ export function Author({ author, timestamp }) {
   }
 
   const avatar = avatarFor(author);
+  const initial = <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(author)}</span>;
   const providerAvatar = author.kind === 'agent' && author.provider;
   const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
     && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
-    ? author.profile_url : null;
+    ? tdocUrl(author.profile_url) : null;
+  // In the feedback widget the profile is on tdoc, not on the app it sits in.
+  const profileElsewhere = profileUrl && !profileUrl.startsWith('/');
   const hoverCard = author.kind === 'agent' && !!agentOwner(author);
   const title = author.kind === 'agent' && !hoverCard && author.principal?.terminal
     ? author.principal.terminal
@@ -87,16 +92,16 @@ export function Author({ author, timestamp }) {
         <span className="tdoc-agent-provider-mark" aria-hidden="true">
           <ProviderMark target={author} size={18} />
         </span>
-      ) : avatar ? (profileUrl ? (
+      ) : avatar && profileUrl ? (
         <a className="tdoc-author-profile" href={profileUrl}
+          {...(profileElsewhere ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
           aria-label={`View ${authorLine(author)}'s public profile`}
           title={`View ${authorLine(author)}'s public profile`}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}>
-          <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />
+          <AuthorFace src={avatar} style={AUTHOR_FACE_SIZE} fallback={initial} />
         </a>
-      ) : <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />)
-        : <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(author)}</span>}
+      ) : <AuthorFace src={avatar} style={AUTHOR_FACE_SIZE} fallback={initial} />}
       <span className="tdoc-cc-who">
         {hoverCard ? <AgentAuthorName author={author} /> : <span className="login">{authorLine(author)}</span>}
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
@@ -347,7 +352,7 @@ function TdocAiQuota({ reply, currentUser }) {
   const left = freeLeftText(ai && ai.remaining);
   return (
     <div className="tdoc-ai-quota">
-      {left ? <>tdoc AI · {left} · <a href="/start">Connect your agent for unlimited</a></> : 'tdoc AI'}
+      {left ? <>tdoc AI · {left} · <a href={tdocUrl('/start')}>Connect your agent for unlimited</a></> : 'tdoc AI'}
     </div>
   );
 }
@@ -656,7 +661,8 @@ function ProductWhere({ anchor, origin }) {
   let path = webUrl ? 'Page outside this site' : 'Invalid page link';
   if (safeUrl) { const u = new URL(safeUrl); path = `${u.host}${u.pathname}${u.search}`; }
   const text = String(anchor.text || '').trim();
-  const what = anchor.accessible_name || (text ? `${anchor.tag || 'element'} “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”` : anchor.tag || '');
+  // An area (a box dragged on the app) says so, with what was under it.
+  const what = anchor.region ? (anchor.label || 'Area') : anchor.accessible_name || (text ? `${anchor.tag || 'element'} “${text.slice(0, 40)}${text.length > 40 ? '…' : ''}”` : anchor.tag || '');
   const st = anchor.state || {};
   const inState = [
     st.dialog ? `in dialog “${st.dialog}”` : (st.layer ? `in “${st.layer}”` : ''),
@@ -705,6 +711,11 @@ export function CommentCard({
   // A thread that asked AI opens its replies, so the answer is in view when
   // it lands.
   const { ai: asking } = useContext(AgentMentionContext);
+  // Ask/Edit v2: Fix with AI on an open comment (flag askEditV2).
+  const suggest = useContext(SuggestContext);
+  const canFix = Boolean(suggest?.enabled) && !comment.resolved && comment.status !== 'applied' && !comment.deleted;
+  const fixing = canFix && (suggest.busyIds || []).includes(comment.id);
+  const fixPending = canFix && suggest.pendingFor(comment.id);
   const thinkingId = asking?.thinking?.id;
   const askingHere = Boolean(thinkingId) && (thinkingId === comment.id || (comment.replies || []).some((r) => r.id === thinkingId));
   useEffect(() => { if (askingHere) setRepliesOpen(true); }, [askingHere]);
@@ -1005,6 +1016,18 @@ export function CommentCard({
           </button>
           {!reactionCount ? (
             <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
+          ) : null}
+          {canFix ? (
+            <button
+              type="button"
+              className="tdoc-reply-toggle tdoc-fix-ai"
+              aria-busy={fixing ? 'true' : undefined}
+              disabled={fixing}
+              title={fixPending ? 'Show the suggested edit in the doc' : 'tdoc AI suggests an edit for this comment; you accept or reject it'}
+              onClick={(event) => { event.stopPropagation(); if (fixPending) suggest.review(comment.id); else suggest.fix(comment); }}
+            >
+              <Sparkles size={13} aria-hidden="true" />{fixing ? 'Fixing…' : fixPending ? 'Review fix' : 'Fix with AI'}
+            </button>
           ) : null}
         </span>
       </div>

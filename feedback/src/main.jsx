@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw } from 'lucide-react';
+import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw, SquareDashed, ChevronDown, Check } from 'lucide-react';
+import { FLAGS, isPreviewHostname } from '../../shell/src/feature-flags.js';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentThreadList } from '../../shell/src/document/comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from '../../shell/src/document/comment-pin.jsx';
@@ -9,7 +10,8 @@ import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
-import { TOP_BAR_HEIGHT } from '../../shell/src/document/model.js';
+import { askOwnAgent, ownAgentPick, useMyAgent } from '../../shell/src/document/my-agent.js';
+import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
 import {
   createComment, listComments, listMentionableUsers, postNotifyHandoff,
@@ -17,6 +19,8 @@ import {
   toggleReaction, updateCommentAnchor, updateCommentText,
 } from '../../shell/src/document/api.js';
 import { PortalContainerContext } from '../../shell/src/ui/portal.js';
+import { AppMenu, AppMenuItem } from '../../shell/src/ui/menu.jsx';
+import { FeedbackSharePanel } from '../../shell/src/feedback-share-panel.jsx';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
 // controls keep the browser's default button look on foreign pages.
@@ -74,7 +78,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-feedback-dock a:hover,
     #tdoc-feedback-root .tdoc-feedback-dock .on { background: #f0f0ee; }
     #tdoc-feedback-root .tdoc-feedback-dock .icon, #tdoc-feedback-root .tdoc-feedback-dock a { padding: 7px; color: #6b6a66; }
-    #tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share { color: #1a1a1a; }
+    #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-share { color: #1a1a1a; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary { background: #1652f0; color: #fff; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary:hover,
     #tdoc-feedback-root .tdoc-feedback-dock button.primary.on { background: #1245d0; color: #fff; }
@@ -91,7 +95,10 @@ ${uiCss}
       background: #1a1a1a; color: #fff; font: 600 13px/1.2 system-ui, -apple-system, sans-serif;
       box-shadow: 0 8px 28px rgba(0,0,0,.22);
     }
+    /* A phone wraps the words, never the Cancel button. */
+    #tdoc-feedback-root .tdoc-fb-banner { width: max-content; max-width: calc(100vw - 24px); }
     #tdoc-feedback-root .tdoc-fb-banner button {
+      flex: none; white-space: nowrap;
       appearance: none; border: 0; cursor: pointer; pointer-events: auto; border-radius: 999px; padding: 5px 10px;
       background: rgba(255,255,255,.14); color: #fff; font: inherit;
     }
@@ -99,6 +106,7 @@ ${uiCss}
       position: fixed; bottom: 70px; z-index: 2147483646; pointer-events: auto;
       padding: 9px 14px; border-radius: 10px; background: #1a1a1a; color: #fff;
       font: 500 13px/1.35 system-ui, -apple-system, sans-serif; box-shadow: 0 6px 20px rgba(0,0,0,.18);
+      max-width: calc(100vw - 36px); box-sizing: border-box;
     }
     #tdoc-feedback-root .tdoc-fb-toast.bad { background: #b42318; }
     #tdoc-feedback-root .tdoc-pin.is-active { outline: 2px solid #1652f0; outline-offset: 2px; }
@@ -160,7 +168,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-send-label, #tdoc-feedback-root .tdoc-fb-share-label { display: none; }
     @media (min-width: 701px) {
       #tdoc-feedback-root .tdoc-fb-send-label, #tdoc-feedback-root .tdoc-fb-share-label { display: inline; }
-      #tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share { padding: 7px 11px; }
+      #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-share { padding: 7px 11px; }
       #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send { padding: 7px 11px; color: #1a1a1a; }
       #tdoc-feedback-root .tdoc-fb-send-badge { position: static; }
     }
@@ -182,6 +190,47 @@ ${uiCss}
     #tdoc-feedback-root :is(.ui-menu-positioner, .tdoc-picker-positioner, .tdoc-mention-menu) {
       z-index: 2147483647 !important;
     }
+    /* Picking: a transparent sheet over the whole page takes every press, so
+       the app gets no click, drag or outside-press while someone points at
+       it (iframes and disabled controls included). Pins, dock and banner sit
+       above it. */
+    #tdoc-feedback-root .tdoc-fb-shield {
+      position: fixed; inset: 0; z-index: 2147483640; pointer-events: auto; background: transparent;
+      cursor: crosshair; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #tdoc-feedback-root .tdoc-fb-shield[hidden] { display: none; }
+    #tdoc-feedback-root .tdoc-drag-marquee { position: fixed; z-index: 2147483641; border-radius: 4px; }
+    #tdoc-feedback-root .tdoc-fb-area-tag {
+      position: absolute; left: -1.5px; bottom: 100%; margin-bottom: 4px; padding: 3px 7px; border-radius: 6px;
+      background: var(--td-accent); color: var(--td-ground); font: 600 11.5px/1.2 system-ui, -apple-system, sans-serif; white-space: nowrap;
+    }
+    #tdoc-feedback-root .tdoc-fb-area-tag.below { bottom: auto; top: 100%; margin: 4px 0 0; }
+    /* The box keeps a ground-colored hairline so it shows on accent-colored
+       content (a blue chart) as well as on white. */
+    #tdoc-feedback-root .tdoc-drag-marquee { box-shadow: 0 0 0 1px var(--td-ground); }
+    #tdoc-feedback-root .tdoc-fb-area-label { display: none; }
+    #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area { padding: 7px; }
+    @media (min-width: 701px) {
+      #tdoc-feedback-root .tdoc-fb-area-label { display: inline; }
+      #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area { padding: 7px 11px; }
+    }
+    /* The space switcher: the list's title, a menu of My space and the
+       spaces this person was invited to on this site. */
+    #tdoc-feedback-root .tdoc-fb-space { appearance: none; border: 0; background: none; padding: 2px 4px; margin: -2px -4px; border-radius: 6px;
+      display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; cursor: pointer; color: var(--td-ink); font: 700 15px/1.3 system-ui, -apple-system, sans-serif; }
+    #tdoc-feedback-root .tdoc-fb-space:hover { background: var(--td-surface); }
+    #tdoc-feedback-root .tdoc-fb-space span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #tdoc-feedback-root .tdoc-fb-space svg { width: 14px; height: 14px; flex: none; color: var(--td-muted); }
+    #tdoc-feedback-root .tdoc-fb-space-item { display: flex; align-items: center; gap: 8px; min-width: 200px; }
+    #tdoc-feedback-root .tdoc-fb-space-item span { flex: 1; }
+    #tdoc-feedback-root .tdoc-fb-space-item svg { width: 14px; height: 14px; color: var(--td-accent); }
+    #tdoc-feedback-root .tdoc-feedback-notice .tdoc-fb-invite-err { color: #ffb4ab; }
+    /* A small phone: the dock's buttons sit closer so the row stays on screen. */
+    @media (max-width: 400px) {
+      #tdoc-feedback-root .tdoc-feedback-dock { right: 8px; gap: 2px; }
+      #tdoc-feedback-root .tdoc-feedback-dock button.primary { padding: 7px 9px; }
+    }
   `;
   const host = document.createElement('div');
   host.id = 'tdoc-feedback-root';
@@ -192,6 +241,11 @@ ${uiCss}
   const feedbackRoot = document.createElement('div');
   feedbackRoot.id = 'tdoc-feedback-root';
   shadow.append(style, feedbackRoot);
+  const shield = document.createElement('div');
+  shield.className = 'tdoc-fb-shield';
+  shield.hidden = true;
+  feedbackRoot.append(shield);
+  const isOurs = (node) => node === host || host.contains(node);
   host.style.cssText = 'position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;margin:0!important;padding:0!important;border:0!important;width:auto!important;height:auto!important;max-width:none!important;max-height:none!important;overflow:visible!important;visibility:visible!important;font:13px/1.45 system-ui,-apple-system,sans-serif!important;color:#1a1a1a!important;text-transform:none!important;direction:ltr!important;text-align:left!important;letter-spacing:normal!important;word-spacing:normal!important;white-space:normal!important;line-height:1.45!important';
   document.documentElement.appendChild(host);
 
@@ -317,6 +371,52 @@ ${uiCss}
     place();
   })();
 
+  // The layer's presses and focus never reach the app. Following the modal
+  // (above) only helps with modals that say they are one; a hand-written
+  // overlay, a dropdown menu or a focus trap without aria-modal still runs
+  // its capture-phase "press outside" check on document, sees our host as the
+  // target, and closes (or swallows the click) before our bubble listeners
+  // run. So in window capture, which runs before any document listener, the
+  // app's copy of the event stops and a copy that cannot leave the shadow
+  // tree (composed: false) is sent to the same target for our own React
+  // handlers. Not copied: a link's click (the browser's own, trusted one
+  // opens it) and a press on our own dialog's backdrop, which Base UI closes
+  // from document. The capture sheet handles its own events below.
+  (function isolateLayerEvents() {
+    const KEYS = ['bubbles', 'cancelable', 'view', 'detail', 'screenX', 'screenY', 'clientX', 'clientY',
+      'ctrlKey', 'shiftKey', 'altKey', 'metaKey', 'button', 'buttons', 'relatedTarget', 'pointerId', 'width',
+      'height', 'pressure', 'tangentialPressure', 'tiltX', 'tiltY', 'twist', 'pointerType', 'isPrimary'];
+    let lastFocus = null;
+    shadow.addEventListener('focusin', (e) => { lastFocus = e.composedPath()[0] || null; }, true);
+    const copy = (e) => {
+      const init = { composed: false };
+      for (const key of KEYS) if (key in e) init[key] = e[key];
+      if (e.type === 'focusin' && init.relatedTarget === host) init.relatedTarget = lastFocus && lastFocus.isConnected ? lastFocus : null;
+      if ('touches' in e) {
+        init.touches = [...e.touches]; init.targetTouches = [...e.targetTouches]; init.changedTouches = [...e.changedTouches];
+      }
+      return new e.constructor(e.type, init);
+    };
+    const relay = (e) => {
+      const path = e.composedPath();
+      const inner = path[0];
+      if (!(inner instanceof Node) || inner === host || inner === shield || !path.includes(host)) return;
+      if (inner instanceof Element && inner.matches('.ui-dialog-backdrop, .ui-dialog-viewport')) return;
+      if (e.type === 'click' && path.some((n) => n instanceof Element && n.localName === 'a' && n.hasAttribute('href'))) return;
+      let event;
+      try { event = copy(e); } catch (_) { return; }
+      e.stopImmediatePropagation();
+      // The copy carries the click's activation (a checkbox, a submit), so
+      // the original must not do it a second time.
+      if (e.type === 'click') e.preventDefault();
+      inner.dispatchEvent(event);
+      if (event.defaultPrevented && e.cancelable && e.type !== 'click') e.preventDefault();
+    };
+    for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'focusin']) window.addEventListener(type, relay, true);
+    for (const type of ['touchstart', 'touchend']) window.addEventListener(type, relay, { capture: true, passive: true });
+  })();
+
+
   // Where we came from is where the comments go: the worker that served this
   // script. The bookmarklet and the one-line install both load it by URL.
   const base = (() => {
@@ -326,6 +426,10 @@ ${uiCss}
     } catch (_) {}
     return window.__TDOC_FEEDBACK_BASE__ || 'https://tdoc.dev';
   })();
+  // Faces, the tdoc mark and profile links come from that same tdoc origin
+  // (production, a PR preview or a local server), never from GitHub, Clerk
+  // or a logo CDN: the app's CSP then needs to allow only tdoc.
+  setTdocOrigin(base);
   const autoOpen = Boolean(document.currentScript && document.currentScript.getAttribute('data-tdoc-open'));
   // A site's own comment space (the SDK): <script … data-tdoc-space="…">.
   // Its visitors comment there, so their session is kept apart from any
@@ -336,6 +440,53 @@ ${uiCss}
     return /^[a-z0-9][a-z0-9-]{0,80}$/.test(String(raw)) ? String(raw) : '';
   })();
   const storageKey = space ? `tdoc-feedback:${base}:${space}` : `tdoc-feedback:${base}`;
+
+  // The click that follows a pick (see onPointerUp in FeedbackApp).
+  let swallowClickUntil = 0;
+  window.addEventListener('click', (event) => {
+    if (Date.now() > swallowClickUntil || isOurs(event.composedPath()[0])) return;
+    swallowClickUntil = 0;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+
+  // Comment on an area: drag a box, the dock's Area tool, C, and long-press
+  // then drag on a phone (shell/src/feature-flags.js feedbackAreaSelect). The
+  // flag is read for the tdoc origin that served this script.
+  const flagOn = (name) => {
+    const pinned = window.__TDOC_FLAGS__ && window.__TDOC_FLAGS__[name];
+    if (typeof pinned === 'boolean') return pinned;
+    const flag = FLAGS[name];
+    if (!flag) return false;
+    if (flag.default === true) return true;
+    try { return flag.preview === true && isPreviewHostname(new URL(base).hostname); } catch (_) { return false; }
+  };
+  const areaSelectOn = flagOn('feedbackAreaSelect');
+  // Share and invites inside the widget (feature-flags.js feedbackInvites).
+  const invitesOn = flagOn('feedbackInvites');
+
+  // An invite link opens the site with ?tdoc_invite=<id>. The id is taken
+  // off the address at once (it is a one-time key; a reload or a copied URL
+  // must not carry it on) and kept for this tab until it is answered: Join,
+  // or Keep my own. Answers are remembered per invite.
+  const INVITE_ID_RE = /^[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/;
+  const inviteKey = `${storageKey}:invite`;
+  if (invitesOn) {
+    try {
+      const url = new URL(location.href);
+      const id = url.searchParams.get('tdoc_invite');
+      if (id !== null) {
+        url.searchParams.delete('tdoc_invite');
+        history.replaceState(history.state, '', url.href);
+        if (INVITE_ID_RE.test(id)) sessionStorage.setItem(inviteKey, id);
+      }
+    } catch (_) {}
+  }
+  const readInvite = () => { try { const id = sessionStorage.getItem(inviteKey); return id && INVITE_ID_RE.test(id) ? id : null; } catch (_) { return null; } };
+  const dropInvite = () => { try { sessionStorage.removeItem(inviteKey); } catch (_) {} };
+  const choiceKey = (which) => `${storageKey}:invite-choice:${which}`;
+  const rememberChoice = (which, choice) => { try { localStorage.setItem(choiceKey(which), choice); } catch (_) {} };
+  const rememberedChoice = (which) => { try { return localStorage.getItem(choiceKey(which)); } catch (_) { return null; } };
 
   // The connect popup mints a token that stands in for our missing cookie
   // (see getSession in the worker). It lives with the app's origin: one per
@@ -388,33 +539,102 @@ ${uiCss}
 
   // First run on an app: a small window on the worker's origin, where the
   // cookie is, signs the person in if needed and posts the token back here.
+  //
+  // Signing in visits pages that send Cross-Origin-Opener-Policy: same-origin
+  // (the sign-in page and the check in front of it). From then on the popup
+  // has no window.opener, its message never arrives, and popup.closed reads
+  // true here while the person is still signing in. So the popup's first page
+  // tells us a claim id (posted only to this origin), and once the window
+  // reads closed we collect the connection from tdoc under that claim
+  // instead of giving up. See "Connecting when the popup loses its opener"
+  // in the worker.
+  const CLAIM_RE = /^[a-f0-9]{64}$/;
+  const CLAIM_WAIT_MS = 180_000;
+  const CLAIM_POLL_MS = 1500;
+  // The overlay's "Finish signing in in the tdoc window…" line; set by the app.
+  let connectWaiting = () => {};
   let connecting = null;
-  function connect() {
+  function connect({ invite = null } = {}) {
     if (connecting) return connecting;
     const attempt = new Promise((resolve, reject) => {
-      const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}${space ? `&space=${encodeURIComponent(space)}` : ''}`;
+      // With an invite, the window asks Join and connecting takes it.
+      const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}${space ? `&space=${encodeURIComponent(space)}` : ''}${invite ? `&invite=${encodeURIComponent(invite)}` : ''}`;
       let popup = null;
       let watch = null;
+      let poll = null;
+      let deadline = 0;
+      let settled = false;
+      const claims = new Set();
       const done = (fn) => (value) => {
+        if (settled) return;
+        settled = true;
         window.removeEventListener('message', onMessage);
         clearInterval(watch);
+        clearTimeout(poll);
+        connectWaiting(null);
         fn(value);
       };
-      const finish = done(resolve);
+      const finish = done((session) => { writeSession(session); resolve(session); });
       const fail = done(reject);
+      const failWith = (message, extra = {}) => { const error = new Error(message); error.status = 0; Object.assign(error, extra); fail(error); };
       const onMessage = (event) => {
-        if (event.origin !== base || !event.data || event.data.type !== 'tdoc-feedback-connected') return;
-        if (event.data.origin !== location.origin) return;
+        if (event.origin !== base || !event.data || event.data.origin !== location.origin) return;
+        if (event.data.type === 'tdoc-feedback-claim') {
+          if (CLAIM_RE.test(String(event.data.claim || ''))) claims.add(event.data.claim);
+          return;
+        }
+        if (event.data.type !== 'tdoc-feedback-connected') return;
         const session = event.data.session;
         if (!session || !session.token) return;
-        writeSession(session);
         finish(session);
+      };
+      const collect = async () => {
+        for (const claim of [...claims]) {
+          if (settled) return;
+          try {
+            const response = await fetch(`${base}/api/feedback/connect/claim`, {
+              method: 'POST', credentials: 'omit',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ claim }),
+            });
+            const body = await response.json().catch(() => null);
+            if (response.ok && body && body.status === 'connected' && body.session && body.session.token) { finish(body.session); return; }
+            if (response.status === 400 || response.status === 404) claims.delete(claim);
+          } catch (_) {}
+        }
+        if (settled) return;
+        if (!claims.size) { failWith('The tdoc window was closed before connecting.'); return; }
+        if (Date.now() > deadline) { failWith('Signing in took too long.', { timedOut: true }); return; }
+        poll = setTimeout(collect, CLAIM_POLL_MS);
+      };
+      const openPopup = () => window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+      const controls = {
+        // A new window makes a new claim; the old ones are still collected.
+        reopen: () => {
+          const next = openPopup();
+          if (next) { popup = next; deadline = Date.now() + CLAIM_WAIT_MS; }
+          return Boolean(next);
+        },
+        cancel: () => failWith('Not connected.', { cancelled: true }),
+      };
+      const watchPopup = () => {
+        watch = setInterval(() => {
+          if (!popup.closed) return;
+          clearInterval(watch);
+          // Closed before its first page could name a claim: really closed.
+          if (!claims.size) { failWith('The tdoc window was closed before connecting.'); return; }
+          // Maybe closed, maybe only cut off by signing in: keep collecting.
+          deadline = Date.now() + CLAIM_WAIT_MS;
+          connectWaiting(controls);
+          collect();
+        }, 500);
       };
       // Listen before opening. A signed-in popup can answer immediately, and
       // registering afterwards leaves the app waiting for a message it missed.
       window.addEventListener('message', onMessage);
-      popup = window.open(url, 'tdoc-feedback-connect', 'popup,width=520,height=640');
+      popup = openPopup();
       if (!popup) {
+        settled = true;
         window.removeEventListener('message', onMessage);
         const error = new Error('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.');
         error.status = 0;
@@ -422,13 +642,7 @@ ${uiCss}
         reject(error);
         return;
       }
-      watch = setInterval(() => {
-        if (popup.closed) {
-          const error = new Error('The tdoc window was closed before connecting.');
-          error.status = 0;
-          fail(error);
-        }
-      }, 500);
+      watchPopup();
     });
     // Every attempt, including a browser-blocked popup, must release the
     // single-flight slot. Otherwise the first rejected Promise is cached and
@@ -440,8 +654,21 @@ ${uiCss}
     return connecting;
   }
 
+  // A comment written before the connection exists is kept until it posts:
+  // connecting can be blocked, cancelled or fail, and the person retries
+  // (the tab can even reload). It is posted by the first call that has a
+  // session, then dropped.
+  const draftKey = `${storageKey}:draft`;
+  const readDraft = () => { try { return JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch (_) { return null; } };
+  const writeDraft = (draft) => {
+    try { if (draft) sessionStorage.setItem(draftKey, JSON.stringify(draft)); else sessionStorage.removeItem(draftKey); } catch (_) {}
+  };
+
   // A stored token that the worker no longer honours is dropped, not retried.
-  async function ensureSession() {
+  // `interactive: false` (the quiet warm-up on page load) never opens the
+  // connect window: a window no click opened is blocked by the browser. A
+  // space that moved says so instead, and Reconnect (a click) connects.
+  async function ensureSession({ interactive = true } = {}) {
     const stored = readSession();
     if (stored && stored.token) {
       try {
@@ -454,8 +681,15 @@ ${uiCss}
         // the token was minted — reconnect so it names the one they joined.
         if (![401, 403, 404, 409].includes(error.status)) throw error;
         writeSession(null);
+        if (!interactive) {
+          const quiet = new Error(error.message);
+          quiet.status = error.status;
+          quiet.reconnect = error.status === 409;
+          throw quiet;
+        }
       }
     }
+    if (!interactive) return null;
     return connect();
   }
 
@@ -554,7 +788,9 @@ ${uiCss}
   function elementFor(comment) {
     const anchor = comment && comment.anchor;
     if (!anchor) return null;
-    const want = norm(anchor.text);
+    // An area's `text` is what was under the box; its element is the
+    // container, found by the container's own text.
+    const want = norm(anchor.region ? anchor.region.container_text : anchor.text);
     const cached = found.get(comment.id);
     if (cached && cached.isConnected) return cached;
     let bySelector = null;
@@ -572,6 +808,163 @@ ${uiCss}
     if (!el && bySelector && (!anchor.tag || bySelector.localName === anchor.tag)) el = bySelector;
     if (el) found.set(comment.id, el); else found.delete(comment.id);
     return el;
+  }
+
+  // ---- Areas ---------------------------------------------------------------
+  // What is on the page at a point, under the capture sheet: the sheet and the
+  // rest of the layer are skipped. Iframes, canvases and disabled controls
+  // come back as themselves (they never get a click of their own).
+  function underPoint(x, y) {
+    let list = [];
+    try { list = document.elementsFromPoint(x, y); } catch (_) { list = []; }
+    return list.find((el) => !isOurs(el) && el !== document.documentElement) || null;
+  }
+
+  // A press that starts on text: the caret position at the point lies in a
+  // text node whose glyphs cover the point. Blank space, images, canvases and
+  // charts are not text.
+  function startsOnText(x, y) {
+    const before = shield.style.pointerEvents;
+    shield.style.pointerEvents = 'none';
+    try {
+      let node = null;
+      if (document.caretPositionFromPoint) node = document.caretPositionFromPoint(x, y)?.offsetNode || null;
+      else if (document.caretRangeFromPoint) node = document.caretRangeFromPoint(x, y)?.startContainer || null;
+      if (!node || node.nodeType !== 3 || !node.textContent.trim() || isOurs(node.parentNode)) return false;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return [...range.getClientRects()].some((r) => x >= r.left - 1 && x <= r.right + 1 && y >= r.top - 1 && y <= r.bottom + 1);
+    } catch (_) {
+      return false;
+    } finally {
+      shield.style.pointerEvents = before;
+    }
+  }
+
+  const canScroll = (el, dx, dy) => {
+    if (!(el instanceof Element)) return false;
+    const css = getComputedStyle(el);
+    const y = /(auto|scroll|overlay)/.test(css.overflowY) && el.scrollHeight > el.clientHeight
+      && (dy < 0 ? el.scrollTop > 0 : dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : true);
+    const x = /(auto|scroll|overlay)/.test(css.overflowX) && el.scrollWidth > el.clientWidth
+      && (dx < 0 ? el.scrollLeft > 0 : dx > 0 ? el.scrollLeft + el.clientWidth < el.scrollWidth - 1 : true);
+    return (dy && y) || (dx && x);
+  };
+  // The scrolling box under a point that is not the page itself (a modal's
+  // body, a list). The sheet would otherwise only ever scroll the page.
+  function innerScroller(x, y, dx, dy) {
+    for (let el = underPoint(x, y); el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      if (canScroll(el, dx, dy)) return el;
+    }
+    return null;
+  }
+
+  const contains = (outer, inner, slack = 2) => inner.left >= outer.left - slack && inner.top >= outer.top - slack
+    && inner.right <= outer.right + slack && inner.bottom <= outer.bottom + slack;
+  const toRect = ({ left, top, width, height }) => ({ left, top, width, height, right: left + width, bottom: top + height });
+  const overlap = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
+    * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+
+  // The smallest element on the page that holds the whole box: from what is
+  // under its middle, up. Inside a modal that is the modal (or a part of it).
+  function enclosingFor(box) {
+    let el = underPoint(box.left + box.width / 2, box.top + box.height / 2);
+    for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      if (!isOurs(el) && contains(el.getBoundingClientRect(), box)) return el;
+    }
+    return document.body;
+  }
+
+  const visibleText = (node) => {
+    const el = node.parentElement;
+    if (!el || isOurs(el) || el.closest('script,style,noscript,template')) return false;
+    return Boolean(node.textContent.trim());
+  };
+  // The words the box covers, in reading order.
+  function textUnder(box, container) {
+    const out = [];
+    let length = 0;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    for (let node = walker.nextNode(); node && length < 500; node = walker.nextNode()) {
+      if (!visibleText(node)) continue;
+      range.selectNodeContents(node);
+      if (![...range.getClientRects()].some((r) => overlap(toRect(r), box) > 0)) continue;
+      const words = node.textContent.replace(/\s+/g, ' ').trim();
+      out.push(words); length += words.length + 1;
+    }
+    return out.join(' ').slice(0, 500);
+  }
+
+  // The named things mostly inside the box: what an agent can look for in
+  // the code (a button, a chart canvas, an iframe), nearest the box first.
+  const MEANINGFUL = 'a,button,input,select,textarea,label,img,svg,canvas,video,iframe,h1,h2,h3,h4,h5,h6,li,td,th,[role],[id],[aria-label],[data-testid]';
+  function elementsUnder(box, container) {
+    const out = [];
+    const seen = new Set();
+    const nodes = [container, ...container.querySelectorAll(MEANINGFUL)].slice(0, 3000);
+    for (const el of nodes) {
+      if (out.length >= 8) break;
+      if (isOurs(el) || (el.closest && el.closest('svg') && el.localName !== 'svg')) continue;
+      const r = el.getBoundingClientRect();
+      const area = r.width * r.height;
+      if (!area || el === container) continue;
+      if (overlap(toRect(r), box) / area < 0.6) continue;
+      if ([...seen].some((parent) => parent.contains(el))) continue;
+      seen.add(el);
+      const text = norm(el.innerText || el.textContent).slice(0, 80);
+      out.push({
+        selector: selectorFor(el), tag: el.localName,
+        ...(text ? { text } : {}),
+        ...((el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title')) ? { name: (el.getAttribute('aria-label') || el.getAttribute('alt') || el.getAttribute('title')).slice(0, 80) } : {}),
+      });
+    }
+    return out;
+  }
+
+  const round4 = (n) => Math.round(n * 10000) / 10000;
+  // A comment on an area: the container's own anchor (selector, its text to
+  // find it again, the page state), the box relative to the container, in
+  // pixels and as fractions of its size (the container can be resized),
+  // where the page was scrolled, and a description of what is under the box.
+  // `text` is the text under the box: what every reader of an anchor shows.
+  function regionContext(box, container = enclosingFor(box)) {
+    const base = contextFor(container);
+    const c = container.getBoundingClientRect();
+    const text = textUnder(box, container);
+    const elements = elementsUnder(box, container);
+    const rel = { x: Math.round(box.left - c.left), y: Math.round(box.top - c.top), width: Math.round(box.width), height: Math.round(box.height) };
+    const frac = c.width && c.height
+      ? { x: round4((box.left - c.left) / c.width), y: round4((box.top - c.top) / c.height), width: round4(box.width / c.width), height: round4(box.height / c.height) }
+      : null;
+    const what = text
+      ? `“${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”`
+      : (elements[0] ? (elements[0].name || elements[0].tag) : (base.accessible_name || base.tag));
+    return {
+      ...base,
+      text,
+      label: `Area ${rel.width}×${rel.height} · ${what}`,
+      rect: { x: Math.round(box.left + scrollX), y: Math.round(box.top + scrollY), width: rel.width, height: rel.height },
+      region: {
+        container_text: base.text,
+        container_rect: base.rect,
+        rel, frac,
+        scroll: { x: Math.round(scrollX), y: Math.round(scrollY) },
+        elements,
+      },
+    };
+  }
+
+  // Where an area is on screen now: its fractions of the container's box.
+  function regionRect(anchor, el) {
+    const region = anchor && anchor.region;
+    if (!region || !el) return null;
+    const c = el.getBoundingClientRect();
+    if (region.frac) {
+      return toRect({ left: c.left + region.frac.x * c.width, top: c.top + region.frac.y * c.height, width: region.frac.width * c.width, height: region.frac.height * c.height });
+    }
+    const rel = region.rel || {};
+    return toRect({ left: c.left + (rel.x || 0), top: c.top + (rel.y || 0), width: rel.width || 0, height: rel.height || 0 });
   }
 
   async function loadSurface(session) {
@@ -618,25 +1011,48 @@ ${uiCss}
   // Every action: do the thing, then hand back the page's fresh surface. A
   // failure comes back as { ok: false, status, error } so the UI can say why.
   async function call(message) {
+    if (message.type === 'tdoc-feedback-submit') {
+      writeDraft({ text: message.text, anchor: message.anchor, sendToAgent: Boolean(message.sendToAgent), recipient: message.recipient || null, askAgent: message.askAgent || null });
+    }
+    // Connect again: drop the token first, then the one connect below.
+    if (message.type === 'tdoc-feedback-signin') writeSession(null);
     try {
       const session = await ensureSession();
       const { slug, version } = session;
       const body = (fields) => ({ slug, version, ...fields });
       let handoff = null;
+      let postedDraft = false;
+      const draft = readDraft();
+      if (draft && draft.text && draft.anchor) {
+        // Taken before posting, so two calls at once cannot post it twice.
+        writeDraft(null);
+        let made;
+        try {
+          made = await createComment(body({ text: draft.text, anchor: draft.anchor }));
+        } catch (error) {
+          // Kept for the next try, unless refused for a reason connecting
+          // again will not fix (an open composer still has the words).
+          if ((!error.status || error.status === 401) && !readDraft()) writeDraft(draft);
+          throw error;
+        }
+        postedDraft = message.type !== 'tdoc-feedback-submit';
+        emit('comment', { id: made && made.id, text: draft.text });
+        if (draft.sendToAgent && made && made.id) handoff = await sendToAgent(slug, made.id, draft.recipient);
+        // One of the commenter's own agents: it answers in the thread.
+        else if (draft.askAgent && made && made.id) handoff = await askOwnAgent(slug, made.id, draft.askAgent);
+      }
       switch (message.type) {
         case 'tdoc-feedback-load':
+        case 'tdoc-feedback-signin':
+        case 'tdoc-feedback-submit':
+          // Posted above, as the draft it was saved as.
           break;
-        case 'tdoc-feedback-submit': {
-          const made = await createComment(body({ text: message.text, anchor: message.anchor }));
-          emit('comment', { id: made && made.id, text: message.text });
-          if (message.sendToAgent && made && made.id) handoff = await sendToAgent(slug, made.id, message.recipient);
-          break;
-        }
         case 'tdoc-feedback-reply': {
           const made = await createComment(body({ text: message.text, parent_id: message.parentId }));
           emit('comment', { id: made && made.id, text: message.text, parentId: message.parentId });
           const target = message.handoffCommentId || (made && made.id);
           if (message.sendToAgent && target) handoff = await sendToAgent(slug, target, message.recipient);
+          else if (message.askAgent && made && made.id) handoff = await askOwnAgent(slug, made.id, message.askAgent);
           break;
         }
         case 'tdoc-feedback-resolve':
@@ -655,17 +1071,18 @@ ${uiCss}
         case 'tdoc-feedback-react':
           await toggleReaction(body({ comment_id: message.id, emoji: message.emoji }));
           break;
-        case 'tdoc-feedback-signin':
-          writeSession(null);
-          await connect();
-          break;
         default:
           return { ok: false, error: 'Unknown feedback action' };
       }
       const surface = await loadSurface(session);
-      return handoff ? { ...surface, handoff } : surface;
+      return { ...surface, ...(handoff ? { handoff } : {}), ...(postedDraft ? { postedDraft: true } : {}) };
     } catch (error) {
-      return { ok: false, status: error.status || 0, blocked: Boolean(error.blocked), error: String(error && error.message || error) };
+      const kept = Boolean(readDraft());
+      const why = String(error && error.message || error);
+      return {
+        ok: false, status: error.status || 0, blocked: Boolean(error.blocked), draftKept: kept,
+        error: kept && !error.status ? `${why} Your comment is kept: connect to post it.` : why,
+      };
     }
   }
 
@@ -674,6 +1091,7 @@ ${uiCss}
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
     const a = anchor || {};
+    if (a.region) return a.label || 'Area';
     const text = String(a.text || '').trim();
     return a.accessible_name || (text ? `${a.tag || 'element'} · “${text.slice(0, 48)}${text.length > 48 ? '…' : ''}”` : (a.selector || 'element'));
   };
@@ -687,12 +1105,11 @@ ${uiCss}
     return parts.join(' · ');
   };
 
-  function Dock({ session, openCount, unreadCount = 0, panelOpen, picking, onList, onPick, onHide, sendCount, onSend }) {
-    // Share opens the space's page on tdoc with the doc Share dialog open,
-    // as on any doc: who can comment here is whoever it lets in, and the
-    // owner moves the space into a team from there. The dialog is not drawn
-    // here: this page holds a token for comments on one doc, never one that
-    // may change who has access.
+  function Dock({ session, openCount, unreadCount = 0, panelOpen, picking, areaMode, onArea, onList, onPick, onHide, sendCount, onSend, onShare }) {
+    // Share: in the widget, the owner's invites (SharePanel). Who else has
+    // access, and moving the space into a team, stay in the space's Share on
+    // tdoc: this page's token can add an invite, never change the rest.
+    // (feedbackInvites off: Share opens that page, as it used to.)
     const shareUrl = session && session.share_url;
     return (
       <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && innerWidth > 700 ? { right: PANEL_WIDTH + 18 } : null}>
@@ -703,6 +1120,13 @@ ${uiCss}
         <button type="button" className={`primary${picking ? ' on' : ''}`} onClick={onPick} title="Click anything on the page to comment on it">
           <Plus aria-hidden="true" /> Comment
         </button>
+        {onArea ? (
+          // Same toggle as Comment, but every drag draws a box (no element
+          // or text guess). Icon only on a phone, as Share.
+          <button type="button" className={`tdoc-fb-area${picking && areaMode ? ' on' : ''}`} onClick={onArea} aria-pressed={picking && areaMode ? 'true' : 'false'} title="Drag a box around an area to comment on it" aria-label="Area">
+            <SquareDashed aria-hidden="true" /><span className="tdoc-fb-area-label">Area</span>
+          </button>
+        ) : null}
         {onSend ? (
           // The doc page's Send to agent: same icon, same count (comments
           // never sent, or with a human word since the last handoff).
@@ -710,7 +1134,13 @@ ${uiCss}
             <Send aria-hidden="true" /><span className="tdoc-fb-send-label">Send to agent</span>{sendCount ? <span className="tdoc-fb-send-badge">{sendCount > 99 ? '99+' : sendCount}</span> : null}
           </button>
         ) : null}
-        {shareUrl ? (
+        {invitesOn ? (onShare ? (
+          // Share opens here, in the widget (Julie, 2026-11-03): the owner
+          // invites people without leaving the site. Owner (team admin) only.
+          <button type="button" className="tdoc-fb-share" onClick={onShare} title="Invite people to comment here" aria-label="Share">
+            <Share2 aria-hidden="true" /><span className="tdoc-fb-share-label">Share</span>
+          </button>
+        ) : null) : shareUrl ? (
           // On a phone the dock is icons with counts (as Send to agent):
           // the word does not fit beside them at 390px.
           <a className="tdoc-fb-share" href={shareUrl} target="_blank" rel="noopener noreferrer" title="Invite people, or move this space into a team" aria-label="Share">
@@ -725,7 +1155,26 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ area, unreadComments, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing }) {
+  // Where this list's comments go, and the others to switch to (the
+  // bookmarklet: My space and the spaces this person was invited to here).
+  function SpaceSwitcher({ spaces, onSwitch }) {
+    const nameOf = (sp) => (sp.mine ? 'My space' : sp.owner ? `${sp.owner}’s space` : (sp.title || 'Shared space'));
+    const current = spaces.find((sp) => sp.current) || spaces[0];
+    return (
+      <AppMenu
+        align="start"
+        trigger={<button type="button" className="tdoc-fb-space" aria-label={`Feedback space: ${nameOf(current)}`}><span>{nameOf(current)}</span><ChevronDown aria-hidden="true" /></button>}
+      >
+        {spaces.map((sp) => (
+          <AppMenuItem key={sp.slug || 'mine'} onClick={() => onSwitch(sp)}>
+            <span className="tdoc-fb-space-item"><span>{nameOf(sp)}</span>{sp.current ? <Check aria-label="Current" /> : null}</span>
+          </AppMenuItem>
+        ))}
+      </AppMenu>
+    );
+  }
+
+  function ListPanel({ area, unreadComments, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
     const here = area.shownPageComments;
     const unreadIds = new Set(unreadComments.map((comment) => comment.id));
     const elsewhere = new Map();
@@ -751,7 +1200,7 @@ ${uiCss}
     return (
       <aside className="tdoc-fb-panel" aria-label="Feedback on this app">
         <header>
-          <strong>Feedback</strong>
+          {spaces.length > 1 && onSwitch ? <strong><SpaceSwitcher spaces={spaces} onSwitch={onSwitch} /></strong> : <strong>Feedback</strong>}
           <span className="tdoc-fb-filter" role="group" aria-label="Show">
             {['open', 'replied', 'resolved', 'all'].map((f) => (
               <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>
@@ -778,6 +1227,25 @@ ${uiCss}
     );
   }
 
+  // "<Name> invited you to comment on <site>": the invite link's question,
+  // or the server's (an invite for this person on this site they have not
+  // answered). Join, or for the bookmarklet Keep my own (its comments stay
+  // in the person's own space). The SDK's space is the site's: only Join.
+  function InvitePrompt({ invite, rightInset, onJoin, onKeep, onClose }) {
+    return (
+      <section className="tdoc-popup tdoc-feedback-notice tdoc-fb-invite-prompt" role="dialog" aria-label="Invitation" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
+        <div className="head"><span className="h">Invitation</span><button className="x" type="button" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button></div>
+        <p><strong>{invite.inviter}</strong> invited you to comment on <strong>{invite.host}</strong>.</p>
+        {invite.site ? null : <p>Join to leave your comments here in their space. Keep my own to keep them in yours.</p>}
+        {invite.error ? <p className="tdoc-fb-invite-err" role="alert">{invite.error}</p> : null}
+        <div className="foot">
+          {invite.site ? <span /> : <button className="ui-btn ui-btn-secondary ui-btn-m" type="button" disabled={invite.busy} onClick={onKeep}>Keep my own</button>}
+          <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" disabled={invite.busy} onClick={onJoin}>Join</button>
+        </div>
+      </section>
+    );
+  }
+
   function FeedbackApp() {
     const [shown, setShown] = useState(false);
     const [picking, setPicking] = useState(false);
@@ -787,14 +1255,27 @@ ${uiCss}
     const [session, setSession] = useState(() => readSession());
     const [hovered, setHovered] = useState(null);
     const [selected, setSelected] = useState(null);
+    // A box being commented on: fractions of `selected` (its container).
+    const [areaSel, setAreaSel] = useState(null);
+    // The dock's Area tool: every drag draws a box.
+    const [areaMode, setAreaMode] = useState(false);
+    // The box while it is being drawn, in viewport pixels.
+    const [drag, setDrag] = useState(null);
+    const pressRef = useRef(null);
     const [openId, setOpenId] = useState(null);
     const [notice, setNotice] = useState(null);
+    // Connecting, with the tdoc window cut off from us by signing in.
+    const [waiting, setWaiting] = useState(null);
+    useEffect(() => { connectWaiting = setWaiting; return () => { connectWaiting = () => {}; }; }, []);
     const [toast, setToast] = useState(null);
     const [refreshing, setRefreshing] = useState(false);
     const refreshingRef = useRef(false);
     const [reanchorId, setReanchorId] = useState(null);
     const [notifyIds, setNotifyIds] = useState(null);
     const [notifyAvoid, setNotifyAvoid] = useState(null);
+    const [shareOpen, setShareOpen] = useState(false);
+    // An invite to answer: { id } from the link, or { slug } from the server.
+    const [invite, setInvite] = useState(null);
     const [, setViewportTick] = useState(0);
 
     const say = useCallback((text, bad = false) => {
@@ -808,6 +1289,8 @@ ${uiCss}
         if (result.config) setSession((prev) => ({ ...(prev || {}), ...result.config, token: (prev && prev.token) || result.config.token }));
         setNotice(result.signedIn === false ? { status: 401, error: 'Connect your tdoc account to comment here.' } : null);
         if (result.handoff) say(result.handoff.message, !result.handoff.ok);
+        // The comment held while connecting has posted: its composer is done.
+        if (result.postedDraft) { setSelected(null); setAreaSel(null); setPicking(false); if (!result.handoff) say('Comment posted'); }
         return true;
       }
       setNotice(result || { error: 'Could not load tdoc comments' });
@@ -831,6 +1314,9 @@ ${uiCss}
     const show = useCallback(async ({ intent } = {}) => {
       try { localStorage.removeItem(hiddenKey); } catch (_) {}
       setShown(true);
+      // Opened by an invite link, not connected yet: its Join connects (and
+      // takes the invite); Keep my own connects on the first comment.
+      if (invitesOn && readInvite() && !readSession()) return;
       const result = await call({ type: 'tdoc-feedback-load' });
       if (!apply(result)) return;
       if (intent === 'bookmark') {
@@ -845,28 +1331,124 @@ ${uiCss}
     const hide = useCallback(() => {
       try { localStorage.setItem(hiddenKey, '1'); } catch (_) {}
       setShown(false); setPicking(false); setPanelOpen(false);
-      setSelected(null); setOpenId(null); setHovered(null); setReanchorId(null);
+      setSelected(null); setAreaSel(null); setOpenId(null); setHovered(null); setReanchorId(null);
     }, [hiddenKey]);
 
     const toggle = useCallback(() => { if (shown) hide(); else show({ intent: 'bookmark' }); }, [shown, hide, show]);
 
     // Warm the counts and the session quietly; connecting needs a click.
+    // A space that moved (409) is said with a Reconnect button: a window
+    // opened here, with no click, is one the browser blocks.
     useEffect(() => {
       let cancelled = false;
       (async () => {
         if (!readSession()) return;
+        let hidden = false;
+        try { hidden = localStorage.getItem(`${storageKey}:hidden`) === '1'; } catch (_) {}
         try {
-          const next = await ensureSession();
+          const next = await ensureSession({ interactive: false });
           if (cancelled || !next) return;
           setSession(next);
           const result = await call({ type: 'tdoc-feedback-load' });
-          let hidden = false;
-          try { hidden = localStorage.getItem(`${storageKey}:hidden`) === '1'; } catch (_) {}
           if (!cancelled && result?.ok) { setSurface(result); if (!hidden) setShown(true); }
-        } catch (_) {}
+        } catch (error) {
+          if (cancelled || !(error && error.reconnect)) return;
+          setSession(null);
+          if (!hidden) setShown(true);
+          setNotice({ status: 409, reconnect: true, error: 'Your comments on this site go to another feedback space now. Reconnect to keep commenting.' });
+        }
       })();
       return () => { cancelled = true; };
     }, []);
+
+    // An invite link (?tdoc_invite): who invited them, to which site.
+    useEffect(() => {
+      if (!invitesOn) return undefined;
+      const id = readInvite();
+      if (!id) return undefined;
+      if (rememberedChoice(id)) { dropInvite(); return undefined; }
+      let cancelled = false;
+      (async () => {
+        try {
+          const info = await request(`/api/feedback/invite?id=${encodeURIComponent(id)}`);
+          if (cancelled) return;
+          if (info.status !== 'pending' && info.status !== 'accepted') {
+            dropInvite();
+            setShown(true);
+            say(info.status === 'expired' ? 'This invite has expired. Ask for a new one.' : 'This invite is no longer valid.', true);
+            return;
+          }
+          setInvite({ id, inviter: (info.inviter && info.inviter.name) || 'Someone', host: info.host || location.host, site: Boolean(space) });
+          setShown(true);
+        } catch (error) {
+          if (cancelled) return;
+          dropInvite();
+          setShown(true);
+          say('This invite link is not valid.', true);
+        }
+      })();
+      return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    // Without a link: an invite for this person on this site that they have
+    // not answered (the bookmarklet only), asked once.
+    const serverPrompt = invitesOn && !space ? session?.invite_prompt : null;
+    useEffect(() => {
+      if (!serverPrompt || !serverPrompt.slug || invite || readInvite()) return;
+      if (rememberedChoice(`slug:${serverPrompt.slug}`)) return;
+      setInvite({ slug: serverPrompt.slug, invite: serverPrompt.invite || null, inviter: serverPrompt.inviter || 'Someone', host: serverPrompt.host || location.host, site: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [serverPrompt && serverPrompt.slug]);
+
+    const adopt = useCallback((next) => {
+      const stored = readSession();
+      const merged = { ...(stored || {}), ...next, token: next.token || (stored && stored.token) };
+      writeSession(merged);
+      setSession(merged);
+      return merged;
+    }, []);
+    const joinInvite = useCallback(async () => {
+      const current = invite;
+      if (!current) return;
+      setInvite({ ...current, busy: true, error: '' });
+      try {
+        // Taking an invite is a click on tdoc: the connect window asks Join
+        // and answers with a token for the space joined.
+        const id = current.id || current.invite;
+        if (!id) throw new Error('This invite is no longer valid.');
+        setSession(await connect({ invite: id }));
+        if (current.id) { rememberChoice(current.id, 'joined'); dropInvite(); }
+        else rememberChoice(`slug:${current.slug}`, 'joined');
+        setInvite(null);
+        setOpenId(null);
+        await load();
+        say(current.site ? 'Joined. Your comments here go to this site’s space.' : `Joined ${current.inviter}’s space`);
+      } catch (error) {
+        setInvite({ ...current, busy: false, error: error.message || 'Could not join' });
+      }
+    }, [invite, adopt, load, say]);
+    const keepOwn = useCallback(async () => {
+      const current = invite;
+      if (!current) return;
+      setInvite(null);
+      if (current.id) { rememberChoice(current.id, 'kept'); dropInvite(); }
+      else rememberChoice(`slug:${current.slug}`, 'kept');
+      if (!(readSession() || {}).token) return;
+      try {
+        adopt(await request('/api/feedback/invite/keep', { method: 'POST', body: JSON.stringify(current.id ? { id: current.id } : { slug: current.slug }) }));
+      } catch (_) {}
+    }, [invite, adopt]);
+    const switchSpace = useCallback(async (target) => {
+      if (target.current) return;
+      try {
+        // Not joined yet: Join in the connect window, with their invite.
+        if (target.invite) setSession(await connect({ invite: target.invite }));
+        else adopt(await request('/api/feedback/switch', { method: 'POST', body: JSON.stringify(target.mine ? { own: true } : { slug: target.slug }) }));
+        setOpenId(null);
+        await load();
+        say(target.mine ? 'Now in your own space' : `Now in ${target.owner ? `${target.owner}’s` : 'the shared'} space`);
+      } catch (error) { say(error.message || 'Could not switch', true); }
+    }, [adopt, load, say]);
 
     // @agent is the owner's: ask once who it would reach.
     const owner = Boolean(surface?.isOwner);
@@ -890,9 +1472,19 @@ ${uiCss}
     // button silently not being there. A team member gets it once the team
     // has an agent to send to; anyone else never does.
     const showSend = Boolean(slug && (owner || (teamMember && session?.notify && canSendToAgent)));
-    const agentChoices = useMemo(() => composerAgents({ canSendToAgent, notifyTargets: agent }), [canSendToAgent, agent]);
+    // Anyone else's own agents, answer only (my-agent.js): only where the
+    // server allows this token to reach them, the bookmarklet on tdoc's own
+    // pages (own_agent). No tdoc AI or team agent: they have no way in here.
+    const myAgent = useMyAgent(slug, Boolean(slug && surface?.ok && !owner && session?.own_agent));
+    const agentChoices = useMemo(() => composerAgents({
+      canSendToAgent,
+      notifyTargets: agent,
+      mine: !owner && session?.own_agent && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: [], tdoc_ai: false } : null,
+    }), [canSendToAgent, agent, owner, session?.own_agent, myAgent.state]);
+    // The default is an agent that may edit (the owner's, the team's); an
+    // own agent is picked from the @ list, as on a doc page.
     const agentMentions = useMemo(() => ({
-      choices: agentChoices, preselected: agentChoices[0] || null,
+      choices: agentChoices, preselected: agentChoices.find((t) => t.can_edit) || null,
       ai: null, privateAskSupported: false,
     }), [agentChoices]);
 
@@ -925,23 +1517,35 @@ ${uiCss}
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Picking: the only mode that takes over the page's clicks. Browsing
-    // leaves the app fully usable with the pins on top.
+    // Picking: the only mode that takes over the page. A transparent sheet
+    // covers it, so the app sees no press at all (no button fires, no modal
+    // closes on an outside press, no slider or drag-and-drop starts). One
+    // gesture, decided where it starts:
+    //   - a click (moved < 8px) picks the element under it;
+    //   - a drag that starts on text picks the element holding the text
+    //     (product anchors have no text ranges yet);
+    //   - a drag that starts anywhere else (blank, image, canvas, chart,
+    //     iframe), with Option/Alt held, or with the Area tool on, draws a box;
+    //   - on a touch screen a tap picks, a long press then drag draws a box,
+    //     and a plain swipe still scrolls.
     useEffect(() => {
-      if (!picking && !reanchorId) return undefined;
+      if (!picking && !reanchorId) { shield.hidden = true; return undefined; }
+      shield.hidden = Boolean(selected);
+      if (selected) return undefined;
       const priorCursor = document.documentElement.style.cursor;
       document.documentElement.style.cursor = 'crosshair';
-      const isTdocUi = (target) => target.closest?.('#tdoc-feedback-root');
-      const move = (event) => {
-        if (selected || isTdocUi(event.target)) return;
-        setHovered(event.target instanceof Element ? event.target : null);
+      const THRESHOLD = 8;
+      const LONG_PRESS_MS = 450;
+      const fromShield = (event) => event.composedPath()[0] === shield;
+      const pickable = (el) => el && el !== document.body && el !== document.documentElement && !isOurs(el);
+      const boxOf = (p, x, y) => toRect({ left: Math.min(p.x, x), top: Math.min(p.y, y), width: Math.abs(x - p.x), height: Math.abs(y - p.y) });
+      const commonAncestor = (a, b) => {
+        if (!a || !b) return a || b;
+        for (let el = a; el; el = el.parentElement) if (el.contains(b)) return el;
+        return a;
       };
-      const click = async (event) => {
-        if (selected || isTdocUi(event.target)) return;
-        const element = event.target instanceof Element ? event.target : null;
-        if (!element || element === document.body || element === document.documentElement) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
+      const pickElement = async (element) => {
+        if (!pickable(element)) return;
         if (reanchorId) {
           const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: contextFor(element) });
           if (apply(result)) setReanchorId(null);
@@ -949,24 +1553,160 @@ ${uiCss}
           return;
         }
         setOpenId(null);
+        setAreaSel(null);
         setSelected(element);
         setHovered(null);
       };
-      document.addEventListener('mousemove', move, true);
-      document.addEventListener('click', click, true);
-      return () => {
-        document.documentElement.style.cursor = priorCursor;
-        document.removeEventListener('mousemove', move, true);
-        document.removeEventListener('click', click, true);
+      const pickArea = async (box) => {
+        const container = enclosingFor(box);
+        if (reanchorId) {
+          const result = await call({ type: 'tdoc-feedback-reanchor', id: reanchorId, anchor: regionContext(box, container) });
+          if (apply(result)) setReanchorId(null);
+          setHovered(null);
+          return;
+        }
+        const c = container.getBoundingClientRect();
+        setOpenId(null);
+        setAreaSel(c.width && c.height
+          ? { x: (box.left - c.left) / c.width, y: (box.top - c.top) / c.height, width: box.width / c.width, height: box.height / c.height, label: regionContext(box, container).label }
+          : null);
+        setSelected(container);
+        setHovered(null);
       };
-    }, [picking, reanchorId, selected, apply]);
+      const reset = () => {
+        const p = pressRef.current;
+        if (p && p.timer) clearTimeout(p.timer);
+        pressRef.current = null;
+        setDrag(null);
+      };
+      let frame = 0;
+      const hoverAt = (x, y) => {
+        if (frame) return;
+        frame = requestAnimationFrame(() => { frame = 0; const el = underPoint(x, y); setHovered(pickable(el) ? el : null); });
+      };
+      const onPointerDown = (event) => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        if (event.pointerType === 'mouse') event.preventDefault();
+        reset();
+        const x = event.clientX, y = event.clientY;
+        const start = underPoint(x, y);
+        const forced = areaSelectOn && (areaMode || event.altKey);
+        const p = {
+          id: event.pointerId, touch: event.pointerType !== 'mouse', x, y, lastX: x, lastY: y, start,
+          mode: 'pending', onText: !forced && startsOnText(x, y), forced, timer: 0, scroller: undefined,
+        };
+        if (p.touch && areaSelectOn) {
+          // Hold still, then drag: a box. Moving first is a scroll.
+          p.timer = setTimeout(() => {
+            if (pressRef.current !== p || p.mode !== 'pending') return;
+            p.mode = 'area';
+            try { navigator.vibrate && navigator.vibrate(8); } catch (_) {}
+            setHovered(null);
+            setDrag(boxOf(p, p.lastX, p.lastY));
+          }, LONG_PRESS_MS);
+        }
+        if (!p.touch) { try { shield.setPointerCapture(event.pointerId); } catch (_) {} }
+        pressRef.current = p;
+      };
+      const onPointerMove = (event) => {
+        const p = pressRef.current;
+        const x = event.clientX, y = event.clientY;
+        if (!p) { if (event.pointerType === 'mouse') hoverAt(x, y); return; }
+        if (event.pointerId !== p.id) return;
+        p.lastX = x; p.lastY = y;
+        const far = Math.hypot(x - p.x, y - p.y) >= THRESHOLD;
+        if (p.mode === 'pending' && far) {
+          if (p.touch) { p.mode = 'scroll'; clearTimeout(p.timer); return; }
+          p.mode = !areaSelectOn ? 'element' : (p.forced || !p.onText ? 'area' : 'text');
+        }
+        if (p.mode === 'area') { setHovered(null); setDrag(boxOf(p, x, y)); }
+        else if (p.mode === 'text') setHovered(commonAncestor(p.start, underPoint(x, y)));
+      };
+      const onPointerUp = (event) => {
+        const p = pressRef.current;
+        if (!p || event.pointerId !== p.id) return;
+        reset();
+        // The sheet goes away under the composer before this press's click
+        // is sent: that click must not land on the app.
+        swallowClickUntil = Date.now() + 400;
+        const x = event.clientX, y = event.clientY;
+        if (p.mode === 'scroll') return;
+        if (p.mode === 'area') {
+          const box = boxOf(p, x, y);
+          // Smaller than the click threshold both ways: it was a click.
+          if (box.width >= THRESHOLD || box.height >= THRESHOLD) { pickArea(box); return; }
+        }
+        if (p.mode === 'text') { pickElement(commonAncestor(p.start, underPoint(x, y))); return; }
+        pickElement(p.start || underPoint(x, y));
+      };
+      // A finger that scrolls a modal's body: the sheet is not inside it,
+      // so move that box ourselves. Once a long press made a box, the finger
+      // draws instead of scrolling.
+      const onTouchMove = (event) => {
+        const p = pressRef.current;
+        if (!p) return;
+        const t = event.touches[0];
+        if (!t) return;
+        if (p.mode === 'area') { if (event.cancelable) event.preventDefault(); return; }
+        const dx = p.lastTouchX == null ? 0 : p.lastTouchX - t.clientX;
+        const dy = p.lastTouchY == null ? 0 : p.lastTouchY - t.clientY;
+        p.lastTouchX = t.clientX; p.lastTouchY = t.clientY;
+        if (p.scroller === undefined && (dx || dy)) p.scroller = innerScroller(p.x, p.y, dx, dy);
+        if (p.scroller && event.cancelable) { event.preventDefault(); p.scroller.scrollBy(dx, dy); }
+      };
+      const onWheel = (event) => {
+        const scroller = innerScroller(event.clientX, event.clientY, event.deltaX, event.deltaY);
+        if (!scroller) return;
+        event.preventDefault();
+        scroller.scrollBy(event.deltaX, event.deltaY);
+      };
+      const handlers = {
+        pointerdown: onPointerDown, pointermove: onPointerMove, pointerup: onPointerUp,
+        pointercancel: () => { if (pressRef.current && pressRef.current.mode !== 'area') reset(); },
+        touchmove: onTouchMove, wheel: onWheel,
+        // The browser's own reactions to a press on the sheet: a touch's
+        // follow-up mouse events and click, a long press's menu.
+        touchend: (event) => { if (event.cancelable) event.preventDefault(); },
+        contextmenu: (event) => event.preventDefault(),
+      };
+      const types = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'mousedown', 'mousemove', 'mouseup',
+        'click', 'dblclick', 'auxclick', 'contextmenu', 'touchstart', 'touchmove', 'touchend', 'touchcancel', 'wheel'];
+      // Window capture runs before every listener of the app.
+      const listener = (event) => {
+        if (!fromShield(event)) return;
+        event.stopImmediatePropagation();
+        if (handlers[event.type]) handlers[event.type](event);
+      };
+      const options = { capture: true, passive: false };
+      for (const type of types) window.addEventListener(type, listener, options);
+      // A press on the pins, the dock or the banner is not a pick, and a
+      // pointer that leaves the window ends a drag.
+      const away = () => { if (pressRef.current && !pressRef.current.touch) reset(); };
+      window.addEventListener('blur', away);
+      return () => {
+        if (frame) cancelAnimationFrame(frame);
+        reset();
+        shield.hidden = true;
+        document.documentElement.style.cursor = priorCursor;
+        for (const type of types) window.removeEventListener(type, listener, options);
+        window.removeEventListener('blur', away);
+      };
+    }, [picking, reanchorId, selected, apply, areaMode]);
+
+    // Leaving pick mode puts the Area tool away.
+    useEffect(() => { if (!picking && !reanchorId) setAreaMode(false); }, [picking, reanchorId]);
 
     // Esc steps back one level: composer → picking → card → list → hidden.
     useEffect(() => {
       if (!shown) return undefined;
       const keydown = (event) => {
         if (event.key !== 'Escape') return;
-        if (selected) setSelected(null);
+        if (pressRef.current) {
+          const p = pressRef.current;
+          if (p.timer) clearTimeout(p.timer);
+          pressRef.current = null;
+          setDrag(null); setHovered(null);
+        } else if (selected) { setSelected(null); setAreaSel(null); }
         else if (picking || reanchorId) { setPicking(false); setReanchorId(null); setHovered(null); }
         else if (openId) setOpenId(null);
         else if (panelOpen) setPanelOpen(false);
@@ -991,6 +1731,26 @@ ${uiCss}
       document.addEventListener('keydown', keydown, true);
       return () => document.removeEventListener('keydown', keydown, true);
     }, [surface, load]);
+
+    // C: Comment (pick mode) while the layer is shown, unless someone is
+    // typing (in the app or in our composer) or holds a modifier. The app
+    // does not get that C.
+    useEffect(() => {
+      if (!areaSelectOn || !shown) return undefined;
+      const keydown = (event) => {
+        if (event.key !== 'c' && event.key !== 'C') return;
+        if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+        const target = event.composedPath()[0];
+        if (target instanceof Element && (target.matches('input,textarea,select,[contenteditable=""],[contenteditable="true"]') || target.isContentEditable)) return;
+        if (selected || notifyIds) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setOpenId(null); setPanelOpen(false);
+        setPicking((p) => !p);
+      };
+      window.addEventListener('keydown', keydown, true);
+      return () => window.removeEventListener('keydown', keydown, true);
+    }, [shown, selected, notifyIds]);
 
     // Hash-route navigation is a new page: reload which comments are here.
     useEffect(() => {
@@ -1056,7 +1816,7 @@ ${uiCss}
       productLinkOrigin: location.origin,
       canSendToAgent,
       agentSetupHref: agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null,
-      onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, handoffCommentId: opts.handoffCommentId }),
+      onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: ownAgentPick(opts), handoffCommentId: opts.handoffCommentId }),
       onReact: (id, emoji) => mutate({ type: 'tdoc-feedback-react', id, emoji }),
       onDelete: (id) => mutate({ type: 'tdoc-feedback-delete', id }, false),
       onResolve: (id, resolved) => mutate({ type: 'tdoc-feedback-resolve', id, resolved }),
@@ -1089,11 +1849,36 @@ ${uiCss}
       );
     }
 
-    const hoverRect = (picking || reanchorId) ? hovered?.getBoundingClientRect() : null;
+    const hoverRect = (picking || reanchorId) && !drag ? hovered?.getBoundingClientRect() : null;
+    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    const bannerText = !areaSelectOn
+      ? (reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it')
+      : areaMode
+        ? (coarse ? 'Hold, then drag a box around the area' : 'Drag a box around the area')
+        : reanchorId
+          ? (coarse ? 'Tap the element, or hold and drag a box' : 'Click the element, or drag a box, this comment should point at')
+          : (coarse ? 'Tap an element, or hold and drag a box' : 'Click an element, or drag a box around an area');
+    // A box on screen: one being drawn, one being commented on, the open
+    // comment's area.
+    const marquee = (box, tag) => box ? (
+      <div className="tdoc-drag-marquee" style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
+        {tag ? <span className={`tdoc-fb-area-tag${box.top < 30 ? ' below' : ''}`}>{tag}</span> : null}
+      </div>
+    ) : null;
     const rightInset = panelOpen ? Math.min(PANEL_WIDTH, innerWidth) : 0;
-    const composerRect = selected?.getBoundingClientRect();
-    const placeCard = (element) => {
-      const rect = element?.getBoundingClientRect();
+    // The box being commented on, where it is now (it follows a scroll).
+    const areaBox = (() => {
+      if (!selected || !areaSel) return null;
+      const c = selected.getBoundingClientRect();
+      return toRect({ left: c.left + areaSel.x * c.width, top: c.top + areaSel.y * c.height, width: areaSel.width * c.width, height: areaSel.height * c.height });
+    })();
+    const composerRect = areaBox || selected?.getBoundingClientRect();
+    // Where a comment points on screen: its area, or its element.
+    const spotOf = (comment, element) => (comment.anchor && comment.anchor.region ? regionRect(comment.anchor, element) : null)
+      || element?.getBoundingClientRect();
+    const openSpot = openComment && openComment.anchor && openComment.anchor.region ? regionRect(openComment.anchor, elementFor(openComment)) : null;
+    const placeCard = (element, comment) => {
+      const rect = element ? spotOf(comment || {}, element) : null;
       const width = innerWidth - rightInset;
       if (!rect) return { top: 60, left: Math.max(8, width - 300) };
       const left = rect.right + 294 < width ? rect.right + 10 : Math.max(8, Math.min(rect.left - 290, width - 300));
@@ -1120,17 +1905,20 @@ ${uiCss}
 
     return (
       <AgentMentionContext.Provider value={agentMentions}>
-      <AgentButtonsContext.Provider value={!canSendToAgent}>
+      <AgentButtonsContext.Provider value={!canSendToAgent && !agentChoices.length}>
         {(picking || reanchorId) && !selected ? (
           <div className="tdoc-fb-banner" role="status">
-            {reanchorId ? 'Click the element this comment should point at' : 'Click anything on the page to comment on it'}
+            {bannerText}
             <button type="button" onClick={() => { setPicking(false); setReanchorId(null); setHovered(null); }}>Cancel · Esc</button>
           </div>
         ) : null}
         {hoverRect ? <div className="tdoc-hover-outline" style={{ left: hoverRect.left, top: hoverRect.top, width: hoverRect.width, height: hoverRect.height }} /> : null}
+        {marquee(drag, 'Comment on this area')}
+        {marquee(areaBox)}
+        {!selected ? marquee(openSpot) : null}
         {pins.map(({ comment, element }) => {
           if (!element) return null;
-          const rect = element.getBoundingClientRect();
+          const rect = spotOf(comment, element);
           if (rect.bottom < 0 || rect.top > innerHeight) return null;
           const pinState = commentPinState(comment, { seenMap: area.seenMap, handoffViewer, isOwner: owner });
           return (
@@ -1152,7 +1940,7 @@ ${uiCss}
           /* The shared composer adds the document shell's 48px bar. Feedback
              already has viewport coordinates, so cancel that offset here. */
           <CommentComposer
-            selection={{ kind: 'element', label: labelOf(contextFor(selected)), rect: {
+            selection={{ kind: 'element', label: areaBox ? (areaSel.label || 'Area') : labelOf(contextFor(selected)), rect: {
               top: composerRect.top - TOP_BAR_HEIGHT,
               bottom: composerRect.bottom - TOP_BAR_HEIGHT,
               left: Math.min(composerRect.left, Math.max(8, innerWidth - rightInset - COMPOSER_WIDTH - 8)),
@@ -1161,11 +1949,11 @@ ${uiCss}
             canSendToAgent={canSendToAgent}
             connectAgentPrompt={agent && agent.reason === 'no_agent_bound' ? CONNECT_AGENT_PROMPT : null}
             agentSetupHref={agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null}
-            onClose={() => setSelected(null)}
+            onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); }}
             onSubmit={async (text, opts = {}) => {
-              const anchor = contextFor(selected);
-              const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient });
-              if (apply(result)) { setSelected(null); setPicking(false); }
+              const anchor = areaBox ? regionContext(areaBox, selected) : contextFor(selected);
+              const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: ownAgentPick(opts) });
+              if (apply(result)) { setSelected(null); setAreaSel(null); setPicking(false); }
             }}
           />
         ) : null}
@@ -1176,7 +1964,7 @@ ${uiCss}
             comment={openComment}
             unanchored={!elementFor(openComment) && !stateLabel(openComment.anchor)}
             floating
-            position={placeCard(elementFor(openComment))}
+            position={placeCard(elementFor(openComment), openComment)}
           />
         ) : null}
 
@@ -1193,12 +1981,14 @@ ${uiCss}
             onClose={() => setPanelOpen(false)}
             onRefresh={refresh}
             refreshing={refreshing}
+            spaces={invitesOn && !space ? (session?.spaces || []) : []}
+            onSwitch={switchSpace}
           />
         ) : null}
 
         {notice ? (
           <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
-            <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
+            <div className="head"><span className="h">{notice.reconnect ? 'Reconnect tdoc' : notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
             <p>{notice.error}</p>
             <div className="foot"><span /><button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={async () => {
               setNotice(null);
@@ -1206,12 +1996,35 @@ ${uiCss}
               // This button is the continuation of "leave a comment", not a
               // standalone account setting. After a successful first connect,
               // put the person back where they were headed: picking an element.
-              if (apply(result)) setPicking(true);
-            }}>Connect tdoc</button></div>
+              if (apply(result) && !result.postedDraft) setPicking(true);
+            }}>{notice.reconnect ? 'Reconnect' : 'Connect tdoc'}</button></div>
           </section>
         ) : null}
 
-        {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}`} role="status" style={{ right: 18 + rightInset }}>{toast.text}</div> : null}
+        {waiting && !notice ? (
+          <section className="tdoc-popup tdoc-feedback-notice tdoc-feedback-waiting" role="status" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
+            <div className="head"><span className="h">Connecting to tdoc</span></div>
+            <p>Finish signing in in the tdoc window… {readDraft() ? 'Your comment posts as soon as you are connected.' : ''}</p>
+            <div className="foot">
+              <button className="ui-btn ui-btn-secondary ui-btn-m" type="button" onClick={() => waiting.cancel()}>Cancel</button>
+              <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => { if (!waiting.reopen()) say('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.', true); }}>Open the tdoc window again</button>
+            </div>
+          </section>
+        ) : null}
+
+        {invite && !notice ? (
+          <InvitePrompt
+            invite={invite}
+            rightInset={rightInset}
+            onJoin={joinInvite}
+            onKeep={keepOwn}
+            onClose={() => { if (invite.id) dropInvite(); else rememberChoice(`slug:${invite.slug}`, 'later'); setInvite(null); }}
+          />
+        ) : null}
+
+        {shareOpen && slug ? <FeedbackSharePanel slug={slug} open onClose={() => setShareOpen(false)} request={request} /> : null}
+
+        {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}`} role="status" style={{ right: innerWidth - rightInset >= 240 ? 18 + rightInset : 18 }}>{toast.text}</div> : null}
 
         <Dock
           session={session || surface?.config}
@@ -1219,11 +2032,23 @@ ${uiCss}
           unreadCount={unreadComments.length}
           panelOpen={panelOpen}
           picking={picking}
+          areaMode={areaMode}
+          onArea={areaSelectOn ? () => {
+            setOpenId(null); setSelected(null); setAreaSel(null); setPanelOpen(false);
+            if (!picking) { setPicking(true); setAreaMode(true); } else setAreaMode((v) => !v);
+          } : null}
           onList={() => setPanelOpen((v) => !v)}
-          onPick={() => { setOpenId(null); setSelected(null); setPanelOpen(false); setPicking((v) => !v); }}
+          onPick={() => { setOpenId(null); setSelected(null); setAreaSel(null); setPanelOpen(false); setAreaMode(false); setPicking((v) => !v); }}
           onHide={hide}
           sendCount={ready.length}
           onSend={showSend ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
+          onShare={session?.can_share && slug ? () => {
+            setPicking(false);
+            // On the owner's own site (the SDK) or tdoc: here. On anyone
+            // else's, where a page can read this token: tdoc's Share window.
+            if (session.share_here) setShareOpen(true);
+            else if (!window.open(`${base}/feedback/share/${encodeURIComponent(slug)}`, 'tdoc-feedback-share', 'popup,width=560,height=720')) say('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.', true);
+          } : null}
         />
         {notifyIds ? (
           <NotifyHandoffPanel

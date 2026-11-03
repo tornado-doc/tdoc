@@ -180,6 +180,12 @@ if [ -n "${TDOC_DAEMON_ASK:-}" ]; then
   echo "[tdoc] a question run cannot publish; answer with tdoc-agent-reply --ask." >&2
   exit 2
 fi
+# A suggestions run (TDOC_DAEMON_SUGGEST) sends edits with tdoc-propose;
+# the person accepts them in the doc. It never publishes.
+if [ -n "${TDOC_DAEMON_SUGGEST:-}" ]; then
+  echo "[tdoc] a suggestions run cannot publish; send the edits with tdoc-propose." >&2
+  exit 2
+fi
 if [ -n "${TDOC_DAEMON_SLUG:-}" ]; then
   if [ "$SLUG" != "$TDOC_DAEMON_SLUG" ] || [ -n "$PLATFORM_FLAG" ] || [ "$SIGNIN_ONLY" = "1" ]; then
     echo "[tdoc] the daemon may only publish \"$TDOC_DAEMON_SLUG\" (no --platform, no sign-in)." >&2

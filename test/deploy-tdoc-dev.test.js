@@ -34,7 +34,7 @@ t('workflow is scoped to tornado-doc/tdoc, not forks or BYOK workers', () => {
 });
 
 t('wrangler-action is pinned to a commit SHA, not a mutable tag', () => {
-  assert(wf.includes('cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0'),
+  assert(wf.includes('cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0'),
     'wrangler-action must be SHA-pinned (same policy as test.yml)');
   assert(!/wrangler-action@v\d/.test(wf), 'must not use a floating wrangler-action tag');
 });

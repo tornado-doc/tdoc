@@ -28,12 +28,40 @@ export const FLAGS = Object.freeze({
   // Settings -> Delete account (self-serve). Owner-approved; the flag is the
   // off switch while it settles.
   deleteAccount: Object.freeze({ label: 'Delete account in Settings', owner: 'julie', added: '2026-10-28', default: true }),
+  // The homepage demo's scripted Edit: Ask AI's Edit opens with a ready
+  // request, sending it rewrites a paragraph in front of the visitor, then a
+  // sign-up call to action (demo-agent.js DEMO_REWRITES). Landing doc only;
+  // on in PR previews until approved.
+  demoEditRewrite: Object.freeze({ label: 'Homepage demo: scripted Edit', owner: 'julie', added: '2026-11-01', default: true, preview: true }),
+  // Feedback layer: drag a box to comment on an area (charts, canvases,
+  // iframes, tiny or overlapping elements), the dock's Area tool, the C
+  // shortcut and long-press-drag on phones. The client runs on other sites,
+  // so "preview" is the tdoc origin that served feedback.js, not the page.
+  feedbackAreaSelect: Object.freeze({ label: 'Feedback: comment on an area', owner: 'julie', added: '2026-11-01', default: false, preview: true }),
+  // Ask/Edit v2: one Ask AI input (tdoc AI answers a question, or proposes
+  // edits that show in the doc as red/green suggestions to accept or
+  // reject), Edit with AI on a selection, Fix with AI on comment cards.
+  // Replaces Ask AI's Ask / Edit switch where it is on. Dev mode only (and
+  // PR previews): the server enforces it too (worker askEditV2Allowed: the
+  // boot's canSuggest, the routes, propose_edits, reply_as), so pinning the
+  // flag in a browser shows nothing to anybody else.
+  // Feedback widget: Share inside the widget (invite link, invite by email
+  // or GitHub handle), the Join / Keep my own prompt an invite opens on the
+  // site, and the space switcher. Approved by Julie (2026-11-03); off
+  // switch while it settles. Like feedbackAreaSelect it is read for the
+  // tdoc origin that served feedback.js.
+  feedbackInvites: Object.freeze({ label: 'Feedback: share and invite from the widget', owner: 'julie', added: '2026-11-03', default: true }),
+  askEditV2: Object.freeze({ label: 'Ask AI edits the doc (inline suggestions)', owner: 'julie', added: '2026-11-02', default: false, preview: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
 
+export function isPreviewHostname(hostname) {
+  return PREVIEW_HOST.test(String(hostname || ''));
+}
+
 function isPreviewHost() {
-  return typeof location !== 'undefined' && PREVIEW_HOST.test(location.hostname || '');
+  return typeof location !== 'undefined' && isPreviewHostname(location.hostname);
 }
 
 export function isFeatureOn(name, devMode = readDevMode()) {

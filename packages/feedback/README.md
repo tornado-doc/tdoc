@@ -11,6 +11,15 @@ Enter your site's address. Who can comment is the space's Share settings,
 the same as any tdoc doc: people you invite, anyone with the link who signs
 in, or your team if the space is in a team.
 
+Or let your agent do it: with tdoc connected over MCP (`https://tdoc.dev/mcp`),
+the `create_feedback_space` tool takes your site's origins (and optionally a
+team you are an admin of), makes a private space bound to them, and returns
+the space id and the line below. Asked again for the same origin, it returns
+the same space. From a terminal with the tdoc skill:
+`tdoc-feedback init --site https://app.example.com --write index.html`
+(or `--env` for `TDOC_FEEDBACK_SPACE=<slug>`). Both call
+`POST https://tdoc.dev/api/feedback/spaces`.
+
 ## 2. Add it to your site
 
 One line, no build step:
@@ -36,6 +45,31 @@ import { TdocFeedback } from '@tdoc/feedback/react';
 
 <TdocFeedback space="YOUR_SPACE_ID" onReady={(tdoc) => {/* tdoc.open() … */}} />
 ```
+
+### Content-Security-Policy
+
+If your site sends a CSP, allow tdoc's origin in three directives and
+nothing else:
+
+```
+script-src  https://tdoc.dev
+connect-src https://tdoc.dev
+img-src     https://tdoc.dev
+```
+
+Everything the widget loads comes from there: the script, its API calls,
+the tdoc mark, and every face it shows. People's and agents' pictures are
+served by `https://tdoc.dev/avatar/…`, never straight from GitHub or a CDN.
+A face that still cannot load shows the person's initial. (Using a PR
+preview or your own tdoc server? Allow that origin instead.)
+
+### Cross-Origin-Opener-Policy
+
+If your site sends `Cross-Origin-Opener-Policy`, use
+`same-origin-allow-popups`, not `same-origin`. Signing in opens a small tdoc
+window that hands the connection back to the page that opened it;
+`same-origin` cuts that link, and the widget reports the window as closed
+before anyone can sign in. Sites that send no COOP need nothing.
 
 ## API
 
