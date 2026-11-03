@@ -809,7 +809,9 @@ it again leaves one tag); `--env` prints `TDOC_FEEDBACK_SPACE=<slug>` for an
 app that reads the id from its environment. If the site sends a
 Content-Security-Policy, it must allow the tdoc origin (`https://tdoc.dev`) in
 `script-src`, `connect-src` and `img-src`, and nothing else: the widget, its
-API calls and every face it shows come from there. The space is private: the person
+API calls and every face it shows come from there. If it sends
+Cross-Origin-Opener-Policy, that must be `same-origin-allow-popups`, not
+`same-origin`, or signing in from the widget cannot finish. The space is private: the person
 and the people they invite, or with `--team` (team admins only) the team's
 members. Asking again for an origin returns the same space. Comments left on
 the site come back through `tdoc-pull <slug>` like any doc. Same endpoint as

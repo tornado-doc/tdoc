@@ -63,6 +63,14 @@ served by `https://tdoc.dev/avatar/…`, never straight from GitHub or a CDN.
 A face that still cannot load shows the person's initial. (Using a PR
 preview or your own tdoc server? Allow that origin instead.)
 
+### Cross-Origin-Opener-Policy
+
+If your site sends `Cross-Origin-Opener-Policy`, use
+`same-origin-allow-popups`, not `same-origin`. Signing in opens a small tdoc
+window that hands the connection back to the page that opened it;
+`same-origin` cuts that link, and the widget reports the window as closed
+before anyone can sign in. Sites that send no COOP need nothing.
+
 ## API
 
 `open()`, `close()`, `toggle()`, `comment()` (start picking an element),
