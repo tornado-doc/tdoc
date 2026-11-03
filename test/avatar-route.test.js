@@ -210,14 +210,16 @@ globalThis.caches = { default: cache };
     assert(fetched.length === 0);
   });
 
-  await t('an upstream error, 429 or timeout is not cached (no-store); a real miss is', async () => {
-    for (const [name, make] of [['e500', () => new Response('x', { status: 500 })], ['e429', () => new Response('x', { status: 429 })], ['threw', () => { throw new Error('down'); }]]) {
+  await t('an upstream error, 403/429 or timeout: no-store for the browser, a minute at the edge; a real miss 5 min', async () => {
+    for (const [name, make] of [['e500', () => new Response('x', { status: 500 })], ['e429', () => new Response('x', { status: 429 })], ['e403', () => new Response('x', { status: 403 })], ['threw', () => { throw new Error('down'); }]]) {
       reset();
       routes[`https://github.com/${name}.png?size=96`] = make;
       const r = await get(`/avatar/${name}`);
       assert(r.status === 404, `${name} ${r.status}`);
       assert(r.headers.get('cache-control') === 'no-store', `${name} ${r.headers.get('cache-control')}`);
-      assert(cache.puts.length === 0, `${name} cached`);
+      assert(cache.puts.length === 1, `${name} not kept at the edge`);
+      const kept = await cache.match(`https://tdoc.dev/avatar/${name}`);
+      assert(kept.status === 404 && kept.headers.get('cache-control') === 'public, max-age=60', `${name} edge ${kept.headers.get('cache-control')}`);
     }
     reset();
     routes['https://github.com/gone.png?size=96'] = new Response('x', { status: 404 });

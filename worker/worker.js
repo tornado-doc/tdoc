@@ -2213,8 +2213,10 @@ function avatarHeaders(type, cacheControl) {
 }
 
 // A miss upstream answered for (no such picture, not an image) is kept a
-// few minutes; one it did not (an error, a 429, a timeout) is not kept at
-// all, so a throttled minute does not blank everyone's faces for five.
+// few minutes; one it did not (an error, a 403/429, a timeout) is never
+// kept by the browser, so a throttled minute does not blank faces for
+// five, and only a minute at the edge, so a throttled upstream is not
+// hammered by every face load either.
 function avatarMiss(transient = false) {
   return new Response('Not found', {
     status: 404,
@@ -2222,6 +2224,7 @@ function avatarMiss(transient = false) {
   });
 }
 const AVATAR_TRANSIENT = Object.freeze({ transient: true });
+const AVATAR_TRANSIENT_EDGE_CACHE_CONTROL = 'public, max-age=60';
 
 // Upstream { bytes, type } for `target`; null when upstream says there is
 // no such image; AVATAR_TRANSIENT when it could not say. Redirects are followed by hand, each
@@ -2246,7 +2249,8 @@ async function fetchAvatarUpstream(target) {
       }
       if (res.status !== 200 || !res.body) {
         try { await res.body?.cancel(); } catch {}
-        return res.status === 429 || res.status >= 500 ? AVATAR_TRANSIENT : null;
+        // 403 too: GitHub's secondary rate limit answers with it.
+        return res.status === 403 || res.status === 429 || res.status >= 500 ? AVATAR_TRANSIENT : null;
       }
       const declared = String(res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
       const isSvg = declared === 'image/svg+xml';
@@ -2302,8 +2306,11 @@ async function avatarResponse(req, url, ctx) {
     res = got && got.transient ? avatarMiss(true)
       : got ? new Response(got.bytes, { status: 200, headers: avatarHeaders(got.type, AVATAR_CACHE_CONTROL) })
         : avatarMiss();
-    if (cache && !(got && got.transient)) {
-      const put = cache.put(cacheKey, res.clone()).catch(() => {});
+    if (cache) {
+      const stored = got && got.transient
+        ? new Response('Not found', { status: 404, headers: avatarHeaders('text/plain; charset=utf-8', AVATAR_TRANSIENT_EDGE_CACHE_CONTROL) })
+        : res.clone();
+      const put = cache.put(cacheKey, stored).catch(() => {});
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put); else await put;
     }
   }
