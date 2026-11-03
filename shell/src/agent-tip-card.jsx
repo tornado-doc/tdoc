@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Infinity as Loop, Play, Sparkles, X } from 'lucide-react';
 import { AppButton } from './ui/button.jsx';
+import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 import { CodeBlock } from './ui/code-block.jsx';
 import { listNotifications } from './document/api.js';
 import { readStored, writeStored } from './safe-storage.js';
@@ -76,27 +77,57 @@ function dismissals() {
   return Number(readStored(DISMISS_KEY)) || 0;
 }
 
-// The looping product window in the hero: a comment handed to the agent,
-// the agent revising, the new version with a reply.
+const ASK = 'tighten the pricing and add the EU numbers';
+
+// Types `text` out while `active`, a few letters at a time; shows it whole
+// otherwise (and at once with reduced motion).
+function useTyped(text, active) {
+  const [n, setN] = useState(active ? 0 : text.length);
+  useEffect(() => {
+    if (!active) { setN(text.length); return undefined; }
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setN(text.length); return undefined; }
+    setN(0);
+    const id = setInterval(() => setN((k) => (k >= text.length ? k : k + 1)), 38);
+    return () => clearInterval(id);
+  }, [text, active]);
+  return text.slice(0, n);
+}
+
+// The looping product window in the hero, one window for all three frames:
+// Maya's comment types in, the agent picks it up and revises, the new
+// version lands with the comment resolved. The window runs off the bottom
+// of the hero, and the thread moves up as the next message arrives.
 function Hero({ scene, agent, onClose }) {
+  const typed = useTyped(ASK, scene === 0);
+  const typing = scene === 0 && typed.length < ASK.length;
   return (
     <div className="tdoc-tip-hero">
       <AppButton variant="icon" size="s" className="tdoc-tip-close" aria-label="Close" onClick={onClose}><X size={13} /></AppButton>
       <div className="tdoc-tip-win" aria-hidden="true">
-        <div className={`tdoc-tip-scene${scene === 0 ? ' is-on' : ''}`}>
-          <div className="tdoc-tip-bar"><i /><i /><i /> tdoc.dev/d/q4-plan</div>
-          <div className="tdoc-tip-q"><b>Maya</b> · 10:24 AM<br /><span className="tdoc-tip-at">@agent</span> tighten the pricing section and add the EU numbers</div>
-          <div className="tdoc-tip-st">Sent to {agent} automatically</div>
+        <div className="tdoc-tip-bar">
+          <img src="/tdoc_logo.svg" width="9" height="9" alt="" />
+          <span>Q4 plan</span>
+          <span className={`tdoc-tip-ver${scene === 2 ? ' is-new' : ''}`}>{scene === 2 ? 'v4' : 'v3'}</span>
         </div>
-        <div className={`tdoc-tip-scene${scene === 1 ? ' is-on' : ''}`}>
-          <div className="tdoc-tip-bar"><i /><i /><i /> {agent}</div>
-          <div className="tdoc-tip-q">Picked up 1 comment on <b>Q4 plan</b></div>
-          <div className="tdoc-tip-st"><span className="tdoc-tip-spin" />Revising…</div>
-        </div>
-        <div className={`tdoc-tip-scene${scene === 2 ? ' is-on' : ''}`}>
-          <div className="tdoc-tip-bar"><i /><i /><i /> Q4 plan · v4</div>
-          <div className="tdoc-tip-q"><b>{agent}</b><br />Tightened pricing, added EU figures. <span className="tdoc-tip-ok">Resolved ✓</span></div>
-          <div className="tdoc-tip-st">v3 → v4 · replied to 1 comment</div>
+        <div className="tdoc-tip-thread" data-scene={scene}>
+          <div className="tdoc-tip-msg">
+            <span className="tdoc-tip-av tdoc-tip-av-maya">M</span>
+            <div>
+              <div className="tdoc-tip-who"><b>Maya</b><span>10:24 AM</span></div>
+              <div className="tdoc-tip-text"><span className="tdoc-tip-at">@agent</span> {typed}{typing ? <i className="tdoc-tip-caret" /> : null}</div>
+            </div>
+          </div>
+          <div className={`tdoc-tip-msg${scene >= 1 ? ' is-in' : ''}`}>
+            <span className="tdoc-tip-av tdoc-tip-av-agent">{agent === 'Codex' ? <OpenAIMark size={9} /> : <ClaudeMark size={9} />}</span>
+            <div>
+              <div className="tdoc-tip-who"><b>{agent}</b><span>{scene === 2 ? 'now' : 'picked it up'}</span></div>
+              <div className="tdoc-tip-text">
+                {scene === 2
+                  ? <>Tightened pricing, added EU figures. <span className="tdoc-tip-ok">Resolved</span></>
+                  : <span className="tdoc-tip-shimmer">Revising the doc…</span>}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
