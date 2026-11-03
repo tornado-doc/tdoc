@@ -43,6 +43,7 @@ import { folderContents, folderPathLabel, matchesCatalogQuery, sortCatalogDocs }
 import { TextSearchResults, useTextSearch } from './docs-hub/text-search.jsx';
 import { isFeatureOn } from './feature-flags.js';
 import { markShareAfterNav } from './profile-posters.js';
+import { AgentTip } from './agent-tip-card.jsx';
 import './docs-hub.css';
 
 const VIEWS = [['docs', 'Docs'], ['recent', 'Recent'], ['starred', 'Starred'], ['comments', 'Comments'], ['trash', 'Trash'], ['settings', 'Settings']];
@@ -1459,6 +1460,7 @@ export function DocsHub({ boot }) {
           ) : null}
         </div>
       ) : null}
+      <AgentTip enabled={Boolean(boot.identity) && view !== 'settings'} />
     </div>
   );
 }

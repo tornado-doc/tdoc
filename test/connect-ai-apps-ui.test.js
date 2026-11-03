@@ -347,6 +347,44 @@ async function startServer(worker, env) {
         await context.close();
       });
 
+      await t(`${label}: agent tip: someone commented and no agent gets comments, so the card offers auto-send; close folds it`, async () => {
+        const { context, page } = await open(width, height, {});
+        await context.route('**/api/notifications?**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, items: [{ id: 'n1', kind: 'comment', slug: 'q4-plan', title: 'Q4 plan', actor: { name: 'Maya' }, count: 1 }], has_more: false }) }));
+        await context.route('**/api/me/connectors', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, connectors: [], targets: [], available: [] }) }));
+        await context.route('**/api/me/tokens', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, tokens: [{ id: 't1', device: 'serena-mbp', client: 'claude-code' }], workspaces: [] }) }));
+        await page.goto(`${base}/me`);
+        const card = page.locator('.tdoc-tip');
+        await card.waitFor({ timeout: 12000 });
+        await card.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+        assert((await card.locator('.tdoc-tip-pane:not([aria-hidden="true"]) .tdoc-tip-title').innerText()) === 'Auto-send comments to Claude Code', 'local CLI title');
+        assert((await card.locator('.tdoc-tip-rows li').count()) === 3, 'three rows');
+        const box = await card.boundingBox();
+        assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y + box.height <= height + 1, `card fits at ${label}: ${JSON.stringify(box)}`);
+        await shot(page, `${label}-agent-tip`);
+        await card.getByRole('button', { name: 'Turn on' }).click();
+        await card.getByText('Waiting for your computer').waitFor();
+        const after = await card.boundingBox();
+        assert(after && Math.abs(after.width - box.width) < 1 && Math.abs(after.height - box.height) < 1 && Math.abs(after.y - box.y) < 1, `Turn on keeps the card's size and place: ${JSON.stringify(box)} vs ${JSON.stringify(after)}`);
+        assert((await card.locator('.tdoc-tip-pane[aria-hidden="true"]').count()) === 1, 'one view shown at a time');
+        assert(/tdoc-daemon install/.test(await card.locator('.ui-code-block').innerText()), 'the daemon line to paste');
+        await shot(page, `${label}-agent-tip-step`);
+        await card.getByRole('button', { name: 'Close' }).click();
+        await page.locator('.tdoc-tip-pill').waitFor();
+        assert((await page.locator('.tdoc-tip').count()) === 0, 'close folds the card to a pill');
+        assert((await page.evaluate(() => localStorage.getItem('tdoc.agentTip.dismissals'))) === '1', 'the close is remembered');
+        await context.close();
+      });
+
+      await t(`${label}: agent tip stays away when an agent already gets comments`, async () => {
+        const { context, page } = await open(width, height, {});
+        await context.route('**/api/notifications?**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, items: [{ id: 'n1', kind: 'comment', slug: 'q4-plan', title: 'Q4 plan' }], has_more: false }) }));
+        await context.route('**/api/me/connectors', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, connectors: [{ kind: 'local', id: 'local:x', device: 'x', agents: [] }] }) }));
+        await page.goto(`${base}/me`);
+        await page.waitForTimeout(6500);
+        assert((await page.locator('.tdoc-tip, .tdoc-tip-pill').count()) === 0, 'no tip with a connected agent');
+        await context.close();
+      });
+
       await t(`${label}: signed out, the consent card shortens the app's name, shows its address, and fits`, async () => {
         const client = (await call('/oauth/register', { method: 'POST', body: { client_name: 'Gemini CLI MCP Client', redirect_uris: ['http://127.0.0.1:55905/oauth/callback'], token_endpoint_auth_method: 'none' } })).body;
         const q = new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: 'http://127.0.0.1:55905/oauth/callback', code_challenge: 'x'.repeat(43), code_challenge_method: 'S256', state: 's', scope: 'mcp' });

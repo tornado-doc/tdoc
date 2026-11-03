@@ -1347,3 +1347,60 @@ a.ui-menu-item:visited {
   .tdoc-connect-app { flex-direction: column; align-items: stretch; gap: 8px; }
   .tdoc-connect-apps-cli { grid-template-columns: minmax(0, 1fr); }
 }
+/* Agent tip (agent-tip-card.jsx): a card bottom-left, like an editor's
+   "Now available" card. Hero with a looping product window, eyebrow, title,
+   three rows (the one matching the hero frame lit), then one action. */
+.tdoc-tip {
+  position: fixed; left: 16px; bottom: 16px; z-index: 60; width: 300px; max-width: calc(100vw - 32px);
+  background: #fff; color: var(--td-ink, #1a1a1a); border: 1px solid var(--td-line, #e8e7e3); border-radius: 12px;
+  overflow: hidden; box-shadow: 0 12px 40px rgba(16,18,26,.18); transform-origin: bottom left;
+  animation: tdoc-tip-rise .32s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes tdoc-tip-rise { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+.tdoc-tip-hero {
+  position: relative; height: 125px; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 120%, #2c5a3a 0 34%, transparent 35%),
+    radial-gradient(80% 70% at 15% 115%, #3c6b44 0 40%, transparent 41%),
+    linear-gradient(180deg, #5a7bd6 0%, #9a86d8 32%, #e58a7a 62%, #f2b36d 100%);
+}
+.tdoc-tip .tdoc-tip-close { position: absolute; top: 8px; right: 8px; z-index: 2; border-radius: 50%; background: rgba(0,0,0,.45); color: #fff; border: 0; }
+.tdoc-tip .tdoc-tip-close:hover { background: rgba(0,0,0,.6); color: #fff; }
+.tdoc-tip-win {
+  position: absolute; left: 50%; top: 18px; transform: translateX(-50%); width: 76%;
+  background: rgba(18,18,20,.92); border: 1px solid rgba(255,255,255,.08); border-radius: 7px; padding: 8px 9px;
+  color: #d8d8d4; font-size: 8.5px; line-height: 1.35; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+.tdoc-tip-scene { display: none; }
+.tdoc-tip-scene.is-on { display: block; animation: tdoc-tip-fade .4s ease; }
+@keyframes tdoc-tip-fade { from { opacity: 0; } to { opacity: 1; } }
+.tdoc-tip-bar { display: flex; gap: 5px; align-items: center; color: #8e8e89; margin-bottom: 6px; }
+.tdoc-tip-bar i { width: 5px; height: 5px; border-radius: 50%; background: #555; }
+.tdoc-tip-q { background: rgba(255,255,255,.05); border-radius: 4px; padding: 5px 6px; margin-top: 4px; }
+.tdoc-tip-q b { color: #fff; font-weight: 600; }
+.tdoc-tip-at { color: #9fb6ff; }
+.tdoc-tip-st { display: flex; align-items: center; gap: 5px; margin-top: 6px; color: #bdbdb8; }
+.tdoc-tip-ok { color: #6fdc9c; }
+.tdoc-tip-spin { display: inline-block; width: 7px; height: 7px; border: 1.2px solid #777; border-top-color: #ddd; border-radius: 50%; animation: tdoc-tip-sp 1s linear infinite; }
+@keyframes tdoc-tip-sp { to { transform: rotate(360deg); } }
+.tdoc-tip-body { padding: 16px 18px 4px; display: grid; }
+.tdoc-tip-pane { grid-area: 1 / 1; min-width: 0; transition: opacity .18s ease; }
+.tdoc-tip-pane[aria-hidden="true"] { visibility: hidden; opacity: 0; }
+.tdoc-tip-eyebrow { margin: 0; font-size: 12px; color: var(--td-muted, #6b6a66); }
+.tdoc-tip-title { margin: 2px 0 14px; font-size: 15px; font-weight: 550; line-height: 1.35; text-wrap: balance; }
+.tdoc-tip-rows { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.tdoc-tip-rows li { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; transition: opacity .2s; }
+.tdoc-tip-rows li.is-dim { opacity: .5; }
+.tdoc-tip-rows li > svg { margin-top: 2px; }
+.tdoc-tip-rows li > span { display: grid; gap: 1px; font-size: 12px; line-height: 1.4; color: var(--td-muted, #6b6a66); }
+.tdoc-tip-row-title { margin: 0; font-size: 12.5px; font-weight: 550; color: var(--td-ink, #1a1a1a); }
+.tdoc-tip-body .tdoc-tip-code { margin: 8px 0 0; }
+.tdoc-tip-body .tdoc-tip-code pre, .tdoc-tip-body .tdoc-tip-code code { font-size: 11.5px; line-height: 1.45; }
+.tdoc-tip-status { display: flex; align-items: center; gap: 7px; margin: 10px 0 0; font-size: 12px; color: var(--td-muted, #6b6a66); }
+.tdoc-tip-status .tdoc-tip-spin { border-color: var(--td-line, #e8e7e3); border-top-color: var(--td-ink, #1a1a1a); }
+.tdoc-tip-status.is-ready { color: #2f9e5b; }
+.tdoc-tip-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 12px 10px 14px; border-top: 1px solid var(--td-line, #e8e7e3); }
+.tdoc-tip-foot .ui-btn.is-hidden { visibility: hidden; }
+.tdoc-tip-pill.ui-btn { position: fixed; left: 16px; bottom: 16px; z-index: 60; border-radius: 99px; gap: 6px; box-shadow: 0 4px 14px rgba(16,18,26,.12); }
+.tdoc-tip-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--td-accent, #1652f0); }
+@media (prefers-reduced-motion: reduce) { .tdoc-tip, .tdoc-tip-scene.is-on, .tdoc-tip-spin { animation: none; } }
