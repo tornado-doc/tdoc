@@ -243,6 +243,15 @@ export function orderedAskAiChoices(agents, recent = null) {
       || Number(Boolean(b.last_writer)) - Number(Boolean(a.last_writer))), [recent]);
 }
 
+// The @ list's order: the agent that edited this doc last, then the rest in
+// the order given (server: most recent first), tdoc AI always last. It also
+// outranks how well a typed name matches, so the last editor stays on top.
+const relevance = (t) => (t.last_writer && !t.tdoc_ai ? 0 : t.tdoc_ai ? 2 : 1);
+export function byRelevance(list) {
+  return (Array.isArray(list) ? list.filter(Boolean) : [])
+    .map((t, i) => ({ t, i })).sort((a, b) => (relevance(a.t) - relevance(b.t)) || (a.i - b.i)).map(({ t }) => t);
+}
+
 // The agents to offer for what is typed after `@`. With nothing typed, the
 // first `limit` (the ones the dropdown would preselect or list first); once
 // a name is typed, every agent it matches, prefix hits first. `labelOf` adds
@@ -264,7 +273,7 @@ export function matchAgentChoices(choices, query, { limit = 2, labelOf = null } 
   return list
     .map((t, i) => ({ t, r: rank(t), i }))
     .filter((row) => row.r >= 0)
-    .sort((a, b) => (a.r - b.r) || (a.i - b.i))
+    .sort((a, b) => (relevance(a.t) - relevance(b.t)) || (a.r - b.r) || (a.i - b.i))
     .map((row) => row.t);
 }
 

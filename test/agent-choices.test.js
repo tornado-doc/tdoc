@@ -82,7 +82,19 @@ t('the dropdown and the picker read the same helper', () => {
   const answerer = read('shell/src/document/ai-answerer.js');
   assert(/const edit = canSendToAgent \? orderedAgentChoices\(notifyTargets\) : \[\];/.test(answerer), 'picker list not from orderedAgentChoices');
   assert(/composerAgents\(\{\s*canSendToAgent,\s*notifyTargets,/.test(shell), 'the shell does not build the @ list from the send targets');
-  assert(/matchAgentChoices\(agentsOnOffer\.choices/.test(field), 'picker does not filter the shared list');
+  assert(/matchAgentChoices\(byRelevance\(agentsOnOffer\.choices\)/.test(field), 'picker does not filter the shared list');
+});
+
+t('@ order: the agent that edited last, then the rest, tdoc AI last -- also once a name is typed', () => {
+  const team = (id, name, extra = {}) => raft(id, name, { team_agent: { id, name }, ...extra });
+  const list = [raft('m1', 'smart-julie-claude'), raft('m2', 'tdoc-bot'), team('ta2', 'tdoc-reviewer'),
+    team('ta1', 'smarter-tdoc-claw', { last_writer: true }), { provider: 'tdoc', server_id: 'tdoc', agent_sub: 'tdoc-ai', agent_name: 'tdoc AI', tdoc_ai: true }];
+  const order = box.byRelevance(list);
+  const pick = (q) => box.matchAgentChoices(order, q, { limit: Infinity }).map((t) => box.agentMentionName(t, list));
+  assert(JSON.stringify(pick('')) === JSON.stringify(['smarter-tdoc-claw', 'smart-julie-claude', 'tdoc-bot', 'tdoc-reviewer', 'tdoc AI']), JSON.stringify(pick('')));
+  assert(pick('sma')[0] === 'smarter-tdoc-claw', JSON.stringify(pick('sma')));
+  assert(pick('tdoc-r')[0] === 'tdoc-reviewer', JSON.stringify(pick('tdoc-r')));
+  assert(JSON.stringify(pick('tdoc')) === JSON.stringify(['smarter-tdoc-claw', 'tdoc-bot', 'tdoc-reviewer', 'tdoc AI']), JSON.stringify(pick('tdoc')));
 });
 
 t('nothing typed: the first two agents only', () => {
