@@ -24,6 +24,7 @@ const OFFLINE = [
   'plugins.test.js',          // plugins/: Claude, Codex/ChatGPT, Cursor, Gemini, VS Code packages for the remote MCP server
   'remote-mcp.test.js',       // /mcp + OAuth 2.1: PKCE, redirect URIs, consent CSRF, token mapping, refresh/revoke, tools and refusals, rate limit
   'feedback.test.js',         // #564 product feedback: token door, space, bookmarklet + one-line entry
+  'feedback-invites.test.js', // share from the widget: signed expiring invites, owner-only, email pending, revoke, Join / Keep my own, switcher, landing page
   'comment-history.test.js',  // event-log fold + cross-version pull
   'comment-dedupe.test.js',   // the same words twice within seconds is one comment
   'comment-notification-failure.test.js', // inbox KV trouble never turns a saved comment into HTTP 500
@@ -235,6 +236,7 @@ const BROWSER = [
   'ui-fonts-ui.test.js', // no serif in product controls: doc page (bar, card, composer, menus, drawer, Ask AI, Agent activity), /me, account + team settings, /feedback; settings hints muted, /me views fit a phone; desktop + phone
   'feedback-own-agent-ui.test.js', // a joiner's @ lists their own agents (answer only) on the space page and the widget on tdoc's own pages; none on a third-party space; desktop + phone
   'feedback-share-ui.test.js', // feedback space Share = the doc Share dialog; owner moves it to a team; site mode offers the team first; desktop + phone
+  'feedback-invites-ui.test.js', // share from the widget: copy link + invite by name; landing page; Join / Keep my own; switcher; SDK Join; Reconnect without a popup; desktop + phone
   'app-header-ui.test.js', // every page under one top bar: logo, avatar + account menu (desktop), ⋯ → My account (phone); /feedback bookmark + Copy
 ];
 

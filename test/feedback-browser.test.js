@@ -233,13 +233,14 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       }
     });
 
-    // Share is in the dock for everyone, on a phone too: it opens the
-    // space's page on tdoc with the doc Share dialog open (?share=1), where
-    // people are invited and the owner moves the space into a team.
-    await test('the dock has Share: it opens the space page with Share open, and fits at 390, 430 and 1440', async () => {
+    // With feedbackInvites off, Share in the dock opens the space's page on
+    // tdoc with the doc Share dialog open (?share=1). With it on (the
+    // default), Share opens in the widget: feedback-invites-ui.test.js.
+    await test('flag off: the dock has Share: it opens the space page with Share open, and fits at 390, 430 and 1440', async () => {
       for (const width of [390, 430, 1440]) {
         const host = await context.newPage();
         try {
+          await host.addInitScript(() => { window.__TDOC_FLAGS__ = { ...(window.__TDOC_FLAGS__ || {}), feedbackInvites: false }; });
           await host.setViewportSize({ width, height: 800 });
           await host.route('**/api/feedback/session', async (route) => {
             const response = await route.fetch();

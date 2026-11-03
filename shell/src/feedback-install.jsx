@@ -16,7 +16,7 @@ import './feedback-pages.css';
 
 // The coach's handwriting. Only this page uses it, so it loads here rather
 // than in every page's stylesheet.
-function useHandFont() {
+export function useHandFont() {
   useEffect(() => {
     if (document.getElementById('tdoc-hand-font')) return;
     const link = document.createElement('link');
@@ -111,7 +111,7 @@ export function Bookmarklet({ href, className = 'bookmarklet', onTeach = null, l
   );
 }
 
-function Coach({ open, target, onClose }) {
+export function Coach({ open, target, onClose, numbered = true }) {
   const [d, setD] = useState('');
   const place = useCallback(() => {
     const btn = target.current;
@@ -148,9 +148,32 @@ function Coach({ open, target, onClose }) {
         <path d={d} fill="none" stroke="#1652f0" strokeWidth="2" strokeLinecap="round" markerEnd="url(#coachHead)" />
       </svg>
       <p className="coach-copy">
-        <span className="line"><span className="n">2</span>Drag onto the bookmarks bar ↑</span>
-        <span className="line"><span className="n">3</span>No bar? ⌘⇧B · Fullscreen top bar? ⌘⇧F</span>
+        <span className="line">{numbered ? <span className="n">2</span> : null}Drag onto the bookmarks bar ↑</span>
+        <span className="line">{numbered ? <span className="n">3</span> : null}No bar? ⌘⇧B · Fullscreen top bar? ⌘⇧F</span>
       </p>
+    </div>
+  );
+}
+
+// The browser window with the real bookmark in it, to drag onto the bar
+// (here and on an invite's page, feedback-invite.jsx).
+export function BookmarkDemo({ bookmarklet, omnibox, coaching, pillRef, onTeach, hint = '1 · Click Me!' }) {
+  return (
+    <div className="demo" id="demo">
+      <div className="demo-titlebar">
+        <div className="demo-dots" aria-hidden="true"><i className="r" /><i className="y" /><i className="g" /></div>
+        <div className="demo-omnibox">{omnibox}</div>
+      </div>
+      <div className="demo-bookmarks">
+        <span className="demo-bm">Docs</span>
+        <span className="demo-bm">GitHub</span>
+        <span className="demo-slot" aria-hidden="true" />
+      </div>
+      <div className="demo-page">
+        <span className="demo-ghost" aria-hidden="true">🌪️ tdoc</span>
+        <Bookmarklet id="bookmarklet" href={bookmarklet} className={coaching ? 'bookmarklet' : 'bookmarklet demo-fly'} linkRef={pillRef} onTeach={onTeach} />
+        <span className="step-1" aria-hidden="true">{hint}</span>
+      </div>
     </div>
   );
 }
@@ -175,22 +198,7 @@ export function FeedbackInstall({ boot }) {
           <div className="bookmark-path" id="bookmarkPath">
             <h2>Drag a bookmark</h2>
             <p className="device-note muted">Desktop only — drag the pill onto your bookmarks bar.</p>
-            <div className="demo" id="demo">
-              <div className="demo-titlebar">
-                <div className="demo-dots" aria-hidden="true"><i className="r" /><i className="y" /><i className="g" /></div>
-                <div className="demo-omnibox">localhost:3000</div>
-              </div>
-              <div className="demo-bookmarks">
-                <span className="demo-bm">Docs</span>
-                <span className="demo-bm">GitHub</span>
-                <span className="demo-slot" aria-hidden="true" />
-              </div>
-              <div className="demo-page">
-                <span className="demo-ghost" aria-hidden="true">🌪️ tdoc</span>
-                <Bookmarklet id="bookmarklet" href={bookmarklet} className={coaching ? 'bookmarklet' : 'bookmarklet demo-fly'} linkRef={pill} onTeach={() => setCoaching(true)} />
-                <span className="step-1" aria-hidden="true">1 · Click Me!</span>
-              </div>
-            </div>
+            <BookmarkDemo bookmarklet={bookmarklet} omnibox="localhost:3000" coaching={coaching} pillRef={pill} onTeach={() => setCoaching(true)} />
             <ol className="install-steps">
               <li><strong>Click Me!</strong> — that blue pill is the real bookmark</li>
               <li><strong>Drag it up</strong> onto the bookmarks bar at the top of the window</li>
