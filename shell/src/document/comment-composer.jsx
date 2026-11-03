@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Copy, X } from 'lucide-react';
+import { Copy, Sparkles, X } from 'lucide-react';
 import { AgentButtonsContext, MentionField } from './mention-field.jsx';
 import { joinAiTags, mentionsAi } from './ai-answerer.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
@@ -81,6 +81,9 @@ export function CommentComposer({
   privateAsk = null,
   onMakePublic = null,
   onCopyToast = null,
+  // Ask/Edit v2 (flag askEditV2): "Edit with AI" on a text selection. The
+  // draft is the instruction; tdoc AI's edits show in the passage.
+  onEditWithAi = null,
 }) {
   const [text, setText] = useState(initialText);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -247,6 +250,13 @@ export function CommentComposer({
               title={sendToAgentDisabledReason || 'Comment and hand to the following agent'}
             >
               {busy ? 'Posting…' : '@agent'}
+            </button>
+          ) : null}
+          {onEditWithAi && selection.kind !== 'document' && selection.kind !== 'element' && quoted ? (
+            <button className="tdoc-composer-edit-ai ui-btn ui-btn-secondary ui-btn-m" type="button" disabled={busy}
+              title="tdoc AI suggests an edit to the selected text; you accept or reject it"
+              onClick={() => onEditWithAi(text.trim())}>
+              <Sparkles size={14} aria-hidden="true" />Edit with AI
             </button>
           ) : null}
           <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={() => submit(false)} disabled={busy}>

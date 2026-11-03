@@ -41,6 +41,9 @@ const { spawn } = require('child_process');
 // `bash -c …` or `node -e …`; and Edit/Write reach only the writable folders,
 // never the skill checkout, so it cannot rewrite an allowed script either.
 const TDOC_SCRIPTS = ['tdoc-pull', 'tdoc-write', 'tdoc-publish', 'tdoc-agent-reply'];
+// A handoff that asks for suggestions (Ask/Edit v2, reply_as "suggestions"):
+// read, suggest edits, reply -- nothing is published.
+const TDOC_SUGGEST_SCRIPTS = ['tdoc-pull', 'tdoc-propose', 'tdoc-agent-reply'];
 // A reader's question (Send to my agent) is answered, never applied: it may
 // read the doc and post the answer, nothing else -- no Edit, no Write, no
 // tdoc-write or tdoc-publish.
@@ -203,7 +206,7 @@ async function runAgentWithOar({ cli, prompt, cwd, env = process.env, timeoutMs 
     // Only the daemon's own variables ride along: OAR takes `env` as deltas
     // over its inherited environment.
     const delta = {};
-    for (const k of ['TDOC_SKILL_DIR', 'TDOC_DIR', 'TDOC_DAEMON', 'TDOC_DAEMON_SLUG', 'TDOC_DAEMON_ASK', 'TDOC_AGENT']) if (env[k]) delta[k] = env[k];
+    for (const k of ['TDOC_SKILL_DIR', 'TDOC_DIR', 'TDOC_DAEMON', 'TDOC_DAEMON_SLUG', 'TDOC_DAEMON_ASK', 'TDOC_DAEMON_SUGGEST', 'TDOC_AGENT']) if (env[k]) delta[k] = env[k];
     session = await runtime.session(installation, { cwd, env: delta, ...(cli === 'claude' ? { disallowedTools: OAR_DISALLOWED_TOOLS } : {}) });
     let text = '';
     const stop = session.events((ev) => {
@@ -235,4 +238,4 @@ function runAgentVia(opts) {
   return (opts.runner || process.env.TDOC_DAEMON_RUNNER || 'cli') === 'oar' ? runAgentWithOar(opts) : runAgent(opts);
 }
 
-module.exports = { RUNNERS, TDOC_SCRIPTS, TDOC_ASK_SCRIPTS, claudeAllowedTools, OAR_DISALLOWED_TOOLS, runAgent, runAgentWithOar, runAgentVia, loadOar, findOnPath, detectClis, knownClis };
+module.exports = { RUNNERS, TDOC_SCRIPTS, TDOC_ASK_SCRIPTS, TDOC_SUGGEST_SCRIPTS, claudeAllowedTools, OAR_DISALLOWED_TOOLS, runAgent, runAgentWithOar, runAgentVia, loadOar, findOnPath, detectClis, knownClis };

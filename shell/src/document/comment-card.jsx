@@ -1,7 +1,8 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
-import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
+import { Check, ChevronRight, MoreHorizontal, SmilePlus, Sparkles } from 'lucide-react';
+import { SuggestContext } from './suggestions.js';
 import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
 import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
@@ -710,6 +711,11 @@ export function CommentCard({
   // A thread that asked AI opens its replies, so the answer is in view when
   // it lands.
   const { ai: asking } = useContext(AgentMentionContext);
+  // Ask/Edit v2: Fix with AI on an open comment (flag askEditV2).
+  const suggest = useContext(SuggestContext);
+  const canFix = Boolean(suggest?.enabled) && !comment.resolved && comment.status !== 'applied' && !comment.deleted;
+  const fixing = canFix && (suggest.busyIds || []).includes(comment.id);
+  const fixPending = canFix && suggest.pendingFor(comment.id);
   const thinkingId = asking?.thinking?.id;
   const askingHere = Boolean(thinkingId) && (thinkingId === comment.id || (comment.replies || []).some((r) => r.id === thinkingId));
   useEffect(() => { if (askingHere) setRepliesOpen(true); }, [askingHere]);
@@ -1010,6 +1016,18 @@ export function CommentCard({
           </button>
           {!reactionCount ? (
             <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
+          ) : null}
+          {canFix ? (
+            <button
+              type="button"
+              className="tdoc-reply-toggle tdoc-fix-ai"
+              aria-busy={fixing ? 'true' : undefined}
+              disabled={fixing}
+              title={fixPending ? 'Show the suggested edit in the doc' : 'tdoc AI suggests an edit for this comment; you accept or reject it'}
+              onClick={(event) => { event.stopPropagation(); if (fixPending) suggest.review(comment.id); else suggest.fix(comment); }}
+            >
+              <Sparkles size={13} aria-hidden="true" />{fixing ? 'Fixing…' : fixPending ? 'Review fix' : 'Fix with AI'}
+            </button>
           ) : null}
         </span>
       </div>
