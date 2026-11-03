@@ -14,6 +14,13 @@ build:feedback` writes one self-contained IIFE to `server/runtime/feedback.js`,
 which `bin/tdoc-bundle` inlines into the worker (served at `/feedback.js`) and
 `server/server.js` serves as-is. Commit the built file with the source.
 
+Everything the client loads comes from the tdoc origin that served it, so a
+site's CSP needs only that origin in `script-src`, `connect-src` and
+`img-src`. Faces go through `GET /avatar/<github-login>` and
+`/avatar/agent/<name>` (`avatarResponse` in `worker/worker.js`; `avatarFor`
+in `shell/src/document/model.js` builds the URLs once `setTdocOrigin` is
+called), the tdoc mark and profile links are absolute.
+
 The client never sees the tdoc cookie (it runs on the app's origin). The first
 time it runs on an app it opens `/feedback/connect` on the tdoc origin, which
 signs the person in, finds or creates the app's feedback space (a normal doc,

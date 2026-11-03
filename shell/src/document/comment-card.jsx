@@ -11,7 +11,7 @@ import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } f
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
-import { avatarFor, avatarInitial, QUICK_REACTIONS } from './model.js';
+import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
 import { AuthorFace } from './author-face.jsx';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
@@ -78,7 +78,9 @@ export function Author({ author, timestamp }) {
   const providerAvatar = author.kind === 'agent' && author.provider;
   const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
     && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
-    ? author.profile_url : null;
+    ? tdocUrl(author.profile_url) : null;
+  // In the feedback widget the profile is on tdoc, not on the app it sits in.
+  const profileElsewhere = profileUrl && !profileUrl.startsWith('/');
   const hoverCard = author.kind === 'agent' && !!agentOwner(author);
   const title = author.kind === 'agent' && !hoverCard && author.principal?.terminal
     ? author.principal.terminal
@@ -91,6 +93,7 @@ export function Author({ author, timestamp }) {
         </span>
       ) : avatar && profileUrl ? (
         <a className="tdoc-author-profile" href={profileUrl}
+          {...(profileElsewhere ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
           aria-label={`View ${authorLine(author)}'s public profile`}
           title={`View ${authorLine(author)}'s public profile`}
           onPointerDown={(event) => event.stopPropagation()}
@@ -348,7 +351,7 @@ function TdocAiQuota({ reply, currentUser }) {
   const left = freeLeftText(ai && ai.remaining);
   return (
     <div className="tdoc-ai-quota">
-      {left ? <>tdoc AI · {left} · <a href="/start">Connect your agent for unlimited</a></> : 'tdoc AI'}
+      {left ? <>tdoc AI · {left} · <a href={tdocUrl('/start')}>Connect your agent for unlimited</a></> : 'tdoc AI'}
     </div>
   );
 }

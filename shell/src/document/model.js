@@ -25,7 +25,59 @@ export function avatarInitial(author) {
   return (Array.from(name)[0] || '?').toUpperCase();
 }
 
+// Where faces and profile links come from when the page is not tdoc's own:
+// the feedback widget runs inside someone else's app, whose CSP img-src
+// names tdoc but not GitHub, Clerk or a logo CDN. Set (to the tdoc origin
+// that served the widget) by feedback/src/main.jsx; null on tdoc's pages,
+// which keep their relative and upstream URLs.
+let tdocOrigin = null;
+export function setTdocOrigin(origin) {
+  let ok = false;
+  try { ok = typeof origin === 'string' && /^https?:$/.test(new URL(origin).protocol) && new URL(origin).origin === origin; } catch (_) {}
+  tdocOrigin = ok ? origin : null;
+}
+
+// A tdoc path (/@handle, /tdoc_logo.png) as a link that works on this page.
+export function tdocUrl(path) {
+  return tdocOrigin && typeof path === 'string' && path.startsWith('/') && !path.startsWith('//') ? `${tdocOrigin}${path}` : path;
+}
+
+// Logins a comment carries that are not GitHub accounts (the worker's
+// AVATAR_NOT_GITHUB): a face for one of these must not be a stranger's.
+const NOT_GITHUB = new Set(['tdoc', 'tdoc-ai', 'tdoc-agent', 'agent', 'anon', 'anonymous', 'email-hidden', 'ghost']);
+const GITHUB_LOGIN = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/;
+
+// GitHub's picture URL by numeric account id, as GitHub sign-in stores it.
+const GITHUB_ID_AVATAR = /^https:\/\/avatars\.githubusercontent\.com\/u\/(\d{1,12})(?:[?#]|$)/;
+
+// The face as the widget asks tdoc for it (worker avatarResponse): a person
+// by GitHub account id when the stored picture names one (a renamed login
+// can be taken by someone else; the id cannot), else by GitHub login; an
+// agent by its mark's name; anything else nothing (the initial). Never a
+// third-party URL, so the host page needs only tdoc.
+function tdocFace(author, upstream) {
+  if (!upstream) return '';
+  const login = String(author?.login || '').trim().toLowerCase();
+  if (author?.kind === 'system' || login === 'tdoc' || login === 'tdoc-ai') return `${tdocOrigin}/tdoc_logo.png`;
+  if (upstream.startsWith('/') && !upstream.startsWith('//')) return `${tdocOrigin}${upstream}`;
+  if (author?.kind === 'agent') {
+    if (upstream.includes('simpleicons.org/claude/')) return `${tdocOrigin}/avatar/agent/claude`;
+    if (upstream.includes('simpleicons.org/googlegemini/')) return `${tdocOrigin}/avatar/agent/gemini`;
+    if (upstream.includes('simpleicons.org/cursor/')) return `${tdocOrigin}/avatar/agent/cursor`;
+    if (upstream.startsWith('https://github.com/openai.png')) return `${tdocOrigin}/avatar/agent/openai`;
+    return '';
+  }
+  const id = upstream.match(GITHUB_ID_AVATAR);
+  if (id) return `${tdocOrigin}/avatar/u/${id[1]}`;
+  return GITHUB_LOGIN.test(login) && !NOT_GITHUB.has(login) ? `${tdocOrigin}/avatar/${login}` : '';
+}
+
 export function avatarFor(author) {
+  const upstream = upstreamAvatarFor(author);
+  return tdocOrigin ? tdocFace(author, upstream) : upstream;
+}
+
+function upstreamAvatarFor(author) {
   const key = String(author?.login || author?.name || '').toLowerCase();
   // Product seed ("First reader here") and other system/tdoc rows use the
   // global mark — even when older comments stored an empty avatar_url. So

@@ -435,6 +435,7 @@ function SiteEmbedDialog({ space, onClose, onSaved }) {
             <span className="tdoc-send-label">Paste this into your site</span>
             <code className="tdoc-site-snippet">{snippet}</code>
             <CopyPromptButton text={snippet} />
+            <p className="tdoc-send-hint">If your site sends a Content-Security-Policy, add <code>{(snippet.match(/src="(https?:\/\/[^/"]+)\/feedback\.js"/) || [])[1] || location.origin}</code> to <code>script-src</code>, <code>connect-src</code> and <code>img-src</code>. Nothing else is needed.</p>
           </div>
         ) : null}
         {error ? <p className="tdoc-send-result tdoc-notify-error" role="status">{error}</p> : null}
