@@ -10,7 +10,7 @@ import { FeedbackSpace } from './feedback-space.jsx';
 import { FeedbackInstall } from './feedback-install.jsx';
 import { FeedbackConnect } from './feedback-connect.jsx';
 import { FeedbackInvite } from './feedback-invite.jsx';
-import { FeedbackShare } from './feedback-share-panel.jsx';
+import { FeedbackShare } from './feedback-share.jsx';
 import { AgentsPage } from './agents-page.jsx';
 import { Profile } from './profile.jsx';
 import { DocumentShell } from './document-shell.jsx';
