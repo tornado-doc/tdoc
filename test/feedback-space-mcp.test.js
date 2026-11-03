@@ -448,7 +448,10 @@ function interleaveRead(env, key, during) {
   await t('race: Share made private while a site bind holds the old record stays private', async () => {
     const made = await call('/api/feedback/connect', { method: 'POST', cookie: dana.cookie, headers: home, body: { origin: 'https://dana.example' } });
     const slug = made.body.slug;
-    assert((await stored(slug)).access.visibility === 'unlisted', 'precondition: a bookmarklet space starts unlisted');
+    // A bookmarklet space starts private; the owner opened it to its link.
+    assert((await stored(slug)).access.visibility === 'private', 'precondition: a bookmarklet space starts private');
+    const opened = await call('/api/doc/access', { method: 'PATCH', cookie: dana.cookie, headers: home, body: { slug, access: { visibility: 'unlisted' } } });
+    assert(opened.status === 200 && (await stored(slug)).access.visibility === 'unlisted', `open to link ${opened.status}`);
     const hook = interleaveRead(env, `meta:${slug}`, async () => {
       const r = await call('/api/doc/access', { method: 'PATCH', cookie: dana.cookie, headers: home, body: { slug, access: { visibility: 'private' } } });
       assert(r.status === 200, `make private ${r.status}`);
