@@ -263,18 +263,20 @@ async function startServer(worker, env) {
         const openPops = async () => pick.locator('.pick-pop:popover-open').evaluateAll((els) => els.map((e) => e.id));
         assert(JSON.stringify(await openPops()) === '[]', `a popover is open before any click: ${await openPops()}`);
         const expect = {
-          vscode: 'https://vscode.dev/redirect/mcp/install?',
           gemini: 'gemini mcp add --scope user --transport http tdoc https://tdoc.dev/mcp',
           grokbot: 'Connect the tdoc MCP server: https://tdoc.dev/mcp',
           raft: 'set up https://tdoc.dev/SKILL.md',
         };
         assert(/issues\/new$/.test(await pick.getByRole('link', { name: /Ask for it/ }).getAttribute('href')), 'ask-for-an-app line');
-        const inMore = ['vscode', 'gemini'];
+        await pick.locator('.pick-quick .pick-more').click();
+        assert(/^https:\/\/vscode\.dev\/redirect\/mcp\/install\?/.test(await pick.locator('#pick-pop-more a.pick-pill').getAttribute('href')), 'VS Code in More is a direct install link');
+        await shot(page, `${label}-home-pop-more`);
+        await pick.locator('#pick-pop-more .pick-close').click();
+        const inMore = ['gemini'];
         for (const [app, needle] of Object.entries(expect)) {
           if (inMore.includes(app)) {
             await pick.locator('.pick-quick .pick-more').click();
             assert(JSON.stringify(await openPops()) === '["pick-pop-more"]', `More: ${await openPops()}`);
-            if (app === 'vscode') await shot(page, `${label}-home-pop-more`);
             await pick.locator(`#pick-pop-more .pick-pill[popovertarget="pick-pop-${app}"]`).click();
           } else {
             const opener = pick.locator(`.pick-quick .pick-pill[popovertarget="pick-pop-${app}"]`);
