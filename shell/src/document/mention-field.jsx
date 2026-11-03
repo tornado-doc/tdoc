@@ -9,6 +9,11 @@ import { AGENT_GROUPS, AgentMenuItems, agentTag, whose } from './agent-menu.jsx'
 import { ProviderMark, recipientOption } from './notify-handoff.jsx';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
 import { parseRichText } from './rich-text.js';
+import { avatarFor, tdocUrl } from './model.js';
+
+// A person's face in the list: their picture, from tdoc when the composer is
+// in the feedback widget (see avatarFor). Only people are listed here.
+const personFace = (person) => avatarFor({ login: person.login, avatar_url: person.avatar_url });
 
 // A textarea that offers people after `@`. Both composers use it, so mentioning
 // works the same whether you are starting a thread or answering one.
@@ -291,7 +296,7 @@ export function MentionField({
           {disabledAgentMatches.length && agentsOnOffer.guestAction ? <button type="button" className="tdoc-mention-connect"
             onMouseDown={(event) => event.preventDefault()} onClick={agentsOnOffer.guestAction.onClick}>{agentsOnOffer.guestAction.label}</button> : null}
           {agentMatches.some((row) => row.agent.tdoc_ai) ? (
-            <a className="tdoc-mention-connect" href="/start" onMouseDown={(event) => event.preventDefault()}>Connect my agent</a>
+            <a className="tdoc-mention-connect" href={tdocUrl('/start')} onMouseDown={(event) => event.preventDefault()}>Connect my agent</a>
           ) : null}
           {agentMatches.length && matches.length ? <div className="tdoc-mention-group" role="presentation">People</div> : null}
           {matches.map((person, i) => {
@@ -308,7 +313,7 @@ export function MentionField({
                 onMouseEnter={() => setActive(index)}
                 onClick={() => pick(person)}
               >
-                {person.avatar_url ? <img src={person.avatar_url} alt="" /> : <span className="tdoc-mention-anon" />}
+                {personFace(person) ? <img src={personFace(person)} alt="" /> : <span className="tdoc-mention-anon" />}
                 <span className="tdoc-mention-login">@{String(person.login).startsWith('email:') ? String(person.login).slice(6) : person.login}</span>
                 {person.name && person.name.toLowerCase() !== person.login ? (
                   <span className="tdoc-mention-name">{person.name}</span>

@@ -46,6 +46,23 @@ import { TdocFeedback } from '@tdoc/feedback/react';
 <TdocFeedback space="YOUR_SPACE_ID" onReady={(tdoc) => {/* tdoc.open() … */}} />
 ```
 
+### Content-Security-Policy
+
+If your site sends a CSP, allow tdoc's origin in three directives and
+nothing else:
+
+```
+script-src  https://tdoc.dev
+connect-src https://tdoc.dev
+img-src     https://tdoc.dev
+```
+
+Everything the widget loads comes from there: the script, its API calls,
+the tdoc mark, and every face it shows. People's and agents' pictures are
+served by `https://tdoc.dev/avatar/…`, never straight from GitHub or a CDN.
+A face that still cannot load shows the person's initial. (Using a PR
+preview or your own tdoc server? Allow that origin instead.)
+
 ## API
 
 `open()`, `close()`, `toggle()`, `comment()` (start picking an element),

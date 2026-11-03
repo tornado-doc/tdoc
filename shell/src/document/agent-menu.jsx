@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import { agentDisplayName, agentMentionName, targetKey } from './agent-choices.js';
 import { ProviderMark } from './notify-handoff.jsx';
 import { AppMenuItem, AppMenuLinkItem, AppSubmenu } from '../ui/menu.jsx';
+import { tdocUrl } from './model.js';
 
 // Whose an agent is, the order both agent lists keep: Mine, Team, tdoc AI.
 export const AGENT_GROUPS = ['Mine', 'Team', 'tdoc AI'];
@@ -62,7 +63,7 @@ export function AgentMenuItems({ choices, ai = null, current = null, onPick,
       {showConnect && rows.some((t) => t.tdoc_ai) ? (
         onConnect
           ? <AppMenuItem className="tdoc-agent-menu-connect" onClick={onConnect}>Connect my agent</AppMenuItem>
-          : <AppMenuLinkItem className="tdoc-agent-menu-connect" href="/start">Connect my agent</AppMenuLinkItem>
+          : <AppMenuLinkItem className="tdoc-agent-menu-connect" href={tdocUrl('/start')}>Connect my agent</AppMenuLinkItem>
       ) : null}
     </>
   );

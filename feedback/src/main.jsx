@@ -10,7 +10,7 @@ import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
-import { TOP_BAR_HEIGHT } from '../../shell/src/document/model.js';
+import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
 import {
   createComment, listComments, listMentionableUsers, postNotifyHandoff,
@@ -411,6 +411,10 @@ ${uiCss}
     } catch (_) {}
     return window.__TDOC_FEEDBACK_BASE__ || 'https://tdoc.dev';
   })();
+  // Faces, the tdoc mark and profile links come from that same tdoc origin
+  // (production, a PR preview or a local server), never from GitHub, Clerk
+  // or a logo CDN: the app's CSP then needs to allow only tdoc.
+  setTdocOrigin(base);
   const autoOpen = Boolean(document.currentScript && document.currentScript.getAttribute('data-tdoc-open'));
   // A site's own comment space (the SDK): <script … data-tdoc-space="…">.
   // Its visitors comment there, so their session is kept apart from any

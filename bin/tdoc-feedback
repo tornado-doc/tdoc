@@ -97,6 +97,7 @@ printf '%s' "$resp" | node -e '
     const c = (v) => String(v == null ? "" : v).replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
     process.stderr.write(`[tdoc] ${b.created ? "created" : "found your"} feedback space in ${c(where)}: ${c(b.url)}\n`);
     process.stderr.write(`[tdoc] sites: ${c((b.origins || []).join(" "))}\n[tdoc] ${c(b.who_can_comment)}\n`);
+    if (b.csp) process.stderr.write(`[tdoc] ${c(b.csp)}\n`);
   });'
 
 if [ -n "$WRITE" ]; then
