@@ -18811,7 +18811,11 @@ async function handleMyAgent(env, req, url, slug) {
   // Not from the widget: its token reaches the holder's own agents only.
   const team = viaFeedbackToken ? { targets: [], reachable: [] } : await teamAskTargets(env, { meta, session });
   if (req.method === 'GET') {
-    const asks = accountId ? (await loadAgentAsks(env, slug, asker)).slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
+    // The widget's token sees only what it could have asked: questions in a
+    // thread, to the holder's own agents (no private answers, no team's).
+    const asks = accountId ? (await loadAgentAsks(env, slug, asker))
+      .filter((a) => !viaFeedbackToken || (a.comment_id && !a.runner && !a.team_agent))
+      .slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
     const guestTeam = !viaFeedbackToken && meta.workspace_id && !await isTeamMemberSession(env, session, meta.workspace_id)
       && isAllowlisted(accessFromMeta(meta), session, env, meta)
       ? await loadTeam(env, meta.workspace_id) : null;

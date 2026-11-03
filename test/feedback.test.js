@@ -310,6 +310,13 @@ const APP = 'http://localhost:3000';
     const asked = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: julieComment, recipient: julieAgent } });
     assert(asked.status === 200 && asked.body.ask.comment_id === julieComment && asked.body.ask.recipient.agent_sub === 'j2', `POST ${asked.status} ${JSON.stringify(asked.body)}`);
 
+    // A private question asked from the page (cookie) stays out of the token's view.
+    const priv = await myAgent({ cookie: julie.cookie, method: 'POST', body: { question: 'private one', recipient: julieAgent } });
+    assert(priv.status === 200, `cookie private ask ${priv.status} ${JSON.stringify(priv.body)}`);
+    const seen = (await myAgent({ token: mine.token })).body.asks.map((a) => a.ask_id);
+    assert(seen.includes(asked.body.ask.ask_id) && !seen.includes(priv.body.ask.ask_id), `token sees ${JSON.stringify(seen)}`);
+    assert((await myAgent({ cookie: julie.cookie })).body.asks.some((a) => a.ask_id === priv.body.ask.ask_id), 'the page lost its private ask');
+
     // Refused: the owner's agent, a comment Julie did not write, no comment.
     const theirAgent = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: julieComment, recipient: serenaAgent } });
     assert(theirAgent.status === 403 && theirAgent.body.error === 'not_your_agent', `owner's agent ${theirAgent.status} ${JSON.stringify(theirAgent.body)}`);
