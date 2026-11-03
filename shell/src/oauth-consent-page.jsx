@@ -14,7 +14,7 @@ const APP_MARKS = { claude: ClaudeMark, chatgpt: OpenAIMark, cursor: CursorMark,
 // the address the browser goes back to, because a registered name is the
 // app's own claim and the return address is what actually receives access.
 //
-// Allow and Cancel post to /api/oauth/approve with the request id and the
+// Allow posts to /api/oauth/approve with the request id and the
 // CSRF value the server rendered into this page for this session; the answer
 // is where to send the browser next (the app's redirect URI, with a code or
 // access_denied).
@@ -38,6 +38,7 @@ export function OAuthConsentPage({ boot }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [signInOpen, setSignInOpen] = useState(false);
+  const [changing, setChanging] = useState(false);
   const back = boot.returnTo || '/';
   const choosing = workspaces.length > 1;
 
@@ -84,16 +85,22 @@ export function OAuthConsentPage({ boot }) {
             <span className="tdoc-consent-link" />
             <img src="/tdoc_logo.svg" width="28" height="28" alt="" />
           </div>
-          <h1>{name} wants to use your tdoc</h1>
-          {client.redirect_host || identity ? (
-            <p className="tdoc-consent-from">
-              {client.redirect_host ? <>from <code>{client.redirect_host}</code></> : null}
-              {client.redirect_host && identity ? ' · ' : null}
-              {identity ? <>as <b>{who}</b></> : null}
-            </p>
-          ) : null}
-          <ul className="tdoc-consent-can" aria-label="It will be able to">
-            <li>Read, edit and share your docs</li>
+          <h1>Connect {name} to tdoc</h1>
+          <p className="tdoc-consent-sub">
+            {identity ? <>Let {name} use your tdoc as <b>{who}</b></> : <>Sign in to let {name} use your tdoc</>}
+          </p>
+          <ul className="tdoc-consent-can" aria-label="What this means">
+            <li>
+              <b>Read, edit and share your docs</b>
+              {identity && choosing ? (
+                <span>
+                  In {picked.length === workspaces.length ? 'all your workspaces' : workspaceSummary(workspaces, picked)}{' '}
+                  <button type="button" className="tdoc-consent-change" aria-expanded={changing} disabled={busy} onClick={() => setChanging((v) => !v)}>{changing ? 'Done' : 'Change'}</button>
+                </span>
+              ) : <span>Only what your tdoc account can open</span>}
+            </li>
+            <li><b>{name} never sees your password</b><span>You sign in on tdoc, not in {name}</span></li>
+            <li><b>Remove it any time</b><span>In Settings, Agents</span></li>
           </ul>
           {!identity ? (
             boot.oidcAuth || boot.authConfigured ? (
@@ -104,9 +111,8 @@ export function OAuthConsentPage({ boot }) {
             ) : <p className="tdoc-activate-hint">Sign-in is not configured on this host.</p>
           ) : (
             <>
-              {choosing ? (
+              {choosing && changing ? (
                 <div className="tdoc-activate-workspaces">
-                  <p className="tdoc-activate-ask">In these workspaces:</p>
                   <WorkspaceChecklist
                     workspaces={workspaces}
                     picked={picked}
@@ -114,19 +120,13 @@ export function OAuthConsentPage({ boot }) {
                     disabled={busy}
                     label="Workspaces this app can reach"
                   />
-                  {picked.length ? null : <p className="tdoc-activate-hint">Tick at least one workspace.</p>}
                 </div>
               ) : null}
-              {/* One button: Allow. Cancel is a word in the line under it, still
-                  sent to the app as access_denied so it stops waiting. The
-                  name is unchecked, so the address above is what to trust. */}
+              {choosing && !picked.length ? <p className="tdoc-activate-hint">Tick at least one workspace.</p> : null}
               <AppButton variant="primary" disabled={busy || (choosing && !picked.length)} onClick={() => decide('allow')}>Allow</AppButton>
-              <p className="tdoc-activate-hint tdoc-oauth-return">
-                Didn't start this?{' '}
-                <button type="button" className="tdoc-consent-cancel" disabled={busy} onClick={() => decide('deny')}>Cancel</button>
-              </p>
             </>
           )}
+          {client.redirect_host ? <p className="tdoc-consent-from">Access goes to <code>{client.redirect_host}</code></p> : null}
           {error ? <p role="alert" className="tdoc-activate-error">{error}</p> : null}
         </div>
         <p className="tdoc-consent-foot"><a href="/privacy">Privacy policy</a></p>
