@@ -94,9 +94,9 @@ Same structure and interaction as Cursor's bottom-left update card; the content 
 
 | Type | Title | Rows | Button |
 | --- | --- | --- | --- |
-| local | Let Claude Code handle your comments | Hand off from any comment · Keeps working in the background · Every change is visible | Turn on |
-| bot | Send comments to your own bot | Hand off from any comment · Runs wherever your bot runs · Every change is visible | Add a bot |
-| hosted | Get comments back to Claude | A reminder for every comment · Want it fully automatic? · Same doc, same account | Set up Claude Code |
+| local | Auto-send comments to Claude Code | Comments go straight to your agent · Works with the chat closed · Every change is visible | Turn on |
+| bot | Auto-send comments to your bot | Comments go straight to your bot · Runs wherever your bot runs · Every change is visible | Add a bot |
+| hosted | Auto-send comments to your agent | Comments go straight to your agent · Needs an agent on your computer · Every change is visible | Set up Claude Code |
 
 The title uses the user's actual agent name. The hosted version steers people to connect local Claude Code so comments are handled automatically.
 
