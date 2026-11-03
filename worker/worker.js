@@ -10328,7 +10328,12 @@ async function createFeedbackInvite(env, ctx, base, mgr, rawInvitee) {
   const same = kind === 'link'
     ? existing.find((r) => r.kind === 'link' && feedbackInviteStatus(r) === 'pending')
     : existing.find((r) => r.kind === kind && r.invitee === invitee);
-  if (same) return { status: 200, body: { ok: true, invite: feedbackInviteForOwner(base, same), emailed: [] } };
+  // ...unless it no longer lets them in (removed in Share since): that one
+  // is set aside and they get a new one.
+  const stale = same && (same.status === 'accepted' || same.kind === 'login')
+    && !accessFromMeta(meta).allowed_users.includes(same.granted || same.invitee);
+  if (stale) await saveFeedbackInvite(env, { ...same, status: 'revoked', revoked_at: new Date().toISOString(), superseded: true });
+  else if (same) return { status: 200, body: { ok: true, invite: feedbackInviteForOwner(base, same), emailed: [] } };
   if (await rateLimited(env, `fbinvite:${slug}`, FEEDBACK_INVITES_PER_DAY, 24 * 60 * 60)) {
     return { status: 429, body: { error: 'rate_limited', message: 'Too many invites today. Try again tomorrow.' } };
   }

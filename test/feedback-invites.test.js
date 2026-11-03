@@ -282,6 +282,11 @@ const ID_RE = /^[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/;
     const carol = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.carol, headers: HOME, body: { origin: APP, invite: handle.id } });
     assert(carol.status === 410, `handle retake: ${carol.status} ${JSON.stringify(carol.body)}`);
     assert(!(await meta(w.env, w.space.slug)).access.allowed_users.length, 'someone got back in');
+    // Invited again by the owner: a new invite that works.
+    const re = await invite(w, { invitee: 'carol' });
+    assert(re.status === 201 && re.body.invite.id !== handle.id, `re-invite: ${re.status} ${JSON.stringify(re.body)}`);
+    const carol2 = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.carol, headers: HOME, body: { origin: APP, invite: re.body.invite.id } });
+    assert(carol2.status === 200 && carol2.body.slug === w.space.slug, `after re-invite: ${carol2.status} ${JSON.stringify(carol2.body)}`);
   });
 
   await t('withdrawing an invite takes back what it gave; a withdrawn or expired one cannot be taken', async () => {
