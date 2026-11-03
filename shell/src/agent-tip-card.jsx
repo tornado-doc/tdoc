@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Infinity as Loop, Play, Sparkles, X } from 'lucide-react';
+import { Check, Infinity as Loop, Play, Sparkles, X } from 'lucide-react';
 import { AppButton } from './ui/button.jsx';
+import { ClaudeMark, OpenAIMark } from './agent-marks.jsx';
 import { CodeBlock } from './ui/code-block.jsx';
 import { listNotifications } from './document/api.js';
 import { readStored, writeStored } from './safe-storage.js';
@@ -76,27 +77,60 @@ function dismissals() {
   return Number(readStored(DISMISS_KEY)) || 0;
 }
 
-// The looping product window in the hero: a comment handed to the agent,
-// the agent revising, the new version with a reply.
+const ASK = 'add the EU price here';
+
+// Types `text` out while `active`, a few letters at a time; shows it whole
+// otherwise (and at once with reduced motion).
+function useTyped(text, active) {
+  const [n, setN] = useState(active ? 0 : text.length);
+  useEffect(() => {
+    if (!active) { setN(text.length); return undefined; }
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setN(text.length); return undefined; }
+    setN(0);
+    const id = setInterval(() => setN((k) => (k >= text.length ? k : k + 1)), 38);
+    return () => clearInterval(id);
+  }, [text, active]);
+  return text.slice(0, n);
+}
+
+// The looping product window in the hero: a tdoc doc with a highlighted
+// passage and its comment in the margin, drawn like the real comment card
+// (avatar, name, time, the status chip, a reply under a rule). Maya's comment
+// types in and goes to the agent; the agent's reply comes in revising; the
+// chip turns to "Applied in v4". One window for all three frames.
 function Hero({ scene, agent, onClose }) {
+  const typed = useTyped(ASK, scene === 0);
+  const typing = scene === 0 && typed.length < ASK.length;
+  const mark = agent === 'Codex' ? <OpenAIMark size={8} /> : <ClaudeMark size={8} />;
   return (
     <div className="tdoc-tip-hero">
       <AppButton variant="icon" size="s" className="tdoc-tip-close" aria-label="Close" onClick={onClose}><X size={13} /></AppButton>
       <div className="tdoc-tip-win" aria-hidden="true">
-        <div className={`tdoc-tip-scene${scene === 0 ? ' is-on' : ''}`}>
-          <div className="tdoc-tip-bar"><i /><i /><i /> tdoc.dev/d/q4-plan</div>
-          <div className="tdoc-tip-q"><b>Maya</b> · 10:24 AM<br /><span className="tdoc-tip-at">@agent</span> tighten the pricing section and add the EU numbers</div>
-          <div className="tdoc-tip-st">Sent to {agent} automatically</div>
+        <div className="tdoc-tip-bar">
+          <img src="/tdoc_logo.svg" width="9" height="9" alt="" />
+          <span>Q4 plan</span>
+          <span className={`tdoc-tip-ver${scene === 2 ? ' is-new' : ''}`}>{scene === 2 ? 'v4' : 'v3'}</span>
         </div>
-        <div className={`tdoc-tip-scene${scene === 1 ? ' is-on' : ''}`}>
-          <div className="tdoc-tip-bar"><i /><i /><i /> {agent}</div>
-          <div className="tdoc-tip-q">Picked up 1 comment on <b>Q4 plan</b></div>
-          <div className="tdoc-tip-st"><span className="tdoc-tip-spin" />Revising…</div>
+        <div className="tdoc-tip-doc">
+          <p className="tdoc-tip-h">Pricing</p>
+          <p className="tdoc-tip-p">Plans start at $12 a seat. <mark className={scene === 2 ? 'is-done' : ''}>{scene === 2 ? 'Team is $10 in the US and €9 in the EU.' : 'Team pricing is still being worked out.'}</mark> Annual billing saves 20%.</p>
+          <i className="tdoc-tip-line" /><i className="tdoc-tip-line is-short" />
         </div>
-        <div className={`tdoc-tip-scene${scene === 2 ? ' is-on' : ''}`}>
-          <div className="tdoc-tip-bar"><i /><i /><i /> Q4 plan · v4</div>
-          <div className="tdoc-tip-q"><b>{agent}</b><br />Tightened pricing, added EU figures. <span className="tdoc-tip-ok">Resolved ✓</span></div>
-          <div className="tdoc-tip-st">v3 → v4 · replied to 1 comment</div>
+        <div className="tdoc-tip-cmt">
+          <div className="tdoc-tip-who">
+            <span className="tdoc-tip-av tdoc-tip-av-maya">M</span>
+            <b>Maya</b><span className="tdoc-tip-when">10:24 AM</span>
+          </div>
+          <div className="tdoc-tip-text"><span className="tdoc-tip-at">@agent</span> {typed}{typing ? <i className="tdoc-tip-caret" /> : null}</div>
+          <span className={`tdoc-tip-chip${scene === 2 ? ' is-done' : scene === 1 ? ' is-sent' : ''}`}>
+            {scene === 2 ? <><Check size={7} strokeWidth={4} />Applied in v4</> : scene === 1 ? `Sent to ${agent}` : 'Open'}
+          </span>
+          <div className={`tdoc-tip-reply${scene >= 1 ? ' is-in' : ''}`}>
+            <div className="tdoc-tip-who"><span className="tdoc-tip-av tdoc-tip-av-agent">{mark}</span><b>{agent}</b></div>
+            <div className="tdoc-tip-text">
+              {scene === 2 ? 'Added the EU price in v4.' : <span className="tdoc-tip-shimmer">Revising the doc…</span>}
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -361,6 +361,7 @@ async function startServer(worker, env) {
         const box = await card.boundingBox();
         assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y + box.height <= height + 1, `card fits at ${label}: ${JSON.stringify(box)}`);
         await shot(page, `${label}-agent-tip`);
+        if (process.env.TDOC_SHOT_DIR) { await page.waitForTimeout(2700); await shot(page, `${label}-agent-tip-2`); await page.waitForTimeout(2600); await shot(page, `${label}-agent-tip-3`); }
         await card.getByRole('button', { name: 'Turn on' }).click();
         await card.getByText('Waiting for your computer').waitFor();
         const after = await card.boundingBox();
