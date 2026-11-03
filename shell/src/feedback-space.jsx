@@ -106,7 +106,7 @@ export function FeedbackSpace({ boot }) {
         body: JSON.stringify({ slug }),
       });
       const b = await r.json().catch(() => null);
-      if (!r.ok) throw new Error((b && b.error) || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error((b && (b.message || b.error)) || `HTTP ${r.status}`);
       setJoined(true);
     } catch (err) {
       setNotice(`Could not join: ${err.message}`);
@@ -180,6 +180,10 @@ export function FeedbackSpace({ boot }) {
           <section className="tdoc-fbspace-card">
             <p><strong>Sign in to join.</strong> You're invited to leave feedback on {host}; your comments land here, next to everyone else's.</p>
             <a className="ui-btn ui-btn-primary ui-btn-m" href={signinUrl}>Sign in</a>
+          </section>
+        ) : !joined && boot.canJoin === false ? (
+          <section className="tdoc-fbspace-card">
+            <p><strong>Not invited to this space.</strong> Your comments on {host} go to your own space. To comment here from the app, ask its owner to invite you in Share.</p>
           </section>
         ) : !joined ? (
           <section className="tdoc-fbspace-card">

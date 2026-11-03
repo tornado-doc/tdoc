@@ -40,7 +40,7 @@ const APP = 'http://localhost:3000';
     }
   });
 
-  await t('first connect creates an unlisted, sign-in-to-comment space named after the app', async () => {
+  await t('first connect creates a private space of the person\'s own, named after the app', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'julie');
     const r = await connect(env, cookie);
@@ -52,7 +52,7 @@ const APP = 'http://localhost:3000';
     const meta = JSON.parse(await env.META.get(`meta:${r.body.slug}`));
     assert(meta.title === 'Feedback · localhost:3000', `title ${meta.title}`);
     assert(meta.created_from === 'feedback' && meta.feedback.origin === APP, 'meta names the app');
-    assert(meta.access.visibility === 'unlisted' && meta.access.commenting === 'signed_in', `access ${JSON.stringify(meta.access)}`);
+    assert(meta.access.visibility === 'private' && meta.access.commenting === 'signed_in', `access ${JSON.stringify(meta.access)}`);
     assert(meta.hosted && meta.hosted.github_login === 'julie', 'hosted ownership stamped');
     const html = await (await env.DOCS.get(`docs/${r.body.slug}/v1/index.html`)).text();
     assert(html.includes('Feedback · localhost:3000') && html.includes('/feedback.js'), 'space doc explains itself');
@@ -86,7 +86,7 @@ const APP = 'http://localhost:3000';
     assert(b.status === 200 && b.body.slug !== a.body.slug, 'dangling index was followed');
   });
 
-  await t('"use an existing doc" needs a doc this person may comment on', async () => {
+  await t('"use an existing doc" needs a doc this person owns or was invited to, not just one they hold the link of', async () => {
     const env = makeEnv(mod.CommentsStore);
     const cookie = await putSession(env, 'julie');
     await env.META.put('meta:private-plan', JSON.stringify({
@@ -99,6 +99,12 @@ const APP = 'http://localhost:3000';
     await env.META.put('meta:open-plan', JSON.stringify({
       title: 'Open', versions: [{ n: 1 }, { n: 2 }], hosted: { github_login: 'bob' },
       access: { visibility: 'unlisted', commenting: 'signed_in' },
+    }));
+    const linkOnly = await connect(env, cookie, { slug: 'open-plan' });
+    assert(linkOnly.status === 403 && linkOnly.body.error === 'not_invited', `link-only doc: ${linkOnly.status} ${JSON.stringify(linkOnly.body)}`);
+    await env.META.put('meta:open-plan', JSON.stringify({
+      title: 'Open', versions: [{ n: 1 }, { n: 2 }], hosted: { github_login: 'bob' },
+      access: { visibility: 'unlisted', commenting: 'signed_in', allowed_users: ['julie'] },
     }));
     const okr = await connect(env, cookie, { slug: 'open-plan' });
     assert(okr.status === 200 && okr.body.slug === 'open-plan' && okr.body.version === 2, `existing doc: ${okr.status} ${JSON.stringify(okr.body)}`);
@@ -177,8 +183,15 @@ const APP = 'http://localhost:3000';
     headers: { 'Content-Type': 'application/json', Cookie: cookie, ...(origin ? { Origin: origin } : {}) },
     body: JSON.stringify({ slug }),
   });
+  // The owner's Share: invite people by name, or open the space to its link.
+  const shareSpace = async (env, slug, patch) => {
+    const meta = JSON.parse(await env.META.get(`meta:${slug}`));
+    meta.access = { ...meta.access, ...patch };
+    await env.META.put(`meta:${slug}`, JSON.stringify(meta));
+  };
+  const invite = (env, slug, ...logins) => shareSpace(env, slug, { allowed_users: logins });
 
-  await t('a shared link puts a teammate in the same space: their next connect lands there', async () => {
+  await t('an invited teammate joins the same space: their next connect lands there', async () => {
     const env = makeEnv(mod.CommentsStore);
     const julie = await putSession(env, 'julie');
     const { body: space } = await connect(env, julie);
@@ -186,11 +199,17 @@ const APP = 'http://localhost:3000';
     assert(space.share_url === `https://tdoc.dev/d/${space.slug}?share=1` && !space.invite_url, `share_url ${space.share_url}`);
     assert(space.origin === APP, `origin ${space.origin}`);
     const can = await putSession(env, 'can');
+    // Private until the owner invites: the link alone shows nothing.
+    const shut = await worker.fetch(req(`/d/${space.slug}/v/1`, { cookie: can }), env, {});
+    assert(shut.status !== 200 || !(await shut.text()).includes('"page":"feedback-space"'), `uninvited saw the space: ${shut.status}`);
+    const refused = await worker.fetch(joinReq(can, space.slug), env, {});
+    assert(refused.status === 403, `uninvited join: ${refused.status}`);
+    await invite(env, space.slug, 'can');
     // One link: the space's own page lists the comments and offers Join.
     const page = await worker.fetch(req(`/d/${space.slug}/v/1`, { cookie: can }), env, {});
     const html = await page.text();
     assert(page.status === 200 && html.includes('"page":"feedback-space"'), `space page: ${page.status}`);
-    assert(html.includes('"joined":false') && html.includes('"isOwner":false'), 'invitee should be offered Join');
+    assert(html.includes('"joined":false') && html.includes('"canJoin":true') && html.includes('"isOwner":false'), 'invitee should be offered Join');
     const own = await (await worker.fetch(req(`/d/${space.slug}/v/1`, { cookie: julie }), env, {})).text();
     assert(own.includes('"isOwner":true') && own.includes('"joined":true'), 'owner page flags');
     const asDoc = await (await worker.fetch(req(`/d/${space.slug}/v/1?doc=1`, { cookie: julie }), env, {})).text();
@@ -217,10 +236,138 @@ const APP = 'http://localhost:3000';
     const can = await putSession(env, 'can');
     const { body: own } = await connect(env, can);
     assert(own.slug !== space.slug, 'precondition: can had a space of their own');
+    await invite(env, space.slug, 'can');
     await worker.fetch(joinReq(can, space.slug), env, {});
     const r = await worker.fetch(req('/api/feedback/session', { token: own.token }), env, {});
     const b = await r.json();
     assert(r.status === 409 && b.error === 'space_moved' && b.slug === space.slug, `stale token: ${r.status} ${JSON.stringify(b)}`);
+  });
+
+  // Julie, 2026-11-03: the bookmarklet gives each person their own space per
+  // origin; another person's space is joined only on an explicit invite.
+  await t('bookmarklet: two people on the same origin get separate spaces, even holding the other\'s link', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    // A space opened to its link (every space before this change was).
+    await shareSpace(env, hers.slug, { visibility: 'unlisted', commenting: 'signed_in' });
+    const page = await (await worker.fetch(req(`/d/${hers.slug}`, { cookie: julie }), env, {})).text();
+    const boot = bootData(page, '__TDOC_APP_BOOT__');
+    assert(boot.page === 'feedback-space' && boot.joined === false && boot.canJoin === false, `link holder boot ${JSON.stringify({ joined: boot.joined, canJoin: boot.canJoin })}`);
+    const join = await worker.fetch(joinReq(julie, hers.slug), env, {});
+    const jb = await join.json();
+    assert(join.status === 403 && jb.error === 'not_invited' && /invite/i.test(jb.message), `link-only join: ${join.status} ${JSON.stringify(jb)}`);
+    const viaDoc = await connect(env, julie, { slug: hers.slug });
+    assert(viaDoc.status === 403 && viaDoc.body.error === 'not_invited', `link-only "existing doc": ${viaDoc.status}`);
+    const { body: mine } = await connect(env, julie);
+    assert(mine.slug !== hers.slug && mine.is_owner === true && !mine.moved, `julie got ${mine.slug} (serena's is ${hers.slug})`);
+    assert(await env.META.get(`feedback:space:julie:${APP}`) === mine.slug, 'julie\'s index');
+    assert(await env.META.get(`feedback:space:serena:${APP}`) === hers.slug, 'serena\'s index moved');
+    // Each one's comments stay private to them.
+    const anchor = { kind: 'product', url: `${APP}/`, selector: '#x', tag: 'div', text: 'x' };
+    await worker.fetch(req('/api/comments', { method: 'POST', token: mine.token, body: { slug: mine.slug, version: 1, text: 'julie only', anchor } }), env, {});
+    const peek = await worker.fetch(req(`/api/comments?slug=${mine.slug}&version=1`, { cookie: serena }), env, {});
+    assert(peek.status === 403 || peek.status === 404, `serena read julie's space: ${peek.status}`);
+  });
+
+  await t('a mis-joined bookmarklet mapping moves to the person\'s own space on the next connect; nothing is deleted', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    await shareSpace(env, hers.slug, { visibility: 'unlisted', commenting: 'signed_in' });
+    // What the old join (any link holder) left behind: julie filed into
+    // serena's space, with a live token and a comment there.
+    await env.META.put(`feedback:space:julie:${APP}`, hers.slug);
+    const oldToken = `fb_${'a'.repeat(48)}`;
+    await env.META.put(`feedback:token:${oldToken}`, JSON.stringify({ sid: julie.split('=')[1], slug: hers.slug, origin: APP, created: new Date().toISOString() }));
+    const anchor = { kind: 'product', url: `${APP}/`, selector: '#x', tag: 'div', text: 'x' };
+    await worker.fetch(req('/api/comments', { method: 'POST', cookie: julie, headers: { Origin: 'https://tdoc.dev' }, body: { slug: hers.slug, version: 1, text: 'left before', anchor } }), env, {});
+    const metaBefore = await env.META.get(`meta:${hers.slug}`);
+    // The widget's first call: the old token is told to reconnect.
+    const stale = await worker.fetch(req('/api/feedback/session', { token: oldToken }), env, {});
+    const sb = await stale.json();
+    assert(stale.status === 409 && sb.error === 'space_moved', `old token: ${stale.status} ${JSON.stringify(sb)}`);
+    const { status, body: mine } = await connect(env, julie);
+    assert(status === 200 && mine.slug !== hers.slug && mine.is_owner === true, `reconnect: ${status} ${mine.slug}`);
+    assert(mine.moved === true && !JSON.stringify(mine).includes(hers.slug), `moved ${mine.moved}`);
+    assert(await env.META.get(`feedback:space:julie:${APP}`) === mine.slug, 'index not switched');
+    const meta = JSON.parse(await env.META.get(`meta:${mine.slug}`));
+    assert(meta.access.visibility === 'private' && meta.hosted.github_login === 'julie', `own space ${JSON.stringify(meta.access)}`);
+    // Serena's space, its record and julie's old comment are untouched.
+    assert(await env.META.get(`meta:${hers.slug}`) === metaBefore, 'serena\'s space was changed');
+    assert(await env.META.get(`feedback:space:serena:${APP}`) === hers.slug, 'serena\'s index moved');
+    const left = await (await worker.fetch(req(`/api/comments?slug=${hers.slug}&version=1`, { cookie: serena }), env, {})).json();
+    assert(left.some((c) => c.text === 'left before'), 'old comment gone');
+    const fresh = await worker.fetch(req('/api/feedback/session', { token: mine.token }), env, {});
+    assert(fresh.status === 200, `new token: ${fresh.status}`);
+    // Stable: the connect after that stays in julie's own space.
+    const again = await connect(env, julie);
+    assert(again.body.slug === mine.slug && !again.body.moved, 'second connect moved again');
+  });
+
+  await t('a mapping to a space the person was invited to is kept', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    await invite(env, hers.slug, 'julie');
+    await env.META.put(`feedback:space:julie:${APP}`, hers.slug);
+    const { body } = await connect(env, julie);
+    assert(body.slug === hers.slug && !body.moved, `invited mapping lost: ${body.slug}`);
+    // Uninvited later: the next connect gives julie her own.
+    await invite(env, hers.slug);
+    const after = await connect(env, julie);
+    assert(after.body.slug !== hers.slug && after.body.moved === true, `still in serena's: ${after.body.slug}`);
+  });
+
+  await t('commenting turned off does not move the owner out; /me hides a space joined only by its link', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    await shareSpace(env, hers.slug, { commenting: 'off' });
+    const s = await worker.fetch(req('/api/feedback/session', { token: hers.token }), env, {});
+    const sb = await s.json();
+    assert(s.status === 200 && sb.can_comment === false, `owner session with commenting off: ${s.status} ${JSON.stringify(sb)}`);
+    const again = await connect(env, serena);
+    assert(again.body.slug === hers.slug && !again.body.moved, 'owner was moved out of their own space');
+    await shareSpace(env, hers.slug, { commenting: 'signed_in', visibility: 'unlisted' });
+    await env.META.put(`feedback:space:julie:${APP}`, hers.slug);
+    const me = await (await worker.fetch(req('/api/me', { cookie: julie }), env, {})).json();
+    assert(!(me.feedback || []).some((x) => x.slug === hers.slug), `link-only space listed: ${JSON.stringify(me.feedback)}`);
+  });
+
+  await t('a mis-joined person who already owns a site space for the origin goes back to it', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: hers } = await connect(env, serena);
+    await shareSpace(env, hers.slug, { visibility: 'unlisted' });
+    const { body: own } = await connect(env, julie);
+    await env.META.put(`feedback:sitespace:julie:${APP}`, own.slug);
+    await env.META.put(`feedback:space:julie:${APP}`, hers.slug);
+    const back = await connect(env, julie);
+    assert(back.body.slug === own.slug && back.body.moved === true, `got ${back.body.slug}, own ${own.slug}`);
+    assert(await env.META.get(`feedback:space:julie:${APP}`) === own.slug, 'index not switched back');
+  });
+
+  await t('SDK: a site\'s own space (data-tdoc-space) stays one shared space for everyone it admits', async () => {
+    const env = makeEnv(mod.CommentsStore);
+    const serena = await putSession(env, 'serena');
+    const julie = await putSession(env, 'julie');
+    const { body: site } = await connect(env, serena);
+    await env.META.put(`site:${site.slug}`, JSON.stringify({ origins: [APP] }));
+    await shareSpace(env, site.slug, { visibility: 'unlisted', commenting: 'signed_in' });
+    const a = await connect(env, serena, { space: site.slug });
+    const b = await connect(env, julie, { space: site.slug });
+    assert(a.status === 200 && b.status === 200 && a.body.slug === site.slug && b.body.slug === site.slug && b.body.site === true, `site: ${a.status} ${b.status} ${b.body.slug}`);
+    const s = await worker.fetch(req('/api/feedback/session', { token: b.body.token }), env, {});
+    assert(s.status === 200, `site token session: ${s.status}`);
+    // And julie's bookmarklet on the same origin is still her own.
+    const own = await connect(env, julie);
+    assert(own.body.slug !== site.slug && own.body.is_owner === true, 'bookmarklet joined the site space');
   });
 
   await t('join refuses cross-site posts, non-feedback docs, and anonymous callers', async () => {
@@ -263,8 +410,10 @@ const APP = 'http://localhost:3000';
     const rec = (list.handoffs || [])[0] || {};
     assert(!rec.recipient || rec.recipient.agent_sub !== 'evil', 'page-supplied recipient was honoured');
     const can = await putSession(env, 'can');
+    await invite(env, space.slug, 'can');
     await worker.fetch(joinReq(can, space.slug), env, {});
     const { body: theirs } = await connect(env, can);
+    assert(theirs.slug === space.slug, 'the invited joiner was not in the space');
     const notOwner = await worker.fetch(req(`/api/notify/targets?slug=${space.slug}`, { token: theirs.token }), env, {});
     assert(notOwner.status === 401 || notOwner.status === 403, `a joiner drives the owner's agent: ${notOwner.status}`);
   });
@@ -286,6 +435,7 @@ const APP = 'http://localhost:3000';
     // Serena's space for tdoc.dev itself; Julie joins and connects her bookmarklet there.
     const { body: space } = await connect(env, serena.cookie, { origin: TDOC });
     assert(space.is_owner === true && space.own_agent === true, `owner connect ${JSON.stringify({ is_owner: space.is_owner, own_agent: space.own_agent })}`);
+    await invite(env, space.slug, 'julie');
     assert((await worker.fetch(joinReq(julie.cookie, space.slug), env, {})).status === 200, 'julie joins');
     const { body: mine } = await connect(env, julie.cookie, { origin: TDOC });
     assert(mine.slug === space.slug && mine.is_owner === false && mine.own_agent === true, `joiner connect ${JSON.stringify({ slug: mine.slug, is_owner: mine.is_owner, own_agent: mine.own_agent })}`);
@@ -353,6 +503,7 @@ const APP = 'http://localhost:3000';
 
     // Refused: a third-party app's space. Its page could read the token.
     const { body: appSpace } = await connect(env, serena.cookie);
+    await invite(env, appSpace.slug, 'julie');
     await worker.fetch(joinReq(julie.cookie, appSpace.slug), env, {});
     const { body: appMine } = await connect(env, julie.cookie);
     assert(appMine.slug === appSpace.slug && appMine.own_agent === false, `third-party connect ${JSON.stringify({ slug: appMine.slug, own_agent: appMine.own_agent })}`);
@@ -419,6 +570,7 @@ const APP = 'http://localhost:3000';
     const can = await putSession(env, 'can');
     const before = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
     assert(!(before.feedback || []).length, 'a stranger sees the space');
+    await invite(env, space.slug, 'can');
     await worker.fetch(joinReq(can, space.slug), env, {});
     const after = await (await worker.fetch(req('/api/me', { cookie: can }), env, {})).json();
     const theirs = (after.feedback || []).find((x) => x.slug === space.slug);
@@ -476,8 +628,10 @@ const APP = 'http://localhost:3000';
     const own = await spaceBoot(env, owner.cookie, space.slug);
     assert(own.page === 'feedback-space' && own.isOwner === true, `owner boot ${JSON.stringify(own)}`);
     assert(own.shareUrl === `https://tdoc.dev/d/${space.slug}`, `copy link ${own.shareUrl}`);
-    assert(own.ownerManage && own.ownerManage.access.visibility === 'unlisted', `ownerManage ${JSON.stringify(own.ownerManage)}`);
+    assert(own.ownerManage && own.ownerManage.access.visibility === 'private', `ownerManage ${JSON.stringify(own.ownerManage)}`);
     assert(own.workspaceId === null && own.teamManage === null, 'a personal space names no team');
+    // The owner opens it to its link in Share; others then see the page.
+    await shareSpace(env, space.slug, { visibility: 'unlisted' });
     const can = await issue(worker, env, 'can');
     const theirs = await spaceBoot(env, can.cookie, space.slug);
     assert(theirs.isOwner === false && theirs.ownerManage === null, `non-owner got manage data ${JSON.stringify(theirs.ownerManage)}`);

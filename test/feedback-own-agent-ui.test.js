@@ -109,7 +109,13 @@ async function startServer(worker, env) {
     await env.META.put(`account-notify:${julie.account_id}`, JSON.stringify([raft('j1', 'julie-claw', 'julie'), raft('j2', 'bencher', 'raft')]));
     const space = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: serena.cookie, headers: HOME, body: { origin: TDOC } })).body;
     const app = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: serena.cookie, headers: HOME, body: { origin: APP } })).body;
-    for (const s of [space, app]) await call(env, '/api/feedback/join', { method: 'POST', cookie: julie.cookie, headers: HOME, body: { slug: s.slug } });
+    // Serena invites Julie by name (a link alone no longer lets anyone join).
+    for (const s of [space, app]) {
+      const meta = JSON.parse(await env.META.get(`meta:${s.slug}`));
+      meta.access = { ...meta.access, allowed_users: ['julie'] };
+      await env.META.put(`meta:${s.slug}`, JSON.stringify(meta));
+      await call(env, '/api/feedback/join', { method: 'POST', cookie: julie.cookie, headers: HOME, body: { slug: s.slug } });
+    }
     const mine = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: julie.cookie, headers: HOME, body: { origin: TDOC } })).body;
     const mineApp = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: julie.cookie, headers: HOME, body: { origin: APP } })).body;
     assert.equal(mine.slug, space.slug);

@@ -7179,7 +7179,7 @@ async function feedbackSpacesFor(env, session, rows, toPublic, withCounts) {
     const owned = isDocOwnerSession(env, session, row.meta);
     let joined = false;
     if (!owned) {
-      try { joined = (await env.META.get(feedbackSpaceIndexKey(session, origin))) === row.slug; } catch {}
+      try { joined = (await env.META.get(feedbackSpaceIndexKey(session, origin))) === row.slug && feedbackPersonalSpaceAllowed(env, session, row.meta); } catch {}
     }
     if (!owned && !joined) return null;
     if (!docReadableBy(env, session, row.meta)) return null;
@@ -9601,21 +9601,54 @@ function feedbackSpaceHtml(origin, base) {
 <main>
   <h1>Feedback · ${escapeHtml(host)}</h1>
   <p>Product feedback left on <a href="${escapeHtml(origin)}">${escapeHtml(origin)}</a>. Every comment here points at the page and the element it was left on.</p>
-  <p class="muted">To leave feedback on the app itself, open the app and click the tdoc bookmark (get it at <a href="${escapeHtml(base)}/feedback">${escapeHtml(new URL(base).host)}/feedback</a>), or add <code>&lt;script src="${escapeHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app. Teammates join this same thread through the Invite link in the app.</p>
+  <p class="muted">To leave feedback on the app itself, open the app and click the tdoc bookmark (get it at <a href="${escapeHtml(base)}/feedback">${escapeHtml(new URL(base).host)}/feedback</a>), or add <code>&lt;script src="${escapeHtml(base)}/feedback.js"&gt;&lt;/script&gt;</code> to the app. Only its owner sees these comments until they invite teammates in Share; an invited teammate opens this page and clicks Join.</p>
 </main>
 </body>
 </html>
 `;
 }
 
+// Where a person's bookmarklet comments may go (Julie, 2026-11-03): their
+// own space, or one whose owner explicitly invited them -- by name in Share
+// (allowed_users) or as a member of the team the space lives in. A link that
+// merely lets them read and comment (an unlisted space, "anyone signed in can
+// comment") is not an invite: someone who opens another person's space by its
+// link must not have their bookmarklet quietly filed there. The SDK
+// (data-tdoc-space) does not come through here; a site's own space is shared
+// by design and admits whoever its Share admits. Who may comment is not part
+// of it: commenting turned off for a while does not move anyone out (join and
+// "use an existing doc" check it on their own; the session says can_comment).
+function feedbackPersonalSpaceAllowed(env, session, meta) {
+  if (!meta) return false;
+  const access = accessFromMeta(meta);
+  return isAllowlisted(access, session, env, meta) && canReadDoc(access, session, env, meta);
+}
+
 // Find or create the space for (this person, this origin). A space whose doc
-// has since been deleted is recreated rather than pointed at.
+// has since been deleted is recreated rather than pointed at, and so is one
+// the person was only ever let into by its link (see
+// feedbackPersonalSpaceAllowed): they get a space of their own, and the one
+// they had been filed into is left exactly as it is, comments and all.
+// `moved` says so (not which space: an index key can outlive the account
+// that wrote it), so the connect page can tell them where the old ones are.
 async function feedbackSpaceFor(env, req, session, origin) {
   const key = feedbackSpaceIndexKey(session, origin);
   const known = await env.META.get(key);
+  let moved = false;
   if (known) {
     const meta = await loadDocMeta(env, known);
-    if (meta) return { ok: true, slug: known, meta };
+    if (meta && feedbackPersonalSpaceAllowed(env, session, meta)) return { ok: true, slug: known, meta };
+    if (meta) {
+      moved = true;
+      // A site space of their own for this origin (create_feedback_space)
+      // is theirs already: back to it rather than a new one.
+      const own = await env.META.get(feedbackSiteSpaceIndexKey(session, origin));
+      const ownMeta = own && own !== known && isValidSlug(own) ? await loadDocMeta(env, own) : null;
+      if (ownMeta && ownMeta.created_from === 'feedback' && isDocOwnerSession(env, session, ownMeta)) {
+        await env.META.put(key, own);
+        return { ok: true, slug: own, meta: ownMeta, moved };
+      }
+    }
   }
   const base = new URL(req.url).origin;
   const made = await createDocForSession(env, req, session, {
@@ -9624,15 +9657,15 @@ async function feedbackSpaceFor(env, req, session, origin) {
       title: `Feedback · ${new URL(origin).host}`,
       created_from: 'feedback',
       feedback: { origin },
-      // Anyone holding the link sees the same thread; a name is needed to
-      // write. The owner tightens this in Share like any other doc.
-      access: { visibility: 'unlisted', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
+      // Private: the person's own comments. Others see and join only once
+      // the owner invites them in Share (Julie, 2026-11-03).
+      access: { visibility: 'private', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
     },
     version: { prompt: `Feedback space for ${origin}` },
   });
   if (!made.ok) return made;
   await env.META.put(key, made.slug);
-  return { ok: true, slug: made.slug, meta: made.meta };
+  return { ok: true, slug: made.slug, meta: made.meta, moved };
 }
 
 async function mintFeedbackToken(env, session, slug, origin, { site = false } = {}) {
@@ -9674,6 +9707,10 @@ async function mintFeedbackToken(env, session, slug, origin, { site = false } = 
 // plant one) and only a same-origin Connect fills; and nothing is filled
 // without the signed-in person's Connect click on a page that names the app.
 const FEEDBACK_CLAIM_TTL_SECONDS = 600;
+const FEEDBACK_NOT_INVITED = Object.freeze({
+  error: 'not_invited',
+  message: 'Only people its owner invited can join this feedback space. Ask them to invite you in Share.',
+});
 const FEEDBACK_CLAIM_RE = /^[a-f0-9]{64}$/;
 const feedbackClaimKey = async (claim) => `feedback:claim:${await sha256Hex(claim)}`;
 // One cookie per (app, space): a second connect window for another app does
@@ -9888,7 +9925,9 @@ async function indexFeedbackSiteSpace(env, session, team, slug, origins) {
     if (current === slug) continue;
     // Gone means no record at all: a space in Trash keeps its pointer, so
     // restoring it brings the bookmarklet back to it.
-    if (!current || !isValidSlug(current) || !(await loadDocRecord(env, current))) await env.META.put(key, slug);
+    const record = current && isValidSlug(current) ? await loadDocRecord(env, current) : null;
+    // ...or at a space they were never invited to (feedbackPersonalSpaceAllowed).
+    if (!record || (!isTrashedMeta(record) && !feedbackPersonalSpaceAllowed(env, session, record))) await env.META.put(key, slug);
   }
 }
 
@@ -23120,7 +23159,10 @@ const tdocHandlers = {
           const viewer = await getSession(env, req);
           const signedIn = Boolean(sessionPrincipal(viewer)) && !(viewer && viewer.feedback);
           const isOwner = signedIn && isDocOwnerSession(env, viewer, gate.meta);
-          const joined = isOwner || (signedIn && (await env.META.get(feedbackSpaceIndexKey(viewer, spaceOrigin))) === slug);
+          const joined = isOwner || (signedIn && (await env.META.get(feedbackSpaceIndexKey(viewer, spaceOrigin))) === slug
+            && feedbackPersonalSpaceAllowed(env, viewer, gate.meta));
+          // Join is offered only to people the owner invited.
+          const canJoin = signedIn && feedbackPersonalSpaceAllowed(env, viewer, gate.meta);
           const access = accessFromMeta(gate.meta);
           // Share on this page is the doc's Share dialog: the same owner-only
           // manage data the doc page embeds, computed the same way.
@@ -23145,6 +23187,7 @@ const tdocHandlers = {
               identity: signedIn ? { login: actorKey(viewer), linked_actor_keys: actorKeys(viewer), avatar_url: viewer.avatar_url || '', name: actorDisplayName(viewer) } : null,
               isOwner,
               joined,
+              canJoin,
               canComment: signedIn && canCommentOnDoc(access, viewer, env, gate.meta),
               signinUrl: `/api/auth/oidc/login?return=${encodeURIComponent(`/d/${slug}`)}`,
               ownerManage: isOwner ? { access } : null,
@@ -23443,6 +23486,8 @@ const tdocHandlers = {
       const access = accessFromMeta(meta);
       if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
+      // Reading by its link is not an invite (feedbackPersonalSpaceAllowed).
+      if (!feedbackPersonalSpaceAllowed(env, s, meta)) return json(FEEDBACK_NOT_INVITED, { status: 403 });
       await env.META.put(feedbackSpaceIndexKey(s, origin), slug);
       return json({ ok: true, slug, origin });
     }
@@ -23612,6 +23657,7 @@ const tdocHandlers = {
       };
       let slug;
       let meta;
+      let moved = false;
       if (body.space) {
         // A site's own space (the SDK): only on the origins it was bound to,
         // and only for people the space doc's own access admits, exactly as
@@ -23643,13 +23689,16 @@ const tdocHandlers = {
         return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, body.space, meta, { slug: body.space, origin, site: true }), token, site: true }, body.space);
       }
       if (body.slug) {
-        // "Use an existing doc": any doc this person may comment on.
+        // "Use an existing doc": one this person owns or was invited to.
         if (!isValidSlug(body.slug)) return json({ error: 'invalid_slug' }, { status: 400 });
         meta = await loadDocMeta(env, body.slug);
         if (!meta) return json({ error: 'not_found' }, { status: 404 });
         const access = accessFromMeta(meta);
         if (!canReadDoc(access, s, env, meta)) return json({ error: 'access_denied' }, { status: 403 });
         if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
+        // Your own doc, or one you were invited to; not one you only hold
+        // the link of (feedbackPersonalSpaceAllowed).
+        if (!feedbackPersonalSpaceAllowed(env, s, meta)) return json(FEEDBACK_NOT_INVITED, { status: 403 });
         slug = body.slug;
         await env.META.put(feedbackSpaceIndexKey(s, origin), slug);
       } else {
@@ -23657,9 +23706,10 @@ const tdocHandlers = {
         if (!space.ok) return space.response;
         slug = space.slug;
         meta = space.meta;
+        moved = Boolean(space.moved);
       }
       const token = await mintFeedbackToken(env, s, slug, origin);
-      return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, slug, meta, { slug, origin, site: false }), token }, null);
+      return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, slug, meta, { slug, origin, site: false }), token, ...(moved ? { moved: true } : {}) }, null);
     }
     // The client's first call with a stored token: still valid, still allowed,
     // and where the doc is now.
@@ -23675,6 +23725,10 @@ const tdocHandlers = {
       }
       const meta = await loadDocMeta(env, s.feedback.slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      // A personal token for a space the person was only let into by its
+      // link (filed there before feedbackPersonalSpaceAllowed): the client
+      // reconnects, and the connect gives them a space of their own.
+      if (!s.feedback.site && !feedbackPersonalSpaceAllowed(env, s, meta)) return json({ error: 'space_moved', slug: null }, { status: 409 });
       // A site token lives only as long as the site binding that minted it.
       if (s.feedback.site && !siteServesOrigin(await loadSiteBinding(env, s.feedback.slug, meta), s.feedback.origin)) return json({ error: 'site_off', message: 'Comments are turned off on this site.' }, { status: 403 });
       const access = accessFromMeta(meta);

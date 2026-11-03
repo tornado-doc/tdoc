@@ -47,15 +47,20 @@ export function FeedbackConnect({ boot }) {
   const say = (text, bad = false, acceptUrl = '') => setStatus({ text, bad, acceptUrl });
 
   const deliver = (payload) => {
+    // Had been filed into someone else's space by its link: this connect gave
+    // them their own. Say so, and leave the window up long enough to read.
+    const moved = payload && payload.moved
+      ? ` Your comments on ${host || 'this app'} now go to your own private space; the ones you left before stay in the space you had joined.`
+      : '';
     if (hasOpener()) {
       window.opener.postMessage({ type: 'tdoc-feedback-connected', origin, session: payload }, origin);
-      say('Connected. You can close this window.');
-      setTimeout(() => { window.close(); }, 400);
+      say(`Connected.${moved || ' You can close this window.'}`);
+      setTimeout(() => { window.close(); }, moved ? 6000 : 400);
     } else if (payload && payload.claim_filed) {
       // Signing in cut this window off from the app; the app collects the
       // connection from tdoc instead and posts the comment it was holding.
-      say(`Connected. Go back to ${host || 'your app'}: your comment will post there.`);
-      setTimeout(() => { try { window.close(); } catch (_) {} }, 1200);
+      say(`Connected. Go back to ${host || 'your app'}: your comment will post there.${moved}`);
+      setTimeout(() => { try { window.close(); } catch (_) {} }, moved ? 6000 : 1200);
     } else {
       say('Connected. Go back to your app and click the tdoc button again.');
     }
@@ -144,10 +149,10 @@ export function FeedbackConnect({ boot }) {
           <p>Comments you leave on <strong>{host}</strong> will be saved to your tdoc account, where you can share them and hand them to an agent.</p>
           <div className="row"><button type="button" className="fb-btn" id="connect" disabled={busy} onClick={() => connect()}>Connect</button>{statusLine}</div>
         </div>
-        <p className="muted">Joining a teammate's feedback? Open the invite link they sent you first, then click the bookmark again.</p>
+        <p className="muted">Your comments stay private to you. Joining a teammate's feedback? Ask them to invite you in Share, open their space and click Join, then click the bookmark again.</p>
         <details>
           <summary className="muted">Save to an existing doc instead</summary>
-          <p className="muted">Paste a doc link you can comment on and its comments will hold this app's feedback.</p>
+          <p className="muted">Paste a link to a doc of yours, or one you were invited to, and its comments will hold this app's feedback.</p>
           <div className="row">
             <input id="doc" className="fb-field" placeholder={`https://${baseHost}/d/…/v/1`} value={docLink} onChange={(e) => setDocLink(e.target.value)} />
             <button type="button" className="fb-btn secondary" id="connect-doc" disabled={busy} onClick={connectDoc}>Use this doc</button>

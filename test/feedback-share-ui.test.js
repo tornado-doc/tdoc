@@ -81,14 +81,17 @@ async function startServer(worker, env) {
     return { status: r.status, body };
   };
   // A fresh world per run: julie owns a personal space for her app and is
-  // the admin of Acme; can joined the space to comment.
+  // the admin of Acme; can was invited and joined the space to comment.
   const world = async () => {
     const env = makeEnv(mod.CommentsStore);
     const julie = await issue(worker, env, 'julie');
     const can = await issue(worker, env, 'can');
     const space = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: julie.cookie, headers: HOME, body: { origin: 'http://localhost:3000' } })).body;
     const team = (await call(env, '/api/teams', { method: 'POST', cookie: julie.cookie, headers: HOME, body: { name: 'Acme' } })).body.team;
-    await call(env, '/api/feedback/join', { method: 'POST', cookie: can.cookie, headers: HOME, body: { slug: space.slug } });
+    // A bookmarklet space is private; julie invites can in Share, then can joins.
+    await call(env, '/api/doc/access', { method: 'PATCH', cookie: julie.cookie, headers: HOME, body: { slug: space.slug, access: { allowed_users: ['can'] } } });
+    const joined = await call(env, '/api/feedback/join', { method: 'POST', cookie: can.cookie, headers: HOME, body: { slug: space.slug } });
+    assert.equal(joined.status, 200, `can joins: ${JSON.stringify(joined.body)}`);
     const { server, base } = await startServer(worker, env);
     return { env, julie, can, slug: space.slug, team, server, base };
   };
