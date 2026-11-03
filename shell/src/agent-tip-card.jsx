@@ -147,16 +147,12 @@ export function AgentTipCard({ audience, onClose }) {
   return (
     <div className="tdoc-tip" role="dialog" aria-label={copy.title}>
       <Hero scene={scene} agent={audience.agent} onClose={() => onClose({})} />
-      {step ? (
-        <div className="tdoc-tip-body">
-          <p className="tdoc-tip-row-title">Paste into {audience.agent}:</p>
-          <CodeBlock text={TURN_ON_PROMPT} className="tdoc-tip-code" />
-          <p className={`tdoc-tip-status${ready ? ' is-ready' : ''}`} role="status">
-            {ready ? 'On. Comments now go to your agent.' : <><span className="tdoc-tip-spin" />Waiting for your computer…</>}
-          </p>
-        </div>
-      ) : (
-        <div className="tdoc-tip-body">
+      {/* One body for both views: the intro and the Turn on step sit in the
+          same grid cell, so the card keeps the size of the taller one and
+          only what is inside changes. The view not shown is hidden from
+          sight, focus and screen readers. */}
+      <div className="tdoc-tip-body">
+        <div className="tdoc-tip-pane" aria-hidden={step} inert={step}>
           <p className="tdoc-tip-eyebrow">New for your agents</p>
           <p className="tdoc-tip-title">{copy.title}</p>
           <ul className="tdoc-tip-rows">
@@ -171,12 +167,20 @@ export function AgentTipCard({ audience, onClose }) {
             })}
           </ul>
         </div>
-      )}
+        {audience.kind === 'local' ? (
+          <div className="tdoc-tip-pane" aria-hidden={!step} inert={!step}>
+            <p className="tdoc-tip-eyebrow">Turn on</p>
+            <p className="tdoc-tip-title">Paste this into {audience.agent}</p>
+            <CodeBlock text={TURN_ON_PROMPT} className="tdoc-tip-code" />
+            <p className={`tdoc-tip-status${ready ? ' is-ready' : ''}`} role="status">
+              {!step ? null : ready ? 'On. Comments now go to your agent.' : <><span className="tdoc-tip-spin" />Waiting for your computer…</>}
+            </p>
+          </div>
+        ) : null}
+      </div>
       <div className="tdoc-tip-foot">
-        {step
-          ? <AppButton variant="quiet" size="s" onClick={() => setStep(false)}>Back</AppButton>
-          : <a className="tdoc-tip-learn" href={AGENTS_PAGE}>Other agents</a>}
-        {step ? null : <AppButton variant="primary" size="s" onClick={act}>{copy.cta}</AppButton>}
+        <AppButton variant="quiet" size="s" onClick={() => (step ? setStep(false) : window.location.assign(AGENTS_PAGE))}>{step ? 'Back' : 'Other agents'}</AppButton>
+        <AppButton variant="primary" size="s" className={step ? 'is-hidden' : ''} aria-hidden={step} tabIndex={step ? -1 : undefined} onClick={act}>{copy.cta}</AppButton>
       </div>
     </div>
   );

@@ -355,13 +355,17 @@ async function startServer(worker, env) {
         await page.goto(`${base}/me`);
         const card = page.locator('.tdoc-tip');
         await card.waitFor({ timeout: 12000 });
-        assert((await card.locator('.tdoc-tip-title').innerText()) === 'Auto-send comments to Claude Code', 'local CLI title');
+        await card.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+        assert((await card.locator('.tdoc-tip-pane:not([aria-hidden="true"]) .tdoc-tip-title').innerText()) === 'Auto-send comments to Claude Code', 'local CLI title');
         assert((await card.locator('.tdoc-tip-rows li').count()) === 3, 'three rows');
         const box = await card.boundingBox();
         assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y + box.height <= height + 1, `card fits at ${label}: ${JSON.stringify(box)}`);
         await shot(page, `${label}-agent-tip`);
         await card.getByRole('button', { name: 'Turn on' }).click();
         await card.getByText('Waiting for your computer').waitFor();
+        const after = await card.boundingBox();
+        assert(after && Math.abs(after.width - box.width) < 1 && Math.abs(after.height - box.height) < 1 && Math.abs(after.y - box.y) < 1, `Turn on keeps the card's size and place: ${JSON.stringify(box)} vs ${JSON.stringify(after)}`);
+        assert((await card.locator('.tdoc-tip-pane[aria-hidden="true"]').count()) === 1, 'one view shown at a time');
         assert(/tdoc-daemon install/.test(await card.locator('.ui-code-block').innerText()), 'the daemon line to paste');
         await shot(page, `${label}-agent-tip-step`);
         await card.getByRole('button', { name: 'Close' }).click();
