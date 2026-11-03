@@ -16,7 +16,9 @@ which `bin/tdoc-bundle` inlines into the worker (served at `/feedback.js`) and
 
 Everything the client loads comes from the tdoc origin that served it, so a
 site's CSP needs only that origin in `script-src`, `connect-src` and
-`img-src`. Faces go through `GET /avatar/<github-login>` and
+`img-src`. A site that sends Cross-Origin-Opener-Policy must use
+`same-origin-allow-popups` (not `same-origin`), or the sign-in window cannot
+report back to the page that opened it. Faces go through `GET /avatar/<github-login>` and
 `/avatar/agent/<name>` (`avatarResponse` in `worker/worker.js`; `avatarFor`
 in `shell/src/document/model.js` builds the URLs once `setTdocOrigin` is
 called), the tdoc mark and profile links are absolute.

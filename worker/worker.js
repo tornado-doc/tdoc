@@ -9671,7 +9671,7 @@ function feedbackSiteSnippet(base, slug) {
 // tdoc origin, and nothing else. The script, its API calls and every face it
 // draws (people and agents via /avatar, the tdoc mark) all come from there.
 function feedbackSiteCsp(base) {
-  return `If the site sends a Content-Security-Policy, add ${base} to script-src, connect-src and img-src; nothing else is needed.`;
+  return `If the site sends a Content-Security-Policy, add ${base} to script-src, connect-src and img-src. If it sends Cross-Origin-Opener-Policy, use same-origin-allow-popups (not same-origin), or signing in from the widget cannot finish.`;
 }
 
 // ── A site space made by an agent (create_feedback_space) ────────────────
