@@ -1368,20 +1368,20 @@ a.ui-menu-item:visited {
 .tdoc-tip .tdoc-tip-close:hover { background: rgba(0,0,0,.6); color: #fff; }
 .tdoc-tip-win {
   position: absolute; left: 50%; top: 18px; transform: translateX(-50%); width: 76%;
-  background: rgba(18,18,20,.92); border: 1px solid rgba(255,255,255,.08); border-radius: 7px; padding: 8px 9px;
-  color: #d8d8d4; font-size: 8.5px; line-height: 1.35; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  background: rgba(255,255,255,.96); border: 1px solid rgba(255,255,255,.7); border-radius: 7px; padding: 8px 9px;
+  color: #4a4945; font-size: 8.5px; line-height: 1.35; box-shadow: 0 6px 18px rgba(16,18,26,.18);
 }
 .tdoc-tip-scene { display: none; }
 .tdoc-tip-scene.is-on { display: block; animation: tdoc-tip-fade .4s ease; }
 @keyframes tdoc-tip-fade { from { opacity: 0; } to { opacity: 1; } }
-.tdoc-tip-bar { display: flex; gap: 5px; align-items: center; color: #8e8e89; margin-bottom: 6px; }
-.tdoc-tip-bar i { width: 5px; height: 5px; border-radius: 50%; background: #555; }
-.tdoc-tip-q { background: rgba(255,255,255,.05); border-radius: 4px; padding: 5px 6px; margin-top: 4px; }
-.tdoc-tip-q b { color: #fff; font-weight: 600; }
-.tdoc-tip-at { color: #9fb6ff; }
-.tdoc-tip-st { display: flex; align-items: center; gap: 5px; margin-top: 6px; color: #bdbdb8; }
-.tdoc-tip-ok { color: #6fdc9c; }
-.tdoc-tip-spin { display: inline-block; width: 7px; height: 7px; border: 1.2px solid #777; border-top-color: #ddd; border-radius: 50%; animation: tdoc-tip-sp 1s linear infinite; }
+.tdoc-tip-bar { display: flex; gap: 5px; align-items: center; color: #8e8d88; margin-bottom: 6px; }
+.tdoc-tip-bar i { width: 5px; height: 5px; border-radius: 50%; background: #d6d5d0; }
+.tdoc-tip-q { background: #f4f4f2; border-radius: 4px; padding: 5px 6px; margin-top: 4px; }
+.tdoc-tip-q b { color: #1a1a1a; font-weight: 600; }
+.tdoc-tip-at { color: var(--td-accent, #1652f0); }
+.tdoc-tip-st { display: flex; align-items: center; gap: 5px; margin-top: 6px; color: #6b6a66; }
+.tdoc-tip-ok { color: #2f9e5b; }
+.tdoc-tip-spin { display: inline-block; width: 7px; height: 7px; border: 1.2px solid #d6d5d0; border-top-color: #1a1a1a; border-radius: 50%; animation: tdoc-tip-sp 1s linear infinite; }
 @keyframes tdoc-tip-sp { to { transform: rotate(360deg); } }
 .tdoc-tip-body { padding: 16px 18px 4px; display: grid; }
 .tdoc-tip-pane { grid-area: 1 / 1; min-width: 0; transition: opacity .18s ease; }
