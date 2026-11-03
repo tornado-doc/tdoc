@@ -2,10 +2,10 @@ import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, 
 import { createPortal } from 'react-dom';
 import { usePortalContainer } from '../ui/portal.js';
 import { useGithubUserSearch } from './github-user-search.js';
-import { AGENT_TAG_JOINER, agentDisplayName, agentFacts, agentMentionName, matchAgentChoices, taggedAgentSpan, targetKey } from './agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, byRelevance, agentFacts, agentMentionName, matchAgentChoices, taggedAgentSpan, targetKey } from './agent-choices.js';
 import { ChevronDown } from 'lucide-react';
 import { AppMenu } from '../ui/menu.jsx';
-import { AGENT_GROUPS, AgentMenuItems, agentTag, whose } from './agent-menu.jsx';
+import { AgentMenuItems, agentTag } from './agent-menu.jsx';
 import { ProviderMark, recipientOption } from './notify-handoff.jsx';
 import { insertMention, matchMentionable, mentionQueryAt, mentionReason, splitMentions } from './mentions.js';
 import { parseRichText } from './rich-text.js';
@@ -66,10 +66,10 @@ export function MentionField({
   // tdoc AI (always last) and the team agent from anyone with two agents of
   // their own.
   const agentMatches = query
-    ? matchAgentChoices(agentsOnOffer.choices, query.query, {
+    ? matchAgentChoices(byRelevance(agentsOnOffer.choices), query.query, {
       limit: Infinity,
       labelOf: (t) => recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices).label,
-    }).map((t, i) => ({ t, i })).sort((a, b) => (AGENT_GROUPS.indexOf(whose(a.t)) - AGENT_GROUPS.indexOf(whose(b.t))) || (a.i - b.i)).map(({ t }) => {
+    }).map((t) => {
       const option = recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices);
       return {
         agent: t,
@@ -387,7 +387,7 @@ function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, disabledChoi
           </span>
         )}
       >
-        <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
+        <AgentMenuItems choices={byRelevance(choices)} preserveOrder showRelevance maxVisible={4} disabledChoices={disabledChoices} guestAction={guestAction} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
       </AppMenu>
       <span aria-hidden="true">{`${value.slice(pill.end)}\u200b`}</span>
     </div>
