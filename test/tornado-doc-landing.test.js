@@ -332,9 +332,11 @@ t('names the apps it runs in, each linked to its connect step', () => {
   // No by-hand backups for the quick-send apps: the fallback is copying the prompt.
   assert(!/by hand/.test(pick), 'More still has by-hand backups');
   // More holds only the two apps with neither a quick send nor a bot: VS Code and Gemini CLI.
-  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'), pick.indexOf('<div class="pick-pop pick-p-vscode"'));
+  const moreBody = pick.slice(pick.indexOf('id="pick-pop-more"'), pick.indexOf('<div class="pick-pop pick-p-raft"'));
+  // VS Code opens its own install link straight away (no popover); Gemini CLI needs commands, so it has one.
+  assert(/<a class="pick-pill" href="https:\/\/vscode\.dev\/redirect\/mcp\/install\?[^"]+" target="_blank" rel="noopener">[\s\S]*?<span>VS Code<\/span>/.test(moreBody) && !/pick-pop-vscode/.test(pick), 'VS Code is not a direct link');
   const moreApps = [...moreBody.matchAll(/class="pick-pill" popovertarget="pick-pop-([a-z]+)"/g)].map((m) => m[1]);
-  assert(moreApps.join(' ') === 'vscode gemini', `More: ${moreApps.join(' ')}`);
+  assert(moreApps.join(' ') === 'gemini', `More: ${moreApps.join(' ')}`);
   assert(!/type="radio"|pick-panel|pick-cost/.test(pick), 'the old picker parts are back');
   const apps = ['grokbot', 'raft', ...moreApps];
   // One row grouped by brand: Claude and ChatGPT (Code, Chat), Cursor, Grok (Grok, Grok Bot), Raft, More.
