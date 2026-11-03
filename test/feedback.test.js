@@ -435,6 +435,7 @@ const APP = 'http://localhost:3000';
     // Serena's space for tdoc.dev itself; Julie joins and connects her bookmarklet there.
     const { body: space } = await connect(env, serena.cookie, { origin: TDOC });
     assert(space.is_owner === true && space.own_agent === true, `owner connect ${JSON.stringify({ is_owner: space.is_owner, own_agent: space.own_agent })}`);
+    await invite(env, space.slug, 'julie');
     assert((await worker.fetch(joinReq(julie.cookie, space.slug), env, {})).status === 200, 'julie joins');
     const { body: mine } = await connect(env, julie.cookie, { origin: TDOC });
     assert(mine.slug === space.slug && mine.is_owner === false && mine.own_agent === true, `joiner connect ${JSON.stringify({ slug: mine.slug, is_owner: mine.is_owner, own_agent: mine.own_agent })}`);
@@ -502,6 +503,7 @@ const APP = 'http://localhost:3000';
 
     // Refused: a third-party app's space. Its page could read the token.
     const { body: appSpace } = await connect(env, serena.cookie);
+    await invite(env, appSpace.slug, 'julie');
     await worker.fetch(joinReq(julie.cookie, appSpace.slug), env, {});
     const { body: appMine } = await connect(env, julie.cookie);
     assert(appMine.slug === appSpace.slug && appMine.own_agent === false, `third-party connect ${JSON.stringify({ slug: appMine.slug, own_agent: appMine.own_agent })}`);
