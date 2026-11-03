@@ -387,7 +387,7 @@ function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, disabledChoi
           </span>
         )}
       >
-        <AgentMenuItems choices={byRelevance(choices)} preserveOrder showRelevance maxVisible={4} disabledChoices={disabledChoices} guestAction={guestAction} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
+        <AgentMenuItems choices={byRelevance(choices)} preserveOrder disabledChoices={disabledChoices} guestAction={guestAction} ai={ai} current={pill.target} onPick={(t) => { setMenuOpen(false); onPick(t); }} />
       </AppMenu>
       <span aria-hidden="true">{`${value.slice(pill.end)}\u200b`}</span>
     </div>
