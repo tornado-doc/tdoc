@@ -152,8 +152,8 @@ async function startSite(state) {
         const tag = `${engine}-${width}`;
         const newContext = () => browser.newContext({ viewport: { width, height: 860 }, ...(engine === 'chromium' ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}) });
 
-        await t(`${tag}: the owner shares from the widget: a one-time link and an invite by name`, async () => {
-          const w = await world();
+        await t(`${tag}: the owner shares from the widget on their own site: a one-time link and an invite by name`, async () => {
+          const w = await world({ sdk: true });
           const context = await newContext();
           try {
             const page = await context.newPage();
@@ -161,7 +161,6 @@ async function startSite(state) {
             page.on('pageerror', (e) => errors.push(e.message));
             await page.addInitScript(([key, value]) => { localStorage.setItem(key, value); }, [storageKey(w), JSON.stringify(w.space)]);
             await page.goto(`${w.site}/`);
-            await clickBookmark(page, w.tdoc);
             const root = page.locator('#tdoc-feedback-root');
             const share = root.locator('.tdoc-feedback-dock .tdoc-fb-share');
             await share.waitFor();
@@ -176,9 +175,11 @@ async function startSite(state) {
             await dialog.getByRole('button', { name: 'Copy link' }).click();
             await dialog.locator('#tdoc-fb-share-status').filter({ hasText: /Invite link copied|Link ready/ }).waitFor();
             const field = dialog.locator('#tdoc-fb-invite-link');
-            await page.waitForFunction(() => /\/feedback\/invite\//.test(document.getElementById('tdoc-feedback-root').shadowRoot.getElementById('tdoc-fb-invite-link')?.textContent || ''));
+            await page.waitForFunction(() => /tdoc_invite=/.test(document.getElementById('tdoc-feedback-root').shadowRoot.getElementById('tdoc-fb-invite-link')?.textContent || ''));
             const link = (await field.innerText()).trim();
-            assert.match(link, /^https:\/\/tdoc\.dev\/feedback\/invite\/[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/);
+            // The SDK's link is the site itself.
+            assert.equal(link.split('?')[0], `${w.site}/`);
+            assert.match(link, /\?tdoc_invite=[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/);
             await dialog.locator('.tdoc-invite-row', { hasText: 'Invite link' }).waitFor();
             const input = dialog.locator('.tdoc-token-field input');
             await input.fill('bob');
@@ -198,7 +199,31 @@ async function startSite(state) {
           } finally { await context.close(); w.close(); }
         });
 
-        await t(`${tag}: no widget on the site: the link's page, then the site with the bookmark: Join`, async () => {
+        await t(`${tag}: on somebody else's site (the bookmarklet), Share opens tdoc's Share window`, async () => {
+          const w = await world();
+          const context = await newContext();
+          try {
+            await context.addCookies([{ name: 'tdoc_sid', value: sid(w.julie.cookie), url: w.tdoc }]);
+            const page = await context.newPage();
+            await page.addInitScript(([key, value]) => { localStorage.setItem(key, value); }, [storageKey(w), JSON.stringify(w.space)]);
+            await page.goto(`${w.site}/`);
+            await clickBookmark(page, w.tdoc);
+            const share = page.locator('#tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-share');
+            await share.waitFor();
+            const [popup] = await Promise.all([context.waitForEvent('page'), share.click()]);
+            await popup.waitForLoadState();
+            assert.equal(new URL(popup.url()).pathname, `/feedback/share/${w.space.slug}`);
+            const dialog = popup.getByRole('dialog', { name: 'Share' });
+            await dialog.waitFor();
+            await dialog.getByRole('button', { name: 'Copy link' }).click();
+            await popup.waitForFunction(() => /\/feedback\/invite\//.test(document.getElementById('tdoc-fb-invite-link')?.textContent || ''));
+            await dialog.locator('.tdoc-invite-row', { hasText: 'Invite link' }).waitFor();
+            await shot(popup, `${tag}-owner-share-window`);
+            assert.equal(await page.locator('#tdoc-feedback-root .ui-dialog-popup').count(), 0, 'Share drawn on a foreign site');
+          } finally { await context.close(); w.close(); }
+        });
+
+        await t(`${tag}: no widget on the site: the link's page joins on tdoc and opens the site; the bookmark connects there`, async () => {
           const w = await world();
           const link = (await call(w.env, '/api/feedback/invites', { method: 'POST', cookie: w.julie.cookie, headers: HOME, body: { slug: w.space.slug } })).body.invite;
           const context = await newContext();
@@ -211,35 +236,32 @@ async function startSite(state) {
             const host = new URL(w.site).host;
             await page.getByRole('heading', { name: `julie invited you to comment on ${host}` }).waitFor();
             const open = page.locator('#open-site');
-            assert.equal(await open.getAttribute('href'), `${w.site}/?tdoc_invite=${link.id}`);
+            assert.equal(await open.innerText(), `Join and open ${host}`);
             assert.equal(await page.locator('#step-bookmark').count(), 1, 'no bookmark step');
             if (width > 720) assert.match(await page.locator('#bookmarklet').getAttribute('href'), /^javascript:/);
             else await page.locator('#step-bookmark .phone-only').waitFor();
-            await fits(open, width, 'Open button');
+            await fits(open, width, 'Join button');
             await noSideways(page);
             await shot(page, `${tag}-invite-landing`);
             await open.click();
-            await page.waitForURL(`${w.site}/?tdoc_invite=*`);
+            await page.waitForURL(`${w.site}/`);
+            assert.equal(await page.evaluate(() => location.search), '', 'the site got the invite');
+            assert((await allowed(w)).includes('bob'), 'bob not let in');
+            // The bookmark: its first connect goes to the space joined.
+            const popupP = context.waitForEvent('page', { timeout: 4000 }).catch(() => null);
             await clickBookmark(page, w.tdoc);
-            const prompt = page.locator('#tdoc-feedback-root .tdoc-fb-invite-prompt');
-            await prompt.waitFor();
-            assert.match(await prompt.innerText(), new RegExp(`julie invited you to comment on ${host.replace('.', '\\.')}`));
-            assert.equal(await page.evaluate(() => location.search), '', 'the invite stayed in the address');
-            await prompt.getByRole('button', { name: 'Keep my own' }).waitFor();
-            await fits(prompt, width, 'invite prompt');
-            await shot(page, `${tag}-invite-prompt-bookmarklet`);
-            const [popup] = await Promise.all([context.waitForEvent('page'), prompt.getByRole('button', { name: 'Join' }).click()]);
+            let popup = await popupP;
+            if (!popup) {
+              const connectBtn = page.locator('#tdoc-feedback-root .tdoc-feedback-notice button.submit');
+              await connectBtn.waitFor();
+              [popup] = await Promise.all([context.waitForEvent('page'), connectBtn.click()]);
+            }
             await popup.waitForLoadState();
-            const card = popup.locator('#invite-card');
-            await card.waitFor();
-            assert.match(await card.innerText(), /julie invited you to comment on/);
-            await shot(popup, `${tag}-invite-connect-window`);
             await popup.locator('#connect').click();
-            await page.locator('#tdoc-feedback-root .tdoc-fb-toast', { hasText: 'Joined julie’s space' }).waitFor({ timeout: 8000 });
+            await page.waitForFunction((key) => { try { return Boolean(JSON.parse(localStorage.getItem(key)).token); } catch (_) { return false; } }, storageKey(w));
             const session = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), storageKey(w));
             assert.equal(session.slug, w.space.slug);
-            assert((await allowed(w)).includes('bob'), 'bob not let in');
-            assert.equal(await page.locator('#tdoc-feedback-root .tdoc-fb-invite-prompt').count(), 0, 'the prompt stayed');
+            await page.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor();
             await noSideways(page);
             await shot(page, `${tag}-invite-joined`);
             assert.deepEqual(errors, []);
@@ -276,8 +298,16 @@ async function startSite(state) {
             await item.waitFor();
             await fits(root.locator('.ui-menu-popup'), width, 'switcher menu');
             await shot(page, `${tag}-switcher-open`);
-            await item.click();
-            await root.locator('.tdoc-fb-toast', { hasText: 'Now in julie’s space' }).waitFor();
+            // Not joined yet: the connect window asks Join (a click on tdoc).
+            await context.addCookies([{ name: 'tdoc_sid', value: sid(w.bob.cookie), url: w.tdoc }]);
+            const [popup] = await Promise.all([context.waitForEvent('page'), item.click()]);
+            await popup.waitForLoadState();
+            const card = popup.locator('#invite-card');
+            await card.waitFor();
+            assert.match(await card.innerText(), /julie invited you to comment on/);
+            await shot(popup, `${tag}-invite-connect-window`);
+            await popup.locator('#connect').click();
+            await root.locator('.tdoc-fb-toast', { hasText: 'Now in julie’s space' }).waitFor({ timeout: 8000 });
             await page.waitForFunction(() => /julie/.test(document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-fb-space')?.textContent || ''));
             const session = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), `tdoc-feedback:${w.tdoc}`);
             assert.equal(session.slug, w.space.slug);

@@ -19,12 +19,8 @@ import {
   toggleReaction, updateCommentAnchor, updateCommentText,
 } from '../../shell/src/document/api.js';
 import { PortalContainerContext } from '../../shell/src/ui/portal.js';
-import { AppDialog } from '../../shell/src/ui/dialog.jsx';
-import { AppButton } from '../../shell/src/ui/button.jsx';
 import { AppMenu, AppMenuItem } from '../../shell/src/ui/menu.jsx';
-import { ShareLinkRow } from '../../shell/src/document/document-dialogs.jsx';
-import { InviteField } from '../../shell/src/document/owner-access-dialog.jsx';
-import { copyText } from '../../shell/src/document/model.js';
+import { FeedbackSharePanel } from '../../shell/src/feedback-share-panel.jsx';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
 // controls keep the browser's default button look on foreign pages.
@@ -1231,101 +1227,6 @@ ${uiCss}
     );
   }
 
-  // Share, in the widget (Julie, 2026-11-03): the doc Share dialog's parts
-  // (the link row, the invite field) for a feedback space's invites. A link
-  // is one-time; a person is invited by email or GitHub handle and told by
-  // a tdoc notification and an email. Every invite is listed here to
-  // withdraw. Owner (team admin) only; the server checks.
-  function SharePanel({ slug, open, onClose }) {
-    const [state, setState] = useState(null);
-    // What just happened, said inside the dialog (a toast would sit under
-    // its backdrop).
-    const [note, setNote] = useState(null);
-    const say = (text, bad = false) => setNote({ text, bad });
-    const [error, setError] = useState('');
-    const [busy, setBusy] = useState(false);
-    const reload = useCallback(async () => {
-      try { setState(await request(`/api/feedback/invites?slug=${encodeURIComponent(slug)}`)); setError(''); }
-      catch (err) { setError(err.message || 'Could not load invites'); }
-    }, [slug]);
-    useEffect(() => { if (open && slug) reload(); }, [open, slug, reload]);
-    const invites = (state && state.invites) || [];
-    const host = (state && state.host) || location.host;
-    const link = invites.find((i) => i.kind === 'link' && i.status === 'pending');
-    const create = (fields) => request('/api/feedback/invites', { method: 'POST', body: JSON.stringify({ slug, ...fields }) });
-    const copyLink = async () => {
-      if (busy) return;
-      setBusy(true);
-      try {
-        const url = link ? link.link : (await create({})).invite.link;
-        say(await copyText(url) ? 'Invite link copied' : 'Link ready: copy it from the field');
-        await reload();
-      } catch (err) { say(err.message || 'Could not make a link', true); }
-      finally { setBusy(false); }
-    };
-    const invitePeople = async (next) => {
-      for (const who of next) {
-        try {
-          const out = await create({ invitee: who });
-          say(out.emailed && out.emailed.length ? `Invited ${who} · email sent` : `Invited ${who}`);
-        } catch (err) { say(err.message || `Could not invite ${who}`, true); }
-      }
-      await reload();
-    };
-    const withdraw = async (invite) => {
-      try {
-        await request('/api/feedback/invites/revoke', { method: 'POST', body: JSON.stringify({ slug, id: invite.id }) });
-        say('Invite withdrawn');
-      } catch (err) { say(err.message || 'Could not withdraw', true); }
-      await reload();
-    };
-    const statusOf = (i) => {
-      if (i.status === 'accepted') return i.kind === 'link' ? `Joined · ${i.accepted_name || 'used'}` : 'Joined';
-      if (i.status === 'expired') return 'Expired';
-      return i.kind === 'link' ? `Not used yet · until ${new Date(i.expires).toLocaleDateString()}` : (i.kind === 'email' ? 'Invited · joins when they sign in with this address' : 'Invited');
-    };
-    return (
-      <AppDialog
-        open={open}
-        onOpenChange={(next) => { if (!next) onClose(); }}
-        title="Share"
-        description={state && state.team
-          ? `Your team sees these comments. Invite others to comment on ${host} too.`
-          : `Only you and the people you invite see these comments on ${host}.`}
-        actions={<AppButton onClick={onClose}>Close</AppButton>}
-      >
-        <section className="manage-section">
-          <label className="field">Invite link</label>
-          <ShareLinkRow url={link ? link.link : 'A one-time link, made when you copy it'} id="tdoc-fb-invite-link" onCopy={copyLink} disabled={busy || !state} />
-          <p className="manage-hint">{state && state.site ? `Opens ${host}, where they click Join.` : `Opens a tdoc page that sets up the bookmark, then ${host}.`} One person, within 7 days.</p>
-        </section>
-        <section className="manage-section">
-          <label className="field">Invite people</label>
-          <InviteField users={[]} onChange={invitePeople} search={false} placeholder="Email or GitHub username, then Enter" />
-          <p className="manage-hint">They get a tdoc notification and an email with the link.</p>
-        </section>
-        {error ? <p className="manage-hint tdoc-invite-error" role="alert">{error}</p> : null}
-        <p className={`manage-hint${note && note.bad ? ' tdoc-invite-error' : ''}`} role="status" id="tdoc-fb-share-status">{note ? note.text : ''}</p>
-        {invites.length ? (
-          <section className="manage-section">
-            <label className="field">Invites</label>
-            <ul className="tdoc-invite-list">
-              {invites.map((i) => (
-                <li key={i.id} className="tdoc-invite-row">
-                  <span className="tdoc-invite-who">
-                    <span className="tdoc-invite-name">{i.kind === 'link' ? 'Invite link' : i.invitee}</span>
-                    <span className="tdoc-invite-status">{statusOf(i)}</span>
-                  </span>
-                  <AppButton size="s" variant="quiet" onClick={() => withdraw(i)}>Withdraw</AppButton>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-      </AppDialog>
-    );
-  }
-
   // "<Name> invited you to comment on <site>": the invite link's question,
   // or the server's (an invite for this person on this site they have not
   // answered). Join, or for the bookmarklet Keep my own (its comments stay
@@ -1495,7 +1396,7 @@ ${uiCss}
     useEffect(() => {
       if (!serverPrompt || !serverPrompt.slug || invite || readInvite()) return;
       if (rememberedChoice(`slug:${serverPrompt.slug}`)) return;
-      setInvite({ slug: serverPrompt.slug, inviter: serverPrompt.inviter || 'Someone', host: serverPrompt.host || location.host, site: false });
+      setInvite({ slug: serverPrompt.slug, invite: serverPrompt.invite || null, inviter: serverPrompt.inviter || 'Someone', host: serverPrompt.host || location.host, site: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [serverPrompt && serverPrompt.slug]);
 
@@ -1511,26 +1412,13 @@ ${uiCss}
       if (!current) return;
       setInvite({ ...current, busy: true, error: '' });
       try {
-        if (current.id) {
-          let next = null;
-          const stored = readSession();
-          if (stored && stored.token) {
-            try {
-              next = await request('/api/feedback/invite/accept', { method: 'POST', body: JSON.stringify({ id: current.id }) });
-            } catch (error) {
-              // A token that no longer works: connect, which takes the invite.
-              if (error.status !== 401) throw error;
-              writeSession(null);
-            }
-          }
-          if (next) adopt(next);
-          else setSession(await connect({ invite: current.id }));
-          rememberChoice(current.id, 'joined');
-          dropInvite();
-        } else {
-          adopt(await request('/api/feedback/switch', { method: 'POST', body: JSON.stringify({ slug: current.slug }) }));
-          rememberChoice(`slug:${current.slug}`, 'joined');
-        }
+        // Taking an invite is a click on tdoc: the connect window asks Join
+        // and answers with a token for the space joined.
+        const id = current.id || current.invite;
+        if (!id) throw new Error('This invite is no longer valid.');
+        setSession(await connect({ invite: id }));
+        if (current.id) { rememberChoice(current.id, 'joined'); dropInvite(); }
+        else rememberChoice(`slug:${current.slug}`, 'joined');
         setInvite(null);
         setOpenId(null);
         await load();
@@ -1553,7 +1441,9 @@ ${uiCss}
     const switchSpace = useCallback(async (target) => {
       if (target.current) return;
       try {
-        adopt(await request('/api/feedback/switch', { method: 'POST', body: JSON.stringify(target.mine ? { own: true } : { slug: target.slug }) }));
+        // Not joined yet: Join in the connect window, with their invite.
+        if (target.invite) setSession(await connect({ invite: target.invite }));
+        else adopt(await request('/api/feedback/switch', { method: 'POST', body: JSON.stringify(target.mine ? { own: true } : { slug: target.slug }) }));
         setOpenId(null);
         await load();
         say(target.mine ? 'Now in your own space' : `Now in ${target.owner ? `${target.owner}’s` : 'the shared'} space`);
@@ -2132,7 +2022,7 @@ ${uiCss}
           />
         ) : null}
 
-        {shareOpen && slug ? <SharePanel slug={slug} open onClose={() => setShareOpen(false)} /> : null}
+        {shareOpen && slug ? <FeedbackSharePanel slug={slug} open onClose={() => setShareOpen(false)} request={request} /> : null}
 
         {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}`} role="status" style={{ right: innerWidth - rightInset >= 240 ? 18 + rightInset : 18 }}>{toast.text}</div> : null}
 
@@ -2152,7 +2042,13 @@ ${uiCss}
           onHide={hide}
           sendCount={ready.length}
           onSend={showSend ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
-          onShare={session?.can_share && slug ? () => { setPicking(false); setShareOpen(true); } : null}
+          onShare={session?.can_share && slug ? () => {
+            setPicking(false);
+            // On the owner's own site (the SDK) or tdoc: here. On anyone
+            // else's, where a page can read this token: tdoc's Share window.
+            if (session.share_here) setShareOpen(true);
+            else if (!window.open(`${base}/feedback/share/${encodeURIComponent(slug)}`, 'tdoc-feedback-share', 'popup,width=560,height=720')) say('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.', true);
+          } : null}
         />
         {notifyIds ? (
           <NotifyHandoffPanel

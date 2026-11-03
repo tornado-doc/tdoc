@@ -87,11 +87,23 @@ const ID_RE = /^[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/;
     const bobs = (await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.bob, headers: HOME, body: { origin: APP } })).body;
     const bobTok = await call(w.env, '/api/feedback/invites', { method: 'POST', token: bobs.token, body: { slug: w.space.slug } });
     assert(bobTok.status === 403, `bob's token: ${bobTok.status}`);
-    // The owner's own widget token for this space: yes.
-    const mine = await call(w.env, '/api/feedback/invites', { method: 'POST', token: w.space.token, body: { slug: w.space.slug } });
-    assert(mine.status === 201, `owner token: ${mine.status} ${JSON.stringify(mine.body)}`);
-    const listed = await call(w.env, `/api/feedback/invites?slug=${w.space.slug}`, { token: w.space.token });
-    assert(listed.status === 200 && listed.body.invites.length === 1, `owner token list: ${listed.status}`);
+    // The owner's bookmarklet token on somebody else's site: not there (its
+    // scripts can read it); Share opens tdoc's window instead.
+    const foreign = await call(w.env, '/api/feedback/invites', { method: 'POST', token: w.space.token, body: { slug: w.space.slug } });
+    assert(foreign.status === 403 && foreign.body.error === 'share_on_tdoc', `owner token on a foreign site: ${foreign.status} ${JSON.stringify(foreign.body)}`);
+    assert(w.space.can_share === true && w.space.share_here === false, 'session does not say where to share');
+    const foreignList = await call(w.env, `/api/feedback/invites?slug=${w.space.slug}`, { token: w.space.token });
+    assert(foreignList.status === 403, `owner token list on a foreign site: ${foreignList.status}`);
+    // On tdoc's own pages the widget shares in place.
+    const home = (await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.julie, headers: HOME, body: { origin: 'https://tdoc.dev' } })).body;
+    assert(home.share_here === true, 'share_here on tdoc');
+    const mine = await call(w.env, '/api/feedback/invites', { method: 'POST', token: home.token, body: { slug: home.slug } });
+    assert(mine.status === 201, `owner token on tdoc: ${mine.status} ${JSON.stringify(mine.body)}`);
+    // The Share window: owner only.
+    const win = await worker.fetch(req(`/feedback/share/${w.space.slug}`, { cookie: w.julie }), w.env, {});
+    assert(win.status === 200 && bootData(await win.text(), '__TDOC_APP_BOOT__').page === 'feedback-share', `share window: ${win.status}`);
+    const notMine = await worker.fetch(req(`/feedback/share/${w.space.slug}`, { cookie: w.bob }), w.env, {});
+    assert(notMine.status === 403, `share window for bob: ${notMine.status}`);
   });
 
   await t('a made-up or tampered invite id is refused before anything is looked up', async () => {
@@ -203,34 +215,73 @@ const ID_RE = /^[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/;
     assert(kept.status === 200 && kept.body.invite_prompt === null && kept.body.spaces.length === 2, JSON.stringify(kept.body));
     const sess = await call(w.env, '/api/feedback/session', { token: bobs.token });
     assert(sess.body.invite_prompt === null, 'asked again after Keep my own');
-    // Switch to Julie's space, then back to his own.
-    const there = await call(w.env, '/api/feedback/switch', { method: 'POST', token: bobs.token, body: { slug: w.space.slug } });
-    assert(there.status === 200 && there.body.slug === w.space.slug && there.body.token !== bobs.token, `switch: ${there.status} ${JSON.stringify(there.body)}`);
+    // A page holding his token cannot file him there, even though he is
+    // allowed in: joining is a click on tdoc. The switcher entry carries his
+    // invite for the connect window.
+    const pushed = await call(w.env, '/api/feedback/switch', { method: 'POST', token: bobs.token, body: { slug: w.space.slug } });
+    assert(pushed.status === 403 && pushed.body.error === 'not_invited', `switch before joining: ${pushed.status} ${JSON.stringify(pushed.body)}`);
+    const entry = kept.body.spaces.find((x) => x.slug === w.space.slug);
+    assert(entry && /^[a-f0-9]{32}\./.test(entry.invite), `no invite on the entry: ${JSON.stringify(entry)}`);
+    const there = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.bob, headers: HOME, body: { origin: APP, invite: entry.invite } });
+    assert(there.status === 200 && there.body.slug === w.space.slug && there.body.joined, `join: ${there.status} ${JSON.stringify(there.body)}`);
     assert(there.body.spaces.find((x) => x.current).slug === w.space.slug, 'switcher does not mark the space');
     // The old token now names a space he left: the widget reconnects.
     const stale = await call(w.env, '/api/feedback/session', { token: bobs.token });
     assert(stale.status === 409 && stale.body.error === 'space_moved', `old token: ${stale.status}`);
+    // Joined: the switcher goes back and forth with the token.
     const back = await call(w.env, '/api/feedback/switch', { method: 'POST', token: there.body.token, body: { own: true } });
     assert(back.status === 200 && back.body.slug === bobs.slug, `back: ${back.status} ${JSON.stringify(back.body)}`);
+    const again = await call(w.env, '/api/feedback/switch', { method: 'POST', token: back.body.token, body: { slug: w.space.slug } });
+    assert(again.status === 200 && again.body.slug === w.space.slug, `again: ${again.status} ${JSON.stringify(again.body)}`);
   });
 
-  await t('Join with the widget token: for its own origin only; a pending address invite is taken by the switcher', async () => {
+  await t('no token takes an invite: a page holding one cannot file its person in another space', async () => {
     const w = await world();
     const id = (await invite(w, {})).body.invite.id;
-    const elsewhere = (await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.bob, headers: HOME, body: { origin: 'http://localhost:5173' } })).body;
-    const wrong = await call(w.env, '/api/feedback/invite/accept', { method: 'POST', token: elsewhere.token, body: { id } });
-    assert(wrong.status === 403 && wrong.body.error === 'invite_wrong_site', `other origin token: ${wrong.status}`);
     const bobs = (await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.bob, headers: HOME, body: { origin: APP } })).body;
-    const ok = await call(w.env, '/api/feedback/invite/accept', { method: 'POST', token: bobs.token, body: { id } });
-    assert(ok.status === 200 && ok.body.joined && ok.body.slug === w.space.slug && /^fb_/.test(ok.body.token), `accept: ${ok.status} ${JSON.stringify(ok.body)}`);
-    // An address invite, not taken yet, shows in the switcher and is taken by it.
+    const accept = await call(w.env, '/api/feedback/invite/accept', { method: 'POST', token: bobs.token, body: { id } });
+    assert(accept.status === 403 && accept.body.error === 'feedback_token_scope', `token accept: ${accept.status} ${JSON.stringify(accept.body)}`);
+    const join = await call(w.env, '/api/feedback/invite/join', { method: 'POST', token: bobs.token, body: { id } });
+    assert(join.status === 403, `token join: ${join.status}`);
+    assert(!(await meta(w.env, w.space.slug)).access.allowed_users.includes('bob'), 'bob got in');
+    // An address invite not taken yet is listed, and is taken only in the connect window.
     const dana = await emailSession(w.env, 'dana@example.com');
     await invite(w, { invitee: 'dana@example.com' });
     const danas = (await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: dana, headers: HOME, body: { origin: APP } })).body;
-    assert(danas.spaces.some((x) => x.slug === w.space.slug), `dana's switcher: ${JSON.stringify(danas.spaces)}`);
+    const entry = danas.spaces.find((x) => x.slug === w.space.slug);
+    assert(entry && entry.invite, `dana's switcher: ${JSON.stringify(danas.spaces)}`);
     const sw = await call(w.env, '/api/feedback/switch', { method: 'POST', token: danas.token, body: { slug: w.space.slug } });
-    assert(sw.status === 200 && sw.body.slug === w.space.slug, `dana switch: ${sw.status} ${JSON.stringify(sw.body)}`);
-    assert((await meta(w.env, w.space.slug)).access.allowed_users.includes('dana@example.com'), 'switch did not take the invite');
+    assert(sw.status === 403, `dana switch by token: ${sw.status}`);
+    assert(!(await meta(w.env, w.space.slug)).access.allowed_users.includes('dana@example.com'), 'switch took the invite');
+  });
+
+  await t('the invite page joins on tdoc (same-origin, signed in) and opens the site without the invite', async () => {
+    const w = await world();
+    const link = (await invite(w, {})).body.invite;
+    const xsite = await call(w.env, '/api/feedback/invite/join', { method: 'POST', cookie: w.bob, headers: { Origin: APP }, body: { id: link.id } });
+    assert(xsite.status === 403, `cross-site: ${xsite.status}`);
+    const anon = await call(w.env, '/api/feedback/invite/join', { method: 'POST', headers: HOME, body: { id: link.id } });
+    assert(anon.status === 401, `anonymous: ${anon.status}`);
+    const ok = await call(w.env, '/api/feedback/invite/join', { method: 'POST', cookie: w.bob, headers: HOME, body: { id: link.id } });
+    assert(ok.status === 200 && ok.body.site_url === `${APP}/`, `join: ${ok.status} ${JSON.stringify(ok.body)}`);
+    assert((await meta(w.env, w.space.slug)).access.allowed_users.includes('bob'), 'bob not added');
+    const next = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.bob, headers: HOME, body: { origin: APP } });
+    assert(next.body.slug === w.space.slug, 'the bookmark does not connect to the space joined');
+  });
+
+  await t('removed in Share: the invite they took does not let them back in', async () => {
+    const w = await world();
+    const link = (await invite(w, {})).body.invite;
+    await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.bob, headers: HOME, body: { origin: APP, invite: link.id } });
+    await call(w.env, '/api/doc/access', { method: 'PATCH', cookie: w.julie, headers: HOME, body: { slug: w.space.slug, access: { allowed_users: [] } } });
+    const back = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.bob, headers: HOME, body: { origin: APP, invite: link.id } });
+    assert(back.status === 410 && back.body.error === 'invite_revoked', `retake: ${back.status} ${JSON.stringify(back.body)}`);
+    // Same for a handle invite.
+    const handle = (await invite(w, { invitee: 'carol' })).body.invite;
+    await call(w.env, '/api/doc/access', { method: 'PATCH', cookie: w.julie, headers: HOME, body: { slug: w.space.slug, access: { allowed_users: [] } } });
+    const carol = await call(w.env, '/api/feedback/connect', { method: 'POST', cookie: w.carol, headers: HOME, body: { origin: APP, invite: handle.id } });
+    assert(carol.status === 410, `handle retake: ${carol.status} ${JSON.stringify(carol.body)}`);
+    assert(!(await meta(w.env, w.space.slug)).access.allowed_users.length, 'someone got back in');
   });
 
   await t('withdrawing an invite takes back what it gave; a withdrawn or expired one cannot be taken', async () => {
@@ -311,7 +362,8 @@ const ID_RE = /^[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/;
     assert(page.headers.get('referrer-policy') === 'no-referrer', 'the invite can leak through Referer');
     const boot = bootData(await page.text(), '__TDOC_APP_BOOT__');
     assert(boot.page === 'feedback-invite' && boot.inviter === 'julie' && boot.host === 'localhost:3000', JSON.stringify(boot));
-    assert(boot.siteUrl === `${APP}/?tdoc_invite=${link.id}` && boot.site === false, boot.siteUrl);
+    // The site is often not the owner's: it never gets the invite.
+    assert(boot.siteUrl === `${APP}/` && boot.site === false && boot.id === link.id, boot.siteUrl);
     assert(/^javascript:/.test(boot.bookmarklet), 'no bookmark');
     assert(!JSON.stringify(boot).includes(w.space.slug), 'the page names the space');
     for (const bad of ['nope', `${'0'.repeat(32)}.${'A'.repeat(22)}`]) {
