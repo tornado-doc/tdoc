@@ -496,6 +496,11 @@ const FEEDBACK_TOKEN_RE = /^Bearer\s+(fb_[a-f0-9]{48})$/;
 const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session', '/api/notify/targets', '/api/notify/handoff', '/api/notify/handoffs', '/api/notify/handoff/resend']);
 const FEEDBACK_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 
+// The one route past the comment surface: the token holder's OWN agents
+// (GET/POST /api/docs/<slug>/my-agent, answer only, never anyone else's).
+// handleMyAgent admits a token there only when feedbackTokenOwnAgent says so.
+const FEEDBACK_TOKEN_MY_AGENT_RE = /^\/api\/docs\/[^/]+\/my-agent\/?$/;
+
 function feedbackTokenFrom(req) {
   const m = (req.headers.get('authorization') || '').match(FEEDBACK_TOKEN_RE);
   return m ? m[1] : null;
@@ -528,6 +533,20 @@ function invalidProductAnchorUrl(anchor) {
     const url = new URL(anchor.url);
     return url.protocol !== 'http:' && url.protocol !== 'https:';
   } catch { return true; }
+}
+
+// May this feedback token ask its holder's own agents about its space
+// (handleMyAgent)? Only a token the bookmarklet got for tdoc's own pages: its
+// origin is this worker's, so the page holding it is ours. A token handed to
+// any other origin lives in that site's page, where the site's scripts can
+// read it, so it must never make anybody's agent run. Never a site (SDK)
+// token, and only on the space the token was minted for, which is a
+// feedback space for this same origin.
+function feedbackTokenOwnAgent(feedback, slug, meta, base) {
+  return Boolean(feedback && !feedback.site && typeof feedback.origin === 'string'
+    && feedback.origin === base && feedback.slug === slug
+    && meta && meta.created_from === 'feedback' && meta.feedback
+    && feedbackOrigin(meta.feedback.origin) === base);
 }
 
 // A token-bound session may only touch the doc it was minted for.
@@ -9914,7 +9933,7 @@ async function createFeedbackSiteSpace(env, req, session, { origins, team, title
   return { ok: true, body: await feedbackSpaceResult(env, base, made.slug, made.meta, { origins }, team, true) };
 }
 
-function feedbackSessionPayload(env, base, session, slug, meta) {
+function feedbackSessionPayload(env, base, session, slug, meta, token = session && session.feedback) {
   const version = Math.max(1, latestVersionNumber(meta));
   return {
     ok: true,
@@ -9931,6 +9950,9 @@ function feedbackSessionPayload(env, base, session, slug, meta) {
     notify: true,
     identity: { login: actorKey(session), linked_actor_keys: actorKeys(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
     is_owner: isDocOwnerSession(env, session, meta),
+    // The widget may offer its holder's own agents (answer only): only on
+    // tdoc's own pages (feedbackTokenOwnAgent).
+    own_agent: feedbackTokenOwnAgent(token, slug, meta, base),
   };
 }
 
@@ -18756,8 +18778,10 @@ async function handleMyAgentCancel(env, req, url, slug) {
 async function handleMyAgent(env, req, url, slug) {
   if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
   // The reader in their browser. An agent's token asks its own account's
-  // agents through the CLI, not through here.
-  if (req.headers.get('authorization')) return json({ error: 'browser_session_required' }, { status: 403 });
+  // agents through the CLI, not through here. The one other door: the
+  // feedback widget on tdoc's own pages, with its token (feedbackTokenOwnAgent).
+  const viaFeedbackToken = Boolean(feedbackTokenFrom(req));
+  if (req.headers.get('authorization') && !viaFeedbackToken) return json({ error: 'browser_session_required' }, { status: 403 });
   if (!sameOrigin(req, url)) return json({ error: 'cross_origin' }, { status: 403 });
   // Sending makes an agent run, so it must provably come from this site: an
   // Origin of ours, or a browser that says same-origin. A missing Origin is
@@ -18766,9 +18790,15 @@ async function handleMyAgent(env, req, url, slug) {
     return json({ error: 'cross_origin' }, { status: 403 });
   }
   const session = await getSession(env, req);
-  if (!sessionPrincipal(session) || session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+  if (!sessionPrincipal(session)) return json({ error: 'sign_in_required' }, { status: 401 });
+  // A cookie wins over a token in getSession: with a token sent, the session
+  // must be the token's, or it is refused.
+  if (viaFeedbackToken ? !session.feedback : session.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
   const meta = await loadDocMeta(env, slug);
   if (!meta) return json({ error: 'not_found' }, { status: 404 });
+  if (viaFeedbackToken && !feedbackTokenOwnAgent(session.feedback, slug, meta, url.origin)) {
+    return json({ error: 'feedback_token_scope' }, { status: 403 });
+  }
   // The reader's own read gate, exactly as the page applies it.
   const gate = await enforceDocAccess(env, req, slug, latestVersionNumber(meta) || 1);
   if (!gate.ok || gate.ownerToken || gate.bearerSession) {
@@ -18778,10 +18808,15 @@ async function handleMyAgent(env, req, url, slug) {
   const state = accountId ? await readerAgentState(env, accountId) : { group: { ids: [], canonical: null }, own: [], reachable: [], tier: 'none' };
   const asker = state.group.canonical || accountId;
   // Ask only may also go to the doc's team agent, for a member of its team.
-  const team = await teamAskTargets(env, { meta, session });
+  // Not from the widget: its token reaches the holder's own agents only.
+  const team = viaFeedbackToken ? { targets: [], reachable: [] } : await teamAskTargets(env, { meta, session });
   if (req.method === 'GET') {
-    const asks = accountId ? (await loadAgentAsks(env, slug, asker)).slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
-    const guestTeam = meta.workspace_id && !await isTeamMemberSession(env, session, meta.workspace_id)
+    // The widget's token sees only what it could have asked: questions in a
+    // thread, to the holder's own agents (no private answers, no team's).
+    const asks = accountId ? (await loadAgentAsks(env, slug, asker))
+      .filter((a) => !viaFeedbackToken || (a.comment_id && !a.runner && !a.team_agent))
+      .slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
+    const guestTeam = !viaFeedbackToken && meta.workspace_id && !await isTeamMemberSession(env, session, meta.workspace_id)
       && isAllowlisted(accessFromMeta(meta), session, env, meta)
       ? await loadTeam(env, meta.workspace_id) : null;
     return json({
@@ -18793,8 +18828,9 @@ async function handleMyAgent(env, req, url, slug) {
         provider: 'local', agent_sub: agent.id, agent_name: agent.name,
         team_agent: { id: agent.id, name: agent.name }, disabled: true,
       })) : [],
-      // tdoc AI is offered to everyone, within their free answers.
-      tdoc_ai: askConfig(env).available,
+      // tdoc AI is offered to everyone, within their free answers (not in
+      // the widget, which has no way to ask it).
+      tdoc_ai: viaFeedbackToken ? false : askConfig(env).available,
       asks,
       helper_href: AGENT_HELPER_HREF,
     }, { headers: { 'Cache-Control': 'no-store' } });
@@ -18805,6 +18841,9 @@ async function handleMyAgent(env, req, url, slug) {
   // Asked in a comment, the question is that comment as stored (see
   // handleAsk): an answer signed by an agent must answer what the thread shows.
   let question = askCut(body && body.question, ASK_QUESTION_CHARS);
+  // The widget asks about a comment its holder wrote (askedComment), in the
+  // thread: never privately, never free text.
+  if (viaFeedbackToken && commentId == null) return json({ error: 'comment_id_required' }, { status: 400 });
   if (!question && commentId == null) return json({ error: 'question_required' }, { status: 400 });
   if (!accountId) return json({ error: 'agent_not_connected', tier: 'none' }, { status: 409 });
   // One of the reader's own agents, or the doc's team agent for a member of
@@ -21806,7 +21845,7 @@ const tdocHandlers = {
 
     // Before any route can read it as a session: a feedback token opens the
     // comment surface of one doc and nothing else (see getSession).
-    if (feedbackTokenFrom(req) && !FEEDBACK_TOKEN_PATHS.has(p)) {
+    if (feedbackTokenFrom(req) && !FEEDBACK_TOKEN_PATHS.has(p) && !FEEDBACK_TOKEN_MY_AGENT_RE.test(p)) {
       return json({ error: 'feedback_token_scope' }, { status: 403 });
     }
     // A team-scoped token (#65) gets the routes a publishing agent needs, and
@@ -23601,7 +23640,7 @@ const tdocHandlers = {
           return json({ error: 'not_invited', message: 'This site\'s comments are not shared with you. Ask its owner to share them with you.' }, { status: 403 });
         }
         const token = await mintFeedbackToken(env, s, body.space, origin, { site: true });
-        return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, body.space, meta), token, site: true }, body.space);
+        return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, body.space, meta, { slug: body.space, origin, site: true }), token, site: true }, body.space);
       }
       if (body.slug) {
         // "Use an existing doc": any doc this person may comment on.
@@ -23620,7 +23659,7 @@ const tdocHandlers = {
         meta = space.meta;
       }
       const token = await mintFeedbackToken(env, s, slug, origin);
-      return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, slug, meta), token }, null);
+      return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, slug, meta, { slug, origin, site: false }), token }, null);
     }
     // The client's first call with a stored token: still valid, still allowed,
     // and where the doc is now.

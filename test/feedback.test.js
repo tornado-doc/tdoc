@@ -269,6 +269,113 @@ const APP = 'http://localhost:3000';
     assert(notOwner.status === 401 || notOwner.status === 403, `a joiner drives the owner's agent: ${notOwner.status}`);
   });
 
+  // A joiner's widget reaches THEIR OWN agents (answer only, in the thread)
+  // through /api/docs/<slug>/my-agent, and only where the token cannot have
+  // been read by another site's scripts: the bookmarklet on tdoc's own pages.
+  await t('a joiner\'s widget token asks only their own agents, only on tdoc\'s own origin', async () => {
+    const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev' });
+    const TDOC = 'https://tdoc.dev';
+    const home = { Origin: TDOC };
+    const raft = (sub, name, server) => ({ provider: 'raft', server_id: `srv-${server}`, agent_sub: sub, server_slug: server, agent_name: name, last_touched: new Date().toISOString() });
+    const serena = await issue(worker, env, 'serena');
+    const julie = await issue(worker, env, 'julie');
+    await env.META.put(`account-notify:${serena.account_id}`, JSON.stringify([raft('s1', 'serena-codex', 'stan')]));
+    await env.META.put(`account-notify:${julie.account_id}`, JSON.stringify([raft('j1', 'julie-claw', 'julie'), raft('j2', 'bencher', 'raft')]));
+    const serenaAgent = raft('s1', 'serena-codex', 'stan');
+    const julieAgent = raft('j2', 'bencher', 'raft');
+    // Serena's space for tdoc.dev itself; Julie joins and connects her bookmarklet there.
+    const { body: space } = await connect(env, serena.cookie, { origin: TDOC });
+    assert(space.is_owner === true && space.own_agent === true, `owner connect ${JSON.stringify({ is_owner: space.is_owner, own_agent: space.own_agent })}`);
+    assert((await worker.fetch(joinReq(julie.cookie, space.slug), env, {})).status === 200, 'julie joins');
+    const { body: mine } = await connect(env, julie.cookie, { origin: TDOC });
+    assert(mine.slug === space.slug && mine.is_owner === false && mine.own_agent === true, `joiner connect ${JSON.stringify({ slug: mine.slug, is_owner: mine.is_owner, own_agent: mine.own_agent })}`);
+    const refreshed = await (await worker.fetch(req('/api/feedback/session', { token: mine.token }), env, {})).json();
+    assert(refreshed.own_agent === true, `session own_agent ${refreshed.own_agent}`);
+    const anchor = { kind: 'product', url: `${TDOC}/me`, selector: '#x', tag: 'div', text: 'x' };
+    const post = async (token, text) => (await (await worker.fetch(req('/api/comments', { method: 'POST', token, body: { slug: space.slug, version: 1, text, anchor } }), env, {})).json()).id;
+    const julieComment = await post(mine.token, 'why is this here?');
+    const serenaComment = await post(space.token, 'owner note');
+    const call = async (_env, p, opts) => {
+      const r = await worker.fetch(req(p, opts), env, {});
+      let body = null; try { body = await r.json(); } catch {}
+      return { status: r.status, body };
+    };
+    const myAgent = (opts, slug = space.slug) => call(env, `/api/docs/${slug}/my-agent`, { headers: home, ...opts });
+
+    // Allowed: GET lists Julie's own agents only; POST asks one about her comment.
+    const got = await myAgent({ token: mine.token });
+    assert(got.status === 200, `GET ${got.status} ${JSON.stringify(got.body)}`);
+    assert(JSON.stringify(got.body.agents.map((a) => a.agent_name).sort()) === '["bencher","julie-claw"]', `agents ${JSON.stringify(got.body.agents)}`);
+    assert(!got.body.team_agents.length && got.body.tdoc_ai === false && !got.body.disabled_team_agents.length, `extras ${JSON.stringify(got.body)}`);
+    const asked = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: julieComment, recipient: julieAgent } });
+    assert(asked.status === 200 && asked.body.ask.comment_id === julieComment && asked.body.ask.recipient.agent_sub === 'j2', `POST ${asked.status} ${JSON.stringify(asked.body)}`);
+
+    // A private question asked from the page (cookie) stays out of the token's view.
+    const priv = await myAgent({ cookie: julie.cookie, method: 'POST', body: { question: 'private one', recipient: julieAgent } });
+    assert(priv.status === 200, `cookie private ask ${priv.status} ${JSON.stringify(priv.body)}`);
+    const seen = (await myAgent({ token: mine.token })).body.asks.map((a) => a.ask_id);
+    assert(seen.includes(asked.body.ask.ask_id) && !seen.includes(priv.body.ask.ask_id), `token sees ${JSON.stringify(seen)}`);
+    assert((await myAgent({ cookie: julie.cookie })).body.asks.some((a) => a.ask_id === priv.body.ask.ask_id), 'the page lost its private ask');
+
+    // Refused: the owner's agent, a comment Julie did not write, no comment.
+    const theirAgent = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: julieComment, recipient: serenaAgent } });
+    assert(theirAgent.status === 403 && theirAgent.body.error === 'not_your_agent', `owner's agent ${theirAgent.status} ${JSON.stringify(theirAgent.body)}`);
+    const teamAgent = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: julieComment, recipient: { ...julieAgent, team_agent: { id: 'ta_x', name: 'x' } } } });
+    assert(teamAgent.status === 403 && teamAgent.body.error === 'not_your_agent', `team agent ${teamAgent.status} ${JSON.stringify(teamAgent.body)}`);
+    const notHers = await myAgent({ token: mine.token, method: 'POST', body: { comment_id: serenaComment, recipient: julieAgent } });
+    assert(notHers.status === 403 && notHers.body.error === 'not_your_comment', `not her comment ${notHers.status} ${JSON.stringify(notHers.body)}`);
+    const free = await myAgent({ token: mine.token, method: 'POST', body: { question: 'anything', recipient: julieAgent } });
+    assert(free.status === 400 && free.body.error === 'comment_id_required', `no comment ${free.status} ${JSON.stringify(free.body)}`);
+    const crossSite = await myAgent({ token: mine.token, method: 'POST', headers: { Origin: 'https://evil.example' }, body: { comment_id: julieComment } });
+    assert(crossSite.status === 403, `cross-site POST ${crossSite.status}`);
+    // Only the token's own session: a cookie riding along is not it.
+    const both = await myAgent({ token: mine.token, cookie: serena.cookie });
+    assert(both.status === 401, `cookie + token ${both.status} ${JSON.stringify(both.body)}`);
+    // Only the plain my-agent route: not cancel, not publish.
+    for (const tail of ['cancel', 'publish']) {
+      const r = await call(env, `/api/docs/${space.slug}/my-agent/${tail}`, { method: 'POST', token: mine.token, headers: home, body: { ask_id: asked.body.ask.ask_id, comment_id: julieComment } });
+      assert(r.status === 403 && r.body.error === 'feedback_token_scope', `${tail}: ${r.status} ${JSON.stringify(r.body)}`);
+    }
+
+    // Refused: another slug than the token's.
+    const { body: elsewhere } = await connect(env, julie.cookie, { origin: 'http://localhost:5173' });
+    const otherSlug = await myAgent({ token: mine.token }, elsewhere.slug);
+    assert(otherSlug.status === 403 && otherSlug.body.error === 'feedback_token_scope', `other slug ${otherSlug.status} ${JSON.stringify(otherSlug.body)}`);
+
+    // Refused: a site (SDK) token, even for tdoc's own origin.
+    const rec = JSON.parse(await env.META.get(`feedback:token:${mine.token}`));
+    const siteToken = `fb_${'ab'.repeat(24)}`;
+    await env.META.put(`feedback:token:${siteToken}`, JSON.stringify({ ...rec, site: true }));
+    const site = await myAgent({ token: siteToken });
+    assert(site.status === 403 && site.body.error === 'feedback_token_scope', `site token ${site.status} ${JSON.stringify(site.body)}`);
+    const siteAsk = await myAgent({ token: siteToken, method: 'POST', body: { comment_id: julieComment } });
+    assert(siteAsk.status === 403, `site token POST ${siteAsk.status}`);
+
+    // Refused: a third-party app's space. Its page could read the token.
+    const { body: appSpace } = await connect(env, serena.cookie);
+    await worker.fetch(joinReq(julie.cookie, appSpace.slug), env, {});
+    const { body: appMine } = await connect(env, julie.cookie);
+    assert(appMine.slug === appSpace.slug && appMine.own_agent === false, `third-party connect ${JSON.stringify({ slug: appMine.slug, own_agent: appMine.own_agent })}`);
+    const appComment = (await (await worker.fetch(req('/api/comments', { method: 'POST', token: appMine.token, body: { slug: appSpace.slug, version: 1, text: 'q', anchor: { ...anchor, url: `${APP}/` } } }), env, {})).json()).id;
+    for (const opts of [{}, { method: 'POST', body: { comment_id: appComment, recipient: julieAgent } }]) {
+      const r = await myAgent({ token: appMine.token, ...opts, headers: { Origin: APP } }, appSpace.slug);
+      assert(r.status === 403, `third-party ${opts.method || 'GET'} ${r.status} ${JSON.stringify(r.body)}`);
+      const home2 = await myAgent({ token: appMine.token, ...opts }, appSpace.slug);
+      assert(home2.status === 403 && home2.body.error === 'feedback_token_scope', `third-party token from tdoc ${opts.method || 'GET'} ${home2.status} ${JSON.stringify(home2.body)}`);
+    }
+    // ...and a tdoc-origin token pointed at that third-party space ("use an existing doc").
+    const { body: pointed } = await connect(env, julie.cookie, { origin: TDOC, slug: appSpace.slug });
+    assert(pointed.slug === appSpace.slug && pointed.own_agent === false, `pointed connect ${JSON.stringify({ slug: pointed.slug, own_agent: pointed.own_agent })}`);
+    const pointedGet = await myAgent({ token: pointed.token }, appSpace.slug);
+    assert(pointedGet.status === 403 && pointedGet.body.error === 'feedback_token_scope', `pointed ${pointedGet.status}`);
+
+    // The owner's agents stay out of a joiner's reach from the widget.
+    const targets = await worker.fetch(req(`/api/notify/targets?slug=${space.slug}`, { token: mine.token }), env, {});
+    assert(targets.status === 401 || targets.status === 403, `joiner reads owner targets ${targets.status}`);
+    const handoff = await worker.fetch(req('/api/notify/handoff', { method: 'POST', token: mine.token, body: { slug: space.slug, comment_ids: [julieComment] } }), env, {});
+    assert(handoff.status === 401 || handoff.status === 403, `joiner hands off to owner's agent ${handoff.status}`);
+  });
+
   // The widget shows Send to agent from these two answers: the owner always,
   // a member of the space's team once the team has an agent (as the doc page).
   await t('Send to agent: the session says the host can notify; mentions names the owner and the team members', async () => {
