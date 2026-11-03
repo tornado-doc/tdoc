@@ -1358,7 +1358,7 @@ a.ui-menu-item:visited {
 }
 @keyframes tdoc-tip-rise { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 .tdoc-tip-hero {
-  position: relative; height: 125px; overflow: hidden;
+  position: relative; height: 142px; overflow: hidden;
   background:
     radial-gradient(120% 90% at 50% 120%, #2c5a3a 0 34%, transparent 35%),
     radial-gradient(80% 70% at 15% 115%, #3c6b44 0 40%, transparent 41%),
@@ -1367,21 +1367,43 @@ a.ui-menu-item:visited {
 .tdoc-tip .tdoc-tip-close { position: absolute; top: 8px; right: 8px; z-index: 2; border-radius: 50%; background: rgba(0,0,0,.45); color: #fff; border: 0; }
 .tdoc-tip .tdoc-tip-close:hover { background: rgba(0,0,0,.6); color: #fff; }
 .tdoc-tip-win {
-  position: absolute; left: 50%; top: 18px; transform: translateX(-50%); width: 76%;
-  background: rgba(18,18,20,.92); border: 1px solid rgba(255,255,255,.08); border-radius: 7px; padding: 8px 9px;
-  color: #d8d8d4; font-size: 8.5px; line-height: 1.35; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  position: absolute; left: 50%; top: 18px; transform: translateX(-50%); width: 86%; height: 140px; overflow: hidden;
+  background: #fff; border-radius: 9px 9px 0 0; color: #3c4043; font: 8px/1.45 system-ui, -apple-system, sans-serif;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.6), 0 10px 28px rgba(16,18,26,.22);
 }
-.tdoc-tip-scene { display: none; }
-.tdoc-tip-scene.is-on { display: block; animation: tdoc-tip-fade .4s ease; }
-@keyframes tdoc-tip-fade { from { opacity: 0; } to { opacity: 1; } }
-.tdoc-tip-bar { display: flex; gap: 5px; align-items: center; color: #8e8e89; margin-bottom: 6px; }
-.tdoc-tip-bar i { width: 5px; height: 5px; border-radius: 50%; background: #555; }
-.tdoc-tip-q { background: rgba(255,255,255,.05); border-radius: 4px; padding: 5px 6px; margin-top: 4px; }
-.tdoc-tip-q b { color: #fff; font-weight: 600; }
-.tdoc-tip-at { color: #9fb6ff; }
-.tdoc-tip-st { display: flex; align-items: center; gap: 5px; margin-top: 6px; color: #bdbdb8; }
-.tdoc-tip-ok { color: #6fdc9c; }
-.tdoc-tip-spin { display: inline-block; width: 7px; height: 7px; border: 1.2px solid #777; border-top-color: #ddd; border-radius: 50%; animation: tdoc-tip-sp 1s linear infinite; }
+.tdoc-tip-bar { display: flex; align-items: center; gap: 5px; height: 20px; padding: 0 9px; border-bottom: 1px solid #eeede9; color: #1a1a1a; font-weight: 600; }
+.tdoc-tip-ver { padding: 0 5px; border-radius: 99px; background: #f1f1ef; color: #555; font-weight: 500; transition: background .3s, color .3s; }
+.tdoc-tip-ver.is-new { background: #e3f4ea; color: #1e7d45; }
+.tdoc-tip-doc { position: absolute; left: 10px; top: 27px; width: 40%; }
+.tdoc-tip-h { margin: 0 0 3px; font-size: 9px; font-weight: 650; color: #111; }
+.tdoc-tip-p { margin: 0 0 5px; color: #3c4043; }
+.tdoc-tip-p mark { background: #ffd84d; color: inherit; text-decoration: underline solid #b8860b; text-decoration-thickness: 1.5px; text-underline-offset: 1px; transition: background .4s; }
+.tdoc-tip-p mark.is-done { background: #fff7d0; text-decoration: none; }
+.tdoc-tip-line { display: block; height: 4px; margin: 0 0 4px; border-radius: 2px; background: #eeede9; }
+.tdoc-tip-line.is-short { width: 60%; }
+.tdoc-tip-cmt {
+  position: absolute; right: 8px; top: 26px; width: 50%; box-sizing: border-box; padding: 6px 7px;
+  background: #fff; border: 1px solid var(--td-accent, #1652f0); border-radius: 7px;
+  box-shadow: 0 2px 8px rgba(22,82,240,.14);
+}
+.tdoc-tip-who { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.tdoc-tip-who b { color: #111; font-weight: 600; }
+.tdoc-tip-when { color: #80868b; font-size: 7px; white-space: nowrap; }
+.tdoc-tip-av { display: grid; place-items: center; flex: none; width: 12px; height: 12px; border-radius: 50%; font-size: 6.5px; font-weight: 700; }
+.tdoc-tip-av-maya { background: #f6d6e0; color: #a33a5f; }
+.tdoc-tip-av-agent { background: #fbe9e1; }
+.tdoc-tip-chip { display: inline-flex; align-items: center; gap: 2px; margin-top: 3px; padding: 0 5px; border-radius: 99px; background: #f1f1ef; color: #555; font-size: 6.5px; font-weight: 500; white-space: nowrap; transition: background .3s, color .3s; }
+.tdoc-tip-chip.is-sent { background: var(--td-accent-tint, #eef3fe); color: var(--td-accent, #1652f0); }
+.tdoc-tip-chip.is-done { background: #e3f4ea; color: #1e7d45; }
+.tdoc-tip-text { margin-top: 2px; color: #222; }
+.tdoc-tip-at { color: var(--td-accent, #1652f0); font-weight: 600; }
+.tdoc-tip-caret { display: inline-block; width: 1px; height: 8px; margin-left: 1px; vertical-align: -1px; background: #1a1a1a; animation: tdoc-tip-blink 1s steps(2) infinite; }
+@keyframes tdoc-tip-blink { 50% { opacity: 0; } }
+.tdoc-tip-reply { margin-top: 5px; padding-left: 6px; border-left: 1.5px solid #e5e5e5; opacity: 0; transform: translateY(4px); transition: opacity .35s ease, transform .35s ease; }
+.tdoc-tip-reply.is-in { opacity: 1; transform: none; }
+.tdoc-tip-shimmer { background: linear-gradient(90deg, #9a9994 0%, #1a1a1a 50%, #9a9994 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: tdoc-tip-shine 1.4s linear infinite; }
+@keyframes tdoc-tip-shine { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.tdoc-tip-spin { display: inline-block; width: 7px; height: 7px; border: 1.2px solid #d6d5d0; border-top-color: #1a1a1a; border-radius: 50%; animation: tdoc-tip-sp 1s linear infinite; }
 @keyframes tdoc-tip-sp { to { transform: rotate(360deg); } }
 .tdoc-tip-body { padding: 16px 18px 4px; display: grid; }
 .tdoc-tip-pane { grid-area: 1 / 1; min-width: 0; transition: opacity .18s ease; }
@@ -1403,4 +1425,4 @@ a.ui-menu-item:visited {
 .tdoc-tip-foot .ui-btn.is-hidden { visibility: hidden; }
 .tdoc-tip-pill.ui-btn { position: fixed; left: 16px; bottom: 16px; z-index: 60; border-radius: 99px; gap: 6px; box-shadow: 0 4px 14px rgba(16,18,26,.12); }
 .tdoc-tip-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--td-accent, #1652f0); }
-@media (prefers-reduced-motion: reduce) { .tdoc-tip, .tdoc-tip-scene.is-on, .tdoc-tip-spin { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .tdoc-tip, .tdoc-tip-spin, .tdoc-tip-caret, .tdoc-tip-shimmer { animation: none; } .tdoc-tip-shimmer { color: #6b6a66; } .tdoc-tip-reply, .tdoc-tip-p mark { transition: none; } }
