@@ -806,7 +806,10 @@ Name every origin the app runs on (production, preview, local dev). It prints
 the `<script src=".../feedback.js" data-tdoc-space="<slug>" async></script>`
 line; `--write` puts it before `</head>` in the project's HTML entry (running
 it again leaves one tag); `--env` prints `TDOC_FEEDBACK_SPACE=<slug>` for an
-app that reads the id from its environment. The space is private: the person
+app that reads the id from its environment. If the site sends a
+Content-Security-Policy, it must allow the tdoc origin (`https://tdoc.dev`) in
+`script-src`, `connect-src` and `img-src`, and nothing else: the widget, its
+API calls and every face it shows come from there. The space is private: the person
 and the people they invite, or with `--team` (team admins only) the team's
 members. Asking again for an origin returns the same space. Comments left on
 the site come back through `tdoc-pull <slug>` like any doc. Same endpoint as

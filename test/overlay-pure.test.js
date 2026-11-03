@@ -31,9 +31,9 @@ function sliceFunction(name) {
 
 const box = { URL };
 vm.createContext(box);
-vm.runInContext([
+vm.runInContext('var tdocOrigin = null;\n' + [
   'normalizeNeedle', 'normalizeContext', 'commonPrefixLen', 'commonSuffixLen',
-  'isGitHubUrl', 'avatarFor', 'notificationTarget',
+  'isGitHubUrl', 'avatarFor', 'upstreamAvatarFor', 'notificationTarget',
 ].map(sliceFunction).join('\n'), box);
 
 console.log('React/frame pure helpers');
