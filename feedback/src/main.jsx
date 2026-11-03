@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw, SquareDashed } from 'lucide-react';
+import { MessageSquarePlus, MessagesSquare, Plus, Share2, ExternalLink, X, Send, RefreshCw, SquareDashed, ChevronDown, Check } from 'lucide-react';
 import { FLAGS, isPreviewHostname } from '../../shell/src/feature-flags.js';
 import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentThreadList } from '../../shell/src/document/comment-thread-list.jsx';
@@ -19,6 +19,8 @@ import {
   toggleReaction, updateCommentAnchor, updateCommentText,
 } from '../../shell/src/document/api.js';
 import { PortalContainerContext } from '../../shell/src/ui/portal.js';
+import { AppMenu, AppMenuItem } from '../../shell/src/ui/menu.jsx';
+import { FeedbackSharePanel } from '../../shell/src/feedback-share-panel.jsx';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
 // controls keep the browser's default button look on foreign pages.
@@ -76,7 +78,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-feedback-dock a:hover,
     #tdoc-feedback-root .tdoc-feedback-dock .on { background: #f0f0ee; }
     #tdoc-feedback-root .tdoc-feedback-dock .icon, #tdoc-feedback-root .tdoc-feedback-dock a { padding: 7px; color: #6b6a66; }
-    #tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share { color: #1a1a1a; }
+    #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-share { color: #1a1a1a; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary { background: #1652f0; color: #fff; }
     #tdoc-feedback-root .tdoc-feedback-dock button.primary:hover,
     #tdoc-feedback-root .tdoc-feedback-dock button.primary.on { background: #1245d0; color: #fff; }
@@ -166,7 +168,7 @@ ${uiCss}
     #tdoc-feedback-root .tdoc-fb-send-label, #tdoc-feedback-root .tdoc-fb-share-label { display: none; }
     @media (min-width: 701px) {
       #tdoc-feedback-root .tdoc-fb-send-label, #tdoc-feedback-root .tdoc-fb-share-label { display: inline; }
-      #tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share { padding: 7px 11px; }
+      #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-share { padding: 7px 11px; }
       #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send { padding: 7px 11px; color: #1a1a1a; }
       #tdoc-feedback-root .tdoc-fb-send-badge { position: static; }
     }
@@ -213,6 +215,17 @@ ${uiCss}
       #tdoc-feedback-root .tdoc-fb-area-label { display: inline; }
       #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-area { padding: 7px 11px; }
     }
+    /* The space switcher: the list's title, a menu of My space and the
+       spaces this person was invited to on this site. */
+    #tdoc-feedback-root .tdoc-fb-space { appearance: none; border: 0; background: none; padding: 2px 4px; margin: -2px -4px; border-radius: 6px;
+      display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; cursor: pointer; color: var(--td-ink); font: 700 15px/1.3 system-ui, -apple-system, sans-serif; }
+    #tdoc-feedback-root .tdoc-fb-space:hover { background: var(--td-surface); }
+    #tdoc-feedback-root .tdoc-fb-space span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #tdoc-feedback-root .tdoc-fb-space svg { width: 14px; height: 14px; flex: none; color: var(--td-muted); }
+    #tdoc-feedback-root .tdoc-fb-space-item { display: flex; align-items: center; gap: 8px; min-width: 200px; }
+    #tdoc-feedback-root .tdoc-fb-space-item span { flex: 1; }
+    #tdoc-feedback-root .tdoc-fb-space-item svg { width: 14px; height: 14px; color: var(--td-accent); }
+    #tdoc-feedback-root .tdoc-feedback-notice .tdoc-fb-invite-err { color: #ffb4ab; }
     /* A small phone: the dock's buttons sit closer so the row stays on screen. */
     @media (max-width: 400px) {
       #tdoc-feedback-root .tdoc-feedback-dock { right: 8px; gap: 2px; }
@@ -440,14 +453,40 @@ ${uiCss}
   // Comment on an area: drag a box, the dock's Area tool, C, and long-press
   // then drag on a phone (shell/src/feature-flags.js feedbackAreaSelect). The
   // flag is read for the tdoc origin that served this script.
-  const areaSelectOn = (() => {
-    const pinned = window.__TDOC_FLAGS__ && window.__TDOC_FLAGS__.feedbackAreaSelect;
+  const flagOn = (name) => {
+    const pinned = window.__TDOC_FLAGS__ && window.__TDOC_FLAGS__[name];
     if (typeof pinned === 'boolean') return pinned;
-    const flag = FLAGS.feedbackAreaSelect;
+    const flag = FLAGS[name];
     if (!flag) return false;
     if (flag.default === true) return true;
     try { return flag.preview === true && isPreviewHostname(new URL(base).hostname); } catch (_) { return false; }
-  })();
+  };
+  const areaSelectOn = flagOn('feedbackAreaSelect');
+  // Share and invites inside the widget (feature-flags.js feedbackInvites).
+  const invitesOn = flagOn('feedbackInvites');
+
+  // An invite link opens the site with ?tdoc_invite=<id>. The id is taken
+  // off the address at once (it is a one-time key; a reload or a copied URL
+  // must not carry it on) and kept for this tab until it is answered: Join,
+  // or Keep my own. Answers are remembered per invite.
+  const INVITE_ID_RE = /^[a-f0-9]{32}\.[A-Za-z0-9_-]{22}$/;
+  const inviteKey = `${storageKey}:invite`;
+  if (invitesOn) {
+    try {
+      const url = new URL(location.href);
+      const id = url.searchParams.get('tdoc_invite');
+      if (id !== null) {
+        url.searchParams.delete('tdoc_invite');
+        history.replaceState(history.state, '', url.href);
+        if (INVITE_ID_RE.test(id)) sessionStorage.setItem(inviteKey, id);
+      }
+    } catch (_) {}
+  }
+  const readInvite = () => { try { const id = sessionStorage.getItem(inviteKey); return id && INVITE_ID_RE.test(id) ? id : null; } catch (_) { return null; } };
+  const dropInvite = () => { try { sessionStorage.removeItem(inviteKey); } catch (_) {} };
+  const choiceKey = (which) => `${storageKey}:invite-choice:${which}`;
+  const rememberChoice = (which, choice) => { try { localStorage.setItem(choiceKey(which), choice); } catch (_) {} };
+  const rememberedChoice = (which) => { try { return localStorage.getItem(choiceKey(which)); } catch (_) { return null; } };
 
   // The connect popup mints a token that stands in for our missing cookie
   // (see getSession in the worker). It lives with the app's origin: one per
@@ -515,10 +554,11 @@ ${uiCss}
   // The overlay's "Finish signing in in the tdoc window…" line; set by the app.
   let connectWaiting = () => {};
   let connecting = null;
-  function connect() {
+  function connect({ invite = null } = {}) {
     if (connecting) return connecting;
     const attempt = new Promise((resolve, reject) => {
-      const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}${space ? `&space=${encodeURIComponent(space)}` : ''}`;
+      // With an invite, the window asks Join and connecting takes it.
+      const url = `${base}/feedback/connect?origin=${encodeURIComponent(location.origin)}${space ? `&space=${encodeURIComponent(space)}` : ''}${invite ? `&invite=${encodeURIComponent(invite)}` : ''}`;
       let popup = null;
       let watch = null;
       let poll = null;
@@ -625,7 +665,10 @@ ${uiCss}
   };
 
   // A stored token that the worker no longer honours is dropped, not retried.
-  async function ensureSession() {
+  // `interactive: false` (the quiet warm-up on page load) never opens the
+  // connect window: a window no click opened is blocked by the browser. A
+  // space that moved says so instead, and Reconnect (a click) connects.
+  async function ensureSession({ interactive = true } = {}) {
     const stored = readSession();
     if (stored && stored.token) {
       try {
@@ -638,8 +681,15 @@ ${uiCss}
         // the token was minted — reconnect so it names the one they joined.
         if (![401, 403, 404, 409].includes(error.status)) throw error;
         writeSession(null);
+        if (!interactive) {
+          const quiet = new Error(error.message);
+          quiet.status = error.status;
+          quiet.reconnect = error.status === 409;
+          throw quiet;
+        }
       }
     }
+    if (!interactive) return null;
     return connect();
   }
 
@@ -1055,12 +1105,11 @@ ${uiCss}
     return parts.join(' · ');
   };
 
-  function Dock({ session, openCount, unreadCount = 0, panelOpen, picking, areaMode, onArea, onList, onPick, onHide, sendCount, onSend }) {
-    // Share opens the space's page on tdoc with the doc Share dialog open,
-    // as on any doc: who can comment here is whoever it lets in, and the
-    // owner moves the space into a team from there. The dialog is not drawn
-    // here: this page holds a token for comments on one doc, never one that
-    // may change who has access.
+  function Dock({ session, openCount, unreadCount = 0, panelOpen, picking, areaMode, onArea, onList, onPick, onHide, sendCount, onSend, onShare }) {
+    // Share: in the widget, the owner's invites (SharePanel). Who else has
+    // access, and moving the space into a team, stay in the space's Share on
+    // tdoc: this page's token can add an invite, never change the rest.
+    // (feedbackInvites off: Share opens that page, as it used to.)
     const shareUrl = session && session.share_url;
     return (
       <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && innerWidth > 700 ? { right: PANEL_WIDTH + 18 } : null}>
@@ -1085,7 +1134,13 @@ ${uiCss}
             <Send aria-hidden="true" /><span className="tdoc-fb-send-label">Send to agent</span>{sendCount ? <span className="tdoc-fb-send-badge">{sendCount > 99 ? '99+' : sendCount}</span> : null}
           </button>
         ) : null}
-        {shareUrl ? (
+        {invitesOn ? (onShare ? (
+          // Share opens here, in the widget (Julie, 2026-11-03): the owner
+          // invites people without leaving the site. Owner (team admin) only.
+          <button type="button" className="tdoc-fb-share" onClick={onShare} title="Invite people to comment here" aria-label="Share">
+            <Share2 aria-hidden="true" /><span className="tdoc-fb-share-label">Share</span>
+          </button>
+        ) : null) : shareUrl ? (
           // On a phone the dock is icons with counts (as Send to agent):
           // the word does not fit beside them at 390px.
           <a className="tdoc-fb-share" href={shareUrl} target="_blank" rel="noopener noreferrer" title="Invite people, or move this space into a team" aria-label="Share">
@@ -1100,7 +1155,26 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ area, unreadComments, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing }) {
+  // Where this list's comments go, and the others to switch to (the
+  // bookmarklet: My space and the spaces this person was invited to here).
+  function SpaceSwitcher({ spaces, onSwitch }) {
+    const nameOf = (sp) => (sp.mine ? 'My space' : sp.owner ? `${sp.owner}’s space` : (sp.title || 'Shared space'));
+    const current = spaces.find((sp) => sp.current) || spaces[0];
+    return (
+      <AppMenu
+        align="start"
+        trigger={<button type="button" className="tdoc-fb-space" aria-label={`Feedback space: ${nameOf(current)}`}><span>{nameOf(current)}</span><ChevronDown aria-hidden="true" /></button>}
+      >
+        {spaces.map((sp) => (
+          <AppMenuItem key={sp.slug || 'mine'} onClick={() => onSwitch(sp)}>
+            <span className="tdoc-fb-space-item"><span>{nameOf(sp)}</span>{sp.current ? <Check aria-label="Current" /> : null}</span>
+          </AppMenuItem>
+        ))}
+      </AppMenu>
+    );
+  }
+
+  function ListPanel({ area, unreadComments, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
     const here = area.shownPageComments;
     const unreadIds = new Set(unreadComments.map((comment) => comment.id));
     const elsewhere = new Map();
@@ -1126,7 +1200,7 @@ ${uiCss}
     return (
       <aside className="tdoc-fb-panel" aria-label="Feedback on this app">
         <header>
-          <strong>Feedback</strong>
+          {spaces.length > 1 && onSwitch ? <strong><SpaceSwitcher spaces={spaces} onSwitch={onSwitch} /></strong> : <strong>Feedback</strong>}
           <span className="tdoc-fb-filter" role="group" aria-label="Show">
             {['open', 'replied', 'resolved', 'all'].map((f) => (
               <button key={f} type="button" className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f[0].toUpperCase() + f.slice(1)}</button>
@@ -1150,6 +1224,25 @@ ${uiCss}
           ))}
         </div>
       </aside>
+    );
+  }
+
+  // "<Name> invited you to comment on <site>": the invite link's question,
+  // or the server's (an invite for this person on this site they have not
+  // answered). Join, or for the bookmarklet Keep my own (its comments stay
+  // in the person's own space). The SDK's space is the site's: only Join.
+  function InvitePrompt({ invite, rightInset, onJoin, onKeep, onClose }) {
+    return (
+      <section className="tdoc-popup tdoc-feedback-notice tdoc-fb-invite-prompt" role="dialog" aria-label="Invitation" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
+        <div className="head"><span className="h">Invitation</span><button className="x" type="button" aria-label="Close" onClick={onClose}><X size={14} aria-hidden="true" /></button></div>
+        <p><strong>{invite.inviter}</strong> invited you to comment on <strong>{invite.host}</strong>.</p>
+        {invite.site ? null : <p>Join to leave your comments here in their space. Keep my own to keep them in yours.</p>}
+        {invite.error ? <p className="tdoc-fb-invite-err" role="alert">{invite.error}</p> : null}
+        <div className="foot">
+          {invite.site ? <span /> : <button className="ui-btn ui-btn-secondary ui-btn-m" type="button" disabled={invite.busy} onClick={onKeep}>Keep my own</button>}
+          <button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" disabled={invite.busy} onClick={onJoin}>Join</button>
+        </div>
+      </section>
     );
   }
 
@@ -1180,6 +1273,9 @@ ${uiCss}
     const [reanchorId, setReanchorId] = useState(null);
     const [notifyIds, setNotifyIds] = useState(null);
     const [notifyAvoid, setNotifyAvoid] = useState(null);
+    const [shareOpen, setShareOpen] = useState(false);
+    // An invite to answer: { id } from the link, or { slug } from the server.
+    const [invite, setInvite] = useState(null);
     const [, setViewportTick] = useState(0);
 
     const say = useCallback((text, bad = false) => {
@@ -1218,6 +1314,9 @@ ${uiCss}
     const show = useCallback(async ({ intent } = {}) => {
       try { localStorage.removeItem(hiddenKey); } catch (_) {}
       setShown(true);
+      // Opened by an invite link, not connected yet: its Join connects (and
+      // takes the invite); Keep my own connects on the first comment.
+      if (invitesOn && readInvite() && !readSession()) return;
       const result = await call({ type: 'tdoc-feedback-load' });
       if (!apply(result)) return;
       if (intent === 'bookmark') {
@@ -1238,22 +1337,118 @@ ${uiCss}
     const toggle = useCallback(() => { if (shown) hide(); else show({ intent: 'bookmark' }); }, [shown, hide, show]);
 
     // Warm the counts and the session quietly; connecting needs a click.
+    // A space that moved (409) is said with a Reconnect button: a window
+    // opened here, with no click, is one the browser blocks.
     useEffect(() => {
       let cancelled = false;
       (async () => {
         if (!readSession()) return;
+        let hidden = false;
+        try { hidden = localStorage.getItem(`${storageKey}:hidden`) === '1'; } catch (_) {}
         try {
-          const next = await ensureSession();
+          const next = await ensureSession({ interactive: false });
           if (cancelled || !next) return;
           setSession(next);
           const result = await call({ type: 'tdoc-feedback-load' });
-          let hidden = false;
-          try { hidden = localStorage.getItem(`${storageKey}:hidden`) === '1'; } catch (_) {}
           if (!cancelled && result?.ok) { setSurface(result); if (!hidden) setShown(true); }
-        } catch (_) {}
+        } catch (error) {
+          if (cancelled || !(error && error.reconnect)) return;
+          setSession(null);
+          if (!hidden) setShown(true);
+          setNotice({ status: 409, reconnect: true, error: 'Your comments on this site go to another feedback space now. Reconnect to keep commenting.' });
+        }
       })();
       return () => { cancelled = true; };
     }, []);
+
+    // An invite link (?tdoc_invite): who invited them, to which site.
+    useEffect(() => {
+      if (!invitesOn) return undefined;
+      const id = readInvite();
+      if (!id) return undefined;
+      if (rememberedChoice(id)) { dropInvite(); return undefined; }
+      let cancelled = false;
+      (async () => {
+        try {
+          const info = await request(`/api/feedback/invite?id=${encodeURIComponent(id)}`);
+          if (cancelled) return;
+          if (info.status !== 'pending' && info.status !== 'accepted') {
+            dropInvite();
+            setShown(true);
+            say(info.status === 'expired' ? 'This invite has expired. Ask for a new one.' : 'This invite is no longer valid.', true);
+            return;
+          }
+          setInvite({ id, inviter: (info.inviter && info.inviter.name) || 'Someone', host: info.host || location.host, site: Boolean(space) });
+          setShown(true);
+        } catch (error) {
+          if (cancelled) return;
+          dropInvite();
+          setShown(true);
+          say('This invite link is not valid.', true);
+        }
+      })();
+      return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    // Without a link: an invite for this person on this site that they have
+    // not answered (the bookmarklet only), asked once.
+    const serverPrompt = invitesOn && !space ? session?.invite_prompt : null;
+    useEffect(() => {
+      if (!serverPrompt || !serverPrompt.slug || invite || readInvite()) return;
+      if (rememberedChoice(`slug:${serverPrompt.slug}`)) return;
+      setInvite({ slug: serverPrompt.slug, invite: serverPrompt.invite || null, inviter: serverPrompt.inviter || 'Someone', host: serverPrompt.host || location.host, site: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [serverPrompt && serverPrompt.slug]);
+
+    const adopt = useCallback((next) => {
+      const stored = readSession();
+      const merged = { ...(stored || {}), ...next, token: next.token || (stored && stored.token) };
+      writeSession(merged);
+      setSession(merged);
+      return merged;
+    }, []);
+    const joinInvite = useCallback(async () => {
+      const current = invite;
+      if (!current) return;
+      setInvite({ ...current, busy: true, error: '' });
+      try {
+        // Taking an invite is a click on tdoc: the connect window asks Join
+        // and answers with a token for the space joined.
+        const id = current.id || current.invite;
+        if (!id) throw new Error('This invite is no longer valid.');
+        setSession(await connect({ invite: id }));
+        if (current.id) { rememberChoice(current.id, 'joined'); dropInvite(); }
+        else rememberChoice(`slug:${current.slug}`, 'joined');
+        setInvite(null);
+        setOpenId(null);
+        await load();
+        say(current.site ? 'Joined. Your comments here go to this site’s space.' : `Joined ${current.inviter}’s space`);
+      } catch (error) {
+        setInvite({ ...current, busy: false, error: error.message || 'Could not join' });
+      }
+    }, [invite, adopt, load, say]);
+    const keepOwn = useCallback(async () => {
+      const current = invite;
+      if (!current) return;
+      setInvite(null);
+      if (current.id) { rememberChoice(current.id, 'kept'); dropInvite(); }
+      else rememberChoice(`slug:${current.slug}`, 'kept');
+      if (!(readSession() || {}).token) return;
+      try {
+        adopt(await request('/api/feedback/invite/keep', { method: 'POST', body: JSON.stringify(current.id ? { id: current.id } : { slug: current.slug }) }));
+      } catch (_) {}
+    }, [invite, adopt]);
+    const switchSpace = useCallback(async (target) => {
+      if (target.current) return;
+      try {
+        // Not joined yet: Join in the connect window, with their invite.
+        if (target.invite) setSession(await connect({ invite: target.invite }));
+        else adopt(await request('/api/feedback/switch', { method: 'POST', body: JSON.stringify(target.mine ? { own: true } : { slug: target.slug }) }));
+        setOpenId(null);
+        await load();
+        say(target.mine ? 'Now in your own space' : `Now in ${target.owner ? `${target.owner}’s` : 'the shared'} space`);
+      } catch (error) { say(error.message || 'Could not switch', true); }
+    }, [adopt, load, say]);
 
     // @agent is the owner's: ask once who it would reach.
     const owner = Boolean(surface?.isOwner);
@@ -1786,12 +1981,14 @@ ${uiCss}
             onClose={() => setPanelOpen(false)}
             onRefresh={refresh}
             refreshing={refreshing}
+            spaces={invitesOn && !space ? (session?.spaces || []) : []}
+            onSwitch={switchSpace}
           />
         ) : null}
 
         {notice ? (
           <section className="tdoc-popup tdoc-feedback-notice" style={{ top: 64, right: 18 + rightInset, left: 'auto' }}>
-            <div className="head"><span className="h">{notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
+            <div className="head"><span className="h">{notice.reconnect ? 'Reconnect tdoc' : notice.status === 401 ? 'Connect to comment' : 'tdoc Feedback'}</span><button className="x" type="button" aria-label="Close" onClick={() => setNotice(null)}><X size={14} aria-hidden="true" /></button></div>
             <p>{notice.error}</p>
             <div className="foot"><span /><button className="submit ui-btn ui-btn-primary ui-btn-m" type="button" onClick={async () => {
               setNotice(null);
@@ -1800,7 +1997,7 @@ ${uiCss}
               // standalone account setting. After a successful first connect,
               // put the person back where they were headed: picking an element.
               if (apply(result) && !result.postedDraft) setPicking(true);
-            }}>Connect tdoc</button></div>
+            }}>{notice.reconnect ? 'Reconnect' : 'Connect tdoc'}</button></div>
           </section>
         ) : null}
 
@@ -1814,6 +2011,18 @@ ${uiCss}
             </div>
           </section>
         ) : null}
+
+        {invite && !notice ? (
+          <InvitePrompt
+            invite={invite}
+            rightInset={rightInset}
+            onJoin={joinInvite}
+            onKeep={keepOwn}
+            onClose={() => { if (invite.id) dropInvite(); else rememberChoice(`slug:${invite.slug}`, 'later'); setInvite(null); }}
+          />
+        ) : null}
+
+        {shareOpen && slug ? <FeedbackSharePanel slug={slug} open onClose={() => setShareOpen(false)} request={request} /> : null}
 
         {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}`} role="status" style={{ right: innerWidth - rightInset >= 240 ? 18 + rightInset : 18 }}>{toast.text}</div> : null}
 
@@ -1833,6 +2042,13 @@ ${uiCss}
           onHide={hide}
           sendCount={ready.length}
           onSend={showSend ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
+          onShare={session?.can_share && slug ? () => {
+            setPicking(false);
+            // On the owner's own site (the SDK) or tdoc: here. On anyone
+            // else's, where a page can read this token: tdoc's Share window.
+            if (session.share_here) setShareOpen(true);
+            else if (!window.open(`${base}/feedback/share/${encodeURIComponent(slug)}`, 'tdoc-feedback-share', 'popup,width=560,height=720')) say('Your browser blocked the tdoc window. Allow pop-ups for this site and try again.', true);
+          } : null}
         />
         {notifyIds ? (
           <NotifyHandoffPanel

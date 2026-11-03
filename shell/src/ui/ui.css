@@ -1264,6 +1264,7 @@ a.ui-menu-item:visited {
   white-space: nowrap; overflow-x: auto; user-select: all;
 }
 .tdoc-share-link-row .tdoc-share-link-field[id="tdoc-share-url"] { cursor: copy; }
+.tdoc-share-link-row .tdoc-share-copy { flex: none; }
 @media (max-width: 700px) {
   .tdoc-share-link-row { flex-direction: column; }
   .tdoc-share-link-row .tdoc-share-copy { width: 100%; }
@@ -1426,3 +1427,14 @@ a.ui-menu-item:visited {
 .tdoc-tip-pill.ui-btn { position: fixed; left: 16px; bottom: 16px; z-index: 60; border-radius: 99px; gap: 6px; box-shadow: 0 4px 14px rgba(16,18,26,.12); }
 .tdoc-tip-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--td-accent, #1652f0); }
 @media (prefers-reduced-motion: reduce) { .tdoc-tip, .tdoc-tip-spin, .tdoc-tip-caret, .tdoc-tip-shimmer { animation: none; } .tdoc-tip-shimmer { color: #6b6a66; } .tdoc-tip-reply, .tdoc-tip-p mark { transition: none; } }
+
+/* A feedback space's invites in its Share (the widget): who, how far along,
+   and Withdraw. */
+.tdoc-invite-list { list-style: none; margin: 0; padding: 0; }
+.tdoc-invite-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 0; border-top: 1px solid var(--td-line); }
+.tdoc-invite-row:first-child { border-top: 0; }
+.tdoc-invite-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tdoc-invite-name { font-size: 13px; font-weight: 600; color: var(--td-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-invite-status { font-size: 12px; color: var(--td-muted); }
+.tdoc-modal .manage-hint.tdoc-invite-error { color: var(--td-danger); }
+#tdoc-fb-share-status:empty { display: none; }

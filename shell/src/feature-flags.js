@@ -45,6 +45,12 @@ export const FLAGS = Object.freeze({
   // PR previews): the server enforces it too (worker askEditV2Allowed: the
   // boot's canSuggest, the routes, propose_edits, reply_as), so pinning the
   // flag in a browser shows nothing to anybody else.
+  // Feedback widget: Share inside the widget (invite link, invite by email
+  // or GitHub handle), the Join / Keep my own prompt an invite opens on the
+  // site, and the space switcher. Approved by Julie (2026-11-03); off
+  // switch while it settles. Like feedbackAreaSelect it is read for the
+  // tdoc origin that served feedback.js.
+  feedbackInvites: Object.freeze({ label: 'Feedback: share and invite from the widget', owner: 'julie', added: '2026-11-03', default: true }),
   askEditV2: Object.freeze({ label: 'Ask AI edits the doc (inline suggestions)', owner: 'julie', added: '2026-11-02', default: false, preview: true }),
 });
 

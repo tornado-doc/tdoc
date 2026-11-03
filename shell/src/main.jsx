@@ -9,6 +9,8 @@ import { FolderShare } from './folder-share.jsx';
 import { FeedbackSpace } from './feedback-space.jsx';
 import { FeedbackInstall } from './feedback-install.jsx';
 import { FeedbackConnect } from './feedback-connect.jsx';
+import { FeedbackInvite } from './feedback-invite.jsx';
+import { FeedbackShare } from './feedback-share.jsx';
 import { AgentsPage } from './agents-page.jsx';
 import { Profile } from './profile.jsx';
 import { DocumentShell } from './document-shell.jsx';
@@ -47,6 +49,8 @@ if (appRoot && appBoot) {
   else if (appBoot.page === 'feedback-space') page = <FeedbackSpace boot={appBoot} />;
   else if (appBoot.page === 'feedback-install') page = <FeedbackInstall boot={appBoot} />;
   else if (appBoot.page === 'feedback-connect') page = <FeedbackConnect boot={appBoot} />;
+  else if (appBoot.page === 'feedback-invite') page = <FeedbackInvite boot={appBoot} />;
+  else if (appBoot.page === 'feedback-share') page = <FeedbackShare boot={appBoot} />;
   else if (appBoot.page === 'agents') page = <AgentsPage boot={appBoot} />;
   else if (appBoot.page === 'folder-share') page = <FolderShare boot={appBoot} />;
   else if (appBoot.page === 'profile') page = <Profile boot={appBoot} />;

@@ -9,9 +9,11 @@ import './feedback-pages.css';
 // A consent page, so it stays small, but under the same top bar as the rest:
 // the account it is about to connect is the avatar in the corner.
 export function FeedbackConnect({ boot }) {
-  const { origin = null, space = null, identity = null, doors = {}, error = '', baseHost = '' } = boot;
+  const { origin = null, space = null, identity = null, doors = {}, error = '', baseHost = '', invite = null } = boot;
   const host = (() => { try { return new URL(origin).host; } catch { return ''; } })();
-  const returnTo = `/feedback/connect?origin=${encodeURIComponent(origin || '')}${space ? `&space=${encodeURIComponent(space)}` : ''}`;
+  // Opened by Join on an invite (feedback widget): connecting takes it.
+  const inviteOk = Boolean(invite && invite.id && (invite.status === 'pending' || invite.status === 'accepted'));
+  const returnTo = `/feedback/connect?origin=${encodeURIComponent(origin || '')}${space ? `&space=${encodeURIComponent(space)}` : ''}${inviteOk ? `&invite=${encodeURIComponent(invite.id)}` : ''}`;
   // Signing in visits pages that cut this window off from the app
   // (Cross-Origin-Opener-Policy), so while it can still hear us, start a
   // claim and tell the app its id (sent only to the app's own origin); the
@@ -49,6 +51,17 @@ export function FeedbackConnect({ boot }) {
   const deliver = (payload) => {
     // Had been filed into someone else's space by its link: this connect gave
     // them their own. Say so, and leave the window up long enough to read.
+    if (payload && payload.joined) {
+      if (hasOpener()) {
+        window.opener.postMessage({ type: 'tdoc-feedback-connected', origin, session: payload }, origin);
+        say('Joined. You can close this window.');
+        setTimeout(() => { window.close(); }, 400);
+      } else {
+        say(`Joined. Go back to ${host || 'the site'} and comment there.`);
+        if (payload.claim_filed) setTimeout(() => { try { window.close(); } catch (_) {} }, 1200);
+      }
+      return;
+    }
     const moved = payload && payload.moved
       ? ` Your comments on ${host || 'this app'} now go to your own private space; the ones you left before stay in the space you had joined.`
       : '';
@@ -113,7 +126,9 @@ export function FeedbackConnect({ boot }) {
   } else if (!identity) {
     body = (
       <>
-        <p>Sign in so your feedback on <strong>{host}</strong> carries your name.</p>
+        {inviteOk
+          ? <p><strong>{invite.inviter}</strong> invited you to comment on <strong>{host}</strong>. Sign in to join.</p>
+          : <p>Sign in so your feedback on <strong>{host}</strong> carries your name.</p>}
         <div className="row">
           {doors.oidc ? <a className="fb-btn" href={`/api/auth/oidc/login?prompt=login&return=${encodeURIComponent(returnTo)}`} onClick={leaveToSignIn}>Sign in with {doors.oidcLabel || 'Email'}</a> : null}
           {doors.web ? <a className={`fb-btn${doors.oidc ? ' secondary' : ''}`} href={`/api/auth/web/login?return=${encodeURIComponent(returnTo)}`} onClick={leaveToSignIn}>Sign in with GitHub</a> : null}
@@ -133,7 +148,20 @@ export function FeedbackConnect({ boot }) {
         {status.acceptUrl ? <> <a href={status.acceptUrl} target="_blank" rel="noopener">Open the invitation</a></> : null}
       </span>
     );
-    body = space ? (
+    const invited = inviteOk ? (
+      // Someone invited them: the one question is Join.
+      <>
+        <p>Signed in as <strong>{identity.name || identity.login}</strong>.</p>
+        <div className="card" id="invite-card">
+          <p><strong>{invite.inviter}</strong> invited you to comment on <strong>{host}</strong>. Your comments there go to their space, and they see them.</p>
+          <div className="row"><button type="button" className="fb-btn" id="connect" disabled={busy} onClick={() => connect({ invite: invite.id })}>Join</button>{statusLine}</div>
+        </div>
+      </>
+    ) : null;
+    const invalidInvite = invite && !inviteOk
+      ? <p className="err" id="invite-invalid">{invite.status === 'expired' ? 'This invite has expired.' : 'This invite is no longer valid.'} Ask for a new one, or connect on your own below.</p>
+      : null;
+    body = invited || (space ? (
       // A site's own comment space: nothing to choose, the site chose it.
       <>
         <p>Signed in as <strong>{identity.name || identity.login}</strong>.</p>
@@ -159,7 +187,8 @@ export function FeedbackConnect({ boot }) {
           </div>
         </details>
       </>
-    );
+    ));
+    if (invalidInvite) body = <>{invalidInvite}{body}</>;
   }
 
   return (

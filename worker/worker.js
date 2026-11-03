@@ -493,7 +493,13 @@ const FEEDBACK_TOKEN_RE = /^Bearer\s+(fb_[a-f0-9]{48})$/;
 // The two notify routes let the space's owner hand a comment to their agent
 // from inside the app (@agent). Both are owner-gated by authorizeOwnerMutation,
 // which also refuses a token-bound session on any other doc.
-const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session', '/api/notify/targets', '/api/notify/handoff', '/api/notify/handoffs', '/api/notify/handoff/resend']);
+// The invite routes let the owner's widget share the space it is for where
+// the page is the owner's own (feedbackInviteManager), answer Keep my own,
+// and switch between spaces its person already chose to join. Taking an
+// invite is never a token's: that is a click on tdoc (connect, the invite
+// page), so a page holding the token cannot file its person anywhere.
+const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session', '/api/notify/targets', '/api/notify/handoff', '/api/notify/handoffs', '/api/notify/handoff/resend',
+  '/api/feedback/invites', '/api/feedback/invites/revoke', '/api/feedback/invite', '/api/feedback/invite/keep', '/api/feedback/switch']);
 const FEEDBACK_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 // The one route past the comment surface: the token holder's OWN agents
@@ -9650,19 +9656,7 @@ async function feedbackSpaceFor(env, req, session, origin) {
       }
     }
   }
-  const base = new URL(req.url).origin;
-  const made = await createDocForSession(env, req, session, {
-    html: feedbackSpaceHtml(origin, base),
-    meta: {
-      title: `Feedback · ${new URL(origin).host}`,
-      created_from: 'feedback',
-      feedback: { origin },
-      // Private: the person's own comments. Others see and join only once
-      // the owner invites them in Share (Julie, 2026-11-03).
-      access: { visibility: 'private', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
-    },
-    version: { prompt: `Feedback space for ${origin}` },
-  });
+  const made = await createOwnFeedbackSpace(env, req, session, origin);
   if (!made.ok) return made;
   await env.META.put(key, made.slug);
   return { ok: true, slug: made.slug, meta: made.meta, moved };
@@ -9989,10 +9983,464 @@ function feedbackSessionPayload(env, base, session, slug, meta, token = session 
     notify: true,
     identity: { login: actorKey(session), linked_actor_keys: actorKeys(session), name: actorDisplayName(session), avatar_url: session.avatar_url || '' },
     is_owner: isDocOwnerSession(env, session, meta),
+    // Share in the widget (invites): the owner, or a team admin for a team
+    // space -- who isDocOwnerSession says manages it.
+    can_share: isDocOwnerSession(env, session, meta),
+    // ...in the widget itself, or in tdoc's Share window (feedbackShareHere).
+    share_here: feedbackShareHere(token, base),
     // The widget may offer its holder's own agents (answer only): only on
     // tdoc's own pages (feedbackTokenOwnAgent).
     own_agent: feedbackTokenOwnAgent(token, slug, meta, base),
   };
+}
+
+// ── Inviting people into a feedback space, from the widget ───────────────
+// Julie, 2026-11-03: sharing happens inside the widget, never by sending
+// people to the space's page on tdoc. The owner (a team admin, for a team
+// space) makes an invite there: a one-time link, or one for a named person
+// (an email address, or a GitHub handle). Taking it adds the person to the
+// space's allowed_users, which is what feedbackPersonalSpaceAllowed reads:
+// still no joining by link alone (#939), only by an invite.
+//
+//   - The id is `<32 hex>.<22 b64url>`: random, plus an HMAC of it under a
+//     server key, so a made-up id is refused before any lookup.
+//   - It expires (a link in a week, a named invite in a month), can be
+//     withdrawn by the owner (which takes back the access it gave), and is
+//     tied to who owned the space when it was made: a space moved to another
+//     owner or team since takes none of its old invites.
+//   - A link works once. A named invite works only for that person: the
+//     handle among the session's identities, or the address as a verified
+//     sign-in email (the same match isAllowlisted makes). An address is
+//     added to the space when they accept; a handle is added right away.
+//   - Where it leads: the site itself, `?tdoc_invite=<id>`, when the space
+//     has the SDK there (its widget asks Join); else a small tdoc page that
+//     gives the bookmark and then opens the site with the same param.
+//
+// The widget's token makes invites (the owner's token, for this space, on
+// an origin of this space). A page holding that token can already read and
+// write every comment in it; an invite adds a named person or one link, each
+// listed in the widget's Share for the owner to withdraw, under a daily cap.
+const FEEDBACK_INVITE_RE = /^([a-f0-9]{32})\.([A-Za-z0-9_-]{22})$/;
+const FEEDBACK_INVITE_LINK_TTL_S = 7 * 24 * 60 * 60;
+const FEEDBACK_INVITE_PERSON_TTL_S = 30 * 24 * 60 * 60;
+const FEEDBACK_INVITES_PER_DAY = 50;
+const FEEDBACK_INVITES_KEPT = 100;
+
+async function feedbackInviteKey(env) {
+  const configured = mcpUploadSecret(env);
+  if (configured) return hmacBytes(configured, 'tdoc-feedback-invite-v1');
+  // No server secret (a local twin, tests): one random key, kept in KV.
+  let stored = await env.META.get('feedback:invite-key');
+  if (!stored) { stored = rand(32); await env.META.put('feedback:invite-key', stored); }
+  return hmacBytes(stored, 'tdoc-feedback-invite-v1');
+}
+async function feedbackInviteSig(env, id) {
+  return b64urlBytes(await hmacBytes(await feedbackInviteKey(env), `invite\n${id}`)).slice(0, 22);
+}
+async function readFeedbackInvite(env, raw) {
+  const m = FEEDBACK_INVITE_RE.exec(String(raw || ''));
+  if (!m) return null;
+  if (!(await timingSafeEqual(await feedbackInviteSig(env, m[1]), m[2]))) return null;
+  try {
+    const rec = JSON.parse((await env.META.get(`feedback:invite:${m[1]}`)) || 'null');
+    return rec && rec.id === m[1] && isValidSlug(rec.slug) && feedbackOrigin(rec.origin) ? rec : null;
+  } catch { return null; }
+}
+async function saveFeedbackInvite(env, rec) {
+  // Kept a month past its expiry, so a withdrawn or used one still says so.
+  const ttl = Math.max(60, Math.ceil((Date.parse(rec.expires) - Date.now()) / 1000)) + 30 * 24 * 60 * 60;
+  await env.META.put(`feedback:invite:${rec.id}`, JSON.stringify(rec), { expirationTtl: ttl });
+}
+function feedbackInviteStatus(rec) {
+  if (!rec) return 'missing';
+  if (rec.status === 'revoked') return 'revoked';
+  if (rec.status === 'accepted') return 'accepted';
+  return Date.parse(rec.expires) > Date.now() ? 'pending' : 'expired';
+}
+// Who manages the space: its team, or its owner's account. An invite names
+// the one it was made under and is void once the space has moved on.
+function feedbackSpaceManagerRef(meta) {
+  if (meta && meta.workspace_id) return `team:${meta.workspace_id}`;
+  const hosted = (meta && meta.hosted) || {};
+  return `owner:${hosted.account_id || normalizeGithubLogin(hosted.github_login) || hosted.owner_key || ''}`;
+}
+// The site a space is for: the first origin it serves with the SDK, else the
+// origin its bookmarklet comments come from. Never anything from a request.
+function feedbackSpaceSiteOrigin(meta, site) {
+  if (site && Array.isArray(site.origins) && site.origins.length) return site.origins[0];
+  return feedbackOrigin(meta && meta.feedback && meta.feedback.origin);
+}
+function feedbackInviteSiteUrl(origin, token) {
+  const u = new URL(`${origin}/`);
+  u.searchParams.set('tdoc_invite', token);
+  return u.href;
+}
+function feedbackInviteLink(base, rec) {
+  return rec.site ? feedbackInviteSiteUrl(rec.origin, rec.token) : `${base}/feedback/invite/${rec.token}`;
+}
+const feedbackInvitedIndexKey = (key, origin) => `feedback:invited:${key}:${origin}`;
+const feedbackInviteChoiceKey = (session, slug) => `feedback:invite-choice:${feedbackSpaceOwnerKey(session)}:${slug}`;
+const feedbackOwnSpaceKey = (session, origin) => `feedback:ownspace:${feedbackSpaceOwnerKey(session)}:${origin}`;
+
+// For the bookmarklet's space switcher and its one-time prompt: the spaces
+// someone was invited to on an origin, by the identity the invite named.
+async function noteFeedbackInvited(env, key, origin, entry) {
+  const k = feedbackInvitedIndexKey(key, origin);
+  let list = [];
+  try { list = JSON.parse((await env.META.get(k)) || '[]'); } catch {}
+  list = [entry, ...(Array.isArray(list) ? list : []).filter((x) => x && x.slug !== entry.slug)].slice(0, 20);
+  await env.META.put(k, JSON.stringify(list));
+}
+
+// Add one person to the space's allowed_users (read fresh: KV has no
+// compare-and-set, and Share may have just written it). A team space keeps
+// its guest limit and who invited each guest, as Share does.
+async function grantFeedbackSpace(env, slug, entry, inviterName) {
+  const meta = await loadDocMeta(env, slug);
+  if (!meta) return { error: 'not_found', status: 404 };
+  const access = accessFromMeta(meta);
+  if (access.allowed_users.includes(entry)) return { ok: true, meta };
+  const next = applyAccessPatch(meta, { allowed_users: access.allowed_users.concat(entry) });
+  if (next.error) return { error: next.error, status: 400 };
+  if (meta.workspace_id) {
+    const team = await loadTeam(env, meta.workspace_id);
+    if (team) {
+      const blocked = await teamGuestLimitError(env, team, slug, next.access, access);
+      if (blocked) return { ...blocked, status: 409 };
+    }
+    next.meta.guest_invited_by = { ...(meta.guest_invited_by || {}), [entry]: inviterName || 'Someone' };
+  }
+  next.meta.invited_at = { ...(meta.invited_at || {}), [entry]: new Date().toISOString() };
+  await putDocMetaJson(env, slug, JSON.stringify(next.meta));
+  return { ok: true, meta: next.meta, added: true };
+}
+async function ungrantFeedbackSpace(env, slug, entry) {
+  const meta = await loadDocMeta(env, slug);
+  if (!meta) return;
+  const access = accessFromMeta(meta);
+  if (!access.allowed_users.includes(entry)) return;
+  const next = applyAccessPatch(meta, { allowed_users: access.allowed_users.filter((x) => x !== entry) });
+  if (next.error) return;
+  if (next.meta.guest_invited_by) { const by = { ...next.meta.guest_invited_by }; delete by[entry]; next.meta.guest_invited_by = by; }
+  await putDocMetaJson(env, slug, JSON.stringify(next.meta));
+}
+
+// Is this invite for this person? A link is for whoever takes it first.
+function feedbackInviteEntryFor(session, rec) {
+  const keys = actorKeys(session);
+  if (rec.kind === 'link') {
+    if (rec.accepted_by && !keys.includes(rec.accepted_by)) return { error: 'invite_used', status: 410, message: 'This invite link has already been used. Ask for a new one.' };
+    const entry = sessionLogin(session) || normalizeEmail(session && session.email);
+    return entry ? { entry } : { error: 'sign_in_required', status: 401 };
+  }
+  const want = rec.kind === 'email' ? `email:${rec.invitee}` : rec.invitee;
+  if (!keys.includes(want)) {
+    const shown = rec.kind === 'email' ? rec.invitee.replace(/^(.).*(@.*)$/, '$1…$2') : `@${rec.invitee}`;
+    return { error: 'invite_for_someone_else', status: 403, message: `This invite is for ${shown}. Sign in as them to accept it.` };
+  }
+  return { entry: rec.invitee };
+}
+
+// Taking an invite: checks, then the access. Joining (where the person's
+// bookmarklet comments go) is the caller's.
+async function acceptFeedbackInvite(env, session, rec) {
+  const status = feedbackInviteStatus(rec);
+  if (status === 'revoked') return { error: 'invite_revoked', status: 410, message: 'This invite was withdrawn.' };
+  if (status === 'expired') return { error: 'invite_expired', status: 410, message: 'This invite has expired. Ask for a new one.' };
+  const meta = await loadDocMeta(env, rec.slug);
+  if (!meta || meta.created_from !== 'feedback') return { error: 'not_found', status: 404 };
+  if (feedbackSpaceManagerRef(meta) !== rec.manager) return { error: 'invite_revoked', status: 410, message: 'This invite is no longer valid: the space has moved.' };
+  if (isDocOwnerSession(env, session, meta)) return { ok: true, meta, owner: true };
+  const who = feedbackInviteEntryFor(session, rec);
+  if (who.error) return who;
+  let granted;
+  if (rec.status === 'accepted' || rec.kind === 'login') {
+    // Taken already, or a handle let in when it was made: an invite never
+    // lets back in someone the owner has since removed in Share.
+    if (!feedbackPersonalSpaceAllowed(env, session, meta)) return { error: 'invite_revoked', status: 410, message: 'You no longer have access to this space. Ask for a new invite.' };
+    granted = { ok: true, meta };
+  } else {
+    granted = await grantFeedbackSpace(env, rec.slug, who.entry, rec.inviter && rec.inviter.name);
+    if (granted.error) return granted;
+  }
+  if (rec.status !== 'accepted') {
+    // Read again before marking it taken: a withdraw that landed meanwhile
+    // wins, and takes back what this granted.
+    const fresh = await readFeedbackInvite(env, rec.token);
+    if (!fresh || fresh.status === 'revoked') {
+      if (granted.added) await ungrantFeedbackSpace(env, rec.slug, who.entry);
+      return { error: 'invite_revoked', status: 410, message: 'This invite was withdrawn.' };
+    }
+    await saveFeedbackInvite(env, {
+      ...fresh, status: 'accepted', accepted_by: actorKey(session), accepted_name: actorDisplayName(session),
+      accepted_at: new Date().toISOString(), granted: who.entry,
+    });
+  }
+  if (!rec.site) await noteFeedbackInvited(env, actorKey(session), rec.origin, { slug: rec.slug, id: rec.token, inviter: (rec.inviter && rec.inviter.name) || '' });
+  return { ok: true, meta: granted.meta };
+}
+
+// Where this person's bookmarklet comments on `origin` go from now on. Their
+// own space, if that is where they were, is remembered for "My space".
+async function joinFeedbackSpace(env, session, origin, slug) {
+  const key = feedbackSpaceIndexKey(session, origin);
+  const current = await env.META.get(key);
+  if (current && current !== slug && isValidSlug(current)) {
+    const m = await loadDocMeta(env, current);
+    if (m && m.created_from === 'feedback' && !m.workspace_id && isDocOwnerSession(env, session, m)) await env.META.put(feedbackOwnSpaceKey(session, origin), current);
+  }
+  await env.META.put(key, slug);
+  await env.META.put(feedbackInviteChoiceKey(session, slug), 'joined');
+}
+
+// The person's own space on an origin, if they have one.
+async function feedbackOwnSpace(env, session, origin) {
+  for (const key of [feedbackOwnSpaceKey(session, origin), feedbackSiteSpaceIndexKey(session, origin), feedbackSpaceIndexKey(session, origin)]) {
+    const slug = await env.META.get(key);
+    if (!slug || !isValidSlug(slug)) continue;
+    const meta = await loadDocMeta(env, slug);
+    if (meta && meta.created_from === 'feedback' && !meta.workspace_id && isDocOwnerSession(env, session, meta)
+        && feedbackOrigin(meta.feedback && meta.feedback.origin) === origin) return { slug, meta };
+  }
+  return null;
+}
+
+// The bookmarklet's switcher (My space and the spaces they were invited to
+// on this origin) and the one-time Join / Keep my own prompt: an invite they
+// have not answered, for a space they are not in now.
+async function feedbackSpaceChoices(env, session, origin, current) {
+  if (!origin) return { spaces: [], invite_prompt: null };
+  const own = await feedbackOwnSpace(env, session, origin);
+  const seen = new Set(own ? [own.slug] : []);
+  const invited = [];
+  for (const key of actorKeys(session)) {
+    let list = [];
+    try { list = JSON.parse((await env.META.get(feedbackInvitedIndexKey(key, origin))) || '[]'); } catch {}
+    for (const x of Array.isArray(list) ? list : []) {
+      if (!x || !isValidSlug(x.slug) || seen.has(x.slug)) continue;
+      seen.add(x.slug);
+      const meta = await loadDocMeta(env, x.slug);
+      if (!meta || meta.created_from !== 'feedback' || feedbackOrigin(meta.feedback && meta.feedback.origin) !== origin) continue;
+      if (isDocOwnerSession(env, session, meta)) continue;
+      let ok = feedbackPersonalSpaceAllowed(env, session, meta);
+      if (!ok) {
+        // Invited by an address they have not used yet: theirs to take.
+        const rec = await readFeedbackInvite(env, x.id);
+        ok = Boolean(rec && rec.slug === x.slug && feedbackInviteStatus(rec) === 'pending' && !feedbackInviteEntryFor(session, rec).error
+          && feedbackSpaceManagerRef(meta) === rec.manager);
+      }
+      if (!ok) continue;
+      const choice = await env.META.get(feedbackInviteChoiceKey(session, x.slug));
+      invited.push({ slug: x.slug, title: meta.title || x.slug, owner: x.inviter || '', choice, invite: typeof x.id === 'string' ? x.id : null });
+    }
+  }
+  const spaces = [{ slug: own ? own.slug : null, mine: true, title: 'My space', current: Boolean(own && own.slug === current) }];
+  // Not joined yet: the widget takes it through the connect window (a click
+  // on tdoc), with this person's own invite.
+  for (const x of invited) spaces.push({ slug: x.slug, mine: false, title: x.title, owner: x.owner, current: x.slug === current, ...(x.choice === 'joined' ? {} : { invite: x.invite }) });
+  if (current && !spaces.some((x) => x.current)) {
+    const meta = await loadDocMeta(env, current);
+    if (meta) spaces.push({ slug: current, mine: false, title: meta.title || current, owner: '', current: true });
+  }
+  const ask = invited.find((x) => x.slug !== current && !x.choice);
+  let host = '';
+  try { host = new URL(origin).host; } catch {}
+  return {
+    spaces: spaces.length > 1 ? spaces : [],
+    invite_prompt: ask ? { slug: ask.slug, inviter: ask.owner, host, invite: ask.invite } : null,
+  };
+}
+
+// Who may manage a space's invites: its owner (team admins for a team
+// space), from tdoc in the browser, or through the widget's token for this
+// space on one of its own origins.
+async function feedbackInviteManager(env, req, url, slug) {
+  const s = await getSession(env, req);
+  if (!sessionPrincipal(s)) return { response: json({ error: 'sign_in_required' }, { status: 401 }) };
+  if (s.team_agent) return { response: json({ error: 'forbidden' }, { status: 403 }) };
+  if (s.feedback) {
+    if (s.feedback.slug !== slug) return { response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
+  } else if (req.method !== 'GET' && req.headers.get('origin') !== url.origin) {
+    return { response: json({ error: 'forbidden' }, { status: 403 }) };
+  }
+  if (!isValidSlug(slug)) return { response: json({ error: 'invalid_slug' }, { status: 400 }) };
+  const meta = await loadDocMeta(env, slug);
+  if (!meta || meta.created_from !== 'feedback') return { response: json({ error: 'not_found' }, { status: 404 }) };
+  if (!isDocOwnerSession(env, s, meta)) {
+    return { response: json({ error: 'not_owner', message: meta.workspace_id ? 'Only a team admin can invite people to this space.' : 'Only the owner can invite people to this space.' }, { status: 403 }) };
+  }
+  const site = await loadSiteBinding(env, slug, meta);
+  const origin = feedbackSpaceSiteOrigin(meta, site);
+  if (!origin) return { response: json({ error: 'not_found' }, { status: 404 }) };
+  if (s.feedback) {
+    const ownOrigin = s.feedback.site ? siteServesOrigin(site, s.feedback.origin) : s.feedback.origin === feedbackOrigin(meta.feedback && meta.feedback.origin);
+    if (!ownOrigin) return { response: json({ error: 'feedback_token_scope' }, { status: 403 }) };
+    // Only where the page is the owner's own: their site with the SDK (they
+    // put tdoc there), or tdoc itself. A bookmarklet token on anybody else's
+    // site lives where that site's scripts can read it; sharing from there
+    // opens tdoc's Share window instead (feedbackShareHere).
+    if (!feedbackShareHere(s.feedback, url.origin)) return { response: json({ error: 'share_on_tdoc', message: 'Share from the tdoc window.' }, { status: 403 }) };
+  }
+  return { s, meta, site, origin, slug };
+}
+
+function feedbackShareHere(token, base) {
+  return Boolean(token && (token.site === true || (typeof token.origin === 'string' && token.origin === base)));
+}
+
+// What the owner's Share lists: no withdrawn ones.
+function feedbackInviteForOwner(base, rec) {
+  return {
+    id: rec.token,
+    kind: rec.kind,
+    invitee: rec.invitee || null,
+    status: feedbackInviteStatus(rec),
+    created: rec.created,
+    expires: rec.expires,
+    accepted_name: rec.accepted_name || null,
+    link: feedbackInviteLink(base, rec),
+  };
+}
+async function listFeedbackInvites(env, slug) {
+  let ids = [];
+  try { ids = JSON.parse((await env.META.get(`feedback:invites:${slug}`)) || '[]'); } catch {}
+  const out = [];
+  for (const id of Array.isArray(ids) ? ids : []) {
+    if (!/^[a-f0-9]{32}$/.test(String(id))) continue;
+    let rec = null;
+    try { rec = JSON.parse((await env.META.get(`feedback:invite:${id}`)) || 'null'); } catch {}
+    if (rec && rec.slug === slug) out.push(rec);
+  }
+  return out;
+}
+
+async function createFeedbackInvite(env, ctx, base, mgr, rawInvitee) {
+  const { s, meta, site, origin, slug } = mgr;
+  let kind = 'link';
+  let invitee = null;
+  if (rawInvitee != null && rawInvitee !== '') {
+    invitee = normalizeInvitee(rawInvitee);
+    if (!invitee) return { status: 400, body: { error: 'invalid_invitee', message: 'Enter an email address or a GitHub username.' } };
+    kind = invitee.includes('@') ? 'email' : 'login';
+  }
+  const existing = (await listFeedbackInvites(env, slug)).filter((r) => r.manager === feedbackSpaceManagerRef(meta) && ['pending', 'accepted'].includes(feedbackInviteStatus(r)));
+  // Asked again: the same invite, not a second email.
+  const same = kind === 'link'
+    ? existing.find((r) => r.kind === 'link' && feedbackInviteStatus(r) === 'pending')
+    : existing.find((r) => r.kind === kind && r.invitee === invitee);
+  // ...unless it no longer lets them in (removed in Share since): that one
+  // is set aside and they get a new one.
+  const stale = same && (same.status === 'accepted' || same.kind === 'login')
+    && !accessFromMeta(meta).allowed_users.includes(same.granted || same.invitee);
+  if (stale) await saveFeedbackInvite(env, { ...same, status: 'revoked', revoked_at: new Date().toISOString(), superseded: true });
+  else if (same) return { status: 200, body: { ok: true, invite: feedbackInviteForOwner(base, same), emailed: [] } };
+  if (await rateLimited(env, `fbinvite:${slug}`, FEEDBACK_INVITES_PER_DAY, 24 * 60 * 60)) {
+    return { status: 429, body: { error: 'rate_limited', message: 'Too many invites today. Try again tomorrow.' } };
+  }
+  const id = rand(16);
+  const token = `${id}.${await feedbackInviteSig(env, id)}`;
+  const now = Date.now();
+  const inviter = { key: actorKey(s), name: actorDisplayName(s), avatar_url: s.avatar_url || '' };
+  const rec = {
+    v: 1, id, token, slug, origin, site: Boolean(site), kind, invitee,
+    inviter, manager: feedbackSpaceManagerRef(meta),
+    created: new Date(now).toISOString(),
+    expires: new Date(now + (kind === 'link' ? FEEDBACK_INVITE_LINK_TTL_S : FEEDBACK_INVITE_PERSON_TTL_S) * 1000).toISOString(),
+    status: 'pending',
+  };
+  // A handle is let in now; an address when someone signed in with it takes it.
+  if (kind === 'login') {
+    const granted = await grantFeedbackSpace(env, slug, invitee, inviter.name);
+    if (granted.error) return { status: granted.status || 400, body: { ...granted, status: undefined } };
+    rec.granted = invitee;
+  }
+  await saveFeedbackInvite(env, rec);
+  let ids = [];
+  try { ids = JSON.parse((await env.META.get(`feedback:invites:${slug}`)) || '[]'); } catch {}
+  await env.META.put(`feedback:invites:${slug}`, JSON.stringify([id, ...(Array.isArray(ids) ? ids : [])].slice(0, FEEDBACK_INVITES_KEPT)));
+  const link = feedbackInviteLink(base, rec);
+  let emailed = [];
+  if (kind !== 'link') {
+    const key = kind === 'email' ? `email:${invitee}` : invitee;
+    if (!rec.site) await noteFeedbackInvited(env, key, origin, { slug, id: token, inviter: inviter.name });
+    const host = new URL(origin).host;
+    try {
+      await writeInboxEvent(env, key, {
+        kind: 'feedback_invite', slug, title: host, link, target_id: id,
+        actor: { login: inviter.key, name: inviter.name, avatar_url: inviter.avatar_url },
+      }, { ctx, origin: base });
+    } catch (error) {
+      console.error('[feedback] invite notification failed:', error && error.message ? error.message : error);
+    }
+    try {
+      emailed = await sendInviteEmails(env, {
+        added: [invitee], inviterName: inviter.name, inviterId: inviter.key, slug, title: host, origin: base,
+        compose: ({ optoutUrl }) => feedbackInviteEmail({ inviterName: inviter.name, host, link, site: rec.site, optoutUrl }),
+      });
+    } catch {}
+  }
+  return { status: 201, body: { ok: true, invite: feedbackInviteForOwner(base, rec), emailed } };
+}
+
+function feedbackInviteEmail({ inviterName, host, link, site, optoutUrl }) {
+  const how = site
+    ? `Open ${host} from this link and click Join in the tdoc comments.`
+    : `Open the link: it sets you up and takes you to ${host}.`;
+  const text = [
+    `${inviterName} invited you to comment on ${host}.`,
+    '',
+    how,
+    link,
+    '',
+    '—',
+    'tdoc · feedback on the page itself',
+    `No more emails like this: ${optoutUrl}`,
+  ].join('\n');
+  const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const html = [
+    '<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;color:#1a1a1a;max-width:34em;margin:2em auto;padding:0 1em">',
+    `<p><strong>${esc(inviterName)}</strong> invited you to comment on <strong>${esc(host)}</strong>.</p>`,
+    `<p><a href="${esc(link)}">Open ${esc(host)}</a></p>`,
+    `<p style="color:#555">${esc(how)}</p>`,
+    `<p style="color:#999;font-size:0.85em;border-top:1px solid #eee;padding-top:1em">tdoc · feedback on the page itself · <a href="${esc(optoutUrl)}" style="color:#999">No more emails like this</a></p>`,
+    '</body></html>',
+  ].join('');
+  return { subject: `${inviterName} invited you to comment on ${host}`, text, html };
+}
+
+async function revokeFeedbackInvite(env, slug, token) {
+  const rec = await readFeedbackInvite(env, token);
+  if (!rec || rec.slug !== slug) return { status: 404, body: { error: 'invite_not_found' } };
+  if (rec.status === 'revoked') return { status: 200, body: { ok: true } };
+  await saveFeedbackInvite(env, { ...rec, status: 'revoked', revoked_at: new Date().toISOString() });
+  // Withdrawing takes back the access it gave, unless another live invite
+  // gave the same person in.
+  if (rec.granted) {
+    const others = (await listFeedbackInvites(env, slug)).some((r) => r.id !== rec.id && r.granted === rec.granted && r.status !== 'revoked');
+    if (!others) await ungrantFeedbackSpace(env, slug, rec.granted);
+  }
+  return { status: 200, body: { ok: true } };
+}
+
+// A person's own space for an origin, made now (the switcher's My space,
+// for someone whose first connect joined somebody else's).
+async function createOwnFeedbackSpace(env, req, session, origin) {
+  const base = new URL(req.url).origin;
+  const made = await createDocForSession(env, req, session, {
+    html: feedbackSpaceHtml(origin, base),
+    meta: {
+      title: `Feedback · ${new URL(origin).host}`,
+      created_from: 'feedback',
+      feedback: { origin },
+      // Private: the person's own comments. Others see and join only once
+      // the owner invites them (Julie, 2026-11-03).
+      access: { visibility: 'private', commenting: 'signed_in', history_visibility: 'owner', allowed_users: [] },
+    },
+    version: { prompt: `Feedback space for ${origin}` },
+  });
+  if (!made.ok) return made;
+  await env.META.put(feedbackOwnSpaceKey(session, origin), made.slug);
+  return { ok: true, slug: made.slug, meta: made.meta };
 }
 
 // /feedback, /feedback/connect: app pages (feedback-install.jsx,
@@ -13888,7 +14336,9 @@ function inviteEmailBodies({ inviterName, title, docUrl, optoutUrl }) {
   return { text, html };
 }
 
-async function sendInviteEmails(env, { added, inviterName, inviterId, slug, title, origin }) {
+// `compose` writes another kind of invitation (a feedback space's) through
+// the same caps, cooldown and opt-out.
+async function sendInviteEmails(env, { added, inviterName, inviterId, slug, title, origin, compose = null }) {
   const emailed = [];
   if (!emailSenderAvailable(env)) return emailed;
   if (!Array.isArray(added) || !added.length) return emailed;
@@ -13907,17 +14357,16 @@ async function sendInviteEmails(env, { added, inviterName, inviterId, slug, titl
     const coolKey = `invite-sent:${slug}:${addr}`;
     if (await env.META.get(coolKey)) continue;
     const tok = rand(16);
-    const { text, html: htmlBody } = inviteEmailBodies({
-      inviterName, title,
-      docUrl: `${origin}/d/${slug}`,
-      optoutUrl: `${origin}/email/optout?t=${tok}`,
-    });
+    const optoutUrl = `${origin}/email/optout?t=${tok}`;
+    const { text, html: htmlBody, subject } = compose
+      ? compose({ optoutUrl })
+      : { ...inviteEmailBodies({ inviterName, title, docUrl: `${origin}/d/${slug}`, optoutUrl }), subject: `${inviterName} invited you to "${title}" on tdoc` };
     try {
       await env.META.put(`email-optout-token:${tok}`, addr, { expirationTtl: 60 * 60 * 24 * 30 });
       await deliverEmail(env, {
         to: addr,
         from,
-        subject: `${inviterName} invited you to "${title}" on tdoc`,
+        subject,
         text,
         html: htmlBody,
       });
@@ -14120,6 +14569,7 @@ function inboxGroupKey(kind, slug, targetId) {
   // One row per person asking: each is approved or ignored on its own.
   if (kind === 'access_request') return targetId ? `access_request:${slug}:${targetId}` : `access_request:${slug}`;
   if (kind === 'team_join_request') return `team_join_request:${slug}:${targetId || ''}`;
+  if (kind === 'feedback_invite') return `feedback_invite:${targetId || slug}`;
   return `other:${slug || 'x'}`;
 }
 
@@ -14163,6 +14613,8 @@ function applyInboxEvent(inbox, ev) {
     count: 1,
     emoji: ev.emoji || null,
     ...(ev.requester ? { requester: ev.requester } : {}),
+    // A feedback invite leads off tdoc, to the site (notificationTarget).
+    ...(ev.kind === 'feedback_invite' && typeof ev.link === 'string' && /^https?:\/\//.test(ev.link) ? { link: ev.link } : {}),
   };
   return { items: [row, ...items].slice(0, INBOX_MAX) };
 }
@@ -14805,7 +15257,7 @@ async function deliverInbox(env, recipientLogin, ev, delivery = {}) {
 const PUSH_SUBS_MAX = 10;
 const PUSH_TTL_S = 24 * 60 * 60;
 const PUSH_PREVIEW_MAX = 280;
-const PUSH_KINDS = new Set(['comment', 'mention', 'reply', 'access_request', 'access_granted', 'team_join_request']);
+const PUSH_KINDS = new Set(['comment', 'mention', 'reply', 'access_request', 'access_granted', 'team_join_request', 'feedback_invite']);
 // The worker POSTs to whatever endpoint a subscription names, so only the
 // browsers' own push services are accepted -- never an arbitrary URL.
 const PUSH_HOSTS = [
@@ -23451,6 +23903,70 @@ const tdocHandlers = {
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
+    // The owner's Share for a feedback space, in a small tdoc window: what
+    // the widget opens on a site that is not the owner's own, where a page
+    // could read its token (feedbackShareHere). Same panel as in the widget.
+    const feedbackShareMatch = p.match(/^\/feedback\/share\/([^/]+)\/?$/);
+    if (feedbackShareMatch && method === 'GET') {
+      const slug = decodeURIComponent(feedbackShareMatch[1]);
+      const s = await getSession(env, req);
+      const meta = isValidSlug(slug) ? await loadDocMeta(env, slug) : null;
+      if (!sessionPrincipal(s) || s.feedback) return redirectTo(`/api/auth/oidc/login?return=${encodeURIComponent(`/feedback/share/${slug}`)}`);
+      if (!meta || meta.created_from !== 'feedback' || !isDocOwnerSession(env, s, meta)) {
+        return statusPageResponse({ docTitle: 'Share · tdoc', title: 'Only the owner can share this space', message: 'Ask its owner to invite people.', error: true, status: 403 });
+      }
+      const site = await loadSiteBinding(env, slug, meta);
+      const nonce = rand(16);
+      return html(SHELL.appHtml({
+        title: 'Share · tdoc Feedback',
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({ page: 'feedback-share', identity: appIdentity(s), slug, host: new URL(feedbackSpaceSiteOrigin(meta, site)).host }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
+    }
+    // An invite to a space whose site has no tdoc widget (the bookmarklet's):
+    // the one page whose only job is getting the person there with the
+    // bookmark (feedback-invite.jsx). Its Open button goes to the space's own
+    // site, never anywhere a request names.
+    const feedbackInviteMatch = p.match(/^\/feedback\/invite\/([^/]+)\/?$/);
+    if (feedbackInviteMatch && method === 'GET') {
+      const rec = await readFeedbackInvite(env, decodeURIComponent(feedbackInviteMatch[1]));
+      const meta = rec ? await loadDocMeta(env, rec.slug) : null;
+      const status = !rec ? 'missing' : (!meta || feedbackSpaceManagerRef(meta) !== rec.manager ? 'revoked' : feedbackInviteStatus(rec));
+      if (status !== 'pending' && status !== 'accepted') {
+        return statusPageResponse({
+          docTitle: 'Feedback invite · tdoc',
+          title: status === 'expired' ? 'This invite has expired' : 'This invite link is not valid',
+          message: status === 'expired' ? 'Ask the person who invited you for a new link.' : 'The link is wrong, or the invite was withdrawn.',
+          error: true,
+          status: 404,
+          actions: [{ label: 'What is tdoc Feedback?', href: '/feedback' }],
+        });
+      }
+      const nonce = rand(16);
+      const src = feedbackScriptSrc(url.origin);
+      return html(SHELL.appHtml({
+        title: `Comment on ${new URL(rec.origin).host} · tdoc`,
+        nonceAttr: ` nonce="${nonce}"`,
+        runtimeJsPath: SHELL_RUNTIME_JS_PATH,
+        runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
+        bootJson: safeJsonForScript({
+          page: 'feedback-invite',
+          identity: appIdentity(await getSession(env, req)),
+          id: rec.token,
+          inviter: (rec.inviter && rec.inviter.name) || 'Someone',
+          host: new URL(rec.origin).host,
+          // A bookmarklet space's site is often not the owner's: Join happens
+          // here, and the site opens without the invite in its address.
+          siteUrl: rec.site ? feedbackInviteSiteUrl(rec.origin, rec.token) : `${rec.origin}/`,
+          site: Boolean(rec.site),
+          bookmarklet: feedbackBookmarklet(src),
+          signinUrl: `/api/auth/oidc/login?return=${encodeURIComponent(`/feedback/invite/${rec.token}`)}`,
+          doors: { oidc: Boolean(oidcConfig(env)), web: githubDirectSignIn(env) },
+        }),
+      }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
+    }
     // An invite: /feedback/join/<space>. Invites point at the space itself
     // now (/d/<space>), whose page offers Join; links sent before that land
     // there too. A bad link says so on the ordinary status page.
@@ -23488,7 +24004,7 @@ const tdocHandlers = {
       if (!canCommentOnDoc(access, s, env, meta)) return json({ error: 'commenting_disabled' }, { status: 403 });
       // Reading by its link is not an invite (feedbackPersonalSpaceAllowed).
       if (!feedbackPersonalSpaceAllowed(env, s, meta)) return json(FEEDBACK_NOT_INVITED, { status: 403 });
-      await env.META.put(feedbackSpaceIndexKey(s, origin), slug);
+      await joinFeedbackSpace(env, s, origin, slug);
       return json({ ok: true, slug, origin });
     }
 
@@ -23582,6 +24098,16 @@ const tdocHandlers = {
       const s = await getSession(env, req);
       const oidc = oidcConfig(env);
       const space = isValidSlug(url.searchParams.get('space') || '') ? url.searchParams.get('space') : null;
+      // Opened by Join on an invite: say whose, and take it on Connect.
+      let invite = null;
+      const inviteId = url.searchParams.get('invite');
+      if (inviteId) {
+        const rec = await readFeedbackInvite(env, inviteId);
+        const meta = rec ? await loadDocMeta(env, rec.slug) : null;
+        invite = rec
+          ? { id: rec.token, inviter: (rec.inviter && rec.inviter.name) || 'Someone', status: !meta || feedbackSpaceManagerRef(meta) !== rec.manager ? 'revoked' : feedbackInviteStatus(rec) }
+          : { id: null, status: 'missing' };
+      }
       return html(SHELL.appHtml({
         title: 'Connect tdoc Feedback',
         nonceAttr: ` nonce="${nonce}"`,
@@ -23593,6 +24119,7 @@ const tdocHandlers = {
           space,
           baseHost: url.host,
           identity: appIdentity(s),
+          invite,
           doors: { oidc: !!oidc, oidcLabel: (oidc && oidc.label) || '', web: githubDirectSignIn(env) },
           ...(origin ? {} : { error: 'Open this window from the tdoc button inside your app.' }),
         }),
@@ -23658,6 +24185,26 @@ const tdocHandlers = {
       let slug;
       let meta;
       let moved = false;
+      // Taking an invite (feedbackInvite*) as part of connecting: the invite
+      // must be for this site; Join is this person's click on our own page.
+      if (body.invite != null) {
+        if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+        const invite = await readFeedbackInvite(env, body.invite);
+        if (!invite) return json({ error: 'invite_not_found', message: 'This invite link is not valid.' }, { status: 404 });
+        const forThisSite = invite.site ? body.space === invite.slug : (!body.space && !body.slug && invite.origin === origin);
+        if (!forThisSite) return json({ error: 'invite_wrong_site', message: `This invite is for ${new URL(invite.origin).host}.` }, { status: 403 });
+        const accepted = await acceptFeedbackInvite(env, s, invite);
+        if (accepted.error) return json({ error: accepted.error, ...(accepted.message ? { message: accepted.message } : {}) }, { status: accepted.status || 403 });
+        if (!invite.site) {
+          await joinFeedbackSpace(env, s, origin, invite.slug);
+          const token = await mintFeedbackToken(env, s, invite.slug, origin);
+          return feedbackConnected({
+            ...feedbackSessionPayload(env, url.origin, s, invite.slug, accepted.meta, { slug: invite.slug, origin, site: false }),
+            token, joined: true, ...(await feedbackSpaceChoices(env, s, origin, invite.slug)),
+          }, null);
+        }
+        // The site's space: admitted now, connect to it as below.
+      }
       if (body.space) {
         // A site's own space (the SDK): only on the origins it was bound to,
         // and only for people the space doc's own access admits, exactly as
@@ -23700,7 +24247,7 @@ const tdocHandlers = {
         // the link of (feedbackPersonalSpaceAllowed).
         if (!feedbackPersonalSpaceAllowed(env, s, meta)) return json(FEEDBACK_NOT_INVITED, { status: 403 });
         slug = body.slug;
-        await env.META.put(feedbackSpaceIndexKey(s, origin), slug);
+        await joinFeedbackSpace(env, s, origin, slug);
       } else {
         const space = await feedbackSpaceFor(env, req, s, origin);
         if (!space.ok) return space.response;
@@ -23709,7 +24256,10 @@ const tdocHandlers = {
         moved = Boolean(space.moved);
       }
       const token = await mintFeedbackToken(env, s, slug, origin);
-      return feedbackConnected({ ...feedbackSessionPayload(env, url.origin, s, slug, meta, { slug, origin, site: false }), token, ...(moved ? { moved: true } : {}) }, null);
+      return feedbackConnected({
+        ...feedbackSessionPayload(env, url.origin, s, slug, meta, { slug, origin, site: false }), token, ...(moved ? { moved: true } : {}),
+        ...(await feedbackSpaceChoices(env, s, origin, slug)),
+      }, null);
     }
     // The client's first call with a stored token: still valid, still allowed,
     // and where the doc is now.
@@ -23736,6 +24286,120 @@ const tdocHandlers = {
       return json({
         ...feedbackSessionPayload(env, url.origin, s, s.feedback.slug, meta),
         can_comment: canCommentOnDoc(access, s, env, meta),
+        // The bookmarklet's space switcher and its one-time invite prompt.
+        ...(s.feedback.site ? {} : await feedbackSpaceChoices(env, s, s.feedback.origin, s.feedback.slug)),
+      });
+    }
+
+    // ── Feedback invites (see "Inviting people into a feedback space") ──
+    // The owner's list, and a new invite: a one-time link, or one for a
+    // named person ({ invitee: email or GitHub handle }).
+    if (p === '/api/feedback/invites' && (method === 'GET' || method === 'POST')) {
+      let body = {};
+      if (method === 'POST') { try { body = await req.json(); } catch {} }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) body = {};
+      const slug = method === 'GET' ? String(url.searchParams.get('slug') || '') : String(body.slug || '');
+      const mgr = await feedbackInviteManager(env, req, url, slug);
+      if (mgr.response) return mgr.response;
+      if (method === 'POST') {
+        if (body.invitee != null && typeof body.invitee !== 'string') return json({ error: 'invalid_invitee' }, { status: 400 });
+        const out = await createFeedbackInvite(env, ctx, url.origin, mgr, body.invitee ? String(body.invitee).slice(0, 320) : null);
+        return json(out.body, { status: out.status, headers: { 'Cache-Control': 'no-store' } });
+      }
+      const invites = (await listFeedbackInvites(env, slug))
+        .filter((r) => r.manager === feedbackSpaceManagerRef(mgr.meta) && feedbackInviteStatus(r) !== 'revoked')
+        .map((r) => feedbackInviteForOwner(url.origin, r));
+      return json({
+        ok: true, slug, origin: mgr.origin, host: new URL(mgr.origin).host, site: Boolean(mgr.site),
+        team: Boolean(mgr.meta.workspace_id), invites,
+      }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (p === '/api/feedback/invites/revoke' && method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const mgr = await feedbackInviteManager(env, req, url, String((body && body.slug) || ''));
+      if (mgr.response) return mgr.response;
+      const out = await revokeFeedbackInvite(env, mgr.slug, String((body && body.id) || ''));
+      return json(out.body, { status: out.status });
+    }
+    // What an invite says, for its prompt and its page: who, and which site.
+    // Never who it was sent to, and never the space itself.
+    if (p === '/api/feedback/invite' && method === 'GET') {
+      const rec = await readFeedbackInvite(env, url.searchParams.get('id'));
+      if (!rec) return json({ error: 'invite_not_found' }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+      const meta = await loadDocMeta(env, rec.slug);
+      const status = !meta || feedbackSpaceManagerRef(meta) !== rec.manager ? 'revoked' : feedbackInviteStatus(rec);
+      return json({
+        ok: true, status, site: Boolean(rec.site), kind: rec.kind,
+        inviter: { name: (rec.inviter && rec.inviter.name) || 'Someone' },
+        origin: rec.origin, host: new URL(rec.origin).host,
+      }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    // Join on the invite's own page (feedback-invite.jsx): the signed-in
+    // person's click on tdoc, same-origin only. A bookmarklet space then
+    // gets their bookmarklet comments on its site; the page opens the site
+    // without the invite in its address (the site is often not the owner's).
+    if (p === '/api/feedback/invite/join' && method === 'POST') {
+      if (req.headers.get('origin') !== url.origin) return json({ error: 'forbidden' }, { status: 403 });
+      const s = await getSession(env, req);
+      if (!sessionPrincipal(s) || s.feedback) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      const invite = await readFeedbackInvite(env, body && body.id);
+      if (!invite) return json({ error: 'invite_not_found', message: 'This invite link is not valid.' }, { status: 404 });
+      const accepted = await acceptFeedbackInvite(env, s, invite);
+      if (accepted.error) return json({ error: accepted.error, ...(accepted.message ? { message: accepted.message } : {}) }, { status: accepted.status || 403 });
+      if (!invite.site) await joinFeedbackSpace(env, s, invite.origin, invite.slug);
+      return json({ ok: true, site_url: invite.site ? feedbackInviteSiteUrl(invite.origin, invite.token) : `${invite.origin}/` }, { headers: { 'Cache-Control': 'no-store' } });
+    }
+    // Keep my own: the prompt for this space is answered and not asked again.
+    if (p === '/api/feedback/invite/keep' && method === 'POST') {
+      const s = await getSession(env, req);
+      if (!s || !s.feedback || s.feedback.site || !sessionPrincipal(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      let slug = String((body && body.slug) || '');
+      if (body && body.id) {
+        const invite = await readFeedbackInvite(env, body.id);
+        if (!invite) return json({ error: 'invite_not_found' }, { status: 404 });
+        slug = invite.slug;
+      }
+      if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+      await env.META.put(feedbackInviteChoiceKey(s, slug), 'kept');
+      return json({ ok: true, ...(await feedbackSpaceChoices(env, s, s.feedback.origin, s.feedback.slug)) });
+    }
+    // The bookmarklet's space switcher: My space ({ own: true }), or a space
+    // this person already joined on this origin. Answers with a token for it.
+    if (p === '/api/feedback/switch' && method === 'POST') {
+      const s = await getSession(env, req);
+      if (!s || !s.feedback || s.feedback.site || !sessionPrincipal(s)) return json({ error: 'sign_in_required' }, { status: 401 });
+      const origin = feedbackOrigin(s.feedback.origin);
+      if (!origin) return json({ error: 'invalid_origin' }, { status: 400 });
+      let body = {};
+      try { body = await req.json(); } catch {}
+      let slug;
+      let meta;
+      if (body && body.own === true) {
+        const own = (await feedbackOwnSpace(env, s, origin)) || (await createOwnFeedbackSpace(env, req, s, origin));
+        if (!own.ok && !own.slug) return own.response || json({ error: 'create_failed' }, { status: 500 });
+        slug = own.slug;
+        meta = own.meta;
+      } else {
+        slug = String((body && body.slug) || '');
+        if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+        meta = await loadDocMeta(env, slug);
+        if (!meta || meta.created_from !== 'feedback' || feedbackOrigin(meta.feedback && meta.feedback.origin) !== origin) return json({ error: 'not_found' }, { status: 404 });
+        // Only back to a space this person joined with a click on tdoc (an
+        // invite taken in the connect window or on its page, or Join on the
+        // space): never one a page could pick for them.
+        const joined = (await env.META.get(feedbackInviteChoiceKey(s, slug))) === 'joined';
+        if (!joined || !feedbackPersonalSpaceAllowed(env, s, meta)) return json({ ...FEEDBACK_NOT_INVITED, error: 'not_invited' }, { status: 403 });
+      }
+      await joinFeedbackSpace(env, s, origin, slug);
+      const token = await mintFeedbackToken(env, s, slug, origin);
+      return json({
+        ...feedbackSessionPayload(env, url.origin, s, slug, meta, { slug, origin, site: false }),
+        token, ...(await feedbackSpaceChoices(env, s, origin, slug)),
       });
     }
 

@@ -641,7 +641,9 @@ const APP = 'http://localhost:3000';
     assert(src.includes('<OwnerAccessDialog') && src.includes('<ShareDialog') && src.includes('<MoveToTeamDialog'), 'space Share is not the doc Share dialog and move picker');
     assert(src.includes('moveDocsToTeam([slug], target.id)'), 'space move is not the doc move');
     const widget = fs.readFileSync(path.join(ROOT, 'feedback/src/main.jsx'), 'utf8');
-    assert(/className="tdoc-fb-share" href=\{shareUrl\}/.test(widget), 'the widget lost its Share entry');
+    // Share in the widget (feedbackInvites); with the flag off, the old link to this page.
+    assert(/className="tdoc-fb-share" onClick=\{onShare\}/.test(widget), 'the widget lost its Share entry');
+    assert(/className="tdoc-fb-share" href=\{shareUrl\}/.test(widget), 'the widget lost its Share link (flag off)');
   });
 
   await t('moving a space into a team: only its owner, only into a team they belong to; admins then manage it', async () => {

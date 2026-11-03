@@ -32,6 +32,9 @@
   color: #fff; font: 600 14px/1 -apple-system, system-ui, sans-serif; text-decoration: none; cursor: pointer; }
 .tdoc-feedback-page .fb-btn:hover { background: var(--td-accent-hover); border-color: var(--td-accent-hover); }
 .tdoc-feedback-page .fb-btn.secondary { background: #fff; color: var(--fb-ink); border-color: var(--fb-line); }
+/* A link drawn as a button keeps the button's ink, not the link colour. */
+.tdoc-feedback-page .fb-main a.fb-btn { color: var(--td-ground); }
+.tdoc-feedback-page .fb-main a.fb-btn.secondary { color: var(--fb-ink); }
 .tdoc-feedback-page .fb-btn.secondary:hover { border-color: var(--td-accent); color: var(--td-accent); }
 .tdoc-feedback-page .fb-btn:disabled { opacity: .5; cursor: default; }
 .tdoc-feedback-page .fb-field { flex: 1; min-width: 14rem; height: 36px; box-sizing: border-box; padding: 0 .6rem;
@@ -173,3 +176,14 @@
   .tdoc-feedback-page .bookmarklet.demo-fly,
   .tdoc-feedback-page.coaching .bookmarklet { top: 1.85rem; opacity: 1; transform: translateX(-50%) scale(1.06); }
 }
+
+/* /feedback/invite/<id>: two numbered steps, the bookmark and the site. */
+.tdoc-feedback-page .fb-invite h1 { overflow-wrap: anywhere; }
+.tdoc-feedback-page .fb-invite-steps { list-style: none; margin: 1.75rem 0 0; padding: 0; counter-reset: fb-step; }
+.tdoc-feedback-page .fb-invite-step { counter-increment: fb-step; position: relative; padding: 0 0 1.75rem 2.6rem; }
+.tdoc-feedback-page .fb-invite-step::before { content: counter(fb-step); position: absolute; left: 0; top: .05rem;
+  width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--td-accent-tint); color: var(--td-accent);
+  font: 700 .9rem/1.7rem -apple-system, system-ui, sans-serif; text-align: center; }
+.tdoc-feedback-page .fb-invite-step h2 { margin: 0 0 .6rem; font-size: 1.05rem; line-height: 1.6; overflow-wrap: anywhere; }
+.tdoc-feedback-page .fb-invite-step .fb-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tdoc-feedback-page .fb-invite-step .phone-only { margin: 0 0 .5rem; }
