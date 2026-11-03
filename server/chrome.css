@@ -889,6 +889,7 @@
   body.tdoc-narrow .tdoc-margin-comment { position: static !important; width: auto !important; left: auto !important; top: auto !important; margin-bottom: 10px; transform: none !important; }
   body.tdoc-narrow .tdoc-fab { position: fixed; bottom: 16px; right: 16px; z-index: 999997; background: var(--td-accent); color: #fff; border: none; border-radius: 999px; padding: 10px 16px; font: 13px system-ui; font-weight: 600; box-shadow: 0 4px 16px var(--td-accent-ring); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   body.tdoc-narrow .tdoc-fab.is-hidden { display: none; }
+  body.tdoc-narrow[data-tdoc-suggest-bar] .tdoc-fab { bottom: calc(var(--tdoc-suggest-bar-h, 110px) + 12px); }
   body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
   body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
   body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -1170,6 +1171,27 @@
   .tdoc-ask-demo-cta-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .tdoc-ask-demo-cta-actions a.ui-btn { text-decoration: none; }
   .tdoc-ask-public-notice { color: var(--td-ink, #1a1a1a); }
+  /* Ask/Edit v2 (flag askEditV2): the review bar for AI suggestions in the
+     doc. A floating bar over the bottom of the page on a desktop, a bottom
+     sheet on a phone; same contents and buttons. */
+  .tdoc-suggest-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 999997; display: flex; align-items: center; gap: 12px; max-width: min(760px, calc(100vw - 32px)); padding: 8px 10px 8px 14px; box-sizing: border-box; background: var(--td-ground, #fff); border: 1px solid var(--td-line, #e8e7e3); border-radius: 12px; box-shadow: 0 6px 28px rgba(0,0,0,0.12); color: var(--td-ink, #1a1a1a); font: 500 13px/1.35 Inter, system-ui, sans-serif; }
+  .tdoc-suggest-bar-text { min-width: 0; flex: 1 1 auto; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; }
+  .tdoc-suggest-bar-mark { flex: none; color: var(--td-accent, #1652f0); }
+  .tdoc-suggest-bar-who { flex: none; font-weight: 650; }
+  .tdoc-suggest-bar-owner { flex: none; color: var(--td-muted, #6b6a66); }
+  .tdoc-suggest-bar-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--td-muted, #6b6a66); }
+  .tdoc-suggest-bar-count { flex: none; color: var(--td-muted, #6b6a66); font-variant-numeric: tabular-nums; }
+  .tdoc-suggest-bar-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+  .tdoc-suggest-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--td-accent, #1652f0); animation: tdoc-demo-bar-pulse 1s ease-in-out infinite alternate; }
+  .tdoc-suggest-bar.is-narrow { left: 0; right: 0; bottom: 0; transform: none; max-width: none; flex-wrap: wrap; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-radius: 14px 14px 0 0; border-width: 1px 0 0; box-shadow: 0 -4px 24px rgba(0,0,0,0.08); font-size: 14px; }
+  .tdoc-suggest-bar.is-narrow .tdoc-suggest-bar-text { flex-basis: 100%; }
+  .tdoc-suggest-bar.is-narrow .tdoc-suggest-bar-actions { flex: 1 1 auto; justify-content: flex-end; flex-wrap: wrap; }
+  @media (prefers-reduced-motion: reduce) { .tdoc-suggest-dot { animation: none; } }
+  .tdoc-suggest-chip { position: fixed; z-index: 999996; display: inline-flex; gap: 4px; padding: 3px; background: var(--td-ground, #fff); border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.10); }
+  .tdoc-margin-comment .meta .tdoc-fix-ai { display: inline-flex; align-items: center; gap: 4px; }
+  .tdoc-margin-comment .meta .tdoc-fix-ai[aria-busy="true"] { color: var(--td-muted, #6b6a66); }
+  .tdoc-fix-all { display: inline-flex; align-items: center; gap: 4px; }
+  .tdoc-composer-edit-ai { display: inline-flex; align-items: center; gap: 4px; }
   .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
   .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }
   .tdoc-ask-turn { display: grid; min-width: 0; gap: 8px; }

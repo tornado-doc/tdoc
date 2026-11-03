@@ -206,11 +206,15 @@ export function DemoRewriteBar({ state, agent, onUndo }) {
 export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets, viewer,
   disabledChoices = [], guestAction = null,
   turns, busy, remaining, onAsk, onKeep, onPost, send = null, cta = null,
-  activityOpen, onActivityOpen, unreadCount, signInToAsk = false, onConnect = null, children }) {
+  activityOpen, onActivityOpen, unreadCount, signInToAsk = false, onConnect = null, children,
+  // Ask/Edit v2 (flag askEditV2): one input, no Ask / Edit switch. tdoc AI
+  // answers a question or proposes edits that show in the doc; an agent
+  // that may edit gets the request as a handoff and replies the same way.
+  unified = false }) {
   const input = useRef(null);
   const [expandedTurnId, setExpandedTurnId] = useState(null);
   const [pickedMode, setPickedMode] = useState(() => (send ? storedMode(send.slug) : 'ask'));
-  const mode = send ? pickedMode : 'ask';
+  const mode = send && !unified ? pickedMode : 'ask';
   const pickMode = (next) => {
     setPickedMode(next);
     if (send) writeStored(modeKey(send.slug), next);
@@ -241,13 +245,14 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
   const latest = turns.at(-1);
   useEffect(() => { setExpandedTurnId(null); }, [latest?.id]);
   const activeTurnId = expandedTurnId || latest?.id;
-  const modePicker = send ? <ModePicker mode={mode} onPick={pickMode} /> : null;
+  const modePicker = send && !unified ? <ModePicker mode={mode} onPick={pickMode} /> : null;
   return <div className="tdoc-ask-panel">
     <h2>Ask AI</h2>
     {mode === 'edit' ? <EditForm key={send.resetKey || 0} send={send} modePicker={modePicker}
       draft={draft} onDraft={onDraft} focusInput={focusInput} onCaret={onCaret} /> : <>
     <form className="tdoc-ask-form" onSubmit={(event) => { event.preventDefault(); onAsk(); }}>
-      <textarea ref={input} aria-label="Ask about this document" placeholder={latest ? 'Ask a follow-up…' : 'Ask about this document…'}
+      <textarea ref={input} aria-label={unified ? 'Ask AI about this document or ask for a change' : 'Ask about this document'}
+        placeholder={unified ? (latest ? 'Ask, or ask for another change…' : 'Ask a question, or ask for a change…  ⌘K') : latest ? 'Ask a follow-up…' : 'Ask about this document…'}
         rows={2} value={draft} onChange={(event) => onDraft(event.target.value)} onSelect={onCaret}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); onAsk(); } }} />
       <div className="tdoc-ask-form-bottom">
@@ -261,7 +266,8 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
         <button type="submit" aria-label="Send question" disabled={!draft.trim() || busy || !selected || noFreeAnswers}>↑</button>
       </div>
     </form>
-    <div className="tdoc-ask-only-hint">{signInToAsk ? 'Free · sign in to get your answer' : 'Answers only · won’t edit this document'}</div>
+    <div className="tdoc-ask-only-hint">{signInToAsk ? 'Free · sign in to get your answer'
+      : unified ? 'Questions get a private answer · changes show in the doc for you to accept' : 'Answers only · won’t edit this document'}</div>
     {teamAgent ? <div className="tdoc-ask-notice tdoc-ask-public-notice" role="note">{teamAgent} is a team agent: its answer is posted as a comment everyone can see</div> : null}
     {noFreeAnswers ? <div className="tdoc-ask-notice">No free tdoc AI answers left. <a href="/start">Connect my agent</a> to keep asking.</div> : null}
     {!targets.length && !signInToAsk ? <div className="tdoc-ask-notice">Connect an agent to ask about this document. <a href="/start">Connect my agent</a></div> : null}
@@ -284,10 +290,11 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
               : turn.status === 'waiting' ? 'Sent · waiting for your agent…'
                 : turn.status === 'failed' ? turn.error || 'Could not get an answer.' : turn.answer} />
           </div>
-          <div className="tdoc-ask-visibility">{turn.public ? 'Posted as a comment · Visible to everyone' : 'Only you can see this'}</div>
+          <div className="tdoc-ask-visibility">{turn.suggested && turn.public ? 'Posted as a comment · Visible to everyone'
+            : turn.suggested ? 'Suggestions only you can see until accepted' : turn.public ? 'Posted as a comment · Visible to everyone' : 'Only you can see this'}</div>
           {turn.status === 'failed' ? <button type="button" className="ui-btn ui-btn-primary ui-btn-m" onClick={() => onAsk(turn.question, turn.target)}>Retry</button>
             : turn.status === 'thinking' || turn.status === 'waiting' ? null
-              : <>
+              : turn.suggested ? null : <>
                   {turn.public ? null
                     : turn.kept ? <span className="tdoc-ask-private-note">Kept private</span>
                       : <div className="tdoc-ask-answer-actions">

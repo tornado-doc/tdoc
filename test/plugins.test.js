@@ -87,7 +87,9 @@ t('one skill, identical in every plugin, with SKILL.md\'s description verbatim a
 t('the skill names exactly the tools the worker serves', () => {
   const worker = fs.readFileSync(path.join(root, 'worker', 'worker.js'), 'utf8');
   const block = worker.slice(worker.indexOf('const MCP_TOOLS = {'), worker.indexOf('const MCP_CAPABILITIES'));
-  const served = [...block.matchAll(/^  ([a-z_]+): \{$/gm)].map((m) => m[1]).sort();
+  // A dev-mode-only tool (devMode: true) is not in the skill yet.
+  const heads = [...block.matchAll(/^  ([a-z_]+): \{$/gm)];
+  const served = heads.filter((m, i) => !/^    devMode: true,$/m.test(block.slice(m.index, i + 1 < heads.length ? heads[i + 1].index : undefined))).map((m) => m[1]).sort();
   assert(served.join(',') === 'answer_question,commit_upload,create_doc,create_feedback_space,create_upload,edit_doc,get_comments,get_doc,get_writing_guide,list_docs,reply_to_comment,resolve_comment,share_doc,update_doc', served.join(','));
 });
 

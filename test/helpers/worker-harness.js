@@ -196,6 +196,7 @@ async function loadWorker({ previewRenderer = false } = {}) {
   src = src.replace('/* __TDOC_SHELL_MODULE__ */', shellMod);
   src = src.replace('/* __TDOC_NOTIFICATION_TEXT__ */', fs.readFileSync(path.join(root, 'shell', 'src', 'notification-text.js'), 'utf8').replace(/^export /gm, ''));
   src = src.replace('/* __TDOC_PREVIEW_VALIDATOR__ */', fs.readFileSync(path.join(root, 'server', 'preview', 'validate-svg.js'), 'utf8'));
+  src = src.replace('/* __TDOC_HTML_PARSER__ */', () => fs.readFileSync(path.join(root, 'server', 'html-parser', 'parse5.js'), 'utf8'));
   src = src.replace(/const PROBE_JS = `__TDOC_PROBE_JS__`;/, 'const PROBE_JS = ' + JSON.stringify(probeJs) + ';');
   const guides = require(path.join(root, 'server', 'authoring-guides.js')).loadAuthoringGuides(root);
   src = src.replace(/const AUTHORING_GUIDES = "__TDOC_AUTHORING_GUIDES__";/, 'const AUTHORING_GUIDES = ' + JSON.stringify(guides) + ';');

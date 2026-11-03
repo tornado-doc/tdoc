@@ -25,6 +25,7 @@ const PARITY = {
   create_doc: { http: ['/api/upload'], cli: 'tdoc-publish' },
   update_doc: { http: ['/api/upload'], cli: 'tdoc-publish' },
   edit_doc: { http: ['/api/upload'], cli: 'tdoc-publish' },
+  propose_edits: { http: ['/api/docs/<slug>/suggestions'], cli: 'tdoc-propose' },
   create_upload: { http: ['/api/upload'], cli: 'tdoc-publish' },
   commit_upload: { http: ['/api/upload'], cli: 'tdoc-publish' },
   get_doc: { http: [], cli: 'tdoc-pull', why: 'reads the public document routes (/d/<slug>/...)' },

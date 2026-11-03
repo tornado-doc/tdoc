@@ -268,8 +268,11 @@ export function listNotifyHandoffs(slug, limit = 10) {
   return request(`/api/notify/handoffs?${query}`);
 }
 
-export function postNotifyHandoff({ slug, comment_ids, instruction, recipient }) {
+// reply_as 'suggestions' (Ask/Edit v2): the agent is asked to send its
+// edits with propose_edits, to show in the doc for the person to accept.
+export function postNotifyHandoff({ slug, comment_ids, instruction, recipient, reply_as = null }) {
   const body = { slug, comment_ids: comment_ids || [] };
+  if (reply_as) body.reply_as = reply_as;
   if (instruction != null) body.instruction = instruction;
   if (recipient) body.recipient = recipient;
   return request('/api/notify/handoff', {
@@ -605,5 +608,29 @@ export function sendToMyAgent(slug, { question, passage, commentId = null }) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question, ...(passage ? { passage } : {}), ...(commentId ? { comment_id: commentId } : {}) }),
+  });
+}
+
+// AI suggestions (Ask/Edit v2): tdoc AI answers a question, or proposes
+// text edits that show in the doc until an editor accepts (publishes) or
+// rejects them. scope: { kind: 'doc' } | { kind: 'selection', text } |
+// { kind: 'comments', comment_ids }.
+export function suggestEdits(slug, { instruction, baseVersion, scope }) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/suggest`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instruction, base_version: baseVersion, scope }),
+  });
+}
+
+export function listSuggestions(slug) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/suggestions`);
+}
+
+export function decideSuggestion(slug, id, decision, editIds = null) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/suggestions/${encodeURIComponent(id)}/${decision === 'accept' ? 'accept' : 'reject'}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(editIds ? { edit_ids: editIds } : {}),
   });
 }

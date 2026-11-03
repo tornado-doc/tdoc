@@ -13,6 +13,7 @@ import {
   resendNotifyHandoff,
   getAskAllowance,
   handOff,
+  postNotifyHandoff,
   publishAsk,
   setDocumentStar,
   acceptTeamInvite,
@@ -54,7 +55,7 @@ import {
   OwnerAccessDialog,
 } from './document/owner-access-dialog.jsx';
 import { copyText, isDocumentComment, layoutPins, TOP_BAR_HEIGHT } from './document/model.js';
-import { readStored } from './safe-storage.js';
+import { readStored, writeStored } from './safe-storage.js';
 import { isFeatureOn } from './feature-flags.js';
 import { useComments } from './hooks/use-comments.js';
 import { useMentionable } from './hooks/use-mentionable.js';
@@ -72,6 +73,8 @@ import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAgentChoic
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-panel.jsx';
+import { SuggestContext, useSuggestions } from './document/suggestions.js';
+import { SuggestInlineChip, SuggestReviewBar } from './document/suggest-review-bar.jsx';
 import { useCommentArea } from './document/comment-area.js';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
@@ -202,6 +205,8 @@ export function DocumentShell({ boot, config }) {
   const editorRef = useRef(null);
   const diagramApplyRef = useRef(null);
   const demoRewriteWait = useRef(null);
+  const suggestRef = useRef(null);
+  const openAskRef = useRef(null);
   const [diagram, setDiagram] = useState(null);
   const [visualOpen, setVisualOpen] = useState(false);
   // Slides presenting: full screen like a visual, but commenting stays on.
@@ -259,7 +264,12 @@ export function DocumentShell({ boot, config }) {
   const [askAiDraft, setAskAiDraft] = useState('');
   // Edit's unchecked pending comments, kept here for the same reason.
   const [askAiUnchecked, setAskAiUnchecked] = useState([]);
-  const [askAiTargetKey, setAskAiTargetKey] = useState('');
+  // Ask/Edit v2 remembers the agent picked last (the chip), per browser:
+  // only where the server turned it on for this person (canSuggest), so a
+  // pinned flag changes nothing for anybody else.
+  const rememberAskAgent = isFeatureOn('askEditV2') && Boolean(config.canSuggest);
+  const [askAiTargetKey, setAskAiTargetKeyState] = useState(() => (rememberAskAgent ? readStored('tdoc-ask-agent') || '' : ''));
+  const setAskAiTargetKey = (key) => { setAskAiTargetKeyState(key); if (rememberAskAgent) writeStored('tdoc-ask-agent', key); };
   const [askAiTurns, setAskAiTurns] = useState([]);
   const [askAiBusy, setAskAiBusy] = useState(false);
   const [notifyCommentIds, setNotifyCommentIds] = useState(null);
@@ -542,7 +552,20 @@ export function DocumentShell({ boot, config }) {
       if (message.supportsTheme === true) bridge.send({ type: 'tdoc:theme', theme: nextTheme });
       bridge.send({ type: 'tdoc:mode', mode: editorRef.current?.mode || 'read', elementComment: !config.isLanding });
       comments.refresh();
+      suggestRef.current?.frameHandlers['tdoc:ready']();
     },
+    // AI suggestions in the doc (flag askEditV2; suggestions.js).
+    'tdoc:suggestShown': (message) => suggestRef.current?.frameHandlers['tdoc:suggestShown'](message),
+    'tdoc:suggestRect': (message) => suggestRef.current?.frameHandlers['tdoc:suggestRect'](message),
+    // A click on a suggestion in the doc picks it; Accept / Reject stay in
+    // the shell (the doc's own scripts can post as the frame), and focus
+    // stays where it is.
+    'tdoc:suggestAction': (message) => {
+      const s = suggestRef.current;
+      if (!s?.enabled || message.action !== 'focus') return;
+      s.pick(String(message.id));
+    },
+    'tdoc:suggestKey': () => openAskRef.current?.(),
     'tdoc:editState': (message) => editorRef.current?.frameHandlers.editState(message),
     'tdoc:editBaseline': (message) => editorRef.current?.frameHandlers.editBaseline(message),
     'tdoc:editDraft': (message) => editorRef.current?.frameHandlers.editDraft(message),
@@ -670,6 +693,23 @@ export function DocumentShell({ boot, config }) {
     setDrawerOpen(false);
     bridge.send({ type: 'tdoc:clearPending' });
   }, [bridge.send]);
+
+  // Ask/Edit v2 (flag askEditV2): one Ask AI input that answers or edits,
+  // Edit with AI on a selection, Fix with AI on comment cards; tdoc AI's
+  // edits show in the doc to accept (publish) or reject. The owner and
+  // editors only, on the latest version.
+  const [askEditFlag] = useState(() => isFeatureOn('askEditV2'));
+  const suggestOn = askEditFlag && Boolean(config.canSuggest) && config.mode === 'published' && !demoAgents;
+  const suggestions = useSuggestions({
+    slug: config.slug,
+    version: config.version,
+    enabled: suggestOn,
+    send: bridge.send,
+    onToast: showToast,
+    onPublished: (v) => { location.href = `/d/${encodeURIComponent(config.slug)}/v/${v}`; },
+    onAccepted: () => comments.refresh(),
+  });
+  suggestRef.current = suggestions;
 
   const editor = useDocumentEditor({
     boot,
@@ -1159,6 +1199,62 @@ export function DocumentShell({ boot, config }) {
       : askAiTargets.find((item) => item.key === selectedAskAiTargetKey);
     if (!question || !choice || askAiBusy) return;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // Ask/Edit v2: tdoc AI decides. A question gets the private answer as
+    // before; a change comes back as suggestions in the doc.
+    if (suggestOn && choice.tdocAi) {
+      setAskAiBusy(true);
+      if (!retryText) setAskAiDraft('');
+      setAskAiTurns((turns) => [...turns, { id, question, target: choice.target, label: choice.label,
+        kind: 'tdoc-ai', status: 'thinking', answer: '', askId: null, public: false }]);
+      try {
+        const body = await suggestions.request({ instruction: question, scope: { kind: 'doc' } });
+        if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
+        if (body?.kind === 'answer') {
+          setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, askId: body.ask_id || null, answer: body.answer || '', status: 'answered' } : turn));
+        } else {
+          const n = body?.suggestion?.edits?.length || 0;
+          setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, status: 'answered', suggested: true,
+            answer: n ? `Suggested ${n} ${n === 1 ? 'change' : 'changes'} in the document${body.suggestion.summary ? `: ${body.suggestion.summary}` : '.'} Review them in the doc; Accept publishes a new version.`
+              : 'I could not place an edit for that in the text. Say which part to change, or select it and use Edit with AI.' } : turn));
+          if (n) { setHandoffDetailsOpen(false); if (unifiedEntry) setDrawerOpen(false); }
+        }
+      } catch (error) {
+        if (error.status === 429) setAiRemaining(0);
+        setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, status: 'failed',
+          error: error.status === 429 ? 'No free tdoc AI answers left.' : (error.message || 'Could not get an answer.') } : turn));
+      } finally {
+        setAskAiBusy(false);
+      }
+      return;
+    }
+    // Ask/Edit v2 with an agent that may edit this doc: the request is posted
+    // as the viewer's whole-document comment and handed to that agent (the
+    // existing handoff), asking for its edits as suggestions in the doc.
+    if (suggestOn && !choice.tdocAi && canSendToAgent && !demoAgents
+      && orderedAgentChoices(notifyTargets).some((t) => sameTarget(t, choice.target))) {
+      setAskAiBusy(true);
+      if (!retryText) setAskAiDraft('');
+      setAskAiTurns((turns) => [...turns, { id, question, target: choice.target, label: choice.label,
+        kind: 'agent', status: 'thinking', answer: '', askId: null, public: true, suggested: true }]);
+      try {
+        const comment = await comments.addComment({ kind: 'document' }, question);
+        if (!comment?.id) throw new Error('Could not post the request');
+        markCommented();
+        const body = await postNotifyHandoff({ slug: config.slug, comment_ids: [comment.id], instruction: question, recipient: choice.target, reply_as: 'suggestions' });
+        const failed = body?.delivery?.status === 'failed';
+        if (!failed) suggestions.awaitAgent({ commentId: comment.id, label: choice.target.provider === 'local' ? `${choice.label} is working on your computer…` : `${choice.label} is working on it…` });
+        setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, publicCommentId: comment.id,
+          status: failed ? 'failed' : 'answered',
+          error: failed ? `Not delivered to ${choice.label}.` : '',
+          answer: `Sent to ${choice.label} ✓ Its edits will show in the doc as suggestions to accept or reject; any answer arrives as a reply to your comment.` } : turn));
+        comments.refresh();
+      } catch (error) {
+        setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, status: 'failed', error: error.message || 'Could not send it.' } : turn));
+      } finally {
+        setAskAiBusy(false);
+      }
+      return;
+    }
     // A team agent answers for the team, never privately (worker
     // team_agent_not_private): the question is posted as the asker's comment
     // and the answer is its reply. The panel said so before Send.
@@ -1213,6 +1309,75 @@ export function DocumentShell({ boot, config }) {
       return changed ? next : turns;
     });
   }, [myAgent.state?.asks]);
+  // Ask/Edit v2: Edit with AI (a selection) and Fix with AI (comments). The
+  // agent picked in Ask AI's chip does it: tdoc AI suggests at once; an
+  // agent that may edit this doc gets a handoff asking for suggestions.
+  const pickedAskAiChoice = () => askAiTargets.find((item) => item.key === selectedAskAiTargetKey) || null;
+  const editingAgentChoice = (choice) => Boolean(suggestOn && choice && !choice.tdocAi && canSendToAgent && !demoAgents
+    && orderedAgentChoices(notifyTargets).some((t) => sameTarget(t, choice.target)));
+  const agentWorkingLabel = (choice) => (choice.target.provider === 'local'
+    ? `${choice.label} is working on your computer…` : `${choice.label} is working on it…`);
+  const suggestFailed = (error) => showToast(error.status === 429 ? 'No free tdoc AI answers left.' : (error.message || 'tdoc AI could not do that'), true);
+  const handToAgentForSuggestions = async (choice, commentIds, instruction, passage) => {
+    try {
+      const body = await postNotifyHandoff({ slug: config.slug, comment_ids: commentIds, instruction, recipient: choice.target, reply_as: 'suggestions' });
+      if (body?.delivery?.status === 'failed') { showToast(`Not delivered to ${choice.label}`, true); return; }
+      suggestions.awaitAgent({ commentIds, label: agentWorkingLabel(choice), passage });
+    } catch (error) { showToast(error.message || 'Could not send it', true); }
+    comments.refresh();
+  };
+  const editWithAi = async (text) => {
+    const selection = composer;
+    if (!selection?.text) return;
+    const instruction = text || 'Make this clearer and more concise.';
+    closeComposer();
+    const choice = pickedAskAiChoice();
+    if (editingAgentChoice(choice)) {
+      const { ok, value } = await attempt(() => comments.addComment(selection, instruction));
+      if (!ok || !value?.id) return;
+      markCommented();
+      await handToAgentForSuggestions(choice, [value.id], instruction, selection.text);
+      return;
+    }
+    try {
+      const body = await suggestions.request({ instruction, scope: { kind: 'selection', text: selection.text }, passage: selection.text });
+      if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
+      if (body?.kind === 'answer') {
+        // It was a question after all: the answer goes where answers go.
+        setAskAiTurns((turns) => [...turns, { id: `${Date.now()}`, question: instruction, target: TDOC_AI, label: 'tdoc AI', kind: 'tdoc-ai', status: 'answered', answer: body.answer || '', askId: body.ask_id || null, public: false }]);
+        openAskRef.current?.();
+      } else if (!body?.suggestion) showToast('tdoc AI could not place an edit in that passage. Rephrase, or select a little more.', true);
+    } catch (error) { suggestFailed(error); }
+  };
+  const anchorTextOf = (comment) => comment?.anchor?.text || comment?.anchor?.fallback?.text || null;
+  const fixWithAi = async (list) => {
+    const targets = list.filter(Boolean);
+    if (!targets.length || suggestions.busy) return;
+    const ids = targets.map((c) => c.id);
+    const passage = targets.length === 1 ? anchorTextOf(targets[0]) : null;
+    const choice = pickedAskAiChoice();
+    if (editingAgentChoice(choice)) {
+      await handToAgentForSuggestions(choice, ids, ids.length === 1 ? 'address this comment' : 'address my new comments', passage);
+      return;
+    }
+    if (narrow) setDrawerOpen(false);
+    try {
+      const body = await suggestions.request({ instruction: '', scope: { kind: 'comments', comment_ids: ids }, passage,
+        label: ids.length > 1 ? `tdoc AI is fixing ${ids.length} comments…` : 'tdoc AI is fixing this comment…' });
+      if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
+      if (!body?.suggestion) showToast(ids.length > 1 ? 'tdoc AI had no text change to suggest for these comments.' : 'tdoc AI had no text change to suggest for this comment.', true);
+    } catch (error) { suggestFailed(error); }
+  };
+  const fixableComments = suggestOn ? comments.comments.filter((c) => c && !c.resolved && c.status !== 'applied' && !c.deleted) : [];
+  const suggestContext = suggestOn ? {
+    enabled: true,
+    fix: (comment) => fixWithAi([comment]),
+    fixAll: () => fixWithAi(fixableComments.slice(0, 30)),
+    fixable: fixableComments.length,
+    busyIds: suggestions.busy?.commentIds || [],
+    pendingFor: suggestions.commentPending,
+    review: (id) => { if (narrow) setDrawerOpen(false); suggestions.review(id); },
+  } : null;
   const keepAskAiAnswer = (id) => setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, kept: true } : turn));
   const postAskAiAnswer = async (id) => {
     const turn = askAiTurns.find((item) => item.id === id);
@@ -1728,6 +1893,7 @@ export function DocumentShell({ boot, config }) {
   }, [config.identity, config.slug]);
   const askAiPanel = (panelOpen) => (
     <AskAiPanel
+      unified={suggestOn}
       open={panelOpen}
       draft={askAiDraft}
       onDraft={setAskAiDraft}
@@ -1807,6 +1973,33 @@ export function DocumentShell({ boot, config }) {
           : { target: comment.handoff_to, askOnly: true }) : null}
     />}</AskAiPanel>
   );
+  // ⌘K opens Ask AI; with a suggestion in review, ⌘↵ accepts it and Esc
+  // rejects it (the frame forwards the same keys: tdoc:suggestKey/Action).
+  openAskRef.current = suggestOn ? () => {
+    if (unifiedEntry) { setDrawerTab('ask'); setDrawerOpen(true); }
+    else { setHandoffDetailsOpen(true); setAgentActivityOpen(false); }
+  } : null;
+  const suggestKeysBlocked = useRef(false);
+  suggestKeysBlocked.current = Boolean(composer || handoffDetailsOpen || (narrow && drawerOpen));
+  useEffect(() => {
+    if (!suggestOn) return undefined;
+    const onKey = (event) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && !event.shiftKey && !event.altKey && String(event.key).toLowerCase() === 'k') {
+        event.preventDefault();
+        openAskRef.current?.();
+        return;
+      }
+      const t = event.target;
+      if (suggestKeysBlocked.current || (t && t.closest && t.closest('input, textarea, [contenteditable="true"]'))) return;
+      const s = suggestRef.current;
+      if (!s?.activeKey) return;
+      if (mod && event.key === 'Enter') { event.preventDefault(); s.accept(); }
+      else if (event.key === 'Escape') s.reject();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [suggestOn]);
   const askAiAction = (askAiPanelEnabled || signedOutAsk) && !unifiedEntry ? (
     <DocumentSendAgentAction
       counts={Object.fromEntries(Object.entries(handoffBuckets).map(([state, list]) => [state, list.length]))}
@@ -1874,6 +2067,7 @@ export function DocumentShell({ boot, config }) {
       onSubmit={postComment}
       onClose={closeComposer}
       onCopyToast={showToast}
+      onEditWithAi={suggestOn && !privateAskView ? editWithAi : null}
     />
   ) : null;
   return (
@@ -1890,6 +2084,7 @@ export function DocumentShell({ boot, config }) {
     >
       <HandoffSendTransport.Provider value={demoBackend ? demoBackend.postNotifyHandoff : null}>
       <AgentMentionContext.Provider value={agentMentions}>
+      <SuggestContext.Provider value={suggestContext}>
       <TopBar
         identity={config.identity}
         onboardingTest={config.debug ? {
@@ -2290,6 +2485,15 @@ export function DocumentShell({ boot, config }) {
           {toast.text}
         </div>
       ) : null}
+      {suggestOn && !(narrow && (drawerOpen || composer)) && !comparing ? <SuggestReviewBar suggestions={suggestions} narrow={narrow} /> : null}
+      {suggestOn && suggestions.rect && !narrow && !comparing && !composer ? (() => {
+        const frameBox = bridge.frameRef.current?.getBoundingClientRect();
+        const top = (frameBox?.top || frameTop) + suggestions.rect.docY - bridge.layout.scrollY + 6;
+        if (top < (frameBox?.top || frameTop) || top > window.innerHeight - 120) return null;
+        const left = Math.min(window.innerWidth - 120, (frameBox?.left || 0) + suggestions.rect.right - 40);
+        return <SuggestInlineChip suggestions={suggestions} style={{ top, left }} />;
+      })() : null}
+      </SuggestContext.Provider>
       </AgentMentionContext.Provider>
       </HandoffSendTransport.Provider>
     </div>

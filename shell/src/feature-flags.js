@@ -38,6 +38,14 @@ export const FLAGS = Object.freeze({
   // shortcut and long-press-drag on phones. The client runs on other sites,
   // so "preview" is the tdoc origin that served feedback.js, not the page.
   feedbackAreaSelect: Object.freeze({ label: 'Feedback: comment on an area', owner: 'julie', added: '2026-11-01', default: false, preview: true }),
+  // Ask/Edit v2: one Ask AI input (tdoc AI answers a question, or proposes
+  // edits that show in the doc as red/green suggestions to accept or
+  // reject), Edit with AI on a selection, Fix with AI on comment cards.
+  // Replaces Ask AI's Ask / Edit switch where it is on. Dev mode only (and
+  // PR previews): the server enforces it too (worker askEditV2Allowed: the
+  // boot's canSuggest, the routes, propose_edits, reply_as), so pinning the
+  // flag in a browser shows nothing to anybody else.
+  askEditV2: Object.freeze({ label: 'Ask AI edits the doc (inline suggestions)', owner: 'julie', added: '2026-11-02', default: false, preview: true }),
 });
 
 const PREVIEW_HOST = /^pr-[1-9]\d*-tdoc-preview\./;
