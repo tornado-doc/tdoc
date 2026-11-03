@@ -12,6 +12,7 @@ import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, avatarInitial, QUICK_REACTIONS } from './model.js';
+import { AuthorFace } from './author-face.jsx';
 import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
 import { productPageUrl } from './product-url.js';
@@ -73,6 +74,7 @@ export function Author({ author, timestamp }) {
   }
 
   const avatar = avatarFor(author);
+  const initial = <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(author)}</span>;
   const providerAvatar = author.kind === 'agent' && author.provider;
   const profileUrl = author.kind !== 'agent' && author.kind !== 'system'
     && /^\/@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/.test(author.profile_url || '')
@@ -87,16 +89,15 @@ export function Author({ author, timestamp }) {
         <span className="tdoc-agent-provider-mark" aria-hidden="true">
           <ProviderMark target={author} size={18} />
         </span>
-      ) : avatar ? (profileUrl ? (
+      ) : avatar && profileUrl ? (
         <a className="tdoc-author-profile" href={profileUrl}
           aria-label={`View ${authorLine(author)}'s public profile`}
           title={`View ${authorLine(author)}'s public profile`}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}>
-          <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />
+          <AuthorFace src={avatar} style={AUTHOR_FACE_SIZE} fallback={initial} />
         </a>
-      ) : <img src={avatar} alt="" width="24" height="24" style={AUTHOR_FACE_SIZE} />)
-        : <span className="tdoc-avatar-fallback" aria-hidden="true">{avatarInitial(author)}</span>}
+      ) : <AuthorFace src={avatar} style={AUTHOR_FACE_SIZE} fallback={initial} />}
       <span className="tdoc-cc-who">
         {hoverCard ? <AgentAuthorName author={author} /> : <span className="login">{authorLine(author)}</span>}
         {timestamp ? <span className="tdoc-cc-when">{timestamp}</span> : null}
