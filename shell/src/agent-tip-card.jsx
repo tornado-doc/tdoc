@@ -3,7 +3,6 @@ import { Infinity as Loop, Play, Sparkles, X } from 'lucide-react';
 import { AppButton } from './ui/button.jsx';
 import { CodeBlock } from './ui/code-block.jsx';
 import { listNotifications } from './document/api.js';
-import { LOCAL_DAEMON_PROMPT } from './document/notify-handoff.jsx';
 import { readStored, writeStored } from './safe-storage.js';
 
 // The agent tip (docs/design/agent-model.md, "Tip card"): a card that floats
@@ -20,6 +19,9 @@ const SEEN_KEY = 'tdoc.agentTip.shown';
 const DELAY_MS = 5000;
 const SCENE_MS = 2600;
 const AGENTS_PAGE = '/me?view=settings#agents';
+// What the person pastes into their agent: short, since the tdoc skill
+// already knows the rest (Linux, login start-up).
+export const TURN_ON_PROMPT = 'Use the tdoc skill to run bin/tdoc-daemon install';
 
 const ROW_ICONS = [Sparkles, Loop, Play];
 
@@ -30,9 +32,9 @@ export function tipCopy(kind, agent = 'Claude Code') {
     return {
       title: `Auto-send comments to ${agent}`,
       rows: [
-        ['Comments go straight to your agent', `Send to agent or @agent, and ${agent} revises the doc and replies.`],
-        ['Works with the chat closed', 'A small helper on your computer picks up comments every minute.'],
-        ['Every change is visible', 'Each run is a new version, with a reply on every comment it handled.'],
+        ['Comments go straight to your agent', `${agent} revises the doc and replies.`],
+        ['Works with the chat closed', 'A small helper on your computer picks them up.'],
+        ['Every change is visible', 'A new version, with a reply on each comment.'],
       ],
       cta: 'Turn on',
     };
@@ -40,9 +42,9 @@ export function tipCopy(kind, agent = 'Claude Code') {
   return {
     title: 'Auto-send comments to your agent',
     rows: [
-      ['Comments go straight to your agent', 'No more copying comments into a chat.'],
-      ['Needs an agent on your computer', 'Claude.ai can’t be woken from outside. Claude Code or Codex on your computer can.'],
-      ['Every change is visible', 'Each run is a new version, with a reply on every comment it handled.'],
+      ['Comments go straight to your agent', 'No more copying them into a chat.'],
+      ['Needs an agent on your computer', 'Claude Code or Codex, not claude.ai.'],
+      ['Every change is visible', 'A new version, with a reply on each comment.'],
     ],
     cta: 'Set up Claude Code',
   };
@@ -147,11 +149,10 @@ export function AgentTipCard({ audience, onClose }) {
       <Hero scene={scene} agent={audience.agent} onClose={() => onClose({})} />
       {step ? (
         <div className="tdoc-tip-body">
-          <p className="tdoc-tip-eyebrow">One step</p>
-          <p className="tdoc-tip-row-title">Paste this into {audience.agent}{audience.device ? ` on ${audience.device}` : ''}:</p>
-          <CodeBlock text={LOCAL_DAEMON_PROMPT} className="tdoc-tip-code" />
+          <p className="tdoc-tip-row-title">Paste into {audience.agent}:</p>
+          <CodeBlock text={TURN_ON_PROMPT} className="tdoc-tip-code" />
           <p className={`tdoc-tip-status${ready ? ' is-ready' : ''}`} role="status">
-            {ready ? `${audience.agent} is set up. Comments now go to it automatically.` : <><span className="tdoc-tip-spin" />Waiting for your computer to check in…</>}
+            {ready ? 'On. Comments now go to your agent.' : <><span className="tdoc-tip-spin" />Waiting for your computer…</>}
           </p>
         </div>
       ) : (

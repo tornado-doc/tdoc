@@ -1386,7 +1386,8 @@ a.ui-menu-item:visited {
 .tdoc-tip-rows li > svg { margin-top: 2px; }
 .tdoc-tip-rows li > span { display: grid; gap: 1px; font-size: 12px; line-height: 1.4; color: var(--td-muted, #6b6a66); }
 .tdoc-tip-row-title { margin: 0; font-size: 12.5px; font-weight: 550; color: var(--td-ink, #1a1a1a); }
-.tdoc-tip-body .tdoc-tip-code { margin: 10px 0 0; }
+.tdoc-tip-body .tdoc-tip-code { margin: 8px 0 0; }
+.tdoc-tip-body .tdoc-tip-code pre, .tdoc-tip-body .tdoc-tip-code code { font-size: 11.5px; line-height: 1.45; }
 .tdoc-tip-status { display: flex; align-items: center; gap: 7px; margin: 10px 0 0; font-size: 12px; color: var(--td-muted, #6b6a66); }
 .tdoc-tip-status .tdoc-tip-spin { border-color: var(--td-line, #e8e7e3); border-top-color: var(--td-ink, #1a1a1a); }
 .tdoc-tip-status.is-ready { color: #2f9e5b; }

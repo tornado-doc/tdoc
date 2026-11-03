@@ -361,7 +361,7 @@ async function startServer(worker, env) {
         assert(box && box.x >= 0 && box.x + box.width <= width + 1 && box.y + box.height <= height + 1, `card fits at ${label}: ${JSON.stringify(box)}`);
         await shot(page, `${label}-agent-tip`);
         await card.getByRole('button', { name: 'Turn on' }).click();
-        await card.getByText('Waiting for your computer to check in').waitFor();
+        await card.getByText('Waiting for your computer').waitFor();
         assert(/tdoc-daemon install/.test(await card.locator('.ui-code-block').innerText()), 'the daemon line to paste');
         await shot(page, `${label}-agent-tip-step`);
         await card.getByRole('button', { name: 'Close' }).click();
