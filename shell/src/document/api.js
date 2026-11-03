@@ -603,11 +603,16 @@ export function publishAsk(slug, kind, { askId, commentId }) {
   });
 }
 
-export function sendToMyAgent(slug, { question, passage, commentId = null }) {
+// commentId: the asker's own comment, answered in its thread. recipient:
+// one of the asker's own agents (else the first that can be reached).
+export function sendToMyAgent(slug, { question, passage, commentId = null, recipient = null }) {
   return request(`/api/docs/${encodeURIComponent(slug)}/my-agent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, ...(passage ? { passage } : {}), ...(commentId ? { comment_id: commentId } : {}) }),
+    body: JSON.stringify({
+      ...(question ? { question } : {}), ...(passage ? { passage } : {}),
+      ...(commentId ? { comment_id: commentId } : {}), ...(recipient ? { recipient } : {}),
+    }),
   });
 }
 

@@ -10,6 +10,7 @@ import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
+import { askOwnAgent, ownAgentPick, useMyAgent } from '../../shell/src/document/my-agent.js';
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
 import {
@@ -103,6 +104,7 @@ ${uiCss}
       position: fixed; bottom: 70px; z-index: 2147483646; pointer-events: auto;
       padding: 9px 14px; border-radius: 10px; background: #1a1a1a; color: #fff;
       font: 500 13px/1.35 system-ui, -apple-system, sans-serif; box-shadow: 0 6px 20px rgba(0,0,0,.18);
+      max-width: calc(100vw - 36px); box-sizing: border-box;
     }
     #tdoc-feedback-root .tdoc-fb-toast.bad { background: #b42318; }
     #tdoc-feedback-root .tdoc-pin.is-active { outline: 2px solid #1652f0; outline-offset: 2px; }
@@ -960,7 +962,7 @@ ${uiCss}
   // failure comes back as { ok: false, status, error } so the UI can say why.
   async function call(message) {
     if (message.type === 'tdoc-feedback-submit') {
-      writeDraft({ text: message.text, anchor: message.anchor, sendToAgent: Boolean(message.sendToAgent), recipient: message.recipient || null });
+      writeDraft({ text: message.text, anchor: message.anchor, sendToAgent: Boolean(message.sendToAgent), recipient: message.recipient || null, askAgent: message.askAgent || null });
     }
     // Connect again: drop the token first, then the one connect below.
     if (message.type === 'tdoc-feedback-signin') writeSession(null);
@@ -986,6 +988,8 @@ ${uiCss}
         postedDraft = message.type !== 'tdoc-feedback-submit';
         emit('comment', { id: made && made.id, text: draft.text });
         if (draft.sendToAgent && made && made.id) handoff = await sendToAgent(slug, made.id, draft.recipient);
+        // One of the commenter's own agents: it answers in the thread.
+        else if (draft.askAgent && made && made.id) handoff = await askOwnAgent(slug, made.id, draft.askAgent);
       }
       switch (message.type) {
         case 'tdoc-feedback-load':
@@ -998,6 +1002,7 @@ ${uiCss}
           emit('comment', { id: made && made.id, text: message.text, parentId: message.parentId });
           const target = message.handoffCommentId || (made && made.id);
           if (message.sendToAgent && target) handoff = await sendToAgent(slug, target, message.recipient);
+          else if (message.askAgent && made && made.id) handoff = await askOwnAgent(slug, made.id, message.askAgent);
           break;
         }
         case 'tdoc-feedback-resolve':
@@ -1272,9 +1277,19 @@ ${uiCss}
     // button silently not being there. A team member gets it once the team
     // has an agent to send to; anyone else never does.
     const showSend = Boolean(slug && (owner || (teamMember && session?.notify && canSendToAgent)));
-    const agentChoices = useMemo(() => composerAgents({ canSendToAgent, notifyTargets: agent }), [canSendToAgent, agent]);
+    // Anyone else's own agents, answer only (my-agent.js): only where the
+    // server allows this token to reach them, the bookmarklet on tdoc's own
+    // pages (own_agent). No tdoc AI or team agent: they have no way in here.
+    const myAgent = useMyAgent(slug, Boolean(slug && surface?.ok && !owner && session?.own_agent));
+    const agentChoices = useMemo(() => composerAgents({
+      canSendToAgent,
+      notifyTargets: agent,
+      mine: !owner && session?.own_agent && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: [], tdoc_ai: false } : null,
+    }), [canSendToAgent, agent, owner, session?.own_agent, myAgent.state]);
+    // The default is an agent that may edit (the owner's, the team's); an
+    // own agent is picked from the @ list, as on a doc page.
     const agentMentions = useMemo(() => ({
-      choices: agentChoices, preselected: agentChoices[0] || null,
+      choices: agentChoices, preselected: agentChoices.find((t) => t.can_edit) || null,
       ai: null, privateAskSupported: false,
     }), [agentChoices]);
 
@@ -1606,7 +1621,7 @@ ${uiCss}
       productLinkOrigin: location.origin,
       canSendToAgent,
       agentSetupHref: agent && agent.reason === 'no_agent_bound' ? `${base}/me/agents?tab=send` : null,
-      onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, handoffCommentId: opts.handoffCommentId }),
+      onReply: (parentId, text, opts = {}) => mutate({ type: 'tdoc-feedback-reply', text, parentId, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: ownAgentPick(opts), handoffCommentId: opts.handoffCommentId }),
       onReact: (id, emoji) => mutate({ type: 'tdoc-feedback-react', id, emoji }),
       onDelete: (id) => mutate({ type: 'tdoc-feedback-delete', id }, false),
       onResolve: (id, resolved) => mutate({ type: 'tdoc-feedback-resolve', id, resolved }),
@@ -1695,7 +1710,7 @@ ${uiCss}
 
     return (
       <AgentMentionContext.Provider value={agentMentions}>
-      <AgentButtonsContext.Provider value={!canSendToAgent}>
+      <AgentButtonsContext.Provider value={!canSendToAgent && !agentChoices.length}>
         {(picking || reanchorId) && !selected ? (
           <div className="tdoc-fb-banner" role="status">
             {bannerText}
@@ -1742,7 +1757,7 @@ ${uiCss}
             onClose={() => { writeDraft(null); setSelected(null); setAreaSel(null); }}
             onSubmit={async (text, opts = {}) => {
               const anchor = areaBox ? regionContext(areaBox, selected) : contextFor(selected);
-              const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient });
+              const result = await call({ type: 'tdoc-feedback-submit', text, anchor, sendToAgent: Boolean(opts.sendToAgent), recipient: opts.recipient, askAgent: ownAgentPick(opts) });
               if (apply(result)) { setSelected(null); setAreaSel(null); setPicking(false); }
             }}
           />
@@ -1800,7 +1815,7 @@ ${uiCss}
           </section>
         ) : null}
 
-        {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}`} role="status" style={{ right: 18 + rightInset }}>{toast.text}</div> : null}
+        {toast ? <div className={`tdoc-fb-toast${toast.bad ? ' bad' : ''}`} role="status" style={{ right: innerWidth - rightInset >= 240 ? 18 + rightInset : 18 }}>{toast.text}</div> : null}
 
         <Dock
           session={session || surface?.config}

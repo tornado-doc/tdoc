@@ -9,7 +9,8 @@ import { ShareDialog } from './document/document-dialogs.jsx';
 import { OwnerAccessDialog } from './document/owner-access-dialog.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
-import { orderedAgentChoices } from './document/agent-choices.js';
+import { composerAgents } from './document/ai-answerer.js';
+import { askOwnAgent, ownAgentPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from './document/handoff-state.js';
 import {
@@ -55,11 +56,22 @@ export function FeedbackSpace({ boot }) {
   const notify = useNotifyTargets(slug, Boolean(isOwner));
   const canSendToAgent = Boolean(isOwner && notify.ready && notify.available && notify.reason !== 'no_agent_bound'
     && (notify.default || (notify.candidates || []).length || notify.fallback));
-  // Replies here use the same @ picker: the owner's agents, as in the document.
-  const agentMentions = useMemo(() => (canSendToAgent
-    ? { choices: orderedAgentChoices(notify), preselected: notify.default }
-    : { choices: [], preselected: null }
-  ), [canSendToAgent, notify.default, notify.candidates, notify.fallback]);
+  // Anyone else who joined: their OWN agents, which answer in the thread
+  // and never edit (my-agent.js), as on a doc page.
+  const myAgent = useMyAgent(slug, Boolean(identity && joined && !isOwner));
+  // Replies here use the same @ picker as the document: the owner's agents
+  // (may edit), else the replier's own (answer only). No tdoc AI or team
+  // agent here, and no private answer: nothing on this page shows one.
+  const agentChoices = useMemo(() => composerAgents({
+    canSendToAgent,
+    notifyTargets: notify,
+    mine: !isOwner && myAgent.state ? { agents: myAgent.state.agents || [], team_agents: [], tdoc_ai: false } : null,
+  }), [canSendToAgent, notify.default, notify.candidates, notify.fallback, isOwner, myAgent.state]);
+  const agentMentions = useMemo(() => ({
+    choices: agentChoices,
+    preselected: canSendToAgent ? agentChoices.find((t) => t.can_edit) || null : null,
+    privateAskSupported: false,
+  }), [agentChoices, canSendToAgent]);
 
   const refresh = useCallback(async () => {
     try {
@@ -72,6 +84,10 @@ export function FeedbackSpace({ boot }) {
   }, [slug, version]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  // An answer from the replier's agent arrives as a reply: read the list
+  // again when one of their questions here is answered.
+  const answered = (myAgent.state?.asks || []).filter((a) => a.answer).length;
+  useEffect(() => { if (answered) refresh(); }, [answered]);
   useEffect(() => {
     if (!identity) return;
     listMentionableUsers(slug).then((b) => setMentionable(Array.isArray(b && b.users) ? b.users : [])).catch(() => {});
@@ -221,6 +237,14 @@ export function FeedbackSpace({ boot }) {
                     if (ok && opts.sendToAgent && canSendToAgent) {
                       const target = opts.handoffCommentId || (made && made.id);
                       if (target) await act(() => sendOneCommentToAgent(slug, target, opts.recipient));
+                    }
+                    // Their own agent answers the reply they just wrote (only
+                    // a comment of theirs may ask it).
+                    const own = ownAgentPick(opts);
+                    if (ok && own && made && made.id) {
+                      const sent = await askOwnAgent(slug, made.id, own);
+                      if (sent.ask) myAgent.addAsk(sent.ask);
+                      setNotice(sent.message);
                     }
                     return ok;
                   }}

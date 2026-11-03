@@ -9,7 +9,8 @@
 // pending-question helpers below still serve the setup page's way back.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getMyAgent } from './api.js';
+import { getMyAgent, sendToMyAgent } from './api.js';
+import { agentDisplayName } from './agent-choices.js';
 import { readStored, removeStored, writeStored } from '../safe-storage.js';
 
 export const MY_AGENT_LABELS = {
@@ -119,4 +120,31 @@ export function useMyAgent(slug, enabled) {
   }, []);
 
   return { state, tier: state?.tier || null, refresh, addAsk };
+}
+
+// What a comment box picked that only the commenter's own agent can do: an
+// agent of theirs that may not edit here (can_edit false), so it answers in
+// the thread. null for tdoc AI, a team agent, an editor, or nothing picked.
+export function ownAgentPick(opts) {
+  const t = opts && opts.target;
+  return t && opts.askOnly && !opts.onlyMe && !t.tdoc_ai && !t.team_agent && !t.can_edit ? t : null;
+}
+
+// Hand a comment its writer just posted to one of their own agents
+// (POST /api/docs/<slug>/my-agent): the answer comes back as a reply in
+// that thread. The feedback space page and the feedback widget, where the
+// doc page's hand-off is not on offer. { ok, message, ask }.
+export async function askOwnAgent(slug, commentId, target) {
+  const name = agentDisplayName(target) || 'your agent';
+  try {
+    const body = await sendToMyAgent(slug, { commentId, recipient: target });
+    const failed = body?.ask?.delivery?.status === 'failed';
+    return { ok: !failed, ask: body?.ask || null, message: failed ? `Posted — not delivered to ${name}` : `Asked ${name}; it answers in the thread` };
+  } catch (error) {
+    return {
+      ok: false,
+      ask: null,
+      message: error.status === 409 ? `Posted — ${name} cannot be reached right now` : `Posted — could not ask ${name} (${error.message})`,
+    };
+  }
 }
