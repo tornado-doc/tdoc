@@ -14,7 +14,7 @@ const APP_MARKS = { claude: ClaudeMark, chatgpt: OpenAIMark, cursor: CursorMark,
 // the address the browser goes back to, because a registered name is the
 // app's own claim and the return address is what actually receives access.
 //
-// Allow and Cancel post to /api/oauth/approve with the request id and the
+// Allow posts to /api/oauth/approve with the request id and the
 // CSRF value the server rendered into this page for this session; the answer
 // is where to send the browser next (the app's redirect URI, with a code or
 // access_denied).
@@ -123,14 +123,7 @@ export function OAuthConsentPage({ boot }) {
                 </div>
               ) : null}
               {choosing && !picked.length ? <p className="tdoc-activate-hint">Tick at least one workspace.</p> : null}
-              {/* One button: Allow. Cancel is a word in the line under it, still
-                  sent to the app as access_denied so it stops waiting. The
-                  name is unchecked, so the address it names is what to trust. */}
               <AppButton variant="primary" disabled={busy || (choosing && !picked.length)} onClick={() => decide('allow')}>Allow</AppButton>
-              <p className="tdoc-activate-hint tdoc-oauth-return">
-                Didn't start this?{' '}
-                <button type="button" className="tdoc-consent-cancel" disabled={busy} onClick={() => decide('deny')}>Cancel</button>
-              </p>
             </>
           )}
           {client.redirect_host ? <p className="tdoc-consent-from">Access goes to <code>{client.redirect_host}</code></p> : null}
