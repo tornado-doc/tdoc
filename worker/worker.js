@@ -18270,10 +18270,11 @@ async function handleOAuthAuthorize(env, req, url) {
         // A metadata-document client is named by a URL its owner controls;
         // a dynamically registered one names itself.
         verified_host: client.cimd ? new URL(client.client_id).host : '',
-        // A logo only where the browser itself will hand the code to that
-        // product's own site: anyone can register as "Claude", but a code
-        // sent to https://claude.ai goes to Claude and to no one else.
-        app: consentAppMark(redirectUri),
+        // A logo where the browser itself will hand the code to that
+        // product's own site (anyone can register as "Claude", but a code
+        // sent to https://claude.ai goes to Claude and to no one else), or
+        // by name for a command-line app on this computer.
+        app: consentAppMark(redirectUri, client.client_name),
       },
       workspaces,
       returnTo: sanitizeReturn(url.pathname + url.search),
@@ -18813,9 +18814,17 @@ const MCP_VERIFIED_APPS = [
 ];
 // The consent page's logo: by the https host the code is sent back to.
 const CONSENT_APP_MARKS = new Set(['claude', 'chatgpt', 'cursor', 'copilot', 'gemini']);
-function consentAppMark(redirectUri) {
+// Command-line apps sign in through a port on the person's own computer, so
+// their name is the only thing to go on; the card still shows that the
+// access goes to that local address.
+const CONSENT_LOCAL_MARKS = [[/gemini/i, 'gemini'], [/claude/i, 'claude'], [/codex|openai/i, 'chatgpt'], [/cursor/i, 'cursor'], [/copilot|vs ?code/i, 'copilot']];
+function consentAppMark(redirectUri, clientName = '') {
   let u;
   try { u = new URL(redirectUri); } catch { return ''; }
+  if (u.protocol === 'http:' && /^(127\.0\.0\.1|localhost|\[::1\])$/i.test(u.hostname)) {
+    for (const [re, mark] of CONSENT_LOCAL_MARKS) if (re.test(String(clientName))) return mark;
+    return '';
+  }
   if (u.protocol !== 'https:') return '';
   const host = u.hostname.toLowerCase();
   for (const [re, login] of MCP_VERIFIED_APPS) if (re.test(host)) return CONSENT_APP_MARKS.has(login) ? login : '';
