@@ -66,10 +66,30 @@
     });
     return parts;
   }
+  // Whether an edit is a rewrite, to show as one removed block then one added
+  // block rather than word by word (Ask/Edit v2): the words kept are too few,
+  // or too scattered among the changes, to read in place. Measured on visible
+  // characters, so CJK and spaced text count alike. Short edits stay in place:
+  // a phrase or two reads fine however little of it survives.
+  var REWRITE_MIN_CHARS = 30;
+  function isRewrite(parts) {
+    var visible = function (text) { return text.replace(/\s+/g, '').length; };
+    var kept = 0, before = 0, after = 0, runs = 0;
+    parts.forEach(function (p) {
+      before += visible(p.before); after += visible(p.after);
+      if (p.kind === 'equal') kept += visible(p.before);
+      // A run of nothing but spaces changed is not a change anyone reads.
+      else if (visible(p.before) || visible(p.after)) runs++;
+    });
+    var longest = Math.max(before, after);
+    if (longest < REWRITE_MIN_CHARS) return false;
+    var share = kept / longest;
+    return share < 0.5 || (runs >= 4 && share < 0.75);
+  }
   // How a changed word reads wherever the reader shows a change in the doc
   // itself: the version compare (frame-compare.js) and the homepage demo's
   // scripted Edit (frame-probe.js). One rule, so both mark it the same way.
   var markCss = '.tdoc-diff-ins{text-decoration:none;background:rgba(37,168,91,.16)!important;padding:1px 2px}'
     + '.tdoc-diff-del{text-decoration:line-through;background:rgba(219,58,75,.13)!important;padding:1px 2px;margin-inline-end:.15em}';
-  return { align: align, textParts: textParts, markCss: markCss };
+  return { align: align, textParts: textParts, isRewrite: isRewrite, markCss: markCss };
 });

@@ -559,8 +559,8 @@
   .tdoc-replies-toggle.open .chev { transform: rotate(90deg); }
   .tdoc-replies { display: none; flex-direction: column; gap: 10px; margin-top: 10px; }
   .tdoc-replies.open { display: flex; }
-  .tdoc-reply { padding-left: 12px; border-left: 2px solid #e5e5e5; }
-  .tdoc-reply-kids { margin: 8px 0 0 10px; display: flex; flex-direction: column; gap: 10px; }
+  /* A thread is one flat list, flush with the top comment (Google Docs). */
+  .tdoc-replies > .tdoc-reply + .tdoc-reply { padding-top: 10px; border-top: 1px dashed #eee; }
   .tdoc-reply .tdoc-reply-toggle,
   .tdoc-reply .tdoc-edit-toggle { cursor: pointer; color: var(--td-accent); font-size: 11px; }
   .tdoc-reply .tdoc-reply-toggle:hover,
@@ -585,11 +585,6 @@
   /* Past the indent cap a thread continues at one level (#365). The rail stays
      — these are still replies inside the thread — but the width stops being
      spent, and each one says who it answers in place of the position it lost. */
-  .tdoc-thread-more { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; cursor: pointer; color: var(--td-accent); font-size: 11px; }
-  .tdoc-thread-more:hover { text-decoration: underline; }
-  .tdoc-thread-more .chev { transition: transform .12s; }
-  .tdoc-thread-more.open .chev { transform: rotate(90deg); }
-  .tdoc-thread-tail { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
   .tdoc-reply .author { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
   .tdoc-reply .author .login { font-weight: 600; font-size: 12px; color: #111; }
@@ -1196,7 +1191,7 @@
   .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }
   .tdoc-ask-turn { display: grid; min-width: 0; gap: 8px; }
   .tdoc-margin-comment.tdoc-ask-question { position: static; width: auto; max-width: none; padding: 12px; z-index: auto; box-shadow: none; }
-  .tdoc-ask-answer.tdoc-reply { padding: 2px 0 2px 12px; }
+  .tdoc-ask-answer.tdoc-reply { padding: 2px 0 2px 12px; border-left: 2px solid #e5e5e5; }
   /* Private turns read as a conversation. Posted turns keep the same comment
      and reply shape they have in the document margin. */
   .tdoc-ask-turn:not(.is-public) .tdoc-ask-question { justify-self: end; max-width: 88%; border-radius: 12px 12px 3px 12px; background: var(--td-surface-2, #f7f7f5); }

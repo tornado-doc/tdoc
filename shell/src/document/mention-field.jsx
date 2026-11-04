@@ -50,6 +50,9 @@ export function MentionField({
   rootClassName = '',
   // The textarea, for a caller that inserts at the caret (the @agent button).
   fieldRef = null,
+  // A tag the box started with: picking another agent takes its place, since
+  // the first agent named is the one a comment goes to.
+  replacesTag = '',
 }) {
   const ownRef = useRef(null);
   const mirrorRef = useRef(null);
@@ -86,7 +89,8 @@ export function MentionField({
   // Typing an address is already a complete tag — asking GitHub's user search
   // about "dana@corp.com" offers strangers and leaks the address upstream.
   const remote = useGithubUserSearch(query ? query.query : '', {
-    enabled: Boolean(query) && localMatches.length === 0 && !query.query.includes('@'),
+    enabled: Boolean(query) && localMatches.length === 0 && !query.query.includes('@')
+      && !(agentsOnOffer.quietPeopleSearch && agentMatches.length > 0),
   });
   const matches = useMemo(() => {
     const seen = new Set(localMatches.map((person) => String(person.login).toLowerCase()));
@@ -157,8 +161,10 @@ export function MentionField({
     };
   }, [open, rows.length]);
 
+  // Keeps the same object when nothing moved: this runs on every key up too.
   const syncQuery = (element) => {
-    setQuery(mentionQueryAt(element.value, element.selectionStart));
+    const next = mentionQueryAt(element.value, element.selectionStart);
+    setQuery((cur) => (cur && next && cur.query === next.query && cur.start === next.start ? cur : next));
   };
 
   const pick = (person) => {
@@ -166,9 +172,10 @@ export function MentionField({
     if (person.agent) {
       // "@\u2060claude": reads as the agent's name, never parsed as a login.
       const next = insertMention(value, query, `${AGENT_TAG_JOINER}${agentMentionName(person.agent, agentsOnOffer.choices)}`);
-      caretAfterInsert.current = next.caret;
+      const drop = replacesTag && next.text.startsWith(replacesTag) ? replacesTag.length : 0;
+      caretAfterInsert.current = next.caret - drop;
       setQuery(null);
-      onChange(next.text);
+      onChange(next.text.slice(drop));
       return;
     }
     // An email participant's key is "email:<addr>"; the text form of the tag
@@ -342,24 +349,31 @@ const MIRRORED = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeig
 function AgentPillMirror({ boxRef, mirrorRef, value, pill, choices, disabledChoices, guestAction, ai, onPick }) {
   const [box, setBox] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const measure = useRef(null);
+  measure.current = () => {
+    const el = boxRef.current;
+    if (!el) return;
+    const cs = window.getComputedStyle(el);
+    const style = {};
+    for (const k of MIRRORED) style[k] = cs[k];
+    // A vertical scrollbar narrows the textarea's text column.
+    const bars = el.offsetWidth - el.clientWidth - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
+    if (bars > 0) style.paddingRight = `${parseFloat(cs.paddingRight) + bars}px`;
+    const next = { ...style, top: el.offsetTop, left: el.offsetLeft, width: el.offsetWidth, height: el.offsetHeight };
+    // The same box is not another render: a key usually changes nothing here.
+    setBox((cur) => (cur && Object.keys(next).every((k) => cur[k] === next[k]) ? cur : next));
+    if (mirrorRef.current) mirrorRef.current.scrollTop = el.scrollTop;
+  };
+  useLayoutEffect(() => { measure.current(); }, [value]);
+  // One observer for the field's life, not a new one (and its first callback,
+  // another measure) on every key.
   useLayoutEffect(() => {
     const el = boxRef.current;
-    if (!el) return undefined;
-    const measure = () => {
-      const cs = window.getComputedStyle(el);
-      const style = {};
-      for (const k of MIRRORED) style[k] = cs[k];
-      // A vertical scrollbar narrows the textarea's text column.
-      const bars = el.offsetWidth - el.clientWidth - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
-      if (bars > 0) style.paddingRight = `${parseFloat(cs.paddingRight) + bars}px`;
-      setBox({ ...style, top: el.offsetTop, left: el.offsetLeft, width: el.offsetWidth, height: el.offsetHeight });
-      if (mirrorRef.current) mirrorRef.current.scrollTop = el.scrollTop;
-    };
-    measure();
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-    ro?.observe(el);
-    return () => ro?.disconnect();
-  }, [value]);
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => measure.current());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [boxRef]);
   const tag = value.slice(pill.start, pill.end);
   const name = tag.slice(1);
   // The pill reads the short name; the full one is its tooltip.

@@ -280,6 +280,38 @@ export function matchAgentChoices(choices, query, { limit = 2, labelOf = null } 
 // The agent a posted text hands itself to: the first agent tag in it that
 // the picker inserted, or null. One handoff addresses one agent, so a second
 // tag does not fork the comment to a second agent.
+// The row in `choices` for the agent whose reply is the thread's latest: who a
+// reply box starts tagged with. Only a row the viewer already has, so this can
+// never name an agent they could not pick after @, and nothing when the latest
+// reply is a person's, when it is unclear which row it was, or for tdoc AI (a
+// tag on it makes the reply a private question, and spends a free answer).
+// `parentId` is what the box answers: the thread, or that latest reply; a box
+// opened on anyone else's reply is talking to them.
+// A reply says the route it came by (worker: provider, cli, location, handle);
+// one that does not, an older client's, goes by who the thread was handed to.
+export function agentForThread(thread, choices, parentId = null) {
+  const replies = (thread && thread.replies) || [];
+  const latest = replies.filter((r) => r && !r.deleted).reduce((a, b) => (a && Date.parse(a.created) > Date.parse(b.created) ? a : b), null);
+  const who = latest && latest.author;
+  if (!who || who.kind !== 'agent' || who.login === 'tdoc-ai') return null;
+  if (parentId && parentId !== thread.id && parentId !== latest.id) return null;
+  // Same name, same computer name, somebody else's: not this viewer's agent.
+  // The key where both have one: a display name is not unique.
+  const owned = (t) => Boolean(who.owner && t.owner) && (who.owner.key && t.owner.key
+    ? who.owner.key === t.owner.key : who.owner.display === t.owner.display);
+  const list = (Array.isArray(choices) ? choices : []).filter((t) => t && !t.tdoc_ai && owned(t));
+  const handle = String(who.handle || '').replace(/^@/, '').toLowerCase();
+  const rows = who.team_agent && who.team_agent.id
+    ? list.filter((t) => t.team_agent && t.team_agent.id === who.team_agent.id)
+    : who.provider === 'local'
+      ? list.filter((t) => !t.team_agent && t.provider === 'local' && agentCli(t) === agentCli(who) && String(t.device || t.server_id) === String(who.location || ''))
+      : who.provider
+        ? list.filter((t) => !t.team_agent && t.provider === who.provider && String(t.agent_name || '').replace(/^@/, '').toLowerCase() === handle
+          && (who.provider !== 'raft' || String(t.server_slug || '') === String(who.location || '')))
+        : list.filter((t) => sameTarget(t, thread.handoff_to));
+  return rows.length === 1 ? rows[0] : null;
+}
+
 export function taggedAgent(text, choices) {
   const span = taggedAgentSpan(text, choices);
   return span ? span.target : null;

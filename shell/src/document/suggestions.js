@@ -81,12 +81,14 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
   }), [showAll]);
 
   useEffect(() => {
-    // Keep the review bar on a suggestion that is still there.
+    // Keep the review bar on a suggestion that is still there, or one the
+    // frame has yet to report on; one it could not show gives way.
     if (activeKey && ordered.some((p) => p.key === activeKey)) return;
+    if (activeKey && pending.some((p) => p.key === activeKey) && !shown[activeKey]) return;
     if (ordered.length) focus(ordered[0].key, false);
     else setActiveKey(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ordered.map((p) => p.key).join('|')]);
+  }, [ordered.map((p) => p.key).join('|'), activeKey, shown]);
 
   const step = (delta) => {
     if (!ordered.length) return;
@@ -163,34 +165,51 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
 
   // A person's own agent was handed the request (reply_as 'suggestions'):
   // the status shows on the passage until its propose_edits arrive. Polled,
-  // as Agent activity is; given up after ten minutes.
+  // as Agent activity is; given up after ten minutes. `settled` says the
+  // agent has spoken or the delivery failed: an agent that only answered is
+  // not still working, so the status goes, and the quiet poll goes on in case
+  // its edits follow its reply. A second handoff adds to the wait.
   const waiting = useRef(null);
-  const awaitAgent = ({ commentId = null, commentIds = null, label, passage = null }) => {
-    const ids = commentIds || (commentId ? [commentId] : []);
-    const known = new Set(sets.map((x) => x.id));
-    if (waiting.current) clearInterval(waiting.current.timer);
+  const awaitAgent = ({ commentId = null, commentIds = null, label, passage = null, settled = null }) => {
+    const prior = waiting.current;
+    const ids = [...new Set([...(prior?.ids || []), ...(commentIds || (commentId ? [commentId] : []))])];
+    const known = prior?.known || new Set(sets.map((x) => x.id));
+    const checks = [...(prior?.checks || []), ...(settled ? [settled] : [])];
+    if (prior) clearInterval(prior.timer);
     setBusy({ label, text: passage, commentIds: ids });
     send({ type: 'tdoc:suggestBusy', text: passage, label });
     const started = Date.now();
-    const stop = () => {
-      if (waiting.current) clearInterval(waiting.current.timer);
-      waiting.current = null;
+    const quiet = () => {
       setBusy(null);
       send({ type: 'tdoc:suggestBusy', text: null, label: '' });
     };
+    const stop = () => {
+      if (waiting.current) clearInterval(waiting.current.timer);
+      waiting.current = null;
+      quiet();
+    };
+    let spoke = false;
     const timer = setInterval(async () => {
       if (Date.now() - started > 10 * 60 * 1000) { stop(); return; }
       let body = null;
       try { body = await listSuggestions(slug); } catch { return; }
       const list = Array.isArray(body?.suggestions) ? body.suggestions : [];
-      const fresh = list.filter((x) => !known.has(x.id) && (!ids.length || (x.comment_ids || []).some((c) => ids.includes(c))));
-      if (!fresh.length) return;
+      // Edits this person's own agent sent since, naming no comment, still
+      // belong to this wait: nothing else would show them. Somebody else's
+      // are not the answer being waited for. (A minute's grace: the server's clock.)
+      const unnamed = (x) => !(x.comment_ids || []).length && x.mine && Date.parse(x.created) >= started - 60000;
+      const fresh = list.filter((x) => !known.has(x.id) && (!ids.length || unnamed(x) || (x.comment_ids || []).some((c) => ids.includes(c))));
+      if (!fresh.length) {
+        if (!spoke && checks.length && checks.every((check) => check())) { spoke = true; quiet(); }
+        return;
+      }
       stop();
       setSets(list);
+      onToast?.('Suggestions are ready to review.');
       const first = fresh[0].edits.find((e) => e.state === 'pending');
       if (first) setTimeout(() => focus(suggestionKey(fresh[0], first)), 120);
     }, 4000);
-    waiting.current = { timer, stop };
+    waiting.current = { timer, stop, ids, known, checks };
   };
   useEffect(() => () => { if (waiting.current) clearInterval(waiting.current.timer); }, []);
 
@@ -213,8 +232,10 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     focus,
     next: () => step(1),
     prev: () => step(-1),
-    accept: (key) => decide([key || activeKey].filter(Boolean), 'accept'),
-    reject: (key) => decide([key || activeKey].filter(Boolean), 'reject'),
+    // The one on screen (`active`, from what the frame could show), never a
+    // focus that outran the frame's report: nobody accepts what they did not see.
+    accept: (key) => decide([key || ordered.find((p) => p.key === activeKey)?.key].filter(Boolean), 'accept'),
+    reject: (key) => decide([key || ordered.find((p) => p.key === activeKey)?.key].filter(Boolean), 'reject'),
     acceptAll: () => decide(ordered.map((p) => p.key), 'accept'),
     rejectAll: () => decide(pending.map((p) => p.key), 'reject'),
     review: (commentId) => {

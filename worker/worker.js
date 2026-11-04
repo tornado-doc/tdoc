@@ -16612,7 +16612,7 @@ async function putHandoff(env, slug, record) {
 // surface we do not control should not become a copy of the document.
 // What an agent handed a reply_as "suggestions" request is told to do, in
 // the payload's instruction (every provider shows it) and as reply_as.
-const SUGGEST_REPLY_LINE = 'Reply with suggestions, not a new version: send your edits with the propose_edits MCP tool or tdoc-propose (exact find/replace on the doc\'s visible text, with comment_id). Do not publish; the person accepts or rejects each edit in the doc. A question gets an ordinary reply.';
+const SUGGEST_REPLY_LINE = 'Reply with suggestions, not a new version: send your edits with the propose_edits MCP tool or tdoc-propose (exact find/replace on the doc\'s visible text, with comment_id). Do not publish; the person accepts or rejects each edit in the doc. A question gets an ordinary reply. If you cannot send suggestions (no propose_edits or tdoc-propose, or it refuses you), say so in a reply on the comment and do not publish.';
 function handoffEvent({ slug, docTitle, handoffId, commentIds, instruction, publicHost, replyAs = null }) {
   const n = commentIds.length;
   return {
@@ -18544,6 +18544,7 @@ function suggestionView(set, mine = false) {
   }
   return {
     id: set.id, base_version: set.base_version, created: set.created, instruction: mine ? (set.instruction || '') : '',
+    ...(mine ? { mine: true } : {}),
     summary: set.summary || '', agent, scope: set.scope || { kind: 'doc' },
     comment_ids: set.comment_ids || [], by: set.by_display || '',
     edits: set.edits.map((e) => ({ id: e.id, find: e.find, replace: e.replace, state: e.state, ...(e.comment_id ? { comment_id: e.comment_id } : {}), ...(e.version ? { version: e.version } : {}) })),
@@ -27550,7 +27551,7 @@ const tdocHandlers = {
         && offered.some((t) => sameNotifyTarget(t, asked))) {
         await touchDocAgent(env, slug, target);
       }
-      return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(skipped.length ? { skipped } : {}) });
+      return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(replyAs ? { reply_as: replyAs } : {}), ...(skipped.length ? { skipped } : {}) });
     }
 
     if (p === '/api/notify/handoff/resend' && method === 'POST') {

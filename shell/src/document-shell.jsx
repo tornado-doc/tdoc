@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { deliveryErrorText, resendResultText } from './document/notify-handoff.jsx';
+import { handoffSurfaceState } from './document/handoff-state.js';
 import { TopBar } from './top-bar.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
 import {
@@ -948,7 +949,7 @@ export function DocumentShell({ boot, config }) {
     if (target && opts.askOnly) { await askOn(value.id, text, selection, target); return; }
     // To edit: the agent named after @, or (⌘⇧Enter) the default one.
     const editor = target || (opts.sendToAgent && canSendToAgent ? opts.recipient || defaultEditor : null);
-    if (editor && canSendToAgent) await editOn(value.id, editor);
+    if (editor && canSendToAgent) await editOn(value.id, editor, selection?.text || null);
   };
 
   // tdoc AI: the server's free answers, where it has a model, on a
@@ -960,9 +961,36 @@ export function DocumentShell({ boot, config }) {
   const recipientFor = (target) => (target.tdoc_ai ? { tdoc_ai: true } : target);
   // Hand a posted comment to an agent to EDIT the doc (Ask only off). The
   // server decides whether this agent may (agentEditPolicy).
-  const editOn = async (commentId, target) => {
+  const editOn = async (commentId, target, passage = null) => {
     setSendToAgentBusy(true);
     try {
+      // Ask/Edit v2: its edits come back as suggestions in the doc, not as a
+      // new version. Everyone else keeps the handoff below, unchanged.
+      if (handsBackSuggestions(target)) {
+        // The stock note: the payload keeps out the comment's words
+        // (handoffEvent's rule); the agent reads the thread.
+        const sent = await postNotifyHandoff({ slug: config.slug, comment_ids: [commentId], instruction: 'address this comment', recipient: target, reply_as: 'suggestions' });
+        const name = agentDisplayName(target) || readableHandle(target) || 'agent';
+        if (sent?.delivery?.status === 'failed') {
+          showToast(`Sent — not delivered${sent.delivery.error ? `: ${deliveryErrorText(sent.delivery.error)}` : ''}`, true);
+        } else if (sent?.reason === 'agent_has_last_word') {
+          showToast('Nothing sent: an agent already replied to this comment.');
+        } else if (sent?.reply_as !== 'suggestions') {
+          // The server dropped it (dev mode went off in another tab): a plain handoff.
+          showToast(`Sent to ${name}`);
+        } else {
+          suggestions.awaitAgent({
+            commentId,
+            passage,
+            label: target.provider === 'local' ? `${name} is working on your computer…` : `${name} is working on it…`,
+            settled: () => ['replied', 'failed'].includes(handoffSurfaceState(comments.latest.current.find((c) => c.id === commentId))),
+          });
+          showToast(`Sent to ${name}. Its edits will show here as suggestions.`);
+        }
+        // Not awaited: it has been sent, and a failed read must not say otherwise.
+        comments.refresh().catch(() => {});
+        return;
+      }
       const body = await agentApi.handOff(config.slug, { ask_only: false, comment_id: commentId, recipient: target });
       const failed = body?.delivery?.status === 'failed';
       showToast(failed
@@ -1077,15 +1105,18 @@ export function DocumentShell({ boot, config }) {
     if (!ok) return false;
     markCommented();
     reportMentions(value);
+    // The reply is posted, so its box is done: the sends below report on their
+    // own (a toast, the thread). Waiting for them held the box on "Posting…"
+    // through the whole delivery, three requests to Raft.
     // An agent named in a reply that may only answer: under this reply.
     if (opts.target && opts.askOnly && value?.id) {
-      await askOn(value.id, text, null, opts.target);
+      askOn(value.id, text, null, opts.target);
       return true;
     }
     // @agent on a reply re-hands the thread root (or the new reply if no root).
     if (opts.sendToAgent && canSendToAgent) {
       const handoffId = opts.handoffCommentId || value?.id;
-      if (handoffId) await editOn(handoffId, opts.recipient || defaultEditor);
+      if (handoffId) editOn(handoffId, opts.recipient || defaultEditor);
     }
     return true;
   };
@@ -1135,6 +1166,12 @@ export function DocumentShell({ boot, config }) {
   const notifyEnabled = notifyQuery && (!config.teamManage || hasNotifyTargets);
   // The demo's Claude may "edit": its handoff runs the real status line.
   const canSendToAgent = Boolean(notifyEnabled && hasNotifyTargets) || demoAgents;
+  // Who a comment's @agent can ask for suggestions (Ask/Edit v2). Not a team
+  // agent: propose_edits refuses it (askEditV2Decide), so it keeps the plain
+  // handoff. Not a local CLI other than claude: the daemon refuses to run a
+  // suggestions handoff on one, since only claude can be kept from publishing.
+  const handsBackSuggestions = (target) => Boolean(suggestOn && canSendToAgent && target && !target.tdoc_ai && !target.team_agent
+    && !(target.provider === 'local' && target.cli !== 'claude'));
   // Resend / send elsewhere / the Send to agent dialog are real-only.
   const canNotify = Boolean(notifyEnabled && hasNotifyTargets) && !demoAgents;
   const defaultEditor = demoAgents ? DEMO_AGENT_CHOICES[0] : notifyTargets.default;
@@ -1242,11 +1279,13 @@ export function DocumentShell({ boot, config }) {
         markCommented();
         const body = await postNotifyHandoff({ slug: config.slug, comment_ids: [comment.id], instruction: question, recipient: choice.target, reply_as: 'suggestions' });
         const failed = body?.delivery?.status === 'failed';
-        if (!failed) suggestions.awaitAgent({ commentId: comment.id, label: choice.target.provider === 'local' ? `${choice.label} is working on your computer…` : `${choice.label} is working on it…` });
+        // reply_as back: the server took it (dev mode can go off in another tab).
+        const suggesting = body?.reply_as === 'suggestions';
+        if (!failed && suggesting) suggestions.awaitAgent({ commentId: comment.id, label: choice.target.provider === 'local' ? `${choice.label} is working on your computer…` : `${choice.label} is working on it…` });
         setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, publicCommentId: comment.id,
           status: failed ? 'failed' : 'answered',
           error: failed ? `Not delivered to ${choice.label}.` : '',
-          answer: `Sent to ${choice.label} ✓ Its edits will show in the doc as suggestions to accept or reject; any answer arrives as a reply to your comment.` } : turn));
+          answer: suggesting ? `Sent to ${choice.label} ✓ Its edits will show in the doc as suggestions to accept or reject; any answer arrives as a reply to your comment.` : `Sent to ${choice.label} ✓` } : turn));
         comments.refresh();
       } catch (error) {
         setAskAiTurns((turns) => turns.map((turn) => turn.id === id ? { ...turn, status: 'failed', error: error.message || 'Could not send it.' } : turn));
@@ -1322,6 +1361,7 @@ export function DocumentShell({ boot, config }) {
     try {
       const body = await postNotifyHandoff({ slug: config.slug, comment_ids: commentIds, instruction, recipient: choice.target, reply_as: 'suggestions' });
       if (body?.delivery?.status === 'failed') { showToast(`Not delivered to ${choice.label}`, true); return; }
+      if (body?.reply_as !== 'suggestions') { showToast(`Sent to ${choice.label}`); comments.refresh(); return; }
       suggestions.awaitAgent({ commentIds, label: agentWorkingLabel(choice), passage });
     } catch (error) { showToast(error.message || 'Could not send it', true); }
     comments.refresh();
@@ -1459,7 +1499,12 @@ export function DocumentShell({ boot, config }) {
     privateReply: privateAskView && privateAskView.parentId ? privateAskView : null,
     onMakePublic: () => makePublicRef.current(),
     onClosePrivate: () => setPrivateAsk(null),
-  }), [agentChoices, defaultEditor, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
+    // Ask/Edit v2: what the hint says about the named agent, and no GitHub
+    // search while an agent already answers what was typed after @.
+    suggestsFor: suggestOn ? handsBackSuggestions : null,
+    quietPeopleSearch: suggestOn,
+    prefillReplies: suggestOn,
+  }), [suggestOn, canSendToAgent, agentChoices, defaultEditor, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);
