@@ -4,14 +4,17 @@
 //     edits come back to the review bar, and an agent that only answers does
 //     not leave the "working" status up.
 //   - a local CLI other than claude keeps the plain handoff (the daemon would
-//     refuse it), and so does everybody outside dev mode, to the byte.
+//     refuse it), and so does everybody outside dev mode, to the byte. No
+//     suggestion capability reaches anyone outside dev mode.
 //   - a reply box is done once the reply is posted, whatever the delivery takes.
 //   - a rewrite shows as one removed block then one added block; a small edit
 //     stays word by word; clearing puts the original back exactly; edits are
 //     text, never markup.
-//   - answering an agent, the reply box starts with its tag; deleted, it stays
-//     deleted; nothing for a person's reply, for an agent the viewer can't pick,
-//     or outside dev mode.
+//   - answering an agent, the reply box starts with its tag, in and out of dev
+//     mode; deleted, it stays deleted and wakes nobody; nothing for a person's
+//     reply or an agent the viewer can't pick.
+//   - the version compare marks a rewrite with the same blocks as a suggestion,
+//     for everybody.
 //   - a thread is flat: replies flush with the top comment at any depth.
 // Run with: node test/ask-edit-feedback-ui.test.js
 
@@ -89,11 +92,13 @@ async function startServer(worker, env) {
 
   const open = async (opts = {}, which = browser) => {
     const ctx = await which.newContext(opts.phone ? PHONE : { viewport: { width: 1280, height: 800 } });
-    await ctx.addCookies([{ name: 'tdoc_sid', value: sid, domain: '127.0.0.1', path: '/' }]);
+    await ctx.addCookies([{ name: 'tdoc_sid', value: opts.sid || sid, domain: '127.0.0.1', path: '/' }]);
     await ctx.route(/api\.github\.com/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' }));
     if (opts.delayHandoff) await ctx.route(/\/(hand-off|api\/notify\/handoff)(\?|$)/, async (r) => { await new Promise((f) => setTimeout(f, opts.delayHandoff)); await r.continue(); });
     if (opts.delayLists) await ctx.route(/\/api\/(notify\/targets|docs\/[^/]+\/my-agent)/, async (r) => { await new Promise((f) => setTimeout(f, opts.delayLists)); await r.continue(); });
     const page = await ctx.newPage();
+    const github = [];
+    page.on('request', (r) => { if (r.url().includes('api.github.com')) github.push(r.url()); });
     const sends = [];
     page.on('request', (r) => { if (r.method() === 'POST' && /\/hand-off$|\/api\/notify\/handoff$/.test(r.url())) sends.push({ path: new URL(r.url()).pathname, body: JSON.parse(r.postData() || '{}') }); });
     const errors = [];
@@ -101,7 +106,7 @@ async function startServer(worker, env) {
     await page.goto(`${base}/d/${SLUG}`);
     await page.frameLocator('iframe').locator('h1').waitFor({ timeout: 15000 });
     await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
-    return { ctx, page, sends, errors, frame: page.frames().find((f) => f !== page.mainFrame()) };
+    return { ctx, page, sends, errors, github, frame: page.frames().find((f) => f !== page.mainFrame()) };
   };
   // The phone: drawer, Reply on the card, @, the agent picked by a tap.
   // On a thread with no replies yet (pass `id` for one made before the page loaded).
@@ -375,15 +380,201 @@ async function startServer(worker, env) {
       await v.ctx.close();
     }));
 
-    await t('outside dev mode: no tag', () => threadOf(async (id) => {
+    // Outside dev mode: every fix above but no suggestion capability.
+    const outside = (name, fn) => t(`outside dev mode: ${name}`, async () => {
       await setDevMode(false);
-      const v = await open({ phone: true });
-      const { box } = await openReply(v.page, true, id);
-      await v.page.waitForTimeout(800);
-      assert.equal(await box.inputValue(), '');
-      await setDevMode(true);
+      try { await fn(); } finally { await setDevMode(true); }
+    });
+    const typeAfterTag = async (page, box, words) => {
+      await box.click();
+      await page.keyboard.press('End');
+      await page.keyboard.type(words);
+    };
+    for (const phone of [true, false]) await outside(`${phone ? 390 : 1280}: replying to your own agent starts with its tag; the tag alone doesn't send; a reply takes the plain handoff`, () => threadOf(async (id) => {
+      const v = await open({ phone });
+      const suggestCalls = [];
+      v.page.on('request', (r) => { if (/\/suggest/.test(r.url())) suggestCalls.push(r.url()); });
+      const { card, box } = await openReply(v.page, phone, id);
+      await card.locator('.tdoc-agent-pill').waitFor();
+      assert.match(await box.inputValue(), /Claude Code/);
+      const form = await card.locator('.tdoc-reply-form').innerText();
+      assert.match(form, /changes the doc/, 'the box says what this agent may do');
+      assert.doesNotMatch(form, /suggests/);
+      await shot(v.page, `nondev-reply-prefilled-${phone ? 390 : 1280}.png`);
+      await card.locator('.tdoc-reply-submit').last().click();
+      await v.page.waitForTimeout(300);
+      assert.equal(v.sends.length, 0, 'sent on the tag alone');
+      await typeAfterTag(v.page, box, 'shorter please');
+      await card.locator('.tdoc-reply-submit').last().click();
+      await v.page.waitForTimeout(600);
+      assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
+      assert.equal(v.sends[0].path.endsWith('/hand-off'), true);
+      assert.deepEqual(Object.keys(v.sends[0].body).sort(), ['ask_only', 'comment_id', 'recipient']);
+      assert.deepEqual(suggestCalls, []);
+      assert.equal('reply_as' in JSON.parse(await env.META.get(`handoffs:${SLUG}`))[0], false);
+      assert.deepEqual(v.errors, []);
       await v.ctx.close();
     }));
+
+    await outside('a CLI that would skip review in dev mode gets its tag too: every agent takes the plain handoff here', async () => {
+      const codex = await comment();
+      assert.equal((await api('/api/notify/handoff', { method: 'POST', cookie, body: { slug: SLUG, comment_ids: [codex], recipient: { provider: 'local', server_id: 'mac-mini', agent_sub: 'mac-mini_codex' } } })).status, 200);
+      assert.equal((await api('/api/agent/reply', { method: 'POST', token, body: { slug: SLUG, parent_id: codex, text: 'From codex', status: 'answered', agent_login: 'codex', agent_name: 'codex' } })).status, 200);
+      const v = await open({ phone: true });
+      const { card, box } = await openReply(v.page, true, codex);
+      await card.locator('.tdoc-agent-pill').waitFor();
+      assert.match(await box.inputValue(), /Codex/);
+      await v.ctx.close();
+    });
+
+    await outside('the tag deleted stays deleted, and the reply wakes nobody', () => threadOf(async (id) => {
+      const v = await open({ phone: true });
+      const { card, box } = await openReply(v.page, true, id);
+      await card.locator('.tdoc-agent-pill').waitFor();
+      await box.tap();
+      await v.page.keyboard.press('End');
+      await v.page.keyboard.press('Backspace');
+      await v.page.keyboard.press('Backspace');
+      assert.equal((await box.inputValue()).trim(), '');
+      await v.page.waitForTimeout(3000);
+      assert.equal((await box.inputValue()).trim(), '', 'the tag came back');
+      const handoffs = JSON.parse(await env.META.get(`handoffs:${SLUG}`)).length;
+      await box.tap();
+      await v.page.keyboard.type('thanks');
+      await card.locator('.tdoc-reply-submit').last().tap();
+      await v.page.waitForTimeout(600);
+      assert.equal(v.sends.length, 0, JSON.stringify(v.sends));
+      assert.equal(JSON.parse(await env.META.get(`handoffs:${SLUG}`)).length, handoffs);
+      await v.ctx.close();
+    }));
+
+    await outside('no tag when the latest reply is a person\'s, or the agent is not in this viewer\'s list', async () => {
+      const human = await agentThread({}, handed);
+      assert.equal((await api('/api/comments', { method: 'POST', cookie, body: { slug: SLUG, version: 1, text: 'Thanks', parent_id: human } })).status, 200);
+      const other = await agentThread({ agent_login: 'someone-else', agent_name: 'someone else' });
+      for (const id of [human, other]) {
+        const v = await open({ phone: true });
+        const { box } = await openReply(v.page, true, id);
+        await v.page.waitForTimeout(800);
+        assert.equal(await box.inputValue(), '');
+        await v.ctx.close();
+      }
+    });
+
+    await outside('a reader answering their own agent gets its tag; the reply asks only that agent, under the reply', async () => {
+      const readerSid = 'b'.repeat(32);
+      await env.META.put(`session:${readerSid}`, JSON.stringify({ login: 'rita', name: 'rita', email: 'rita@tdoc.test', avatar_url: '', created: new Date().toISOString() }));
+      const readerCookie = `tdoc_sid=${readerSid}`;
+      const readerToken = (await (await worker.fetch(new Request('https://tdoc.dev/api/hosted/token', { method: 'POST', headers: { cookie: readerCookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ label: 'rita' }) }), env, {})).json()).token;
+      assert.equal((await api('/api/notify/local/register', { method: 'POST', token: readerToken, body: { device: 'ritabox', clis: ['claude'] } })).status, 200);
+      const id = (await api('/api/comments', { method: 'POST', cookie: readerCookie, body: { slug: SLUG, version: 1, text: 'Why first?', anchor: { kind: 'text', text: 'Billing ships first' } } })).body.id;
+      const asked = await api(`/api/docs/${SLUG}/my-agent`, { method: 'POST', cookie: readerCookie, body: { question: 'Why first?', comment_id: id, recipient: { provider: 'local', device: 'ritabox', cli: 'claude' } } });
+      assert.equal(asked.status, 200, JSON.stringify(asked.body));
+      const answered = await api('/api/agent/ask-reply', { method: 'POST', token: readerToken, body: { slug: SLUG, ask_id: asked.body.ask.ask_id, text: 'Invoices.', agent_login: 'claude', agent_name: 'Claude' } });
+      assert.equal(answered.status, 200, JSON.stringify(answered.body));
+      const v = await open({ phone: true, sid: readerSid });
+      const { card, box } = await openReply(v.page, true, id);
+      await card.locator('.tdoc-agent-pill').waitFor({ timeout: 8000 });
+      assert.match(await card.locator('.tdoc-reply-form').innerText(), /answers in the thread/);
+      await typeAfterTag(v.page, box, 'and search?');
+      await card.locator('.tdoc-reply-submit').last().click();
+      await v.page.waitForTimeout(800);
+      assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
+      assert.equal(v.sends[0].body.ask_only, true);
+      assert.equal(v.sends[0].body.question, 'and search?');
+      assert.equal(v.sends[0].body.reply_as, undefined);
+      await v.ctx.close();
+    });
+
+    await outside('the reply box is done when the reply is posted, not when the delivery ends', () => threadOf(async (id) => {
+      const v = await open({ phone: true, delayHandoff: 1500 });
+      const { card, box } = await openReply(v.page, true, id);
+      await card.locator('.tdoc-agent-pill').waitFor();
+      await typeAfterTag(v.page, box, 'shorter please');
+      const started = Date.now();
+      await card.locator('.tdoc-reply-submit').last().tap();
+      await box.waitFor({ state: 'detached', timeout: 5000 });
+      const took = Date.now() - started;
+      assert.ok(took < 1400, `the box waited ${took}ms on a 1500ms delivery`);
+      await v.ctx.close();
+    }));
+
+    await outside('no GitHub search while an agent answers what was typed; it still runs when none does', async () => {
+      const id = await comment();
+      const v = await open({ phone: true });
+      const { box } = await openReply(v.page, true, id);
+      await box.tap();
+      await v.page.keyboard.type('@cla');
+      await v.page.locator('#tdoc-mention-menu [role=option]', { hasText: /Claude Code/ }).first().waitFor();
+      await v.page.waitForTimeout(700);
+      assert.deepEqual(v.github, []);
+      await v.page.keyboard.type('rissa');
+      await v.page.waitForTimeout(700);
+      assert.equal(v.github.length, 1, JSON.stringify(v.github));
+      await v.ctx.close();
+    });
+
+    // The version compare, for anybody: a doc of its own, two versions.
+    const RW = 'rewrites';
+    const rwDoc = (small, long, nest, evil) => `<!doctype html><html><body><h1>Plan</h1><p id="small">${small}</p><p id="long">${long}</p><ul><li id="nest">${nest}<ul><li>A child that stays</li></ul></li></ul><p id="evil">${evil}</p></body></html>`;
+    const EVIL = '&lt;img src=x onerror="window.__pwned=1"&gt; is what this old paragraph happened to quote at length';
+    assert.equal((await api('/api/upload', { method: 'POST', token, body: { slug: RW, version: 1, html: rwDoc(SMALL, LONG, 'The first plan had every launch happening in one single week of spring', EVIL), meta: { title: 'Rewrites' } } })).status, 200);
+    assert.equal((await api('/api/upload', { method: 'POST', token, body: { slug: RW, version: 2, html: rwDoc(SMALL.replace('March 14', 'March 21'), `${LONG_NEW.slice(0, 20)}<a href="https://tdoc.dev">${LONG_NEW.slice(20, 40)}</a>${LONG_NEW.slice(40)}`, 'Launches now spread out across autumn so support can keep up', 'Nothing dangerous remains and these words share nothing with the earlier ones'), meta: { title: 'Rewrites' } } })).status, 200);
+    const compare = (which, phone) => outside(`${which === browser ? 'chromium' : 'webkit'} ${phone ? 390 : 1280}: the version compare shows a rewrite as blocks, a small edit word by word`, async () => {
+      const ctx = await which.newContext(phone ? PHONE : { viewport: { width: 1280, height: 800 } });
+      await ctx.addCookies([{ name: 'tdoc_sid', value: sid, domain: '127.0.0.1', path: '/' }]);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(`${base}/d/${RW}?compare=1`);
+      const after = page.frameLocator('iframe[aria-label="New version"]');
+      await after.locator('#long ins').waitFor({ timeout: 15000 });
+      await shot(page, `nondev-compare-${phone ? 390 : 1280}.png`);
+      const read = () => {
+        const css = (el) => (el ? getComputedStyle(el).display : null);
+        const q = (s) => document.querySelector(s);
+        return {
+          long: { del: q('#long > del.tdoc-diff-del.tdoc-diff-block')?.textContent ?? null, delDisplay: css(q('#long > del')),
+            ins: q('#long > ins.tdoc-diff-ins.tdoc-diff-block')?.textContent ?? null, insDisplay: css(q('#long > ins')),
+            link: q('#long > ins a')?.getAttribute('href') ?? null, delThenIns: q('#long > del + ins') !== null },
+          small: { ins: [...document.querySelectorAll('#small ins')].map((e) => e.textContent), del: [...document.querySelectorAll('#small del')].map((e) => e.textContent), blocks: document.querySelectorAll('#small .tdoc-diff-block').length, display: css(q('#small del, #small ins')) },
+          nest: { childRows: document.querySelectorAll('#nest li').length, emptyRows: [...document.querySelectorAll('#nest li, #nest ul')].filter((e) => !e.textContent.trim()).length },
+          evil: { imgs: document.querySelectorAll('#evil img').length, pwned: window.__pwned, del: q('#evil del')?.textContent ?? null },
+        };
+      };
+      const a = await after.locator('body').evaluate(new Function(`return (${read})()`));
+      assert.equal(a.long.ins.includes('Hiring decides this'), true);
+      assert.equal(a.long.insDisplay, 'block');
+      assert.equal(a.long.link, 'https://tdoc.dev', 'the version\'s own markup stays');
+      assert.equal(a.small.blocks, 0);
+      assert.equal(a.small.display, 'inline');
+      assert.deepEqual(a.nest, { childRows: 1, emptyRows: 0 });
+      assert.equal(a.evil.imgs, 0);
+      assert.equal(a.evil.pwned, undefined);
+      if (phone) {
+        // One pane: the old text then the new, in the same marks.
+        assert.equal(a.long.del, LONG);
+        assert.equal(a.long.delDisplay, 'block');
+        assert.equal(a.long.delThenIns, true);
+        assert.match(a.evil.del, /<img src=x onerror=/, 'old text shows as characters');
+        assert.deepEqual(a.small, { ...a.small, ins: ['21'], del: ['14'] });
+      } else {
+        const before = await page.frameLocator('iframe[aria-label="Previous version"]').locator('body').evaluate(new Function(`return (${read})()`));
+        assert.equal(before.long.del, LONG);
+        assert.equal(before.long.delDisplay, 'block');
+        assert.equal(before.long.ins, null);
+        assert.equal(before.small.blocks, 0);
+        assert.deepEqual(before.small.del, ['14']);
+        assert.deepEqual(a.small.ins, ['21']);
+        assert.deepEqual(before.nest, { childRows: 1, emptyRows: 0 });
+        assert.equal(before.evil.imgs, 0);
+      }
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    });
+    await compare(browser, true);
+    await compare(browser, false);
+    if (webkit) await compare(webkit, true);
 
     for (const phone of [true, false]) await t(`a deep thread is flat at ${phone ? 390 : 1440}: flush with the top comment, in order, its reply box too`, async () => {
       const id = await comment();

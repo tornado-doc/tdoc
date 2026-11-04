@@ -1836,9 +1836,6 @@
     st.setAttribute('data-tdoc-provider', '');
     st.textContent = ((window.TdocVersionDiff && window.TdocVersionDiff.markCss) || '') +
       '[data-tdoc-sugg]{cursor:pointer;border-radius:2px}' +
-      // A rewrite: the whole old text, then the whole new text, each its own
-      // block (same marks as a word change; suggRender decides).
-      '.tdoc-diff-del.tdoc-sugg-block,.tdoc-diff-ins.tdoc-sugg-block{display:block;margin:.25em 0;padding:2px 6px;overflow-wrap:anywhere}' +
       '[data-tdoc-sugg-active] .tdoc-diff-ins,[data-tdoc-sugg-active] .tdoc-diff-del,.tdoc-diff-ins[data-tdoc-sugg-active],.tdoc-diff-del[data-tdoc-sugg-active]{outline:2px solid rgba(22,82,240,.45);outline-offset:1px}' +
       '[data-tdoc-sugg-busy]{background:linear-gradient(90deg,rgba(22,82,240,0) 0%,rgba(22,82,240,.10) 50%,rgba(22,82,240,0) 100%);background-size:200% 100%;animation:tdoc-sugg-shimmer 1.4s linear infinite;border-radius:4px}' +
       '@keyframes tdoc-sugg-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}' +
@@ -1921,8 +1918,8 @@
       var engine = window.TdocVersionDiff;
       var parts = engine ? engine.textParts(original, replace) : [{ kind: 'replace', before: original, after: replace }];
       if (engine && engine.isRewrite(parts)) {
-        if (original) wrap.appendChild(suggMark('del', 'tdoc-diff-del tdoc-sugg-block', id, original));
-        if (replace) wrap.appendChild(suggMark('ins', 'tdoc-diff-ins tdoc-sugg-block', id, replace));
+        if (original) wrap.appendChild(suggMark('del', 'tdoc-diff-del tdoc-diff-block', id, original));
+        if (replace) wrap.appendChild(suggMark('ins', 'tdoc-diff-ins tdoc-diff-block', id, replace));
       } else parts.forEach(function (p) {
         if (p.kind === 'equal') wrap.appendChild(document.createTextNode(p.before));
         else {
@@ -1948,7 +1945,7 @@
     // new text still reads as its own block under them.
     var eng = window.TdocVersionDiff;
     var rewrite = eng && eng.isRewrite(eng.textParts(old, replace));
-    var ins = suggMark('ins', rewrite ? 'tdoc-diff-ins tdoc-sugg-block' : 'tdoc-diff-ins', id, replace);
+    var ins = suggMark('ins', rewrite ? 'tdoc-diff-ins tdoc-diff-block' : 'tdoc-diff-ins', id, replace);
     var lastDel = els[els.length - 1];
     lastDel.parentNode.insertBefore(ins, lastDel.nextSibling);
     els.push(ins);

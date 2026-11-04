@@ -212,10 +212,10 @@ function ReplyForm({
   // is not a reply: nothing was written yet.
   const touched = useRef(false);
   const prefilled = useRef('');
-  // Not a row whose edits would skip review (agents.suggestsFor): a tag nobody
-  // typed should not lead to a publish.
-  const candidate = v4 && agents.prefillReplies ? agentForThread(thread, ask.choices, commentId) : null;
-  const answering = candidate && (!candidate.can_edit || agents.suggestsFor?.(candidate)) ? candidate : null;
+  // The doc page says which agents qualify (agents.prefillFor); the feedback
+  // surfaces don't offer it.
+  const candidate = v4 && agents.prefillFor ? agentForThread(thread, ask.choices, commentId, agents.viewerKeys) : null;
+  const answering = candidate && agents.prefillFor(candidate) ? candidate : null;
   const answeringKey = answering ? targetKey(answering) : '';
   useLayoutEffect(() => {
     if (!answering || touched.current || prefilled.current || text) return;

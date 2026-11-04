@@ -289,7 +289,9 @@ export function matchAgentChoices(choices, query, { limit = 2, labelOf = null } 
 // opened on anyone else's reply is talking to them.
 // A reply says the route it came by (worker: provider, cli, location, handle);
 // one that does not, an older client's, goes by who the thread was handed to.
-export function agentForThread(thread, choices, parentId = null) {
+// `viewerKeys`: who is looking. A reader's own rows (my-agent) carry no owner,
+// so the reply's owner, which the server stamps, has to be the viewer.
+export function agentForThread(thread, choices, parentId = null, viewerKeys = []) {
   const replies = (thread && thread.replies) || [];
   const latest = replies.filter((r) => r && !r.deleted).reduce((a, b) => (a && Date.parse(a.created) > Date.parse(b.created) ? a : b), null);
   const who = latest && latest.author;
@@ -297,8 +299,10 @@ export function agentForThread(thread, choices, parentId = null) {
   if (parentId && parentId !== thread.id && parentId !== latest.id) return null;
   // Same name, same computer name, somebody else's: not this viewer's agent.
   // The key where both have one: a display name is not unique.
-  const owned = (t) => Boolean(who.owner && t.owner) && (who.owner.key && t.owner.key
-    ? who.owner.key === t.owner.key : who.owner.display === t.owner.display);
+  const replyOwner = String((who.owner && who.owner.key) || '').toLowerCase();
+  const owned = (t) => (t.owner
+    ? Boolean(who.owner) && (who.owner.key && t.owner.key ? who.owner.key === t.owner.key : who.owner.display === t.owner.display)
+    : Boolean(replyOwner) && viewerKeys.some((k) => String(k || '').toLowerCase() === replyOwner));
   const list = (Array.isArray(choices) ? choices : []).filter((t) => t && !t.tdoc_ai && owned(t));
   const handle = String(who.handle || '').replace(/^@/, '').toLowerCase();
   const rows = who.team_agent && who.team_agent.id

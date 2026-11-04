@@ -90,9 +90,30 @@
     }
     return null;
   }
+  // A rewrite (the same isRewrite as AI suggestions): one removed block, then
+  // one added block. The version's own nodes move as they are, into one mark,
+  // so nested markup stays whole and nothing is parsed; the old text is text.
+  function rewriteDiff(el, oldText, newText, side, inline) {
+    var own = side === 'before' ? oldText : newText;
+    if (own) {
+      var span = document.createElement(side === 'before' ? 'del' : 'ins');
+      span.className = (side === 'before' ? 'tdoc-diff-del' : 'tdoc-diff-ins') + ' tdoc-diff-block';
+      while (el.firstChild) span.append(el.firstChild);
+      el.append(span);
+    }
+    if (inline && oldText) {
+      var del = document.createElement('del');
+      del.className = 'tdoc-diff-del tdoc-diff-block';
+      del.textContent = oldText;
+      el.prepend(del);
+    }
+    changes.push(el);
+  }
   function textDiff(el, oldText, newText, side, inline) {
+    var parts = engine.textParts(oldText, newText);
+    if (engine.isRewrite(parts)) { rewriteDiff(el, oldText, newText, side, inline); return; }
     if (inline && !newText && oldText) { var removed = document.createElement('del'); removed.className = 'tdoc-diff-del'; removed.textContent = oldText; el.append(removed); changes.push(el); return; }
-    var parts = engine.textParts(oldText, newText), offset = 0, edits = [];
+    var offset = 0, edits = [];
     parts.forEach(function (p) {
       var text = side === 'before' ? p.before : p.after;
       if (p.kind !== 'equal') edits.push({ start: offset, end: offset + text.length, old: p.before });

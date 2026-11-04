@@ -196,5 +196,21 @@ t('a tag with the location suffix hands itself to the right twin', () => {
   assert(box.taggedAgent(`fix ${tag(two[0])} now`, two) === two[0]);
 });
 
+t('a reply box answers an agent only for the viewer\'s own agent: not tdoc AI, not a person, not a reply further up', () => {
+  const choices = [local('juliesmac', 'claude'), { tdoc_ai: true, owner }];
+  const reply = (id, author) => ({ id, created: '2026-11-04T00:00:00Z', author });
+  const claude = { kind: 'agent', login: 'claude', handle: 'claude', provider: 'local', cli: 'claude', location: 'juliesmac', owner };
+  const thread = (replies) => ({ id: 'c', replies });
+  assert(box.agentForThread(thread([reply('r', claude)]), choices, 'c') === choices[0], 'own agent');
+  assert(box.agentForThread(thread([reply('r', { kind: 'agent', login: 'tdoc-ai', owner })]), choices, 'c') === null, 'tdoc AI costs quota');
+  assert(box.agentForThread(thread([reply('r', { kind: 'user', login: 'dana' })]), choices, 'c') === null, 'a person');
+  assert(box.agentForThread(thread([reply('r', claude)]), choices, 'other') === null, 'a box answering someone else');
+  // A reader's rows (my-agent) carry no owner: the reply's owner must be the viewer.
+  const mine = [{ ...local('juliesmac', 'claude'), owner: undefined }];
+  assert(box.agentForThread(thread([reply('r', claude)]), mine, 'c', ['JULIE']) === mine[0], 'a reader, their own agent');
+  assert(box.agentForThread(thread([reply('r', claude)]), mine, 'c', ['dana']) === null, 'same computer name, somebody else\'s');
+  assert(box.agentForThread(thread([reply('r', claude)]), mine, 'c') === null, 'nobody named');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

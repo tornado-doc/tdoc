@@ -1499,12 +1499,16 @@ export function DocumentShell({ boot, config }) {
     privateReply: privateAskView && privateAskView.parentId ? privateAskView : null,
     onMakePublic: () => makePublicRef.current(),
     onClosePrivate: () => setPrivateAsk(null),
-    // Ask/Edit v2: what the hint says about the named agent, and no GitHub
-    // search while an agent already answers what was typed after @.
+    // Ask/Edit v2: what the hint says about the named agent.
     suggestsFor: suggestOn ? handsBackSuggestions : null,
-    quietPeopleSearch: suggestOn,
-    prefillReplies: suggestOn,
-  }), [suggestOn, canSendToAgent, agentChoices, defaultEditor, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
+    // A reply box answering the viewer's own agent starts with its tag. Where
+    // suggestions are on, @agent means "suggest", so a row that would publish
+    // instead is not offered: a tag nobody typed should not skip that review.
+    // Elsewhere every agent takes the plain handoff, and the hint under the box
+    // says what it may do.
+    prefillFor: (target) => !suggestOn || !target.can_edit || handsBackSuggestions(target),
+    viewerKeys: handoffViewer,
+  }), [suggestOn, canSendToAgent, handoffViewer, agentChoices, defaultEditor, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);

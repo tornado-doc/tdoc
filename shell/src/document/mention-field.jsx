@@ -87,10 +87,11 @@ export function MentionField({
     .map((agent) => ({ agent, key: `disabled:${targetKey(agent)}`, name: agentMentionName(agent, agentsOnOffer.disabledChoices), tag: 'Team · members only', disabled: true })) : [];
   const localMatches = query ? matchMentionable(people, query.query) : [];
   // Typing an address is already a complete tag — asking GitHub's user search
-  // about "dana@corp.com" offers strangers and leaks the address upstream.
+  // about "dana@corp.com" offers strangers and leaks the address upstream. And
+  // no search while an agent answers what was typed: the menu has its row.
   const remote = useGithubUserSearch(query ? query.query : '', {
     enabled: Boolean(query) && localMatches.length === 0 && !query.query.includes('@')
-      && !(agentsOnOffer.quietPeopleSearch && agentMatches.length > 0),
+      && agentMatches.length === 0,
   });
   const matches = useMemo(() => {
     const seen = new Set(localMatches.map((person) => String(person.login).toLowerCase()));
