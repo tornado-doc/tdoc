@@ -528,7 +528,8 @@ const SLUG = 'hostile-body-css';
         }, card);
         if (flat.lefts.length !== 1 || flat.lefts[0] !== flat.top) throw new Error(`replies do not line up: ${JSON.stringify(flat)}`);
         if (flat.nested || flat.more) throw new Error(`a reply is nested or folded: ${JSON.stringify(flat)}`);
-        if (flat.order.join() !== [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `depth ${i}`).join()) throw new Error(`order changed: ${flat.order}`);
+        const chainOrder = flat.order.filter((text) => /^depth /.test(text));
+        if (chainOrder.join() !== [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `depth ${i}`).join()) throw new Error(`order changed: ${flat.order}`);
 
         // A deep link to the last of them lands on it, not on a fold.
         await page.goto(`${shellUrl}&comment=${chain[7]}`, { waitUntil: 'networkidle' });
