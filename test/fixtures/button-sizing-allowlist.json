@@ -63,7 +63,6 @@
  "shell/src/ui/ui.css :: .tdoc-margin-comment button.tdoc-replies-toggle",
  "shell/src/ui/ui.css :: .tdoc-margin-comment button.tdoc-reply-toggle",
  "shell/src/ui/ui.css :: .tdoc-margin-comment button.tdoc-resolve-toggle",
- "shell/src/ui/ui.css :: .tdoc-margin-comment button.tdoc-thread-more",
  "shell/src/ui/ui.css :: .tdoc-modal .tdoc-notif-head button.tdoc-quiet-link",
  "shell/src/ui/ui.css :: .tdoc-modal button",
  "shell/src/ui/ui.css :: .tdoc-modal button.mk-back",

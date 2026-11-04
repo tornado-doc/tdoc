@@ -11,6 +11,7 @@ import { CopyPromptButton } from '../ui/copy-prompt-button.jsx';
 import { AgentButtonsContext, AgentMentionContext, MentionField, MentionText } from './mention-field.jsx';
 import { agentFacts, agentName, agentOwner } from './agent-choices.js';
 import { AgentAskRow, AgentButton, PrivateAnswer, agentAskHint, useAgentAsk } from './agent-ask.jsx';
+import { agentForThread, targetKey } from './agent-choices.js';
 import { freeLeftText, isOwnTdocAiReply, joinAiTags, mentionsAi } from './ai-answerer.js';
 import { avatarFor, avatarInitial, QUICK_REACTIONS, tdocUrl } from './model.js';
 import { AuthorFace } from './author-face.jsx';
@@ -183,6 +184,7 @@ function Reactions({ item, me, onReact }) {
 function ReplyForm({
   commentId,
   handoffCommentId,
+  thread = null,
   onReply,
   replyingTo,
   mentionable,
@@ -204,6 +206,22 @@ function ReplyForm({
   const ask = useAgentAsk(text, setText, field);
   const { agents, target } = ask;
   const v4 = !agentButtons && !demo;
+  // Answering an agent: the box starts with its tag, as if picked after @
+  // (Ask/Edit v2). Once per draft, and only into a box nobody has touched: the
+  // list can load late, and a tag someone deleted stays deleted. The tag alone
+  // is not a reply: nothing was written yet.
+  const touched = useRef(false);
+  const prefilled = useRef('');
+  // Not a row whose edits would skip review (agents.suggestsFor): a tag nobody
+  // typed should not lead to a publish.
+  const candidate = v4 && agents.prefillReplies ? agentForThread(thread, ask.choices, commentId) : null;
+  const answering = candidate && (!candidate.can_edit || agents.suggestsFor?.(candidate)) ? candidate : null;
+  const answeringKey = answering ? targetKey(answering) : '';
+  useLayoutEffect(() => {
+    if (!answering || touched.current || prefilled.current || text) return;
+    prefilled.current = ask.putAgent(answering);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answeringKey]);
   // An "Only me" question asked from this reply box: its answer shows here.
   const privateAsk = agents.privateReply && agents.privateReply.parentId === commentId ? agents.privateReply : null;
   // Asked: the question has gone, so the box it came from starts empty.
@@ -211,6 +229,7 @@ function ReplyForm({
 
   const submit = async (sendToAgent = false) => {
     if (busy || !text.trim()) return;
+    if (prefilled.current && text.trim() === prefilled.current.trim()) return;
     if (sendToAgent && v4 && !target && !agents.preselected) { ask.putDefault(); return; }
     setBusy(true);
     try {
@@ -258,7 +277,8 @@ function ReplyForm({
           : v4 && (agents.choices || []).length ? 'Reply, or type @ to ask an agent' : 'Reply… (@ to notify someone)'}
         value={text}
         people={mentionable}
-        onChange={setText}
+        replacesTag={prefilled.current}
+        onChange={(next) => { touched.current = true; setText(next); }}
         onSubmit={({ sendToAgent } = {}) => submit(Boolean(sendToAgent))}
       />
       {v4 ? <AgentAskRow ask={ask} hint={agentAskHint(ask)} /> : null}
@@ -410,15 +430,15 @@ function editedSuffix(item) {
   return item.edited ? ' · edited' : '';
 }
 
+// One formatter for the page: a phone drawer formats every comment and reply
+// on each open, and toLocaleString builds a new Intl.DateTimeFormat per call.
+let createdFormat = null;
 function formatCreated(created) {
-  return created
-    ? new Date(created).toLocaleString([], {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    })
-    : '';
+  if (!created) return '';
+  const date = new Date(created);
+  if (Number.isNaN(date.getTime())) return date.toLocaleString();
+  createdFormat ||= new Intl.DateTimeFormat([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return createdFormat.format(date);
 }
 
 // A reply's parent is another comment id: the thread root when parent_id is
@@ -429,17 +449,10 @@ function childrenOf(replies, parentId, rootId) {
   return replies.filter((reply) => (reply.parent_id || rootId) === parentId);
 }
 
-// Past this depth a thread stops indenting. Each level costs about 24px of a
-// 306px card, so a chain that keeps nesting ends up reading in a column too
-// narrow to read — and a narrower column wraps more, which makes the card
-// taller, which is the other half of #363. Reddit stops at a similar point
-// and offers "continue this thread"; here the whole thread is already in
-// memory, so the continuation is a fold rather than another page.
-const REPLY_INDENT_CAP = 4;
-
-// Everything hanging off a reply, at any depth, in thread order. What the
-// continuation shows: the shape is flattened, not truncated — every reply is
-// still there, each one saying who it answers.
+// Everything hanging off a reply, at any depth, in thread order. A thread reads
+// as one flat list, as in Google Docs (Julie, 2026-11-03): every reply flush with
+// the top comment, however deep the chain; who a reply answers is said where the
+// row above is not it.
 function descendantsOf(replies, parentId, rootId) {
   const out = [];
   for (const kid of childrenOf(replies, parentId, rootId)) {
@@ -492,9 +505,7 @@ function ReplyCard({
   replies,
   rootId,
   rootComment,
-  depth,
-  expandAll = false,
-  flattened = false,
+  saysWhoItAnswers = false,
   currentUser,
   isOwner,
   mentionable,
@@ -511,88 +522,20 @@ function ReplyCard({
   onDelete,
   onEdit,
 }) {
-  const kids = childrenOf(replies, reply.id, rootId);
   const reacted = hasReactions(reply);
   const author = replyName(reply.author);
-  // A deep link lands on a reply that may live inside a continuation, so an
-  // expanded thread opens its continuations too — otherwise the link arrives
-  // at a thread with its own target folded away.
-  const [tailOpen, setTailOpen] = useState(expandAll);
-  const capped = depth >= REPLY_INDENT_CAP;
-  // A flattened reply's children are already in the list it belongs to.
-  const tail = flattened ? [] : (capped ? descendantsOf(replies, reply.id, rootId) : []);
-
-  const kidOf = (kid, kidDepth, isFlat) => (
-    <ReplyCard
-      key={kid.id}
-      reply={kid}
-      replies={replies}
-      rootId={rootId}
-      rootComment={rootComment}
-      depth={kidDepth}
-      expandAll={expandAll}
-      flattened={isFlat}
-      currentUser={currentUser}
-      isOwner={isOwner}
-      mentionable={mentionable}
-      demo={demo}
-      canSendToAgent={canSendToAgent}
-      agentSetupHref={agentSetupHref}
-      replyTarget={replyTarget}
-      onReplyTarget={onReplyTarget}
-      editTarget={editTarget}
-      onEditTarget={onEditTarget}
-      onReply={onReply}
-      onReact={onReact}
-      onDelete={onDelete}
-      onEdit={onEdit}
-    />
-  );
-
-  let kidCards = null;
-  if (flattened) {
-    kidCards = null;
-  } else if (capped) {
-    kidCards = tail.length ? (
-      <>
-        <button
-          type="button"
-          className={`tdoc-thread-more${tailOpen ? ' open' : ''}`}
-          onClick={() => setTailOpen((open) => !open)}
-        >
-          <ChevronRight className="chev" size={10} />
-          {tailOpen ? 'hide the rest of this thread' : `continue this thread · ${tail.length}`}
-        </button>
-        {tailOpen ? (
-          <div className="tdoc-thread-tail">
-            {tail.map((kid) => kidOf(kid, depth, true))}
-          </div>
-        ) : null}
-      </>
-    ) : null;
-  } else if (kids.length) {
-    kidCards = <div className="tdoc-reply-kids">{kids.map((kid) => kidOf(kid, depth + 1, false))}</div>;
-  }
 
   if (reply.deleted) {
     return (
-      <div
-        className={`tdoc-reply tdoc-deleted${flattened ? ' tdoc-reply-flat' : ''}`}
-        data-comment-id={reply.id}
-        data-depth={depth}
-      >
-        <Tombstone item={reply}>{kidCards}</Tombstone>
+      <div className="tdoc-reply tdoc-deleted" data-comment-id={reply.id}>
+        <Tombstone item={reply} />
       </div>
     );
   }
 
   return (
-    <div
-      className={`tdoc-reply${flattened ? ' tdoc-reply-flat' : ''}`}
-      data-comment-id={reply.id}
-      data-depth={depth}
-    >
-      {flattened ? (
+    <div className="tdoc-reply" data-comment-id={reply.id}>
+      {saysWhoItAnswers ? (
         <div className="tdoc-reply-to">Replying to @{answers(replies, reply, rootComment)}</div>
       ) : null}
       {editTarget === reply.id ? (
@@ -637,6 +580,7 @@ function ReplyCard({
         <ReplyForm
           commentId={reply.id}
           handoffCommentId={rootId}
+          thread={rootComment}
           onReply={onReply}
           replyingTo={author}
           mentionable={mentionable}
@@ -645,8 +589,6 @@ function ReplyCard({
             agentSetupHref={agentSetupHref}
         />
       ) : null}
-
-      {kidCards}
     </div>
   );
 }
@@ -775,6 +717,8 @@ export function CommentCard({
   const known = new Set(replies.map((reply) => reply.id).concat([comment.id]));
   const rootReplies = childrenOf(replies, comment.id, comment.id)
     .concat(replies.filter((reply) => reply.parent_id && !known.has(reply.parent_id)));
+  // The order they always read in; only the nesting is gone.
+  const flatReplies = rootReplies.flatMap((reply) => [reply, ...descendantsOf(replies, reply.id, comment.id)]);
 
   const className = [
     'tdoc-margin-comment',
@@ -799,15 +743,14 @@ export function CommentCard({
         {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
       </button>
       <div className={`tdoc-replies${repliesOpen ? ' open' : ''}`}>
-        {rootReplies.map((reply) => (
+        {flatReplies.map((reply, index) => (
           <ReplyCard
             key={reply.id}
             reply={reply}
             replies={replies}
             rootId={comment.id}
             rootComment={comment}
-            depth={1}
-            expandAll={expandReplies}
+            saysWhoItAnswers={Boolean(reply.parent_id) && reply.parent_id !== comment.id && reply.parent_id !== flatReplies[index - 1]?.id}
             currentUser={currentUser}
             isOwner={isOwner}
             mentionable={mentionable}
@@ -1039,6 +982,7 @@ export function CommentCard({
         <ReplyForm
           commentId={comment.id}
           handoffCommentId={comment.id}
+          thread={comment}
           onReply={submitReply}
           mentionable={mentionable}
           demo={demo}

@@ -60,6 +60,16 @@ export function useAgentAsk(text, setText, fieldRef = null) {
       if (next.caret != null) el.setSelectionRange(next.caret, next.caret);
     });
   };
+  // Start the box with this agent's tag, caret after it. Returns the text.
+  const putAgent = (t) => {
+    const next = withAgent(text, t, 0);
+    setText(next.text);
+    requestAnimationFrame(() => {
+      const el = fieldRef && fieldRef.current;
+      if (el && next.caret != null && document.activeElement === el) el.setSelectionRange(next.caret, next.caret);
+    });
+    return next.text;
+  };
   // What a submit sends. `withDefault` (⌘⇧Enter): put the default agent in
   // first when none is named.
   const outgoing = (withDefault = false) => {
@@ -73,7 +83,7 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   };
   return {
     agents, choices, target, canChange, ownOrCloud, onlyMe: private_,
-    setOnlyMe, putDefault, outgoing,
+    setOnlyMe, putDefault, putAgent, outgoing,
   };
 }
 
@@ -118,11 +128,12 @@ export function AgentAskRow({ ask, hint = null }) {
 
 // The line under the box saying what the named agent will do.
 export function agentAskHint(ask) {
-  const { target, onlyMe, canChange, choices } = ask;
+  const { target, onlyMe, canChange, choices, agents } = ask;
   if (!target) return null;
   // The pill's short name (Julie, 2026-10-25).
   const name = agentMentionName(target, choices);
   if (onlyMe) return `${name} answers you alone`;
+  if (canChange && agents?.suggestsFor?.(target)) return `${name} answers or suggests edits`;
   return canChange ? `${name} answers or changes the doc` : `${name} answers in the thread`;
 }
 

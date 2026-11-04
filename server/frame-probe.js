@@ -1836,6 +1836,9 @@
     st.setAttribute('data-tdoc-provider', '');
     st.textContent = ((window.TdocVersionDiff && window.TdocVersionDiff.markCss) || '') +
       '[data-tdoc-sugg]{cursor:pointer;border-radius:2px}' +
+      // A rewrite: the whole old text, then the whole new text, each its own
+      // block (same marks as a word change; suggRender decides).
+      '.tdoc-diff-del.tdoc-sugg-block,.tdoc-diff-ins.tdoc-sugg-block{display:block;margin:.25em 0;padding:2px 6px;overflow-wrap:anywhere}' +
       '[data-tdoc-sugg-active] .tdoc-diff-ins,[data-tdoc-sugg-active] .tdoc-diff-del,.tdoc-diff-ins[data-tdoc-sugg-active],.tdoc-diff-del[data-tdoc-sugg-active]{outline:2px solid rgba(22,82,240,.45);outline-offset:1px}' +
       '[data-tdoc-sugg-busy]{background:linear-gradient(90deg,rgba(22,82,240,0) 0%,rgba(22,82,240,.10) 50%,rgba(22,82,240,0) 100%);background-size:200% 100%;animation:tdoc-sugg-shimmer 1.4s linear infinite;border-radius:4px}' +
       '@keyframes tdoc-sugg-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}' +
@@ -1915,9 +1918,12 @@
       var original = mid.data;
       var wrap = document.createElement('span');
       wrap.setAttribute('data-tdoc-sugg', id);
-      var diff = window.TdocVersionDiff && window.TdocVersionDiff.textParts;
-      var parts = diff ? diff(original, replace) : [{ kind: 'replace', before: original, after: replace }];
-      parts.forEach(function (p) {
+      var engine = window.TdocVersionDiff;
+      var parts = engine ? engine.textParts(original, replace) : [{ kind: 'replace', before: original, after: replace }];
+      if (engine && engine.isRewrite(parts)) {
+        if (original) wrap.appendChild(suggMark('del', 'tdoc-diff-del tdoc-sugg-block', id, original));
+        if (replace) wrap.appendChild(suggMark('ins', 'tdoc-diff-ins tdoc-sugg-block', id, replace));
+      } else parts.forEach(function (p) {
         if (p.kind === 'equal') wrap.appendChild(document.createTextNode(p.before));
         else {
           if (p.before) wrap.appendChild(suggMark('del', 'tdoc-diff-del', id, p.before));
@@ -1929,14 +1935,20 @@
       return wrap;
     }
     var els = [];
+    var old = '';
     hit.runs.forEach(function (r) {
       var m = r.node.splitText(r.start);
       m.splitText(r.end - r.start);
+      old += m.data;
       var del = suggMark('del', 'tdoc-diff-del', id, m.data);
       m.parentNode.replaceChild(del, m);
       els.push(del);
     });
-    var ins = suggMark('ins', 'tdoc-diff-ins', id, replace);
+    // Across inline elements the old words stay where they are; a rewrite's
+    // new text still reads as its own block under them.
+    var eng = window.TdocVersionDiff;
+    var rewrite = eng && eng.isRewrite(eng.textParts(old, replace));
+    var ins = suggMark('ins', rewrite ? 'tdoc-diff-ins tdoc-sugg-block' : 'tdoc-diff-ins', id, replace);
     var lastDel = els[els.length - 1];
     lastDel.parentNode.insertBefore(ins, lastDel.nextSibling);
     els.push(ins);

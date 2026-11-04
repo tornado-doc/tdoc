@@ -514,50 +514,30 @@ const SLUG = 'hostile-body-css';
         if (await page.locator(toggle).isVisible()) await page.click(toggle);
         await page.waitForTimeout(400);
 
-        const folded = await page.evaluate((sel) => {
+        // Flat as in Google Docs: all eight, every one the same distance in,
+        // in thread order, nothing folded away and nothing nested.
+        const flat = await page.evaluate((sel) => {
           const rows = [...document.querySelectorAll(`${sel} .tdoc-reply`)];
           return {
-            maxDepth: Math.max(...rows.map((n) => Number(n.dataset.depth))),
-            shown: rows.length,
-            more: document.querySelector(`${sel} .tdoc-thread-more`)?.textContent.trim() || null,
+            lefts: [...new Set(rows.map((n) => Math.round(n.getBoundingClientRect().left)))],
+            order: rows.map((n) => n.querySelector('.text')?.textContent.trim()),
+            nested: rows.some((n) => n.querySelector('.tdoc-reply')),
+            more: document.querySelectorAll(`${sel} .tdoc-thread-more`).length,
+            top: Math.round(document.querySelector(`${sel} .tdoc-replies`).getBoundingClientRect().left),
           };
         }, card);
-        if (folded.maxDepth > 4) throw new Error(`the thread still indents to depth ${folded.maxDepth}`);
-        if (!folded.more || !/continue this thread/.test(folded.more)) {
-          throw new Error(`no continuation offered: ${JSON.stringify(folded.more)}`);
-        }
-        if (!/4$/.test(folded.more)) throw new Error(`the continuation miscounts what it holds: ${folded.more}`);
+        if (flat.lefts.length !== 1 || flat.lefts[0] !== flat.top) throw new Error(`replies do not line up: ${JSON.stringify(flat)}`);
+        if (flat.nested || flat.more) throw new Error(`a reply is nested or folded: ${JSON.stringify(flat)}`);
+        if (flat.order.join() !== [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `depth ${i}`).join()) throw new Error(`order changed: ${flat.order}`);
 
-        await page.click(`${card} .tdoc-thread-more`);
-        await page.waitForTimeout(400);
-        const opened = await page.evaluate((sel) => {
-          const rows = [...document.querySelectorAll(`${sel} .tdoc-reply`)];
-          const flat = [...document.querySelectorAll(`${sel} .tdoc-reply-flat`)];
-          return {
-            maxDepth: Math.max(...rows.map((n) => Number(n.dataset.depth))),
-            shown: rows.length,
-            flat: flat.length,
-            everyFlatSaysWhoItAnswers: flat.every((n) => /Replying to @/.test(n.querySelector('.tdoc-reply-to')?.textContent || '')),
-            deepest: !!document.querySelector(`${sel} .tdoc-reply .text`),
-          };
-        }, card);
-        if (opened.shown !== folded.shown + 4) {
-          throw new Error(`continuing the thread should reveal the remaining 4: ${JSON.stringify(opened)}`);
-        }
-        if (opened.maxDepth > 4) throw new Error('the continuation kept indenting');
-        if (opened.flat !== 4) throw new Error(`expected 4 flattened replies, got ${opened.flat}`);
-        if (!opened.everyFlatSaysWhoItAnswers) {
-          throw new Error('a flattened reply must say who it answers — it has no position left to say it');
-        }
-
-        // A deep link into the continuation must not land on a folded thread.
+        // A deep link to the last of them lands on it, not on a fold.
         await page.goto(`${shellUrl}&comment=${chain[7]}`, { waitUntil: 'networkidle' });
         await page.waitForTimeout(800);
         const linked = await page.evaluate((id) => {
           const el = document.querySelector(`.tdoc-reply[data-comment-id="${id}"]`);
           return !!el && el.getBoundingClientRect().height > 0;
         }, chain[7]);
-        if (!linked) throw new Error('a deep link to a reply inside a continuation lands on it folded away');
+        if (!linked) throw new Error('a deep link to a deep reply lands on it folded away');
       } finally {
         fs.writeFileSync(COMMENTS_FIXTURE, snapshot);
       }
