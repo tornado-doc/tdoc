@@ -22501,6 +22501,7 @@ const tdocHandlers = {
           identity: sessionPrincipal(session)
             ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '', email: normalizeEmail(session.email) || '' }
             : null,
+          devMode: (await devModeBoot(env, session)).devMode,
           webAuth: githubDirectSignIn(env),
           authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
           oidcAuth: !!oidcConfig(env),
@@ -23099,6 +23100,7 @@ const tdocHandlers = {
           token: teamJoinMatch[1],
           team: { id: team.id, name: team.name, member_count: team.members.length },
           identity: appIdentity(s),
+          devMode: (await devModeBoot(env, s)).devMode,
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -23149,6 +23151,7 @@ const tdocHandlers = {
             page: 'team-join',
             team: { id: team.id, name: team.name, member_count: team.members.length },
             identity: { ...appIdentity(s), label: who },
+            devMode: (await devModeBoot(env, s)).devMode,
             switch_href: switchHref,
           }),
         }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
@@ -23642,6 +23645,7 @@ const tdocHandlers = {
               docUrl: `/d/${encodeURIComponent(slug)}/v/${Number(vStr)}?doc=1`,
               bookmarklet: feedbackBookmarklet(feedbackScriptSrc(url.origin)),
               identity: signedIn ? { login: actorKey(viewer), linked_actor_keys: actorKeys(viewer), avatar_url: viewer.avatar_url || '', name: actorDisplayName(viewer) } : null,
+              devMode: signedIn ? (await devModeBoot(env, viewer)).devMode : null,
               isOwner,
               joined,
               canJoin,
@@ -23894,6 +23898,7 @@ const tdocHandlers = {
     if (p === '/feedback' && method === 'GET') {
       const nonce = rand(16);
       const src = feedbackScriptSrc(url.origin);
+      const session = await getSession(env, req);
       return html(SHELL.appHtml({
         title: 'tdoc Feedback',
         nonceAttr: ` nonce="${nonce}"`,
@@ -23901,7 +23906,8 @@ const tdocHandlers = {
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
         bootJson: safeJsonForScript({
           page: 'feedback-install',
-          identity: appIdentity(await getSession(env, req)),
+          identity: appIdentity(session),
+          devMode: (await devModeBoot(env, session)).devMode,
           scriptSrc: src,
           bookmarklet: feedbackBookmarklet(src),
           host: url.host,
@@ -23927,7 +23933,7 @@ const tdocHandlers = {
         nonceAttr: ` nonce="${nonce}"`,
         runtimeJsPath: SHELL_RUNTIME_JS_PATH,
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
-        bootJson: safeJsonForScript({ page: 'feedback-share', identity: appIdentity(s), slug, host: new URL(feedbackSpaceSiteOrigin(meta, site)).host }),
+        bootJson: safeJsonForScript({ page: 'feedback-share', identity: appIdentity(s), devMode: (await devModeBoot(env, s)).devMode, slug, host: new URL(feedbackSpaceSiteOrigin(meta, site)).host }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
     }
     // An invite to a space whose site has no tdoc widget (the bookmarklet's):
@@ -23951,6 +23957,7 @@ const tdocHandlers = {
       }
       const nonce = rand(16);
       const src = feedbackScriptSrc(url.origin);
+      const inviteSession = await getSession(env, req);
       return html(SHELL.appHtml({
         title: `Comment on ${new URL(rec.origin).host} · tdoc`,
         nonceAttr: ` nonce="${nonce}"`,
@@ -23958,7 +23965,8 @@ const tdocHandlers = {
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
         bootJson: safeJsonForScript({
           page: 'feedback-invite',
-          identity: appIdentity(await getSession(env, req)),
+          identity: appIdentity(inviteSession),
+          devMode: (await devModeBoot(env, inviteSession)).devMode,
           id: rec.token,
           inviter: (rec.inviter && rec.inviter.name) || 'Someone',
           host: new URL(rec.origin).host,
@@ -24124,6 +24132,7 @@ const tdocHandlers = {
           space,
           baseHost: url.host,
           identity: appIdentity(s),
+          devMode: (await devModeBoot(env, s)).devMode,
           invite,
           doors: { oidc: !!oidc, oidcLabel: (oidc && oidc.label) || '', web: githubDirectSignIn(env) },
           ...(origin ? {} : { error: 'Open this window from the tdoc button inside your app.' }),
