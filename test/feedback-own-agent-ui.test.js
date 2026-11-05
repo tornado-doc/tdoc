@@ -218,6 +218,39 @@ async function startServer(worker, env) {
           } finally { await context.close(); w.server.close(); }
         });
 
+        await t(`${tag}: the agent the joiner used on this space comes first, on the space page and in the widget`, async () => {
+          const w = await world();
+          // bencher answered Julie here; julie-claw leads her account's list.
+          const answered = { ask_id: 'a1', at: new Date().toISOString(), by: w.julie.account_id, question: 'q', recipient: raft('j2', 'bencher', 'raft'),
+            delivery: { status: 'delivered' }, answer: { text: 'a', at: new Date().toISOString() } };
+          await w.env.META.put(`agent-asks:${w.space.slug}:${w.julie.account_id}`, JSON.stringify([answered]));
+          const context = await browser.newContext({ viewport: { width, height: 900 } });
+          try {
+            await context.addCookies([{ name: 'tdoc_sid', value: sid(w.julie.cookie), url: w.base }]);
+            const page = await context.newPage();
+            const listFrom = async (root, name) => {
+              const card = root.locator(`[data-comment-id="${w.comment.id}"]`).first();
+              await card.waitFor();
+              await card.getByRole('button', { name: 'Reply' }).first().click();
+              const box = root.locator('.tdoc-reply-form textarea').first();
+              await box.waitFor();
+              await box.fill('@');
+              const menu = root.locator('.tdoc-mention-menu');
+              await menu.waitFor();
+              const names = await menu.locator('.tdoc-mention-agent .tdoc-mention-login').allInnerTexts();
+              assert.ok(/bencher/.test(names[0]) && /julie-claw/.test(names[1]), `order: ${names}`);
+              assert.ok(!names.some((n) => /serena/.test(n)), `the owner's agent is offered: ${names}`);
+              await shot(page, `${tag}-${name}-used-first`);
+            };
+            await page.goto(`${w.base}/d/${w.space.slug}`);
+            await listFrom(page, 'space-page');
+            await context.clearCookies();
+            await page.addInitScript(([key, value]) => { localStorage.setItem(key, value); }, [`tdoc-feedback:${w.base}`, JSON.stringify(w.mine)]);
+            await page.goto(`${w.base}/__page`);
+            await listFrom(page.locator('#tdoc-feedback-root'), 'widget');
+          } finally { await context.close(); w.server.close(); }
+        });
+
         await t(`${tag}: widget for a third-party app's space offers no agents`, async () => {
           const w = await world();
           const context = await browser.newContext({ viewport: { width, height: 900 } });

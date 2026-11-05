@@ -243,13 +243,21 @@ export function orderedAskAiChoices(agents, recent = null) {
       || Number(Boolean(b.last_writer)) - Number(Boolean(a.last_writer))), [recent]);
 }
 
-// The @ list's order: the agent that edited this doc last, then the rest in
-// the order given (server: most recent first), tdoc AI always last. It also
-// outranks how well a typed name matches, so the last editor stays on top.
-const relevance = (t) => (t.last_writer && !t.tdoc_ai ? 0 : t.tdoc_ai ? 2 : 1);
+// The @ list's order. Agents used on this doc first, most recent on top
+// (used_here_at, from the server; the last editor counts as used), then the
+// rest in the order given with the viewer's own most recent first (a team
+// agent keeps its place), tdoc AI always last. It also outranks how well a
+// typed name matches, so the list keeps its top once a name is typed. Display
+// only: who an unaddressed Send goes to is the list as given, not this.
+const relevance = (t) => (t.tdoc_ai ? 2 : t.used_here_at || t.last_writer ? 0 : 1);
+const newestFirst = (a, b) => String(b || '').localeCompare(String(a || ''));
 export function byRelevance(list) {
-  return (Array.isArray(list) ? list.filter(Boolean) : [])
-    .map((t, i) => ({ t, i })).sort((a, b) => (relevance(a.t) - relevance(b.t)) || (a.i - b.i)).map(({ t }) => t);
+  const rows = (Array.isArray(list) ? list.filter(Boolean) : []).map((t, i) => ({ t, i }));
+  const ranked = rows.sort((a, b) => (relevance(a.t) - relevance(b.t))
+    || (relevance(a.t) === 0 ? newestFirst(a.t.used_here_at, b.t.used_here_at) : 0) || (a.i - b.i));
+  const reorders = ({ t }) => relevance(t) === 1 && !t.team_agent;
+  const own = ranked.filter(reorders).sort((a, b) => newestFirst(a.t.last_touched, b.t.last_touched) || (a.i - b.i));
+  return ranked.map((row) => (reorders(row) ? own.shift().t : row.t));
 }
 
 // The agents to offer for what is typed after `@`. With nothing typed, the
@@ -273,7 +281,7 @@ export function matchAgentChoices(choices, query, { limit = 2, labelOf = null } 
   return list
     .map((t, i) => ({ t, r: rank(t), i }))
     .filter((row) => row.r >= 0)
-    .sort((a, b) => (relevance(a.t) - relevance(b.t)) || (a.r - b.r) || (a.i - b.i))
+    .sort((a, b) => (relevance(a.t) - relevance(b.t)) || (relevance(a.t) === 0 ? 0 : a.r - b.r) || (a.i - b.i))
     .map((row) => row.t);
 }
 

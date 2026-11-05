@@ -83,6 +83,9 @@ t('the dropdown and the picker read the same helper', () => {
   assert(/const edit = canSendToAgent \? orderedAgentChoices\(notifyTargets\) : \[\];/.test(answerer), 'picker list not from orderedAgentChoices');
   assert(/composerAgents\(\{\s*canSendToAgent,\s*notifyTargets,/.test(shell), 'the shell does not build the @ list from the send targets');
   assert(/matchAgentChoices\(byRelevance\(agentsOnOffer\.choices\)/.test(field), 'picker does not filter the shared list');
+  // Every agent pill's menu, Ask AI's included, in that one order.
+  assert(/AgentMenuItems choices=\{byRelevance\(choices\)\}/.test(field), 'the pill forks the order');
+  assert(read('shell/src/document/ask-ai-panel.jsx').match(/AgentMenuItems choices=\{byRelevance\(choices\)\}/g)?.length === 2, 'Ask AI forks the order');
 });
 
 t('@ order: the agent that edited last, then the rest, tdoc AI last -- also once a name is typed', () => {
@@ -95,6 +98,22 @@ t('@ order: the agent that edited last, then the rest, tdoc AI last -- also once
   assert(pick('sma')[0] === 'smarter-tdoc-claw', JSON.stringify(pick('sma')));
   assert(pick('tdoc-r')[0] === 'tdoc-reviewer', JSON.stringify(pick('tdoc-r')));
   assert(JSON.stringify(pick('tdoc')) === JSON.stringify(['smarter-tdoc-claw', 'tdoc-bot', 'tdoc-reviewer', 'tdoc AI']), JSON.stringify(pick('tdoc')));
+});
+
+t('@ order: most recent use here beats the last editor; the viewer\'s others by recency; a team agent keeps its place', () => {
+  const at = (h) => `2026-11-04T0${h}:00:00.000Z`;
+  const team = raft('ta', 'crew', { team_agent: { id: 'ta', name: 'crew' } });
+  const list = [
+    raft('w', 'writer', { last_writer: true, used_here_at: at(1), last_touched: at(1) }),
+    raft('r', 'replier', { used_here_at: at(2), last_touched: at(2) }),
+    team,
+    raft('o', 'older', { last_touched: at(3) }),
+    raft('n', 'newer', { last_touched: at(4) }),
+    { provider: 'tdoc', server_id: 'tdoc', agent_sub: 'tdoc-ai', agent_name: 'tdoc AI', tdoc_ai: true },
+  ];
+  const order = box.byRelevance(list).map((t) => t.agent_name);
+  assert(JSON.stringify(order) === JSON.stringify(['replier', 'writer', 'crew', 'newer', 'older', 'tdoc AI']), JSON.stringify(order));
+  assert(list[0].agent_name === 'writer', 'byRelevance moved the list it was given');
 });
 
 t('nothing typed: the first two agents only', () => {

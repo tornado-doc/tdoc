@@ -94,6 +94,20 @@ async function t(name, fn) {
       });
     }
 
+    await t('@ puts agents used on this doc first, most recent on top, also once a name is typed (390px)', async () => {
+      const { context, page } = await open(390, '?used=1');
+      const box = page.locator('textarea');
+      await box.click();
+      await box.type('@');
+      await page.locator('.tdoc-mention-option').first().waitFor();
+      assert.deepEqual((await rows(page)).slice(0, 4), ['CodexMine', 'xiaoccMine', 'devinMine', 'Claude CodeMine'], JSON.stringify(await rows(page)));
+      if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, 'agent-mention-used-390.png') }); }
+      await box.type('c');
+      await page.waitForFunction(() => document.querySelectorAll('.tdoc-mention-agent').length >= 2);
+      assert.equal((await rows(page))[0], 'CodexMine', JSON.stringify(await rows(page)));
+      await context.close();
+    });
+
     await t('the fallback agent is found by name', async () => {
       const { context, page } = await open(1050);
       const box = page.locator('textarea');

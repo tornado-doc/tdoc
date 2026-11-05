@@ -20,6 +20,14 @@ const targets = {
   candidates: [doc, local('juliesmac', 'claude'), local('juliesmac', 'codex')],
   fallback: { provider: 'raft', server_id: 'S1', server_slug: 'acme', agent_sub: 'b', agent_name: 'devin', owner },
 };
+// ?used=1: Codex replied here after xiaocc published, and devin was used most
+// recently, on another doc (a later last_touched says so, not used_here_at).
+if (params.get('used')) {
+  doc.last_writer = true;
+  doc.used_here_at = '2026-11-01T00:00:00.000Z';
+  targets.candidates[2] = { ...targets.candidates[2], used_here_at: '2026-11-02T00:00:00.000Z' };
+  targets.fallback.last_touched = '2026-11-03T00:00:00.000Z';
+}
 const agents = canSend
   // The composer's @ list (ai-answerer.js composerAgents): these may edit.
   ? { choices: orderedAgentChoices(targets).map((t) => ({ ...t, can_edit: true })), preselected: targets.default }

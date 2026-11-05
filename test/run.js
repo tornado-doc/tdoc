@@ -163,6 +163,7 @@ const OFFLINE = [
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
   'agent-choices.test.js',    // @ offers the Send to agent list: same order, top 2, typed search, tag is no @login
+  'agent-used-here.test.js',  // @ order: used on this doc first, most recent on top; order only; no other person's use leaks
   'ai-answerer.test.js',      // composer @ list: edit agents first, then ask-only own/team; tdoc AI last resort; @AI never a login
   'rich-text.test.js',        // comment markdown subset (bold/code/list/link)
   'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
