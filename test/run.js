@@ -170,6 +170,7 @@ const OFFLINE = [
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)
   'preview-cards.test.js',    // versioned OG cards, PNG rendering and access gate
   'preview-screenshot.test.js', // page screenshot as the card: PNG checks, write access, precedence
+  'preview-card-refresh.test.js', // old-template automatic cards redrawn: lazy fill, backfill, failed render keeps the card
   'preview-workflow.test.js', // #148 PR preview GitHub Action contract
   'ci-workflow.test.js',      // browser CI image matches locked playwright; suites sharded
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)
