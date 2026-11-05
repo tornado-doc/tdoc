@@ -30,8 +30,8 @@ const MENU_MAX_HEIGHT = 184;
 // dropdown's order (orderedAgentChoices), and the one it preselects. Empty
 // unless the shell lets this viewer send to agents: a reader sees people only.
 // `choices` is the composer's @ list (ai-answerer.js composerAgents): agents
-// that may edit and agents that may only answer, each row saying which, the
-// default first. `ai` carries tdoc AI's free answers left and who is
+// that may edit and agents that may only answer, each row saying which.
+// `preselected` is composerDefault of them. `ai` carries tdoc AI's free answers left and who is
 // answering where.
 export const AgentMentionContext = createContext({ choices: [], disabledChoices: [], guestAction: null, preselected: null, ai: null });
 
@@ -71,9 +71,10 @@ export function MentionField({
   const agentMatches = query
     ? matchAgentChoices(byRelevance(agentsOnOffer.choices), query.query, {
       limit: Infinity,
-      labelOf: (t) => recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices).label,
+      labelOf: (t) => recipientOption(t, null, agentsOnOffer.choices).label,
     }).map((t) => {
-      const option = recipientOption(t, agentsOnOffer.preselected, agentsOnOffer.choices);
+      // Not `preselected`: the top row may have only replied, no "last handoff".
+      const option = recipientOption(t, null, agentsOnOffer.choices);
       return {
         agent: t,
         key: `agent:${targetKey(t)}`,

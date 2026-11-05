@@ -10,6 +10,7 @@ import { productPageUrl } from '../../shell/src/document/product-url.js';
 import { AgentButtonsContext, AgentMentionContext } from '../../shell/src/document/mention-field.jsx';
 import { CommentComposer, COMPOSER_WIDTH } from '../../shell/src/document/comment-composer.jsx';
 import { composerAgents } from '../../shell/src/document/ai-answerer.js';
+import { composerDefault } from '../../shell/src/document/agent-choices.js';
 import { askOwnAgent, ownAgentPick, useMyAgent } from '../../shell/src/document/my-agent.js';
 import { TOP_BAR_HEIGHT, setTdocOrigin } from '../../shell/src/document/model.js';
 import { CONNECT_AGENT_PROMPT, NotifyHandoffPanel, deliveryErrorText, resendResultText, useNotifyTargets } from '../../shell/src/document/notify-handoff.jsx';
@@ -1484,7 +1485,7 @@ ${uiCss}
     // The default is an agent that may edit (the owner's, the team's); an
     // own agent is picked from the @ list, as on a doc page.
     const agentMentions = useMemo(() => ({
-      choices: agentChoices, preselected: agentChoices.find((t) => t.can_edit) || null,
+      choices: agentChoices, preselected: composerDefault(agentChoices, { orTop: true }),
       ai: null, privateAskSupported: false,
     }), [agentChoices]);
 

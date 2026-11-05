@@ -16384,7 +16384,7 @@ async function accountRaftServers(env, accountId) {
 
 // doc first, account second. Returns what the handoff panel renders: one
 // preselected recipient, the other recent ones as switchable candidates.
-async function resolveNotifyTargets(env, slug, viewerAccountId = null) {
+async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs = null) {
   const meta = await loadDocMeta(env, slug);
   const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
   const ownerAccount = meta && meta.hosted && meta.hosted.account_id;
@@ -16421,7 +16421,7 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null) {
   // viewing their own document can still use that agent by default.
   const writer = docLastWriter(meta);
   const publisher = writer?.kind === 'agent' ? writer.agent : null;
-  const docHandoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+  const docHandoff = lastDeliveredHandoffAgent(handoffs || await loadHandoffs(env, slug));
   const evidenced = [publisher, docHandoff]
     .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
@@ -16587,11 +16587,11 @@ async function agentWriteRefusalResponse(env, meta, refusal) {
   }, { status: 403 });
 }
 
-async function notifyTargetsFor(env, slug, gate, localDriver = null) {
+async function notifyTargetsFor(env, slug, gate, localDriver = null, handoffs = null) {
   if (!(gate.meta && gate.meta.workspace_id)) {
     const hosted = (gate.meta && gate.meta.hosted) || {};
     const owner = await agentOwner(env, hosted.account_id, hosted.owner_key || hosted.github_login);
-    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug, localDriver), owner, 'personal');
+    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug, localDriver, handoffs), owner, 'personal');
     return resolved;
   }
   // The team's own agents, when the team agent wrote this doc; an admin's
@@ -16613,7 +16613,7 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
     if (!agents.length) {
       return { default: null, candidates: [], fallback: null, reason: none, writer: policy.writer ? policy.writer.kind : null, writer_name: await docWriterName(env, gate.meta, policy.writer) };
     }
-    const handoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+    const handoff = lastDeliveredHandoffAgent(handoffs || await loadHandoffs(env, slug));
     const preferred = agents.find((t) => t.last_writer) || agents.find((t) => sameNotifyTarget(t, handoff)) || null;
     return { default: preferred, candidates: agents.filter((t) => t !== preferred), fallback: null, reason: null };
   }
@@ -16622,7 +16622,7 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
   const owner = await agentOwner(env, localDriver, credentialKey(gate.session || gate.actor));
   const own = withTargetOwner(await resolveAccountNotifyTargets(env, localDriver), owner, 'team');
   const publisher = policy.writer?.kind === 'agent' && policy.writer.account_id === localDriver ? policy.writer.agent : null;
-  const handoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+  const handoff = lastDeliveredHandoffAgent(handoffs || await loadHandoffs(env, slug));
   const offered = [...agents, ...(own.candidates || [])];
   const preferred = offered.find((t) => t.last_writer)
     || offered.find((t) => publisher && sameNotifyTarget(t, publisher))
@@ -16642,7 +16642,7 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
 // share a computer name and CLI, so a target alone does not say whose agent it
 // was: outside the owner's own doc, each record has to name the viewer's
 // account, or be a team agent's work the viewer can see.
-async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asker = null, manages = false }) {
+async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asks = [], handoffs, manages = false }) {
   const uses = [];
   const add = (at, what) => { if (at && typeof at === 'string') uses.push({ at, ...what }); };
   const teamDoc = Boolean(meta.workspace_id);
@@ -16657,15 +16657,16 @@ async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asker = null, ma
   }
   // Handed a comment. A handoff routed to a team agent is private to whoever
   // sent it and the people who manage the doc (maySeeCommentHandoff).
-  for (const h of await loadHandoffs(env, slug)) {
+  for (const h of handoffs) {
     if (!h || !h.recipient || !h.delivery?.status || h.delivery.status === 'failed') continue;
     const at = h.delivery.at || h.at;
     if (h.team_agent && h.team_agent.id) {
       if (manages || ids.includes(h.sent_by)) add(at, { team_agent: h.team_agent.id });
     } else if (ownDoc || ids.includes(h.by)) add(at, { target: h.recipient });
   }
-  // Asked or @-mentioned by this viewer: the record is theirs alone.
-  for (const a of await loadAgentAsks(env, slug, asker)) {
+  // Asked or @-mentioned by this viewer: the record is theirs alone, and the
+  // caller passes only the ones this door may see.
+  for (const a of asks) {
     if (a.delivery?.status === 'failed' && !a.answer) continue;
     add(a.answer?.at || a.at, a.runner ? { team_agent: a.runner } : { target: a.recipient });
   }
@@ -16674,12 +16675,16 @@ async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asker = null, ma
   if (teamDoc) {
     const list = await readComments(env, slug);
     ensureMigrated(list);
-    for (const c of historyList(list)) {
-      for (const r of Array.isArray(c.replies) ? c.replies : []) {
-        const who = r && !r.deleted ? r.author : null;
+    // The event log as it is: this needs who replied, not each thread folded.
+    for (const c of list) {
+      const events = Array.isArray(c && c.events) ? c.events : [];
+      if (events.some((e) => e.kind === 'deleted')) continue;
+      const gone = new Set(events.filter((e) => e.kind === 'reply_deleted').map((e) => e.reply_id));
+      for (const e of events) {
+        const who = e.kind === 'reply_added' && e.reply && !gone.has(e.reply.id) ? e.reply.author : null;
         if (!who || who.kind !== 'agent') continue;
-        if (who.team_agent && who.team_agent.id) add(r.created, { team_agent: who.team_agent.id });
-        else if (who.owner && keys.includes(String(who.owner.key || '').toLowerCase())) add(r.created, { author: who });
+        if (who.team_agent && who.team_agent.id) add(e.at, { team_agent: who.team_agent.id });
+        else if (who.owner && keys.includes(String(who.owner.key || '').toLowerCase())) add(e.at, { author: who });
       }
     }
   }
@@ -16704,26 +16709,27 @@ function withUsedHere(t, uses) {
 }
 
 // Who is asking, for agentUseOnDoc. Never fails the list it only orders.
-async function agentUseForViewer(env, slug, meta, session, accountId, manages) {
+async function agentUseForViewer(env, slug, meta, session, use) {
   try {
-    const group = await accountGroup(env, accountId);
     const keys = session ? [...actorKeys(session), String(credentialKey(session) || '').toLowerCase()] : [];
-    return await agentUseOnDoc(env, slug, meta, { ids: group.ids, keys, asker: group.canonical, manages });
+    return await agentUseOnDoc(env, slug, meta, { ...use, keys, handoffs: use.handoffs || await loadHandoffs(env, slug) });
   } catch (e) {
     console.error('[agent-use] not ordered by use:', e && e.message);
     return [];
   }
 }
 
-// GET /api/notify/targets: a personal doc's gate is its owner, a team doc's
-// is any member.
-async function notifyTargetsWithUse(env, slug, gate, resolved) {
+// GET /api/notify/targets: a personal doc's gate is its owner, a team doc's is
+// any member. The viewer's own questions are my-agent's (composerAgents joins
+// them), which keeps this to the handoffs the targets already read.
+async function notifyTargetsWithUse(env, slug, gate, resolved, handoffs) {
   const meta = gate.meta;
   if (!meta || !(resolved.default || resolved.fallback || (resolved.candidates || []).length)) return resolved;
   const viewer = gate.session || gate.actor;
-  const accountId = meta.workspace_id ? sessionAccountIds(viewer)[0] : meta.hosted && meta.hosted.account_id;
-  const uses = await agentUseForViewer(env, slug, meta, viewer, accountId,
-    !meta.workspace_id || Boolean(gate.ownerToken) || isDocOwnerSession(env, viewer, meta));
+  const uses = await agentUseForViewer(env, slug, meta, viewer, {
+    ids: sessionAccountIds(viewer), handoffs,
+    manages: !meta.workspace_id || Boolean(gate.ownerToken) || isDocOwnerSession(env, viewer, meta),
+  });
   return {
     ...resolved,
     default: withUsedHere(resolved.default, uses),
@@ -19478,15 +19484,18 @@ async function handleMyAgent(env, req, url, slug) {
   if (req.method === 'GET') {
     // The widget's token sees only what it could have asked: questions in a
     // thread, to the holder's own agents (no private answers, no team's).
-    const asks = accountId ? (await loadAgentAsks(env, slug, asker))
-      .filter((a) => !viaFeedbackToken || (a.comment_id && !a.runner && !a.team_agent))
-      .slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
+    const seenAsks = accountId ? (await loadAgentAsks(env, slug, asker))
+      .filter((a) => !viaFeedbackToken || (a.comment_id && !a.runner && !a.team_agent)) : [];
+    const asks = seenAsks.slice(0, AGENT_ASK_LIST).map(agentAskView);
     const guestTeam = !viaFeedbackToken && meta.workspace_id && !await isTeamMemberSession(env, session, meta.workspace_id)
       && isAllowlisted(accessFromMeta(meta), session, env, meta)
       ? await loadTeam(env, meta.workspace_id) : null;
     const ownerHere = meta.workspace_id ? isDocOwnerSession(env, session, meta)
       : Boolean(meta.hosted && meta.hosted.account_id && state.group.ids.includes(meta.hosted.account_id));
-    const uses = accountId ? await agentUseForViewer(env, slug, meta, session, accountId, ownerHere) : [];
+    // Waiting on an answer the page polls this: it keeps the use it has
+    // (keepAgentUse), and takes a full read when the answer is in.
+    const uses = accountId && url.searchParams.get('poll') !== '1' && (state.own.length || team.targets.length)
+      ? await agentUseForViewer(env, slug, meta, session, { ids: state.group.ids, asks: seenAsks, manages: ownerHere }) : [];
     return json({
       tier: state.tier,
       agent: agentAskTargetView(state.reachable[0] || null),
@@ -27574,8 +27583,9 @@ const tdocHandlers = {
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       const localDriver = await localDriverAccount(env, gate);
-      const resolved = await notifyTargetsFor(env, slug, gate, localDriver);
-      const used = await notifyTargetsWithUse(env, slug, gate, resolved);
+      const handoffs = await loadHandoffs(env, slug);
+      const resolved = await notifyTargetsFor(env, slug, gate, localDriver, handoffs);
+      const used = await notifyTargetsWithUse(env, slug, gate, resolved, handoffs);
       return json(localDriver ? used : withoutLocalTargets(used));
     }
 

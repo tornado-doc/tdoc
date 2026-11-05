@@ -246,9 +246,8 @@ export function orderedAskAiChoices(agents, recent = null) {
 // The @ list's order. Agents used on this doc first, most recent on top
 // (used_here_at, from the server; the last editor counts as used), then the
 // rest in the order given with the viewer's own most recent first (a team
-// agent keeps its place), tdoc AI always last. It also outranks how well a
-// typed name matches, so the list keeps its top once a name is typed. Display
-// only: who an unaddressed Send goes to is the list as given, not this.
+// agent keeps its place), tdoc AI always last. composerDefault below picks from
+// this same order, so the row on top is the row a composer's default means.
 const relevance = (t) => (t.tdoc_ai ? 2 : t.used_here_at || t.last_writer ? 0 : 1);
 const newestFirst = (a, b) => String(b || '').localeCompare(String(a || ''));
 export function byRelevance(list) {
@@ -260,9 +259,32 @@ export function byRelevance(list) {
   return ranked.map((row) => (reorders(row) ? own.shift().t : row.t));
 }
 
+// Who a composer means by default (⌘⇧Enter, the @agent button, a bare @AI): the
+// top row of the @ list that may edit. On a doc page only a top row with
+// evidence: an agent used here, or the server's `evidence` (its default). With
+// none the person chooses (Connection order is not a recommendation). `orTop`:
+// the feedback surfaces offer the top editable row either way.
+export function composerDefault(choices, { evidence = null, orTop = false } = {}) {
+  const top = byRelevance(choices).find((t) => t.can_edit);
+  if (!top) return null;
+  return orTop || top.used_here_at || top.last_writer || sameTarget(top, evidence) ? top : null;
+}
+
+// A poll for an answer does not look up use (worker handleMyAgent): the rows
+// keep what the last full read said.
+export function keepAgentUse(prev, body) {
+  if (!prev || !body) return body;
+  const carry = (rows, old) => (Array.isArray(rows) ? rows.map((t) => {
+    const was = (old || []).find((o) => sameTarget(o, t));
+    return was && was.used_here_at ? { ...t, used_here_at: was.used_here_at } : t;
+  }) : rows);
+  return { ...body, agents: carry(body.agents, prev.agents), team_agents: carry(body.team_agents, prev.team_agents) };
+}
+
 // The agents to offer for what is typed after `@`. With nothing typed, the
 // first `limit` (the ones the dropdown would preselect or list first); once
-// a name is typed, every agent it matches, prefix hits first. `labelOf` adds
+// a name is typed, every agent it matches: its exact name, then prefix hits,
+// then the rest, the list's own order within each, tdoc AI last. `labelOf` adds
 // the dropdown's own label to what a query can match.
 export function matchAgentChoices(choices, query, { limit = 2, labelOf = null } = {}) {
   const list = Array.isArray(choices) ? choices.filter(Boolean) : [];
@@ -273,15 +295,17 @@ export function matchAgentChoices(choices, query, { limit = 2, labelOf = null } 
     const names = [agentDisplayName(t, list), readableHandle(t), t.agent_name || '', agentLocation(t), labelOf ? labelOf(t) : '']
       .map((s) => String(s || '').toLowerCase())
       .filter(Boolean);
-    if (names.some((s) => s.startsWith(q))) return 0;
-    if (names.some((s) => s.split(/[\s()._·-]+/).some((w) => w.startsWith(q)))) return 1;
-    if (names.some((s) => s.includes(q))) return 2;
+    if ([agentName(t), agentMentionName(t), readableHandle(t)].some((s) => String(s || '').toLowerCase() === q)) return 0;
+    if (names.some((s) => s.startsWith(q))) return 1;
+    if (names.some((s) => s.split(/[\s()._·-]+/).some((w) => w.startsWith(q)))) return 2;
+    if (names.some((s) => s.includes(q))) return 3;
     return -1;
   };
   return list
     .map((t, i) => ({ t, r: rank(t), i }))
     .filter((row) => row.r >= 0)
-    .sort((a, b) => (relevance(a.t) - relevance(b.t)) || (relevance(a.t) === 0 ? 0 : a.r - b.r) || (a.i - b.i))
+    .sort((a, b) => (Number(Boolean(a.t.tdoc_ai)) - Number(Boolean(b.t.tdoc_ai))) || (a.r - b.r)
+      || (relevance(a.t) - relevance(b.t)) || (a.i - b.i))
     .map((row) => row.t);
 }
 

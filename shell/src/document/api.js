@@ -579,8 +579,8 @@ export function askDocument(slug, { question, version, selection, commentId = nu
 // Send to my agent: the reader's own agents and the questions this reader
 // sent them about this doc. Browser session only; the server never offers
 // anyone else's agent, and nobody else ever sees these answers.
-export function getMyAgent(slug) {
-  return request(`/api/docs/${encodeURIComponent(slug)}/my-agent`);
+export function getMyAgent(slug, { poll = false } = {}) {
+  return request(`/api/docs/${encodeURIComponent(slug)}/my-agent${poll ? '?poll=1' : ''}`);
 }
 
 // The comment composer's one door to an agent: ask_only false hands the

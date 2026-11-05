@@ -108,6 +108,39 @@ async function t(name, fn) {
       await context.close();
     });
 
+    await t('the row on top is who the composer means: @agent and ⌘⇧Enter go to it; a plain Comment reaches no agent (390px)', async () => {
+      const { context, page } = await open(390, '?used=1');
+      const box = page.locator('textarea');
+      await box.fill('please look');
+      await page.locator('.tdoc-composer-agent').click();
+      assert.match(await box.inputValue(), /@\u2060Codex/, 'the @agent button is not the top row');
+      await box.fill('please look');
+      await box.press('Control+Shift+Enter');
+      await page.waitForFunction(() => window.__posts.length === 1);
+      const sent = await page.evaluate(() => window.__posts[0]);
+      assert.equal(sent.opts.recipient.agent_sub, 'juliesmac_codex', 'the default went somewhere other than the top row');
+      await context.close();
+      const plain = await open(390, '?used=1');
+      await plain.page.locator('textarea').fill('just a note');
+      await plain.page.getByRole('button', { name: 'Comment', exact: true }).click();
+      await plain.page.waitForFunction(() => window.__posts.length === 1);
+      const note = await plain.page.evaluate(() => window.__posts[0]);
+      assert.equal(note.opts.sendToAgent, false, 'a plain comment reached an agent');
+      assert.ok(!note.opts.recipient && !note.opts.target, 'a plain comment named an agent');
+      await plain.context.close();
+    });
+
+    await t('a typed exact name beats a used agent; Enter picks it', async () => {
+      const { context, page } = await open(1050, '?used=1');
+      const box = page.locator('textarea');
+      await box.click();
+      await box.type('@devin');
+      await page.locator('.tdoc-mention-agent').first().waitFor();
+      await page.keyboard.press('Enter');
+      assert.match(await box.inputValue(), /@\u2060devin/);
+      await context.close();
+    });
+
     await t('the fallback agent is found by name', async () => {
       const { context, page } = await open(1050);
       const box = page.locator('textarea');

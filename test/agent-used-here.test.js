@@ -6,8 +6,12 @@
 //   - used here outranks used more recently on another doc
 //   - replied, published, handed a comment, asked: each counts; a reply never
 //     sets last_writer, and most recent use outranks the last editor
-//   - order only: `default` and the first editable row (the preselected
-//     recipient) stay what they were
+//   - one rule: what a composer means by default is the row on top
+//     (composerDefault); the server's `default`, the Send to agent dialog's,
+//     stays what it was
+//   - a typed name: exact and prefix matches ahead of use
+//   - a feedback token learns nothing of a private question's timing
+//   - cost: nothing read twice, nothing looked up on a poll
 //   - a viewer learns only about their own agents' use: same-named agents of
 //     another person, and another member's handoff to a team agent, stay out
 //
@@ -26,7 +30,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
   console.log('agents used here');
   const mod = await loadWorker();
   const worker = mod.default;
-  const { byRelevance, matchAgentChoices } = await import('../shell/src/document/agent-choices.js');
+  const { byRelevance, composerDefault, matchAgentChoices } = await import('../shell/src/document/agent-choices.js');
   const { composerAgents, TDOC_AI } = await import('../shell/src/document/ai-answerer.js');
   const ORIGIN = { Origin: 'https://tdoc.dev' };
 
@@ -140,18 +144,71 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
     assert(!row(rowsOf(await targets(env, owner, 'here')), 'mac_codex').used_here_at, 'a failed handoff was counted');
   });
 
-  await t('order only: default and the preselected row do not follow the new order', async () => {
+  // What every composer means by default on this list, as each surface asks.
+  const onDocPage = (body) => composerDefault(OWN_LIST(body), { evidence: body.default });
+  const onFeedback = (body) => composerDefault(OWN_LIST(body), { orTop: true });
+  const onTop = (body) => byRelevance(OWN_LIST(body))[0];
+
+  await t('one rule: the last handoff, then a later reply: the replier is on top and is the pick; the server default stays', async () => {
     const { env, owner, here } = await seed();
     const handed = await call(env, '/api/notify/handoff', { method: 'POST', token: owner.token, body: { slug: 'here', comment_ids: [here], recipient: { provider: 'local', server_id: 'box', device: 'box', cli: 'claude', agent_sub: 'box_claude' } } });
     assert(handed.status === 200, handed.text);
     await tick();
     await reply(env, owner, 'here', here, 'local/mac/mac_codex');
     const body = await targets(env, owner, 'here');
-    assert(body.default.agent_sub === 'box_claude', `default moved: ${JSON.stringify(body.default)}`);
-    const list = OWN_LIST(body);
-    // What the feedback space and the widget preselect, and Ask's first row.
-    assert(list.find((x) => x.can_edit).agent_sub === 'box_claude' && list[0].agent_sub === 'box_claude', subs(list).join());
-    assert(byRelevance(list)[0].agent_sub === 'mac_codex', subs(byRelevance(list)).join());
+    assert(body.default.agent_sub === 'box_claude', `the Send to agent dialog's default moved: ${JSON.stringify(body.default)}`);
+    assert(onTop(body).agent_sub === 'mac_codex', subs(byRelevance(OWN_LIST(body))).join());
+    assert(onDocPage(body).agent_sub === 'mac_codex' && onFeedback(body).agent_sub === 'mac_codex', 'the pick is not the row on top');
+  });
+
+  await t('one rule: published, then another replied: the replier is on top and is the pick; the publisher keeps its mark', async () => {
+    const { env, owner, here } = await seed();
+    await publish(env, owner, 'here', 2, 'local/mac/mac_codex');
+    await tick();
+    await reply(env, owner, 'here', here, 'local/box/box_claude');
+    const body = await targets(env, owner, 'here');
+    assert(body.default.agent_sub === 'mac_codex' && body.default.last_writer, JSON.stringify(body.default));
+    assert(onTop(body).agent_sub === 'box_claude' && onDocPage(body).agent_sub === 'box_claude', subs(byRelevance(OWN_LIST(body))).join());
+  });
+
+  await t('one rule, the traced case: a feedback space, A replied with no handoff, then B replied elsewhere: no server default, A on top, A the pick', async () => {
+    const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev' });
+    const owner = await issue(worker, env, 'owner');
+    const raft = (sub) => ({ provider: 'raft', server_id: 'S1', server_slug: 'acme', agent_sub: sub, agent_name: `${sub}-bot`, last_touched: '2026-01-01T00:00:00.000Z' });
+    await env.META.put(`account-notify:${owner.account_id}`, JSON.stringify([raft('a'), raft('b')]));
+    const { slug, token } = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: owner.cookie, body: { origin: 'https://app.example.com' } })).body;
+    await publish(env, owner, 'elsewhere');
+    const away = await commentOn(env, owner, 'elsewhere');
+    const posted = await call(env, '/api/comments', { method: 'POST', token, body: { slug, text: 'broken', anchor: { kind: 'product', url: 'https://app.example.com/' } } });
+    await reply(env, owner, slug, posted.body.id, 'raft/S1/a');
+    await tick();
+    await reply(env, owner, 'elsewhere', away, 'raft/S1/b');
+    const body = await targets(env, owner, slug);
+    // The list the server still gives is B first; A is what the page shows.
+    assert(rowsOf(body)[0].agent_sub === 'b' || body.default?.agent_sub === 'a', JSON.stringify(rowsOf(body)));
+    assert(onTop(body).agent_sub === 'a' && onFeedback(body).agent_sub === 'a', `top ${onTop(body).agent_sub}, pick ${onFeedback(body).agent_sub}`);
+  });
+
+  await t('one rule, the limits: an answer-only row is never the pick; a doc page with no evidence picks nobody', async () => {
+    const raft = (sub, extra) => ({ provider: 'raft', server_id: 'S1', agent_sub: sub, agent_name: sub, ...extra });
+    const list = [raft('edit', { can_edit: true, used_here_at: '2026-01-01T00:00:00.000Z' }), raft('ask', { can_edit: false, used_here_at: '2026-02-01T00:00:00.000Z' })];
+    assert(byRelevance(list)[0].agent_sub === 'ask' && composerDefault(list).agent_sub === 'edit', 'an answer-only row was picked to edit');
+    assert(composerDefault([list[1]]) === null, 'no row may edit');
+    const unused = [raft('one', { can_edit: true }), raft('two', { can_edit: true })];
+    assert(composerDefault(unused) === null, 'an unrelated agent was picked on a doc page');
+    assert(composerDefault(unused, { evidence: unused[0] }).agent_sub === 'one', 'the server\'s evidence, on top, is the pick');
+    assert(composerDefault(unused, { orTop: true }).agent_sub === 'one', 'the feedback surfaces offer the top row');
+    assert(composerDefault([{ ...TDOC_AI, can_edit: false }], { orTop: true }) === null, 'tdoc AI is never the pick');
+  });
+
+  await t('asked on their own doc: the owner\'s question orders the merged row, as my-agent is the one to know', async () => {
+    const { env, owner } = await seed();
+    const state = await mine(env, owner, 'here');
+    const asked = await call(env, '/api/docs/here/my-agent', { method: 'POST', cookie: owner.cookie, headers: ORIGIN, body: { question: 'why?', recipient: row(state.agents, 'mac_codex') } });
+    assert(asked.status === 200, asked.text);
+    const body = await targets(env, owner, 'here');
+    const list = composerAgents({ canSendToAgent: true, notifyTargets: body, mine: await mine(env, owner, 'here') });
+    assert(byRelevance(list)[0].agent_sub === 'mac_codex' && byRelevance(list)[0].can_edit, subs(byRelevance(list)).join());
   });
 
   await t('feedback space: it is a doc, its widget token sees the same order', async () => {
@@ -282,18 +339,70 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
     assert(!row((await mine(env, bob, 'report')).agents, 'mac_claude').used_here_at, 'julie\'s use reached bob');
   });
 
-  await t('tdoc AI last, and typing a name keeps the top of the order', async () => {
+  await t('a typed name: exact and prefix beat use, use breaks ties, tdoc AI stays last', async () => {
+    const at = (m) => `2026-0${m}-01T00:00:00.000Z`;
     const rows = [
-      { provider: 'local', server_id: 'm', agent_sub: 'old', agent_name: 'cl-old', used_here_at: '2026-01-01T00:00:00.000Z' },
-      { provider: 'local', server_id: 'm', agent_sub: 'new', agent_name: 'x cl-new', used_here_at: '2026-02-01T00:00:00.000Z' },
-      { provider: 'local', server_id: 'm', agent_sub: 'other', agent_name: 'cl-other', last_touched: '2026-03-01T00:00:00.000Z' },
+      { provider: 'raft', server_id: 'm', agent_sub: 'claw', agent_name: 'smarter-claude-claw', used_here_at: at(3) },
+      { provider: 'raft', server_id: 'm', agent_sub: 'pre-old', agent_name: 'claude-old', used_here_at: at(1) },
+      { provider: 'raft', server_id: 'm', agent_sub: 'pre-new', agent_name: 'claude-new', used_here_at: at(2) },
+      { provider: 'raft', server_id: 'm', agent_sub: 'exact', agent_name: 'claude' },
       { ...TDOC_AI },
     ];
     const order = byRelevance(rows);
-    same(subs(order), ['new', 'old', 'other', 'tdoc-ai']);
-    // "cl" is a prefix of the older name and a word in the newer one.
-    same(subs(matchAgentChoices(order, 'cl', { limit: Infinity })), ['new', 'old', 'other']);
+    same(subs(order), ['claw', 'pre-new', 'pre-old', 'exact', 'tdoc-ai']);
+    same(subs(matchAgentChoices(order, '', { limit: Infinity })), subs(order));
+    // Enter picks the first of these (mention-field).
+    same(subs(matchAgentChoices(order, 'claude', { limit: Infinity })), ['exact', 'pre-new', 'pre-old', 'claw']);
+    same(subs(matchAgentChoices(order, 'claude-', { limit: Infinity })), ['pre-new', 'pre-old', 'claw']);
     same(subs(matchAgentChoices(order, 'tdoc', { limit: Infinity })), ['tdoc-ai']);
+    const beside = [{ ...TDOC_AI }, { provider: 'raft', server_id: 'm', agent_sub: 'bot', agent_name: 'x tdoc-bot' }];
+    same(subs(matchAgentChoices(beside, 'tdoc', { limit: Infinity })), ['bot', 'tdoc-ai']);
+  });
+
+  // Serena's space on tdoc itself; Julie joined it; her token reaches her own agents.
+  async function joinedSpace() {
+    const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev' });
+    const serena = await issue(worker, env, 'serena');
+    const julie = await issue(worker, env, 'julie');
+    const raft = (sub) => ({ provider: 'raft', server_id: 'S1', server_slug: 'acme', agent_sub: sub, agent_name: sub, last_touched: '2026-01-01T00:00:00.000Z' });
+    await env.META.put(`account-notify:${julie.account_id}`, JSON.stringify([raft('open'), raft('hidden')]));
+    const space = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: serena.cookie, headers: ORIGIN, body: { origin: 'https://tdoc.dev' } })).body;
+    const meta = JSON.parse(await env.META.get(`meta:${space.slug}`));
+    await env.META.put(`meta:${space.slug}`, JSON.stringify({ ...meta, access: { ...meta.access, allowed_users: ['julie'] } }));
+    await call(env, '/api/feedback/join', { method: 'POST', cookie: julie.cookie, headers: ORIGIN, body: { slug: space.slug } });
+    const token = (await call(env, '/api/feedback/connect', { method: 'POST', cookie: julie.cookie, headers: ORIGIN, body: { origin: 'https://tdoc.dev' } })).body.token;
+    const ask = (id, sub, extra = {}) => ({ ask_id: id, at: '2026-03-01T00:00:00.000Z', by: julie.account_id, question: 'q', recipient: raft(sub), delivery: { status: 'delivered' }, ...extra });
+    return { env, julie, slug: space.slug, token, ask };
+  }
+
+  await t('a feedback token: a private question\'s timing stays out of used_here_at, the cookie still sees it', async () => {
+    const { env, julie, slug, token, ask } = await joinedSpace();
+    await env.META.put(`agent-asks:${slug}:${julie.account_id}`, JSON.stringify([ask('private', 'hidden'), ask('thread', 'open', { comment_id: 'c1' })]));
+    const viaToken = await call(env, `/api/docs/${slug}/my-agent`, { token, headers: ORIGIN });
+    assert(viaToken.status === 200, viaToken.text);
+    assert(!viaToken.body.asks.some((a) => a.ask_id === 'private'), 'the token lists a private question');
+    assert(!row(viaToken.body.agents, 'hidden').used_here_at, `the token learned of the private question: ${JSON.stringify(viaToken.body.agents)}`);
+    assert(row(viaToken.body.agents, 'open').used_here_at, 'a question in a thread is the token\'s to see');
+    assert(row((await mine(env, julie, slug)).agents, 'hidden').used_here_at, 'in her own browser it counts');
+  });
+
+  await t('cost: a poll looks up no use; a full read reads asks and handoffs once; targets read handoffs once and no group or asks', async () => {
+    const { env, owner, here } = await seed();
+    await reply(env, owner, 'here', here, 'local/mac/mac_codex');
+    const reads = (key) => env.META.gets.filter((k) => k === key).length;
+    env.META.gets.length = 0;
+    const polled = await call(env, '/api/docs/here/my-agent?poll=1', { cookie: owner.cookie });
+    assert(polled.status === 200 && !polled.body.agents.some((x) => x.used_here_at), polled.text);
+    assert(reads('handoffs:here') === 0, `a poll read handoffs ${reads('handoffs:here')} times`);
+    assert(reads(`agent-asks:here:${owner.account_id}`) === 1, 'a poll still lists the questions');
+    env.META.gets.length = 0;
+    const full = await call(env, '/api/docs/here/my-agent', { cookie: owner.cookie });
+    assert(row(full.body.agents, 'mac_codex').used_here_at, full.text);
+    assert(reads('handoffs:here') === 1 && reads(`agent-asks:here:${owner.account_id}`) === 1, `handoffs ${reads('handoffs:here')}, asks ${reads(`agent-asks:here:${owner.account_id}`)}`);
+    env.META.gets.length = 0;
+    assert(row(rowsOf(await targets(env, owner, 'here')), 'mac_codex').used_here_at, 'targets lost the use');
+    assert(reads('handoffs:here') === 1, `targets read handoffs ${reads('handoffs:here')} times`);
+    assert(reads(`agent-asks:here:${owner.account_id}`) === 0, 'targets read the asks');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
