@@ -10,7 +10,7 @@ if (!base || !/^https?:\/\//.test(base) || !token) {
   process.exit(2);
 }
 let cursor = null;
-const total = { scanned: 0, eligible: 0, updated: 0, failed: 0 };
+const total = { scanned: 0, eligible: 0, updated: 0, queued: 0, failed: 0 };
 do {
   const response = await fetch(new URL('/api/admin/preview-cards/backfill', base), {
     method: 'POST',

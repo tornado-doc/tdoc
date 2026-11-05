@@ -8235,15 +8235,6 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
     return !row.owner || row.owner === viewer;
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 
-  // Docs published before cards existed get theirs the first time their owner
-  // opens My docs: a few per load, in the background, no admin step. The
-  // pending marker in buildDocPreview keeps reloads from queueing twice.
-  if (ctx && typeof ctx.waitUntil === 'function' && env.PREVIEW_QUEUE) {
-    const missing = mine.filter((row) => !previewCardMatches(row.meta && row.meta.preview, row.slug, row.latest))
-      .slice(0, PREVIEW_FILL_PER_LOAD);
-    if (missing.length) ctx.waitUntil(fillMissingPreviewCards(env, missing.map((row) => row.slug)));
-  }
-
   const [starItems, recentItems, folderState] = viewerKey
     ? [starItemsEarly, recentItemsEarly, await folderStateP]
     : [[], [], { folders: [], docs: {} }];
@@ -8331,6 +8322,18 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
       folder: resolveTeamFolder(teamFolderStates.get(team.id), row.meta.team_folder),
     };
   };
+
+  // Docs without a card, or with an automatic card from an older template, get
+  // a fresh one the first time someone who may write them opens their hub (any
+  // team insider may: teamWriteAccess): a few per load, in the background, no
+  // admin step. The pending marker in buildDocPreview keeps reloads from
+  // queueing twice; a doc that keeps failing steps aside (previewCardFillDue).
+  if (ctx && typeof ctx.waitUntil === 'function' && env.PREVIEW_QUEUE) {
+    const due = [...mine, ...teamDocs.filter((row) => !isFeedbackSpace(row.meta))]
+      .filter((row) => previewCardFillDue(row.meta && row.meta.preview, row.slug, row.latest))
+      .slice(0, PREVIEW_FILL_PER_LOAD);
+    if (due.length) ctx.waitUntil(fillMissingPreviewCards(env, due.map((row) => row.slug)));
+  }
 
   // Docs indexed before full-text search, or whose index fell behind, are
   // queued the first time their hub lists them: one call per owner store,
@@ -12201,6 +12204,27 @@ function previewCardMatches(preview, slug, version) {
     && /^[a-f0-9]{12}$/.test(preview.image_hash || '')
     && preview.image === previewCardUrl(slug, version, preview.image_hash);
 }
+// Bump when defaultPreviewSvg changes look: automatic cards stored without this
+// number are redrawn by the lazy fill and the admin backfill. Authored cards and
+// screenshots carry no number and are never redrawn.
+const PREVIEW_CARD_TEMPLATE = 2;
+const PREVIEW_FILL_RETRY_MS = 24 * 60 * 60 * 1000;
+function previewCardIsStale(preview, slug, version) {
+  return !!previewCardMatches(preview, slug, version)
+    && preview.image_source !== 'screenshot'
+    && !preview.image_source_custom && !preview.image_custom
+    && preview.image_template !== PREVIEW_CARD_TEMPLATE;
+}
+function previewCardNeedsFill(preview, slug, version) {
+  return !previewCardMatches(preview, slug, version) || previewCardIsStale(preview, slug, version);
+}
+// The hub's check. A doc that just failed steps aside for a while, or a few
+// that can never render would take every per-load slot from the docs behind them.
+function previewCardFillDue(preview, slug, version) {
+  if (!previewCardNeedsFill(preview, slug, version)) return false;
+  const failedAt = preview ? Date.parse(preview.image_fill_failed_at) : NaN;
+  return !(Date.now() - failedAt < PREVIEW_FILL_RETRY_MS);
+}
 async function previewCardHash(svg) {
   const bytes = new TextEncoder().encode(svg);
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].slice(0, 6).map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -12358,7 +12382,7 @@ function previewIsScreenshot(preview, slug, version) {
   return !!(preview && preview.image_source === 'screenshot' && previewCardMatches(preview, slug, version));
 }
 
-async function buildDocPreview(env, html, { slug, version, title, svg = null, onRenderTask = null, existingPreview = null, screenshot = null } = {}) {
+async function buildDocPreview(env, html, { slug, version, title, svg = null, onRenderTask = null, existingPreview = null, screenshot = null, refresh = false } = {}) {
   const preview = docPreviewFromHtml(html, { slug, version, title });
   // Precedence: screenshot > authored SVG > automatic card. A screenshot is
   // for one version only; a newer version without one gets a card again.
@@ -12436,7 +12460,7 @@ async function buildDocPreview(env, html, { slug, version, title, svg = null, on
       if (imageExists || oldStatus === 'pending' || oldStatus === 'failed') return;
       try {
         if (!env.PREVIEW_QUEUE) throw new Error('preview_queue_unavailable');
-        await env.PREVIEW_QUEUE.send({ v: 1, kind: 'preview', slug, version: Number(version), hash, custom: !!authored, automatic });
+        await env.PREVIEW_QUEUE.send({ v: 1, kind: 'preview', slug, version: Number(version), hash, custom: !!authored, automatic, ...(refresh ? { refresh: true } : {}) });
       } catch (error) {
         console.error('[preview-card] enqueue failed:', slug, version, error && error.message || String(error));
         try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
@@ -12449,6 +12473,7 @@ async function buildDocPreview(env, html, { slug, version, title, svg = null, on
     preview.image_hash = hash;
     preview.image_source_custom = !!authored;
     preview.image_custom = !!(authored && imageExists && oldStatus === 'ready:custom');
+    if (!authored) preview.image_template = PREVIEW_CARD_TEMPLATE;
   } catch (error) {
     console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
     preview.image = '/tdoc_logo-v2.png';
@@ -12468,6 +12493,7 @@ async function processPreviewCardJob(env, job, { attempts = 3 } = {}) {
       if (env.META && await env.META.get(statusKey) === 'pending') {
         await env.META.put(statusKey, job.custom ? 'ready:custom' : 'ready:auto');
       }
+      await promoteRefreshedCard(env, job);
       return;
     }
     const source = await env.DOCS.get(previewCardSourceKey(slug, version, hash));
@@ -12491,12 +12517,14 @@ async function processPreviewCardJob(env, job, { attempts = 3 } = {}) {
       || !await env.DOCS.head(previewCardSourceKey(slug, version, hash))) return;
     await env.DOCS.put(previewCardKey(slug, version, hash), bytes, { httpMetadata: { contentType: 'image/png' } });
     if (env.META) await env.META.put(statusKey, custom ? 'ready:custom' : 'ready:auto');
+    await promoteRefreshedCard(env, job);
   } catch (error) {
     console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
     // The Queue allows two retries. Keep the card pending while another
     // attempt is due; only the final failure gets a negative cache entry.
     if (attempts >= 3) {
       try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
+      if (job.refresh) { try { await notePreviewFillFailed(env, slug, version); } catch {} }
     }
     throw error;
   }
@@ -12504,18 +12532,64 @@ async function processPreviewCardJob(env, job, { attempts = 3 } = {}) {
 
 const PREVIEW_FILL_PER_LOAD = 6;
 
+// A refreshed card replaces one that works, so the record keeps the old card
+// until the new PNG exists: the job swaps it in here. No window of a 503 or the
+// logo, and a failed render leaves the old card in place.
+async function promoteRefreshedCard(env, { refresh, slug, version, hash }) {
+  if (!refresh || !env.META) return;
+  const current = await loadDocMeta(env, slug);
+  if (!current || latestVersionNumber(current) !== version || !previewCardIsStale(current.preview, slug, version)) return;
+  const { image_fill_failed_at: _retried, ...previous } = current.preview;
+  await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: {
+    ...previous,
+    image: previewCardUrl(slug, version, hash), image_v: version, image_hash: hash,
+    image_source_custom: false, image_custom: false, image_template: PREVIEW_CARD_TEMPLATE,
+  } }));
+}
+
+async function notePreviewFillFailed(env, slug, version) {
+  const current = await loadDocMeta(env, slug);
+  if (!current || latestVersionNumber(current) !== version || !previewCardNeedsFill(current.preview, slug, version)) return;
+  const previous = current.preview && typeof current.preview === 'object' ? current.preview : {};
+  await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: { ...previous, image_fill_failed_at: new Date().toISOString() } }));
+}
+
+// One doc, for the hub's lazy fill and the admin backfill. existingPreview keeps
+// an authored card from an older version carried forward.
+async function fillPreviewCard(env, slug, meta, version) {
+  const stale = previewCardIsStale(meta.preview, slug, version);
+  let renderTask = null;
+  const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+  const preview = obj && await buildDocPreview(env, await obj.text(), {
+    slug, version, title: meta.title || slug, existingPreview: meta.preview, refresh: stale,
+    onRenderTask: (task) => { renderTask = task; },
+  });
+  const built = !!preview && previewCardMatches(preview, slug, version);
+  if (built && stale && !await env.DOCS.head(previewCardKey(slug, version, preview.image_hash))) {
+    if (renderTask) await renderTask();
+    if (!env.META || await env.META.get(previewCardStatusKey(slug, version, preview.image_hash)) !== 'failed') return 'queued';
+    await notePreviewFillFailed(env, slug, version);
+    return 'failed';
+  }
+  if (!built) {
+    await notePreviewFillFailed(env, slug, version);
+    return 'failed';
+  }
+  const current = await loadDocMeta(env, slug);
+  if (!current || latestVersionNumber(current) !== version) return 'failed';
+  await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview }));
+  if (renderTask) await renderTask();
+  return 'updated';
+}
+
 async function fillMissingPreviewCards(env, slugs) {
   for (const slug of slugs) {
     try {
       const meta = await loadDocMeta(env, slug);
       if (!meta) continue;
       const version = latestVersionNumber(meta) || 1;
-      if (previewCardMatches(meta.preview, slug, version)) continue;
-      const next = await refreshDocPreview(env, slug, meta);
-      if (!previewCardMatches(next.preview, slug, version)) continue;
-      const current = await loadDocMeta(env, slug);
-      if (!current || latestVersionNumber(current) !== version) continue;
-      await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: next.preview }));
+      if (!previewCardFillDue(meta.preview, slug, version)) continue;
+      await fillPreviewCard(env, slug, meta, version);
     } catch (error) {
       console.error('[preview-card] fill failed:', slug, error && error.message || String(error));
     }
@@ -28116,7 +28190,7 @@ const tdocHandlers = {
       const dryRun = body.apply !== true;
       const limit = Math.max(1, Math.min(10, Number(body.limit) || 5));
       const page = await env.META.list({ prefix: 'meta:', limit, ...(body.cursor ? { cursor: String(body.cursor) } : {}) });
-      let scanned = 0, eligible = 0, updated = 0, failed = 0;
+      let scanned = 0, eligible = 0, updated = 0, queued = 0, failed = 0;
       for (const item of page.keys || []) {
         const slug = String(item.name || '').slice(5);
         if (!isValidSlug(slug)) continue;
@@ -28124,24 +28198,20 @@ const tdocHandlers = {
         const meta = await loadDocMeta(env, slug);
         if (!meta) continue;
         const version = latestVersionNumber(meta) || 1;
-        if (previewCardMatches(meta.preview, slug, version)) continue;
+        if (!previewCardNeedsFill(meta.preview, slug, version)) continue;
         eligible++;
         if (dryRun) continue;
         try {
-          const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
-          if (!obj) { failed++; continue; }
-          const preview = await buildDocPreview(env, await obj.text(), { slug, version, title: meta.title || slug });
-          if (!previewCardMatches(preview, slug, version)) { failed++; continue; }
-          const current = await loadDocMeta(env, slug);
-          if (!current || latestVersionNumber(current) !== version) { failed++; continue; }
-          await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview }));
-          updated++;
+          const outcome = await fillPreviewCard(env, slug, meta, version);
+          if (outcome === 'updated') updated++;
+          else if (outcome === 'queued') queued++;
+          else failed++;
         } catch (error) {
           failed++;
           console.error('[preview-card] backfill failed:', slug, error && error.message || String(error));
         }
       }
-      return json({ ok: true, dry_run: dryRun, scanned, eligible, updated, failed, cursor: page.list_complete ? null : page.cursor });
+      return json({ ok: true, dry_run: dryRun, scanned, eligible, updated, queued, failed, cursor: page.list_complete ? null : page.cursor });
     }
 
     // A screenshot of a doc version's first screen becomes its preview card

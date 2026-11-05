@@ -54,6 +54,19 @@ export default { async fetch(req) {
       if (!png) return new Response('queue produced no PNG: ' + status, { status: 500 });
       return new Response(png, { headers: { 'Content-Type': 'image/png', 'X-Preview-Status': status } });
     }
+    if (new URL(req.url).pathname === '/queue-refresh') {
+      // A refresh job on the real runtime: render, store, then swap the record.
+      const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(svg)))].slice(0, 6).map((n) => n.toString(16).padStart(2, '0')).join('');
+      const old = '/d/workerd-card/preview/v1-aaaaaaaaaaaa.png';
+      const kv = new Map([['meta:workerd-card', JSON.stringify({ title: 'Card', versions: [{ n: 1 }], preview: { image: old, image_v: 1, image_hash: 'aaaaaaaaaaaa', image_source_custom: false, image_custom: false } })]]);
+      const objects = new Map();
+      const env = {
+        DOCS: { async head(key) { return key.endsWith('.svg') || objects.has(key) ? {} : null; }, async get() { return { text: async () => svg }; }, async put(key, bytes) { objects.set(key, bytes); } },
+        META: { async get(key) { return kv.get(key) ?? null; }, async put(key, value) { kv.set(key, value); }, async getWithMetadata(key) { return { value: kv.get(key) ?? null, metadata: null }; }, async delete(key) { kv.delete(key); }, async list() { return { keys: [], list_complete: true }; } },
+      };
+      await worker.queue({ messages: [{ body: { v: 1, kind: 'preview', slug: 'workerd-card', version: 1, hash, custom: false, automatic: svg, refresh: true }, ack() {} }] }, env);
+      return Response.json({ preview: JSON.parse(kv.get('meta:workerd-card')).preview, stored: [...objects.keys()], hash });
+    }
     return new Response(await renderPreviewPng(svg), { headers: { 'Content-Type': 'image/png' } });
   } catch (error) { return new Response(String(error && error.stack || error), { status: 500 }); }
 } };`;
@@ -84,6 +97,12 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     assert.equal(queued.headers.get('x-preview-status'), 'ready:custom');
     const queuedBytes = Buffer.from(await queued.arrayBuffer());
     assert.ok(queuedBytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && queuedBytes.length > 5_000);
+    const refreshed = await fetch(`http://127.0.0.1:${port}/queue-refresh`);
+    if (refreshed.status !== 200) assert.fail(`workerd refresh returned ${refreshed.status}: ${await refreshed.text()}`);
+    const refreshedBody = await refreshed.json();
+    assert.equal(refreshedBody.preview.image_template, 2, 'a refresh job swaps the record once the PNG is stored');
+    assert.equal(refreshedBody.preview.image, `/d/workerd-card/preview/v1-${refreshedBody.hash}.png`);
+    assert.ok(refreshedBody.stored.includes(`docs/workerd-card/v1/preview-${refreshedBody.hash}.png`));
     const budgetResponse = await fetch(`http://127.0.0.1:${port}/budget`);
     if (budgetResponse.status !== 200) assert.fail(`workerd budget returned ${budgetResponse.status}: ${await budgetResponse.text()}`);
     const budget = await budgetResponse.json();
