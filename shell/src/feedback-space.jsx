@@ -10,6 +10,7 @@ import { OwnerAccessDialog } from './document/owner-access-dialog.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { NotifyHandoffPanel, sendOneCommentToAgent, useNotifyTargets } from './document/notify-handoff.jsx';
 import { composerAgents } from './document/ai-answerer.js';
+import { composerDefault } from './document/agent-choices.js';
 import { askOwnAgent, ownAgentPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { summarizeHandoffSurfaces, threadPhase } from './document/handoff-state.js';
@@ -69,7 +70,7 @@ export function FeedbackSpace({ boot }) {
   }), [canSendToAgent, notify.default, notify.candidates, notify.fallback, isOwner, myAgent.state]);
   const agentMentions = useMemo(() => ({
     choices: agentChoices,
-    preselected: canSendToAgent ? agentChoices.find((t) => t.can_edit) || null : null,
+    preselected: canSendToAgent ? composerDefault(agentChoices, { orTop: true }) : null,
     privateAskSupported: false,
   }), [agentChoices, canSendToAgent]);
 

@@ -4,7 +4,7 @@ import { AppMenu, AppMenuItem } from '../ui/menu.jsx';
 import { AppButton } from '../ui/button.jsx';
 import { AppCheckbox } from '../ui/checkbox.jsx';
 import { readStored, writeStored } from '../safe-storage.js';
-import { agentMentionName, sameTarget } from './agent-choices.js';
+import { agentMentionName, byRelevance, sameTarget } from './agent-choices.js';
 import { AgentMenuItems } from './agent-menu.jsx';
 import { Author, CommentMessageText, ReplyMessage, authorLine } from './comment-card.jsx';
 import { HandoffSendResult, defaultInstruction, useHandoffSend } from './notify-handoff.jsx';
@@ -150,7 +150,7 @@ function EditForm({ send, modePicker, draft: instruction, onDraft: setInstructio
         <div className="tdoc-ask-form-pills">
           {modePicker}
           {choices.length ? <AgentPill ariaLabel="Who should change it?" label={recipient ? to : 'Choose an agent'}>
-            <AgentMenuItems choices={choices} current={recipient} preserveOrder maxVisible={4} showConnect={false} showRelevance
+            <AgentMenuItems choices={byRelevance(choices)} current={recipient} preserveOrder maxVisible={4} showConnect={false} showRelevance
               onPick={(target) => { setPicked(target); sending.setResult(null); }} />
           </AgentPill> : null}
         </div>
@@ -259,7 +259,7 @@ export function AskAiPanel({ open, draft, onDraft, targetKey, onTarget, targets,
         <div className="tdoc-ask-form-pills">
           {modePicker}
           {selected ? <AgentPill ariaLabel="Who should answer?" label={agentMentionName(selected.target, choices)}>
-            <AgentMenuItems choices={choices} disabledChoices={disabledChoices} guestAction={guestAction} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={signInToAsk} onConnect={onConnect} showRelevance pinTdocAi
+            <AgentMenuItems choices={byRelevance(choices)} disabledChoices={disabledChoices} guestAction={guestAction} ai={{ remaining }} current={selected.target} preserveOrder maxVisible={4} showConnect={signInToAsk} onConnect={onConnect} showRelevance pinTdocAi
               onPick={(target) => onTarget(targets.find((item) => sameTarget(item.target, target))?.key || selected.key)} />
           </AgentPill> : null}
         </div>

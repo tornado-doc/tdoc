@@ -83,6 +83,9 @@ t('the dropdown and the picker read the same helper', () => {
   assert(/const edit = canSendToAgent \? orderedAgentChoices\(notifyTargets\) : \[\];/.test(answerer), 'picker list not from orderedAgentChoices');
   assert(/composerAgents\(\{\s*canSendToAgent,\s*notifyTargets,/.test(shell), 'the shell does not build the @ list from the send targets');
   assert(/matchAgentChoices\(byRelevance\(agentsOnOffer\.choices\)/.test(field), 'picker does not filter the shared list');
+  // Every agent pill's menu, Ask AI's included, in that one order.
+  assert(/AgentMenuItems choices=\{byRelevance\(choices\)\}/.test(field), 'the pill forks the order');
+  assert(read('shell/src/document/ask-ai-panel.jsx').match(/AgentMenuItems choices=\{byRelevance\(choices\)\}/g)?.length === 2, 'Ask AI forks the order');
 });
 
 t('@ order: the agent that edited last, then the rest, tdoc AI last -- also once a name is typed', () => {
@@ -92,9 +95,44 @@ t('@ order: the agent that edited last, then the rest, tdoc AI last -- also once
   const order = box.byRelevance(list);
   const pick = (q) => box.matchAgentChoices(order, q, { limit: Infinity }).map((t) => box.agentMentionName(t, list));
   assert(JSON.stringify(pick('')) === JSON.stringify(['smarter-tdoc-claw', 'smart-julie-claude', 'tdoc-bot', 'tdoc-reviewer', 'tdoc AI']), JSON.stringify(pick('')));
+  // Both prefix hits: use breaks the tie.
   assert(pick('sma')[0] === 'smarter-tdoc-claw', JSON.stringify(pick('sma')));
   assert(pick('tdoc-r')[0] === 'tdoc-reviewer', JSON.stringify(pick('tdoc-r')));
-  assert(JSON.stringify(pick('tdoc')) === JSON.stringify(['smarter-tdoc-claw', 'tdoc-bot', 'tdoc-reviewer', 'tdoc AI']), JSON.stringify(pick('tdoc')));
+  // Typed, a prefix hit beats use (Enter picks the first); tdoc AI stays last.
+  assert(JSON.stringify(pick('tdoc')) === JSON.stringify(['tdoc-bot', 'tdoc-reviewer', 'smarter-tdoc-claw', 'tdoc AI']), JSON.stringify(pick('tdoc')));
+});
+
+t('@ order: most recent use here beats the last editor; the viewer\'s others by recency; a team agent keeps its place', () => {
+  const at = (h) => `2026-11-04T0${h}:00:00.000Z`;
+  const team = raft('ta', 'crew', { team_agent: { id: 'ta', name: 'crew' } });
+  const list = [
+    raft('w', 'writer', { last_writer: true, used_here_at: at(1), last_touched: at(1) }),
+    raft('r', 'replier', { used_here_at: at(2), last_touched: at(2) }),
+    team,
+    raft('o', 'older', { last_touched: at(3) }),
+    raft('n', 'newer', { last_touched: at(4) }),
+    { provider: 'tdoc', server_id: 'tdoc', agent_sub: 'tdoc-ai', agent_name: 'tdoc AI', tdoc_ai: true },
+  ];
+  const order = box.byRelevance(list).map((t) => t.agent_name);
+  assert(JSON.stringify(order) === JSON.stringify(['replier', 'writer', 'crew', 'newer', 'older', 'tdoc AI']), JSON.stringify(order));
+  assert(list[0].agent_name === 'writer', 'byRelevance moved the list it was given');
+});
+
+t('every surface names its default through composerDefault; the dialog keeps the server\'s', () => {
+  const uses = (p) => /composerDefault\(agentChoices/.test(read(p));
+  for (const p of ['shell/src/document-shell.jsx', 'shell/src/feedback-space.jsx', 'feedback/src/main.jsx']) assert(uses(p), `${p} forks the default`);
+  assert(!/preselected: agentChoices\.find/.test(read('shell/src/feedback-space.jsx') + read('feedback/src/main.jsx') + read('shell/src/document-shell.jsx')), 'a first-row default is back');
+  assert(/byRelevance\(agentChoices\)\[0\]/.test(read('shell/src/document-shell.jsx')), 'the Ask prefill is not the row on top');
+  assert(/targets\.default \|\| null/.test(read('shell/src/document/notify-handoff.jsx')), 'the dialog moved off the server default');
+});
+
+t('a poll keeps the use the last full read gave', () => {
+  const prev = { agents: [raft('a', 'a', { used_here_at: 'T' }), raft('b', 'b')], team_agents: [] };
+  const body = { tier: 'online', agents: [raft('a', 'a', { status: 'active' }), raft('b', 'b')], team_agents: [], asks: [1] };
+  const kept = box.keepAgentUse(prev, body);
+  assert(kept.agents[0].used_here_at === 'T' && kept.agents[0].status === 'active' && !kept.agents[1].used_here_at, JSON.stringify(kept.agents));
+  assert(kept.asks[0] === 1, 'the poll\'s news was lost');
+  assert(box.keepAgentUse(null, body) === body, 'first read');
 });
 
 t('nothing typed: the first two agents only', () => {

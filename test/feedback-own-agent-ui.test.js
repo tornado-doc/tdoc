@@ -218,6 +218,84 @@ async function startServer(worker, env) {
           } finally { await context.close(); w.server.close(); }
         });
 
+        await t(`${tag}: the agent the joiner used on this space comes first, on the space page and in the widget`, async () => {
+          const w = await world();
+          // bencher answered Julie here; julie-claw leads her account's list.
+          // In the thread: the widget's token does not count a private question.
+          const answered = { ask_id: 'a1', at: new Date().toISOString(), by: w.julie.account_id, question: 'q', comment_id: w.comment.id, recipient: raft('j2', 'bencher', 'raft'),
+            delivery: { status: 'delivered' }, answer: { text: 'a', at: new Date().toISOString() } };
+          await w.env.META.put(`agent-asks:${w.space.slug}:${w.julie.account_id}`, JSON.stringify([answered]));
+          const context = await browser.newContext({ viewport: { width, height: 900 } });
+          try {
+            await context.addCookies([{ name: 'tdoc_sid', value: sid(w.julie.cookie), url: w.base }]);
+            const page = await context.newPage();
+            const listFrom = async (root, name) => {
+              const card = root.locator(`[data-comment-id="${w.comment.id}"]`).first();
+              await card.waitFor();
+              await card.getByRole('button', { name: 'Reply' }).first().click();
+              const box = root.locator('.tdoc-reply-form textarea').first();
+              await box.waitFor();
+              await box.fill('@');
+              const menu = root.locator('.tdoc-mention-menu');
+              await menu.waitFor();
+              const names = await menu.locator('.tdoc-mention-agent .tdoc-mention-login').allInnerTexts();
+              assert.ok(/bencher/.test(names[0]) && /julie-claw/.test(names[1]), `order: ${names}`);
+              assert.ok(!names.some((n) => /serena/.test(n)), `the owner's agent is offered: ${names}`);
+              await shot(page, `${tag}-${name}-used-first`);
+            };
+            await page.goto(`${w.base}/d/${w.space.slug}`);
+            await listFrom(page, 'space-page');
+            await context.clearCookies();
+            await page.addInitScript(([key, value]) => { localStorage.setItem(key, value); }, [`tdoc-feedback:${w.base}`, JSON.stringify(w.mine)]);
+            await page.goto(`${w.base}/__page`);
+            await listFrom(page.locator('#tdoc-feedback-root'), 'widget');
+          } finally { await context.close(); w.server.close(); }
+        });
+
+        for (const surface of ['space page', 'widget']) {
+          await t(`${tag}: ${surface}, the traced case: A replied here, B later elsewhere: A on top, and ⌘⇧Enter hands to A`, async () => {
+            const w = await world();
+            await w.env.META.put(`account-notify:${w.serena.account_id}`, JSON.stringify([raft('b', 'bee-agent', 'stan'), raft('a', 'ay-agent', 'stan')]));
+            const meta = JSON.parse(await w.env.META.get(`meta:${w.space.slug}`));
+            await w.env.META.put(`meta:${w.space.slug}`, JSON.stringify({ ...meta, notify_agents: [{ ...raft('a', 'ay-agent', 'stan'), last_touched: new Date(Date.now() - 60000).toISOString() }] }));
+            const context = await browser.newContext({ viewport: { width, height: 900 } });
+            try {
+              const page = await context.newPage();
+              let root = page;
+              if (surface === 'widget') {
+                await page.addInitScript(([key, value]) => { localStorage.setItem(key, value); }, [`tdoc-feedback:${w.base}`, JSON.stringify(w.space)]);
+                await page.goto(`${w.base}/__page`);
+                root = page.locator('#tdoc-feedback-root');
+              } else {
+                await context.addCookies([{ name: 'tdoc_sid', value: sid(w.serena.cookie), url: w.base }]);
+                await page.goto(`${w.base}/d/${w.space.slug}`);
+              }
+              const card = root.locator(`[data-comment-id="${w.comment.id}"]`).first();
+              await card.waitFor();
+              await card.getByRole('button', { name: 'Reply' }).first().click();
+              const box = root.locator('.tdoc-reply-form textarea').first();
+              await box.waitFor();
+              await box.fill('@');
+              const menu = root.locator('.tdoc-mention-menu');
+              await menu.waitFor();
+              // The rows come in with the targets: wait for both, then read the order.
+              await menu.locator('.tdoc-mention-agent', { hasText: 'bee-agent' }).first().waitFor();
+              const names = await menu.locator('.tdoc-mention-agent .tdoc-mention-login').allInnerTexts();
+              assert.ok(/ay-agent/.test(names[0]) && /bee-agent/.test(names[1]), `order: ${names}`);
+              await shot(page, `${tag}-${surface.replace(' ', '-')}-traced-top-row`);
+              await box.fill('please look');
+              await box.press('Control+Shift+Enter');
+              let sent = [];
+              for (let i = 0; i < 100 && !sent.length; i++) {
+                await page.waitForTimeout(100);
+                sent = JSON.parse((await w.env.META.get(`handoffs:${w.space.slug}`)) || '[]');
+              }
+              assert.equal(sent.length, 1, 'nothing was handed over');
+              assert.equal(sent[0].recipient.agent_sub, 'a', `went to ${sent[0].recipient.agent_sub}, not the row on top`);
+            } finally { await context.close(); w.server.close(); }
+          });
+        }
+
         await t(`${tag}: widget for a third-party app's space offers no agents`, async () => {
           const w = await world();
           const context = await browser.newContext({ viewport: { width, height: 900 } });

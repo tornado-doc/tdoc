@@ -7,9 +7,9 @@ import { mentionsAi, onlyMeDefault } from './ai-answerer.js';
 
 // The @agent part of a comment box, shared by the new-comment composer and
 // the reply box under a thread (Julie, 2026-10-24):
-//   - the @agent button puts the default agent (choices[0]: the one that last
-//     edited, if the commenter may drive it) into the text at the caret, as
-//     a pill; the pill's dropdown swaps it (MentionField). Typing @ and
+//   - the @agent button puts the default agent (preselected: composerDefault,
+//     the @ list's top row that may edit) into the text at the caret, as a
+//     pill; the pill's dropdown swaps it (MentionField). Typing @ and
 //     picking an agent makes the same pill.
 //   - no mode to pick: the agent reads the comment and answers or edits. The
 //     server's authorship rules decide whether it may edit; where it may not
@@ -23,7 +23,7 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   const agents = useContext(AgentMentionContext);
   const choices = agents.choices || [];
   const [onlyMe, setOnlyMe] = useState(null);
-  // A bare @AI follows this document's evidenced default, if there is one.
+  // A bare @AI follows this composer's default, if there is one.
   const target = taggedAgent(text, choices) || (mentionsAi(text) ? agents.preselected || null : null);
   const key = target ? targetKey(target) : '';
   useEffect(() => { setOnlyMe(null); }, [key]);
