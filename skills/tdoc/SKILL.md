@@ -44,7 +44,10 @@ session does not switch between the two. Both must be the same tdoc account:
 
 Use the MCP tools only when the CLI cannot run here (no Bash, no Node, or
 `bin/` is missing); the server applies the same rules (write access,
-authorship, answer-only locks, workspace scope). The mapping:
+authorship, answer-only locks, workspace scope). Agents running on Raft pass
+`raft_agent: "$SLOCK_CURRENT_SERVER_ID/$SLOCK_CURRENT_AGENT_ID"` to `create_doc`,
+`update_doc`, `edit_doc`, `commit_upload` and `reply_to_comment`, the way the CLI
+says which agent it is; everyone else omits it. The mapping:
 
 | CLI | MCP tool |
 |---|---|
