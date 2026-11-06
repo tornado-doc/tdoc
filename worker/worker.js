@@ -15814,7 +15814,9 @@ NOTIFY_PROVIDERS.webhook = {
       clearTimeout(timer);
       return r.ok ? { status: 'delivered', error: null } : { status: 'failed', error: `webhook_${r.status}` };
     } catch (e) {
-      return { status: 'failed', error: String((e && e.name === 'AbortError') ? 'webhook_timeout' : (e && e.message) || e).slice(0, 200) };
+      // Never the runtime's message: it could name the address, and this error
+      // is shown wherever the handoff is, a feedback token's answers included.
+      return { status: 'failed', error: e && e.name === 'AbortError' ? 'webhook_timeout' : 'webhook_unreachable' };
     }
   },
 };
@@ -15894,6 +15896,20 @@ async function localDriverAccount(env, gate) {
   return sessionAccountIds(a).find((id) => owner.includes(id)) || null;
 }
 function isLocalTarget(t) { return !!t && t.provider === 'local'; }
+// A feedback token can sit in the source of somebody else's page, and a webhook
+// URL often works as a credential: rows given to that token go without it. The
+// picker sends such a row back, so a webhook is also recognised by its id; the
+// routes then send to the stored copy, whose URL is the only one ever used.
+function withoutWebhookUrl(t) {
+  if (!t || !t.url) return t;
+  const { url: _url, ...rest } = t;
+  return rest;
+}
+function pickedNotifyTarget(t) {
+  const target = normalizeNotifyTarget(t);
+  if (target || !t || t.provider !== 'webhook' || !WEBHOOK_ID_RE.test(t.agent_sub)) return target;
+  return { provider: 'webhook', server_id: 'webhook', agent_sub: t.agent_sub };
+}
 // The picker's answer with local agents taken out, for a caller who may not
 // drive them. The reason stays honest: nothing bound is still nothing bound.
 // A team agent's rows stay: they are offered to every member on purpose.
@@ -19557,7 +19573,7 @@ async function handleMyAgent(env, req, url, slug) {
   // One of the reader's own agents, or the doc's team agent for a member of
   // its team, and only one that can be reached. Anything else is somebody
   // else's agent.
-  const asked = body && body.recipient ? normalizeNotifyTarget(body.recipient) : null;
+  const asked = body && body.recipient ? pickedNotifyTarget(body.recipient) : null;
   const askedTeamAgent = body && body.recipient && body.recipient.team_agent && typeof body.recipient.team_agent.id === 'string' ? body.recipient.team_agent.id : '';
   let target = null;
   let runner = null;
@@ -27663,7 +27679,9 @@ const tdocHandlers = {
       const handoffs = await loadHandoffs(env, slug);
       const resolved = await notifyTargetsFor(env, slug, gate, localDriver, handoffs);
       const used = await notifyTargetsWithUse(env, slug, gate, resolved, handoffs);
-      return json(localDriver ? used : withoutLocalTargets(used));
+      const answer = localDriver ? used : withoutLocalTargets(used);
+      if (!(gate.session && gate.session.feedback)) return json(answer);
+      return json({ ...answer, default: withoutWebhookUrl(answer.default), candidates: (answer.candidates || []).map(withoutWebhookUrl), fallback: withoutWebhookUrl(answer.fallback) });
     }
 
     if (p === '/api/notify/handoffs' && method === 'GET') {
@@ -27673,6 +27691,7 @@ const tdocHandlers = {
       if (!gate.ok) return gate.response;
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
       let handoffs = await loadHandoffs(env, slug);
+      if (gate.session && gate.session.feedback) handoffs = handoffs.map((h) => (h && h.recipient ? { ...h, recipient: withoutWebhookUrl(h.recipient) } : h));
       if (gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && gate.actor?.kind === 'team_member') {
         const list = await readComments(env, slug);
         ensureMigrated(list);
@@ -27745,7 +27764,7 @@ const tdocHandlers = {
       const teamDoc = !!(gate.meta && gate.meta.workspace_id);
       const caller = teamDoc ? await teamAgentCaller(env, gate) : null;
       if (teamDoc && !localDriver && !caller) return json(TEAM_ADMIN_AGENT_ONLY, { status: 403 });
-      const asked = recipient ? normalizeNotifyTarget(recipient) : null;
+      const asked = recipient ? pickedNotifyTarget(recipient) : null;
       const askedAgent = recipient && recipient.team_agent && typeof recipient.team_agent.id === 'string' ? recipient.team_agent.id : '';
       // Only a team member may name a local agent without driving it: the
       // team's own agent, checked against the team's list below.
