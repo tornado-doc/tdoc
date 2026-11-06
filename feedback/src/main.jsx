@@ -21,6 +21,7 @@ import {
 } from '../../shell/src/document/api.js';
 import { PortalContainerContext } from '../../shell/src/ui/portal.js';
 import { AppMenu, AppMenuItem } from '../../shell/src/ui/menu.jsx';
+import { SideResizeHandle, useSideWidth } from '../../shell/src/ui/side-resize.jsx';
 import { FeedbackSharePanel } from '../../shell/src/feedback-share-panel.jsx';
 import chromeCss from '../../server/chrome.css?inline';
 // ui.css resets <button> chrome on Reply / Edit / Resolve — without it those
@@ -49,8 +50,7 @@ ${uiCss}
        > pins and dock. The panel covers pins on narrow screens. */
     #tdoc-feedback-root .tdoc-popup { z-index: 2147483646; max-width: calc(100vw - 16px); }
     #tdoc-feedback-root .tdoc-margin-comment.tdoc-floating-open {
-      position: fixed; max-height: calc(100vh - 24px); overflow-y: auto;
-      overscroll-behavior: contain; z-index: 2147483645;
+      position: fixed; z-index: 2147483645;
     }
     #tdoc-feedback-root .tdoc-feedback-mode {
       position: fixed !important; right: 18px !important; bottom: 18px !important;
@@ -1087,7 +1087,9 @@ ${uiCss}
     }
   }
 
-  const PANEL_WIDTH = 340;
+  // The panel's width, dragged by its edge (ui/side-resize.jsx). A phone gets
+  // the whole screen and no handle.
+  const PANEL_WIDTH = { storageKey: 'tdoc-feedback-panel-width', initial: 340, min: 280, max: 640 };
   const POLL_MS = 15_000;
   const pathOf = (href) => { try { const u = new URL(href); return `${u.pathname}${u.search}` || '/'; } catch (_) { return href; } };
   const labelOf = (anchor) => {
@@ -1106,14 +1108,14 @@ ${uiCss}
     return parts.join(' · ');
   };
 
-  function Dock({ session, openCount, unreadCount = 0, panelOpen, picking, areaMode, onArea, onList, onPick, onHide, sendCount, onSend, onShare }) {
+  function Dock({ session, openCount, unreadCount = 0, panelOpen, panelWidth, picking, areaMode, onArea, onList, onPick, onHide, sendCount, onSend, onShare }) {
     // Share: in the widget, the owner's invites (SharePanel). Who else has
     // access, and moving the space into a team, stay in the space's Share on
     // tdoc: this page's token can add an invite, never change the rest.
     // (feedbackInvites off: Share opens that page, as it used to.)
     const shareUrl = session && session.share_url;
     return (
-      <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && innerWidth > 700 ? { right: PANEL_WIDTH + 18 } : null}>
+      <div className={`tdoc-feedback-dock${panelOpen ? ' panel-open' : ''}`} role="toolbar" aria-label="tdoc feedback" style={panelOpen && innerWidth > 700 ? { right: panelWidth + 18 } : null}>
         <button type="button" className={panelOpen ? 'on' : ''} onClick={onList} title={unreadCount ? `${unreadCount} new agent ${unreadCount === 1 ? 'reply' : 'replies'}` : 'All comments on this app'}>
           <MessagesSquare aria-hidden="true" /> <strong>{openCount}</strong> open
           {unreadCount ? <span className="tdoc-fb-inline-unread-dot" aria-label="New agent reply" /> : null}
@@ -1175,7 +1177,7 @@ ${uiCss}
     );
   }
 
-  function ListPanel({ area, unreadComments, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
+  function ListPanel({ side, area, unreadComments, pageUrl, filter, setFilter, cardProps, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
     const here = area.shownPageComments;
     const unreadIds = new Set(unreadComments.map((comment) => comment.id));
     const elsewhere = new Map();
@@ -1199,7 +1201,8 @@ ${uiCss}
       </button>}
     />;
     return (
-      <aside className="tdoc-fb-panel" aria-label="Feedback on this app">
+      <aside className="tdoc-fb-panel" aria-label="Feedback on this app" style={innerWidth > 700 ? { width: side.width } : undefined}>
+        {innerWidth > 700 ? <SideResizeHandle side={side} label="Resize the feedback panel" /> : null}
         <header>
           {spaces.length > 1 && onSwitch ? <strong><SpaceSwitcher spaces={spaces} onSwitch={onSwitch} /></strong> : <strong>Feedback</strong>}
           <span className="tdoc-fb-filter" role="group" aria-label="Show">
@@ -1251,6 +1254,7 @@ ${uiCss}
     const [shown, setShown] = useState(false);
     const [picking, setPicking] = useState(false);
     const [panelOpen, setPanelOpen] = useState(false);
+    const panelSide = useSideWidth(PANEL_WIDTH);
     const [filter, setFilter] = useState('open');
     const [surface, setSurface] = useState(null);
     const [session, setSession] = useState(() => readSession());
@@ -1866,7 +1870,7 @@ ${uiCss}
         {tag ? <span className={`tdoc-fb-area-tag${box.top < 30 ? ' below' : ''}`}>{tag}</span> : null}
       </div>
     ) : null;
-    const rightInset = panelOpen ? Math.min(PANEL_WIDTH, innerWidth) : 0;
+    const rightInset = panelOpen ? (innerWidth > 700 ? panelSide.width : innerWidth) : 0;
     // The box being commented on, where it is now (it follows a scroll).
     const areaBox = (() => {
       if (!selected || !areaSel) return null;
@@ -1971,6 +1975,7 @@ ${uiCss}
 
         {panelOpen ? (
           <ListPanel
+            side={panelSide}
             area={area}
             unreadComments={unreadComments}
             pageUrl={canonical()}
@@ -2032,6 +2037,7 @@ ${uiCss}
           openCount={openCount}
           unreadCount={unreadComments.length}
           panelOpen={panelOpen}
+          panelWidth={panelSide.width}
           picking={picking}
           areaMode={areaMode}
           onArea={areaSelectOn ? () => {

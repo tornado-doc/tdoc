@@ -1,6 +1,4 @@
-import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Sparkles } from 'lucide-react';
-import { SuggestContext } from './suggestions.js';
+import React, { useEffect, useRef, useState } from 'react';
 import { CommentIcon } from '../ui/comment-icon.jsx';
 import { SegmentedControl } from '../ui/segmented-control.jsx';
 import { AskIcon } from '../ui/ask-icon.jsx';
@@ -11,16 +9,9 @@ import { CommentPinFace, commentPinState } from './comment-pin.jsx';
 import { isDocumentComment, TOP_BAR_HEIGHT } from './model.js';
 
 export function CommentListControls({ filter, unreadCount = 0, onMarkAllRead = null }) {
-  const suggest = useContext(SuggestContext);
   if (!filter && !(unreadCount && onMarkAllRead)) return null;
-  const fixable = suggest?.enabled ? suggest.fixable : 0;
   return <div className={`tdoc-comment-filter-row${unreadCount > 0 && onMarkAllRead ? ' has-mark-all' : ''}`}>
     {filter}
-    {fixable > 1 ? (
-      <button type="button" className="tdoc-comment-mark-all tdoc-fix-all" disabled={Boolean(suggest.busyIds?.length)}
-        title="tdoc AI suggests edits for every open comment; you accept or reject each"
-        onClick={() => suggest.fixAll()}><Sparkles size={13} aria-hidden="true" />Fix all {fixable} with AI</button>
-    ) : null}
     {unreadCount > 0 && onMarkAllRead ? (
       <button type="button" className="tdoc-comment-mark-all" onClick={() => onMarkAllRead()}>Mark all as read</button>
     ) : null}

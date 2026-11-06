@@ -40,7 +40,7 @@ export const FLAGS = Object.freeze({
   feedbackAreaSelect: Object.freeze({ label: 'Feedback: comment on an area', owner: 'julie', added: '2026-11-01', default: false, preview: true }),
   // Ask/Edit v2: one Ask AI input (tdoc AI answers a question, or proposes
   // edits that show in the doc as red/green suggestions to accept or
-  // reject), Edit with AI on a selection, Fix with AI on comment cards.
+  // reject), Edit with AI on a selection.
   // Replaces Ask AI's Ask / Edit switch where it is on. Dev mode only (and
   // PR previews): the server enforces it too (worker askEditV2Allowed: the
   // boot's canSuggest, the routes, propose_edits, reply_as), so pinning the

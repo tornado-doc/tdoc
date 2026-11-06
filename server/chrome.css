@@ -190,6 +190,12 @@
      rendered cards absolutely-positioned at the page's top-left corner. */
   #tdoc-comment-layer { display: none; }
   .tdoc-margin-comment { position: absolute; width: 280px; background: #fff; border: 1px solid #e8eaed; border-radius: 12px; padding: 14px 14px 12px; box-shadow: 0 1px 3px rgba(60,64,67,.15), 0 4px 8px rgba(60,64,67,.08); font: 13px system-ui, sans-serif; transition: box-shadow .15s, transform .15s; z-index: 999996; pointer-events: auto; }
+  /* The card's text and thread. Only the floating card gives it a box: that one
+     fits the screen, scrolls this part, and keeps the reply box under it. */
+  .tdoc-cc-body { display: contents; }
+  .tdoc-margin-comment.tdoc-floating-open { display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; }
+  .tdoc-floating-open > .tdoc-cc-body { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .tdoc-floating-open > .tdoc-reply-form { flex: none; max-height: 60%; overflow-y: auto; overscroll-behavior: contain; }
   .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
   .tdoc-margin-comment.tdoc-current-comment { box-shadow: 0 0 0 2px var(--td-accent-ring-soft), 0 4px 16px var(--td-accent-ring-soft); }
   .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
@@ -705,7 +711,7 @@
   .tdoc-mention-field { position: relative; }
   /* Positioned in viewport coordinates by MentionField and portalled to the
      body, so a scrolling comment card cannot clip it (#363). */
-  .tdoc-mention-menu { position: fixed; z-index: 1000002; max-height: 184px; overflow-y: auto; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); padding: 4px; }
+  .tdoc-mention-menu { position: fixed; z-index: 1000002; background: #fff; border: 1px solid var(--td-line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.16); padding: 4px; }
   .tdoc-mention-option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; box-sizing: border-box; appearance: none; border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font: 13px system-ui, sans-serif; color: var(--td-ink); text-align: left; }
   .tdoc-mention-option.active { background: #f0f1f4; }
   .tdoc-mention-option img { width: 18px; height: 18px; border-radius: 50%; flex: none; }
@@ -1183,9 +1189,6 @@
   .tdoc-suggest-bar.is-narrow .tdoc-suggest-bar-actions { flex: 1 1 auto; justify-content: flex-end; flex-wrap: wrap; }
   @media (prefers-reduced-motion: reduce) { .tdoc-suggest-dot { animation: none; } }
   .tdoc-suggest-chip { position: fixed; z-index: 999996; display: inline-flex; gap: 4px; padding: 3px; background: var(--td-ground, #fff); border: 1px solid var(--td-line, #e8e7e3); border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.10); }
-  .tdoc-margin-comment .meta .tdoc-fix-ai { display: inline-flex; align-items: center; gap: 4px; }
-  .tdoc-margin-comment .meta .tdoc-fix-ai[aria-busy="true"] { color: var(--td-muted, #6b6a66); }
-  .tdoc-fix-all { display: inline-flex; align-items: center; gap: 4px; }
   .tdoc-composer-edit-ai { display: inline-flex; align-items: center; gap: 4px; }
   .tdoc-ask-conversation { display: grid; gap: 11px; min-width: 0; max-height: min(38vh, 320px); overflow-y: auto; margin-top: 13px; padding-right: 2px; }
   .tdoc-ask-conversation > *, .tdoc-ask-turn > * { min-width: 0; }

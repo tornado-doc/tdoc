@@ -19496,11 +19496,14 @@ async function handleMyAgent(env, req, url, slug) {
     // (keepAgentUse), and takes a full read when the answer is in.
     const uses = accountId && url.searchParams.get('poll') !== '1' && (state.own.length || team.targets.length)
       ? await agentUseForViewer(env, slug, meta, session, { ids: state.group.ids, asks: seenAsks, manages: ownerHere }) : [];
+    // Whose they are, stamped as a notify target's is: how a reply box knows
+    // the agent that answered a thread is this one (agentForThread).
+    const owner = accountId && state.own.length ? await agentOwner(env, accountId, credentialKey(session)) : null;
     return json({
       tier: state.tier,
       agent: agentAskTargetView(state.reachable[0] || null),
       // last_touched is this viewer's own agent's, for the @ list's order.
-      agents: state.own.map((t) => ({ ...agentAskTargetView(withUsedHere(t, uses)), last_touched: t.last_touched })),
+      agents: state.own.map((t) => ({ ...agentAskTargetView(withUsedHere(t, uses)), last_touched: t.last_touched, ...(owner ? { owner } : {}) })),
       team_agents: team.targets.map((t) => agentAskTargetView(withUsedHere(t, uses))),
       disabled_team_agents: guestTeam ? teamAgents(guestTeam).map((agent) => ({
         provider: 'local', agent_sub: agent.id, agent_name: agent.name,

@@ -696,7 +696,7 @@ export function DocumentShell({ boot, config }) {
   }, [bridge.send]);
 
   // Ask/Edit v2 (flag askEditV2): one Ask AI input that answers or edits,
-  // Edit with AI on a selection, Fix with AI on comment cards; tdoc AI's
+  // Edit with AI on a selection; tdoc AI's
   // edits show in the doc to accept (publish) or reject. The owner and
   // editors only, on the latest version.
   const [askEditFlag] = useState(() => isFeatureOn('askEditV2'));
@@ -1353,7 +1353,7 @@ export function DocumentShell({ boot, config }) {
       return changed ? next : turns;
     });
   }, [myAgent.state?.asks]);
-  // Ask/Edit v2: Edit with AI (a selection) and Fix with AI (comments). The
+  // Ask/Edit v2: Edit with AI (a selection). The
   // agent picked in Ask AI's chip does it: tdoc AI suggests at once; an
   // agent that may edit this doc gets a handoff asking for suggestions.
   const pickedAskAiChoice = () => askAiTargets.find((item) => item.key === selectedAskAiTargetKey) || null;
@@ -1394,32 +1394,8 @@ export function DocumentShell({ boot, config }) {
       } else if (!body?.suggestion) showToast('tdoc AI could not place an edit in that passage. Rephrase, or select a little more.', true);
     } catch (error) { suggestFailed(error); }
   };
-  const anchorTextOf = (comment) => comment?.anchor?.text || comment?.anchor?.fallback?.text || null;
-  const fixWithAi = async (list) => {
-    const targets = list.filter(Boolean);
-    if (!targets.length || suggestions.busy) return;
-    const ids = targets.map((c) => c.id);
-    const passage = targets.length === 1 ? anchorTextOf(targets[0]) : null;
-    const choice = pickedAskAiChoice();
-    if (editingAgentChoice(choice)) {
-      await handToAgentForSuggestions(choice, ids, ids.length === 1 ? 'address this comment' : 'address my new comments', passage);
-      return;
-    }
-    if (narrow) setDrawerOpen(false);
-    try {
-      const body = await suggestions.request({ instruction: '', scope: { kind: 'comments', comment_ids: ids }, passage,
-        label: ids.length > 1 ? `tdoc AI is fixing ${ids.length} comments…` : 'tdoc AI is fixing this comment…' });
-      if (typeof body?.remaining === 'number') setAiRemaining(body.remaining);
-      if (!body?.suggestion) showToast(ids.length > 1 ? 'tdoc AI had no text change to suggest for these comments.' : 'tdoc AI had no text change to suggest for this comment.', true);
-    } catch (error) { suggestFailed(error); }
-  };
-  const fixableComments = suggestOn ? comments.comments.filter((c) => c && !c.resolved && c.status !== 'applied' && !c.deleted) : [];
   const suggestContext = suggestOn ? {
     enabled: true,
-    fix: (comment) => fixWithAi([comment]),
-    fixAll: () => fixWithAi(fixableComments.slice(0, 30)),
-    fixable: fixableComments.length,
-    busyIds: suggestions.busy?.commentIds || [],
     pendingFor: suggestions.commentPending,
     review: (id) => { if (narrow) setDrawerOpen(false); suggestions.review(id); },
   } : null;
@@ -1506,7 +1482,6 @@ export function DocumentShell({ boot, config }) {
     onClosePrivate: () => setPrivateAsk(null),
     // Ask/Edit v2: what the hint says about the named agent.
     suggestsFor: suggestOn ? handsBackSuggestions : null,
-    prefillReplies: suggestOn,
   }), [suggestOn, canSendToAgent, agentChoices, composerPick, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
