@@ -3532,6 +3532,8 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
     // the boot at all, so the page is what it was before.
     && !!(oidc && (oidc.askEditV2Preview || (oidc.devMode && oidc.devMode.on)));
   if (!cfg.canSuggest) delete cfg.canSuggest;
+  // "Open as a document" on a space: what the agent row says about it.
+  if (docMeta && docMeta.created_from === 'feedback') cfg.feedbackSpace = true;
   if (!isLanding && vlist.length > 1 && typeof version === 'number' && version < latestVersion) {
     oldVersion = {
       current: version,
@@ -22042,8 +22044,14 @@ const MCP_TOOLS = {
         if (!ref) return mcpToolError('invalid_arguments', 'slug: a slug or doc URL.');
         const denied = await mcpReadGate(call, ref.slug);
         if (denied) return denied;
+        // Spare a writer the upload. Anyone /api/upload would tell something else
+        // (no write access, an answer-only run) hears that at commit_upload.
         const target = await loadDocMeta(call.env, ref.slug);
-        if (target && target.created_from === 'feedback') return mcpToolError('feedback_space_no_versions', `This is a feedback space: a comment space takes replies, not versions. ${MCP_REFUSAL_NEXT.feedback_space_no_versions}`);
+        if (target && target.created_from === 'feedback'
+          && (await requireDocWriteAccess(call.env, call.actor, ref.slug)).ok
+          && !(await answerLockRefusal(call.env, call.actor, ref.slug))) {
+          return mcpToolError('feedback_space_no_versions', `This is a feedback space: a comment space takes replies, not versions. ${MCP_REFUSAL_NEXT.feedback_space_no_versions}`);
+        }
         slug = ref.slug;
       }
       if (!mcpUploadSecret(call.env)) return mcpToolError('upload_unavailable', 'Uploads are not configured on this server. Use create_doc / update_doc with the HTML inline.');

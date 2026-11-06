@@ -75,6 +75,7 @@ export function FeedbackSpace({ boot }) {
     privateAskSupported: false,
     // A feedback space takes replies, not versions (the server refuses them).
     nothingToPublish: true,
+    fixesTheApp: true,
   }), [agentChoices, canSendToAgent]);
 
   // Which threads this tab shows: the same area the doc page and the widget

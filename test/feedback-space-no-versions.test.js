@@ -10,8 +10,6 @@
 //     duplicate (a doc of its own), publishing to any other doc.
 // Run with: node test/feedback-space-no-versions.test.js
 const assert = require('assert/strict');
-const fs = require('fs');
-const path = require('path');
 const { loadWorker, makeEnv, issue, req } = require('./helpers/worker-harness');
 
 const HTML = (t) => `<!doctype html><html><head><title>${t}</title></head><body><h1>${t}</h1><p>Words.</p></body></html>`;
@@ -173,9 +171,57 @@ const ERROR = 'feedback_space_no_versions';
     } finally { delete env.TDOC_PREVIEW; }
   });
 
-  await t('an answer-only question on a space hears the answer lock, not "fix the site"', async () => {
-    assert.match(fs.readFileSync(path.join(__dirname, '..', 'worker/worker.js'), 'utf8'),
-      /answerLockRefusal\(env, auth\.actor, slug\) : null;\s*if \(answering\) return answering;\s*const spaceRefusal/);
+  await t('an answer-only question on a space hears the answer lock on every route, not "fix the site"', async () => {
+    const meta = JSON.parse(await env.META.get(`meta:${space.slug}`));
+    const acct = meta.hosted.account_id;
+    const stub = env.COMMENTS.get(env.COMMENTS.idFromName(space.slug));
+    const lockOp = (op) => stub.fetch('https://do/answer-locks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug: space.slug, op }) });
+    assert.equal((await lockOp({ kind: 'add', id: 'a1', lock: { ask_id: 'a1', asker: acct, by: acct, ids: [acct], until: Date.now() + 600000 } })).status, 200);
+    env.TDOC_PREVIEW = '1';
+    try {
+      const upload = await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: space.slug, version: 2, html: HTML('x') } });
+      assert.equal(upload.body.error, 'answer_only_run', upload.text);
+      const card = await call(`/api/docs/${space.slug}/preview`, { method: 'POST', token: julie.token, body: { preview_png: 'x' } });
+      assert.equal(card.body.error, 'answer_only_run', card.text);
+      const propose = await call(`/api/docs/${space.slug}/suggestions`, { method: 'POST', token: julie.token, body: { edits: [{ find: 'Product feedback', replace: 'x' }] } });
+      assert.equal(propose.body.error, 'answer_only_run', propose.text);
+      assert.match((await mcp('update_doc', { slug: space.slug, html: HTML('x') })).text, /answer_only_run/);
+      // create_upload lets it through, and commit_upload says so: never "fix the site".
+      assert.doesNotMatch((await mcp('create_upload', { slug: space.slug, files: [{ name: 'index.html', size: 10, type: 'text/html' }] })).text, new RegExp(ERROR));
+    } finally {
+      delete env.TDOC_PREVIEW;
+      assert.equal((await lockOp({ kind: 'remove', id: 'a1' })).status, 200);
+    }
+  });
+
+  await t('someone with no write access is never told to fix the site, by create_upload either', async () => {
+    const other = await issue(worker, env, 'other2');
+    const meta = JSON.parse(await env.META.get(`meta:${space.slug}`));
+    await env.META.put(`meta:${space.slug}`, JSON.stringify({ ...meta, access: { ...meta.access, visibility: 'unlisted' } }));
+    try {
+      const r = await call('/mcp', { method: 'POST', token: other.token, headers: { Accept: 'application/json, text/event-stream' }, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_upload', arguments: { slug: space.slug, files: [{ name: 'index.html', size: 10, type: 'text/html' }] } } } });
+      assert.doesNotMatch(r.text, new RegExp(ERROR), r.text);
+    } finally { await env.META.put(`meta:${space.slug}`, JSON.stringify(meta)); }
+  });
+
+  await t('a resend on a space never asks for suggestions, even from a stored handoff that did', async () => {
+    const c = await call('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: 'For a resend', anchor } });
+    await call('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device: 'mac', clis: ['claude'] } });
+    const handed = await call('/api/notify/handoff', { method: 'POST', cookie: julie.cookie, headers: O, body: { slug: space.slug, comment_ids: [c.body.id], recipient: { provider: 'local', server_id: 'mac', agent_sub: 'mac_claude' } } });
+    assert.equal(handed.status, 200, handed.text);
+    const key = `handoffs:${space.slug}`;
+    const stored = JSON.parse(await env.META.get(key));
+    const mine = stored.find((h) => (h.comment_ids || []).includes(c.body.id));
+    mine.reply_as = 'suggestions';
+    await env.META.put(key, JSON.stringify(stored));
+    env.TDOC_PREVIEW = '1';
+    try {
+      const again = await call('/api/notify/handoff/resend', { method: 'POST', cookie: julie.cookie, headers: O, body: { slug: space.slug, handoff_id: mine.handoff_id } });
+      assert.equal(again.status, 200, again.text);
+      const queue = await call('/api/notify/local/pending?device=mac', { token: julie.token });
+      assert.ok(JSON.stringify(queue.body).includes(mine.handoff_id), `the resend is not queued: ${queue.text}`);
+      assert.doesNotMatch(JSON.stringify(queue.body), /reply_as/, queue.text);
+    } finally { delete env.TDOC_PREVIEW; }
   });
 
   await t('propose_edits refuses: there is no review on a space', async () => {

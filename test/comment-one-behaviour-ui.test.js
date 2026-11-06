@@ -349,6 +349,33 @@ async function startServer(worker, env) {
         await v.ctx.close();
       });
     }
+    // "Open as a document" on the space: no suggestion path, and not the list's
+    // surface either, so no tag; what the row says is still true of a space.
+    await t(`${tag}: dev mode, the document page of a space: no tag for an editing agent, and no promise to change the doc`, async () => {
+      const id = await ownerThread();
+      const ctx = await contextFor(julie);
+      const page = await tracked(ctx);
+      await page.goto(`${base}/d/${space.slug}/v/1?doc=1`);
+      await page.frameLocator('iframe').locator('h1').waitFor({ timeout: 15000 });
+      await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
+      assert.equal(await page.evaluate(() => (window.__TDOC_SHELL__ || {}).canSuggest), undefined);
+      if (phone) await page.locator('.tdoc-fab').click();
+      else await page.locator(`.tdoc-pin[data-id="${id}"], .tdoc-pin`).first().click({ force: true });
+      const card = page.locator(`[data-comment-id="${id}"]`).first();
+      await card.waitFor({ timeout: 10000 });
+      await card.getByRole('button', { name: 'Reply', exact: true }).first().click();
+      const box = card.locator('.tdoc-reply-form textarea').first();
+      await box.waitFor();
+      await untagged(card, box, 'the document page of a space started with a tag');
+      await box.click();
+      await page.keyboard.type('@');
+      await page.locator('#tdoc-mention-menu [role=option]', { hasText: /Claude Code/ }).first().click();
+      const form = await card.locator('.tdoc-reply-form').innerText();
+      assert.match(form, /fixes the app/);
+      assert.doesNotMatch(form, /changes the doc|suggests/);
+      assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
     // The widget with no word of dev mode: another site's page.
     await t(`${tag}: the cross-site widget (no dev-mode signal) stays off for the owner's editing agent`, async () => {
       const id = await ownerRaftThread();

@@ -1493,6 +1493,7 @@ ${uiCss}
       ai: null, privateAskSupported: false,
       // A feedback space takes replies, not versions (the server refuses them).
       nothingToPublish: true,
+      fixesTheApp: true,
     }), [agentChoices]);
 
     useEffect(() => {

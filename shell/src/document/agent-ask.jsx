@@ -134,7 +134,7 @@ export function agentAskHint(ask) {
   const name = agentMentionName(target, choices);
   if (onlyMe) return `${name} answers you alone`;
   if (canChange && agents?.suggestsFor?.(target)) return `${name} answers or suggests edits`;
-  if (canChange && agents?.nothingToPublish) return `${name} answers or fixes the app`;
+  if (canChange && agents?.fixesTheApp) return `${name} answers or fixes the app`;
   return canChange ? `${name} answers or changes the doc` : `${name} answers in the thread`;
 }
 
