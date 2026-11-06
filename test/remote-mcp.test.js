@@ -1237,7 +1237,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       assert(agentName(author) === 'linked', agentName(author));
       assert(metaOf(slug).notify_agents[0].agent_sub === 'agent-linked', 'a reply earns the seat');
       const list = await tool(conn.access_token, 'get_comments', { slug });
-      assert(list.structuredContent.comments[0].replies[0].author === '@linked', JSON.stringify(list.structuredContent.comments[0].replies));
+      assert(list.structuredContent.comments[0].replies[0].author === '@linked (Claude)', JSON.stringify(list.structuredContent.comments[0].replies));
     });
 
     await t('an agent on a connected server, not linked: its handle comes from Raft, not the caller', async () => {

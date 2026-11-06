@@ -22224,8 +22224,9 @@ const MCP_TOOLS = {
       if (!ref) return mcpToolError('invalid_arguments', 'slug is required.');
       const r = await mcpApi(call, 'GET', `/api/comments?slug=${encodeURIComponent(ref.slug)}&version=all`);
       if (!r.ok || !Array.isArray(r.data)) return mcpApiError(r);
-      // An agent with a handle goes by it, as on the comment card.
-      const who = (a) => (a && ((a.kind === 'agent' && a.handle) || a.name || a.login)) || 'someone';
+      // An agent with a handle goes by it, as on the comment card, and keeps the
+      // name it signed with: "(unverified app)" is not to be lost on the reader.
+      const who = (a) => (a && (a.kind === 'agent' && a.handle ? `${a.handle} (${a.name})` : a.name || a.login)) || 'someone';
       const all = r.data.map((c) => ({
         id: c.id,
         author: who(c.author),
