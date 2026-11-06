@@ -3531,12 +3531,16 @@ function shellDocumentWorker(rawHtml, slug, version, identity, versions, isOwner
   // person (handleSuggestionDecision), with a preview fallback where there is
   // no Durable Object, so this does not follow canEdit's storage check.
   cfg.canSuggest = (!!isOwner || !!(oidc && oidc.teamManage)) && !isLanding
+    // A feedback space takes no versions, so no suggestion could land.
+    && !(docMeta && docMeta.created_from === 'feedback')
     && Number(version) === Number(latestVersion) && !!cfg.ask
     // Dev mode (or a PR preview) only, as askEditV2Allowed decides for a
     // session: devModeBoot's state is that same read. Off, the key is not in
     // the boot at all, so the page is what it was before.
     && !!(oidc && (oidc.askEditV2Preview || (oidc.devMode && oidc.devMode.on)));
   if (!cfg.canSuggest) delete cfg.canSuggest;
+  // "Open as a document" on a space: what the agent row says about it.
+  if (docMeta && docMeta.created_from === 'feedback') cfg.feedbackSpace = true;
   if (!isLanding && vlist.length > 1 && typeof version === 'number' && version < latestVersion) {
     oldVersion = {
       current: version,
@@ -14219,6 +14223,20 @@ async function teamWriteAccess(env, actor, meta) {
   return { ok: true, meta, teamDoc: true, teamAdmin: role === 'admin' };
 }
 
+// A feedback space holds the comments left on an app. Its page is that list,
+// and an agent's fix lands on the app, not here. A version published to one
+// would replace the page behind "Open as a document" and the list's title, with
+// nobody asked, so a token gets this instead (everyone, every token). The
+// space's creation and a person's save in the browser editor are not tokens;
+// tdoc AI's suggestions and accepting them, which would publish, are refused too.
+function feedbackSpaceVersionRefusal(meta) {
+  if (!meta || meta.created_from !== 'feedback') return null;
+  return json({
+    error: 'feedback_space_no_versions',
+    message: 'This is a feedback space: a comment space takes replies, not versions.',
+  }, { status: 409 });
+}
+
 async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   const meta = await loadDocRecord(env, slug);
   // In Trash the slug stays reserved and nothing writes it. Its owner, who
@@ -18962,6 +18980,8 @@ async function handleSuggest(env, req, url, slug) {
   if (!cfg.available) return json({ error: 'ask_unavailable' }, { status: 503 });
   const gate = await suggestEditorGate(env, req, url, slug);
   if (gate.error) return gate.error;
+  const spaceRefusal = feedbackSpaceVersionRefusal(gate.meta);
+  if (spaceRefusal) return spaceRefusal;
   const { session, meta, latest } = gate;
   let body = {};
   try { body = await req.json(); } catch {}
@@ -19110,6 +19130,11 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
   const gate = await suggestEditorGate(env, req, url, slug);
   if (gate.error) return gate.error;
   const { session } = gate;
+  // Accepting would publish; rejecting one left from before is still fine.
+  if (decision === 'accept') {
+    const spaceRefusal = feedbackSpaceVersionRefusal(gate.meta);
+    if (spaceRefusal) return spaceRefusal;
+  }
   const view = (x) => suggestionView(x, gate.mine(x));
   let body = {};
   try { body = await req.json(); } catch {}
@@ -19250,6 +19275,8 @@ async function handleProposeEdits(env, req, url, slug) {
   if (!writeGate.ok) return writeGate.response;
   const answering = await answerLockRefusal(env, auth.actor, slug);
   if (answering) return answering;
+  const spaceRefusal = feedbackSpaceVersionRefusal(writeGate.meta);
+  if (spaceRefusal) return spaceRefusal;
   const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
   if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
   let body = {};
@@ -19612,11 +19639,14 @@ async function handleMyAgent(env, req, url, slug) {
     // (keepAgentUse), and takes a full read when the answer is in.
     const uses = accountId && url.searchParams.get('poll') !== '1' && (state.own.length || team.targets.length)
       ? await agentUseForViewer(env, slug, meta, session, { ids: state.group.ids, asks: seenAsks, manages: ownerHere }) : [];
+    // Whose they are, stamped as a notify target's is: how a reply box knows
+    // the agent that answered a thread is this one (agentForThread).
+    const owner = accountId && state.own.length ? await agentOwner(env, accountId, credentialKey(session)) : null;
     return json({
       tier: state.tier,
       agent: agentAskTargetView(state.reachable[0] || null),
       // last_touched is this viewer's own agent's, for the @ list's order.
-      agents: state.own.map((t) => ({ ...agentAskTargetView(withUsedHere(t, uses)), last_touched: t.last_touched })),
+      agents: state.own.map((t) => ({ ...agentAskTargetView(withUsedHere(t, uses)), last_touched: t.last_touched, ...(owner ? { owner } : {}) })),
       team_agents: team.targets.map((t) => agentAskTargetView(withUsedHere(t, uses))),
       disabled_team_agents: guestTeam ? teamAgents(guestTeam).map((agent) => ({
         provider: 'local', agent_sub: agent.id, agent_name: agent.name,
@@ -21100,6 +21130,7 @@ function mcpToolError(error, message, extra = {}) {
 // What an agent needs to hear when tdoc says no, in the API's own words,
 // plus the one next step the skill would tell it.
 const MCP_REFUSAL_NEXT = {
+  feedback_space_no_versions: 'Fix the site, then answer with reply_to_comment, with status applied once it is fixed. Do not retry.',
   answer_only_run: 'You were asked a question on this doc. Answer it with answer_question; do not edit or retry.',
   agent_not_author_editor: 'Another writer owns the latest version. Reply with reply_to_comment without status applied or partial, and say the writer named here can make the change. Do not retry.',
   token_scope: 'This connection cannot reach that workspace. Its owner can change it in Settings -> Agents.',
@@ -22129,6 +22160,14 @@ const MCP_TOOLS = {
         if (!ref) return mcpToolError('invalid_arguments', 'slug: a slug or doc URL.');
         const denied = await mcpReadGate(call, ref.slug);
         if (denied) return denied;
+        // Spare a writer the upload. Anyone /api/upload would tell something else
+        // (no write access, an answer-only run) hears that at commit_upload.
+        const target = await loadDocMeta(call.env, ref.slug);
+        if (target && target.created_from === 'feedback'
+          && (await requireDocWriteAccess(call.env, call.actor, ref.slug)).ok
+          && !(await answerLockRefusal(call.env, call.actor, ref.slug))) {
+          return mcpToolError('feedback_space_no_versions', `This is a feedback space: a comment space takes replies, not versions. ${MCP_REFUSAL_NEXT.feedback_space_no_versions}`);
+        }
         slug = ref.slug;
       }
       if (!mcpUploadSecret(call.env)) return mcpToolError('upload_unavailable', 'Uploads are not configured on this server. Use create_doc / update_doc with the HTML inline.');
@@ -27793,7 +27832,7 @@ const tdocHandlers = {
       // doc (propose_edits / tdoc-propose), to accept or reject there. Dev
       // mode only (askEditV2Allowed): for anybody else reply_as is dropped and
       // the handoff is exactly what it was.
-      const replyAs = body.reply_as === 'suggestions'
+      const replyAs = body.reply_as === 'suggestions' && gate.meta?.created_from !== 'feedback'
         && await askEditV2Allowed(env, gate.session || (gate.actor && gate.actor.kind === 'hosted' ? gate.actor : null))
         ? 'suggestions' : null;
       if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
@@ -27943,7 +27982,7 @@ const tdocHandlers = {
       // agent twice for the same batch.
       // reply_as "suggestions" (Ask/Edit v2) only if whoever presses Resend
       // is in dev mode now (askEditV2Allowed); otherwise the plain handoff.
-      const replyAs = prev.reply_as === 'suggestions'
+      const replyAs = prev.reply_as === 'suggestions' && gate.meta?.created_from !== 'feedback'
         && await askEditV2Allowed(env, gate.session || (gate.actor && gate.actor.kind === 'hosted' ? gate.actor : null))
         ? 'suggestions' : null;
       const event = handoffEvent({
@@ -28543,6 +28582,8 @@ const tdocHandlers = {
       // this agent holds here, then authorship at write time.
       const answering = await answerLockRefusal(env, auth.actor, slug);
       if (answering) return answering;
+      const spaceRefusal = feedbackSpaceVersionRefusal(writeGate.meta);
+      if (spaceRefusal) return spaceRefusal;
       const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
       if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
       let body = {};
@@ -28606,6 +28647,8 @@ const tdocHandlers = {
       // then authorship at write time.
       const answering = writeGate.meta ? await answerLockRefusal(env, auth.actor, slug) : null;
       if (answering) return answering;
+      const spaceRefusal = feedbackSpaceVersionRefusal(writeGate.meta);
+      if (spaceRefusal) return spaceRefusal;
       const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
       if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
       previewWarning = body.preview_svg == null ? null : validatePreviewSvg(body.preview_svg);
@@ -29372,6 +29415,11 @@ const tdocHandlers = {
       if (!auth.ok) return auth.response;
       const meta = auth.meta || await loadDocMeta(env, slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      // A person renames a space in the browser; a token has no business there.
+      if (req.headers.get('authorization')) {
+        const spaceRefusal = feedbackSpaceVersionRefusal(meta);
+        if (spaceRefusal) return spaceRefusal;
+      }
       await putDocMetaJson(env, slug, JSON.stringify({ ...meta, title: clean }));
       return json({ ok: true, slug, title: clean });
     }

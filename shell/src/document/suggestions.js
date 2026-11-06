@@ -10,8 +10,8 @@ import { decideSuggestion, listSuggestions, suggestEdits } from './api.js';
 // that version (pending suggestions are stored and come back with it).
 //
 // A suggestion is named in the frame and the review bar by `${set}:${edit}`.
-// What comment cards and the comment list need (Fix with AI, Fix all):
-// { enabled, fix(comment), fixAll(), fixable, busyIds, pendingFor(id), review(id) }.
+// What a comment card needs to lead to the edit suggested for it:
+// { enabled, pendingFor(id), review(id) }.
 export const SuggestContext = createContext(null);
 
 export const suggestionKey = (set, edit) => `${set.id}:${edit.id}`;
@@ -20,7 +20,7 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
   const [sets, setSets] = useState([]);
   const [shown, setShown] = useState({});
   const [activeKey, setActiveKey] = useState(null);
-  const [busy, setBusy] = useState(null); // { label, text, commentIds }
+  const [busy, setBusy] = useState(null); // { label, text }
   const [deciding, setDeciding] = useState(false);
   // Where the active suggestion ends in the doc (frame tdoc:suggestRect),
   // for the inline Accept / Reject chip the shell draws over the frame.
@@ -146,13 +146,12 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
   // Ask tdoc AI. Resolves with the server's answer ({ kind:'answer' } or
   // { kind:'edits', suggestion, dropped }); progress shows on the passage.
   const request = async ({ instruction, scope = { kind: 'doc' }, passage = null, label = 'tdoc AI is editing…' }) => {
-    setBusy({ label, text: passage, commentIds: scope.kind === 'comments' ? scope.comment_ids : [] });
+    setBusy({ label, text: passage });
     send({ type: 'tdoc:suggestBusy', text: passage, label });
     try {
       const body = await suggestEdits(slug, { instruction, baseVersion: version, scope });
       if (body?.kind === 'edits' && body.suggestion) {
-        setSets((list) => [body.suggestion, ...list.filter((s) => s.id !== body.suggestion.id
-          && !(scope.kind === 'comments' && (s.comment_ids || []).some((c) => scope.comment_ids.includes(c))))]);
+        setSets((list) => [body.suggestion, ...list.filter((s) => s.id !== body.suggestion.id)]);
         const first = body.suggestion.edits[0];
         if (first) setTimeout(() => focus(suggestionKey(body.suggestion, first)), 80);
       }
@@ -176,7 +175,7 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     const known = prior?.known || new Set(sets.map((x) => x.id));
     const checks = [...(prior?.checks || []), ...(settled ? [settled] : [])];
     if (prior) clearInterval(prior.timer);
-    setBusy({ label, text: passage, commentIds: ids });
+    setBusy({ label, text: passage });
     send({ type: 'tdoc:suggestBusy', text: passage, label });
     const started = Date.now();
     const quiet = () => {

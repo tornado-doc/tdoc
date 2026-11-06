@@ -232,9 +232,11 @@ async function startServer(worker, env) {
             const listFrom = async (root, name) => {
               const card = root.locator(`[data-comment-id="${w.comment.id}"]`).first();
               await card.waitFor();
-              await card.getByRole('button', { name: 'Reply' }).first().click();
+              // The same tab, so the '@' from the page before is a draft on this thread: its box reopens.
               const box = root.locator('.tdoc-reply-form textarea').first();
+              if (!(await box.isVisible().catch(() => false))) await card.getByRole('button', { name: 'Reply' }).first().click();
               await box.waitFor();
+              await box.fill('');
               await box.fill('@');
               const menu = root.locator('.tdoc-mention-menu');
               await menu.waitFor();
