@@ -30,4 +30,6 @@ assert.equal(rewrite('Alpha one bravo two charlie three delta four echo five fox
 assert.equal(rewrite('一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十', '完全不同的内容在这里写出来让它足够长也和原来没有任何相同的字词句子'), true, 'CJK');
 assert.equal(rewrite('今天发布', '明天发布'), false, 'short CJK');
 assert.equal(rewrite('a long enough deleted sentence with several plain words in it', ''), true, 'a long deletion');
+// One rule for a rewrite's blocks: the compare and AI suggestions both read it here.
+assert.match(require('../server/version-diff.js').markCss, /\.tdoc-diff-del\.tdoc-diff-block,\.tdoc-diff-ins\.tdoc-diff-block\{display:block/);
 console.log('PASS version matching: insertions, stable IDs, empty baselines, Unicode and bounded large inputs');

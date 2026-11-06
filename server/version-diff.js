@@ -87,9 +87,12 @@
     return share < 0.5 || (runs >= 4 && share < 0.75);
   }
   // How a changed word reads wherever the reader shows a change in the doc
-  // itself: the version compare (frame-compare.js) and the homepage demo's
-  // scripted Edit (frame-probe.js). One rule, so both mark it the same way.
+  // itself: the version compare (frame-compare.js), AI suggestions and the
+  // homepage demo's scripted Edit (frame-probe.js). One rule, so all of them
+  // mark it the same way. tdoc-diff-block: a rewrite's whole old or new text
+  // (isRewrite), each its own block.
   var markCss = '.tdoc-diff-ins{text-decoration:none;background:rgba(37,168,91,.16)!important;padding:1px 2px}'
-    + '.tdoc-diff-del{text-decoration:line-through;background:rgba(219,58,75,.13)!important;padding:1px 2px;margin-inline-end:.15em}';
+    + '.tdoc-diff-del{text-decoration:line-through;background:rgba(219,58,75,.13)!important;padding:1px 2px;margin-inline-end:.15em}'
+    + '.tdoc-diff-del.tdoc-diff-block,.tdoc-diff-ins.tdoc-diff-block{display:block;margin:.25em 0;padding:2px 6px;overflow-wrap:anywhere}';
   return { align: align, textParts: textParts, isRewrite: isRewrite, markCss: markCss };
 });

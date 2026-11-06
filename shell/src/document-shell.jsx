@@ -1504,10 +1504,8 @@ export function DocumentShell({ boot, config }) {
     privateReply: privateAskView && privateAskView.parentId ? privateAskView : null,
     onMakePublic: () => makePublicRef.current(),
     onClosePrivate: () => setPrivateAsk(null),
-    // Ask/Edit v2: what the hint says about the named agent, and no GitHub
-    // search while an agent already answers what was typed after @.
+    // Ask/Edit v2: what the hint says about the named agent.
     suggestsFor: suggestOn ? handsBackSuggestions : null,
-    quietPeopleSearch: suggestOn,
     prefillReplies: suggestOn,
   }), [suggestOn, canSendToAgent, agentChoices, composerPick, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
   const openNotifyPanel = (ids, avoid = null) => {
