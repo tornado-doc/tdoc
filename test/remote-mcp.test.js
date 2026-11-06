@@ -63,9 +63,9 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
   };
   // The whole browser leg: authorize page, Allow, the redirect with a code.
   // A fresh browser session each time: approvals are rate-limited per session.
-  const consent = async (who, client, p, { workspaces } = {}) => {
+  const consent = async (who, client, p, { workspaces, ip } = {}) => {
     who = { ...who, cookie: await putSession(env, who.login) };
-    const page = await call(authorizeUrl(client, p), { cookie: who.cookie });
+    const page = await call(authorizeUrl(client, p), { cookie: who.cookie, ...(ip ? { headers: { 'cf-connecting-ip': ip } } : {}) });
     assert(page.status === 200, `authorize page ${page.status} ${page.text.slice(0, 200)}`);
     const boot = bootData(page.text, '__TDOC_APP_BOOT__');
     const ok = await call('/api/oauth/approve', { method: 'POST', cookie: who.cookie, headers: origin, body: { request_id: boot.request_id, csrf: boot.csrf, decision: 'allow', ...(workspaces ? { workspaces } : {}) } });
@@ -574,8 +574,8 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     // Every client pays for tools/list on each connection: keep it small.
     const listed = await mcp(julieConn.access_token, 'tools/list', {}, { legacy: true });
     const bytes = Buffer.byteLength(listed.text);
-    // 8000 for the first 13 tools; create_feedback_space added ~550.
-    assert(bytes <= 8600, `tools/list is ${bytes} bytes; the budget is 8600 (move guidance into tdoc://authoring/essentials.md)`);
+    // 8000 for the first 13 tools; create_feedback_space added ~550; raft_agent on five write tools ~800.
+    assert(bytes <= 9400, `tools/list is ${bytes} bytes; the budget is 9400 (move guidance into tdoc://authoring/essentials.md)`);
     for (const x of tools) assert(x.description.length <= 400, `${x.name} description is ${x.description.length} chars`);
     assert(tools.find((x) => x.name === 'get_doc').annotations.readOnlyHint === true && create.annotations.readOnlyHint === false, 'annotations');
     assert(tools.find((x) => x.name === 'share_doc').annotations.destructiveHint === true, 'share_doc is destructive: hosts ask before it runs');
@@ -1123,6 +1123,232 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     assert(!/tdoc-style|data-tdoc-design|class="wrap"/.test(v2), 'no house style added');
     assert(JSON.parse(env.META.map.get(`meta:${slug}`)).style === styleBefore, 'meta.style unchanged');
   });
+
+  // ------------------------------------------- which Raft agent is calling
+  // One OAuth connection serves every agent on the account, so the token cannot
+  // say which one wrote. raft_agent says it, as the CLI's X-Tdoc-Raft-Agent
+  // does, and actingAgent checks it the same way.
+  {
+    const { byRelevance, agentName } = await import('../shell/src/document/agent-choices.js');
+    const { composerAgents } = await import('../shell/src/document/ai-answerer.js');
+    const S1 = 'server-one';
+    const linkedAgent = { provider: 'raft', server_id: S1, server_slug: 'one', agent_sub: 'agent-linked', agent_name: 'linked' };
+    const otherAgent = { provider: 'raft', server_id: S1, server_slug: 'one', agent_sub: 'agent-other', agent_name: 'other' };
+    env.RAFT_CLIENT_ID = 'tdoc-x';
+    env.RAFT_CLIENT_SECRET = 's';
+    await env.META.put(`raft-directory:${S1}`, JSON.stringify([
+      { ...linkedAgent }, { ...otherAgent },
+      { provider: 'raft', server_id: S1, server_slug: 'one', agent_sub: 'agent-listed', agent_name: '小c' },
+    ]));
+    // A client a host vouches for: its metadata document on claude.ai's own
+    // domain (read from the cache a fetch would fill), as the real connector.
+    const CLAUDE_CLIENT = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+    await env.META.put(`oauth-cimd:${crypto.createHash('sha256').update(CLAUDE_CLIENT).digest('hex')}`, JSON.stringify({ client_id: CLAUDE_CLIENT, client_name: 'Claude', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], cimd: true }));
+    // Its own network: authorize pages are limited per address, and the rest of
+    // this file uses most of the shared one.
+    const OWN_NETWORK = { ip: '198.51.100.50' };
+    const connectVerified = async (who) => {
+      const client = { client_id: CLAUDE_CLIENT };
+      const p = pkce();
+      const back = await consent(who, client, p, OWN_NETWORK);
+      const tok = await exchange(client, back.searchParams.get('code'), p.verifier);
+      assert(tok.status === 200 && tok.body.access_token, `token ${tok.status} ${tok.text}`);
+      return tok.body;
+    };
+    const raftTester = await issue(worker, env, 'raftie');
+    const conn = await connectVerified(raftTester);
+    await env.META.put(`account-notify:${raftTester.account_id}`, JSON.stringify([otherAgent, linkedAgent]));
+    await env.META.put(`account-raft-servers:${raftTester.account_id}`, JSON.stringify([{ server_id: S1, server_slug: 'one', installation_id: 'inst-1' }]));
+    const metaOf = (slug) => JSON.parse(env.META.map.get(`meta:${slug}`));
+    const noIdentity = (slug) => {
+      const m = metaOf(slug);
+      assert(!m.versions.some((v) => v.publisher_agent) && !(m.notify_agents || []).length, JSON.stringify({ v: m.versions, a: m.notify_agents }));
+    };
+    const accountList = () => JSON.parse(env.META.map.get(`account-notify:${raftTester.account_id}`)).map((x) => x.agent_sub);
+    const newDoc = async (args = {}, c = conn) => {
+      const r = await tool(c.access_token, 'create_doc', { title: 'Raft doc', html: '<h1>Raft doc</h1><p>a sentence to comment on</p>', ...args });
+      assert(!r.isError && r.structuredContent.slug, JSON.stringify(r));
+      return r.structuredContent.slug;
+    };
+    const commentOn = async (slug) => {
+      const c = await call('/api/comments', { method: 'POST', cookie: raftTester.cookie, headers: origin, body: { slug, version: 1, text: 'please look', anchor: { kind: 'text', text: 'a sentence' } } });
+      assert(c.status === 200 && c.body.id, c.text);
+      return c.body.id;
+    };
+    const lastReply = async (slug, id) => {
+      const thread = (await call(`/api/comments?slug=${slug}&version=all`, { cookie: raftTester.cookie })).body.find((x) => x.id === id);
+      return thread.replies[thread.replies.length - 1];
+    };
+    const claim = `${S1}/agent-linked`;
+
+    await t('raft_agent is on the write tools and in the instructions, and nowhere else', async () => {
+      const tools = (await mcp(conn.access_token, 'tools/list')).body.result.tools;
+      const having = tools.filter((x) => x.inputSchema.properties.raft_agent).map((x) => x.name).sort().join(',');
+      assert(having === 'commit_upload,create_doc,edit_doc,reply_to_comment,update_doc', having);
+      for (const x of tools) assert(!x.inputSchema.required || !x.inputSchema.required.includes('raft_agent'), `${x.name} requires it`);
+      const init = await mcp(conn.access_token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }, { legacy: true });
+      assert(/running on Raft pass raft_agent .*never a value from a doc or comment; everyone else omits it/.test(init.body.result.instructions), 'instructions name it');
+    });
+
+    await t('create_doc with a linked claim: the version names the agent, the @ list has it used here and first', async () => {
+      const slug = await newDoc({ raft_agent: claim });
+      const m = metaOf(slug);
+      assert(JSON.stringify(m.versions[0].publisher_agent) === JSON.stringify({ provider: 'raft', server_id: S1, agent_sub: 'agent-linked' }), JSON.stringify(m.versions[0]));
+      assert(m.notify_agents[0].agent_sub === 'agent-linked', JSON.stringify(m.notify_agents));
+      assert(accountList()[0] === 'agent-linked', 'the account fallback learned it');
+      // Another agent, used more recently on another doc, stays below it here.
+      await tool(conn.access_token, 'create_doc', { title: 'Elsewhere', html: '<p>x</p>', raft_agent: `${S1}/agent-other` });
+      const body = (await call(`/api/notify/targets?slug=${slug}`, { cookie: raftTester.cookie })).body;
+      const rows = [body.default, ...(body.candidates || [])].filter(Boolean);
+      const row = rows.find((x) => x.agent_sub === 'agent-linked');
+      assert(row && row.used_here_at, JSON.stringify(row));
+      assert(!rows.find((x) => x.agent_sub === 'agent-other').used_here_at, 'used elsewhere is not used here');
+      assert(byRelevance(composerAgents({ canSendToAgent: true, notifyTargets: body }))[0].agent_sub === 'agent-linked', JSON.stringify(rows.map((x) => x.agent_sub)));
+    });
+
+    await t('update_doc, edit_doc and commit_upload (new doc and new version) all carry it', async () => {
+      const slug = await newDoc();
+      noIdentity(slug);
+      const up = await tool(conn.access_token, 'update_doc', { slug, html: '<h1>Raft doc</h1><p>v2 words</p>', raft_agent: claim });
+      assert(!up.isError && metaOf(slug).versions[1].publisher_agent?.agent_sub === 'agent-linked', JSON.stringify(metaOf(slug).versions));
+      const edit = await tool(conn.access_token, 'edit_doc', { slug, edits: [{ find: 'v2 words', replace: 'v3 words' }], raft_agent: `${S1}/agent-other` });
+      assert(!edit.isError && metaOf(slug).versions[2].publisher_agent?.agent_sub === 'agent-other', JSON.stringify(edit));
+      const files = [['index.html', 'text/html', Buffer.from('<h1>By upload</h1><p>v4</p>')]];
+      const upload = await tool(conn.access_token, 'create_upload', { slug, files: declare(files) });
+      await sendAll(upload, files);
+      const done = await tool(conn.access_token, 'commit_upload', { upload_id: upload.structuredContent.upload_id, raft_agent: claim });
+      assert(!done.isError && metaOf(slug).versions[3].publisher_agent?.agent_sub === 'agent-linked', JSON.stringify(done));
+      const fresh = await tool(conn.access_token, 'create_upload', { files: declare(files) });
+      await sendAll(fresh, files);
+      const made = await tool(conn.access_token, 'commit_upload', { upload_id: fresh.structuredContent.upload_id, title: 'By upload', raft_agent: claim });
+      assert(!made.isError && metaOf(made.structuredContent.slug).versions[0].publisher_agent?.agent_sub === 'agent-linked', JSON.stringify(made));
+      // The next write without the argument names nobody: identity is per call.
+      await tool(conn.access_token, 'update_doc', { slug, html: '<h1>Raft doc</h1><p>v5</p>' });
+      assert(!metaOf(slug).versions[4].publisher_agent, 'an unnamed write kept the earlier writer');
+    });
+
+    await t('reply_to_comment with the claim is signed by the agent, not by the app', async () => {
+      const slug = await newDoc();
+      const id = await commentOn(slug);
+      const r = await tool(conn.access_token, 'reply_to_comment', { slug, comment_id: id, text: 'Looked at it.', status: 'answered', raft_agent: claim });
+      assert(!r.isError, JSON.stringify(r));
+      const { author } = await lastReply(slug, id);
+      assert(author.kind === 'agent' && author.provider === 'raft' && author.handle === '@linked' && author.location === 'one', JSON.stringify(author));
+      assert(agentName(author) === 'linked', agentName(author));
+      assert(metaOf(slug).notify_agents[0].agent_sub === 'agent-linked', 'a reply earns the seat');
+      const list = await tool(conn.access_token, 'get_comments', { slug });
+      assert(list.structuredContent.comments[0].replies[0].author === '@linked (Claude)', JSON.stringify(list.structuredContent.comments[0].replies));
+    });
+
+    await t('an agent on a connected server, not linked: its handle comes from Raft, not the caller', async () => {
+      const slug = await newDoc({ raft_agent: `${S1}/agent-listed` });
+      assert(metaOf(slug).versions[0].publisher_agent?.agent_sub === 'agent-listed', JSON.stringify(metaOf(slug).versions));
+      assert(metaOf(slug).notify_agents[0].agent_name === '小c', JSON.stringify(metaOf(slug).notify_agents));
+      const id = await commentOn(slug);
+      await tool(conn.access_token, 'reply_to_comment', { slug, comment_id: id, text: 'Hello.', raft_agent: `${S1}/agent-listed` });
+      assert((await lastReply(slug, id)).author.handle === '@小c', 'signed with the directory handle');
+    });
+
+    await t('an id Raft does not list on a connected server claims nothing; the write still lands', async () => {
+      const slug = await newDoc({ raft_agent: `${S1}/agent-made-up` });
+      noIdentity(slug);
+      assert(!accountList().includes('agent-made-up'), 'a made-up agent joined the account');
+    });
+
+    await t('a server this account did not connect: the write lands, no identity, Raft is not asked', async () => {
+      const someoneElse = await issue(worker, env, 'raftie-other');
+      await env.META.put(`account-raft-servers:${someoneElse.account_id}`, JSON.stringify([{ server_id: 'theirs', server_slug: 'theirs', installation_id: 'inst-9' }]));
+      await env.META.put('raft-directory:theirs', JSON.stringify([{ provider: 'raft', server_id: 'theirs', server_slug: 'theirs', agent_sub: 'their-agent', agent_name: 'their' }]));
+      const fetched = [];
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async (u, init) => { fetched.push(String(u)); return realFetch(u, init); };
+      try {
+        const before = accountList();
+        const slug = await newDoc({ raft_agent: 'theirs/their-agent' });
+        noIdentity(slug);
+        const id = await commentOn(slug);
+        const r = await tool(conn.access_token, 'reply_to_comment', { slug, comment_id: id, text: 'Hello.', raft_agent: 'theirs/their-agent' });
+        assert(!r.isError && !r.structuredContent.skipped, JSON.stringify(r));
+        const { author } = await lastReply(slug, id);
+        assert(!author.provider && !author.handle, JSON.stringify(author));
+        noIdentity(slug);
+        assert(JSON.stringify(accountList()) === JSON.stringify(before), 'the account list changed');
+        assert(!fetched.some((u) => /raft/.test(u)), fetched.join());
+      } finally { globalThis.fetch = realFetch; }
+    });
+
+    await t('a self-registered app cannot sign as an agent: the write lands under its own unverified name', async () => {
+      const unverified = await connect(raftTester, OWN_NETWORK);
+      const slug = await newDoc({ raft_agent: claim }, unverified);
+      noIdentity(slug);
+      const id = await commentOn(slug);
+      const r = await tool(unverified.access_token, 'reply_to_comment', { slug, comment_id: id, text: 'Hello.', raft_agent: claim });
+      assert(!r.isError, JSON.stringify(r));
+      const { author } = await lastReply(slug, id);
+      assert(!author.provider && !author.handle && author.name === 'Claude (unverified app)', JSON.stringify(author));
+      noIdentity(slug);
+    });
+
+    await t('a claim does not open someone else\'s doc', async () => {
+      const slug = await newDoc();
+      const strangerConn = await connectVerified(carl);
+      const r = await tool(strangerConn.access_token, 'update_doc', { slug, html: '<p>not yours</p>', raft_agent: claim });
+      assert(r.isError && metaOf(slug).versions.length === 1, JSON.stringify(r));
+      noIdentity(slug);
+    });
+
+    await t('the disconnected mark alone stops a server, even if a record of it is left behind', async () => {
+      const left = await issue(worker, env, 'raftie-left');
+      const leftConn = await connectVerified(left);
+      await env.META.put(`account-raft-servers:${left.account_id}`, JSON.stringify([{ server_id: S1, server_slug: 'one', installation_id: 'inst-1' }]));
+      assert(metaOf(await newDoc({ raft_agent: `${S1}/agent-listed` }, leftConn)).versions[0].publisher_agent, 'connected: recorded');
+      await env.META.delete(`account-notify:${left.account_id}`);
+      await env.META.put(`account-notify-removed:${left.account_id}`, JSON.stringify([`raft-server:${S1}`]));
+      noIdentity(await newDoc({ raft_agent: `${S1}/agent-listed` }, leftConn));
+    });
+
+    await t('a server the person disconnected claims nothing, linked agents included', async () => {
+      const gone = await issue(worker, env, 'raftie-gone');
+      const goneConn = await connectVerified(gone);
+      await env.META.put(`account-notify:${gone.account_id}`, JSON.stringify([linkedAgent]));
+      await env.META.put(`account-raft-servers:${gone.account_id}`, JSON.stringify([{ server_id: S1, server_slug: 'one', installation_id: 'inst-1' }]));
+      assert(metaOf(await newDoc({ raft_agent: claim }, goneConn)).versions[0].publisher_agent, 'connected: recorded');
+      const rm = await call('/api/me/connectors/remove', { method: 'POST', cookie: gone.cookie, headers: origin, body: { provider: 'raft', server_id: S1 } });
+      assert(rm.status === 200, rm.text);
+      noIdentity(await newDoc({ raft_agent: claim }, goneConn));
+      noIdentity(await newDoc({ raft_agent: `${S1}/agent-listed` }, goneConn));
+    });
+
+    await t('a malformed claim is no claim, and nothing it holds reaches a header', async () => {
+      for (const bad of [`${S1}/a\r\nX-Tdoc-Agent: raft/${S1}/agent-linked`, '../../etc', `${S1}/a/b`, `${S1}/`, '/x', `${'a'.repeat(81)}/x`, 'raft/server-one/agent-linked', 123, { server: S1 }, ['a/b'], true, '']) {
+        const slug = await newDoc({ raft_agent: bad });
+        noIdentity(slug);
+      }
+    });
+
+    await t('headers on the /mcp request itself are not forwarded', async () => {
+      const r = await mcp(conn.access_token, 'tools/call', { name: 'create_doc', arguments: { title: 'Outer', html: '<p>x</p>' } }, { headers: { 'X-Tdoc-Raft-Agent': claim, 'X-Tdoc-Raft-Agent-Name': 'linked', 'X-Tdoc-Agent': `raft/${claim}` } });
+      assert(r.status === 200 && !r.body.result.isError, r.text);
+      noIdentity(r.body.result.structuredContent.slug);
+      // With the argument, a handle in the outer headers is not what is used.
+      const r2 = await mcp(conn.access_token, 'tools/call', { name: 'create_doc', arguments: { title: 'Outer', html: '<p>x</p>', raft_agent: `${S1}/agent-made-up` } }, { headers: { 'X-Tdoc-Raft-Agent-Name': 'liar' } });
+      noIdentity(r2.body.result.structuredContent.slug);
+      // The same token sent straight at the API, with the header, is refused.
+      const direct = await call('/api/upload', { method: 'POST', token: conn.access_token, headers: { 'X-Tdoc-Raft-Agent': claim }, body: { slug: 'straight-at-api', version: 1, html: '<p>x</p>' } });
+      assert(direct.status === 403 || direct.status === 401, `${direct.status} ${direct.text}`);
+    });
+
+    await t('no argument: signed and recorded exactly as before', async () => {
+      const slug = await newDoc();
+      noIdentity(slug);
+      const id = await commentOn(slug);
+      await tool(conn.access_token, 'reply_to_comment', { slug, comment_id: id, text: 'Hello.' });
+      const { author } = await lastReply(slug, id);
+      assert(!author.provider && !author.handle && author.name === 'Claude', JSON.stringify(author));
+      const list = await tool(conn.access_token, 'get_comments', { slug });
+      assert(list.structuredContent.comments[0].replies[0].author === 'Claude', JSON.stringify(list.structuredContent.comments[0].replies));
+    });
+  }
 
   await t('rate limit: tool calls per connection per minute', async () => {
     const c = await connect(carl);
