@@ -16394,17 +16394,22 @@ function isAccountAgent(t, linked, servers) {
     || (t.provider === 'raft' && servers.some((sv) => sv.server_id === t.server_id));
 }
 
-// A version the owner's own token published says the agent is theirs, even after
-// newer agents pushed it off their account list (NOTIFY_AGENTS_MAX).
-function ownerPublishedAs(meta, ownerIds, t) {
+// A version the owner's token published, or a handoff they sent, says the agent
+// is theirs, even after newer agents pushed it off their account list
+// (NOTIFY_AGENTS_MAX). Never by itself against a disconnect: callers check that.
+function ownerRecordedAgent(meta, handoffs, ownerIds, t) {
   return (Array.isArray(meta && meta.versions) ? meta.versions : [])
-    .some((v) => v && v.by && ownerIds.includes(v.by) && sameNotifyTarget(v.publisher_agent, t));
+    .some((v) => v && v.by && ownerIds.includes(v.by) && sameNotifyTarget(v.publisher_agent, t))
+    || (handoffs || []).some((h) => h && h.by && ownerIds.includes(h.by) && sameNotifyTarget(h.recipient, t));
 }
 
-async function isDocOwnerAgent(env, meta, t) {
+async function isDocOwnerAgent(env, meta, handoffs, t) {
   const owner = meta && meta.hosted && meta.hosted.account_id;
-  return !owner || isAccountAgent(t, await accountNotifyTargets(env, owner), await accountRaftServers(env, owner))
-    || ownerPublishedAs(meta, (await accountGroup(env, owner)).ids, t);
+  if (!owner) return true;
+  const removed = await accountRemovedTargets(env, owner);
+  if (removed.has(notifyKey(t)) || (t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`))) return false;
+  return isAccountAgent(t, await accountNotifyTargets(env, owner), await accountRaftServers(env, owner))
+    || ownerRecordedAgent(meta, handoffs, (await accountGroup(env, owner)).ids, t);
 }
 
 // Somebody else's agent, known here only from the doc's records: what a picker
@@ -16418,7 +16423,7 @@ async function agentLeftPersonalDoc(env, meta, handoffs, t) {
   const recorded = (Array.isArray(meta.notify_agents) ? meta.notify_agents : []).some((x) => sameNotifyTarget(normalizeNotifyTarget(x), t))
     || (Array.isArray(meta.versions) ? meta.versions : []).some((v) => v && others(v.by) && sameNotifyTarget(v.publisher_agent, t))
     || handoffs.some((h) => h && others(h.by) && sameNotifyTarget(h.recipient, t));
-  return recorded && !await isDocOwnerAgent(env, meta, t);
+  return recorded && !await isDocOwnerAgent(env, meta, handoffs, t);
 }
 const AGENT_LEFT_DOC = { error: 'agent_left_doc', message: 'That agent is not connected to the owner of this doc any more. Choose another agent.' };
 
@@ -16449,13 +16454,14 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
   const linked = await accountNotifyTargets(env, ownerAccount);
   const servers = await accountRaftServers(env, ownerAccount);
   const ownerIds = ownerAccount ? (await accountGroup(env, ownerAccount)).ids : null;
+  const allHandoffs = handoffs || await loadHandoffs(env, slug);
   const docTargets = (Array.isArray(meta && meta.notify_agents) ? meta.notify_agents : [])
     .map(normalizeNotifyTarget)
     .filter((t) => t && !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)))
     // Worked on it and is the owner's. No account to compare with: a doc from
     // before accounts, or a self-host. An agent on a server the owner connected
     // but never used is an ordinary directory row below, with no claim on them.
-    .filter((t) => !ownerAccount || linked.some((x) => sameNotifyTarget(x, t)) || ownerPublishedAs(meta, ownerIds, t))
+    .filter((t) => !ownerAccount || linked.some((x) => sameNotifyTarget(x, t)) || ownerRecordedAgent(meta, allHandoffs, ownerIds, t))
     .sort(byRecency);
   const fallbackList = linked
     .filter((t) => !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)));
@@ -16489,8 +16495,8 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
   const publisher = writer?.kind === 'agent' && ownerWork(writer.account_id) ? writer.agent : null;
   // A handoff from before they named a sender is the owner's only if its agent is.
   const ownerHandoff = (h) => (!ownerIds ? true : h.by ? ownerIds.includes(h.by)
-    : linked.some((x) => sameNotifyTarget(x, h.recipient)) || ownerPublishedAs(meta, ownerIds, h.recipient));
-  const docHandoff = lastDeliveredHandoffAgent((handoffs || await loadHandoffs(env, slug)).filter((h) => h && ownerHandoff(h)));
+    : linked.some((x) => sameNotifyTarget(x, h.recipient)) || ownerRecordedAgent(meta, allHandoffs, ownerIds, h.recipient));
+  const docHandoff = lastDeliveredHandoffAgent(allHandoffs.filter((h) => h && ownerHandoff(h)));
   const evidenced = [publisher, docHandoff]
     .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
@@ -16724,7 +16730,7 @@ async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asks = [], hando
   // Replied, published, or was picked for this doc (touchDocAgent). Each of
   // those also puts the agent on its account's list, the owner's if it was theirs.
   const linked = ownDoc && ownerAccount ? await accountNotifyTargets(env, ownerAccount) : null;
-  const ownerAgent = (t) => !linked || linked.some((x) => sameNotifyTarget(x, t)) || ownerPublishedAs(meta, ownerIds, t);
+  const ownerAgent = (t) => !linked || linked.some((x) => sameNotifyTarget(x, t)) || ownerRecordedAgent(meta, handoffs, ownerIds, t);
   if (ownDoc) {
     for (const t of Array.isArray(meta.notify_agents) ? meta.notify_agents : []) {
       if (ownerAgent(t)) add(t && t.last_touched, { target: t });
@@ -27802,7 +27808,9 @@ const tdocHandlers = {
         // A local handoff records who queued it: the daemon re-checks that it
         // was the owner before running anything. For a team agent that is the
         // agent itself, and the member who sent it is kept beside it.
-        by: viaTeamAgent ? viaTeamAgent.id : teamDoc ? localDriver : (isLocalTarget(target) ? localDriver : null),
+        // On a personal doc it is the owner's, whichever door it came through:
+        // this is what later says the agent was theirs (ownerRecordedAgent).
+        by: viaTeamAgent ? viaTeamAgent.id : teamDoc ? localDriver : (localDriver || (isLocalTarget(target) ? null : gate.meta?.hosted?.account_id || null)),
         ...(viaTeamAgent ? { teamAgent: viaTeamAgent, sentBy: caller.accountId } : {}),
       });
       // The first agent a person picks, when they had no default yet, is
@@ -27849,7 +27857,7 @@ const tdocHandlers = {
       // Its recipient is on record, so this needs nothing else from the record:
       // a handoff from before handoffs named their sender says as little.
       const resendTo = normalizeNotifyTarget(prev.recipient);
-      if (!gate.meta?.workspace_id && resendTo && !await isDocOwnerAgent(env, gate.meta, resendTo)) {
+      if (!gate.meta?.workspace_id && resendTo && !await isDocOwnerAgent(env, gate.meta, await loadHandoffs(env, slug), resendTo)) {
         return json(AGENT_LEFT_DOC, { status: 409 });
       }
       // A resend reuses the original externalEventId, so a provider that did
