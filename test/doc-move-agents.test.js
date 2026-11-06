@@ -411,6 +411,85 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(!addressed().length, `addressed ${addressed()}`);
   });
 
+  await t('a stale picker cannot reach a disconnected agent only Ann\'s own records mention', async () => {
+    const w = await world();
+    await w.upload(w.ann, 'mine', 1, w.claim(ANN_AGENT));
+    const m = await w.meta('mine');
+    delete m.notify_agents;
+    await w.env.META.put('meta:mine', JSON.stringify(m));
+    await w.call('/api/me/connectors/remove', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { provider: 'raft', server_id: ANN_AGENT.server_id } });
+    const c = await w.comment(w.ann, 'mine');
+    raftCalls = [];
+    const picked = await w.send(w.ann, 'mine', [c], ANN_AGENT);
+    assert(picked.status === 409 && picked.body.error === 'agent_left_doc', `${picked.status} ${picked.text}`);
+    assert(!addressed().length, `addressed ${addressed()}`);
+  });
+
+  await t('Resend of Ann\'s own handoff, after she disconnected and moved the doc into a team, is refused', async () => {
+    const w = await world();
+    await w.upload(w.ann, 'mine', 1, w.claim(ANN_AGENT));
+    const c = await w.comment(w.ann, 'mine');
+    const sent = await w.send(w.ann, 'mine', [c]);
+    assert(sent.body.delivery.status === 'delivered', sent.text);
+    await w.call('/api/me/connectors/remove', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { provider: 'raft', server_id: ANN_AGENT.server_id } });
+    await w.move(w.ann, 'mine', w.team.id);
+    raftCalls = [];
+    const again = await w.call('/api/notify/handoff/resend', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { slug: 'mine', handoff_id: sent.body.handoff_id } });
+    assert(again.status === 409 && again.body.error === 'agent_left_doc', `${again.status} ${again.text}`);
+    assert(!addressed().length, `addressed ${addressed()}`);
+  });
+
+  await t('on a shared server, pressing Resend on a team-era card does not make Ben\'s agent Ann\'s', async () => {
+    const w = await world();
+    await w.teamDoc('plan');
+    await w.promoteBen();
+    await w.upload(w.ben, 'plan', 2, w.claim(BEN_AGENT));
+    const c = await w.comment(w.ben, 'plan');
+    const sent = await w.send(w.ben, 'plan', [c], BEN_AGENT);
+    assert(sent.status === 200, sent.text);
+    await w.link(w.ann, { ...BEN_AGENT, agent_sub: 'ann-on-bens-server', agent_name: 'annie2' });
+    await w.move(w.ann, 'plan', null);
+    const again = await w.call('/api/notify/handoff/resend', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { slug: 'plan', handoff_id: sent.body.handoff_id } });
+    assert(again.status === 200, again.text);
+    const body = await w.targets(w.ann, 'plan');
+    assert(!body.default || body.default.agent_sub !== BEN_AGENT.agent_sub, `default: ${JSON.stringify(body.default)}`);
+    const d = await w.comment(w.ann, 'plan');
+    raftCalls = [];
+    await w.send(w.ann, 'plan', [d]);
+    assert(!addressed().includes('bens-server'), `addressed ${addressed()}`);
+  });
+
+  await t('team -> another team: a handoff queued to a daemon whose account stayed behind is not handed out', async () => {
+    const w = await world();
+    await w.teamDoc('plan');
+    await w.promoteBen();
+    const reg = await w.call('/api/notify/local/register', { method: 'POST', token: w.ben.token, body: { device: 'benbox', clis: ['claude'] } });
+    assert(reg.status === 200, reg.text);
+    await w.upload(w.ben, 'plan', 2, { 'X-Tdoc-Agent': 'local/benbox/benbox_claude' });
+    const c = await w.comment(w.ben, 'plan');
+    const sent = await w.send(w.ben, 'plan', [c], { provider: 'local', device: 'benbox', cli: 'claude', server_id: 'benbox', agent_sub: 'benbox_claude' });
+    assert(sent.status === 200, sent.text);
+    const other = (await w.call('/api/teams', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { name: 'Other' } })).body.team;
+    await w.move(w.ann, 'plan', other.id);
+    const after = await w.call('/api/notify/local/pending', { token: w.ben.token });
+    assert(after.status === 200 && !after.body.pending.some((p) => p.slug === 'plan'), `still handed out: ${after.text}`);
+  });
+
+  await t('a feedback token records the owner as sender, and is not told their account id', async () => {
+    const w = await world();
+    const made = await w.call('/api/feedback/connect', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { origin: 'https://app.example' } });
+    assert(made.status === 200 && made.body.token, made.text);
+    const { slug, token } = made.body;
+    const anchor = { kind: 'product', url: 'https://app.example/', selector: '#x', tag: 'div', text: 'x' };
+    const c = await w.call('/api/comments', { method: 'POST', token, body: { slug, version: 1, text: 'fix', anchor } });
+    assert(c.status === 200, c.text);
+    const sent = await w.call('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: [c.body.id], recipient: ANN_AGENT } });
+    assert(sent.status === 200, sent.text);
+    assert(JSON.parse(await w.env.META.get(`handoffs:${slug}`))[0].by === w.ann.account_id, 'stored sender');
+    const list = await w.call(`/api/notify/handoffs?slug=${slug}`, { token });
+    assert(list.status === 200 && list.body.handoffs.length === 1 && !('by' in list.body.handoffs[0]), list.text);
+  });
+
   await t('an agent Ann picked with Send and pushed off her list still follows that doc', async () => {
     const w = await world();
     await w.upload(w.ann, 'mine', 1);

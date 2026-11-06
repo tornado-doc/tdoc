@@ -495,9 +495,6 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
 
   await t('Resend keeps reply_as "suggestions" only while the sender is in dev mode', async () => {
     const target = { provider: 'raft', server_id: 'S1', agent_sub: 'uuid-a', agent_name: 'xiaocc' };
-    // Resend goes only to an agent still connected to the doc's owner.
-    await env.META.put('raft-link:race-code', JSON.stringify(target));
-    assert((await call('/api/notify/link', { method: 'POST', token: alice.token, body: { link_code: 'race-code' } })).status === 200, 'link');
     const c = await call('/api/comments', { method: 'POST', cookie: bob.cookie, body: { slug: 'race', version: 1, text: 'Tighten', anchor: { kind: 'text', text: 'Second thoughts' } } });
     const h = await call('/api/notify/handoff', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug: 'race', comment_ids: [c.body.id], recipient: target, reply_as: 'suggestions' } });
     assert(h.status === 200, h.text);

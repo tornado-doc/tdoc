@@ -16403,26 +16403,28 @@ function ownerRecordedAgent(meta, handoffs, ownerIds, t) {
     || (handoffs || []).some((h) => h && h.by && ownerIds.includes(h.by) && sameNotifyTarget(h.recipient, t));
 }
 
+async function accountDisconnectedAgent(env, accountId, t) {
+  const removed = await accountRemovedTargets(env, accountId);
+  return removed.has(notifyKey(t)) || (t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`));
+}
+
 async function isDocOwnerAgent(env, meta, handoffs, t) {
   const owner = meta && meta.hosted && meta.hosted.account_id;
   if (!owner) return true;
-  const removed = await accountRemovedTargets(env, owner);
-  if (removed.has(notifyKey(t)) || (t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`))) return false;
+  if (await accountDisconnectedAgent(env, owner, t)) return false;
   return isAccountAgent(t, await accountNotifyTargets(env, owner), await accountRaftServers(env, owner))
     || ownerRecordedAgent(meta, handoffs, (await accountGroup(env, owner)).ids, t);
 }
 
-// Somebody else's agent, known here only from the doc's records: what a picker
-// opened before a move could still name. An agent the owner names that no record
-// mentions is theirs to name, as ever.
+// An agent known here only from the doc's records, that is not the owner's now:
+// what a picker opened before a move, or before a disconnect, could still name.
+// An agent the owner names that no record mentions is theirs to name, as ever.
 async function agentLeftPersonalDoc(env, meta, handoffs, t) {
   const owner = meta && meta.hosted && meta.hosted.account_id;
   if (!owner || !t) return false;
-  const ownerIds = (await accountGroup(env, owner)).ids;
-  const others = (by) => by && !ownerIds.includes(by);
   const recorded = (Array.isArray(meta.notify_agents) ? meta.notify_agents : []).some((x) => sameNotifyTarget(normalizeNotifyTarget(x), t))
-    || (Array.isArray(meta.versions) ? meta.versions : []).some((v) => v && others(v.by) && sameNotifyTarget(v.publisher_agent, t))
-    || handoffs.some((h) => h && others(h.by) && sameNotifyTarget(h.recipient, t));
+    || (Array.isArray(meta.versions) ? meta.versions : []).some((v) => v && sameNotifyTarget(v.publisher_agent, t))
+    || handoffs.some((h) => h && sameNotifyTarget(h.recipient, t));
   return recorded && !await isDocOwnerAgent(env, meta, handoffs, t);
 }
 const AGENT_LEFT_DOC = { error: 'agent_left_doc', message: 'That agent is not connected to the owner of this doc any more. Choose another agent.' };
@@ -27706,6 +27708,8 @@ const tdocHandlers = {
           }];
         });
       }
+      // A feedback token lives in a page tdoc does not control: no account ids.
+      if (gate.session && gate.session.feedback) handoffs = handoffs.map(({ by: _by, sent_by: _sentBy, ...rest }) => rest);
       return json({ handoffs: handoffs.slice(0, limit) });
     }
 
@@ -27854,8 +27858,8 @@ const tdocHandlers = {
         const own = await handoffThreadIdsFor(env, slug, gate.session);
         if ((prev.comment_ids || []).some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
       }
-      // Its recipient is on record, so this needs nothing else from the record:
-      // a handoff from before handoffs named their sender says as little.
+      // Its recipient is on record, so this asks only whether it is the owner's:
+      // a handoff from before they named a sender says nothing about whose it was.
       const resendTo = normalizeNotifyTarget(prev.recipient);
       if (!gate.meta?.workspace_id && resendTo && !await isDocOwnerAgent(env, gate.meta, await loadHandoffs(env, slug), resendTo)) {
         return json(AGENT_LEFT_DOC, { status: 409 });
@@ -27882,6 +27886,10 @@ const tdocHandlers = {
         return json({ error: 'not_handoff_sender' }, { status: 403 });
       }
       if (isLocalTarget(target) && !localDriver && !viaTeamAgent) return json(LOCAL_OWNER_ONLY, { status: 403 });
+      // On a team doc it goes to the sender's own connection: not one they took back.
+      if (gate.meta?.workspace_id && !viaTeamAgent && target && await accountDisconnectedAgent(env, localDriver, target)) {
+        return json(AGENT_LEFT_DOC, { status: 409 });
+      }
       const delivery = target
         ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
         : { status: 'failed', error: 'no_recipient' };
@@ -27890,7 +27898,9 @@ const tdocHandlers = {
       const { run: _run, reply_as: _replyAs, ...keep } = prev;
       const rec = await putHandoff(env, slug, {
         ...keep, ...(replyAs ? { reply_as: replyAs } : {}), delivery: { ...delivery, at: new Date().toISOString() },
-        ...(viaTeamAgent ? { sent_by: caller.accountId } : localDriver ? { by: localDriver } : {}),
+        // Pressing Resend on a personal doc says nothing about whose agent it
+        // is (ownerRecordedAgent reads `by`): only a local run changes hands.
+        ...(viaTeamAgent ? { sent_by: caller.accountId } : localDriver && (gate.meta?.workspace_id || isLocalTarget(target)) ? { by: localDriver } : {}),
       });
       if (target && target.provider === 'local') await localPendingAdd(env, gate.meta, slug, rec);
       return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery });
