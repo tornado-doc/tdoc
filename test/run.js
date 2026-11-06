@@ -51,6 +51,7 @@ const OFFLINE = [
   'ask-doc.test.js',           // Ask this doc: off without a key, browser readers only, read gate, 5 per account, no address to the model
   'reader-agent-ask.test.js',  // Send to my agent: a reader's own agents only, never anyone else's; the answer is the asker's alone
   'suggest-edits.test.js',     // Ask/Edit v2: tdoc AI suggests text edits; editors accept (publish) or reject; text only, no markup
+  'suggest-handoff-lock.test.js', // Ask/Edit v2: a reply_as "suggestions" handoff refuses its agent's publish until it is dealt with or an hour passes; browser, other agents, non-dev and team docs untouched
   'ask-in-thread.test.js',     // Ask AI in a comment: tdoc AI or the commenter's own agent answers as a reply in the thread, seen by all
   'hand-off.test.js',          // one door: Ask only decides edit (authorship) or answer (own / team agent / tdoc AI), never another's agent
   'handoff-privacy.test.js',   // handoff details: commenter, sender and owner only; a member hands off threads they began or replied in

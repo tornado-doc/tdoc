@@ -41,15 +41,24 @@ class R2 {
   async delete(k) { for (const key of Array.isArray(k) ? k : [k]) this.map.delete(key); }
   async list({ prefix = '' } = {}) { return { objects: [...this.map.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })), truncated: false }; }
 }
+// Raft's three legs, answered here: workerd has no network, and a handoff that
+// is not delivered holds nobody.
+globalThis.fetch = async (input) => {
+  const u = String(input && input.url ? input.url : input);
+  if (u.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'r1', agent: { serverId: 'server-one' } });
+  if (u.endsWith('/api/oauth/token')) return Response.json({ access_token: 't' });
+  if (u.endsWith('/api/oauth/agent-events')) return Response.json({ id: 'e1', status: 'queued' });
+  return new Response('no network here', { status: 502 });
+};
 const fake = globalThis.__tdocFake || (globalThis.__tdocFake = { META: new KV(), DOCS: new R2() });
-const envFor = (env) => ({ META: fake.META, DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_REMOTE_MCP: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', RAFT_CLIENT_ID: 'tdoc-x', RAFT_CLIENT_SECRET: 's' });
+const envFor = (env) => ({ META: fake.META, DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_REMOTE_MCP: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', RAFT_CLIENT_ID: 'tdoc-x', RAFT_CLIENT_SECRET: 's', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test' });
 export class TestStore extends CommentsStore { constructor(state, env) { super(state, envFor(env)); } }
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (url.pathname === '/__seed-session') {
-      const { id, login } = await req.json();
-      await fake.META.put('session:' + id, JSON.stringify({ login, name: login, avatar_url: '', created: new Date().toISOString() }));
+      const { id, login, email } = await req.json();
+      await fake.META.put('session:' + id, JSON.stringify({ login, name: login, email, avatar_url: '', created: new Date().toISOString() }));
       return new Response('ok');
     }
     if (url.pathname === '/__kv') {
@@ -111,7 +120,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       try { await fetch(base + '/__ping'); break; } catch { await new Promise((resolve) => setTimeout(resolve, 100)); }
     }
     const id = crypto.randomBytes(16).toString('hex');
-    await fetch(`${base}/__seed-session`, { method: 'POST', body: JSON.stringify({ id, login: 'julie' }) });
+    await fetch(`${base}/__seed-session`, { method: 'POST', body: JSON.stringify({ id, login: 'julie', email: 'julie@tdoc.test' }) });
     const cookie = `tdoc_sid=${id}`;
     const minted = await call('/api/hosted/token', { method: 'POST', cookie, body: { label: 'julie' } });
     assert.equal(minted.status, 200, `token: ${minted.text} ${stderr}`);
@@ -194,6 +203,59 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     const direct = await call('/api/upload', { method: 'POST', token, headers: { 'X-Tdoc-Raft-Agent': `${S1}/agent-linked` }, body: { slug: 'straight', version: 1, html: '<p>x</p>' } });
     assert.ok(direct.status === 401 || direct.status === 403, `${direct.status} ${direct.text}`);
     console.log('raft_agent in workerd: OAuth connection, publish, upload commit, reply, unlinked handle, foreign and malformed claims ok');
+
+    // A suggestions handoff (dev mode: julie is on the list) on the real Durable
+    // Object, through every MCP publish tool. The acting agent is what raft_agent
+    // says; the OAuth token alone cannot tell the agents apart.
+    const A = `${S1}/agent-linked`;
+    const B = `${S1}/agent-listed`;
+    const held = await doc({ raft_agent: A, html: '<h1>Raft doc</h1><p>First sentence here.</p><p>Second sentence here.</p>' });
+    const say = async (text, quote) => {
+      const r = await call('/api/comments', { method: 'POST', cookie, body: { slug: held, version: 1, text, anchor: { kind: 'text', text: quote } } });
+      assert.equal(r.status, 200, r.text);
+      return r.body.id;
+    };
+    const c1 = await say('fix the first', 'First sentence');
+    const c2 = await say('fix the second', 'Second sentence');
+    const sent = await call('/api/notify/handoff', { method: 'POST', cookie, body: { slug: held, comment_ids: [c1, c2], recipient: row('agent-linked', 'linked'), instruction: 'address these', reply_as: 'suggestions' } });
+    assert.equal(sent.status, 200, sent.text);
+    assert.equal(sent.body.reply_as, 'suggestions', sent.text);
+    assert.equal(sent.body.delivery.status, 'delivered', sent.text);
+    const refusedSuggest = (r, what) => {
+      assert.ok(r.isError, `${what}: ${JSON.stringify(r)}`);
+      assert.equal(r.structuredContent.error, 'suggestions_only_run', `${what}: ${JSON.stringify(r)}`);
+      assert.match(r.content[0].text, /propose_edits/, what);
+      assert.match(r.content[0].text, /do not publish or retry/, what);
+    };
+    const versions = async () => (await metaOf(held)).versions.length;
+    refusedSuggest(await tool(token, 'update_doc', { slug: held, html: '<h1>Raft doc</h1><p>rewritten</p>', raft_agent: A }), 'update_doc');
+    refusedSuggest(await tool(token, 'edit_doc', { slug: held, edits: [{ find: 'First sentence', replace: 'Changed' }], raft_agent: A }), 'edit_doc');
+    const staged = Buffer.from('<h1>By upload</h1><p>held</p>');
+    const up2 = await tool(token, 'create_upload', { slug: held, files: [{ name: 'index.html', type: 'text/html', size: staged.length }] });
+    assert.ok(!up2.isError, JSON.stringify(up2));
+    assert.equal((await fetch(up2.structuredContent.files[0].url.replace(ORIGIN, base), { method: 'PUT', body: staged })).status, 200);
+    refusedSuggest(await tool(token, 'commit_upload', { upload_id: up2.structuredContent.upload_id, raft_agent: A }), 'commit_upload');
+    // No raft_agent at all: it may well be the recipient.
+    refusedSuggest(await tool(token, 'update_doc', { slug: held, html: '<h1>Raft doc</h1><p>nameless</p>' }), 'update_doc with no identity');
+    assert.equal(await versions(), 1, 'nothing was published');
+    // A new doc is not this doc; suggestions and replies go on.
+    assert.ok(!(await tool(token, 'create_doc', { title: 'Another', html: '<p>x</p>', raft_agent: A })).isError, 'create_doc');
+    const first = await tool(token, 'propose_edits', { slug: held, edits: [{ find: 'First sentence here.', replace: 'First, better.', comment_id: c1 }] });
+    assert.ok(!first.isError, JSON.stringify(first));
+    // The second comment is open: still held. Accepting the first publishes as the person.
+    refusedSuggest(await tool(token, 'update_doc', { slug: held, html: '<h1>Raft doc</h1><p>rewritten</p>', raft_agent: A }), 'one comment still open');
+    const accepted = await call(`/api/docs/${held}/suggestions/${first.structuredContent.suggestion_id}/accept`, { method: 'POST', cookie, body: {} });
+    assert.equal(accepted.status, 200, accepted.text);
+    assert.equal(await versions(), 2, 'accepting published');
+    refusedSuggest(await tool(token, 'update_doc', { slug: held, html: '<h1>Raft doc</h1><p>rewritten</p>', raft_agent: A }), 'still open after an accept');
+    // Another of the account's agents, named, is not held.
+    const other = await tool(token, 'update_doc', { slug: held, html: '<h1>Raft doc</h1><p>First, better.</p><p>Second sentence here.</p>', raft_agent: B });
+    assert.ok(!other.isError, JSON.stringify(other));
+    const second = await tool(token, 'propose_edits', { slug: held, edits: [{ find: 'Second sentence here.', replace: 'Second, better.', comment_id: c2 }] });
+    assert.ok(!second.isError, JSON.stringify(second));
+    const free = await tool(token, 'update_doc', { slug: held, html: '<h1>Raft doc</h1><p>rewritten</p>', raft_agent: A });
+    assert.ok(!free.isError, JSON.stringify(free));
+    console.log('suggestions handoff in workerd: every MCP publish tool refused, propose_edits lifts it, accept and another agent unaffected ok');
   } finally {
     child.kill();
     fs.rmSync(dir, { recursive: true, force: true });

@@ -119,6 +119,7 @@ const env = {
     assert(baked.includes('Updated content.'));
     console.log('  ✓ create/edit bake templates; static rejection preserves versions and comments');
 
+    let refuseUploads = false;
     uploadServer = http.createServer((req, res) => {
       let body = '';
       req.on('data', d => { body += d; });
@@ -126,6 +127,11 @@ const env = {
         res.setHeader('content-type', 'application/json');
         if (req.url === '/api/upload') {
           assert.equal(req.headers.authorization, 'Bearer test-token');
+          if (refuseUploads) {
+            res.statusCode = 403;
+            res.end(JSON.stringify({ error: 'suggestions_only_run', message: 'Comments on this doc were handed to an agent for suggestions.' }));
+            return;
+          }
           const data = JSON.parse(body); uploads.push(data);
           res.end(JSON.stringify({ ok: true, slug: data.slug, version: data.version, size: 42 }));
         } else { res.statusCode = 404; res.end('{}'); }
@@ -146,6 +152,15 @@ const env = {
     assert.equal(latest.meta.access.history_visibility, 'owner');
     assert(!/layout check|playwright|chromium/i.test(result.stderr));
     console.log('  ✓ actual publish CLI uploads exact HTML and private access to an isolated HTTP endpoint');
+
+    // A suggestions handoff on this doc: the CLI stops, and says what to do.
+    refuseUploads = true;
+    result = await run('tdoc-publish', ['--visibility', 'private', '--history', 'owner', 'sample']);
+    refuseUploads = false;
+    assert.notEqual(result.code, 0, result.stdout);
+    assert(result.stderr.includes('Not published (suggestions_only_run)'), result.stderr);
+    assert(/Do not retry.*tdoc-propose/.test(result.stderr), result.stderr);
+    console.log('  ✓ publish CLI stops on suggestions_only_run and names tdoc-propose');
 
     // Serve the shipped runtime with no developer dependencies installed.
     const portServer = http.createServer();
