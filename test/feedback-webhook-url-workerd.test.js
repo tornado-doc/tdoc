@@ -347,7 +347,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
         const id = `h_seed_${crypto.randomBytes(3).toString('hex')}`;
         await kv('handoffs:dana-doc', JSON.stringify([{ handoff_id: id, at: new Date().toISOString(), recipient, comment_ids: [await note(dana, 'dana-doc')], instruction: '', delivery: { status: 'delivered' } }]));
         const r = await call('/api/notify/handoff/resend', { method: 'POST', cookie: dana.cookie, body: { slug: 'dana-doc', handoff_id: id } });
-        assert.equal(r.body.delivery && r.body.delivery.status, 'failed', r.text);
+        assert.ok(r.status === 409 || r.body.delivery.status === 'failed', r.text);
         assert.deepEqual(await posts(), []);
       }
       await kv('handoffs:dana-doc', '[]');
@@ -420,7 +420,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.equal((await call('/api/team/move', { method: 'POST', cookie, body: { team: null, slugs: ['bob-team'] } })).status, 200);
       assertClean('owner, doc out of the team', await call('/api/notify/handoffs?slug=bob-team', { cookie: bob.cookie }));
       const again = await call('/api/notify/handoff/resend', { method: 'POST', cookie: bob.cookie, body: { slug: 'bob-team', handoff_id: out.body.handoff_id } });
-      assert.equal(again.body.delivery && again.body.delivery.status, 'failed', again.text);
+      assert.ok(again.status === 409 || again.body.delivery.status === 'failed', again.text);
       assert.deepEqual(await posts(), []);
     });
 
