@@ -576,7 +576,13 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
       return r;
     };
     const who = () => raftCalls.filter((c) => c.url.endsWith('/api/oauth/requests/agent')).map((c) => c.body.agentName).join();
-    return { ...w, space, another, tokenSend, who };
+    // Connected again: the link clears the removal, the server is listed again.
+    const reconnect = async () => {
+      await w.link(w.ann, AAA_BEN);
+      await w.env.META.delete(`account-notify:${w.ann.account_id}`);
+      await w.env.META.put(`account-raft-servers:${w.ann.account_id}`, JSON.stringify([{ server_id: AAA_BEN.server_id, server_slug: AAA_BEN.server_slug, installation_id: 'inst' }]));
+    };
+    return { ...w, space, another, tokenSend, who, reconnect };
   }
 
   await t('a widget pick sticks: the next unaddressed token Send goes to the agent just picked', async () => {
@@ -606,17 +612,69 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(w.who() === 'aaa-ben', `went to ${w.who()}`);
   });
 
-  await t('a widget pick is recency, not a default, for the owner on tdoc itself', async () => {
+  await t('a widget pick changes nothing for the owner on tdoc itself: no default, no new order', async () => {
     const w = await pickWorld();
     await w.tokenSend(ZZZ_OWN);
     const body = await w.targets(w.ann, w.space.slug);
     assert(!body.default, `default: ${JSON.stringify(body.default)}`);
-    assert(body.candidates[0].agent_sub === 'zzz-own' && body.candidates[0].last_touched, `first: ${JSON.stringify(body.candidates)}`);
-    assert(!body.candidates[0].used_here_at, 'no used-here claim');
+    assert(body.candidates[0].agent_sub === 'aaa-ben', `a token cannot move a row to the top of her page: ${JSON.stringify(body.candidates)}`);
+    assert(body.candidates.every((t) => !t.last_touched && !t.used_here_at), `no recency: ${JSON.stringify(body.candidates)}`);
+    // What her space page preselects (feedback-space.jsx) is that top row.
+    const top = composerDefault(w.rows(body).map((t) => ({ ...t, can_edit: true })), { orTop: true });
+    assert(top.agent_sub === 'aaa-ben', `preselected: ${JSON.stringify(top)}`);
     const c = await w.another();
     raftCalls = [];
     const un = await w.send(w.ann, w.space.slug, [c]);
     assert(un.body.delivery.error === 'no_recipient', `Ann's unaddressed Send: ${un.text}`);
+  });
+
+  await t('a widget pick does not come back after a disconnect and reconnect', async () => {
+    const w = await pickWorld();
+    await w.tokenSend(ZZZ_OWN);
+    await new Promise((r) => setTimeout(r, 2));
+    const off = await w.call('/api/me/connectors/remove', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { provider: 'raft', server_id: ZZZ_OWN.server_id } });
+    assert(off.status === 200, off.text);
+    await w.reconnect();
+    const body = await w.call(`/api/notify/targets?slug=${w.space.slug}`, { token: w.space.token });
+    assert(body.body.default.agent_sub === 'aaa-ben', `token default: ${body.text}`);
+    await w.tokenSend();
+    assert(w.who() === 'aaa-ben', `the old pick came back: ${w.who()}`);
+    // Picking it again afterwards is a new pick.
+    await new Promise((r) => setTimeout(r, 2));
+    await w.tokenSend(ZZZ_OWN);
+    await w.tokenSend();
+    assert(w.who() === 'zzz-own', `a pick after the reconnect: ${w.who()}`);
+  });
+
+  await t('a disconnect from the other half of a merged account ends the pick too', async () => {
+    const w = await pickWorld();
+    const other = await issue(worker, w.env, 'annother');
+    const group = JSON.stringify({ canonical: other.account_id, ids: [other.account_id, w.ann.account_id], actor_keys: [] });
+    await w.env.META.put(`account-group:${w.ann.account_id}`, group);
+    await w.env.META.put(`account-group:${other.account_id}`, group);
+    await w.tokenSend(ZZZ_OWN);
+    await new Promise((r) => setTimeout(r, 2));
+    const off = await w.call('/api/me/connectors/remove', { method: 'POST', cookie: other.cookie, headers: ORIGIN, body: { provider: 'raft', server_id: ZZZ_OWN.server_id } });
+    assert(off.status === 200, off.text);
+    assert(JSON.parse(await w.env.META.get(`account-notify-removed:${other.account_id}`) || '[]').length, 'recorded under the other id');
+    assert(!(await w.env.META.get(`account-notify-disconnected-at:${w.ann.account_id}`)), 'and not under the doc owner\'s');
+    await w.reconnect();
+    await w.tokenSend();
+    assert(w.who() === 'aaa-ben', `the old pick came back: ${w.who()}`);
+  });
+
+  await t('/api/upload does not take a feedback_pick from the client, and keeps the stored one', async () => {
+    const w = await pickWorld();
+    const forged = { agent: { provider: 'raft', server_id: ZZZ_OWN.server_id, agent_sub: 'zzz-own' }, at: '2999-01-01T00:00:00.000Z' };
+    const up = (version) => w.call('/api/upload', { method: 'POST', token: w.ann.token, body: { slug: 'mine', version, html: '<h1>x</h1><p>a sentence to comment on</p>', meta: { title: 't', feedback_pick: forged } } });
+    const first = await up(1);
+    assert(first.status === 200, first.text);
+    assert(!(await w.meta('mine')).feedback_pick, `stored: ${JSON.stringify((await w.meta('mine')).feedback_pick)}`);
+    const real = { agent: { provider: 'raft', server_id: AAA_BEN.server_id, agent_sub: 'aaa-ben' }, at: '2026-01-01T00:00:00.000Z' };
+    await w.env.META.put('meta:mine', JSON.stringify({ ...(await w.meta('mine')), feedback_pick: real }));
+    const second = await up(2);
+    assert(second.status === 200, second.text);
+    assert((await w.meta('mine')).feedback_pick.agent.agent_sub === 'aaa-ben', 'the stored value stays');
   });
 
   await t('a widget pick is not proof: ownerRecordedAgent is not satisfied', async () => {

@@ -11372,7 +11372,7 @@ const ACCOUNT_DELETE_STEP_FNS = {
     for (const id of ids) {
       keys.push(
         `account-profile:${id}`, `account-onboarding:${id}`, `account-quota:${id}`, `account-teams:${id}`,
-        `account-notify:${id}`, `account-notify-removed:${id}`, `account-raft-servers:${id}`,
+        `account-notify:${id}`, `account-notify-removed:${id}`, `account-notify-disconnected-at:${id}`, `account-raft-servers:${id}`,
         `local-pending:${id}`, `local-agents-seen:${id}`, `account-terminal:${id}`, `account-github:${id}`,
         disconnectedKey(id), docIndexBuiltKey(`p:${id}`),
       );
@@ -16448,6 +16448,29 @@ async function accountDisconnectedAgent(env, accountId, t) {
   return removed.has(notifyKey(t)) || (t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`));
 }
 
+// When each was disconnected, kept apart from the list above (which a reconnect
+// clears, as it should). Something that remembers an agent past a reconnect
+// compares against this: only the feedback pick does.
+async function noteDisconnected(env, accountId, keys) {
+  const key = `account-notify-disconnected-at:${accountId}`;
+  let times = {};
+  try { times = JSON.parse((await env.META.get(key)) || '{}') || {}; } catch {}
+  const at = new Date().toISOString();
+  for (const k of keys) { delete times[k]; times[k] = at; }
+  await env.META.put(key, JSON.stringify(Object.fromEntries(Object.entries(times).slice(-200))));
+}
+
+// Across the account group: either half of a merged account may have done it.
+async function disconnectedSince(env, accountId, t, at) {
+  if (!accountId) return false;
+  for (const id of (await accountGroup(env, accountId)).ids) {
+    let times = {};
+    try { times = JSON.parse((await env.META.get(`account-notify-disconnected-at:${id}`)) || '{}') || {}; } catch {}
+    if (String(times[notifyKey(t)] || '') >= String(at) || String(times[`raft-server:${t.server_id}`] || '') >= String(at)) return true;
+  }
+  return false;
+}
+
 async function isDocOwnerAgent(env, meta, handoffs, t) {
   const owner = meta && meta.hosted && meta.hosted.account_id;
   if (!owner) return true;
@@ -16558,16 +16581,19 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
     && !linked.some((x) => sameNotifyTarget(x, t)) && !ownerRecordedAgent(meta, allHandoffs, ownerIds, t);
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
     && !writer.agent && writer.account_id === viewerAccountId && offered.length === 1 && !notOwnerAgent(offered[0]) ? offered[0] : null;
-  // What the widget last picked here (recordFeedbackPick): recency on this doc,
-  // and at the widget, where it was picked, what its next Send means, unless the
-  // owner has sent to another since. Never a default on tdoc itself, and never
-  // for an agent this doc's records say is somebody else's.
-  const pick = meta && meta.feedback_pick;
+  // What the widget last picked here (recordFeedbackPick), at the widget only:
+  // its recency, and what its next Send means unless the owner has sent to
+  // another since. On tdoc itself it changes nothing: a row a token moved to the
+  // top of the owner's list would be preselected, and her Send would make the
+  // token's pick proof. Never for an agent this doc's records say is somebody
+  // else's, and a disconnect ends it for good, reconnected or not.
+  const pick = feedbackDoor && meta ? meta.feedback_pick : null;
   const pickIndex = pick ? offered.findIndex((t) => sameNotifyTarget(t, pick.agent)) : -1;
-  const picked = pickIndex >= 0 && !notOwnerAgent(offered[pickIndex]) ? offered[pickIndex] : null;
+  const pickEnded = pickIndex >= 0 && await disconnectedSince(env, ownerAccount, pick.agent, pick.at);
+  const picked = pickIndex >= 0 && !pickEnded && !notOwnerAgent(offered[pickIndex]) ? offered[pickIndex] : null;
   if (picked && String(pick.at) > String(picked.last_touched || '')) offered[pickIndex] = { ...picked, last_touched: pick.at };
   const lastSent = ownerHandoffs.find((h) => h.recipient && h.delivery?.status && h.delivery.status !== 'failed');
-  const widgetPick = feedbackDoor && picked && !(publisher && offered.some((t) => sameNotifyTarget(t, publisher)))
+  const widgetPick = picked && !(publisher && offered.some((t) => sameNotifyTarget(t, publisher)))
     && (!lastSent || String(pick.at) >= String(lastSent.at)) ? picked : null;
   const preferred = widgetPick || evidenced || soleAuthorAgent;
   offered.sort(byRecency);
@@ -27721,6 +27747,7 @@ const tdocHandlers = {
         const removed = await accountRemovedTargets(env, accountId);
         removed.add(`raft-server:${body.server_id}`);
         await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
+        await noteDisconnected(env, accountId, [`raft-server:${body.server_id}`]);
         try {
           const explicit = JSON.parse((await env.META.get(`account-raft-servers:${accountId}`)) || '[]').filter((sv) => sv && sv.server_id !== body.server_id);
           await env.META.put(`account-raft-servers:${accountId}`, JSON.stringify(explicit));
@@ -27736,6 +27763,7 @@ const tdocHandlers = {
         const removed = await accountRemovedTargets(env, accountId);
         for (const t of gone) removed.add(notifyKey(t));
         await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
+        await noteDisconnected(env, accountId, gone.map(notifyKey));
         return json({ ok: true, removed: gone.length });
       }
       if (p === '/api/me/connectors/remove' && method === 'POST') {
@@ -27745,6 +27773,7 @@ const tdocHandlers = {
         const removed = await accountRemovedTargets(env, accountId);
         removed.add(notifyKey(target));
         await env.META.put(`account-notify-removed:${accountId}`, JSON.stringify([...removed].slice(-200)));
+        await noteDisconnected(env, accountId, [notifyKey(target)]);
         if (target.provider === 'webhook') {
           try { await env.META.delete(`notify-webhook-secret:${target.agent_sub}`); } catch {}
           try { await env.META.delete(`notify-webhook-auth:${target.agent_sub}`); } catch {}
@@ -28772,6 +28801,7 @@ const tdocHandlers = {
         // authorship and team listings skip) or back. The stored value stays.
         delete incoming.created_from;
         delete incoming.feedback;
+        delete incoming.feedback_pick;
         delete incoming.trashed_at;
         delete incoming.guest_invited_by;
         const prev = writeGate.meta;
