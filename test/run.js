@@ -163,6 +163,7 @@ const OFFLINE = [
   'notifications.test.js',    // inbox aggregation + Reddit recipients
   'mentions.test.js',         // @mentions: parsing, who is mentionable, mention-beats-position
   'agent-choices.test.js',    // @ offers the Send to agent list: same order, top 2, typed search, tag is no @login
+  'agent-used-here.test.js',  // @ order: used on this doc first, most recent on top; order only; no other person's use leaks
   'ai-answerer.test.js',      // composer @ list: edit agents first, then ask-only own/team; tdoc AI last resort; @AI never a login
   'rich-text.test.js',        // comment markdown subset (bold/code/list/link)
   'overlay-inbox.test.js',    // #180 inbox click → /d/slug?comment= deep-link
@@ -170,6 +171,7 @@ const OFFLINE = [
   'preview-worker.test.js',   // #148 isolated preview Worker (no DO, 14d TTL)
   'preview-cards.test.js',    // versioned OG cards, PNG rendering and access gate
   'preview-screenshot.test.js', // page screenshot as the card: PNG checks, write access, precedence
+  'preview-card-refresh.test.js', // old-template automatic cards redrawn: lazy fill, backfill, failed render keeps the card
   'preview-workflow.test.js', // #148 PR preview GitHub Action contract
   'ci-workflow.test.js',      // browser CI image matches locked playwright; suites sharded
   'csp-headers.test.js',      // CSP header + nonce plumbing (hermetic, no browser)

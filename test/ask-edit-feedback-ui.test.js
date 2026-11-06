@@ -10,9 +10,12 @@
 //   - a rewrite shows as one removed block then one added block; a small edit
 //     stays word by word; clearing puts the original back exactly; edits are
 //     text, never markup.
-//   - answering an agent, the reply box starts with its tag, in and out of dev
-//     mode; deleted, it stays deleted and wakes nobody; nothing for a person's
-//     reply or an agent the viewer can't pick.
+//   - answering an agent in dev mode, the reply box starts with its tag; deleted,
+//     it stays deleted; nothing for a person's reply, for an agent the viewer
+//     can't pick, or for one whose edits would skip review.
+//   - outside dev mode no reply box starts with a tag, readers included: a tag on
+//     an editing agent there leads to a plain handoff, which can publish without
+//     review. Someone who wants an agent names it.
 //   - the version compare marks a rewrite with the same blocks as a suggestion,
 //     for everybody.
 //   - a thread is flat: replies flush with the top comment at any depth.
@@ -385,26 +388,31 @@ async function startServer(worker, env) {
       await setDevMode(false);
       try { await fn(); } finally { await setDevMode(true); }
     });
-    const typeAfterTag = async (page, box, words) => {
-      await box.click();
-      await page.keyboard.press('End');
-      await page.keyboard.type(words);
+    const noTag = async (v, card, box) => {
+      await v.page.waitForTimeout(1000); // the agent lists have loaded by now
+      assert.equal(await box.inputValue(), '', 'the box started with a tag');
+      assert.equal(await card.locator('.tdoc-agent-pill').count(), 0);
     };
-    for (const phone of [true, false]) await outside(`${phone ? 390 : 1280}: replying to your own agent starts with its tag; the tag alone doesn't send; a reply takes the plain handoff`, () => threadOf(async (id) => {
+    const nameAgent = async (v, box, phone, agentRow = /Claude Code/) => {
+      if (phone) await box.tap(); else await box.click();
+      await v.page.keyboard.type('@');
+      const row = v.page.locator('#tdoc-mention-menu [role=option]', { hasText: agentRow }).first();
+      if (phone) await row.tap(); else await row.click();
+    };
+    for (const phone of [true, false]) await outside(`${phone ? 390 : 1280}: replying to your own agent, the box starts empty; named by hand, a reply takes the plain handoff`, () => threadOf(async (id) => {
       const v = await open({ phone });
       const suggestCalls = [];
       v.page.on('request', (r) => { if (/\/suggest/.test(r.url())) suggestCalls.push(r.url()); });
       const { card, box } = await openReply(v.page, phone, id);
+      await noTag(v, card, box);
+      await shot(v.page, `nondev-reply-empty-${phone ? 390 : 1280}.png`);
+      await nameAgent(v, box, phone);
       await card.locator('.tdoc-agent-pill').waitFor();
       assert.match(await box.inputValue(), /Claude Code/);
       const form = await card.locator('.tdoc-reply-form').innerText();
       assert.match(form, /changes the doc/, 'the box says what this agent may do');
       assert.doesNotMatch(form, /suggests/);
-      await shot(v.page, `nondev-reply-prefilled-${phone ? 390 : 1280}.png`);
-      await card.locator('.tdoc-reply-submit').last().click();
-      await v.page.waitForTimeout(300);
-      assert.equal(v.sends.length, 0, 'sent on the tag alone');
-      await typeAfterTag(v.page, box, 'shorter please');
+      await v.page.keyboard.type('shorter please');
       await card.locator('.tdoc-reply-submit').last().click();
       await v.page.waitForTimeout(600);
       assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
@@ -416,28 +424,20 @@ async function startServer(worker, env) {
       await v.ctx.close();
     }));
 
-    await outside('a CLI that would skip review in dev mode gets its tag too: every agent takes the plain handoff here', async () => {
+    await outside('no tag for a CLI that would skip review in dev mode either', async () => {
       const codex = await comment();
       assert.equal((await api('/api/notify/handoff', { method: 'POST', cookie, body: { slug: SLUG, comment_ids: [codex], recipient: { provider: 'local', server_id: 'mac-mini', agent_sub: 'mac-mini_codex' } } })).status, 200);
       assert.equal((await api('/api/agent/reply', { method: 'POST', token, body: { slug: SLUG, parent_id: codex, text: 'From codex', status: 'answered', agent_login: 'codex', agent_name: 'codex' } })).status, 200);
       const v = await open({ phone: true });
       const { card, box } = await openReply(v.page, true, codex);
-      await card.locator('.tdoc-agent-pill').waitFor();
-      assert.match(await box.inputValue(), /Codex/);
+      await noTag(v, card, box);
       await v.ctx.close();
     });
 
-    await outside('the tag deleted stays deleted, and the reply wakes nobody', () => threadOf(async (id) => {
+    await outside('a reply that names nobody wakes nobody', () => threadOf(async (id) => {
       const v = await open({ phone: true });
       const { card, box } = await openReply(v.page, true, id);
-      await card.locator('.tdoc-agent-pill').waitFor();
-      await box.tap();
-      await v.page.keyboard.press('End');
-      await v.page.keyboard.press('Backspace');
-      await v.page.keyboard.press('Backspace');
-      assert.equal((await box.inputValue()).trim(), '');
-      await v.page.waitForTimeout(3000);
-      assert.equal((await box.inputValue()).trim(), '', 'the tag came back');
+      await noTag(v, card, box);
       const handoffs = JSON.parse(await env.META.get(`handoffs:${SLUG}`)).length;
       await box.tap();
       await v.page.keyboard.type('thanks');
@@ -448,20 +448,7 @@ async function startServer(worker, env) {
       await v.ctx.close();
     }));
 
-    await outside('no tag when the latest reply is a person\'s, or the agent is not in this viewer\'s list', async () => {
-      const human = await agentThread({}, handed);
-      assert.equal((await api('/api/comments', { method: 'POST', cookie, body: { slug: SLUG, version: 1, text: 'Thanks', parent_id: human } })).status, 200);
-      const other = await agentThread({ agent_login: 'someone-else', agent_name: 'someone else' });
-      for (const id of [human, other]) {
-        const v = await open({ phone: true });
-        const { box } = await openReply(v.page, true, id);
-        await v.page.waitForTimeout(800);
-        assert.equal(await box.inputValue(), '');
-        await v.ctx.close();
-      }
-    });
-
-    await outside('a reader answering their own agent gets its tag; the reply asks only that agent, under the reply', async () => {
+    await outside('a reader answering their own agent: no tag', async () => {
       const readerSid = 'b'.repeat(32);
       await env.META.put(`session:${readerSid}`, JSON.stringify({ login: 'rita', name: 'rita', email: 'rita@tdoc.test', avatar_url: '', created: new Date().toISOString() }));
       const readerCookie = `tdoc_sid=${readerSid}`;
@@ -474,23 +461,16 @@ async function startServer(worker, env) {
       assert.equal(answered.status, 200, JSON.stringify(answered.body));
       const v = await open({ phone: true, sid: readerSid });
       const { card, box } = await openReply(v.page, true, id);
-      await card.locator('.tdoc-agent-pill').waitFor({ timeout: 8000 });
-      assert.match(await card.locator('.tdoc-reply-form').innerText(), /answers in the thread/);
-      await typeAfterTag(v.page, box, 'and search?');
-      await card.locator('.tdoc-reply-submit').last().click();
-      await v.page.waitForTimeout(800);
-      assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
-      assert.equal(v.sends[0].body.ask_only, true);
-      assert.equal(v.sends[0].body.question, 'and search?');
-      assert.equal(v.sends[0].body.reply_as, undefined);
+      await noTag(v, card, box);
       await v.ctx.close();
     });
 
     await outside('the reply box is done when the reply is posted, not when the delivery ends', () => threadOf(async (id) => {
       const v = await open({ phone: true, delayHandoff: 1500 });
       const { card, box } = await openReply(v.page, true, id);
+      await nameAgent(v, box, true);
       await card.locator('.tdoc-agent-pill').waitFor();
-      await typeAfterTag(v.page, box, 'shorter please');
+      await v.page.keyboard.type('shorter please');
       const started = Date.now();
       await card.locator('.tdoc-reply-submit').last().tap();
       await box.waitFor({ state: 'detached', timeout: 5000 });

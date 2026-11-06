@@ -7,7 +7,7 @@ import '../../../shell/src/ui/ui.css';
 import { AgentMentionContext } from '../../../shell/src/document/mention-field.jsx';
 import { CommentComposer } from '../../../shell/src/document/comment-composer.jsx';
 import { Author } from '../../../shell/src/document/comment-card.jsx';
-import { orderedAgentChoices } from '../../../shell/src/document/agent-choices.js';
+import { composerDefault, orderedAgentChoices } from '../../../shell/src/document/agent-choices.js';
 
 const params = new URLSearchParams(location.search);
 const canSend = params.get('agents') !== '0';
@@ -20,10 +20,18 @@ const targets = {
   candidates: [doc, local('juliesmac', 'claude'), local('juliesmac', 'codex')],
   fallback: { provider: 'raft', server_id: 'S1', server_slug: 'acme', agent_sub: 'b', agent_name: 'devin', owner },
 };
-const agents = canSend
+// ?used=1: Codex replied here after xiaocc published, and devin was used most
+// recently, on another doc (a later last_touched says so, not used_here_at).
+if (params.get('used')) {
+  doc.last_writer = true;
+  doc.used_here_at = '2026-11-01T00:00:00.000Z';
+  targets.candidates[2] = { ...targets.candidates[2], used_here_at: '2026-11-02T00:00:00.000Z' };
+  targets.fallback.last_touched = '2026-11-03T00:00:00.000Z';
+}
+const choices = canSend
   // The composer's @ list (ai-answerer.js composerAgents): these may edit.
-  ? { choices: orderedAgentChoices(targets).map((t) => ({ ...t, can_edit: true })), preselected: targets.default }
-  : { choices: [], preselected: null };
+  ? orderedAgentChoices(targets).map((t) => ({ ...t, can_edit: true })) : [];
+const agents = { choices, preselected: composerDefault(choices, { evidence: targets.default }) };
 
 window.__posts = [];
 // "claude" commented here as an agent once; the server no longer lists it.

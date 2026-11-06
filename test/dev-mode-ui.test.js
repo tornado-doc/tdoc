@@ -239,8 +239,17 @@ async function startServer(worker, env) {
         await openAccountMenu(page);
         await devItem(page).waitFor();
         assert.match(await page.locator('.tdoc-dev-mode-flags').innerText(), /Dev mode shows: Doc thumbnails/);
+        const menuWidth = await page.locator('.ui-menu-popup').filter({ has: page.locator('.tdoc-dev-mode-flags') }).evaluate((el) => el.getBoundingClientRect().width);
+        assert.ok(menuWidth < 320, `the flags note wraps and does not stretch the menu (${menuWidth}px)`);
         await shot(page, 'menu-flags');
         await page.keyboard.press('Escape');
+        // The same menu on the feedback page: its boot says dev mode too.
+        await page.goto(`${base}/feedback`);
+        await openAccountMenu(page);
+        await devItem(page).waitFor();
+        assert.match(await page.locator('.tdoc-dev-mode-flags').innerText(), /Dev mode shows:/);
+        await page.keyboard.press('Escape');
+        await page.goto(`${base}/me`);
         await thumbs();
         await page.goto(`${base}/@julie`);
         await page.locator('.profile-pick-card').first().waitFor();

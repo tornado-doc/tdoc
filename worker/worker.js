@@ -8235,15 +8235,6 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
     return !row.owner || row.owner === viewer;
   }).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
 
-  // Docs published before cards existed get theirs the first time their owner
-  // opens My docs: a few per load, in the background, no admin step. The
-  // pending marker in buildDocPreview keeps reloads from queueing twice.
-  if (ctx && typeof ctx.waitUntil === 'function' && env.PREVIEW_QUEUE) {
-    const missing = mine.filter((row) => !previewCardMatches(row.meta && row.meta.preview, row.slug, row.latest))
-      .slice(0, PREVIEW_FILL_PER_LOAD);
-    if (missing.length) ctx.waitUntil(fillMissingPreviewCards(env, missing.map((row) => row.slug)));
-  }
-
   const [starItems, recentItems, folderState] = viewerKey
     ? [starItemsEarly, recentItemsEarly, await folderStateP]
     : [[], [], { folders: [], docs: {} }];
@@ -8331,6 +8322,18 @@ async function indexData(env, session, origin, { ctx = null, searchScopes: searc
       folder: resolveTeamFolder(teamFolderStates.get(team.id), row.meta.team_folder),
     };
   };
+
+  // Docs without a card, or with an automatic card from an older template, get
+  // a fresh one the first time someone who may write them opens their hub (any
+  // team insider may: teamWriteAccess): a few per load, in the background, no
+  // admin step. The pending marker in buildDocPreview keeps reloads from
+  // queueing twice; a doc that keeps failing steps aside (previewCardFillDue).
+  if (ctx && typeof ctx.waitUntil === 'function' && env.PREVIEW_QUEUE) {
+    const due = [...mine, ...teamDocs.filter((row) => !isFeedbackSpace(row.meta))]
+      .filter((row) => previewCardFillDue(row.meta && row.meta.preview, row.slug, row.latest))
+      .slice(0, PREVIEW_FILL_PER_LOAD);
+    if (due.length) ctx.waitUntil(fillMissingPreviewCards(env, due.map((row) => row.slug)));
+  }
 
   // Docs indexed before full-text search, or whose index fell behind, are
   // queued the first time their hub lists them: one call per owner store,
@@ -12201,6 +12204,27 @@ function previewCardMatches(preview, slug, version) {
     && /^[a-f0-9]{12}$/.test(preview.image_hash || '')
     && preview.image === previewCardUrl(slug, version, preview.image_hash);
 }
+// Bump when defaultPreviewSvg changes look: automatic cards stored without this
+// number are redrawn by the lazy fill and the admin backfill. Authored cards and
+// screenshots carry no number and are never redrawn.
+const PREVIEW_CARD_TEMPLATE = 2;
+const PREVIEW_FILL_RETRY_MS = 24 * 60 * 60 * 1000;
+function previewCardIsStale(preview, slug, version) {
+  return !!previewCardMatches(preview, slug, version)
+    && preview.image_source !== 'screenshot'
+    && !preview.image_source_custom && !preview.image_custom
+    && preview.image_template !== PREVIEW_CARD_TEMPLATE;
+}
+function previewCardNeedsFill(preview, slug, version) {
+  return !previewCardMatches(preview, slug, version) || previewCardIsStale(preview, slug, version);
+}
+// The hub's check. A doc that just failed steps aside for a while, or a few
+// that can never render would take every per-load slot from the docs behind them.
+function previewCardFillDue(preview, slug, version) {
+  if (!previewCardNeedsFill(preview, slug, version)) return false;
+  const failedAt = preview ? Date.parse(preview.image_fill_failed_at) : NaN;
+  return !(Date.now() - failedAt < PREVIEW_FILL_RETRY_MS);
+}
 async function previewCardHash(svg) {
   const bytes = new TextEncoder().encode(svg);
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].slice(0, 6).map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -12358,7 +12382,7 @@ function previewIsScreenshot(preview, slug, version) {
   return !!(preview && preview.image_source === 'screenshot' && previewCardMatches(preview, slug, version));
 }
 
-async function buildDocPreview(env, html, { slug, version, title, svg = null, onRenderTask = null, existingPreview = null, screenshot = null } = {}) {
+async function buildDocPreview(env, html, { slug, version, title, svg = null, onRenderTask = null, existingPreview = null, screenshot = null, refresh = false } = {}) {
   const preview = docPreviewFromHtml(html, { slug, version, title });
   // Precedence: screenshot > authored SVG > automatic card. A screenshot is
   // for one version only; a newer version without one gets a card again.
@@ -12436,7 +12460,7 @@ async function buildDocPreview(env, html, { slug, version, title, svg = null, on
       if (imageExists || oldStatus === 'pending' || oldStatus === 'failed') return;
       try {
         if (!env.PREVIEW_QUEUE) throw new Error('preview_queue_unavailable');
-        await env.PREVIEW_QUEUE.send({ v: 1, kind: 'preview', slug, version: Number(version), hash, custom: !!authored, automatic });
+        await env.PREVIEW_QUEUE.send({ v: 1, kind: 'preview', slug, version: Number(version), hash, custom: !!authored, automatic, ...(refresh ? { refresh: true } : {}) });
       } catch (error) {
         console.error('[preview-card] enqueue failed:', slug, version, error && error.message || String(error));
         try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
@@ -12449,6 +12473,7 @@ async function buildDocPreview(env, html, { slug, version, title, svg = null, on
     preview.image_hash = hash;
     preview.image_source_custom = !!authored;
     preview.image_custom = !!(authored && imageExists && oldStatus === 'ready:custom');
+    if (!authored) preview.image_template = PREVIEW_CARD_TEMPLATE;
   } catch (error) {
     console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
     preview.image = '/tdoc_logo-v2.png';
@@ -12468,6 +12493,7 @@ async function processPreviewCardJob(env, job, { attempts = 3 } = {}) {
       if (env.META && await env.META.get(statusKey) === 'pending') {
         await env.META.put(statusKey, job.custom ? 'ready:custom' : 'ready:auto');
       }
+      await promoteRefreshedCard(env, job);
       return;
     }
     const source = await env.DOCS.get(previewCardSourceKey(slug, version, hash));
@@ -12491,12 +12517,14 @@ async function processPreviewCardJob(env, job, { attempts = 3 } = {}) {
       || !await env.DOCS.head(previewCardSourceKey(slug, version, hash))) return;
     await env.DOCS.put(previewCardKey(slug, version, hash), bytes, { httpMetadata: { contentType: 'image/png' } });
     if (env.META) await env.META.put(statusKey, custom ? 'ready:custom' : 'ready:auto');
+    await promoteRefreshedCard(env, job);
   } catch (error) {
     console.error('[preview-card] generation failed:', slug, version, error && error.message || String(error));
     // The Queue allows two retries. Keep the card pending while another
     // attempt is due; only the final failure gets a negative cache entry.
     if (attempts >= 3) {
       try { if (env.META) await env.META.put(statusKey, 'failed', { expirationTtl: 3600 }); } catch {}
+      if (job.refresh) { try { await notePreviewFillFailed(env, slug, version); } catch {} }
     }
     throw error;
   }
@@ -12504,18 +12532,64 @@ async function processPreviewCardJob(env, job, { attempts = 3 } = {}) {
 
 const PREVIEW_FILL_PER_LOAD = 6;
 
+// A refreshed card replaces one that works, so the record keeps the old card
+// until the new PNG exists: the job swaps it in here. No window of a 503 or the
+// logo, and a failed render leaves the old card in place.
+async function promoteRefreshedCard(env, { refresh, slug, version, hash }) {
+  if (!refresh || !env.META) return;
+  const current = await loadDocMeta(env, slug);
+  if (!current || latestVersionNumber(current) !== version || !previewCardIsStale(current.preview, slug, version)) return;
+  const { image_fill_failed_at: _retried, ...previous } = current.preview;
+  await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: {
+    ...previous,
+    image: previewCardUrl(slug, version, hash), image_v: version, image_hash: hash,
+    image_source_custom: false, image_custom: false, image_template: PREVIEW_CARD_TEMPLATE,
+  } }));
+}
+
+async function notePreviewFillFailed(env, slug, version) {
+  const current = await loadDocMeta(env, slug);
+  if (!current || latestVersionNumber(current) !== version || !previewCardNeedsFill(current.preview, slug, version)) return;
+  const previous = current.preview && typeof current.preview === 'object' ? current.preview : {};
+  await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: { ...previous, image_fill_failed_at: new Date().toISOString() } }));
+}
+
+// One doc, for the hub's lazy fill and the admin backfill. existingPreview keeps
+// an authored card from an older version carried forward.
+async function fillPreviewCard(env, slug, meta, version) {
+  const stale = previewCardIsStale(meta.preview, slug, version);
+  let renderTask = null;
+  const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
+  const preview = obj && await buildDocPreview(env, await obj.text(), {
+    slug, version, title: meta.title || slug, existingPreview: meta.preview, refresh: stale,
+    onRenderTask: (task) => { renderTask = task; },
+  });
+  const built = !!preview && previewCardMatches(preview, slug, version);
+  if (built && stale && !await env.DOCS.head(previewCardKey(slug, version, preview.image_hash))) {
+    if (renderTask) await renderTask();
+    if (!env.META || await env.META.get(previewCardStatusKey(slug, version, preview.image_hash)) !== 'failed') return 'queued';
+    await notePreviewFillFailed(env, slug, version);
+    return 'failed';
+  }
+  if (!built) {
+    await notePreviewFillFailed(env, slug, version);
+    return 'failed';
+  }
+  const current = await loadDocMeta(env, slug);
+  if (!current || latestVersionNumber(current) !== version) return 'failed';
+  await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview }));
+  if (renderTask) await renderTask();
+  return 'updated';
+}
+
 async function fillMissingPreviewCards(env, slugs) {
   for (const slug of slugs) {
     try {
       const meta = await loadDocMeta(env, slug);
       if (!meta) continue;
       const version = latestVersionNumber(meta) || 1;
-      if (previewCardMatches(meta.preview, slug, version)) continue;
-      const next = await refreshDocPreview(env, slug, meta);
-      if (!previewCardMatches(next.preview, slug, version)) continue;
-      const current = await loadDocMeta(env, slug);
-      if (!current || latestVersionNumber(current) !== version) continue;
-      await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview: next.preview }));
+      if (!previewCardFillDue(meta.preview, slug, version)) continue;
+      await fillPreviewCard(env, slug, meta, version);
     } catch (error) {
       console.error('[preview-card] fill failed:', slug, error && error.message || String(error));
     }
@@ -16310,7 +16384,7 @@ async function accountRaftServers(env, accountId) {
 
 // doc first, account second. Returns what the handoff panel renders: one
 // preselected recipient, the other recent ones as switchable candidates.
-async function resolveNotifyTargets(env, slug, viewerAccountId = null) {
+async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs = null) {
   const meta = await loadDocMeta(env, slug);
   const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
   const ownerAccount = meta && meta.hosted && meta.hosted.account_id;
@@ -16347,7 +16421,7 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null) {
   // viewing their own document can still use that agent by default.
   const writer = docLastWriter(meta);
   const publisher = writer?.kind === 'agent' ? writer.agent : null;
-  const docHandoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+  const docHandoff = lastDeliveredHandoffAgent(handoffs || await loadHandoffs(env, slug));
   const evidenced = [publisher, docHandoff]
     .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
@@ -16513,11 +16587,11 @@ async function agentWriteRefusalResponse(env, meta, refusal) {
   }, { status: 403 });
 }
 
-async function notifyTargetsFor(env, slug, gate, localDriver = null) {
+async function notifyTargetsFor(env, slug, gate, localDriver = null, handoffs = null) {
   if (!(gate.meta && gate.meta.workspace_id)) {
     const hosted = (gate.meta && gate.meta.hosted) || {};
     const owner = await agentOwner(env, hosted.account_id, hosted.owner_key || hosted.github_login);
-    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug, localDriver), owner, 'personal');
+    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug, localDriver, handoffs), owner, 'personal');
     return resolved;
   }
   // The team's own agents, when the team agent wrote this doc; an admin's
@@ -16539,7 +16613,7 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
     if (!agents.length) {
       return { default: null, candidates: [], fallback: null, reason: none, writer: policy.writer ? policy.writer.kind : null, writer_name: await docWriterName(env, gate.meta, policy.writer) };
     }
-    const handoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+    const handoff = lastDeliveredHandoffAgent(handoffs || await loadHandoffs(env, slug));
     const preferred = agents.find((t) => t.last_writer) || agents.find((t) => sameNotifyTarget(t, handoff)) || null;
     return { default: preferred, candidates: agents.filter((t) => t !== preferred), fallback: null, reason: null };
   }
@@ -16548,7 +16622,7 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
   const owner = await agentOwner(env, localDriver, credentialKey(gate.session || gate.actor));
   const own = withTargetOwner(await resolveAccountNotifyTargets(env, localDriver), owner, 'team');
   const publisher = policy.writer?.kind === 'agent' && policy.writer.account_id === localDriver ? policy.writer.agent : null;
-  const handoff = lastDeliveredHandoffAgent(await loadHandoffs(env, slug));
+  const handoff = lastDeliveredHandoffAgent(handoffs || await loadHandoffs(env, slug));
   const offered = [...agents, ...(own.candidates || [])];
   const preferred = offered.find((t) => t.last_writer)
     || offered.find((t) => publisher && sameNotifyTarget(t, publisher))
@@ -16557,6 +16631,111 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null) {
       && policy.writer.account_id === localDriver && offered.length === 1 ? offered[0] : null);
   return { ...own, default: preferred ? { ...preferred, ...(publisher && sameNotifyTarget(preferred, publisher) ? { last_writer: true } : {}) } : null,
     candidates: offered.filter((t) => t !== preferred), reason: offered.length ? null : own.reason };
+}
+
+// When each of this viewer's agents was last used on this doc: what the @ list
+// orders by (used_here_at, byRelevance in shell/src/document/agent-choices.js).
+// Read from what the doc already records, nothing new is stored. A row's
+// routing does not read this: who gets an unaddressed Send stays `default`.
+//
+// Only use this viewer could already know about. Two people's local agents can
+// share a computer name and CLI, so a target alone does not say whose agent it
+// was: outside the owner's own doc, each record has to name the viewer's
+// account, or be a team agent's work the viewer can see.
+async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asks = [], handoffs, manages = false }) {
+  const uses = [];
+  const add = (at, what) => { if (at && typeof at === 'string') uses.push({ at, ...what }); };
+  const teamDoc = Boolean(meta.workspace_id);
+  const ownDoc = !teamDoc && manages;
+  // Replied, published, or was picked for this doc (touchDocAgent).
+  if (ownDoc) {
+    for (const t of Array.isArray(meta.notify_agents) ? meta.notify_agents : []) add(t && t.last_touched, { target: t });
+  }
+  for (const v of Array.isArray(meta.versions) ? meta.versions : []) {
+    if (v && v.team_agent && v.team_agent.id) add(v.created, { team_agent: v.team_agent.id });
+    else if (v && v.publisher_agent && (ownDoc || ids.includes(v.by))) add(v.created, { target: v.publisher_agent });
+  }
+  // Handed a comment. A handoff routed to a team agent is private to whoever
+  // sent it and the people who manage the doc (maySeeCommentHandoff).
+  for (const h of handoffs) {
+    if (!h || !h.recipient || !h.delivery?.status || h.delivery.status === 'failed') continue;
+    const at = h.delivery.at || h.at;
+    if (h.team_agent && h.team_agent.id) {
+      if (manages || ids.includes(h.sent_by)) add(at, { team_agent: h.team_agent.id });
+    } else if (ownDoc || ids.includes(h.by)) add(at, { target: h.recipient });
+  }
+  // Asked or @-mentioned by this viewer: the record is theirs alone, and the
+  // caller passes only the ones this door may see.
+  for (const a of asks) {
+    if (a.delivery?.status === 'failed' && !a.answer) continue;
+    add(a.answer?.at || a.at, a.runner ? { team_agent: a.runner } : { target: a.recipient });
+  }
+  // On a team doc a reply is the one record of a member's agent replying: its
+  // reply says whose it is (the owner's own doc has touchDocAgent for that).
+  if (teamDoc) {
+    const list = await readComments(env, slug);
+    ensureMigrated(list);
+    // The event log as it is: this needs who replied, not each thread folded.
+    for (const c of list) {
+      const events = Array.isArray(c && c.events) ? c.events : [];
+      if (events.some((e) => e.kind === 'deleted')) continue;
+      const gone = new Set(events.filter((e) => e.kind === 'reply_deleted').map((e) => e.reply_id));
+      for (const e of events) {
+        const who = e.kind === 'reply_added' && e.reply && !gone.has(e.reply.id) ? e.reply.author : null;
+        if (!who || who.kind !== 'agent') continue;
+        if (who.team_agent && who.team_agent.id) add(e.at, { team_agent: who.team_agent.id });
+        else if (who.owner && keys.includes(String(who.owner.key || '').toLowerCase())) add(e.at, { author: who });
+      }
+    }
+  }
+  return uses;
+}
+
+function isUseOfRow(use, t) {
+  if (use.team_agent) return Boolean(t.team_agent) && t.team_agent.id === use.team_agent;
+  if (t.team_agent) return false;
+  if (use.target) return sameNotifyTarget(t, use.target) || sameRaftAgent(t, use.target);
+  const who = use.author;
+  if (who.provider !== t.provider) return false;
+  if (who.provider === 'local') return who.cli === t.cli && who.location === t.device;
+  return String(who.handle || '').replace(/^@/, '').toLowerCase() === String(t.agent_name || '').toLowerCase()
+    && (who.provider !== 'raft' || who.location === t.server_slug);
+}
+
+function withUsedHere(t, uses) {
+  if (!t) return t;
+  const at = uses.reduce((best, use) => (use.at > best && isUseOfRow(use, t) ? use.at : best), '');
+  return at ? { ...t, used_here_at: at } : t;
+}
+
+// Who is asking, for agentUseOnDoc. Never fails the list it only orders.
+async function agentUseForViewer(env, slug, meta, session, use) {
+  try {
+    const keys = session ? [...actorKeys(session), String(credentialKey(session) || '').toLowerCase()] : [];
+    return await agentUseOnDoc(env, slug, meta, { ...use, keys, handoffs: use.handoffs || await loadHandoffs(env, slug) });
+  } catch (e) {
+    console.error('[agent-use] not ordered by use:', e && e.message);
+    return [];
+  }
+}
+
+// GET /api/notify/targets: a personal doc's gate is its owner, a team doc's is
+// any member. The viewer's own questions are my-agent's (composerAgents joins
+// them), which keeps this to the handoffs the targets already read.
+async function notifyTargetsWithUse(env, slug, gate, resolved, handoffs) {
+  const meta = gate.meta;
+  if (!meta || !(resolved.default || resolved.fallback || (resolved.candidates || []).length)) return resolved;
+  const viewer = gate.session || gate.actor;
+  const uses = await agentUseForViewer(env, slug, meta, viewer, {
+    ids: sessionAccountIds(viewer), handoffs,
+    manages: !meta.workspace_id || Boolean(gate.ownerToken) || isDocOwnerSession(env, viewer, meta),
+  });
+  return {
+    ...resolved,
+    default: withUsedHere(resolved.default, uses),
+    candidates: (resolved.candidates || []).map((t) => withUsedHere(t, uses)),
+    fallback: withUsedHere(resolved.fallback, uses),
+  };
 }
 
 // The account an agent acts for, as its rows and replies name it: the
@@ -19305,17 +19484,24 @@ async function handleMyAgent(env, req, url, slug) {
   if (req.method === 'GET') {
     // The widget's token sees only what it could have asked: questions in a
     // thread, to the holder's own agents (no private answers, no team's).
-    const asks = accountId ? (await loadAgentAsks(env, slug, asker))
-      .filter((a) => !viaFeedbackToken || (a.comment_id && !a.runner && !a.team_agent))
-      .slice(0, AGENT_ASK_LIST).map(agentAskView) : [];
+    const seenAsks = accountId ? (await loadAgentAsks(env, slug, asker))
+      .filter((a) => !viaFeedbackToken || (a.comment_id && !a.runner && !a.team_agent)) : [];
+    const asks = seenAsks.slice(0, AGENT_ASK_LIST).map(agentAskView);
     const guestTeam = !viaFeedbackToken && meta.workspace_id && !await isTeamMemberSession(env, session, meta.workspace_id)
       && isAllowlisted(accessFromMeta(meta), session, env, meta)
       ? await loadTeam(env, meta.workspace_id) : null;
+    const ownerHere = meta.workspace_id ? isDocOwnerSession(env, session, meta)
+      : Boolean(meta.hosted && meta.hosted.account_id && state.group.ids.includes(meta.hosted.account_id));
+    // Waiting on an answer the page polls this: it keeps the use it has
+    // (keepAgentUse), and takes a full read when the answer is in.
+    const uses = accountId && url.searchParams.get('poll') !== '1' && (state.own.length || team.targets.length)
+      ? await agentUseForViewer(env, slug, meta, session, { ids: state.group.ids, asks: seenAsks, manages: ownerHere }) : [];
     return json({
       tier: state.tier,
       agent: agentAskTargetView(state.reachable[0] || null),
-      agents: state.own.map(agentAskTargetView),
-      team_agents: team.targets.map(agentAskTargetView),
+      // last_touched is this viewer's own agent's, for the @ list's order.
+      agents: state.own.map((t) => ({ ...agentAskTargetView(withUsedHere(t, uses)), last_touched: t.last_touched })),
+      team_agents: team.targets.map((t) => agentAskTargetView(withUsedHere(t, uses))),
       disabled_team_agents: guestTeam ? teamAgents(guestTeam).map((agent) => ({
         provider: 'local', agent_sub: agent.id, agent_name: agent.name,
         team_agent: { id: agent.id, name: agent.name }, disabled: true,
@@ -22501,6 +22687,7 @@ const tdocHandlers = {
           identity: sessionPrincipal(session)
             ? { login: session.login || null, name: session.name || session.login || session.email, avatar_url: session.avatar_url || '', email: normalizeEmail(session.email) || '' }
             : null,
+          devMode: (await devModeBoot(env, session)).devMode,
           webAuth: githubDirectSignIn(env),
           authConfigured: !!String(env?.GITHUB_CLIENT_ID || '').trim(),
           oidcAuth: !!oidcConfig(env),
@@ -23099,6 +23286,7 @@ const tdocHandlers = {
           token: teamJoinMatch[1],
           team: { id: team.id, name: team.name, member_count: team.members.length },
           identity: appIdentity(s),
+          devMode: (await devModeBoot(env, s)).devMode,
         }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
     }
@@ -23149,6 +23337,7 @@ const tdocHandlers = {
             page: 'team-join',
             team: { id: team.id, name: team.name, member_count: team.members.length },
             identity: { ...appIdentity(s), label: who },
+            devMode: (await devModeBoot(env, s)).devMode,
             switch_href: switchHref,
           }),
         }), { headers: { 'Content-Security-Policy': cspHeader(nonce) } });
@@ -23642,6 +23831,7 @@ const tdocHandlers = {
               docUrl: `/d/${encodeURIComponent(slug)}/v/${Number(vStr)}?doc=1`,
               bookmarklet: feedbackBookmarklet(feedbackScriptSrc(url.origin)),
               identity: signedIn ? { login: actorKey(viewer), linked_actor_keys: actorKeys(viewer), avatar_url: viewer.avatar_url || '', name: actorDisplayName(viewer) } : null,
+              devMode: signedIn ? (await devModeBoot(env, viewer)).devMode : null,
               isOwner,
               joined,
               canJoin,
@@ -23894,6 +24084,7 @@ const tdocHandlers = {
     if (p === '/feedback' && method === 'GET') {
       const nonce = rand(16);
       const src = feedbackScriptSrc(url.origin);
+      const session = await getSession(env, req);
       return html(SHELL.appHtml({
         title: 'tdoc Feedback',
         nonceAttr: ` nonce="${nonce}"`,
@@ -23901,7 +24092,8 @@ const tdocHandlers = {
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
         bootJson: safeJsonForScript({
           page: 'feedback-install',
-          identity: appIdentity(await getSession(env, req)),
+          identity: appIdentity(session),
+          devMode: (await devModeBoot(env, session)).devMode,
           scriptSrc: src,
           bookmarklet: feedbackBookmarklet(src),
           host: url.host,
@@ -23927,7 +24119,7 @@ const tdocHandlers = {
         nonceAttr: ` nonce="${nonce}"`,
         runtimeJsPath: SHELL_RUNTIME_JS_PATH,
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
-        bootJson: safeJsonForScript({ page: 'feedback-share', identity: appIdentity(s), slug, host: new URL(feedbackSpaceSiteOrigin(meta, site)).host }),
+        bootJson: safeJsonForScript({ page: 'feedback-share', identity: appIdentity(s), devMode: (await devModeBoot(env, s)).devMode, slug, host: new URL(feedbackSpaceSiteOrigin(meta, site)).host }),
       }), { headers: { 'Content-Security-Policy': cspHeader(nonce), 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
     }
     // An invite to a space whose site has no tdoc widget (the bookmarklet's):
@@ -23951,6 +24143,7 @@ const tdocHandlers = {
       }
       const nonce = rand(16);
       const src = feedbackScriptSrc(url.origin);
+      const inviteSession = await getSession(env, req);
       return html(SHELL.appHtml({
         title: `Comment on ${new URL(rec.origin).host} · tdoc`,
         nonceAttr: ` nonce="${nonce}"`,
@@ -23958,7 +24151,8 @@ const tdocHandlers = {
         runtimeCssPath: SHELL_RUNTIME_CSS_PATH,
         bootJson: safeJsonForScript({
           page: 'feedback-invite',
-          identity: appIdentity(await getSession(env, req)),
+          identity: appIdentity(inviteSession),
+          devMode: (await devModeBoot(env, inviteSession)).devMode,
           id: rec.token,
           inviter: (rec.inviter && rec.inviter.name) || 'Someone',
           host: new URL(rec.origin).host,
@@ -24124,6 +24318,7 @@ const tdocHandlers = {
           space,
           baseHost: url.host,
           identity: appIdentity(s),
+          devMode: (await devModeBoot(env, s)).devMode,
           invite,
           doors: { oidc: !!oidc, oidcLabel: (oidc && oidc.label) || '', web: githubDirectSignIn(env) },
           ...(origin ? {} : { error: 'Open this window from the tdoc button inside your app.' }),
@@ -27388,8 +27583,10 @@ const tdocHandlers = {
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
       const localDriver = await localDriverAccount(env, gate);
-      const resolved = await notifyTargetsFor(env, slug, gate, localDriver);
-      return json(localDriver ? resolved : withoutLocalTargets(resolved));
+      const handoffs = await loadHandoffs(env, slug);
+      const resolved = await notifyTargetsFor(env, slug, gate, localDriver, handoffs);
+      const used = await notifyTargetsWithUse(env, slug, gate, resolved, handoffs);
+      return json(localDriver ? used : withoutLocalTargets(used));
     }
 
     if (p === '/api/notify/handoffs' && method === 'GET') {
@@ -28107,7 +28304,7 @@ const tdocHandlers = {
       const dryRun = body.apply !== true;
       const limit = Math.max(1, Math.min(10, Number(body.limit) || 5));
       const page = await env.META.list({ prefix: 'meta:', limit, ...(body.cursor ? { cursor: String(body.cursor) } : {}) });
-      let scanned = 0, eligible = 0, updated = 0, failed = 0;
+      let scanned = 0, eligible = 0, updated = 0, queued = 0, failed = 0;
       for (const item of page.keys || []) {
         const slug = String(item.name || '').slice(5);
         if (!isValidSlug(slug)) continue;
@@ -28115,24 +28312,20 @@ const tdocHandlers = {
         const meta = await loadDocMeta(env, slug);
         if (!meta) continue;
         const version = latestVersionNumber(meta) || 1;
-        if (previewCardMatches(meta.preview, slug, version)) continue;
+        if (!previewCardNeedsFill(meta.preview, slug, version)) continue;
         eligible++;
         if (dryRun) continue;
         try {
-          const obj = await env.DOCS.get(`docs/${slug}/v${version}/index.html`);
-          if (!obj) { failed++; continue; }
-          const preview = await buildDocPreview(env, await obj.text(), { slug, version, title: meta.title || slug });
-          if (!previewCardMatches(preview, slug, version)) { failed++; continue; }
-          const current = await loadDocMeta(env, slug);
-          if (!current || latestVersionNumber(current) !== version) { failed++; continue; }
-          await putDocMetaJson(env, slug, JSON.stringify({ ...current, preview }));
-          updated++;
+          const outcome = await fillPreviewCard(env, slug, meta, version);
+          if (outcome === 'updated') updated++;
+          else if (outcome === 'queued') queued++;
+          else failed++;
         } catch (error) {
           failed++;
           console.error('[preview-card] backfill failed:', slug, error && error.message || String(error));
         }
       }
-      return json({ ok: true, dry_run: dryRun, scanned, eligible, updated, failed, cursor: page.list_complete ? null : page.cursor });
+      return json({ ok: true, dry_run: dryRun, scanned, eligible, updated, queued, failed, cursor: page.list_complete ? null : page.cursor });
     }
 
     // A screenshot of a doc version's first screen becomes its preview card

@@ -70,7 +70,7 @@ import { openAppLink, sendToAppLink } from './document/send-to-app.js';
 import { parseDiagramScene } from './document/excalidraw-scene.mjs';
 import { DiagramDialog } from './document/diagram-dialog.jsx';
 import { CONNECT_AGENT_PROMPT, HandoffSendTransport, NotifyHandoffPanel, readableHandle, useNotifyTargets } from './document/notify-handoff.jsx';
-import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, orderedAgentChoices, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
+import { AGENT_TAG_JOINER, agentDisplayName, agentMentionName, byRelevance, composerDefault, orderedAgentChoices, orderedAskAiChoices, sameTarget, taggedAgentSpan, targetKey } from './document/agent-choices.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
 import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-panel.jsx';
@@ -948,7 +948,7 @@ export function DocumentShell({ boot, config }) {
     if (!value?.id) return;
     if (target && opts.askOnly) { await askOn(value.id, text, selection, target); return; }
     // To edit: the agent named after @, or (⌘⇧Enter) the default one.
-    const editor = target || (opts.sendToAgent && canSendToAgent ? opts.recipient || defaultEditor : null);
+    const editor = target || (opts.sendToAgent && canSendToAgent ? opts.recipient || composerPick : null);
     if (editor && canSendToAgent) await editOn(value.id, editor, selection?.text || null);
   };
 
@@ -1116,7 +1116,7 @@ export function DocumentShell({ boot, config }) {
     // @agent on a reply re-hands the thread root (or the new reply if no root).
     if (opts.sendToAgent && canSendToAgent) {
       const handoffId = opts.handoffCommentId || value?.id;
-      if (handoffId) editOn(handoffId, opts.recipient || defaultEditor);
+      if (handoffId) editOn(handoffId, opts.recipient || composerPick);
     }
     return true;
   };
@@ -1194,6 +1194,11 @@ export function DocumentShell({ boot, config }) {
     notifyTargets,
     mine: myAgent.state ? { ...myAgent.state, tdoc_ai: Boolean(myAgent.state.tdoc_ai) && askEnabled } : null,
   }) : []), [demoAgents, config.identity, canSendToAgent, notifyTargets.default, notifyTargets.candidates, notifyTargets.fallback, myAgent.state, askEnabled]);
+  // Who a composer means by default: the row the @ list shows on top. The
+  // Send to agent dialog keeps the server's default.
+  const composerPick = demoAgents
+    ? agentChoices.find((agent) => defaultEditor && sameTarget(agent, defaultEditor)) || null
+    : composerDefault(agentChoices, { evidence: defaultEditor });
   const askAiTargets = useMemo(() => {
     if (demoAgents) {
       return DEMO_AGENT_CHOICES.map((agent) => (agent.tdoc_ai
@@ -1493,7 +1498,7 @@ export function DocumentShell({ boot, config }) {
     choices: agentChoices,
     disabledChoices: teamGuestsEnabled && config.teamManage?.guest ? (myAgent.state?.disabled_team_agents || []) : [],
     guestAction,
-    preselected: agentChoices.find((agent) => defaultEditor && sameTarget(agent, defaultEditor)) || null,
+    preselected: composerPick,
     ai: { remaining: aiRemaining, thinking: aiThinking, offered: offersTdocAi },
     // An Only me question asked from a reply box, which shows its answer.
     privateReply: privateAskView && privateAskView.parentId ? privateAskView : null,
@@ -1501,14 +1506,8 @@ export function DocumentShell({ boot, config }) {
     onClosePrivate: () => setPrivateAsk(null),
     // Ask/Edit v2: what the hint says about the named agent.
     suggestsFor: suggestOn ? handsBackSuggestions : null,
-    // A reply box answering the viewer's own agent starts with its tag. Where
-    // suggestions are on, @agent means "suggest", so a row that would publish
-    // instead is not offered: a tag nobody typed should not skip that review.
-    // Elsewhere every agent takes the plain handoff, and the hint under the box
-    // says what it may do.
-    prefillFor: (target) => !suggestOn || !target.can_edit || handsBackSuggestions(target),
-    viewerKeys: handoffViewer,
-  }), [suggestOn, canSendToAgent, handoffViewer, agentChoices, defaultEditor, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
+    prefillReplies: suggestOn,
+  }), [suggestOn, canSendToAgent, agentChoices, composerPick, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);
     setNotifyAvoid(avoid);
@@ -1958,8 +1957,8 @@ export function DocumentShell({ boot, config }) {
       onPost={postAskAiAnswer}
       send={canSendToAgent ? {
         slug: config.slug,
-        choices: demoAgents ? [DEMO_AGENT] : orderedAgentChoices(notifyTargets),
-        preselected: demoAgents ? DEMO_AGENT : notifyTargets.default,
+        choices: demoAgents ? [DEMO_AGENT] : agentChoices.filter((t) => t.can_edit),
+        preselected: demoAgents ? DEMO_AGENT : composerPick,
         ready: handoffBuckets.ready,
         readyIds: handoffBuckets.ready.map((c) => c.id),
         // Edit with only an instruction: it becomes the viewer's
@@ -2099,8 +2098,8 @@ export function DocumentShell({ boot, config }) {
   const composerView = composer ? (
     <CommentComposer
       selection={composer}
-      initialText={composer.draftText || (composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices[0]
-        ? `@${AGENT_TAG_JOINER}${agentMentionName(agentChoices[0], agentChoices)} ` : '')}
+      initialText={composer.draftText || (composer.kind === 'document' && composer.intent === 'ask-ai' && agentChoices.length
+        ? `@${AGENT_TAG_JOINER}${agentMentionName(byRelevance(agentChoices)[0], agentChoices)} ` : '')}
       mentionable={mentionable}
       demo={!!config.demoComments}
       canSendToAgent={canSendToAgent}

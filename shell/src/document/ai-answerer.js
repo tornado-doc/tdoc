@@ -22,10 +22,10 @@ function reachable(t) {
   return Boolean(t) && (t.provider !== 'local' || t.status === 'active');
 }
 
-// The @ list: [{ ...target, can_edit }], first row the default. With an
-// agent that may edit, that list (server order: the last editor first) and
-// then the ones that may only answer; with none, own agents, the team's
-// agent; tdoc AI last, for everyone.
+// The @ list: [{ ...target, can_edit }], in the server's order; byRelevance
+// is how it shows and composerDefault what it means by default. With an agent
+// that may edit, that list and then the ones that may only answer; with none,
+// own agents, the team's agent; tdoc AI last, for everyone.
 export function composerAgents({ canSendToAgent = false, notifyTargets = null, mine = null } = {}) {
   const edit = canSendToAgent ? orderedAgentChoices(notifyTargets) : [];
   let out = edit.map((t) => ({ ...t, can_edit: true }));
@@ -34,7 +34,12 @@ export function composerAgents({ canSendToAgent = false, notifyTargets = null, m
     ...((mine && mine.agents) || []).filter(reachable),
     ...((mine && mine.team_agents) || []).filter(reachable),
   ];
-  for (const t of ask) if (!has(t)) out.push({ ...t, can_edit: false });
+  for (const t of ask) {
+    if (!has(t)) { out.push({ ...t, can_edit: false }); continue; }
+    // Asked here (only my-agent knows the viewer's questions): that is use too.
+    const row = out.find((x) => sameTarget(x, t));
+    if (t.used_here_at && t.used_here_at > (row.used_here_at || '')) row.used_here_at = t.used_here_at;
+  }
   // One row per agent: a team agent's claude and codex on one computer are
   // one agent; a row that may edit wins over one that may only answer.
   out = oneRowPerAgent(out, out.filter((t) => t.can_edit));
@@ -43,7 +48,8 @@ export function composerAgents({ canSendToAgent = false, notifyTargets = null, m
   return out;
 }
 
-// A bare "@AI" typed by hand means the list's first row. Only whole words:
+// A bare "@AI" typed by hand means the composer's default (composerDefault),
+// the top row that may edit. Only whole words:
 // "@AIDA" is somebody's handle.
 const AI_TAG = new RegExp(`(^|[^A-Za-z0-9_@/-])@${AGENT_TAG_JOINER}?ai(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])`, 'i');
 const AI_TAG_ALL = new RegExp(AI_TAG.source, 'gi');

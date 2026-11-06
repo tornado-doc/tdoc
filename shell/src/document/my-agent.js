@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMyAgent, sendToMyAgent } from './api.js';
-import { agentDisplayName } from './agent-choices.js';
+import { agentDisplayName, keepAgentUse } from './agent-choices.js';
 import { readStored, removeStored, writeStored } from '../safe-storage.js';
 
 export const MY_AGENT_LABELS = {
@@ -82,11 +82,11 @@ const POLL_MS = 5000;
 export function useMyAgent(slug, enabled) {
   const [state, setState] = useState(null);
   const live = useRef(true);
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (poll) => {
     if (!enabled) return null;
     try {
-      const body = await getMyAgent(slug);
-      if (live.current && body) setState(body);
+      const body = await getMyAgent(slug, { poll: poll === true });
+      if (live.current && body) setState((prev) => (poll === true ? keepAgentUse(prev, body) : body));
       return body;
     } catch {
       return null;
@@ -110,7 +110,11 @@ export function useMyAgent(slug, enabled) {
   const waiting = Boolean(state?.asks?.some(askWaiting));
   useEffect(() => {
     if (!enabled || !waiting) return undefined;
-    const timer = setInterval(refresh, POLL_MS);
+    // The answer in: one full read, it is use on this doc.
+    const timer = setInterval(async () => {
+      const body = await refresh(true);
+      if (body && !body.asks?.some(askWaiting)) refresh();
+    }, POLL_MS);
     return () => clearInterval(timer);
   }, [enabled, waiting, refresh]);
 
