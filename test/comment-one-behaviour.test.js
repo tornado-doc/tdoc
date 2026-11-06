@@ -22,7 +22,9 @@ t('the reply prefill is the card\'s rule: no surface can pass or forget it', () 
   // Only where the server refuses versions: never the doc page.
   assert.doesNotMatch(read('shell/src/document-shell.jsx'), /nothingToPublish/, 'the doc page says there is nothing to publish');
   for (const file of ['shell/src/feedback-space.jsx', 'feedback/src/main.jsx']) assert.match(read(file), /nothingToPublish: true/, `${file} lost it`);
-  assert.match(read('worker/worker.js'), /feedbackSpaceVersionRefusal\(writeGate\.meta\)/, 'the server no longer refuses versions to a space');
+  const refusals = read('worker/worker.js').match(/feedbackSpaceVersionRefusal\(writeGate\.meta\)/g) || [];
+  assert.ok(refusals.length >= 3, `the server refuses versions to a space on only ${refusals.length} of upload, propose_edits and the card`);
+  assert.match(read('worker/worker.js'), /!\(docMeta && docMeta\.created_from === 'feedback'\)/, 'a space offers suggestions again');
 });
 t('every surface takes its list from useCommentArea, so a card being typed in stays put', () => {
   for (const file of SURFACES) {

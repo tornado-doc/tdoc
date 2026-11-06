@@ -206,6 +206,12 @@ async function startServer(worker, env) {
       await box.waitFor();
       return { card, box };
     };
+    // The agent list has arrived and put no tag in: the @agent button shows only
+    // with agents to offer and none named yet. Not a pause that a slow list passes.
+    const untagged = async (card, box, label) => {
+      await card.locator('.tdoc-reply-agent').waitFor({ timeout: 10000 });
+      assert.equal(await box.inputValue(), '', label);
+    };
     const noSideways = async (page) => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'the page scrolls sideways');
 
     // ── 1. Reply prefill ────────────────────────────────────────────────
@@ -356,8 +362,7 @@ async function startServer(worker, env) {
       await card.getByRole('button', { name: 'Reply', exact: true }).first().click();
       const box = card.locator('.tdoc-reply-form textarea').first();
       await box.waitFor();
-      await page.waitForTimeout(1200);
-      assert.equal(await box.inputValue(), '');
+      await untagged(card, box, 'the cross-site widget started with a tag');
       // Not for want of the agent: it is there to name by hand.
       await box.fill('@');
       await root.locator('.tdoc-mention-menu .tdoc-mention-agent', { hasText: 'fixer-agent' }).first().waitFor({ timeout: 8000 });
@@ -373,9 +378,8 @@ async function startServer(worker, env) {
           const page = await tracked(ctx);
           await surfaces[name].open(page);
           await surfaces[name].tab(page, 'Replied');
-          const { box } = await openBox(surfaces[name], page, thread.id);
-          await page.waitForTimeout(1200);
-          assert.equal(await box.inputValue(), '', `${name} started with a tag`);
+          const { card, box } = await openBox(surfaces[name], page, thread.id);
+          await untagged(card, box, `${name} started with a tag`);
           await ctx.close();
         }
         const id = await docThread();
@@ -383,9 +387,8 @@ async function startServer(worker, env) {
         const ctx = await contextFor(julie);
         const page = await tracked(ctx);
         await surfaces.doc.open(page);
-        const { box } = await openBox(surfaces.doc, page, id);
-        await page.waitForTimeout(1200);
-        assert.equal(await box.inputValue(), '', 'doc page started with a tag');
+        const docBox = await openBox(surfaces.doc, page, id);
+        await untagged(docBox.card, docBox.box, 'doc page started with a tag');
         await ctx.close();
         const ownerId = await ownerThread();
         const spaceCtx = await contextFor(julie);
@@ -393,8 +396,12 @@ async function startServer(worker, env) {
         await surfaces.space.open(spacePage);
         await surfaces.space.tab(spacePage, 'Replied');
         const owner = await openBox(surfaces.space, spacePage, ownerId);
-        await spacePage.waitForTimeout(1200);
-        assert.equal(await owner.box.inputValue(), '', 'the owner on a space started with a tag');
+        await untagged(owner.card, owner.box, 'the owner on a space started with a tag');
+        // Named by hand, the line says what is true everywhere now: no doc to change.
+        await owner.box.click();
+        await spacePage.keyboard.type('@');
+        await spacePage.locator('#tdoc-mention-menu [role=option]', { hasText: /Claude Code/ }).first().click();
+        assert.match(await owner.card.locator('.tdoc-reply-form').innerText(), /fixes the app/);
         await spaceCtx.close();
       } finally { env.TDOC_DEBUG_ACCOUNTS = DEV; }
     });

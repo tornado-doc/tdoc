@@ -2,13 +2,16 @@
 // A version published to one would replace the page behind "Open as a document"
 // and the list's title, with nobody asked. For everyone, not only dev mode.
 //   - refused: /api/upload with any token (an account's, the provider's), every
-//     MCP tool that publishes (update_doc, edit_doc, commit_upload), propose_edits.
-//     What people see does not change.
+//     MCP tool that publishes (update_doc, edit_doc, create_upload, commit_upload),
+//     propose_edits, a token's rename or preview card, and tdoc AI's suggestions
+//     and accepting them. What people see does not change.
 //   - not touched: creating a space, comments, replies, an agent's reply,
-//     handing a comment to an agent, a person's save in the browser editor, a
+//     handing a comment to an agent, a person's save or rename in the browser, a
 //     duplicate (a doc of its own), publishing to any other doc.
 // Run with: node test/feedback-space-no-versions.test.js
 const assert = require('assert/strict');
+const fs = require('fs');
+const path = require('path');
 const { loadWorker, makeEnv, issue, req } = require('./helpers/worker-harness');
 
 const HTML = (t) => `<!doctype html><html><head><title>${t}</title></head><body><h1>${t}</h1><p>Words.</p></body></html>`;
@@ -20,7 +23,7 @@ const ERROR = 'feedback_space_no_versions';
   console.log('Feedback space: replies, not versions');
   const mod = await loadWorker();
   const worker = mod.default;
-  const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev', TDOC_REMOTE_MCP: '1', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test', TDOC_DATA_MIRROR_KEY: 'test-secret' });
+  const env = makeEnv(mod.CommentsStore, { PUBLIC_HOST: 'tdoc.dev', TDOC_REMOTE_MCP: '1', ASK_API_KEY: 'k', ASK_API_BASE: 'https://model.invalid/v1', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test', TDOC_DATA_MIRROR_KEY: 'test-secret' });
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
   const call = async (p, o = {}) => {
@@ -85,8 +88,8 @@ const ERROR = 'feedback_space_no_versions';
   await t('someone with no write access still hears what they heard before', async () => {
     const other = await issue(worker, env, 'other');
     const r = await call('/api/upload', { method: 'POST', token: other.token, body: { slug: space.slug, version: 2, html: HTML('Replaced') } });
-    assert.notEqual(r.body.error, ERROR, r.text);
-    assert.ok(r.status === 403 || r.status === 409, r.text);
+    assert.equal(r.status, 403, r.text);
+    assert.equal(r.body.error, 'not_doc_owner', r.text);
   });
 
   await t('MCP update_doc and edit_doc refuse, and say what to do instead', async () => {
@@ -100,23 +103,79 @@ const ERROR = 'feedback_space_no_versions';
       assert.match(text, new RegExp(ERROR), `${name}: ${text}`);
       assert.match(text, /takes replies, not versions/, `${name}: ${text}`);
       assert.match(text, /reply_to_comment/, `${name}: ${text}`);
+      assert.match(text, /status applied/, `${name}: ${text}`);
     }
     await unchanged(was);
   });
 
-  await t('MCP commit_upload to a space refuses', async () => {
+  await t('MCP create_upload to a space refuses before anything is sent', async () => {
     const was = await before();
-    const made = await mcp('create_upload', { slug: space.slug, files: [{ name: 'index.html', size: HTML('Replaced').length, type: 'text/html' }] });
-    assert.notEqual(made.result.isError, true, made.text);
-    const url = /https:\/\/tdoc\.dev\/[^\s"\\]+/.exec(made.text);
-    assert.ok(url, made.text);
-    const put = await worker.fetch(new Request(url[0], { method: 'PUT', body: HTML('Replaced'), headers: { 'content-length': String(HTML('Replaced').length) } }), env, { waitUntil() {} });
-    assert.ok(put.ok, `PUT ${put.status}`);
-    const uploadId = made.result.structuredContent.upload_id;
-    const { result, text } = await mcp('commit_upload', { upload_id: uploadId });
+    const { result, text } = await mcp('create_upload', { slug: space.slug, files: [{ name: 'index.html', size: 10, type: 'text/html' }] });
     assert.equal(result.isError, true, text);
     assert.match(text, new RegExp(ERROR), text);
     await unchanged(was);
+  });
+
+  await t('MCP commit_upload refuses at the end too', async () => {
+    // An upload started on a doc that is a space by the time it commits.
+    await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: 'late-space', version: 1, html: HTML('One'), meta: { title: 'One' } } });
+    const body = HTML('Replaced');
+    const made = await mcp('create_upload', { slug: 'late-space', files: [{ name: 'index.html', size: body.length, type: 'text/html' }] });
+    assert.notEqual(made.result.isError, true, made.text);
+    const url = /https:\/\/tdoc\.dev\/[^\s"\\]+/.exec(made.text);
+    assert.ok(url, made.text);
+    const put = await worker.fetch(new Request(url[0], { method: 'PUT', body, headers: { 'content-length': String(body.length) } }), env, { waitUntil() {} });
+    assert.ok(put.ok, `PUT ${put.status}`);
+    const meta = JSON.parse(await env.META.get('meta:late-space'));
+    await env.META.put('meta:late-space', JSON.stringify({ ...meta, created_from: 'feedback', feedback: { origin: 'https://late.example.com' } }));
+    const { result, text } = await mcp('commit_upload', { upload_id: made.result.structuredContent.upload_id });
+    assert.equal(result.isError, true, text);
+    assert.match(text, new RegExp(ERROR), text);
+    assert.equal(JSON.parse(await env.META.get('meta:late-space')).versions.length, 1);
+  });
+
+  await t('a token cannot rename a space or change its card; a person can rename it', async () => {
+    const was = await before();
+    const byToken = await call('/api/doc/title', { method: 'PATCH', token: julie.token, body: { slug: space.slug, title: 'Replaced' } });
+    assert.equal(byToken.status, 409, byToken.text);
+    assert.equal(byToken.body.error, ERROR);
+    const card = await call(`/api/docs/${space.slug}/preview`, { method: 'POST', token: julie.token, body: { preview_png: 'x' } });
+    assert.equal(card.status, 409, card.text);
+    assert.equal(card.body.error, ERROR);
+    await unchanged(was);
+    const byPerson = await call('/api/doc/title', { method: 'PATCH', cookie: julie.cookie, headers: O, body: { slug: space.slug, title: 'Renamed by a person' } });
+    assert.equal(byPerson.status, 200, byPerson.text);
+    assert.equal(JSON.parse(await env.META.get(`meta:${space.slug}`)).title, 'Renamed by a person');
+    await call('/api/doc/title', { method: 'PATCH', cookie: julie.cookie, headers: O, body: { slug: space.slug, title: JSON.parse(was.meta).title } });
+  });
+
+  await t('dev mode finds no suggestion path on a space: no canSuggest, no reply_as, no tdoc AI edit, no accept', async () => {
+    env.TDOC_PREVIEW = '1';
+    try {
+      const page = await call(`/d/${space.slug}/v/1?doc=1`, { cookie: julie.cookie });
+      assert.equal(page.status, 200);
+      assert.doesNotMatch(page.text, /canSuggest\W+true/, 'the document page of a space offers suggestions');
+      const c = await call('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: 'For reply_as', anchor } });
+      await call('/api/notify/local/register', { method: 'POST', token: julie.token, body: { device: 'mac', clis: ['claude'] } });
+      const handed = await call('/api/notify/handoff', { method: 'POST', cookie: julie.cookie, headers: O, body: { slug: space.slug, comment_ids: [c.body.id], reply_as: 'suggestions', recipient: { provider: 'local', server_id: 'mac', agent_sub: 'mac_claude' } } });
+      assert.equal(handed.status, 200, handed.text);
+      assert.equal(JSON.parse(await env.META.get(`handoffs:${space.slug}`)).some((h) => h.reply_as), false, 'a handoff asks for suggestions on a space');
+      const ai = await call(`/api/docs/${space.slug}/suggest`, { method: 'POST', cookie: julie.cookie, headers: O, body: { instruction: 'x' } });
+      assert.equal(ai.status, 409, ai.text);
+      assert.equal(ai.body.error, ERROR);
+      const accept = await call(`/api/docs/${space.slug}/suggestions/s_x/accept`, { method: 'POST', cookie: julie.cookie, headers: O, body: {} });
+      assert.equal(accept.status, 409, accept.text);
+      assert.equal(accept.body.error, ERROR);
+      // A plain doc in the same mode still can.
+      await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: 'still-suggests', version: 1, html: HTML('One'), meta: { title: 'One' } } });
+      const plain = await call('/d/still-suggests', { cookie: julie.cookie });
+      assert.match(plain.text, /canSuggest\W+true/);
+    } finally { delete env.TDOC_PREVIEW; }
+  });
+
+  await t('an answer-only question on a space hears the answer lock, not "fix the site"', async () => {
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'worker/worker.js'), 'utf8'),
+      /answerLockRefusal\(env, auth\.actor, slug\) : null;\s*if \(answering\) return answering;\s*const spaceRefusal/);
   });
 
   await t('propose_edits refuses: there is no review on a space', async () => {
