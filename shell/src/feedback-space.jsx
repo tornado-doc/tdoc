@@ -13,6 +13,7 @@ import { composerAgents } from './document/ai-answerer.js';
 import { composerDefault } from './document/agent-choices.js';
 import { askOwnAgent, ownAgentPick, useMyAgent } from './document/my-agent.js';
 import { AgentMentionContext } from './document/mention-field.jsx';
+import { useCommentArea } from './document/comment-area.js';
 import { summarizeHandoffSurfaces, threadPhase } from './document/handoff-state.js';
 import {
   createComment, listComments, listMentionableUsers, listTeams, moveDocsToTeam, removeComment,
@@ -73,6 +74,14 @@ export function FeedbackSpace({ boot }) {
     preselected: canSendToAgent ? composerDefault(agentChoices, { orTop: true }) : null,
     privateAskSupported: false,
   }), [agentChoices, canSendToAgent]);
+
+  // Which threads this tab shows: the same area the doc page and the widget
+  // use, so a card being typed in stays put the same way everywhere.
+  const viewerKeys = useMemo(() => [(identity && identity.login) || 'anon', ...((identity && identity.linked_actor_keys) || [])], [identity]);
+  const area = useCommentArea({
+    comments: comments || [], slug, selectedId: openId, filter, filterMode: 'phase',
+    handoffViewer: viewerKeys, isOwner: Boolean(isOwner), autoMarkSelected: false,
+  });
 
   const refresh = useCallback(async () => {
     try {
@@ -138,7 +147,7 @@ export function FeedbackSpace({ boot }) {
   };
 
   const live = (comments || []).filter((c) => !c.deleted);
-  const shown = live.filter((c) => filter === 'all' || threadPhase(c) === filter);
+  const shown = area.shown;
   const groups = new Map();
   for (const c of shown) {
     const key = (c.anchor && c.anchor.url) || '';
@@ -227,7 +236,7 @@ export function FeedbackSpace({ boot }) {
                   key={c.id}
                   comment={c}
                   currentUser={(identity && identity.login) || 'anon'}
-                  handoffViewer={[(identity && identity.login) || 'anon', ...((identity && identity.linked_actor_keys) || [])]}
+                  handoffViewer={viewerKeys}
                   isOwner={Boolean(isOwner)}
                   mentionable={mentionable}
                   canSendToAgent={canSendToAgent}

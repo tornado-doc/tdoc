@@ -9,7 +9,7 @@
 //   flag pinned in the browser the same: the server leaves canSuggest out of
 //                              the boot, so pinning askEditV2 changes nothing.
 //   on the list, switch off    the same.
-//   on the list, switch on     the control: the unified input and Fix with AI
+//   on the list, switch on     the control: the unified input
 //                              are there (so the checks above can fail).
 // Run with: node test/ask-edit-v2-gate-ui.test.js
 
@@ -107,8 +107,8 @@ async function startServer(worker, env) {
     // A desktop shows a pin in the margin; its card opens on a click.
     if (!phone) await page.locator(`.tdoc-pin[data-id="${c1.body.id}"]`).first().click({ force: true });
     await page.getByText('Say the date first').first().waitFor({ timeout: 10000 });
-    const fix = await page.locator('.tdoc-fix-ai').count();
-    const fixAll = await page.locator('.tdoc-fix-all').count();
+    const fix = await page.getByText('Fix with AI').count();
+    const fixAll = await page.getByText(/Fix all \d+ with AI/).count();
     // Ask AI: the bar's button on a desktop, the drawer's tab on a phone.
     let panel;
     if (phone) {
@@ -161,13 +161,13 @@ async function startServer(worker, env) {
       unchanged(v, 'switched off');
       await v.ctx.close();
     });
-    await t('control: on the list with dev mode on, the unified input and Fix with AI are there', async () => {
+    await t('control: on the list with dev mode on, the unified input is there, and Fix with AI is gone for good', async () => {
       const on = await api('/api/me/dev-mode', { method: 'POST', cookie: julie.cookie, body: { on: true } });
       if (on.status !== 200) throw new Error(`dev mode on ${on.status}`);
       const v = await look(DESKTOP);
       await shot(v.page, 'gate-dev-1280.png');
       if (v.canSuggest !== true) throw new Error(`canSuggest ${v.canSuggest}`);
-      if (!v.fix) throw new Error('no Fix with AI for a dev-mode owner');
+      if (v.fix || v.fixAll) throw new Error(`Fix with AI is back for a dev-mode owner (${v.fix} / ${v.fixAll})`);
       if (v.input === 'Ask about this document') throw new Error('Ask input not unified');
       if (v.errors.length) throw new Error(v.errors.join(' | '));
       await v.ctx.close();

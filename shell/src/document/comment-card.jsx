@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ProviderMark } from './notify-handoff.jsx';
 import { COPY_FALLBACK } from '../onboarding-copy.js';
-import { Check, ChevronRight, MoreHorizontal, SmilePlus, Sparkles } from 'lucide-react';
+import { Check, ChevronRight, MoreHorizontal, SmilePlus } from 'lucide-react';
 import { SuggestContext } from './suggestions.js';
 import { Popover } from '@base-ui/react/popover';
 import { PreviewCard } from '@base-ui/react/preview-card';
@@ -19,6 +19,8 @@ import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
 import { productPageUrl } from './product-url.js';
 import { observeVisibleRead } from './visible-read.js';
+import { isFeatureOn } from '../feature-flags.js';
+import { clearReplyDraft, readReplyDraft, writeReplyDraft } from './reply-draft.js';
 
 const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };
 
@@ -185,6 +187,10 @@ function ReplyForm({
   commentId,
   handoffCommentId,
   thread = null,
+  account = 'anon',
+  // False for a box that reopened itself on a saved draft in a list: it should
+  // not take the caret (or raise a phone's keyboard) from whatever is going on.
+  takeFocus = true,
   onReply,
   replyingTo,
   mentionable,
@@ -193,7 +199,11 @@ function ReplyForm({
   // Owner with no agent connected: @agent stays visible and leads to setup.
   agentSetupHref = null,
 }) {
-  const [text, setText] = useState('');
+  // One draft per thread, kept outside this form (reply-draft.js): it survives
+  // the card leaving the screen, and moves with the form between replies.
+  const threadId = thread?.id || handoffCommentId || commentId;
+  const [saved] = useState(() => readReplyDraft(threadId, account));
+  const [text, setText] = useState(saved?.text || '');
   // One submit at a time, same as the comment composer: ⌘+Enter and the
   // button share the lock, so a second press while the first reply is still
   // in flight does not post a twin.
@@ -210,11 +220,16 @@ function ReplyForm({
   // (Ask/Edit v2). Once per draft, and only into a box nobody has touched: the
   // list can load late, and a tag someone deleted stays deleted. The tag alone
   // is not a reply: nothing was written yet.
-  const touched = useRef(false);
-  const prefilled = useRef('');
-  // Not a row whose edits would skip review (agents.suggestsFor): a tag nobody
-  // typed should not lead to a publish.
-  const candidate = v4 && agents.prefillReplies ? agentForThread(thread, ask.choices, commentId) : null;
+  const touched = useRef(Boolean(saved));
+  const prefilled = useRef(saved?.prefilled || '');
+  // Dev mode only, on every surface, read here so that no surface can forget
+  // it. Outside dev mode a box starts empty (owner decision: a tag on an editing
+  // agent there leads to a plain handoff, which can publish without review).
+  const [prefillOn] = useState(() => isFeatureOn('askEditV2'));
+  // Not a row whose edits would skip review: only agents.suggestsFor says an
+  // editing agent's edits come back as suggestions, and a surface with no
+  // suggestion path says nothing, so a tag nobody typed cannot lead to a publish.
+  const candidate = v4 && prefillOn ? agentForThread(thread, ask.choices, commentId) : null;
   const answering = candidate && (!candidate.can_edit || agents.suggestsFor?.(candidate)) ? candidate : null;
   const answeringKey = answering ? targetKey(answering) : '';
   useLayoutEffect(() => {
@@ -222,6 +237,17 @@ function ReplyForm({
     prefilled.current = ask.putAgent(answering);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answeringKey]);
+  // The text is the draft, unless it is only the tag the box started with.
+  useEffect(() => {
+    const words = text.trim() && text.trim() !== prefilled.current.trim() ? text : '';
+    writeReplyDraft(threadId, account, words ? { text: words, parentId: commentId, prefilled: prefilled.current } : null);
+  }, [text, commentId, threadId, account]);
+  // Reopened on a draft: the caret goes to the end of it.
+  useLayoutEffect(() => {
+    const box = field.current;
+    if (saved?.text && box && takeFocus) box.setSelectionRange(box.value.length, box.value.length);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // An "Only me" question asked from this reply box: its answer shows here.
   const privateAsk = agents.privateReply && agents.privateReply.parentId === commentId ? agents.privateReply : null;
   // Asked: the question has gone, so the box it came from starts empty.
@@ -232,6 +258,7 @@ function ReplyForm({
     if (prefilled.current && text.trim() === prefilled.current.trim()) return;
     if (sendToAgent && v4 && !target && !agents.preselected) { ask.putDefault(); return; }
     setBusy(true);
+    const sent = text;
     try {
       let opts;
       let body = text;
@@ -251,7 +278,11 @@ function ReplyForm({
         ...opts,
         handoffCommentId: handoffCommentId || commentId,
       });
-      if (ok !== false) setText('');
+      if (ok !== false) {
+        // Words typed while it was on their way stay, as a draft.
+        clearReplyDraft(threadId, account, sent);
+        setText((current) => (current === sent ? '' : current));
+      }
     } finally { setBusy(false); }
   };
 
@@ -271,7 +302,7 @@ function ReplyForm({
         // The box you asked for is the box you want to type in. Without this,
         // clicking Reply put a composer on screen and left the caret wherever
         // it was, so the first thing you do is click the thing you just opened.
-        autoFocus
+        autoFocus={takeFocus}
         fieldRef={field}
         placeholder={demo ? 'Reply… GitHub @ or @email'
           : v4 && (agents.choices || []).length ? 'Reply, or type @ to ask an agent' : 'Reply… (@ to notify someone)'}
@@ -515,6 +546,9 @@ function ReplyCard({
   agentSetupHref = null,
   replyTarget,
   onReplyTarget,
+  // The floating card holds the box at its foot, whichever reply it answers.
+  formHere = true,
+  takeFocus = true,
   editTarget,
   onEditTarget,
   onReply,
@@ -576,11 +610,13 @@ function ReplyCard({
         </span>
       </div>
 
-      {replyTarget === reply.id ? (
+      {replyTarget === reply.id && formHere ? (
         <ReplyForm
           commentId={reply.id}
           handoffCommentId={rootId}
           thread={rootComment}
+          account={currentUser}
+          takeFocus={takeFocus}
           onReply={onReply}
           replyingTo={author}
           mentionable={mentionable}
@@ -649,19 +685,26 @@ export function CommentCard({
   onResendHandoff = null,
   onSendHandoffElsewhere = null,
 }) {
-  const [repliesOpen, setRepliesOpen] = useState(expandReplies);
+  // A thread with a saved reply opens with its box and its words back in it.
+  const [savedDraft] = useState(() => (comment.deleted ? null : readReplyDraft(comment.id, currentUser)));
+  const savedParent = savedDraft && (comment.replies || []).some((r) => r.id === savedDraft.parentId && !r.deleted)
+    ? savedDraft.parentId : savedDraft && comment.id;
+  const [repliesOpen, setRepliesOpen] = useState(expandReplies || Boolean(savedDraft && savedParent !== comment.id));
   // A thread that asked AI opens its replies, so the answer is in view when
   // it lands.
   const { ai: asking } = useContext(AgentMentionContext);
-  // Ask/Edit v2: Fix with AI on an open comment (flag askEditV2).
+  // Ask/Edit v2 (flag askEditV2): the way from an open comment to the edit an
+  // agent suggested for it. Nothing to review, nothing here.
   const suggest = useContext(SuggestContext);
-  const canFix = Boolean(suggest?.enabled) && !comment.resolved && comment.status !== 'applied' && !comment.deleted;
-  const fixing = canFix && (suggest.busyIds || []).includes(comment.id);
-  const fixPending = canFix && suggest.pendingFor(comment.id);
+  const canReview = Boolean(suggest?.enabled) && !comment.resolved && comment.status !== 'applied' && !comment.deleted
+    && suggest.pendingFor(comment.id);
   const thinkingId = asking?.thinking?.id;
   const askingHere = Boolean(thinkingId) && (thinkingId === comment.id || (comment.replies || []).some((r) => r.id === thinkingId));
   useEffect(() => { if (askingHere) setRepliesOpen(true); }, [askingHere]);
-  const [replyTarget, setReplyTarget] = useState(null);
+  const [replyTarget, setReplyTargetNow] = useState(savedParent || null);
+  // Restored rather than asked for: see ReplyForm's takeFocus.
+  const reopenedBox = useRef(Boolean(savedDraft));
+  const setReplyTarget = (next) => { reopenedBox.current = false; setReplyTargetNow(next); };
   // One record at a time is being rewritten — this card's comment or any reply
   // under it — the same way one reply form is open at a time.
   const [editTarget, setEditTarget] = useState(null);
@@ -674,17 +717,40 @@ export function CommentCard({
     if (!unread || !onSeen || !cardRef.current) return undefined;
     return observeVisibleRead(cardRef.current, () => onSeenRef.current?.(commentRef.current));
   }, [comment.id, unread, Boolean(onSeen)]);
-  const [clampedTop, setClampedTop] = useState(null);
-
-  // Legacy positionCard(): keep the whole card on screen, measured after
-  // render so an expanded thread or an open reply form never runs off the
-  // bottom of the viewport.
+  // The floating card fits the screen and scrolls inside, with the reply box
+  // held at its foot. Measured rather than left to the stylesheet: it starts
+  // where its anchor is, and an on-screen keyboard shrinks only the visual
+  // viewport, which no vh unit follows.
+  const [fit, setFit] = useState(null);
+  const anchorTop = position?.top;
   useLayoutEffect(() => {
-    if (!floating || !position || !cardRef.current) return;
-    const limit = window.innerHeight - cardRef.current.offsetHeight - 8;
-    const next = Math.max(52, Math.min(position.top, limit));
-    setClampedTop(next === position.top ? null : next);
-  }, [floating, position, repliesOpen, replyTarget, editTarget, comment]);
+    if (!floating || anchorTop === undefined || !cardRef.current) return undefined;
+    const view = window.visualViewport;
+    const measure = () => {
+      const card = cardRef.current;
+      if (!card) return;
+      const height = view ? view.height : window.innerHeight;
+      const offset = view ? view.offsetTop : 0;
+      // Under the document bar, unless a keyboard has taken the room for it.
+      const floor = offset + (height < window.innerHeight - 100 ? 8 : 52);
+      const maxHeight = Math.max(160, offset + height - 8 - floor);
+      const top = Math.max(floor, Math.min(anchorTop, offset + height - 8 - Math.min(card.offsetHeight, maxHeight)));
+      setFit((cur) => (cur && cur.top === top && cur.maxHeight === maxHeight ? cur : { top, maxHeight }));
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(cardRef.current);
+    window.addEventListener('resize', measure);
+    view?.addEventListener('resize', measure);
+    view?.addEventListener('scroll', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+      view?.removeEventListener('resize', measure);
+      view?.removeEventListener('scroll', measure);
+    };
+  }, [floating, anchorTop]);
+  const floatingStyle = floating ? { ...position, top: fit?.top ?? anchorTop, maxHeight: fit?.maxHeight } : undefined;
 
   // A posted reply closes the composer it came from and opens the thread it
   // landed in. Before, the form stayed on screen under a collapsed "N replies"
@@ -712,6 +778,11 @@ export function CommentCard({
   const canMutate = mayMutate(comment, currentUser, isOwner, handoffViewer);
   const createdAt = formatCreated(comment.created);
   const replies = comment.replies || [];
+  // The reply being answered was deleted: the box and its words move to the thread.
+  const replyTo = replyTarget && replyTarget !== comment.id && !replies.some((r) => r.id === replyTarget && !r.deleted)
+    ? comment.id : replyTarget;
+  const replyFocus = !reopenedBox.current || floating || selected;
+  const footTarget = floating ? replies.find((r) => r.id === replyTo) : null;
   // Orphans — their parent reply was deleted — still show under the root
   // rather than vanishing with it.
   const known = new Set(replies.map((reply) => reply.id).concat([comment.id]));
@@ -757,8 +828,10 @@ export function CommentCard({
             demo={demo}
             canSendToAgent={canSendToAgent}
             agentSetupHref={agentSetupHref}
-            replyTarget={replyTarget}
+            replyTarget={replyTo}
             onReplyTarget={setReplyTarget}
+            formHere={!floating}
+            takeFocus={replyFocus}
             editTarget={editTarget}
             onEditTarget={setEditTarget}
             onReply={submitReply}
@@ -777,10 +850,10 @@ export function CommentCard({
         ref={cardRef}
         className={className}
         data-comment-id={comment.id}
-        style={floating ? { ...position, top: clampedTop ?? position.top } : undefined}
+        style={floatingStyle}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <Tombstone item={comment}>{threadBlock}</Tombstone>
+        <div className="tdoc-cc-body"><Tombstone item={comment}>{threadBlock}</Tombstone></div>
       </article>
     );
   }
@@ -790,7 +863,7 @@ export function CommentCard({
       ref={cardRef}
       className={className}
       data-comment-id={comment.id}
-      style={floating ? { ...position, top: clampedTop ?? position.top } : undefined}
+      style={floatingStyle}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         if (!onActivate) return;
@@ -804,6 +877,7 @@ export function CommentCard({
         onActivate(comment.id);
       }}
     >
+      <div className="tdoc-cc-body">
       {demo ? <span className="tdoc-demo-chip">Demo</span> : null}
       <div className="tdoc-status-row">
         {comment.status === 'applied' ? (
@@ -960,16 +1034,14 @@ export function CommentCard({
           {!reactionCount ? (
             <ReactionPicker onPick={(emoji) => onReact(comment.id, emoji)} />
           ) : null}
-          {canFix ? (
+          {canReview ? (
             <button
               type="button"
-              className="tdoc-reply-toggle tdoc-fix-ai"
-              aria-busy={fixing ? 'true' : undefined}
-              disabled={fixing}
-              title={fixPending ? 'Show the suggested edit in the doc' : 'tdoc AI suggests an edit for this comment; you accept or reject it'}
-              onClick={(event) => { event.stopPropagation(); if (fixPending) suggest.review(comment.id); else suggest.fix(comment); }}
+              className="tdoc-reply-toggle tdoc-review-suggestion"
+              title="Show the suggested edit in the doc"
+              onClick={(event) => { event.stopPropagation(); suggest.review(comment.id); }}
             >
-              <Sparkles size={13} aria-hidden="true" />{fixing ? 'Fixing…' : fixPending ? 'Review fix' : 'Fix with AI'}
+              Review suggestion
             </button>
           ) : null}
         </span>
@@ -977,12 +1049,17 @@ export function CommentCard({
 
       {threadBlock}
       <AiAnswering ids={known} />
+      </div>
 
-      {replyTarget === comment.id ? (
+      {replyTo === comment.id || footTarget ? (
         <ReplyForm
-          commentId={comment.id}
+          key={replyTo}
+          commentId={replyTo}
           handoffCommentId={comment.id}
           thread={comment}
+          account={currentUser}
+          takeFocus={replyFocus}
+          replyingTo={footTarget ? replyName(footTarget.author) : undefined}
           onReply={submitReply}
           mentionable={mentionable}
           demo={demo}
