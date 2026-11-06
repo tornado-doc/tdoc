@@ -16382,6 +16382,47 @@ async function accountRaftServers(env, accountId) {
   return [...byId.values()].filter((sv) => !removed.has(`raft-server:${sv.server_id}`));
 }
 
+// A doc's records outlive its workspace: a member's agent that worked on a team
+// doc stays in notify_agents, on its versions and in the handoff log after the
+// doc moves out. Nothing clears them at the move (no door has to remember to,
+// older docs need no migration, and a version keeps saying who wrote it); what
+// a personal doc may send to is decided here, when it sends. An agent is the
+// owner's when it is linked to their account or on a Raft server they connected
+// (the server is the boundary, see accountRaftServers).
+function isAccountAgent(t, linked, servers) {
+  return linked.some((x) => sameNotifyTarget(x, t))
+    || (t.provider === 'raft' && servers.some((sv) => sv.server_id === t.server_id));
+}
+
+// Somebody else's agent, known here only from the doc's records: what a picker
+// opened before a move, or a Resend of an older handoff, could still name. An
+// agent the owner names that no record mentions is theirs to name, as ever.
+async function agentLeftPersonalDoc(env, meta, handoffs, t) {
+  const owner = meta && meta.hosted && meta.hosted.account_id;
+  if (!owner || !t) return false;
+  const ownerIds = (await accountGroup(env, owner)).ids;
+  const others = (by) => by && !ownerIds.includes(by);
+  const recorded = (Array.isArray(meta.notify_agents) ? meta.notify_agents : []).some((x) => sameNotifyTarget(normalizeNotifyTarget(x), t))
+    || (Array.isArray(meta.versions) ? meta.versions : []).some((v) => v && others(v.by) && sameNotifyTarget(v.publisher_agent, t))
+    || handoffs.some((h) => h && others(h.by) && sameNotifyTarget(h.recipient, t));
+  return recorded && !isAccountAgent(t, await accountNotifyTargets(env, owner), await accountRaftServers(env, owner));
+}
+const AGENT_LEFT_DOC = { error: 'agent_left_doc', message: 'That agent belongs to someone who no longer has this doc. Choose another agent.' };
+
+// A queued local handoff, when its daemon asks: is the account running it still
+// on the doc? The doc's team, or its owner.
+async function accountStillOnDoc(env, meta, accountIds) {
+  if (!meta) return true;
+  if (meta.workspace_id) {
+    const team = await loadTeam(env, meta.workspace_id);
+    return !!team && accountIds.some((id) => teamMember(team, id) || teamAgent(team, id));
+  }
+  const owner = meta.hosted && meta.hosted.account_id;
+  if (!owner) return true;
+  const ownerIds = (await accountGroup(env, owner)).ids;
+  return accountIds.some((id) => ownerIds.includes(id));
+}
+
 // doc first, account second. Returns what the handoff panel renders: one
 // preselected recipient, the other recent ones as switchable candidates.
 async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs = null) {
@@ -16389,13 +16430,16 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
   const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
   const ownerAccount = meta && meta.hosted && meta.hosted.account_id;
   const removed = await accountRemovedTargets(env, ownerAccount);
+  const linked = await accountNotifyTargets(env, ownerAccount);
+  const servers = await accountRaftServers(env, ownerAccount);
   const docTargets = (Array.isArray(meta && meta.notify_agents) ? meta.notify_agents : [])
     .map(normalizeNotifyTarget)
     .filter((t) => t && !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)))
+    // No account to compare with: a doc from before accounts, or a self-host.
+    .filter((t) => !ownerAccount || isAccountAgent(t, linked, servers))
     .sort(byRecency);
-  const fallbackList = (await accountNotifyTargets(env, ownerAccount))
+  const fallbackList = linked
     .filter((t) => !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)));
-  const servers = await accountRaftServers(env, ownerAccount);
   // Then every other agent on the account's connected servers, from Raft's
   // directory, so the dropdown is the whole server and not only the agents
   // that happened to work with tdoc already.
@@ -16420,8 +16464,12 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
   // between multiple agents. With exactly one available agent, the author
   // viewing their own document can still use that agent by default.
   const writer = docLastWriter(meta);
-  const publisher = writer?.kind === 'agent' ? writer.agent : null;
-  const docHandoff = lastDeliveredHandoffAgent(handoffs || await loadHandoffs(env, slug));
+  // What somebody else did here, while it was a team's, recommends nothing to
+  // the owner, even for an agent on a server they share.
+  const ownerIds = ownerAccount ? (await accountGroup(env, ownerAccount)).ids : null;
+  const ownerWork = (by) => !by || !ownerIds || ownerIds.includes(by);
+  const publisher = writer?.kind === 'agent' && ownerWork(writer.account_id) ? writer.agent : null;
+  const docHandoff = lastDeliveredHandoffAgent((handoffs || await loadHandoffs(env, slug)).filter((h) => h && ownerWork(h.by)));
   const evidenced = [publisher, docHandoff]
     .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
@@ -16647,13 +16695,17 @@ async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asks = [], hando
   const add = (at, what) => { if (at && typeof at === 'string') uses.push({ at, ...what }); };
   const teamDoc = Boolean(meta.workspace_id);
   const ownDoc = !teamDoc && manages;
+  // A record of somebody else's, from when this doc was a team's, is not a use
+  // of the owner's agent, even one on a computer of the same name.
+  const ownerAccount = meta.hosted && meta.hosted.account_id;
+  const ownerWork = (by) => ownDoc && (!by || by === ownerAccount);
   // Replied, published, or was picked for this doc (touchDocAgent).
   if (ownDoc) {
     for (const t of Array.isArray(meta.notify_agents) ? meta.notify_agents : []) add(t && t.last_touched, { target: t });
   }
   for (const v of Array.isArray(meta.versions) ? meta.versions : []) {
     if (v && v.team_agent && v.team_agent.id) add(v.created, { team_agent: v.team_agent.id });
-    else if (v && v.publisher_agent && (ownDoc || ids.includes(v.by))) add(v.created, { target: v.publisher_agent });
+    else if (v && v.publisher_agent && (ownerWork(v.by) || ids.includes(v.by))) add(v.created, { target: v.publisher_agent });
   }
   // Handed a comment. A handoff routed to a team agent is private to whoever
   // sent it and the people who manage the doc (maySeeCommentHandoff).
@@ -16662,7 +16714,7 @@ async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asks = [], hando
     const at = h.delivery.at || h.at;
     if (h.team_agent && h.team_agent.id) {
       if (manages || ids.includes(h.sent_by)) add(at, { team_agent: h.team_agent.id });
-    } else if (ownDoc || ids.includes(h.by)) add(at, { target: h.recipient });
+    } else if (ownerWork(h.by) || ids.includes(h.by)) add(at, { target: h.recipient });
   }
   // Asked or @-mentioned by this viewer: the record is theirs alone, and the
   // caller passes only the ones this door may see.
@@ -27702,6 +27754,9 @@ const tdocHandlers = {
           || offered.find(t => sameNotifyTarget(t, asked))
         : null;
       const target = asked && (!fromPage || known) ? (known || asked) : resolved.default;
+      if (!teamDoc && target === asked && await agentLeftPersonalDoc(env, gate.meta, await loadHandoffs(env, slug), asked)) {
+        return json(AGENT_LEFT_DOC, { status: 409 });
+      }
       const viaTeamAgent = caller && target && target.team_agent ? teamAgentOfTarget(caller.team, offered.filter((t) => t.team_agent), target) : null;
       // No recipient is a 200 with a failed delivery, not a 4xx: the handoff
       // is a real record either way, and the panel renders "not delivered"
@@ -27758,11 +27813,15 @@ const tdocHandlers = {
       if (!slug || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
       const gate = await authorizeDocEdit(req, env, slug);
       if (!gate.ok) return gate.response;
-      const prev = (await loadHandoffs(env, slug)).find(h => h && h.handoff_id === handoff_id);
+      const allHandoffs = await loadHandoffs(env, slug);
+      const prev = allHandoffs.find(h => h && h.handoff_id === handoff_id);
       if (!prev) return json({ error: 'handoff_not_found' }, { status: 404 });
       if (gate.meta?.workspace_id && gate.actor?.kind === 'team_member' && !isDocOwnerSession(env, gate.session, gate.meta)) {
         const own = await handoffThreadIdsFor(env, slug, gate.session);
         if ((prev.comment_ids || []).some((id) => !own.has(id))) return json({ error: 'comment_not_owned' }, { status: 403 });
+      }
+      if (!gate.meta?.workspace_id && await agentLeftPersonalDoc(env, gate.meta, allHandoffs, normalizeNotifyTarget(prev.recipient))) {
+        return json(AGENT_LEFT_DOC, { status: 409 });
       }
       // A resend reuses the original externalEventId, so a provider that did
       // receive the first attempt drops the duplicate instead of waking the
@@ -27967,10 +28026,18 @@ const tdocHandlers = {
             if (!metas.has(e.slug)) metas.set(e.slug, await loadDocMeta(env, e.slug));
             if (!metas.get(e.slug) || !tokenScopeAllows(auth.actor, metas.get(e.slug))) { keep.push(e); continue; }
           }
+          // The doc moved away from this account after this was queued: it no
+          // longer gets the doc's title or the instruction, and the owner's
+          // card says it was not delivered.
+          if (!cache.has(`record:${e.slug}`)) cache.set(`record:${e.slug}`, await loadDocRecord(env, e.slug));
+          if (!await accountStillOnDoc(env, cache.get(`record:${e.slug}`), accountIds)) {
+            await putHandoff(env, e.slug, { ...h, delivery: { status: 'failed', error: 'access_lost', at: new Date().toISOString() } });
+            continue;
+          }
           keep.push(e);
           // Kept but not run while its doc is in Trash: a restore brings the
           // handoff back with the doc.
-          if (!cache.has(`trash:${e.slug}`)) cache.set(`trash:${e.slug}`, isTrashedMeta(await loadDocRecord(env, e.slug)));
+          if (!cache.has(`trash:${e.slug}`)) cache.set(`trash:${e.slug}`, isTrashedMeta(cache.get(`record:${e.slug}`)));
           if (cache.get(`trash:${e.slug}`)) continue;
           if (device && e.device !== device) continue;
           pending.push({
