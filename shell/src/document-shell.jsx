@@ -1482,6 +1482,9 @@ export function DocumentShell({ boot, config }) {
     onClosePrivate: () => setPrivateAsk(null),
     // Ask/Edit v2: what the hint says about the named agent.
     suggestsFor: suggestOn ? handsBackSuggestions : null,
+    // "Open as a document" on a feedback space: only the wording. Its reply
+    // boxes still start empty for an editing agent.
+    fixesTheApp: Boolean(config.feedbackSpace),
   }), [suggestOn, canSendToAgent, agentChoices, composerPick, aiRemaining, aiThinking, offersTdocAi, privateAsk, privateAgentAsk, myAgent.state?.disabled_team_agents, teamGuestsEnabled, config.teamManage?.guest, guestAction]);
   const openNotifyPanel = (ids, avoid = null) => {
     setNotifyCommentIds(ids);

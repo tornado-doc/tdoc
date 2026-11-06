@@ -1810,6 +1810,12 @@ EOF
     fi
     # Authorship (who may edit this doc) and answer-only questions are
     # refusals to stop at, not to retry: say who decides and what to do.
+    if [ "$_qerr" = "feedback_space_no_versions" ]; then
+      _smsg="$(printf '%s' "$resp" | json_get message)"
+      echo "[tdoc] Not published ($_qerr): ${_smsg:-a comment space takes replies, not versions.}" >&2
+      echo "[tdoc] Do not retry. Fix the site, then answer in the thread (bin/tdoc-agent-reply), with status applied once it is fixed." >&2
+      return 1
+    fi
     if [ "$_qerr" = "agent_not_author_editor" ] || [ "$_qerr" = "answer_only_run" ] || [ "$_qerr" = "answer_lock_unavailable" ]; then
       _smsg="$(printf '%s' "$resp" | json_get message)"
       echo "[tdoc] Not published ($_qerr): ${_smsg:-this agent may not change this doc.}" >&2

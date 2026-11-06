@@ -226,11 +226,13 @@ function ReplyForm({
   // it. Outside dev mode a box starts empty (owner decision: a tag on an editing
   // agent there leads to a plain handoff, which can publish without review).
   const [prefillOn] = useState(() => isFeatureOn('askEditV2'));
-  // Not a row whose edits would skip review: only agents.suggestsFor says an
-  // editing agent's edits come back as suggestions, and a surface with no
-  // suggestion path says nothing, so a tag nobody typed cannot lead to a publish.
+  // Not a row whose edits would skip review, so a tag nobody typed cannot lead
+  // to a publish: an editing agent only where its edits come back as suggestions
+  // (agents.suggestsFor), or where there is nothing to publish (a feedback space:
+  // agents.nothingToPublish; the server refuses versions there). Say neither and
+  // an editing agent gets no tag.
   const candidate = v4 && prefillOn ? agentForThread(thread, ask.choices, commentId) : null;
-  const answering = candidate && (!candidate.can_edit || agents.suggestsFor?.(candidate)) ? candidate : null;
+  const answering = candidate && (!candidate.can_edit || agents.suggestsFor?.(candidate) || agents.nothingToPublish) ? candidate : null;
   const answeringKey = answering ? targetKey(answering) : '';
   useLayoutEffect(() => {
     if (!answering || touched.current || prefilled.current || text) return;
