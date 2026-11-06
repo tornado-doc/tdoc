@@ -18,7 +18,11 @@ t('the reply prefill is the card\'s rule: no surface can pass or forget it', () 
     assert.doesNotMatch(read(file), /prefillReplies/, `${file} still has a prefillReplies switch`);
   }
   assert.match(read(CARD), /isFeatureOn\('askEditV2'\)/, 'the card no longer reads dev mode itself');
-  assert.match(read(CARD), /!candidate\.can_edit \|\| agents\.suggestsFor\?\.\(candidate\)/, 'the review exclusion went');
+  assert.match(read(CARD), /!candidate\.can_edit \|\| agents\.suggestsFor\?\.\(candidate\) \|\| agents\.nothingToPublish/, 'the review exclusion went');
+  // Only where the server refuses versions: never the doc page.
+  assert.doesNotMatch(read('shell/src/document-shell.jsx'), /nothingToPublish/, 'the doc page says there is nothing to publish');
+  for (const file of ['shell/src/feedback-space.jsx', 'feedback/src/main.jsx']) assert.match(read(file), /nothingToPublish: true/, `${file} lost it`);
+  assert.match(read('worker/worker.js'), /feedbackSpaceVersionRefusal\(writeGate\.meta\)/, 'the server no longer refuses versions to a space');
 });
 t('every surface takes its list from useCommentArea, so a card being typed in stays put', () => {
   for (const file of SURFACES) {

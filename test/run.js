@@ -15,6 +15,7 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const OFFLINE = [
+  'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
   'version-diff.test.js', // bounded block matching and Unicode edits
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission

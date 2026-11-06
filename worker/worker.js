@@ -14212,6 +14212,19 @@ async function teamWriteAccess(env, actor, meta) {
   return { ok: true, meta, teamDoc: true, teamAdmin: role === 'admin' };
 }
 
+// A feedback space holds the comments left on an app. Its page is that list,
+// and an agent's fix lands on the app, not here. A version published to one
+// would replace the page behind "Open as a document" and the list's title, with
+// nobody asked, so a token gets this instead (everyone, every token). The
+// space's creation and a person's save in the browser editor are not tokens.
+function feedbackSpaceVersionRefusal(meta) {
+  if (!meta || meta.created_from !== 'feedback') return null;
+  return json({
+    error: 'feedback_space_no_versions',
+    message: 'This is a feedback space: a comment space takes replies, not versions.',
+  }, { status: 409 });
+}
+
 async function requireDocWriteAccess(env, actor, slug, opts = {}) {
   const meta = await loadDocRecord(env, slug);
   // In Trash the slug stays reserved and nothing writes it. Its owner, who
@@ -19132,6 +19145,8 @@ async function handleProposeEdits(env, req, url, slug) {
   if (!(await askEditV2Allowed(env, auth.actor.kind === 'hosted' ? auth.actor : null))) return new Response('Not found', { status: 404 });
   const writeGate = await requireDocWriteAccess(env, auth.actor, slug);
   if (!writeGate.ok) return writeGate.response;
+  const spaceRefusal = feedbackSpaceVersionRefusal(writeGate.meta);
+  if (spaceRefusal) return spaceRefusal;
   const answering = await answerLockRefusal(env, auth.actor, slug);
   if (answering) return answering;
   const authorship = agentWriteRefusal(writeGate.meta, auth.actor);
@@ -20987,6 +21002,7 @@ function mcpToolError(error, message, extra = {}) {
 // What an agent needs to hear when tdoc says no, in the API's own words,
 // plus the one next step the skill would tell it.
 const MCP_REFUSAL_NEXT = {
+  feedback_space_no_versions: 'Fix the site, then answer with reply_to_comment. Do not retry.',
   answer_only_run: 'You were asked a question on this doc. Answer it with answer_question; do not edit or retry.',
   agent_not_author_editor: 'Another writer owns the latest version. Reply with reply_to_comment without status applied or partial, and say the writer named here can make the change. Do not retry.',
   token_scope: 'This connection cannot reach that workspace. Its owner can change it in Settings -> Agents.',
@@ -28444,6 +28460,8 @@ const tdocHandlers = {
       }
       const writeGate = await requireDocWriteAccess(env, auth.actor, slug, { create: true });
       if (!writeGate.ok) return writeGate.response;
+      const spaceRefusal = feedbackSpaceVersionRefusal(writeGate.meta);
+      if (spaceRefusal) return spaceRefusal;
       // An answer-only question this agent holds here (a new doc has none),
       // then authorship at write time.
       const answering = writeGate.meta ? await answerLockRefusal(env, auth.actor, slug) : null;

@@ -244,17 +244,123 @@ async function startServer(worker, env) {
         await ctx.close();
       });
     }
-    await t(`${tag}: dev mode, space: no tag for the owner's editing agent, because no suggestion path exists there`, async () => {
+    // An owner's editing agent, where the server refuses versions: nothing to
+    // publish, so the tag can lead to nothing unreviewed. The same exclusions.
+    const ownerThread = async () => {
       const c = await call('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: `Owner ${++n}`, anchor } });
       assert.equal(c.status, 200, JSON.stringify(c.body));
       await julieAgentAnswers(space.slug, c.body.id);
-      const ctx = await contextFor(julie);
+      return c.body.id;
+    };
+    // The widget's token cannot drive a CLI on the owner's computer (its list
+    // leaves those out), so there the agent that answered is a Raft one.
+    const RAFT = { provider: 'raft', server_id: 'srv-owner', agent_sub: 'fixer', server_slug: 'owner', agent_name: 'fixer-agent', last_touched: new Date().toISOString() };
+    const ownerRaftThread = async () => {
+      const key = `account-notify:${julie.account_id}`;
+      const list = JSON.parse((await env.META.get(key)) || '[]');
+      if (!list.some((x) => x.agent_sub === RAFT.agent_sub)) await env.META.put(key, JSON.stringify([...list, RAFT]));
+      const c = await call('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: `Owner ${++n}`, anchor } });
+      assert.equal(c.status, 200, JSON.stringify(c.body));
+      const r = await worker.fetch(new Request(`${TDOC}/api/agent/reply`, { method: 'POST', headers: { Authorization: `Bearer ${julie.token}`, 'Content-Type': 'application/json', 'X-Tdoc-Agent': `raft/${RAFT.server_id}/${RAFT.agent_sub}` }, body: JSON.stringify({ slug: space.slug, parent_id: c.body.id, text: 'Done.', status: 'answered', agent_login: 'fixer-agent', agent_name: 'fixer-agent' }) }), env, {});
+      assert.equal(r.status, 200, await r.text());
+      return c.body.id;
+    };
+    const ownerOn = {
+      space: { who: julie, thread: ownerThread, tag: /Claude Code/, open: async (page) => surfaces.space.open(page) },
+      // A tdoc page says dev mode in its boot; the widget reads it from there.
+      'widget on a tdoc page': { who: null, thread: ownerRaftThread, tag: /fixer-agent/, boot: { devMode: { on: true } }, open: async (page) => {
+        await page.addInitScript(([key, value]) => { localStorage.setItem(key, value); }, [`tdoc-feedback:${base}`, JSON.stringify(space)]);
+        await page.goto(`${base}/__page`);
+      }, root: (page) => page.locator('#tdoc-feedback-root') },
+    };
+    for (const [name, on] of Object.entries(ownerOn)) {
+      const rootOf = (page) => (on.root ? on.root(page) : page);
+      const start = async () => {
+        const id = await on.thread();
+        const ctx = await contextFor(on.who);
+        const page = await tracked(ctx);
+        if (on.boot) await page.addInitScript((boot) => { window.__TDOC_APP_BOOT__ = boot; }, on.boot);
+        await on.open(page);
+        const tab = name === 'space'
+          ? page.getByRole('radiogroup', { name: 'Show' }).getByRole('radio', { name: 'Replied' })
+          : rootOf(page).locator('.tdoc-fb-filter button', { hasText: 'Replied' });
+        await tab.click();
+        const card = rootOf(page).locator(`[data-comment-id="${id}"]`).first();
+        await card.waitFor({ timeout: 10000 });
+        await card.getByRole('button', { name: 'Reply', exact: true }).first().click();
+        const box = card.locator('.tdoc-reply-form textarea').first();
+        await box.waitFor();
+        return { id, ctx, page, card, box };
+      };
+      await t(`${tag}: dev mode, ${name}: replying to the owner's editing agent starts with its tag; the tag alone sends nothing`, async () => {
+        const v = await start();
+        await v.card.locator('.tdoc-agent-pill').waitFor({ timeout: 8000 });
+        assert.match(await v.box.inputValue(), on.tag);
+        assert.match(await v.card.locator('.tdoc-reply-form').innerText(), /fixes the app/);
+        assert.doesNotMatch(await v.card.locator('.tdoc-reply-form').innerText(), /changes the doc/);
+        await shot(v.page, `${name.replace(/\W+/g, '-')}-owner-prefilled`);
+        const posts = [];
+        v.page.on('request', (r) => { if (r.method() === 'POST' && /\/api\/(comments|notify\/handoff)/.test(r.url())) posts.push(r.url()); });
+        await v.card.locator('.tdoc-reply-submit.ui-btn-primary').click();
+        await v.page.waitForTimeout(400);
+        assert.deepEqual(posts, [], 'sent on the tag alone');
+        assert.deepEqual(v.page.errors, []);
+        await v.ctx.close();
+      });
+      await t(`${tag}: dev mode, ${name}: a deleted tag stays deleted, and a plain reply wakes nobody`, async () => {
+        const v = await start();
+        await v.card.locator('.tdoc-agent-pill').waitFor({ timeout: 8000 });
+        await v.box.click();
+        await v.page.keyboard.press('End');
+        await v.page.keyboard.press('Backspace');
+        await v.page.keyboard.press('Backspace');
+        assert.equal((await v.box.inputValue()).trim(), '');
+        await v.page.waitForTimeout(1500);
+        assert.equal((await v.box.inputValue()).trim(), '', 'the tag came back');
+        const sends = [];
+        v.page.on('request', (r) => { if (r.method() === 'POST' && /\/api\/notify\/handoff/.test(r.url())) sends.push(r.url()); });
+        await v.box.click();
+        await v.page.keyboard.type('thanks');
+        await v.card.locator('.tdoc-reply-submit.ui-btn-primary').click();
+        await v.box.waitFor({ state: 'detached', timeout: 8000 });
+        await v.page.waitForTimeout(300);
+        assert.deepEqual(sends, []);
+        await v.ctx.close();
+      });
+      await t(`${tag}: dev mode, ${name}: tag plus words hands off plainly, never asking for suggestions`, async () => {
+        const v = await start();
+        await v.card.locator('.tdoc-agent-pill').waitFor({ timeout: 8000 });
+        const sends = [];
+        v.page.on('request', (r) => { if (r.method() === 'POST' && /\/api\/notify\/handoff/.test(r.url())) sends.push(JSON.parse(r.postData() || '{}')); });
+        await v.box.click();
+        await v.page.keyboard.press('End');
+        await v.page.keyboard.type('the chart is still empty');
+        await v.card.locator('.tdoc-reply-submit.ui-btn-primary').click();
+        await v.box.waitFor({ state: 'detached', timeout: 8000 });
+        await v.page.waitForTimeout(400);
+        assert.equal(sends.length, 1, JSON.stringify(sends));
+        assert.equal('reply_as' in sends[0], false);
+        await v.ctx.close();
+      });
+    }
+    // The widget with no word of dev mode: another site's page.
+    await t(`${tag}: the cross-site widget (no dev-mode signal) stays off for the owner's editing agent`, async () => {
+      const id = await ownerRaftThread();
+      const ctx = await contextFor(null);
       const page = await tracked(ctx);
-      await surfaces.space.open(page);
-      await surfaces.space.tab(page, 'Replied');
-      const { box } = await openBox(surfaces.space, page, c.body.id);
+      await ownerOn['widget on a tdoc page'].open(page);
+      const root = ownerOn['widget on a tdoc page'].root(page);
+      await root.locator('.tdoc-fb-filter button', { hasText: 'Replied' }).click();
+      const card = root.locator(`[data-comment-id="${id}"]`).first();
+      await card.waitFor({ timeout: 10000 });
+      await card.getByRole('button', { name: 'Reply', exact: true }).first().click();
+      const box = card.locator('.tdoc-reply-form textarea').first();
+      await box.waitFor();
       await page.waitForTimeout(1200);
       assert.equal(await box.inputValue(), '');
+      // Not for want of the agent: it is there to name by hand.
+      await box.fill('@');
+      await root.locator('.tdoc-mention-menu .tdoc-mention-agent', { hasText: 'fixer-agent' }).first().waitFor({ timeout: 8000 });
       await ctx.close();
     });
     await t(`${tag}: outside dev mode no surface starts with a tag`, async () => {
@@ -281,6 +387,15 @@ async function startServer(worker, env) {
         await page.waitForTimeout(1200);
         assert.equal(await box.inputValue(), '', 'doc page started with a tag');
         await ctx.close();
+        const ownerId = await ownerThread();
+        const spaceCtx = await contextFor(julie);
+        const spacePage = await tracked(spaceCtx);
+        await surfaces.space.open(spacePage);
+        await surfaces.space.tab(spacePage, 'Replied');
+        const owner = await openBox(surfaces.space, spacePage, ownerId);
+        await spacePage.waitForTimeout(1200);
+        assert.equal(await owner.box.inputValue(), '', 'the owner on a space started with a tag');
+        await spaceCtx.close();
       } finally { env.TDOC_DEBUG_ACCOUNTS = DEV; }
     });
 

@@ -1491,6 +1491,8 @@ ${uiCss}
     const agentMentions = useMemo(() => ({
       choices: agentChoices, preselected: composerDefault(agentChoices, { orTop: true }),
       ai: null, privateAskSupported: false,
+      // A feedback space takes replies, not versions (the server refuses them).
+      nothingToPublish: true,
     }), [agentChoices]);
 
     useEffect(() => {
