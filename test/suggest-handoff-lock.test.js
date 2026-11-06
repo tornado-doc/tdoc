@@ -19,7 +19,6 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
 const ORIGIN = { Origin: 'https://tdoc.dev' };
 const SERVER = 'server-1';
-const WEBHOOK = 'wh_0123456789abcdef';
 const REFUSED = 'suggestions_only_run';
 
 (async () => {
@@ -74,10 +73,15 @@ const REFUSED = 'suggestions_only_run';
   const raft = (sub, name) => ({ provider: 'raft', server_id: SERVER, server_slug: 'one', agent_sub: sub, agent_name: name });
   const agentA = raft('agent-a', 'a');
   const agentB = raft('agent-b', 'b');
-  const hook = { provider: 'webhook', server_id: 'webhook', agent_sub: WEBHOOK, url: 'https://hook.test/in', agent_name: 'hook' };
   const local = { provider: 'local', server_id: 'macbook', agent_sub: 'macbook_claude', device: 'macbook', cli: 'claude', agent_name: 'macbook' };
-  for (const who of [alice, carol]) await env.META.put(`account-notify:${who.account_id}`, JSON.stringify([agentA, agentB, hook, local]));
-  await env.META.put(`notify-webhook-secret:${WEBHOOK}`, 'secret');
+  for (const who of [alice, carol]) await env.META.put(`account-notify:${who.account_id}`, JSON.stringify([agentA, agentB, local]));
+  // Added the only way that proves whose it is: notify-webhook:<account>:<id>.
+  const addHook = async (who) => {
+    const r = await call('/api/me/connectors/webhook', { method: 'POST', cookie: who.cookie, headers: ORIGIN, body: { url: 'https://hook.test/in', label: 'hook' } });
+    assert(r.status === 200 && r.body.target, `webhook ${r.status} ${r.text}`);
+    return r.body.target;
+  };
+  const hook = await addHook(alice);
 
   const AS_A = { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-a` };
   const AS_B = { 'X-Tdoc-Raft-Agent': `${SERVER}/agent-b` };
@@ -208,7 +212,7 @@ const REFUSED = 'suggestions_only_run';
     const slug = await newDoc();
     const sent = await handOff(alice, slug, [await comment(alice, slug)], hook);
     assert(sent.delivery.status === 'delivered', JSON.stringify(sent));
-    refused(await publish(alice, slug, { 'X-Tdoc-Agent': `webhook/webhook/${WEBHOOK}` }), 'webhook by name');
+    refused(await publish(alice, slug, { 'X-Tdoc-Agent': `webhook/webhook/${hook.agent_sub}` }), 'webhook by name');
     refused(await publish(alice, slug), 'webhook without a name');
     landed(await publish(alice, slug, AS_B), 'another agent');
   });
@@ -428,6 +432,35 @@ const REFUSED = 'suggestions_only_run';
     assert(!env.META.map.has(`meta:${slug}`), 'the purge stopped partway');
     landed(await call('/api/upload', { method: 'POST', token: carol.token, body: { slug, version: 1, html: html(1), meta: { title: 'Mine' } } }), 'the slug is free');
     await later(HOUR + 1000, async () => landed(await publish(carol, slug), 'the missed lock ended'));
+  });
+
+  await t('a send refused before it goes takes no lock and leaves any lock as it was', async () => {
+    const slug = await newDoc();
+    const c = await comment(alice, slug);
+    const send = (recipient) => call('/api/notify/handoff', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug, comment_ids: [c], recipient, instruction: 'x', reply_as: 'suggestions' } });
+    const carolsHook = await addHook(carol);
+    const notOurs = await send(carolsHook);
+    assert(notOurs.status === 409 && notOurs.body.error === 'agent_unavailable', notOurs.text);
+    assert((await lockOp(slug, { kind: 'list' })).length === 0, 'a webhook this account does not own took a lock');
+    const removedKey = `account-notify-removed:${alice.account_id}`;
+    await env.META.put(removedKey, JSON.stringify([`raft-server:${SERVER}`]));
+    try {
+      const left = await send(agentB);
+      assert(left.status === 409 && left.body.error === 'agent_left_doc', left.text);
+      assert((await lockOp(slug, { kind: 'list' })).length === 0, 'a disconnected agent took a lock');
+    } finally {
+      await env.META.delete(removedKey);
+    }
+    const sent = await handOff(alice, slug, [c], agentA);
+    const before = (await lockOp(slug, { kind: 'list' }))[0];
+    await env.META.put(removedKey, JSON.stringify([`raft-server:${SERVER}`]));
+    try {
+      const again = await later(60000, () => resend(slug, sent.handoff_id));
+      assert(again.status === 409 && again.body.error === 'agent_left_doc', again.text);
+      assert(JSON.stringify(await lockOp(slug, { kind: 'list' })) === JSON.stringify([before]), 'a refused Resend changed the lock');
+    } finally {
+      await env.META.delete(removedKey);
+    }
   });
 
   await t('a failed delivery holds nobody, and the Resend that lands does', async () => {
