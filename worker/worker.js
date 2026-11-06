@@ -16394,9 +16394,17 @@ function isAccountAgent(t, linked, servers) {
     || (t.provider === 'raft' && servers.some((sv) => sv.server_id === t.server_id));
 }
 
+// A version the owner's own token published says the agent is theirs, even after
+// newer agents pushed it off their account list (NOTIFY_AGENTS_MAX).
+function ownerPublishedAs(meta, ownerIds, t) {
+  return (Array.isArray(meta && meta.versions) ? meta.versions : [])
+    .some((v) => v && v.by && ownerIds.includes(v.by) && sameNotifyTarget(v.publisher_agent, t));
+}
+
 async function isDocOwnerAgent(env, meta, t) {
   const owner = meta && meta.hosted && meta.hosted.account_id;
-  return !owner || isAccountAgent(t, await accountNotifyTargets(env, owner), await accountRaftServers(env, owner));
+  return !owner || isAccountAgent(t, await accountNotifyTargets(env, owner), await accountRaftServers(env, owner))
+    || ownerPublishedAs(meta, (await accountGroup(env, owner)).ids, t);
 }
 
 // Somebody else's agent, known here only from the doc's records: what a picker
@@ -16440,13 +16448,14 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
   const removed = await accountRemovedTargets(env, ownerAccount);
   const linked = await accountNotifyTargets(env, ownerAccount);
   const servers = await accountRaftServers(env, ownerAccount);
+  const ownerIds = ownerAccount ? (await accountGroup(env, ownerAccount)).ids : null;
   const docTargets = (Array.isArray(meta && meta.notify_agents) ? meta.notify_agents : [])
     .map(normalizeNotifyTarget)
     .filter((t) => t && !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)))
     // Worked on it and is the owner's. No account to compare with: a doc from
     // before accounts, or a self-host. An agent on a server the owner connected
     // but never used is an ordinary directory row below, with no claim on them.
-    .filter((t) => !ownerAccount || linked.some((x) => sameNotifyTarget(x, t)))
+    .filter((t) => !ownerAccount || linked.some((x) => sameNotifyTarget(x, t)) || ownerPublishedAs(meta, ownerIds, t))
     .sort(byRecency);
   const fallbackList = linked
     .filter((t) => !removed.has(notifyKey(t)) && !(t.provider === 'raft' && removed.has(`raft-server:${t.server_id}`)));
@@ -16476,10 +16485,12 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
   const writer = docLastWriter(meta);
   // What somebody else did here, while it was a team's, recommends nothing to
   // the owner, even for an agent on a server they share.
-  const ownerIds = ownerAccount ? (await accountGroup(env, ownerAccount)).ids : null;
   const ownerWork = (by) => !by || !ownerIds || ownerIds.includes(by);
   const publisher = writer?.kind === 'agent' && ownerWork(writer.account_id) ? writer.agent : null;
-  const docHandoff = lastDeliveredHandoffAgent((handoffs || await loadHandoffs(env, slug)).filter((h) => h && ownerWork(h.by)));
+  // A handoff from before they named a sender is the owner's only if its agent is.
+  const ownerHandoff = (h) => (!ownerIds ? true : h.by ? ownerIds.includes(h.by)
+    : linked.some((x) => sameNotifyTarget(x, h.recipient)) || ownerPublishedAs(meta, ownerIds, h.recipient));
+  const docHandoff = lastDeliveredHandoffAgent((handoffs || await loadHandoffs(env, slug)).filter((h) => h && ownerHandoff(h)));
   const evidenced = [publisher, docHandoff]
     .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
@@ -16712,10 +16723,11 @@ async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asks = [], hando
   const ownerWork = (by) => ownDoc && (!by || !ownerAccount || ownerIds.includes(by));
   // Replied, published, or was picked for this doc (touchDocAgent). Each of
   // those also puts the agent on its account's list, the owner's if it was theirs.
+  const linked = ownDoc && ownerAccount ? await accountNotifyTargets(env, ownerAccount) : null;
+  const ownerAgent = (t) => !linked || linked.some((x) => sameNotifyTarget(x, t)) || ownerPublishedAs(meta, ownerIds, t);
   if (ownDoc) {
-    const linked = ownerAccount ? await accountNotifyTargets(env, ownerAccount) : null;
     for (const t of Array.isArray(meta.notify_agents) ? meta.notify_agents : []) {
-      if (!linked || linked.some((x) => sameNotifyTarget(x, t))) add(t && t.last_touched, { target: t });
+      if (ownerAgent(t)) add(t && t.last_touched, { target: t });
     }
   }
   for (const v of Array.isArray(meta.versions) ? meta.versions : []) {
@@ -16729,7 +16741,7 @@ async function agentUseOnDoc(env, slug, meta, { ids, keys = [], asks = [], hando
     const at = h.delivery.at || h.at;
     if (h.team_agent && h.team_agent.id) {
       if (manages || ids.includes(h.sent_by)) add(at, { team_agent: h.team_agent.id });
-    } else if (ownerWork(h.by) || ids.includes(h.by)) add(at, { target: h.recipient });
+    } else if ((ownerWork(h.by) && (h.by || ownerAgent(h.recipient))) || ids.includes(h.by)) add(at, { target: h.recipient });
   }
   // Asked or @-mentioned by this viewer: the record is theirs alone, and the
   // caller passes only the ones this door may see.

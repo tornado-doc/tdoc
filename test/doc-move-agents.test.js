@@ -41,7 +41,7 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
   let raftCalls = [];
   globalThis.fetch = async (input, init) => {
     const url = String(input && input.url ? input.url : input);
-    if (!url.startsWith('https://api.raft.test')) return realFetch(input, init);
+    if (new URL(url).host !== 'api.raft.test') return realFetch(input, init);
     const body = init && init.body ? JSON.parse(init.body) : null;
     raftCalls.push({ url, body });
     if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq', agent: { serverId: 'x' } });
@@ -350,6 +350,47 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     raftCalls = [];
     const r = await w.send(w.ann, 'plan', [c], BEN_AGENT);
     assert(r.status === 200 && r.body.delivery.status === 'delivered', r.text);
+  });
+
+  await t('a handoff from before they named a sender recommends nobody on a shared server', async () => {
+    const w = await world();
+    await w.teamDoc('plan');
+    await w.promoteBen();
+    await w.upload(w.ben, 'plan', 2, w.claim(BEN_AGENT));
+    const c = await w.comment(w.ben, 'plan');
+    const sent = await w.send(w.ben, 'plan', [c], BEN_AGENT);
+    assert(sent.status === 200, sent.text);
+    await w.link(w.ann, { ...BEN_AGENT, agent_sub: 'ann-on-bens-server', agent_name: 'annie2' });
+    await w.env.META.put(`account-raft-servers:${w.ann.account_id}`, JSON.stringify([{ server_id: BEN_AGENT.server_id, server_slug: BEN_AGENT.server_slug, installation_id: 'inst' }]));
+    await w.env.META.put(`raft-directory:${BEN_AGENT.server_id}`, JSON.stringify([BEN_AGENT]));
+    await w.move(w.ann, 'plan', null);
+    const list = JSON.parse(await w.env.META.get('handoffs:plan'));
+    for (const h of list) delete h.by;
+    await w.env.META.put('handoffs:plan', JSON.stringify(list));
+    const body = await w.targets(w.ann, 'plan');
+    assert(!body.default, `default: ${JSON.stringify(body.default)}`);
+    assert(!w.rows(body).find((t) => t.agent_sub === BEN_AGENT.agent_sub).used_here_at, 'used here');
+    const d = await w.comment(w.ann, 'plan');
+    raftCalls = [];
+    await w.send(w.ann, 'plan', [d]);
+    assert(!addressed().length, `addressed ${addressed()}`);
+  });
+
+  await t('Ann\'s own agent pushed off her account list still follows the doc it published', async () => {
+    const w = await world();
+    await w.upload(w.ann, 'mine', 1, w.claim(ANN_AGENT));
+    // Nine newer connections: the list keeps eight.
+    for (let i = 0; i < 9; i++) await w.link(w.ann, raftAgent(`srv${i}`, `a${i}`, `n${i}`));
+    const stored = JSON.parse(await w.env.META.get(`account-notify:${w.ann.account_id}`));
+    assert(!stored.some((t) => t.agent_sub === ANN_AGENT.agent_sub), 'off the list');
+    const body = await w.targets(w.ann, 'mine');
+    assert(body.default && body.default.agent_sub === ANN_AGENT.agent_sub, `default: ${JSON.stringify(body.default)}`);
+    const c = await w.comment(w.ann, 'mine');
+    raftCalls = [];
+    const r = await w.send(w.ann, 'mine', [c]);
+    assert(r.body.delivery.status === 'delivered' && addressed().join() === 'anns-server', `${r.text} ${addressed()}`);
+    const again = await w.call('/api/notify/handoff/resend', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { slug: 'mine', handoff_id: r.body.handoff_id } });
+    assert(again.status === 200, again.text);
   });
 
   await t('Ben\'s work does not count as Ann\'s agent having been used here', async () => {
