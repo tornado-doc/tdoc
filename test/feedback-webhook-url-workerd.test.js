@@ -1,6 +1,8 @@
 // A feedback token can sit in the source of somebody else's page, and a webhook
 // URL often works as a credential: no response that token can reach names one,
-// while the picker and Resend keep working by id. The deploy bundle in workerd,
+// while the picker and Resend keep working by id. A webhook's URL, signature and
+// key go only to the address stored for it, and only for the account that
+// connected it. The deploy bundle in workerd,
 // through the real routes; only the receiver's end of the webhook is stubbed,
 // inside the isolate. KV and R2 are small in-memory fakes.
 //
@@ -47,7 +49,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const to = String((input && input.url) || input);
   if (!to.startsWith('https://hooks.example/')) return realFetch(input, init);
-  fake.posts.push({ url: to, headers: Object.fromEntries(new Headers(init && init.headers).entries()) });
+  fake.posts.push({ url: to, redirect: init && init.redirect, headers: Object.fromEntries(new Headers(init && init.headers).entries()) });
   if (to.includes('boom')) throw new Error('connection to ' + to + ' failed');
   return new Response('ok');
 };
@@ -180,6 +182,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.deepEqual(got.map((p) => p.url), [HOOK_A]);
       assert.ok(got[0].headers['x-tdoc-signature'], 'signed');
       assert.equal(got[0].headers.authorization, `Bearer ${AUTH_KEY}`);
+      assert.equal(got[0].redirect, 'manual', 'a redirect must not carry the key elsewhere');
     });
 
     await check('handoff: an agent picked by id is not swapped for the default', async () => {
@@ -194,10 +197,18 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.deepEqual((await posts()).map((p) => p.url), [HOOK_B]);
     });
 
-    await check('handoff: an unknown webhook id reaches no address the page named', async () => {
+    await check('handoff: a pick the token was not offered is refused, not sent to the default', async () => {
       const r = await send(await comment('fourth'), { provider: 'webhook', server_id: 'webhook', agent_sub: 'wh_00000000000000000000', url: 'https://hooks.example/page-made-this-up' });
-      assert.equal(r.status, 200, r.text);
-      assert.ok(!(await posts()).some((p) => p.url.includes('page-made-this-up')));
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.error, 'agent_unavailable');
+      assert.ok(r.body.message, 'says why');
+      assert.deepEqual(await posts(), []);
+      const malformed = await send(await comment('fourth array'), { provider: 'webhook', server_id: 'webhook', agent_sub: [botA.agent_sub] });
+      assert.equal(malformed.status, 409, malformed.text);
+      assert.deepEqual(await posts(), []);
+      const raft = await send(await comment('fourth raft'), { provider: 'raft', server_id: 'gone', server_slug: 'gone', agent_sub: 'gone' });
+      assert.equal(raft.status, 409, raft.text);
+      assert.deepEqual(await posts(), []);
     });
 
     await check('handoffs: a feedback token sees the recipient by id, no URL', async () => {
@@ -254,12 +265,169 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.deepEqual((await posts()).map((p) => p.url), [HOOK_B]);
     });
 
-    await check('the owner in their browser still has the URLs', async () => {
+    // Other accounts, on their own docs, with their own credentials.
+    const user = async (login) => {
+      const sid = crypto.randomBytes(16).toString('hex');
+      await fetch(`${base}/__seed-session`, { method: 'POST', body: JSON.stringify({ id: sid, login }) });
+      const userCookie = `tdoc_sid=${sid}`;
+      const made = await call('/api/hosted/token', { method: 'POST', cookie: userCookie, body: { label: login } });
+      assert.equal(made.status, 200, made.text);
+      return { login, cookie: userCookie, token: made.body.token, account: made.body.account_id };
+    };
+    const upload = async (who, name, version = 1) => {
+      const r = await call('/api/upload', { method: 'POST', token: who.token, body: { slug: name, version, html: `<h1>${name}</h1><p>a sentence v${version}</p>`, meta: { title: name, access: { visibility: 'private', allowed_users: [] } } } });
+      assert.equal(r.status, 200, r.text);
+    };
+    const note = async (who, name, text = 'a note') => {
+      const r = await call('/api/comments', { method: 'POST', cookie: who.cookie, body: { slug: name, version: 1, text, anchor: { kind: 'text', text: 'a sentence' } } });
+      assert.equal(r.status, 200, r.text);
+      return r.body.id;
+    };
+    const julie = { login: 'julie', cookie, token: minted.body.token, account: minted.body.account_id };
+    const dana = await user('dana');
+    const bob = await user('bob');
+    const carol = await user('carol');
+    await upload(dana, 'dana-doc');
+    await upload(julie, 'jul-doc');
+    const ELSEWHERE = 'https://hooks.example/somewhere-else';
+    const named = (agent, extra = {}) => ({ provider: 'webhook', server_id: 'webhook', agent_sub: agent.agent_sub, ...extra });
+    const hand = (who, name, commentId, recipient, how = 'cookie') => call('/api/notify/handoff', { method: 'POST', ...(how === 'cookie' ? { cookie: who.cookie } : { token: who.token }), body: { slug: name, comment_ids: [commentId], recipient } });
+
+    await check('another account cannot use a webhook, by any credential, with or without an address', async () => {
+      await posts();
+      for (const how of ['cookie', 'token']) {
+        for (const extra of [{ url: ELSEWHERE }, {}]) {
+          const r = await hand(dana, 'dana-doc', await note(dana, 'dana-doc'), named(botA, extra), how);
+          assert.equal(r.status, 409, `${how} ${JSON.stringify(extra)}: ${r.text}`);
+          assert.equal(r.body.error, 'agent_unavailable');
+        }
+      }
+      assert.deepEqual(await posts(), []);
+      assert.ok(!JSON.parse((await kv('handoffs:dana-doc')) || '[]').length, 'nothing recorded');
+    });
+
+    await check('the owner naming their own webhook: the stored address, whatever else was sent', async () => {
+      for (const how of ['cookie', 'token']) {
+        const r = await hand(julie, 'jul-doc', await note(julie, 'jul-doc'), named(botA, { url: ELSEWHERE }), how);
+        assert.equal(r.body.delivery && r.body.delivery.status, 'delivered', r.text);
+        assert.deepEqual((await posts()).map((p) => p.url), [HOOK_A]);
+      }
+      const seen = JSON.parse(await kv('handoffs:jul-doc'))[0];
+      assert.equal(seen.recipient.url, HOOK_A, 'the record never keeps a sent address');
+    });
+
+    await check('a webhook pushed off the account list can still be named by its owner, and only by them', async () => {
+      const off = await hook('https://hooks.example/secret-path-off', 'Bot Off');
+      const list = JSON.parse(await kv(`account-notify:${julie.account}`));
+      await kv(`account-notify:${julie.account}`, JSON.stringify(list.filter((t) => t.agent_sub !== off.agent_sub)));
+      await posts();
+      const r = await hand(julie, 'jul-doc', await note(julie, 'jul-doc'), named(off));
+      assert.equal(r.body.delivery && r.body.delivery.status, 'delivered', r.text);
+      assert.deepEqual((await posts()).map((p) => p.url), ['https://hooks.example/secret-path-off']);
+      const theirs = await hand(dana, 'dana-doc', await note(dana, 'dana-doc'), named(off, { url: ELSEWHERE }));
+      assert.equal(theirs.status, 409, theirs.text);
+      assert.deepEqual(await posts(), []);
+    });
+
+    await check('a webhook connected before ownership was recorded: its account list says whose it is', async () => {
+      const old = 'wh_aaaaaaaaaaaaaaaaaaaa';
+      await kv(`notify-webhook-secret:${old}`, 'whsec_old');
+      const list = JSON.parse(await kv(`account-notify:${julie.account}`));
+      await kv(`account-notify:${julie.account}`, JSON.stringify([...list, { provider: 'webhook', server_id: 'webhook', agent_sub: old, url: 'https://hooks.example/secret-path-old', agent_name: 'Old' }]));
+      const r = await hand(julie, 'jul-doc', await note(julie, 'jul-doc'), { provider: 'webhook', server_id: 'webhook', agent_sub: old, url: ELSEWHERE });
+      assert.equal(r.body.delivery && r.body.delivery.status, 'delivered', r.text);
+      assert.deepEqual((await posts()).map((p) => p.url), ['https://hooks.example/secret-path-old']);
+      const theirs = await hand(dana, 'dana-doc', await note(dana, 'dana-doc'), { provider: 'webhook', server_id: 'webhook', agent_sub: old, url: ELSEWHERE });
+      assert.equal(theirs.status, 409, theirs.text);
+      assert.deepEqual(await posts(), []);
+    });
+
+    await check('Resend: a stored record naming somebody else\'s webhook sends nothing', async () => {
+      for (const recipient of [named(botA, { url: ELSEWHERE, agent_name: 'x' }), named(botA, { url: HOOK_A, agent_name: 'x' })]) {
+        const id = `h_seed_${crypto.randomBytes(3).toString('hex')}`;
+        await kv('handoffs:dana-doc', JSON.stringify([{ handoff_id: id, at: new Date().toISOString(), recipient, comment_ids: [await note(dana, 'dana-doc')], instruction: '', delivery: { status: 'delivered' } }]));
+        const r = await call('/api/notify/handoff/resend', { method: 'POST', cookie: dana.cookie, body: { slug: 'dana-doc', handoff_id: id } });
+        assert.equal(r.body.delivery && r.body.delivery.status, 'failed', r.text);
+        assert.deepEqual(await posts(), []);
+      }
+      await kv('handoffs:dana-doc', '[]');
+    });
+
+    await check('Resend: the owner\'s old record with another address goes to the stored one', async () => {
+      const id = 'h_seed_owner';
+      await kv('handoffs:jul-doc', JSON.stringify([{ handoff_id: id, at: new Date().toISOString(), recipient: named(botB, { url: ELSEWHERE, agent_name: 'Bot B' }), comment_ids: [await note(julie, 'jul-doc')], instruction: '', delivery: { status: 'delivered' } }]));
+      const r = await call('/api/notify/handoff/resend', { method: 'POST', cookie, body: { slug: 'jul-doc', handoff_id: id } });
+      assert.equal(r.body.delivery && r.body.delivery.status, 'delivered', r.text);
+      assert.deepEqual((await posts()).map((p) => p.url), [HOOK_B]);
+    });
+
+    await check('a test send and my-agent reach only the caller\'s own webhook', async () => {
+      const tested = await call('/api/me/connectors/test', { method: 'POST', cookie: dana.cookie, body: named(botA) });
+      assert.equal(tested.status, 404, tested.text);
+      const home = await call('/api/feedback/connect', { method: 'POST', cookie, body: { origin: ORIGIN } });
+      const made = await call('/api/comments', { method: 'POST', token: home.body.token, body: { slug: home.body.slug, version: 1, text: 'and again', anchor: { kind: 'product', url: `${ORIGIN}/y` } } });
+      await posts();
+      const own = await call(`/api/docs/${home.body.slug}/my-agent`, { method: 'POST', token: home.body.token, body: { comment_id: made.body.id, recipient: named(botB, { url: ELSEWHERE }) } });
+      assert.equal(own.status, 200, own.text);
+      assert.deepEqual((await posts()).map((p) => p.url), [HOOK_B]);
+      const made2 = await call('/api/comments', { method: 'POST', token: home.body.token, body: { slug: home.body.slug, version: 1, text: 'once more', anchor: { kind: 'product', url: `${ORIGIN}/z` } } });
+      const refused = await call(`/api/docs/${home.body.slug}/my-agent`, { method: 'POST', token: home.body.token, body: { comment_id: made2.body.id, recipient: { provider: 'webhook', server_id: 'webhook', agent_sub: 'wh_00000000000000000000', url: ELSEWHERE } } });
+      assert.equal(refused.status, 403, refused.text);
+      assert.deepEqual(await posts(), []);
+    });
+
+    await check('a disconnected webhook is gone: no ownership record, nothing sent, refused to the token', async () => {
+      const gone = await hook('https://hooks.example/secret-path-gone', 'Gone');
+      const removed = await call('/api/me/connectors/remove', { method: 'POST', cookie, body: named(gone) });
+      assert.equal(removed.status, 200, removed.text);
+      assert.equal(await kv(`notify-webhook:${julie.account}:${gone.agent_sub}`), null);
+      const viaOwner = await hand(julie, 'jul-doc', await note(julie, 'jul-doc'), named(gone));
+      assert.equal(viaOwner.status, 409, viaOwner.text);
+      const viaToken = await send(await comment('gone'), named(gone));
+      assert.equal(viaToken.status, 409, viaToken.text);
+      assert.deepEqual(await posts(), []);
+    });
+
+    await check('nobody reads the URL on /api/notify/handoffs: member, second admin, owner, after a doc leaves a team', async () => {
+      const team = (await call('/api/teams', { method: 'POST', cookie, body: { name: 'Crew' } })).body.team;
+      const invite = team.invite_url.split('/').pop();
+      for (const who of [bob, carol]) assert.equal((await call('/api/team/join', { method: 'POST', cookie: who.cookie, body: { token: invite } })).status, 200);
+      assert.equal((await call('/api/team/role', { method: 'POST', cookie, body: { id: team.id, account_id: carol.account, role: 'admin' } })).status, 200);
+      await upload(julie, 'team-doc');
+      assert.equal((await call('/api/team/move', { method: 'POST', token: julie.token, body: { team: team.id, slugs: ['team-doc'] } })).status, 200);
+      const bobsNote = await note(bob, 'team-doc', 'from bob');
+      const row = rowsOf((await call('/api/notify/targets?slug=team-doc', { cookie })).body).find((t) => sameAgent(t, botA));
+      const sent = await call('/api/notify/handoff', { method: 'POST', cookie, body: { slug: 'team-doc', comment_ids: [bobsNote], recipient: row } });
+      assert.equal(sent.body.delivery && sent.body.delivery.status, 'delivered', sent.text);
+      assert.deepEqual((await posts()).map((p) => p.url), [HOOK_A]);
+      const reads = { 'member cookie': { cookie: bob.cookie }, 'second admin cookie': { cookie: carol.cookie }, 'second admin token': { token: carol.token }, 'sender cookie': { cookie }, 'sender token': { token: julie.token } };
+      for (const [who, how] of Object.entries(reads)) {
+        const r = await call('/api/notify/handoffs?slug=team-doc', how);
+        assertClean(who, r);
+        assert.ok(r.body.handoffs.some((h) => h.recipient && sameAgent(h.recipient, botA)), `${who}: ${r.text}`);
+      }
+      // Bob's own doc, in the team, then out of it, with Julie's webhook on record.
+      await upload(bob, 'bob-team');
+      assert.equal((await call('/api/team/move', { method: 'POST', token: bob.token, body: { team: team.id, slugs: ['bob-team'] } })).status, 200);
+      const m = JSON.parse(await kv('meta:bob-team'));
+      for (const v of m.versions) { v.source = 'browser'; delete v.by; }
+      await kv('meta:bob-team', JSON.stringify(m));
+      await upload(julie, 'bob-team', 2);
+      const row2 = rowsOf((await call('/api/notify/targets?slug=bob-team', { cookie })).body).find((t) => sameAgent(t, botA));
+      const out = await call('/api/notify/handoff', { method: 'POST', cookie, body: { slug: 'bob-team', comment_ids: [await note(bob, 'bob-team')], recipient: row2 } });
+      assert.equal(out.body.delivery && out.body.delivery.status, 'delivered', out.text);
+      await posts();
+      assert.equal((await call('/api/team/move', { method: 'POST', cookie, body: { team: null, slugs: ['bob-team'] } })).status, 200);
+      assertClean('owner, doc out of the team', await call('/api/notify/handoffs?slug=bob-team', { cookie: bob.cookie }));
+      const again = await call('/api/notify/handoff/resend', { method: 'POST', cookie: bob.cookie, body: { slug: 'bob-team', handoff_id: out.body.handoff_id } });
+      assert.equal(again.body.delivery && again.body.delivery.status, 'failed', again.text);
+      assert.deepEqual(await posts(), []);
+    });
+
+    await check('the owner in their browser still has the URLs to manage their connector', async () => {
       const targets = await call(`/api/notify/targets?slug=${slug}`, { cookie });
       assert.equal(targets.status, 200, targets.text);
-      assert.deepEqual(rowsOf(targets.body).map((t) => t.url).sort(), [HOOK_A, HOOK_B, HOOK_BOOM].sort());
-      const handoffs = await call(`/api/notify/handoffs?slug=${slug}`, { cookie });
-      assert.ok(handoffs.body.handoffs.some((h) => h.recipient && h.recipient.url === HOOK_A), handoffs.text);
+      for (const url of [HOOK_A, HOOK_B, HOOK_BOOM]) assert.ok(rowsOf(targets.body).some((t) => t.url === url), targets.text);
       const connectors = await call('/api/me/connectors', { cookie });
       assert.ok(connectors.body.targets.some((t) => t.url === HOOK_A), connectors.text);
     });

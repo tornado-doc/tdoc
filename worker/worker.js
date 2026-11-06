@@ -11369,6 +11369,7 @@ const ACCOUNT_DELETE_STEP_FNS = {
         `local-pending:${id}`, `local-agents-seen:${id}`, `account-terminal:${id}`, `account-github:${id}`,
         disconnectedKey(id), docIndexBuiltKey(`p:${id}`),
       );
+      keys.push(...await listKeyNames(env, `notify-webhook:${id}:`));
     }
     for (const k of record.actor_keys) {
       keys.push(personalKey('stars', k), personalKey('recents', k), personalKey('folders', k), inboxKey(k), `push-subs:${k}`, `notify-email-off:${k}`);
@@ -15784,8 +15785,12 @@ NOTIFY_PROVIDERS.webhook = {
     if (!WEBHOOK_ID_RE.test(agent_sub) || !url) return null;
     return { server_id: 'webhook', agent_sub, url };
   },
-  async send(env, target, event) {
-    const secret = await env.META.get(`notify-webhook-secret:${target.agent_sub}`);
+  // `account` is who this send acts for. Every path comes through here, so this
+  // is where a webhook's owner is checked, and the URL comes from that record:
+  // never from the target, which may have been sent by a client or stored from one.
+  async send(env, target, event, account) {
+    const hook = await ownedWebhook(env, target.agent_sub, account);
+    const secret = hook && await env.META.get(`notify-webhook-secret:${target.agent_sub}`);
     if (!secret) return { status: 'failed', error: 'webhook_secret_missing' };
     const authKey = await env.META.get(`notify-webhook-auth:${target.agent_sub}`);
     const body = JSON.stringify({
@@ -15798,9 +15803,11 @@ NOTIFY_PROVIDERS.webhook = {
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 8000);
-      const r = await fetch(target.url, {
+      const r = await fetch(hook.url, {
         method: 'POST',
         signal: ctrl.signal,
+        // The signature and key go to the stored address and nowhere it points.
+        redirect: 'manual',
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': 'tdoc-webhook',
@@ -15816,7 +15823,7 @@ NOTIFY_PROVIDERS.webhook = {
     } catch (e) {
       // Never the runtime's message: it could name the address, and this error
       // is shown wherever the handoff is, a feedback token's answers included.
-      return { status: 'failed', error: e && e.name === 'AbortError' ? 'webhook_timeout' : 'webhook_unreachable' };
+      return { status: 'failed', error: e && e.name === 'AbortError' ? 'webhook_timeout' : 'could not reach the webhook' };
     }
   },
 };
@@ -15896,20 +15903,41 @@ async function localDriverAccount(env, gate) {
   return sessionAccountIds(a).find((id) => owner.includes(id)) || null;
 }
 function isLocalTarget(t) { return !!t && t.provider === 'local'; }
-// A feedback token can sit in the source of somebody else's page, and a webhook
-// URL often works as a credential: rows given to that token go without it. The
-// picker sends such a row back, so a webhook is also recognised by its id; the
-// routes then send to the stored copy, whose URL is the only one ever used.
+// A webhook URL often works as a credential, and a feedback token can sit in the
+// source of somebody else's page: rows given to that token go without it.
 function withoutWebhookUrl(t) {
   if (!t || !t.url) return t;
   const { url: _url, ...rest } = t;
   return rest;
 }
+// Who a recipient names, as a client sent it. A webhook is its id alone: a URL
+// that arrives with it is never read.
 function pickedNotifyTarget(t) {
-  const target = normalizeNotifyTarget(t);
-  if (target || !t || t.provider !== 'webhook' || !WEBHOOK_ID_RE.test(t.agent_sub)) return target;
-  return { provider: 'webhook', server_id: 'webhook', agent_sub: t.agent_sub };
+  const provider = t && typeof t.provider === 'string' ? t.provider.trim().toLowerCase() : '';
+  if (provider !== 'webhook') return normalizeNotifyTarget(t);
+  return typeof t.agent_sub === 'string' && WEBHOOK_ID_RE.test(t.agent_sub)
+    ? { provider, server_id: 'webhook', agent_sub: t.agent_sub } : null;
 }
+// A webhook belongs to the account that connected it, whatever list or record
+// names it now: this record outlasts the eight-row account list, and holds the
+// only URL a delivery uses. One connected before the record existed proves
+// itself once by its row on the account's own list, which only tdoc writes.
+const webhookOwnerKey = (accountId, id) => `notify-webhook:${accountId}:${id}`;
+async function ownedWebhook(env, id, account) {
+  if (!account || typeof id !== 'string' || !WEBHOOK_ID_RE.test(id)) return null;
+  const group = await accountGroup(env, account);
+  if (group.unavailable || group.deleted_at) return null;
+  for (const accountId of group.ids) {
+    const raw = await env.META.get(webhookOwnerKey(accountId, id));
+    if (raw) return JSON.parse(raw);
+  }
+  const row = (await accountNotifyTargets(env, account)).find((t) => t.provider === 'webhook' && t.agent_sub === id);
+  if (!row) return null;
+  const hook = { url: row.url, agent_name: row.agent_name };
+  await env.META.put(webhookOwnerKey(group.canonical || account, id), JSON.stringify(hook));
+  return hook;
+}
+const AGENT_UNAVAILABLE = { error: 'agent_unavailable', message: 'That agent is not available here any more. Pick another one and send again.' };
 // The picker's answer with local agents taken out, for a caller who may not
 // drive them. The reason stays honest: nothing bound is still nothing bound.
 // A team agent's rows stay: they are offered to every member on purpose.
@@ -16854,7 +16882,7 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
     slug, docTitle: meta && meta.title, handoffId, commentIds, instruction, publicHost, replyAs,
   });
   const delivery = target
-    ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
+    ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event, meta && meta.workspace_id ? by : meta && meta.hosted && meta.hosted.account_id)
     : { status: 'failed', error: 'no_recipient' };
   const rec = await putHandoff(env, slug, {
     handoff_id: handoffId,
@@ -19629,7 +19657,7 @@ async function handleMyAgent(env, req, url, slug) {
   // agent.
   let rec;
   try {
-    const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
+    const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event, accountId);
     if (delivery && delivery.status === 'failed') await releaseAnswerLock(env, slug, askId);
     const at = new Date().toISOString();
     rec = await putAgentAsk(env, slug, {
@@ -27558,6 +27586,7 @@ const tdocHandlers = {
         // and never shown back to anyone, the account included.
         if (authKey) await env.META.put(`notify-webhook-auth:${id}`, authKey);
         const target = normalizeNotifyTarget({ provider: 'webhook', server_id: 'webhook', agent_sub: id, url: hookUrl, agent_name: label || new URL(hookUrl).host });
+        await env.META.put(webhookOwnerKey(accountId, id), JSON.stringify({ url: target.url, agent_name: target.agent_name }));
         // Added at the end: a new webhook should not quietly become where
         // everything goes. It is the default only when it is the first.
         const next = [...current, { ...target, last_touched: new Date().toISOString() }].slice(-NOTIFY_AGENTS_MAX);
@@ -27577,7 +27606,7 @@ const tdocHandlers = {
           ttlSeconds: 3600,
           payload: { source: 'tdoc', test: true, comment_ids: [], instruction: 'This is a test. No action needed.', url: `${url.origin}/me/agents?tab=send` },
         };
-        const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event);
+        const delivery = await NOTIFY_PROVIDERS[target.provider].send(env, target, event, accountId);
         return json({ ok: true, delivery });
       }
       if (p === '/api/me/connectors/remove' && method === 'POST' && body.provider === 'raft' && body.server_id && !body.agent_sub) {
@@ -27618,6 +27647,7 @@ const tdocHandlers = {
         if (target.provider === 'webhook') {
           try { await env.META.delete(`notify-webhook-secret:${target.agent_sub}`); } catch {}
           try { await env.META.delete(`notify-webhook-auth:${target.agent_sub}`); } catch {}
+          for (const id of (await accountGroup(env, accountId)).ids) await env.META.delete(webhookOwnerKey(id, target.agent_sub));
         }
         return json({ ok: true });
       }
@@ -27691,7 +27721,8 @@ const tdocHandlers = {
       if (!gate.ok) return gate.response;
       const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 1), HANDOFF_MAX);
       let handoffs = await loadHandoffs(env, slug);
-      if (gate.session && gate.session.feedback) handoffs = handoffs.map((h) => (h && h.recipient ? { ...h, recipient: withoutWebhookUrl(h.recipient) } : h));
+      // Nobody reads the URL here: the connector page is where an owner manages it.
+      handoffs = handoffs.map((h) => (h && h.recipient ? { ...h, recipient: withoutWebhookUrl(h.recipient) } : h));
       if (gate.meta?.workspace_id && !isDocOwnerSession(env, gate.session, gate.meta) && gate.actor?.kind === 'team_member') {
         const list = await readComments(env, slug);
         ensureMigrated(list);
@@ -27808,10 +27839,17 @@ const tdocHandlers = {
         return asked && !known ? json(TEAM_ADMIN_AGENT_ONLY, { status: 403 }) : json(NO_TEAM_AGENT, { status: 409 });
       }
       if (isLocalTarget(target) && !localDriver && !viaTeamAgent) return json(LOCAL_OWNER_ONLY, { status: 403 });
+      // A pick this door no longer offers is refused: the person chose that
+      // agent, so the comment does not quietly go to another one.
+      if (fromPage && (asked ? !known : recipient && recipient.agent_sub)) return json(AGENT_UNAVAILABLE, { status: 409 });
+      // Refused before anything is recorded; the send checks the same again.
+      const hook = target && target.provider === 'webhook'
+        ? await ownedWebhook(env, target.agent_sub, teamDoc ? localDriver : gate.meta && gate.meta.hosted && gate.meta.hosted.account_id) : null;
+      if (target && target.provider === 'webhook' && !hook) return json(AGENT_UNAVAILABLE, { status: 409 });
       const rec = await dispatchHandoff(env, {
         slug, meta: gate.meta, commentIds: ids,
         instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
-        recipient: target, publicHost: env.PUBLIC_HOST,
+        recipient: hook ? { ...target, url: hook.url, agent_name: target.agent_name || hook.agent_name } : target, publicHost: env.PUBLIC_HOST,
         ...(replyAs ? { replyAs } : {}),
         // A local handoff records who queued it: the daemon re-checks that it
         // was the owner before running anything. For a team agent that is the
@@ -27883,7 +27921,7 @@ const tdocHandlers = {
       }
       if (isLocalTarget(target) && !localDriver && !viaTeamAgent) return json(LOCAL_OWNER_ONLY, { status: 403 });
       const delivery = target
-        ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
+        ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event, gate.meta && gate.meta.workspace_id ? localDriver : gate.meta && gate.meta.hosted && gate.meta.hosted.account_id)
         : { status: 'failed', error: 'no_recipient' };
       // A resend after a failed local run is a fresh turn for the daemon,
       // queued by whoever pressed Resend (the owner, per the check above).
