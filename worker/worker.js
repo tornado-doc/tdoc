@@ -15920,8 +15920,8 @@ function pickedNotifyTarget(t) {
 }
 // A webhook belongs to the account that connected it, whatever list or record
 // names it now: this record outlasts the eight-row account list, and holds the
-// only URL a delivery uses. One connected before the record existed proves
-// itself once by its row on the account's own list, which only tdoc writes.
+// only URL a delivery uses. Nothing else proves ownership: a list row or a doc's
+// agent list can name any id, so a webhook with no record has to be added again.
 const webhookOwnerKey = (accountId, id) => `notify-webhook:${accountId}:${id}`;
 async function ownedWebhook(env, id, account) {
   if (!account || typeof id !== 'string' || !WEBHOOK_ID_RE.test(id)) return null;
@@ -15931,13 +15931,10 @@ async function ownedWebhook(env, id, account) {
     const raw = await env.META.get(webhookOwnerKey(accountId, id));
     if (raw) return JSON.parse(raw);
   }
-  const row = (await accountNotifyTargets(env, account)).find((t) => t.provider === 'webhook' && t.agent_sub === id);
-  if (!row) return null;
-  const hook = { url: row.url, agent_name: row.agent_name };
-  await env.META.put(webhookOwnerKey(group.canonical || account, id), JSON.stringify(hook));
-  return hook;
+  return null;
 }
 const AGENT_UNAVAILABLE = { error: 'agent_unavailable', message: 'That agent is not available here any more. Pick another one and send again.' };
+const WEBHOOK_UNAVAILABLE = { error: 'agent_unavailable', message: 'This webhook is not connected to this account. Add it again under Connectors, or pick another agent.' };
 // The picker's answer with local agents taken out, for a caller who may not
 // drive them. The reason stays honest: nothing bound is still nothing bound.
 // A team agent's rows stay: they are offered to every member on purpose.
@@ -27845,11 +27842,14 @@ const tdocHandlers = {
       // Refused before anything is recorded; the send checks the same again.
       const hook = target && target.provider === 'webhook'
         ? await ownedWebhook(env, target.agent_sub, teamDoc ? localDriver : gate.meta && gate.meta.hosted && gate.meta.hosted.account_id) : null;
-      if (target && target.provider === 'webhook' && !hook) return json(AGENT_UNAVAILABLE, { status: 409 });
+      if (target && target.provider === 'webhook' && !hook) return json(WEBHOOK_UNAVAILABLE, { status: 409 });
+      // From here on a webhook carries its stored URL: this copy is what the
+      // handoff record and the lists below keep, never an address from a row.
+      const stored = hook ? { ...target, url: hook.url, agent_name: target.agent_name || hook.agent_name } : target;
       const rec = await dispatchHandoff(env, {
         slug, meta: gate.meta, commentIds: ids,
         instruction: typeof instruction === 'string' ? instruction.slice(0, 2000) : '',
-        recipient: hook ? { ...target, url: hook.url, agent_name: target.agent_name || hook.agent_name } : target, publicHost: env.PUBLIC_HOST,
+        recipient: stored, publicHost: env.PUBLIC_HOST,
         ...(replyAs ? { replyAs } : {}),
         // A local handoff records who queued it: the daemon re-checks that it
         // was the owner before running anything. For a team agent that is the
@@ -27870,7 +27870,7 @@ const tdocHandlers = {
       // what the picker lists first. Choosing one they once disconnected is
       // connecting it again.
       if (target && ownerAccount && delivered && offered.some((t) => sameNotifyTarget(t, target))) {
-        await touchAccountAgent(env, ownerAccount, target);
+        await touchAccountAgent(env, ownerAccount, stored);
         await unremoveTargets(env, ownerAccount, (k) => k === notifyKey(target));
       }
       // A person who picks a different agent for this doc has chosen who
@@ -27880,7 +27880,7 @@ const tdocHandlers = {
       // (Julie, 2026-10-06).
       if (!(gate.meta && gate.meta.workspace_id) && asked && (target === asked || target === known) && !sameNotifyTarget(asked, resolved.default)
         && offered.some((t) => sameNotifyTarget(t, asked))) {
-        await touchDocAgent(env, slug, target);
+        await touchDocAgent(env, slug, stored);
       }
       return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(replyAs ? { reply_as: replyAs } : {}), ...(skipped.length ? { skipped } : {}) });
     }
@@ -28639,6 +28639,9 @@ const tdocHandlers = {
         delete incoming.feedback;
         delete incoming.trashed_at;
         delete incoming.guest_invited_by;
+        // Who follows a doc is earned by doing work on it (touchDocAgent), and
+        // a row here reaches the owner's lists: never taken from a client.
+        delete incoming.notify_agents;
         const prev = writeGate.meta;
         if (prev && prev.guest_invited_by) incoming.guest_invited_by = prev.guest_invited_by;
         // A checkout can carry a stale access snapshot. Keep the browser's

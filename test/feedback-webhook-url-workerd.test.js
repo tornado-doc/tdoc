@@ -329,17 +329,52 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.deepEqual(await posts(), []);
     });
 
-    await check('a webhook connected before ownership was recorded: its account list says whose it is', async () => {
+    await check('a list row with no ownership record proves nothing, creates nothing, and says to add it again', async () => {
       const old = 'wh_aaaaaaaaaaaaaaaaaaaa';
+      const OLD_URL = 'https://hooks.example/secret-path-old';
       await kv(`notify-webhook-secret:${old}`, 'whsec_old');
       const list = JSON.parse(await kv(`account-notify:${julie.account}`));
-      await kv(`account-notify:${julie.account}`, JSON.stringify([...list, { provider: 'webhook', server_id: 'webhook', agent_sub: old, url: 'https://hooks.example/secret-path-old', agent_name: 'Old' }]));
-      const r = await hand(julie, 'jul-doc', await note(julie, 'jul-doc'), { provider: 'webhook', server_id: 'webhook', agent_sub: old, url: ELSEWHERE });
-      assert.equal(r.body.delivery && r.body.delivery.status, 'delivered', r.text);
-      assert.deepEqual((await posts()).map((p) => p.url), ['https://hooks.example/secret-path-old']);
-      const theirs = await hand(dana, 'dana-doc', await note(dana, 'dana-doc'), { provider: 'webhook', server_id: 'webhook', agent_sub: old, url: ELSEWHERE });
-      assert.equal(theirs.status, 409, theirs.text);
+      await kv(`account-notify:${julie.account}`, JSON.stringify([...list, { provider: 'webhook', server_id: 'webhook', agent_sub: old, url: OLD_URL, agent_name: 'Old' }]));
+      await posts();
+      const named = { provider: 'webhook', server_id: 'webhook', agent_sub: old };
+      const r = await hand(julie, 'jul-doc', await note(julie, 'jul-doc'), named);
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.error, 'agent_unavailable');
+      assert.match(r.body.message, /Add it again/);
+      const tested = await call('/api/me/connectors/test', { method: 'POST', cookie, body: named });
+      assert.equal(tested.body.delivery.status, 'failed', tested.text);
+      assert.equal(tested.body.delivery.error, 'webhook_secret_missing');
       assert.deepEqual(await posts(), []);
+      assert.equal(await kv(`notify-webhook:${julie.account}:${old}`), null, 'no record was created');
+      await kv(`account-notify:${julie.account}`, JSON.stringify(list));
+    });
+
+    await check('notify_agents on an upload is dropped; the stored value stands', async () => {
+      const planted = [{ provider: 'webhook', server_id: 'webhook', agent_sub: botA.agent_sub, url: ELSEWHERE, agent_name: 'Planted' }];
+      const publish = (name, version) => call('/api/upload', { method: 'POST', token: julie.token, body: { slug: name, version, html: `<h1>${name}</h1><p>a sentence v${version}</p>`, meta: { title: name, notify_agents: planted, access: { visibility: 'private', allowed_users: [] } } } });
+      assert.equal((await publish('planted-new', 1)).status, 200);
+      assert.equal(JSON.parse(await kv('meta:planted-new')).notify_agents, undefined, 'first publish');
+      const followed = [{ provider: 'webhook', server_id: 'webhook', agent_sub: botB.agent_sub, url: HOOK_B, agent_name: 'Bot B' }];
+      await kv('meta:planted-new', JSON.stringify({ ...JSON.parse(await kv('meta:planted-new')), notify_agents: followed }));
+      const again = await publish('planted-new', 2);
+      assert.equal(again.status, 200, again.text);
+      assert.deepEqual(JSON.parse(await kv('meta:planted-new')).notify_agents, followed, 'republish keeps what the server stored');
+    });
+
+    await check('a handoff writes the stored URL to the lists, not one from a doc row', async () => {
+      const before = await kv('meta:jul-doc');
+      const planted = { provider: 'webhook', server_id: 'webhook', agent_sub: botB.agent_sub, url: ELSEWHERE, agent_name: 'Bot B' };
+      await kv('meta:jul-doc', JSON.stringify({ ...JSON.parse(before), notify_agents: [planted] }));
+      await posts();
+      const r = await call('/api/notify/handoff', { method: 'POST', cookie, body: { slug: 'jul-doc', comment_ids: [await note(julie, 'jul-doc')], recipient: named(botB) } });
+      assert.equal(r.body.delivery && r.body.delivery.status, 'delivered', r.text);
+      assert.deepEqual((await posts()).map((p) => p.url), [HOOK_B]);
+      const list = JSON.parse(await kv(`account-notify:${julie.account}`)).find((t) => t.agent_sub === botB.agent_sub);
+      assert.equal(list.url, HOOK_B, 'the account list');
+      const connectors = await call('/api/me/connectors', { cookie });
+      assert.ok(!connectors.text.includes('somewhere-else'), connectors.text);
+      assert.equal(JSON.parse(await kv('handoffs:jul-doc'))[0].recipient.url, HOOK_B, 'the handoff record');
+      await kv('meta:jul-doc', before);
     });
 
     await check('Resend: a stored record naming somebody else\'s webhook sends nothing', async () => {

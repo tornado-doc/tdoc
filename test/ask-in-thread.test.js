@@ -149,6 +149,7 @@ const MODEL = 'https://model.invalid/v1';
     const sub = 'wh_' + 'a'.repeat(20);
     await env.META.put(`account-notify:${reader.account_id}`, JSON.stringify([{ provider: 'webhook', agent_sub: sub, url: 'https://hook.example/tdoc', agent_name: 'my bot' }]));
     await env.META.put(`notify-webhook-secret:${sub}`, 'secret');
+    await env.META.put(`notify-webhook:${reader.account_id}:${sub}`, JSON.stringify({ url: 'https://hook.example/tdoc', agent_name: 'my bot' }));
     const before = globalThis.fetch;
     const sent = [];
     globalThis.fetch = async (u, init = {}) => { sent.push({ url: String(u), body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); };
