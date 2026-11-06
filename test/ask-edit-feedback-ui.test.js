@@ -155,9 +155,9 @@ async function startServer(worker, env) {
       // The agent answers with an edit, naming the comment, as tdoc-propose does.
       const proposed = await api(`/api/docs/${SLUG}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'March 14', replace: 'March 21', comment_id: v.sends[0].body.comment_ids[0] }], summary: 'New date' } });
       assert.equal(proposed.status, 200, JSON.stringify(proposed.body));
-      await v.page.locator('#tdoc-comment-layer .tdoc-fix-ai', { hasText: 'Review fix' }).first().waitFor({ timeout: 12000 });
+      await v.page.locator('#tdoc-comment-layer .tdoc-review-suggestion', { hasText: 'Review suggestion' }).first().waitFor({ timeout: 12000 });
       await shot(v.page, 'review-fix-card-390.png');
-      await v.page.locator('#tdoc-comment-layer .tdoc-fix-ai', { hasText: 'Review fix' }).first().tap();
+      await v.page.locator('#tdoc-comment-layer .tdoc-review-suggestion', { hasText: 'Review suggestion' }).first().tap();
       await v.page.locator('.tdoc-suggest-bar').waitFor({ timeout: 5000 });
       await shot(v.page, 'review-bar-390.png');
       assert.equal(await v.page.frameLocator('iframe').locator('ins.tdoc-diff-ins').first().innerText(), '21');
@@ -185,11 +185,13 @@ async function startServer(worker, env) {
       const v = await open({ phone: true });
       await replyInDrawer(v.page, /Claude Code/, fresh);
       await sendReply(v.page);
-      await v.page.locator('#tdoc-comment-layer .tdoc-fix-ai', { hasText: 'Fixing' }).first().waitFor({ timeout: 5000 });
+      // The drawer sits over the review bar on a phone: the page's state says it.
+      const working = () => v.page.frameLocator('iframe').locator('.tdoc-sugg-pill').first();
+      await working().waitFor({ timeout: 5000 });
       const id = v.sends[0].body.comment_ids[0];
       const answered = await api('/api/agent/reply', { method: 'POST', token, body: { slug: SLUG, parent_id: id, text: 'It already reads that way.', status: 'answered', agent_login: 'claude', agent_name: 'claude' } });
       assert.equal(answered.status, 200, JSON.stringify(answered.body));
-      await v.page.locator('#tdoc-comment-layer .tdoc-fix-ai', { hasText: 'Fixing' }).first().waitFor({ state: 'detached', timeout: 15000 });
+      await working().waitFor({ state: 'detached', timeout: 15000 });
       const proposed = await api(`/api/docs/${SLUG}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'two renewals', replace: 'three renewals' }] } });
       assert.equal(proposed.status, 200, JSON.stringify(proposed.body));
       await v.page.frameLocator('iframe').locator('ins.tdoc-diff-ins', { hasText: 'three' }).waitFor({ timeout: 10000 });

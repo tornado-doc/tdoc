@@ -51,7 +51,7 @@ export function AgentMenuItems({ choices, ai = null, current = null, onPick,
   return (
     <>
       {visible.map(renderRow)}
-      {more.length ? <AppSubmenu trigger="More agents" className="tdoc-agent-menu-more">
+      {more.length ? <AppSubmenu trigger="More agents" className="tdoc-agent-menu-more" popupClassName="tdoc-agent-menu">
         {more.map(renderRow)}
       </AppSubmenu> : null}
       {disabledChoices.map((agent) => <AppMenuItem key={`disabled:${targetKey(agent)}`} disabled title="You are a guest. Team agents are for members." className="tdoc-agent-menu-item">

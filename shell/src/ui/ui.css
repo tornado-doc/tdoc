@@ -360,6 +360,20 @@ a.ui-menu-item:visited {
   overscroll-behavior: contain;
   box-sizing: border-box;
 }
+/* Every list of agents, wherever it opens: the typed @ list, the pill's menu,
+   More agents, Send to agent. One height and one way to scroll; never past the
+   room the placement left (--available-height: Base UI's positioner, or
+   MentionField's). mention-field.jsx MENU_MAX_HEIGHT is this 240px, for which
+   side of the box to open on (test/comment-one-behaviour.test.js holds them together). */
+.tdoc-mention-menu,
+.ui-menu-popup.tdoc-agent-menu,
+.ui-menu-popup.ui-combo-popup {
+  max-height: min(240px, var(--available-height, 100vh));
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .ui-select-trigger { display: flex; align-items: center; text-align: left; }
 .ui-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-select-item { overflow: hidden; text-overflow: ellipsis; }
@@ -1437,3 +1451,17 @@ a.ui-menu-item:visited {
 .tdoc-invite-status { font-size: 12px; color: var(--td-muted); }
 .tdoc-modal .manage-hint.tdoc-invite-error { color: var(--td-danger); }
 #tdoc-fb-share-status:empty { display: none; }
+
+/* SideResizeHandle (side-resize.jsx): the left edge of a panel fixed to the
+   right. A wider grip than the line it shows. */
+.ui-side-resize {
+  position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; z-index: 1;
+  cursor: col-resize; touch-action: none; user-select: none; -webkit-user-select: none; outline: none;
+}
+.ui-side-resize::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent;
+  transition: background .12s;
+}
+.ui-side-resize:hover::after,
+.ui-side-resize:active::after,
+.ui-side-resize:focus-visible::after { background: var(--td-accent); }

@@ -21,10 +21,9 @@ const personFace = (person) => avatarFor({ login: person.login, avatar_url: pers
 // The doc's own people answer first and instantly. GitHub's search is only
 // reached when they do not match — its unauthenticated limit is 10/min per
 // visitor and the Share panel's invite field spends from the same budget.
-// Kept in step with `.tdoc-mention-menu`'s max-height in chrome.css: the
-// placement needs to know how tall the menu can get to decide which side of
-// the textarea it fits on.
-const MENU_MAX_HEIGHT = 184;
+// The height of every agent list (ui.css): the placement needs to know how tall
+// the menu can get to decide which side of the textarea it fits on.
+const MENU_MAX_HEIGHT = 240;
 
 // The agents this viewer can hand comments to, in the Send to agent
 // dropdown's order (orderedAgentChoices), and the one it preselects. Empty
@@ -145,10 +144,13 @@ export function MentionField({
       if (!box) return;
       const rect = box.getBoundingClientRect();
       const below = window.innerHeight - rect.bottom;
+      const above = below < MENU_MAX_HEIGHT + 8 && rect.top > below;
       setMenuBox({
         left: Math.round(rect.left),
         width: Math.round(rect.width),
-        ...(below < MENU_MAX_HEIGHT + 8 && rect.top > below
+        // What ui.css's agent list rule stops at, so it stays on the screen.
+        '--available-height': `${Math.max(80, Math.round((above ? rect.top : below) - 12))}px`,
+        ...(above
           ? { bottom: Math.round(window.innerHeight - rect.top + 4) }
           : { top: Math.round(rect.bottom + 4) }),
       });
