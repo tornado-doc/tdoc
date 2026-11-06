@@ -249,9 +249,11 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
     const list = composerAgents({ canSendToAgent: false, mine: { ...state, tdoc_ai: true } });
     assert(byRelevance(list)[0].agent_sub === 'mac_codex', subs(byRelevance(list)).join());
     assert(byRelevance(list).at(-1).tdoc_ai, 'tdoc AI is last');
-    // And nothing of the owner's in the answer.
+    // And nothing of the owner's in the answer: each row names the reader, its
+    // own owner (what lets a reply box tell it answered a thread), nobody else.
     const raw = (await call(env, '/api/docs/here/my-agent', { cookie: reader.cookie })).text;
-    assert(!raw.includes('owner'), `owner named in: ${raw}`);
+    assert(JSON.parse(raw).agents.every((x) => x.owner && x.owner.key === 'reader'), `someone else's row: ${raw}`);
+    assert(!raw.replaceAll('"owner":', '').includes('owner'), `owner named in: ${raw}`);
     // The asker's question stays theirs: the owner's rows do not move for it.
     assert(!row(rowsOf(await targets(env, owner, 'here')), 'mac_codex').used_here_at, 'the reader\'s ask reached the owner');
   });

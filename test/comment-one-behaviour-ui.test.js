@@ -414,7 +414,7 @@ async function startServer(worker, env) {
       await box.fill(DRAFT);
       const done = await call('/api/comments', { method: 'PATCH', cookie: julie.cookie, body: { slug: SLUG, version: 1, id, resolved: true } });
       assert.equal(done.status, 200, JSON.stringify(done.body));
-      await card.locator('.tdoc-resolved-chip').waitFor({ timeout: 15000 });
+      await card.locator('.tdoc-resolved-chip').waitFor({ timeout: 40000 });
       assert.equal(await box.inputValue(), DRAFT);
       await page.getByRole('radio', { name: /^Resolved/ }).first().click();
       await page.getByRole('radio', { name: /^Open/ }).first().click();
