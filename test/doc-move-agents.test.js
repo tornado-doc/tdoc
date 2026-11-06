@@ -558,6 +558,192 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(list[0].agent_sub === ANN_AGENT.agent_sub && list.length === 2, `order: ${JSON.stringify(list)}`);
   });
 
+  // Ann has no linked agent. Her connected server lists two, and the one she
+  // picks through the widget is not the top row.
+  const AAA_BEN = raftAgent('bens-server', 'aaa-ben', 'aaa-ben');
+  const ZZZ_OWN = raftAgent('bens-server', 'zzz-own', 'zzz-own');
+  async function pickWorld() {
+    const w = await world();
+    await w.env.META.delete(`account-notify:${w.ann.account_id}`);
+    await w.env.META.put(`account-raft-servers:${w.ann.account_id}`, JSON.stringify([{ server_id: AAA_BEN.server_id, server_slug: AAA_BEN.server_slug, installation_id: 'inst' }]));
+    await w.env.META.put(`raft-directory:${AAA_BEN.server_id}`, JSON.stringify([AAA_BEN, ZZZ_OWN]));
+    const space = await w.feedbackComment();
+    const another = async () => (await w.call('/api/comments', { method: 'POST', token: space.token, body: { slug: space.slug, version: 1, text: `fix ${Math.random()}`, anchor: { kind: 'product', url: 'https://app.example/', selector: '#x', tag: 'div', text: 'x' } } })).body.id;
+    const tokenSend = async (recipient, slug = space.slug, token = space.token, ids = null) => {
+      raftCalls = [];
+      const r = await w.call('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: ids || [await another()], ...(recipient ? { recipient } : {}) } });
+      assert(r.status === 200, r.text);
+      return r;
+    };
+    const who = () => raftCalls.filter((c) => c.url.endsWith('/api/oauth/requests/agent')).map((c) => c.body.agentName).join();
+    return { ...w, space, another, tokenSend, who };
+  }
+
+  await t('a widget pick sticks: the next unaddressed token Send goes to the agent just picked', async () => {
+    const w = await pickWorld();
+    const first = await w.call(`/api/notify/targets?slug=${w.space.slug}`, { token: w.space.token });
+    assert(first.body.default.agent_sub === 'aaa-ben', `the top row before any pick: ${first.text}`);
+    await w.tokenSend(ZZZ_OWN);
+    assert(w.who() === 'zzz-own', `pick went to ${w.who()}`);
+    await w.tokenSend();
+    assert(w.who() === 'zzz-own', `next unaddressed went to ${w.who()}`);
+    const after = await w.call(`/api/notify/targets?slug=${w.space.slug}`, { token: w.space.token });
+    assert(after.body.default.agent_sub === 'zzz-own', `the widget preselects it: ${after.text}`);
+    // Picking another moves it.
+    await w.tokenSend(AAA_BEN);
+    await w.tokenSend();
+    assert(w.who() === 'aaa-ben', `after a new pick: ${w.who()}`);
+  });
+
+  await t('a widget pick that was not delivered does not stick', async () => {
+    const w = await pickWorld();
+    const realFetchNow = globalThis.fetch;
+    globalThis.fetch = async (input, init) => (String(input && input.url ? input.url : input).endsWith('/api/oauth/requests/agent') ? new Response('down', { status: 500 }) : realFetchNow(input, init));
+    const r = await w.tokenSend(ZZZ_OWN);
+    globalThis.fetch = realFetchNow;
+    assert(r.body.delivery.status === 'failed', r.text);
+    await w.tokenSend();
+    assert(w.who() === 'aaa-ben', `went to ${w.who()}`);
+  });
+
+  await t('a widget pick is recency, not a default, for the owner on tdoc itself', async () => {
+    const w = await pickWorld();
+    await w.tokenSend(ZZZ_OWN);
+    const body = await w.targets(w.ann, w.space.slug);
+    assert(!body.default, `default: ${JSON.stringify(body.default)}`);
+    assert(body.candidates[0].agent_sub === 'zzz-own' && body.candidates[0].last_touched, `first: ${JSON.stringify(body.candidates)}`);
+    assert(!body.candidates[0].used_here_at, 'no used-here claim');
+    const c = await w.another();
+    raftCalls = [];
+    const un = await w.send(w.ann, w.space.slug, [c]);
+    assert(un.body.delivery.error === 'no_recipient', `Ann's unaddressed Send: ${un.text}`);
+  });
+
+  await t('a widget pick is not proof: ownerRecordedAgent is not satisfied', async () => {
+    const w = await pickWorld();
+    await w.tokenSend(ZZZ_OWN);
+    const m = await w.meta(w.space.slug);
+    assert(m.feedback_pick && m.feedback_pick.agent.agent_sub === 'zzz-own', `recorded: ${JSON.stringify(m.feedback_pick)}`);
+    const records = JSON.parse(await w.env.META.get(`handoffs:${w.space.slug}`));
+    assert(records.every((h) => !h.by), `no sender: ${JSON.stringify(records)}`);
+    assert(!(m.notify_agents || []).some((t) => t.agent_sub === 'zzz-own'), 'nothing on notify_agents');
+    // With the server gone without a disconnect, only proof would keep it Ann's.
+    await w.env.META.put(`account-raft-servers:${w.ann.account_id}`, '[]');
+    const named = await w.send(w.ann, w.space.slug, [records[0].comment_ids[0]], ZZZ_OWN);
+    assert(named.status === 409 && named.body.error === 'agent_left_doc', `${named.status} ${named.text}`);
+  });
+
+  await t('a widget pick does not join the account list', async () => {
+    const w = await pickWorld();
+    await w.tokenSend(ZZZ_OWN);
+    await w.tokenSend();
+    const list = JSON.parse((await w.env.META.get(`account-notify:${w.ann.account_id}`)) || '[]');
+    assert(!list.length, `account list: ${JSON.stringify(list)}`);
+  });
+
+  await t('a widget pick does not carry to other docs', async () => {
+    const w = await pickWorld();
+    await w.tokenSend(ZZZ_OWN);
+    const made = await w.call('/api/feedback/connect', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { origin: 'https://other.example' } });
+    assert(made.status === 200 && made.body.slug !== w.space.slug, made.text);
+    const other = await w.call(`/api/notify/targets?slug=${made.body.slug}`, { token: made.body.token });
+    assert(other.body.default.agent_sub === 'aaa-ben', `other space: ${other.text}`);
+    await w.upload(w.ann, 'elsewhere', 1);
+    const body = await w.targets(w.ann, 'elsewhere');
+    assert(!body.default && w.rows(body).every((t) => !t.last_touched), `other doc: ${JSON.stringify(body)}`);
+    const dup = await w.call('/api/doc/duplicate', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { slug: w.space.slug, version: 1 } });
+    assert(dup.status === 200 && dup.body.slug && !(await w.meta(dup.body.slug)).feedback_pick, `duplicate: ${dup.text}`);
+  });
+
+  await t('a widget pick does not undo a disconnect', async () => {
+    const w = await pickWorld();
+    await w.tokenSend(ZZZ_OWN);
+    const off = await w.call('/api/me/connectors/remove', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { provider: 'raft', server_id: ZZZ_OWN.server_id } });
+    assert(off.status === 200, off.text);
+    const before = await w.env.META.get(`account-notify-removed:${w.ann.account_id}`);
+    const un = await w.tokenSend();
+    assert(!w.who() && un.body.delivery.error === 'no_recipient', `unaddressed: ${w.who()} ${un.text}`);
+    const named = await w.tokenSend(ZZZ_OWN);
+    assert(!w.who() && named.body.delivery.error === 'no_recipient', `named: ${w.who()} ${named.text}`);
+    assert(await w.env.META.get(`account-notify-removed:${w.ann.account_id}`) === before, 'the removal stands');
+    const body = await w.targets(w.ann, w.space.slug);
+    assert(!w.rows(body).length, `offered: ${JSON.stringify(body)}`);
+  });
+
+  await t('a widget pick does not make a left-behind agent the default after a doc leaves a team', async () => {
+    const w = await pickWorld();
+    // zzz-own stands for Ben's agent here: aaa-ben, the top row, is the other one.
+    await w.link(w.ben, ZZZ_OWN);
+    await w.tokenSend(ZZZ_OWN);
+    await w.tokenSend();
+    assert(w.who() === 'zzz-own', 'stuck at first');
+    await w.move(w.ann, w.space.slug, w.team.id);
+    const stored = await w.meta(w.space.slug);
+    assert(stored.workspace_id === w.team.id, 'in the team');
+    const c = await w.comment(w.ben, w.space.slug);
+    const rep = await w.call('/api/agent/reply', { method: 'POST', token: w.ben.token, headers: w.claim(ZZZ_OWN), body: { slug: w.space.slug, parent_id: c, text: 'on it', status: 'answered', agent_login: 'claude' } });
+    assert(rep.status === 200, rep.text);
+    await w.move(w.ann, w.space.slug, null);
+    const body = await w.call(`/api/notify/targets?slug=${w.space.slug}`, { token: w.space.token });
+    assert(body.status === 200 && body.body.default.agent_sub === 'aaa-ben', `token default: ${body.text}`);
+    await w.tokenSend();
+    assert(w.who() === 'aaa-ben', `left-behind agent got it: ${w.who()}`);
+    const owner = await w.targets(w.ann, w.space.slug);
+    assert(!owner.default, `Ann's default: ${JSON.stringify(owner.default)}`);
+    const row = w.rows(owner).find((t) => t.agent_sub === 'zzz-own');
+    assert(row && !row.last_touched && !row.owner, `no recency, no label: ${JSON.stringify(row)}`);
+  });
+
+  await t('the owner\'s later Send on tdoc beats an earlier widget pick at the widget', async () => {
+    const w = await pickWorld();
+    await w.tokenSend(AAA_BEN);
+    await new Promise((r) => setTimeout(r, 5));
+    const c = await w.another();
+    const sent = await w.send(w.ann, w.space.slug, [c], ZZZ_OWN);
+    assert(sent.status === 200 && sent.body.delivery.status === 'delivered', sent.text);
+    await w.tokenSend();
+    assert(w.who() === 'zzz-own', `went to ${w.who()}`);
+  });
+
+  await t('a widget send keeps the owner label on an unlinked directory agent, and gives Ben\'s none', async () => {
+    const w = await pickWorld();
+    const label = async () => Object.fromEntries(w.rows(await w.targets(w.ann, w.space.slug)).map((t) => [t.agent_sub, t.owner && t.owner.display]));
+    const before = await label();
+    assert(before['zzz-own'] === 'ann', `before: ${JSON.stringify(before)}`);
+    await w.tokenSend(ZZZ_OWN);
+    await w.tokenSend();
+    const after = await label();
+    assert(after['zzz-own'] === 'ann', `after: ${JSON.stringify(after)}`);
+    assert(after['aaa-ben'] === 'ann', 'an untouched row is as it was');
+    // A record from somebody else's work still names it, and a widget send does not launder that.
+    const m = await w.meta(w.space.slug);
+    m.notify_agents = [{ ...AAA_BEN, last_touched: '' }];
+    await w.env.META.put(`meta:${w.space.slug}`, JSON.stringify(m));
+    await w.tokenSend(AAA_BEN);
+    const later = await label();
+    assert(!later['aaa-ben'], `Ben's agent labelled Ann's: ${JSON.stringify(later)}`);
+    assert(later['zzz-own'] === 'ann', `hers stays: ${JSON.stringify(later)}`);
+  });
+
+  await t('linking clears a removal across a merged account, so the agent shows and can be named', async () => {
+    const w = await world();
+    const otherId = 'acct_ann_other';
+    const group = JSON.stringify({ canonical: w.ann.account_id, ids: [w.ann.account_id, otherId], actor_keys: [] });
+    await w.env.META.put(`account-group:${w.ann.account_id}`, group);
+    await w.env.META.put(`account-group:${otherId}`, group);
+    const X = raftAgent('merged-srv', 'x-agent', 'xavier');
+    // The disconnect was recorded under the account's other half.
+    await w.env.META.put(`account-notify-removed:${otherId}`, JSON.stringify([`raft-server:${X.server_id}`]));
+    await w.link(w.ann, X);
+    assert(!JSON.parse(await w.env.META.get(`account-notify-removed:${otherId}`)).length, 'still removed under the other id');
+    await w.upload(w.ann, 'mine', 1);
+    const body = await w.targets(w.ann, 'mine');
+    assert(w.rows(body).some((t) => t.agent_sub === 'x-agent'), `offered: ${JSON.stringify(body)}`);
+    const c = await w.comment(w.ann, 'mine');
+    const r = await w.send(w.ann, 'mine', [c], X);
+    assert(r.status === 200 && r.body.delivery.status === 'delivered', `${r.status} ${r.text}`);
+  });
+
   await t('sole-author rule: a directory row this doc\'s records name is no default of the owner\'s, and not labelled hers', async () => {
     const w = await world();
     await w.env.META.delete(`account-notify:${w.ann.account_id}`);

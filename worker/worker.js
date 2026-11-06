@@ -16240,6 +16240,21 @@ async function touchDocAgent(env, slug, target) {
   return true;
 }
 
+// A person picked an agent through a feedback token, and it was delivered. The
+// comment after it should go to the same agent, so the doc remembers. It stays
+// a field of its own, read only by resolveNotifyTargets for this doc, and not an
+// entry on notify_agents or a `by`: a page tdoc does not control may hold that
+// token, so this must never say the agent is the owner's (ownerRecordedAgent).
+// Whether the pick still counts is decided when it is read: by then the agent
+// may be disconnected, or the doc's records may name it as somebody else's.
+async function recordFeedbackPick(env, slug, target) {
+  const agent = notifyTargetIdentity(target);
+  const meta = agent ? await loadDocMeta(env, slug) : null;
+  if (!meta) return false;
+  await putDocMetaJson(env, slug, JSON.stringify({ ...meta, feedback_pick: { agent, at: new Date().toISOString() } }));
+  return true;
+}
+
 // The account fallback is automatic too: whichever connected agent most
 // recently did real work becomes the first choice for a doc that has never
 // had an agent. This is routing state, not a setting a person should have to
@@ -16479,7 +16494,7 @@ async function accountStillOnDoc(env, meta, accountIds) {
 
 // doc first, account second. Returns what the handoff panel renders: one
 // preselected recipient, the other recent ones as switchable candidates.
-async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs = null) {
+async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs = null, feedbackDoor = false) {
   const meta = await loadDocMeta(env, slug);
   const byRecency = (a, b) => String(b.last_touched || '').localeCompare(String(a.last_touched || ''));
   const ownerAccount = meta && meta.hosted && meta.hosted.account_id;
@@ -16529,18 +16544,32 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
   // A handoff from before they named a sender is the owner's only if its agent is.
   const ownerHandoff = (h) => (!ownerIds ? true : h.by ? ownerIds.includes(h.by)
     : linked.some((x) => sameNotifyTarget(x, h.recipient)) || ownerRecordedAgent(meta, allHandoffs, ownerIds, h.recipient));
-  const docHandoff = lastDeliveredHandoffAgent(allHandoffs.filter((h) => h && ownerHandoff(h)));
+  const ownerHandoffs = allHandoffs.filter((h) => h && ownerHandoff(h));
+  const docHandoff = lastDeliveredHandoffAgent(ownerHandoffs);
   const evidenced = [publisher, docHandoff]
     .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
   // A directory row is usually just an agent on a server the owner connected,
   // perhaps their only one. One this doc's records name, that they never linked
   // or used here, is somebody who worked on it: not the sole author's agent, and
-  // not to be labelled the owner's (withTargetOwner).
-  const notOwnerAgent = (t) => t.source === 'directory' && docRecordsAgent(meta, allHandoffs, t)
+  // not to be labelled the owner's (withTargetOwner). What a feedback token sent
+  // is left out: it says nothing about whose the agent is, either way.
+  const workHandoffs = allHandoffs.filter((h) => h && !h.via_feedback);
+  const notOwnerAgent = (t) => t.source === 'directory' && docRecordsAgent(meta, workHandoffs, t)
     && !linked.some((x) => sameNotifyTarget(x, t)) && !ownerRecordedAgent(meta, allHandoffs, ownerIds, t);
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
     && !writer.agent && writer.account_id === viewerAccountId && offered.length === 1 && !notOwnerAgent(offered[0]) ? offered[0] : null;
-  const preferred = evidenced || soleAuthorAgent;
+  // What the widget last picked here (recordFeedbackPick): recency on this doc,
+  // and at the widget, where it was picked, what its next Send means, unless the
+  // owner has sent to another since. Never a default on tdoc itself, and never
+  // for an agent this doc's records say is somebody else's.
+  const pick = meta && meta.feedback_pick;
+  const pickIndex = pick ? offered.findIndex((t) => sameNotifyTarget(t, pick.agent)) : -1;
+  const picked = pickIndex >= 0 && !notOwnerAgent(offered[pickIndex]) ? offered[pickIndex] : null;
+  if (picked && String(pick.at) > String(picked.last_touched || '')) offered[pickIndex] = { ...picked, last_touched: pick.at };
+  const lastSent = ownerHandoffs.find((h) => h.recipient && h.delivery?.status && h.delivery.status !== 'failed');
+  const widgetPick = feedbackDoor && picked && !(publisher && offered.some((t) => sameNotifyTarget(t, publisher)))
+    && (!lastSent || String(pick.at) >= String(lastSent.at)) ? picked : null;
+  const preferred = widgetPick || evidenced || soleAuthorAgent;
   offered.sort(byRecency);
   const ranked = offered.map((t) => ({
     ...t,
@@ -16709,7 +16738,7 @@ async function notifyTargetsFor(env, slug, gate, localDriver = null, handoffs = 
   if (!(gate.meta && gate.meta.workspace_id)) {
     const hosted = (gate.meta && gate.meta.hosted) || {};
     const owner = await agentOwner(env, hosted.account_id, hosted.owner_key || hosted.github_login);
-    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug, localDriver, handoffs), owner, 'personal');
+    const resolved = withTargetOwner(await resolveNotifyTargets(env, slug, localDriver, handoffs, Boolean(gate.session && gate.session.feedback)), owner, 'personal');
     return resolved;
   }
   // The team's own agents, when the team agent wrote this doc; an admin's
@@ -16947,7 +16976,7 @@ function handoffEvent({ slug, docTitle, handoffId, commentIds, instruction, publ
   };
 }
 
-async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recipient, publicHost, by = null, teamAgent = null, sentBy = null, replyAs = null }) {
+async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recipient, publicHost, by = null, teamAgent = null, sentBy = null, replyAs = null, viaFeedback = false }) {
   const handoffId = `h_${Date.now()}_${rand(3)}`;
   const target = normalizeNotifyTarget(recipient);
   const event = handoffEvent({
@@ -16969,6 +16998,7 @@ async function dispatchHandoff(env, { slug, meta, commentIds, instruction, recip
     // sent it: `by` is the agent (its daemon's queue), not a person.
     ...(teamAgent ? { team_agent: { id: teamAgent.id, name: teamAgent.name } } : {}),
     ...(sentBy ? { sent_by: sentBy } : {}),
+    ...(viaFeedback ? { via_feedback: true } : {}),
   });
   // A local agent is not pushed to; the daemon finds the work in its
   // account's pending index.
@@ -27756,11 +27786,7 @@ const tdocHandlers = {
         ...existing.filter(t => !sameNotifyTarget(t, target)),
       ].slice(0, NOTIFY_AGENTS_MAX);
       await env.META.put(`account-notify:${auth.actor.account_id}`, JSON.stringify(next));
-      const removed = await accountRemovedTargets(env, auth.actor.account_id);
-      const clearedServer = removed.delete(`raft-server:${target.server_id}`);
-      if (removed.delete(notifyKey(target)) || clearedServer) {
-        await env.META.put(`account-notify-removed:${auth.actor.account_id}`, JSON.stringify([...removed]));
-      }
+      await unremoveTargets(env, auth.actor.account_id, (k) => k === notifyKey(target) || k === `raft-server:${target.server_id}`);
       return json({ ok: true, target, targets: next.length });
     }
 
@@ -27925,6 +27951,7 @@ const tdocHandlers = {
         // the owner's. With no sender it counts only if the agent already is.
         by: viaTeamAgent ? viaTeamAgent.id : teamDoc ? localDriver : viaFeedbackToken ? null : (localDriver || (isLocalTarget(target) ? null : gate.meta?.hosted?.account_id || null)),
         ...(viaTeamAgent ? { teamAgent: viaTeamAgent, sentBy: caller.accountId } : {}),
+        viaFeedback: viaFeedbackToken,
       });
       // The first agent a person picks, when they had no default yet, is
       // their default from now on — so @agent has somewhere to go next time.
@@ -27951,9 +27978,13 @@ const tdocHandlers = {
       // until someone else is picked or another agent does work on it. Without
       // this the next @agent went back to whoever touched the doc last
       // (Julie, 2026-10-06).
-      if (!(gate.meta && gate.meta.workspace_id) && asked && (target === asked || target === known) && !sameNotifyTarget(asked, resolved.default)
+      if (!(gate.meta && gate.meta.workspace_id) && asked && (target === asked || target === known)
         && offered.some((t) => sameNotifyTarget(t, asked))) {
-        await touchDocAgent(env, slug, target);
+        if (viaFeedbackToken) {
+          if (delivered) await recordFeedbackPick(env, slug, target);
+        } else if (!sameNotifyTarget(asked, resolved.default)) {
+          await touchDocAgent(env, slug, target);
+        }
       }
       return json({ ok: true, handoff_id: rec.handoff_id, sent: ids.length, delivery: rec.delivery, ...(replyAs ? { reply_as: replyAs } : {}), ...(skipped.length ? { skipped } : {}) });
     }
