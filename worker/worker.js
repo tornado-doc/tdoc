@@ -1239,13 +1239,20 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
 // existed" read the record directly.
 async function loadDocRecord(env, slug) {
   try {
-    const raw = await env.META.get(`meta:${slug}`);
-    if (!raw) return null;
-    const meta = JSON.parse(raw);
-    return meta && typeof meta === 'object' ? meta : null;
+    return await readDocRecord(env, slug);
   } catch {
     return null;
   }
+}
+
+// The same read for the one caller that must tell "no such doc" from "could not
+// read it": null is missing, a read that failed (or a record that will not
+// parse) throws.
+async function readDocRecord(env, slug) {
+  const raw = await env.META.get(`meta:${slug}`);
+  if (!raw) return null;
+  const meta = JSON.parse(raw);
+  return meta && typeof meta === 'object' ? meta : null;
 }
 
 async function loadDocMeta(env, slug) {
@@ -16416,16 +16423,22 @@ async function isDocOwnerAgent(env, meta, handoffs, t) {
     || ownerRecordedAgent(meta, handoffs, (await accountGroup(env, owner)).ids, t);
 }
 
+// Does this doc's own history mention the agent, whoever's it was?
+function docRecordsAgent(meta, handoffs, t) {
+  return (Array.isArray(meta && meta.notify_agents) ? meta.notify_agents : []).some((x) => sameNotifyTarget(normalizeNotifyTarget(x), t))
+    || (Array.isArray(meta && meta.versions) ? meta.versions : []).some((v) => v && sameNotifyTarget(v.publisher_agent, t))
+    || (handoffs || []).some((h) => h && sameNotifyTarget(h.recipient, t));
+}
+
 // An agent known here only from the doc's records, that is not the owner's now:
 // what a picker opened before a move, or before a disconnect, could still name.
 // An agent the owner names that no record mentions is theirs to name, as ever.
 async function agentLeftPersonalDoc(env, meta, handoffs, t) {
   const owner = meta && meta.hosted && meta.hosted.account_id;
   if (!owner || !t) return false;
-  const recorded = (Array.isArray(meta.notify_agents) ? meta.notify_agents : []).some((x) => sameNotifyTarget(normalizeNotifyTarget(x), t))
-    || (Array.isArray(meta.versions) ? meta.versions : []).some((v) => v && sameNotifyTarget(v.publisher_agent, t))
-    || handoffs.some((h) => h && sameNotifyTarget(h.recipient, t));
-  return recorded && !await isDocOwnerAgent(env, meta, handoffs, t);
+  // A disconnect stands whether or not this doc ever mentioned the agent.
+  if (await accountDisconnectedAgent(env, owner, t)) return true;
+  return docRecordsAgent(meta, handoffs, t) && !await isDocOwnerAgent(env, meta, handoffs, t);
 }
 const AGENT_LEFT_DOC = { error: 'agent_left_doc', message: 'That agent is not connected to the owner of this doc any more. Choose another agent.' };
 
@@ -16501,11 +16514,21 @@ async function resolveNotifyTargets(env, slug, viewerAccountId = null, handoffs 
   const docHandoff = lastDeliveredHandoffAgent(allHandoffs.filter((h) => h && ownerHandoff(h)));
   const evidenced = [publisher, docHandoff]
     .map((agent) => offered.find((t) => sameNotifyTarget(t, agent))).find(Boolean) || null;
+  // A directory row is usually just an agent on a server the owner connected,
+  // perhaps their only one. One this doc's records name, that they never linked
+  // or used here, is somebody who worked on it: not the sole author's agent, and
+  // not to be labelled the owner's (withTargetOwner).
+  const notOwnerAgent = (t) => t.source === 'directory' && docRecordsAgent(meta, allHandoffs, t)
+    && !linked.some((x) => sameNotifyTarget(x, t)) && !ownerRecordedAgent(meta, allHandoffs, ownerIds, t);
   const soleAuthorAgent = !evidenced && writer?.kind === 'agent' && !writer.legacy
-    && !writer.agent && writer.account_id === viewerAccountId && offered.length === 1 ? offered[0] : null;
+    && !writer.agent && writer.account_id === viewerAccountId && offered.length === 1 && !notOwnerAgent(offered[0]) ? offered[0] : null;
   const preferred = evidenced || soleAuthorAgent;
   offered.sort(byRecency);
-  const ranked = offered.map((t) => ({ ...t, ...(publisher && sameNotifyTarget(t, publisher) ? { last_writer: true } : {}) }));
+  const ranked = offered.map((t) => ({
+    ...t,
+    ...(publisher && sameNotifyTarget(t, publisher) ? { last_writer: true } : {}),
+    ...(notOwnerAgent(t) ? { not_owner_agent: true } : {}),
+  }));
   if (ranked.length) {
     const chosen = preferred && ranked.find((t) => sameNotifyTarget(t, preferred));
     return { default: chosen || null, candidates: ranked.filter((t) => t !== chosen), fallback: null, reason: null };
@@ -16844,10 +16867,16 @@ function credentialKey(actor) {
 
 // Every connection is account-owned, so every row of one answer has the same
 // owner; stamped on each row so the client never has to guess it. `scope` is
-// the space the agent would act in (a team doc, or the owner's own).
+// the space the agent would act in (a team doc, or the owner's own). The one
+// exception: a row resolveNotifyTargets knows is not the owner's gets no owner
+// rather than a wrong one. tdoc does not know whose it is, so it names nobody.
 function withTargetOwner(resolved, owner, scope) {
   if (!resolved) return resolved;
-  const stamp = (t) => (t ? { ...t, ...(owner ? { owner } : {}), scope } : t);
+  const stamp = (row) => {
+    if (!row) return row;
+    const { not_owner_agent: notOwners, ...t } = row;
+    return { ...t, ...(owner && !notOwners ? { owner } : {}), scope };
+  };
   return {
     ...resolved,
     default: stamp(resolved.default),
@@ -27806,7 +27835,8 @@ const tdocHandlers = {
       // there could hold it. From that door the recipient must be one of the
       // account's own agents that the panel offered — never an address the
       // page made up.
-      const fromPage = Boolean(gate.session && gate.session.feedback) || Boolean(gate.meta && gate.meta.workspace_id);
+      const viaFeedbackToken = Boolean(gate.session && gate.session.feedback);
+      const fromPage = viaFeedbackToken || Boolean(gate.meta && gate.meta.workspace_id);
       const offered = [resolved.default, ...(resolved.candidates || []), resolved.fallback].filter(Boolean);
       // Authorship (agentEditPolicy): a team doc whose latest version
       // somebody else's agent wrote is theirs to change. Nothing is queued;
@@ -27850,9 +27880,11 @@ const tdocHandlers = {
         // A local handoff records who queued it: the daemon re-checks that it
         // was the owner before running anything. For a team agent that is the
         // agent itself, and the member who sent it is kept beside it.
-        // On a personal doc it is the owner's, whichever door it came through:
-        // this is what later says the agent was theirs (ownerRecordedAgent).
-        by: viaTeamAgent ? viaTeamAgent.id : teamDoc ? localDriver : (localDriver || (isLocalTarget(target) ? null : gate.meta?.hosted?.account_id || null)),
+        // On a personal doc it is the owner's: this is what later says the agent
+        // was theirs (ownerRecordedAgent). Not through a feedback token, which
+        // a page tdoc does not control may hold: that page cannot make an agent
+        // the owner's. With no sender it counts only if the agent already is.
+        by: viaTeamAgent ? viaTeamAgent.id : teamDoc ? localDriver : viaFeedbackToken ? null : (localDriver || (isLocalTarget(target) ? null : gate.meta?.hosted?.account_id || null)),
         ...(viaTeamAgent ? { teamAgent: viaTeamAgent, sentBy: caller.accountId } : {}),
       });
       // The first agent a person picks, when they had no default yet, is
@@ -27866,10 +27898,14 @@ const tdocHandlers = {
       // Any agent a person sends to is also their most recently used one,
       // which is what the next doc with no agent of its own falls back to and
       // what the picker lists first. Choosing one they once disconnected is
-      // connecting it again.
+      // connecting it again. A feedback token only freshens an agent already on
+      // the owner's list: the list is what says an agent is theirs, and a token
+      // cannot add to it or undo their disconnect.
       if (target && ownerAccount && delivered && offered.some((t) => sameNotifyTarget(t, target))) {
-        await touchAccountAgent(env, ownerAccount, target);
-        await unremoveTargets(env, ownerAccount, (k) => k === notifyKey(target));
+        if (!viaFeedbackToken || (await accountNotifyTargets(env, ownerAccount)).some((t) => sameNotifyTarget(t, target))) {
+          await touchAccountAgent(env, ownerAccount, target);
+        }
+        if (!viaFeedbackToken) await unremoveTargets(env, ownerAccount, (k) => k === notifyKey(target));
       }
       // A person who picks a different agent for this doc has chosen who
       // follows it: that agent gets the doc's later comments and @agent too,
@@ -28104,25 +28140,31 @@ const tdocHandlers = {
           // not kept. The dispatch gate already refuses this; a record that
           // got here anyway is dropped rather than executed.
           if (!h.by || !accountIds.includes(h.by)) continue;
+          // The doc moved away from this account after this was queued: it no
+          // longer gets the doc's title or the instruction, and the owner's
+          // card says it was not delivered. Asked before the token's scope:
+          // this is about the account, so no wider token of it could run this,
+          // and a team agent's token would otherwise keep it queued for good.
+          if (!cache.has(`seat:${e.slug}`)) {
+            // A read that failed says nothing either way: it waits for the next
+            // poll. A record that is really gone is not that (null, not a throw).
+            try {
+              const record = await readDocRecord(env, e.slug);
+              const seat = await accountStillOnDoc(env, record, accountIds);
+              cache.set(`record:${e.slug}`, record);
+              cache.set(`seat:${e.slug}`, seat);
+            } catch { keep.push(e); continue; }
+          }
+          if (!cache.get(`seat:${e.slug}`)) {
+            await putHandoff(env, e.slug, { ...h, delivery: { status: 'failed', error: 'access_lost', at: new Date().toISOString() } });
+            continue;
+          }
           // A token limited to some workspaces runs only what it can reach:
           // a team agent, its own team's docs. Kept, not dropped: the same
           // account's wider token may still run it.
           if (auth.actor.scope) {
             if (!metas.has(e.slug)) metas.set(e.slug, await loadDocMeta(env, e.slug));
             if (!metas.get(e.slug) || !tokenScopeAllows(auth.actor, metas.get(e.slug))) { keep.push(e); continue; }
-          }
-          // The doc moved away from this account after this was queued: it no
-          // longer gets the doc's title or the instruction, and the owner's
-          // card says it was not delivered.
-          if (!cache.has(`record:${e.slug}`)) cache.set(`record:${e.slug}`, await loadDocRecord(env, e.slug));
-          if (!cache.has(`seat:${e.slug}`)) {
-            // A read that failed says nothing either way: it waits for the next poll.
-            try { cache.set(`seat:${e.slug}`, await accountStillOnDoc(env, cache.get(`record:${e.slug}`), accountIds)); }
-            catch { keep.push(e); continue; }
-          }
-          if (!cache.get(`seat:${e.slug}`)) {
-            await putHandoff(env, e.slug, { ...h, delivery: { status: 'failed', error: 'access_lost', at: new Date().toISOString() } });
-            continue;
           }
           keep.push(e);
           // Kept but not run while its doc is in Trash: a restore brings the

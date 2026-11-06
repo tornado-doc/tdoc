@@ -126,7 +126,34 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
       const r = await call('/api/agent/reply', { method: 'POST', token: ben.token, headers: claim(BEN_AGENT), body: { slug, parent_id: c, text: 'on it', status: 'answered', agent_login: 'claude' } });
       assert(r.status === 200, `ben's reply: ${r.text}`);
     }
-    return { env, call, ann, ben, team, link, upload, comment, move, meta, claim, targets, rows, send, teamDoc, benWorksOn, promoteBen };
+    // Ann connects Ben's Raft server. Its directory lists every agent on it.
+    async function shareBensServer() {
+      await env.META.put(`account-raft-servers:${ann.account_id}`, JSON.stringify([{ server_id: BEN_AGENT.server_id, server_slug: BEN_AGENT.server_slug, installation_id: 'inst' }]));
+      await env.META.put(`raft-directory:${BEN_AGENT.server_id}`, JSON.stringify([BEN_AGENT]));
+    }
+    // A comment on Ann's feedback space, through a token a page could hold.
+    async function feedbackComment() {
+      const made = await call('/api/feedback/connect', { method: 'POST', cookie: ann.cookie, headers: ORIGIN, body: { origin: 'https://app.example' } });
+      assert(made.status === 200 && made.body.token, made.text);
+      const { slug, token } = made.body;
+      const anchor = { kind: 'product', url: 'https://app.example/', selector: '#x', tag: 'div', text: 'x' };
+      const c = await call('/api/comments', { method: 'POST', token, body: { slug, version: 1, text: 'fix', anchor } });
+      assert(c.status === 200, c.text);
+      return { slug, token, commentId: c.body.id };
+    }
+    // A team doc Ben's daemon has work queued on.
+    async function benQueuesToHisDaemon(slug) {
+      await teamDoc(slug);
+      await promoteBen();
+      const reg = await call('/api/notify/local/register', { method: 'POST', token: ben.token, body: { device: 'benbox', clis: ['claude'] } });
+      assert(reg.status === 200, reg.text);
+      await upload(ben, slug, 2, { 'X-Tdoc-Agent': 'local/benbox/benbox_claude' });
+      const c = await comment(ben, slug);
+      const sent = await send(ben, slug, [c], { provider: 'local', device: 'benbox', cli: 'claude', server_id: 'benbox', agent_sub: 'benbox_claude' });
+      assert(sent.status === 200, sent.text);
+      return sent;
+    }
+    return { env, call, ann, ben, team, link, upload, comment, move, meta, claim, targets, rows, send, teamDoc, benWorksOn, promoteBen, shareBensServer, feedbackComment, benQueuesToHisDaemon };
   }
 
   await t('the setup is the reported one: on the team doc Ben\'s agent is on record', async () => {
@@ -475,19 +502,204 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(after.status === 200 && !after.body.pending.some((p) => p.slug === 'plan'), `still handed out: ${after.text}`);
   });
 
-  await t('a feedback token records the owner as sender, and is not told their account id', async () => {
+  await t('a feedback token send reaches the agent, records no sender, and is not told an account id', async () => {
     const w = await world();
-    const made = await w.call('/api/feedback/connect', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { origin: 'https://app.example' } });
-    assert(made.status === 200 && made.body.token, made.text);
-    const { slug, token } = made.body;
-    const anchor = { kind: 'product', url: 'https://app.example/', selector: '#x', tag: 'div', text: 'x' };
-    const c = await w.call('/api/comments', { method: 'POST', token, body: { slug, version: 1, text: 'fix', anchor } });
-    assert(c.status === 200, c.text);
-    const sent = await w.call('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: [c.body.id], recipient: ANN_AGENT } });
-    assert(sent.status === 200, sent.text);
-    assert(JSON.parse(await w.env.META.get(`handoffs:${slug}`))[0].by === w.ann.account_id, 'stored sender');
+    const { slug, token, commentId } = await w.feedbackComment();
+    const sent = await w.call('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: [commentId], recipient: ANN_AGENT } });
+    assert(sent.status === 200 && sent.body.delivery.status === 'delivered', sent.text);
+    assert(!('by' in JSON.parse(await w.env.META.get(`handoffs:${slug}`))[0]), 'stored sender');
     const list = await w.call(`/api/notify/handoffs?slug=${slug}`, { token });
     assert(list.status === 200 && list.body.handoffs.length === 1 && !('by' in list.body.handoffs[0]), list.text);
+    // Her own linked agent is still hers, so it is still the doc's default.
+    const body = await w.targets(w.ann, slug);
+    assert(body.default && body.default.agent_sub === ANN_AGENT.agent_sub, `default: ${JSON.stringify(body)}`);
+  });
+
+  await t('a feedback token send to a directory row does not make the agent the owner\'s', async () => {
+    const w = await world();
+    await w.env.META.delete(`account-notify:${w.ann.account_id}`);
+    await w.shareBensServer();
+    const { slug, token, commentId } = await w.feedbackComment();
+    raftCalls = [];
+    const sent = await w.call('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: [commentId], recipient: BEN_AGENT } });
+    assert(sent.status === 200 && sent.body.delivery.status === 'delivered', sent.text);
+    assert(addressed().join() === 'bens-server', `the handoff itself still goes: ${addressed()}`);
+    const stored = JSON.parse(await w.env.META.get(`handoffs:${slug}`))[0];
+    assert(!stored.by, `no sender: ${JSON.stringify(stored)}`);
+    const list = JSON.parse((await w.env.META.get(`account-notify:${w.ann.account_id}`)) || '[]');
+    assert(!list.some((t) => t.agent_sub === BEN_AGENT.agent_sub), `on her account list: ${JSON.stringify(list)}`);
+    const body = await w.targets(w.ann, slug);
+    assert(!body.default, `default: ${JSON.stringify(body.default)}`);
+    const row = w.rows(body).find((t) => t.agent_sub === BEN_AGENT.agent_sub);
+    assert(row && row.source === 'directory' && !row.used_here_at, `an ordinary row: ${JSON.stringify(row)}`);
+    // The proper test of proof: with the server gone, the record says nothing.
+    await w.env.META.put(`account-raft-servers:${w.ann.account_id}`, '[]');
+    const picked = await w.send(w.ann, slug, [stored.comment_ids[0]], BEN_AGENT);
+    assert(picked.status === 409 && picked.body.error === 'agent_left_doc', `${picked.status} ${picked.text}`);
+  });
+
+  await t('a feedback token cannot connect again an agent the owner took back', async () => {
+    const w = await world();
+    await w.env.META.delete(`account-notify:${w.ann.account_id}`);
+    await w.shareBensServer();
+    await w.env.META.put(`account-notify-removed:${w.ann.account_id}`, JSON.stringify([`raft:${BEN_AGENT.server_id}:${BEN_AGENT.agent_sub}`]));
+    const before = await w.env.META.get(`account-notify-removed:${w.ann.account_id}`);
+    const { slug, token, commentId } = await w.feedbackComment();
+    await w.call('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: [commentId], recipient: BEN_AGENT } });
+    assert(await w.env.META.get(`account-notify-removed:${w.ann.account_id}`) === before, 'the removal stands');
+  });
+
+  await t('a feedback token send to the owner\'s linked agent still counts as using it', async () => {
+    const w = await world();
+    await w.link(w.ann, raftAgent('anns-other', 'ann-other', 'annie3'));
+    const { slug, token, commentId } = await w.feedbackComment();
+    await w.call('/api/notify/handoff', { method: 'POST', token, body: { slug, comment_ids: [commentId], recipient: ANN_AGENT } });
+    const list = JSON.parse(await w.env.META.get(`account-notify:${w.ann.account_id}`));
+    assert(list[0].agent_sub === ANN_AGENT.agent_sub && list.length === 2, `order: ${JSON.stringify(list)}`);
+  });
+
+  await t('sole-author rule: a directory row this doc\'s records name is no default of the owner\'s, and not labelled hers', async () => {
+    const w = await world();
+    await w.env.META.delete(`account-notify:${w.ann.account_id}`);
+    await w.shareBensServer();
+    // Published with no agent claim, so the only evidence is "her agent wrote it".
+    await w.upload(w.ann, 'plan', 1);
+    await w.move(w.ann, 'plan', w.team.id);
+    const c0 = await w.comment(w.ben, 'plan');
+    const rep = await w.call('/api/agent/reply', { method: 'POST', token: w.ben.token, headers: w.claim(BEN_AGENT), body: { slug: 'plan', parent_id: c0, text: 'on it', status: 'answered', agent_login: 'claude' } });
+    assert(rep.status === 200, rep.text);
+    await w.move(w.ann, 'plan', null);
+    const body = await w.targets(w.ann, 'plan');
+    assert(!body.default, `default: ${JSON.stringify(body.default)}`);
+    const row = w.rows(body).find((t) => t.agent_sub === BEN_AGENT.agent_sub);
+    assert(row && row.source === 'directory', `stays offered on a shared server: ${JSON.stringify(body)}`);
+    assert(!row.owner, `called Ann's: ${JSON.stringify(row.owner)}`);
+    assert(!('not_owner_agent' in row), 'an internal mark stays internal');
+    assert(row.scope === 'personal', `still scoped: ${JSON.stringify(row)}`);
+    const c = await w.comment(w.ann, 'plan');
+    raftCalls = [];
+    const un = await w.send(w.ann, 'plan', [c]);
+    assert(un.status === 200 && un.body.delivery.error === 'no_recipient', un.text);
+    assert(!addressed().length && !events().length, `delivered: ${JSON.stringify(events())}`);
+    // The shared-server rule is unchanged: she can still pick it.
+    const picked = await w.send(w.ann, 'plan', [c], BEN_AGENT);
+    assert(picked.status === 200 && picked.body.delivery.status === 'delivered', picked.text);
+  });
+
+  await t('sole-author rule: an owner\'s only agent, an unlinked directory row no record names, keeps the default', async () => {
+    const w = await world();
+    await w.env.META.delete(`account-notify:${w.ann.account_id}`);
+    await w.shareBensServer();
+    await w.upload(w.ann, 'plan', 1);
+    const body = await w.targets(w.ann, 'plan');
+    assert(body.default && body.default.agent_sub === BEN_AGENT.agent_sub && body.default.source === 'directory', `default: ${JSON.stringify(body)}`);
+    assert(body.default.owner && body.default.owner.display === 'ann', `owner: ${JSON.stringify(body.default.owner)}`);
+  });
+
+  await t('a meta read that throws during a poll hands out nothing, keeps the entry, then fails it when it can read', async () => {
+    const w = await world();
+    const sent = await w.benQueuesToHisDaemon('plan');
+    await w.move(w.ann, 'plan', null);
+    const realGet = w.env.META.get.bind(w.env.META);
+    let reads = 0;
+    w.env.META.get = async (key, ...rest) => {
+      if (key === 'meta:plan') { reads++; throw new Error('KV hiccup'); }
+      return realGet(key, ...rest);
+    };
+    const during = await w.call('/api/notify/local/pending', { token: w.ben.token });
+    w.env.META.get = realGet;
+    assert(reads > 0, 'the poll read the doc');
+    assert(during.status === 200 && !during.body.pending.length, `handed out: ${during.text}`);
+    const index = JSON.parse(await realGet(`local-pending:${w.ben.account_id}`));
+    assert(index.some((e) => e.handoff_id === sent.body.handoff_id), 'kept for the next poll');
+    const held = JSON.parse(await realGet('handoffs:plan')).find((h) => h.handoff_id === sent.body.handoff_id);
+    assert(held.delivery.status !== 'failed', `a failed read says nothing: ${JSON.stringify(held.delivery)}`);
+    const next = await w.call('/api/notify/local/pending', { token: w.ben.token });
+    assert(!next.body.pending.length, `next poll: ${next.text}`);
+    const after = JSON.parse(await realGet('handoffs:plan')).find((h) => h.handoff_id === sent.body.handoff_id);
+    assert(after.delivery.error === 'access_lost', `card: ${JSON.stringify(after.delivery)}`);
+  });
+
+  await t('a meta record that will not parse hands out nothing either', async () => {
+    const w = await world();
+    const sent = await w.benQueuesToHisDaemon('plan');
+    const raw = await w.env.META.get('meta:plan');
+    await w.env.META.put('meta:plan', '{not json');
+    const during = await w.call('/api/notify/local/pending', { token: w.ben.token });
+    await w.env.META.put('meta:plan', raw);
+    assert(!during.body.pending.length, `handed out: ${during.text}`);
+    const next = await w.call('/api/notify/local/pending', { token: w.ben.token });
+    assert(next.body.pending.some((p) => p.handoff_id === sent.body.handoff_id), `kept: ${next.text}`);
+  });
+
+  await t('a doc whose record is genuinely gone is not treated as a failed read', async () => {
+    const w = await world();
+    const sent = await w.benQueuesToHisDaemon('plan');
+    await w.env.META.delete('meta:plan');
+    const r = await w.call('/api/notify/local/pending', { token: w.ben.token });
+    assert(r.status === 200 && r.body.pending.some((p) => p.handoff_id === sent.body.handoff_id), `as before: ${r.text}`);
+    const held = JSON.parse(await w.env.META.get('handoffs:plan')).find((h) => h.handoff_id === sent.body.handoff_id);
+    assert(held.delivery.status !== 'failed', `not failed: ${JSON.stringify(held.delivery)}`);
+  });
+
+  await t('a stale tab cannot send to a server the owner disconnected, though no record names the agent', async () => {
+    const w = await world();
+    await w.shareBensServer();
+    await w.upload(w.ann, 'mine', 1);
+    const before = await w.targets(w.ann, 'mine');
+    assert(w.rows(before).some((t) => t.agent_sub === BEN_AGENT.agent_sub), 'the tab saw it');
+    const off = await w.call('/api/me/connectors/remove', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { provider: 'raft', server_id: BEN_AGENT.server_id } });
+    assert(off.status === 200, off.text);
+    const c = await w.comment(w.ann, 'mine');
+    raftCalls = [];
+    const r = await w.send(w.ann, 'mine', [c], BEN_AGENT);
+    assert(r.status === 409 && r.body.error === 'agent_left_doc', `${r.status} ${r.text}`);
+    assert(!addressed().length && !events().length, `delivered: ${JSON.stringify(events())}`);
+  });
+
+  await t('a team agent\'s handoff is marked access_lost when its doc leaves the team, and is not handed out', async () => {
+    const w = await world();
+    const added = (await w.call('/api/team/agents', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { id: w.team.id, name: 'bot' } })).body;
+    const conn = (await w.call('/api/team/agents/connect', { method: 'POST', body: { code: added.setup_code, device: 'botbox' } })).body;
+    await w.call('/api/notify/local/register', { method: 'POST', token: conn.token, body: { device: 'botbox', clis: ['claude'] } });
+    await w.teamDoc('plan');
+    const up = await w.call('/api/upload', { method: 'POST', token: conn.token, body: { slug: 'plan', version: 2, html: '<h1>x</h1><p>a sentence to comment on</p>' } });
+    assert(up.status === 200, up.text);
+    const body = await w.targets(w.ben, 'plan');
+    const row = body.default || body.candidates[0];
+    assert(row && row.team_agent, `the team's agent: ${JSON.stringify(body)}`);
+    const c = await w.comment(w.ben, 'plan');
+    const sent = await w.send(w.ben, 'plan', [c], row);
+    assert(sent.status === 200, sent.text);
+    const before = await w.call('/api/notify/local/pending', { token: conn.token });
+    assert(before.body.pending.length === 1, `queued: ${before.text}`);
+    await w.move(w.ann, 'plan', null);
+    const after = await w.call('/api/notify/local/pending', { token: conn.token });
+    assert(after.status === 200 && !after.body.pending.length, `handed out: ${after.text}`);
+    const seen = await w.call('/api/notify/handoffs?slug=plan', { cookie: w.ann.cookie });
+    const card = seen.body.handoffs.find((h) => h.handoff_id === sent.body.handoff_id);
+    assert(card && card.delivery.status === 'failed' && card.delivery.error === 'access_lost', `Ann's card: ${seen.text}`);
+    assert(!JSON.parse(await w.env.META.get(`local-pending:${conn.account_id}`)).length, 'off the queue');
+  });
+
+  await t('a failed read during a team agent\'s poll keeps its handoff too', async () => {
+    const w = await world();
+    const added = (await w.call('/api/team/agents', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { id: w.team.id, name: 'bot' } })).body;
+    const conn = (await w.call('/api/team/agents/connect', { method: 'POST', body: { code: added.setup_code, device: 'botbox' } })).body;
+    await w.call('/api/notify/local/register', { method: 'POST', token: conn.token, body: { device: 'botbox', clis: ['claude'] } });
+    await w.teamDoc('plan');
+    await w.call('/api/upload', { method: 'POST', token: conn.token, body: { slug: 'plan', version: 2, html: '<h1>x</h1><p>a sentence to comment on</p>' } });
+    const body = await w.targets(w.ben, 'plan');
+    const c = await w.comment(w.ben, 'plan');
+    const sent = await w.send(w.ben, 'plan', [c], body.default || body.candidates[0]);
+    await w.move(w.ann, 'plan', null);
+    const realGet = w.env.META.get.bind(w.env.META);
+    w.env.META.get = async (key, ...rest) => { if (key === 'meta:plan') throw new Error('KV hiccup'); return realGet(key, ...rest); };
+    const during = await w.call('/api/notify/local/pending', { token: conn.token });
+    w.env.META.get = realGet;
+    assert(!during.body.pending.length, `handed out: ${during.text}`);
+    assert(JSON.parse(await realGet('handoffs:plan')).find((h) => h.handoff_id === sent.body.handoff_id).delivery.status !== 'failed', 'marked failed');
+    assert(JSON.parse(await realGet(`local-pending:${conn.account_id}`)).some((e) => e.handoff_id === sent.body.handoff_id), 'kept');
   });
 
   await t('an agent Ann picked with Send and pushed off her list still follows that doc', async () => {
