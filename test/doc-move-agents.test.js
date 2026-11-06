@@ -601,6 +601,26 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(w.who() === 'aaa-ben', `after a new pick: ${w.who()}`);
   });
 
+  await t('a widget pick of a webhook stores no URL, the client\'s or the connected one', async () => {
+    const w = await pickWorld();
+    const hook = await w.call('/api/me/connectors/webhook', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { url: 'https://hooks.example/secret-path', label: 'hook' } });
+    assert(hook.status === 200, hook.text);
+    const realFetchNow = globalThis.fetch;
+    const hits = [];
+    globalThis.fetch = async (input, init) => {
+      const url = String(input && input.url ? input.url : input);
+      if (new URL(url).host === 'api.raft.test') return realFetchNow(input, init);
+      hits.push(url);
+      return new Response('ok', { status: 200 });
+    };
+    const r = await w.tokenSend({ ...hook.body.target, url: 'https://evil.example/steal' }).finally(() => { globalThis.fetch = realFetchNow; });
+    assert(r.body.delivery.status === 'delivered', r.text);
+    assert(hits.join() === 'https://hooks.example/secret-path', `delivered to ${hits}`);
+    const m = await w.meta(w.space.slug);
+    assert(m.feedback_pick && m.feedback_pick.agent.agent_sub === hook.body.target.agent_sub, `pick: ${JSON.stringify(m.feedback_pick)}`);
+    assert(!JSON.stringify(m.feedback_pick).includes('example'), `URL in the pick: ${JSON.stringify(m.feedback_pick)}`);
+  });
+
   await t('a widget pick that was not delivered does not stick', async () => {
     const w = await pickWorld();
     const realFetchNow = globalThis.fetch;
@@ -721,8 +741,9 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     const before = await w.env.META.get(`account-notify-removed:${w.ann.account_id}`);
     const un = await w.tokenSend();
     assert(!w.who() && un.body.delivery.error === 'no_recipient', `unaddressed: ${w.who()} ${un.text}`);
-    const named = await w.tokenSend(ZZZ_OWN);
-    assert(!w.who() && named.body.delivery.error === 'no_recipient', `named: ${w.who()} ${named.text}`);
+    raftCalls = [];
+    const named = await w.call('/api/notify/handoff', { method: 'POST', token: w.space.token, body: { slug: w.space.slug, comment_ids: [await w.another()], recipient: ZZZ_OWN } });
+    assert(!w.who() && named.status === 409 && named.body.error === 'agent_unavailable', `named: ${w.who()} ${named.status} ${named.text}`);
     assert(await w.env.META.get(`account-notify-removed:${w.ann.account_id}`) === before, 'the removal stands');
     const body = await w.targets(w.ann, w.space.slug);
     assert(!w.rows(body).length, `offered: ${JSON.stringify(body)}`);
