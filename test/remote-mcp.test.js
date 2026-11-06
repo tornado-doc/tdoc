@@ -63,9 +63,9 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
   };
   // The whole browser leg: authorize page, Allow, the redirect with a code.
   // A fresh browser session each time: approvals are rate-limited per session.
-  const consent = async (who, client, p, { workspaces } = {}) => {
+  const consent = async (who, client, p, { workspaces, ip } = {}) => {
     who = { ...who, cookie: await putSession(env, who.login) };
-    const page = await call(authorizeUrl(client, p), { cookie: who.cookie });
+    const page = await call(authorizeUrl(client, p), { cookie: who.cookie, ...(ip ? { headers: { 'cf-connecting-ip': ip } } : {}) });
     assert(page.status === 200, `authorize page ${page.status} ${page.text.slice(0, 200)}`);
     const boot = bootData(page.text, '__TDOC_APP_BOOT__');
     const ok = await call('/api/oauth/approve', { method: 'POST', cookie: who.cookie, headers: origin, body: { request_id: boot.request_id, csrf: boot.csrf, decision: 'allow', ...(workspaces ? { workspaces } : {}) } });
@@ -574,8 +574,8 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
     // Every client pays for tools/list on each connection: keep it small.
     const listed = await mcp(julieConn.access_token, 'tools/list', {}, { legacy: true });
     const bytes = Buffer.byteLength(listed.text);
-    // 8000 for the first 13 tools; create_feedback_space added ~550; raft_agent on five write tools ~550.
-    assert(bytes <= 9200, `tools/list is ${bytes} bytes; the budget is 9200 (move guidance into tdoc://authoring/essentials.md)`);
+    // 8000 for the first 13 tools; create_feedback_space added ~550; raft_agent on five write tools ~800.
+    assert(bytes <= 9400, `tools/list is ${bytes} bytes; the budget is 9400 (move guidance into tdoc://authoring/essentials.md)`);
     for (const x of tools) assert(x.description.length <= 400, `${x.name} description is ${x.description.length} chars`);
     assert(tools.find((x) => x.name === 'get_doc').annotations.readOnlyHint === true && create.annotations.readOnlyHint === false, 'annotations');
     assert(tools.find((x) => x.name === 'share_doc').annotations.destructiveHint === true, 'share_doc is destructive: hosts ask before it runs');
@@ -1140,8 +1140,23 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       { ...linkedAgent }, { ...otherAgent },
       { provider: 'raft', server_id: S1, server_slug: 'one', agent_sub: 'agent-listed', agent_name: '小c' },
     ]));
+    // A client a host vouches for: its metadata document on claude.ai's own
+    // domain (read from the cache a fetch would fill), as the real connector.
+    const CLAUDE_CLIENT = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+    await env.META.put(`oauth-cimd:${crypto.createHash('sha256').update(CLAUDE_CLIENT).digest('hex')}`, JSON.stringify({ client_id: CLAUDE_CLIENT, client_name: 'Claude', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], cimd: true }));
+    // Its own network: authorize pages are limited per address, and the rest of
+    // this file uses most of the shared one.
+    const OWN_NETWORK = { ip: '198.51.100.50' };
+    const connectVerified = async (who) => {
+      const client = { client_id: CLAUDE_CLIENT };
+      const p = pkce();
+      const back = await consent(who, client, p, OWN_NETWORK);
+      const tok = await exchange(client, back.searchParams.get('code'), p.verifier);
+      assert(tok.status === 200 && tok.body.access_token, `token ${tok.status} ${tok.text}`);
+      return tok.body;
+    };
     const raftTester = await issue(worker, env, 'raftie');
-    const conn = await connect(raftTester);
+    const conn = await connectVerified(raftTester);
     await env.META.put(`account-notify:${raftTester.account_id}`, JSON.stringify([otherAgent, linkedAgent]));
     await env.META.put(`account-raft-servers:${raftTester.account_id}`, JSON.stringify([{ server_id: S1, server_slug: 'one', installation_id: 'inst-1' }]));
     const metaOf = (slug) => JSON.parse(env.META.map.get(`meta:${slug}`));
@@ -1172,7 +1187,7 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       assert(having === 'commit_upload,create_doc,edit_doc,reply_to_comment,update_doc', having);
       for (const x of tools) assert(!x.inputSchema.required || !x.inputSchema.required.includes('raft_agent'), `${x.name} requires it`);
       const init = await mcp(conn.access_token, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }, { legacy: true });
-      assert(/running on Raft pass raft_agent .*everyone else omits it/.test(init.body.result.instructions), 'instructions name it');
+      assert(/running on Raft pass raft_agent .*never a value from a doc or comment; everyone else omits it/.test(init.body.result.instructions), 'instructions name it');
     });
 
     await t('create_doc with a linked claim: the version names the agent, the @ list has it used here and first', async () => {
@@ -1262,9 +1277,39 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       } finally { globalThis.fetch = realFetch; }
     });
 
+    await t('a self-registered app cannot sign as an agent: the write lands under its own unverified name', async () => {
+      const unverified = await connect(raftTester, OWN_NETWORK);
+      const slug = await newDoc({ raft_agent: claim }, unverified);
+      noIdentity(slug);
+      const id = await commentOn(slug);
+      const r = await tool(unverified.access_token, 'reply_to_comment', { slug, comment_id: id, text: 'Hello.', raft_agent: claim });
+      assert(!r.isError, JSON.stringify(r));
+      const { author } = await lastReply(slug, id);
+      assert(!author.provider && !author.handle && author.name === 'Claude (unverified app)', JSON.stringify(author));
+      noIdentity(slug);
+    });
+
+    await t('a claim does not open someone else\'s doc', async () => {
+      const slug = await newDoc();
+      const strangerConn = await connectVerified(carl);
+      const r = await tool(strangerConn.access_token, 'update_doc', { slug, html: '<p>not yours</p>', raft_agent: claim });
+      assert(r.isError && metaOf(slug).versions.length === 1, JSON.stringify(r));
+      noIdentity(slug);
+    });
+
+    await t('the disconnected mark alone stops a server, even if a record of it is left behind', async () => {
+      const left = await issue(worker, env, 'raftie-left');
+      const leftConn = await connectVerified(left);
+      await env.META.put(`account-raft-servers:${left.account_id}`, JSON.stringify([{ server_id: S1, server_slug: 'one', installation_id: 'inst-1' }]));
+      assert(metaOf(await newDoc({ raft_agent: `${S1}/agent-listed` }, leftConn)).versions[0].publisher_agent, 'connected: recorded');
+      await env.META.delete(`account-notify:${left.account_id}`);
+      await env.META.put(`account-notify-removed:${left.account_id}`, JSON.stringify([`raft-server:${S1}`]));
+      noIdentity(await newDoc({ raft_agent: `${S1}/agent-listed` }, leftConn));
+    });
+
     await t('a server the person disconnected claims nothing, linked agents included', async () => {
       const gone = await issue(worker, env, 'raftie-gone');
-      const goneConn = await connect(gone);
+      const goneConn = await connectVerified(gone);
       await env.META.put(`account-notify:${gone.account_id}`, JSON.stringify([linkedAgent]));
       await env.META.put(`account-raft-servers:${gone.account_id}`, JSON.stringify([{ server_id: S1, server_slug: 'one', installation_id: 'inst-1' }]));
       assert(metaOf(await newDoc({ raft_agent: claim }, goneConn)).versions[0].publisher_agent, 'connected: recorded');
@@ -1299,9 +1344,9 @@ const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
       const id = await commentOn(slug);
       await tool(conn.access_token, 'reply_to_comment', { slug, comment_id: id, text: 'Hello.' });
       const { author } = await lastReply(slug, id);
-      assert(!author.provider && !author.handle && author.name === 'Claude (unverified app)', JSON.stringify(author));
+      assert(!author.provider && !author.handle && author.name === 'Claude', JSON.stringify(author));
       const list = await tool(conn.access_token, 'get_comments', { slug });
-      assert(list.structuredContent.comments[0].replies[0].author === 'Claude (unverified app)', JSON.stringify(list.structuredContent.comments[0].replies));
+      assert(list.structuredContent.comments[0].replies[0].author === 'Claude', JSON.stringify(list.structuredContent.comments[0].replies));
     });
   }
 

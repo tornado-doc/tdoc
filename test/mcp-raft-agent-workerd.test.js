@@ -2,7 +2,8 @@
 // connection made through the real routes, /mcp driving /api/upload and
 // /api/agent/reply in process (MCP_INTERNAL_REQUESTS is what lets that token
 // through at all). KV and R2 are small in-memory fakes inside the isolate, and
-// Raft's directory is read from its KV cache: no network.
+// Raft's directory and the client's metadata document are read from their KV
+// caches: no network.
 //
 // Run with: node test/mcp-raft-agent-workerd.test.js   (part of npm run test:workerd)
 const assert = require('node:assert/strict');
@@ -117,7 +118,9 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     const accountId = minted.body.account_id;
 
     // The claude.ai connector's way in: an OAuth token shared by every agent.
-    const client = (await call('/oauth/register', { method: 'POST', body: { client_name: 'Claude', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'] } })).body;
+    // Its metadata document is read from the cache a fetch would fill.
+    const client = { client_id: 'https://claude.ai/oauth/mcp-oauth-client-metadata' };
+    await kv(`oauth-cimd:${crypto.createHash('sha256').update(client.client_id).digest('hex')}`, JSON.stringify({ ...client, client_name: 'Claude', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], cimd: true }));
     const verifier = b64url(crypto.randomBytes(32));
     const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
     const q = new URLSearchParams({ response_type: 'code', client_id: client.client_id, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: 'S256', state: 'st8', scope: 'mcp', resource: `${ORIGIN}/mcp` });
