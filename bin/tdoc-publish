@@ -1822,6 +1822,13 @@ EOF
       [ "$_qerr" = "answer_lock_unavailable" ] || echo "[tdoc] Do not retry. Answer in the doc's thread instead (bin/tdoc-agent-reply)." >&2
       return 1
     fi
+    # A suggestions handoff (Ask/Edit v2) on this doc: same stop, its own next step.
+    if [ "$_qerr" = "suggestions_only_run" ]; then
+      _smsg="$(printf '%s' "$resp" | json_get message)"
+      echo "[tdoc] Not published ($_qerr): ${_smsg:-comments on this doc were handed to an agent for suggestions.}" >&2
+      echo "[tdoc] Do not retry. Send the edits with bin/tdoc-propose instead." >&2
+      return 1
+    fi
     if [ "$_qerr" = "quota_docs" ]; then
       _qlimit="$(printf '%s' "$resp" | json_get limit)"
       _qused="$(printf '%s' "$resp" | json_get used)"

@@ -64,7 +64,8 @@ The authoring guides are the MCP resources `tdoc://authoring/<path>.md`
 (`essentials.md` first, then `voice.md`, `visuals.md`, `structure/components.md`, `style/*.md`); every
 rule in this file about voice, visuals, styles and comment statuses still
 applies. The refusals arrive as tool errors with the same codes
-(`answer_only_run`, `agent_not_author_editor`, `token_scope`). Local
+(`answer_only_run`, `suggestions_only_run`, `agent_not_author_editor`,
+`token_scope`). Local
 preview, folders, Trash, widgets, preview cards and the local agent daemon
 have no MCP tool.
 
@@ -126,13 +127,19 @@ your reply under that comment, for everyone who can see it; otherwise only
 the person who asked sees it.
 
 tdoc enforces who may edit when you write, not only when work is handed to
-you. Two refusals mean "answer, do not edit":
+you. Three refusals mean "do not publish":
 
 - `403 answer_only_run`: you were asked a question on this doc. Until your
   answer lands (`tdoc-agent-reply --ask`), tdoc refuses your publishes and
   other replies there; ending the run (`ask-done`) does not lift it, only
   the answer, or the person who asked cancelling. Answer the question; do
   not retry the edit.
+- `403 suggestions_only_run`: comments on this doc were handed to an agent
+  to answer with suggestions. Send your edits with `propose_edits` or
+  `tdoc-propose` (a question gets an ordinary reply) and do not retry the
+  publish. It lifts once they land, the comments are resolved, or at `until`
+  (an hour at most); it is refused on one doc only. Applies to the agent they
+  went to and to any token that does not say which agent it is.
 - `403 agent_not_author_editor` (`reason`: `written_by_other` or
   `team_agent_wrote`, `writer`: who wrote it): on a team doc, an agent may
   change only what authorship allows. A team agent edits docs the team agent
