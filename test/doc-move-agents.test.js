@@ -34,6 +34,7 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
   console.log('agents left behind when a doc changes workspace');
   const mod = await loadWorker();
   const worker = mod.default;
+  const { composerDefault } = await import('../shell/src/document/agent-choices.js');
   const realFetch = globalThis.fetch;
 
   // Every Raft request the worker makes, by the server it addresses.
@@ -46,7 +47,7 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     if (url.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'rq', agent: { serverId: 'x' } });
     if (url.endsWith('/api/oauth/token')) return Response.json({ access_token: 'at' });
     if (url.endsWith('/api/oauth/agent-events')) return Response.json({ id: 'ev', status: 'queued' });
-    return Response.json({ agents: [] });
+    return Response.json({});
   };
   const addressed = () => raftCalls.filter((c) => c.url.endsWith('/api/oauth/requests/agent')).map((c) => c.body.serverSlug);
   const events = () => raftCalls.filter((c) => c.url.endsWith('/api/oauth/agent-events')).map((c) => c.body);
@@ -210,6 +211,55 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(card && card.delivery.status === 'failed' && card.delivery.error === 'access_lost', `Ann's card: ${seen.text}`);
   });
 
+  await t('a Resend from before handoffs named their sender is covered too', async () => {
+    const w = await world();
+    await w.teamDoc('plan');
+    await w.promoteBen();
+    await w.upload(w.ben, 'plan', 2, w.claim(BEN_AGENT));
+    const c = await w.comment(w.ben, 'plan');
+    const sent = await w.send(w.ben, 'plan', [c], BEN_AGENT);
+    assert(sent.status === 200, sent.text);
+    await w.move(w.ann, 'plan', null);
+    // No other record mentions the agent, and the handoff names no sender.
+    const m = await w.meta('plan');
+    delete m.notify_agents;
+    for (const v of m.versions) { delete v.by; delete v.publisher_agent; }
+    await w.env.META.put('meta:plan', JSON.stringify(m));
+    const list = JSON.parse(await w.env.META.get('handoffs:plan'));
+    for (const h of list) delete h.by;
+    await w.env.META.put('handoffs:plan', JSON.stringify(list));
+    raftCalls = [];
+    const r = await w.call('/api/notify/handoff/resend', { method: 'POST', cookie: w.ann.cookie, headers: ORIGIN, body: { slug: 'plan', handoff_id: sent.body.handoff_id } });
+    assert(r.status === 409 && r.body.error === 'agent_left_doc', `${r.status} ${r.text}`);
+    assert(!addressed().length, `addressed ${addressed()}`);
+  });
+
+  await t('a team that cannot be read for one poll fails nothing queued', async () => {
+    const w = await world();
+    await w.teamDoc('plan');
+    await w.promoteBen();
+    const reg = await w.call('/api/notify/local/register', { method: 'POST', token: w.ben.token, body: { device: 'benbox', clis: ['claude'] } });
+    assert(reg.status === 200, reg.text);
+    const local = { provider: 'local', device: 'benbox', cli: 'claude', server_id: 'benbox', agent_sub: 'benbox_claude' };
+    await w.upload(w.ben, 'plan', 2, { 'X-Tdoc-Agent': 'local/benbox/benbox_claude' });
+    const c = await w.comment(w.ben, 'plan');
+    const sent = await w.send(w.ben, 'plan', [c], local);
+    assert(sent.status === 200, sent.text);
+    const realGet = w.env.META.get.bind(w.env.META);
+    let reads = 0;
+    w.env.META.get = async (key, ...rest) => {
+      if (key === `team:${w.team.id}` && !reads++) throw new Error('KV hiccup');
+      return realGet(key, ...rest);
+    };
+    await w.call('/api/notify/local/pending', { token: w.ben.token });
+    w.env.META.get = realGet;
+    assert(reads > 0, 'the poll read the team');
+    const after = await w.call('/api/notify/local/pending', { token: w.ben.token });
+    assert(after.body.pending.some((p) => p.handoff_id === sent.body.handoff_id), `lost: ${after.text}`);
+    const list = JSON.parse(await realGet('handoffs:plan'));
+    assert(list.find((h) => h.handoff_id === sent.body.handoff_id).delivery.status !== 'failed', 'marked failed');
+  });
+
   await t('team -> another team: Ben\'s agent is not offered and gets nothing', async () => {
     const w = await world();
     await w.teamDoc('plan');
@@ -282,10 +332,20 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     await w.teamDoc('plan');
     await w.benWorksOn('plan');
     await w.link(w.ann, { ...BEN_AGENT, agent_sub: 'ann-on-bens-server', agent_name: 'annie2' });
+    // Raft's directory of that server lists every agent on it, whoever's.
+    await w.env.META.put(`account-raft-servers:${w.ann.account_id}`, JSON.stringify([{ server_id: BEN_AGENT.server_id, server_slug: BEN_AGENT.server_slug, installation_id: 'inst' }]));
+    await w.env.META.put(`raft-directory:${BEN_AGENT.server_id}`, JSON.stringify([BEN_AGENT]));
     await w.move(w.ann, 'plan', null);
     const body = await w.targets(w.ann, 'plan');
     assert(!body.default || body.default.agent_sub !== BEN_AGENT.agent_sub, `default: ${JSON.stringify(body.default)}`);
-    assert(w.rows(body).some((t) => t.agent_sub === BEN_AGENT.agent_sub), 'on a server she connected, she may pick it');
+    // The row the composer means by default is its own reading of these rows.
+    const row = w.rows(body).find((t) => t.agent_sub === BEN_AGENT.agent_sub);
+    assert(row && row.source === 'directory', `on a server she connected, an ordinary row she may pick: ${JSON.stringify(row)}`);
+    assert(!row.used_here_at && !row.last_writer && !row.last_touched, `no claim on her: ${JSON.stringify(row)}`);
+    const top = composerDefault(w.rows(body).map((t) => ({ ...t, can_edit: true })), { evidence: body.default });
+    assert(!top || top.agent_sub !== BEN_AGENT.agent_sub, `composer default: ${JSON.stringify(top)}`);
+    const orTop = composerDefault(w.rows(body).map((t) => ({ ...t, can_edit: true })), { orTop: true });
+    assert(orTop && orTop.agent_sub !== BEN_AGENT.agent_sub, `feedback surface default: ${JSON.stringify(orTop)}`);
     const c = await w.comment(w.ann, 'plan');
     raftCalls = [];
     const r = await w.send(w.ann, 'plan', [c], BEN_AGENT);
@@ -303,7 +363,9 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     await w.upload(w.ben, 'plan', 2, { 'X-Tdoc-Agent': 'local/macbook/macbook_claude' });
     assert((await w.meta('plan')).versions.at(-1).publisher_agent, 'Ben\'s version names his computer');
     await w.move(w.ann, 'plan', null);
-    // The doc's record of it stays; this is about what it says to Ann.
+    // Known gap, order only and on her own computer: an entry in notify_agents
+    // does not say whose it is, so Ben's and Ann's macbook_claude are one entry.
+    // Taken out here so this pins what versions and handoffs can tell apart.
     const m = await w.meta('plan');
     m.notify_agents = (m.notify_agents || []).filter((a) => a.provider !== 'local');
     await w.env.META.put('meta:plan', JSON.stringify(m));

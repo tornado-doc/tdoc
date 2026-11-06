@@ -48,6 +48,13 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   const handoff = (env, slug, token, body) => worker.fetch(req('/api/notify/handoff', {
     method: 'POST', token, body: { slug, ...body },
   }), env, {});
+  // Resend goes only to an agent still connected to the doc's owner.
+  const linkTarget = async (env, token, agent) => {
+    const code = `code-${agent.agent_sub}`;
+    await env.META.put(`raft-link:${code}`, JSON.stringify(agent));
+    const r = await worker.fetch(req('/api/notify/link', { method: 'POST', token, body: { link_code: code } }), env, {});
+    assert(r.status === 200, `link ${r.status}`);
+  };
   const listComments = async (env, slug) => {
     const r = await worker.fetch(req(`/api/comments?slug=${slug}&version=1`, { cookie: env.__commentReaderCookie }), env, {});
     return r.json();
@@ -164,6 +171,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
 
   await t('a resend reuses the handoff id so the agent is not woken twice', async () => {
     const { env, slug, token, commentId } = await seed();
+    await linkTarget(env, token, target);
     const h = await (await handoff(env, slug, token, { comment_ids: [commentId], recipient: target })).json();
     const again = await (await worker.fetch(req('/api/notify/handoff/resend', {
       method: 'POST', token, body: { slug, handoff_id: h.handoff_id },
@@ -442,6 +450,7 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
       assert(c.handoff_to && c.handoff_to.agent_name === 'xiaocc' && c.handoff_to.provider === 'raft', `handoff_to: ${JSON.stringify(c.handoff_to)}`);
       // A resend Raft recognises is recorded as deduped.
       deduped = true;
+      await linkTarget(env, token, fullTarget);
       const again = await (await worker.fetch(req('/api/notify/handoff/resend', {
         method: 'POST', token, body: { slug: 'wire-doc', handoff_id: r.handoff_id },
       }), env, {})).json();
