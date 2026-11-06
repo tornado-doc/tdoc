@@ -261,7 +261,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       const handoffs = await call(`/api/notify/handoffs?slug=${slug}`, { cookie });
       assert.ok(handoffs.body.handoffs.some((h) => h.recipient && h.recipient.url === HOOK_A), handoffs.text);
       const connectors = await call('/api/me/connectors', { cookie });
-      assert.ok(connectors.text.includes(HOOK_A), connectors.text);
+      assert.ok(connectors.body.targets.some((t) => t.url === HOOK_A), connectors.text);
     });
 
     assert.equal(failed, 0, `${failed} failed`);
