@@ -48,7 +48,7 @@ globalThis.fetch = async (input) => {
   if (globalThis.__down) return new Response('{}', { status: 500 });
   if (u.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'r1', agent: { serverId: 'server-one' } });
   if (u.endsWith('/api/oauth/token')) return Response.json({ access_token: 't' });
-  if (u.endsWith('/api/oauth/agent-events')) return Response.json({ id: 'e1', status: 'queued' });
+  if (u.endsWith('/api/oauth/agent-events')) return Response.json(globalThis.__duplicate ? { id: 'e1', status: 'duplicate', deduped: true } : { id: 'e1', status: 'queued' });
   return new Response('no network here', { status: 502 });
 };
 const fake = globalThis.__tdocFake || (globalThis.__tdocFake = { META: new KV(), DOCS: new R2() });
@@ -57,7 +57,7 @@ export class TestStore extends CommentsStore { constructor(state, env) { super(s
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
-    if (url.pathname === '/__down') { globalThis.__down = (await req.text()) === 'on'; return new Response('ok'); }
+    if (url.pathname === '/__down') { const mode = await req.text(); globalThis.__down = mode === 'on'; globalThis.__duplicate = mode === 'duplicate'; return new Response('ok'); }
     if (url.pathname === '/__seed-session') {
       const { id, login, email } = await req.json();
       await fake.META.put('session:' + id, JSON.stringify({ login, name: login, email, avatar_url: '', created: new Date().toISOString() }));
@@ -303,6 +303,15 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     await fetch(`${base}/__down`, { method: 'POST', body: 'off' });
     assert.equal(failedResend.body.delivery.status, 'failed', failedResend.text);
     await held(resent.slug, 'a failed Resend does not free an agent that already heard');
+
+    const dup = await lockedDoc();
+    const untilOf = async (slug) => { const r = await upload(slug); assert.equal(r.body.error, 'suggestions_only_run', r.text); return r.body.until; };
+    const untilBefore = await untilOf(dup.slug);
+    await fetch(`${base}/__down`, { method: 'POST', body: 'duplicate' });
+    const dupResend = await call('/api/notify/handoff/resend', { method: 'POST', cookie, body: { slug: dup.slug, handoff_id: dup.handoff } });
+    await fetch(`${base}/__down`, { method: 'POST', body: 'off' });
+    assert.equal(dupResend.body.delivery.deduped, true, dupResend.text);
+    assert.equal(await untilOf(dup.slug), untilBefore, 'a Resend that woke nobody starts no new hour');
 
     const applied = await lockedDoc();
     const saved = await call('/api/doc/versions', { method: 'POST', cookie, body: { slug: applied.slug, baseVersion: 1, html: '<!doctype html><html><head><title>T</title></head><body><h1>T</h1><p>Saved.</p></body></html>' } });

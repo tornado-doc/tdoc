@@ -35,6 +35,7 @@ const REFUSED = 'suggestions_only_run';
   // Raft and the webhook receiver, answered here. `down` fails every delivery.
   let down = false;
   let whileFailing = null;
+  let duplicate = false;
   const delivered = [];
   globalThis.fetch = async (input, init = {}) => {
     const u = String(input && input.url ? input.url : input);
@@ -47,7 +48,7 @@ const REFUSED = 'suggestions_only_run';
     if (u.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'r1', agent: { serverId: SERVER } });
     if (u.endsWith('/api/oauth/token')) return Response.json({ access_token: 't' });
     delivered.push(JSON.parse(init.body));
-    return Response.json({ id: 'e1', status: 'queued' });
+    return Response.json(duplicate ? { id: 'e1', status: 'duplicate', deduped: true } : { id: 'e1', status: 'queued' });
   };
 
   const call = async (p, o = {}) => {
@@ -406,6 +407,29 @@ const REFUSED = 'suggestions_only_run';
     landed(await publish(carol, slug), 'carol v2');
   });
 
+  await t('a lock clear that fails does not stop a purge; the hour ends what it missed', async () => {
+    const slug = await newDoc();
+    await handOff(alice, slug, [await comment(alice, slug)], agentA);
+    landed(await call(`/api/doc?slug=${slug}`, { method: 'DELETE', cookie: alice.cookie, headers: ORIGIN }), 'to Trash');
+    const realGet = env.COMMENTS.get;
+    env.COMMENTS.get = function (id) {
+      const stub = realGet.call(this, id);
+      return { ...stub, fetch: (u, o) => (String(u).endsWith('/answer-locks') ? Promise.reject(new Error('lock store down')) : stub.fetch(u, o)) };
+    };
+    let purged;
+    try {
+      purged = await call('/api/trash/purge', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug } });
+    } catch (e) {
+      purged = { status: 500, text: String(e) };
+    } finally {
+      env.COMMENTS.get = realGet;
+    }
+    landed(purged, 'purge');
+    assert(!env.META.map.has(`meta:${slug}`), 'the purge stopped partway');
+    landed(await call('/api/upload', { method: 'POST', token: carol.token, body: { slug, version: 1, html: html(1), meta: { title: 'Mine' } } }), 'the slug is free');
+    await later(HOUR + 1000, async () => landed(await publish(carol, slug), 'the missed lock ended'));
+  });
+
   await t('a failed delivery holds nobody, and the Resend that lands does', async () => {
     const slug = await newDoc();
     down = true;
@@ -455,6 +479,55 @@ const REFUSED = 'suggestions_only_run';
     refused(await publish(alice, slug, AS_A), 'a failed plain send lifts nothing');
     landed(await propose(alice, slug, { find: 'Sentence one, version 1.', replace: 'Better one.', comment_id: c }, AS_A), 'propose');
     landed(await publish(alice, slug, AS_A), 'it can still end the usual way');
+  });
+
+  await t('a Resend the provider dropped as a duplicate woke nobody: same lock, same hour, and the hold on anyone else stays', async () => {
+    const slug = await newDoc();
+    const c = await comment(alice, slug);
+    const sent = await handOff(alice, slug, [c], agentA);
+    const before = (await lockOp(slug, { kind: 'list' }))[0];
+    duplicate = true;
+    try {
+      const again = await later(60000, () => resend(slug, sent.handoff_id));
+      landed(again, 'resend');
+      assert(again.body.delivery.deduped === true, again.text);
+      assert(JSON.stringify(await lockOp(slug, { kind: 'list' })) === JSON.stringify([before]), 'a duplicate started a new hour');
+      refused(await publish(alice, slug, AS_A), 'still held');
+      await env.META.put('dev-mode:alice@tdoc.test', 'off');
+      try { landed(await resend(slug, sent.handoff_id), 'plain duplicate'); } finally { await env.META.delete('dev-mode:alice@tdoc.test'); }
+      refused(await publish(alice, slug, AS_A), 'a plain duplicate told the agent nothing either');
+
+      // Dealt with: a duplicate does not bring it back.
+      const slug2 = await newDoc();
+      const c2 = await comment(alice, slug2);
+      const sent2 = await handOff(alice, slug2, [c2], agentA);
+      landed(await propose(alice, slug2, { find: 'Sentence one, version 1.', replace: 'Better one.', comment_id: c2 }, AS_A), 'propose');
+      landed(await resend(slug2, sent2.handoff_id), 'resend');
+      assert((await lockOp(slug2, { kind: 'list' })).length === 0, 'a settled lock came back');
+
+      // Reassigned to B: a duplicate to A moves nothing.
+      const slug3 = await newDoc();
+      const c3 = await comment(alice, slug3);
+      duplicate = false;
+      const sent3 = await handOff(alice, slug3, [c3], agentA);
+      await handOff(alice, slug3, [c3], agentB);
+      refused(await publish(alice, slug3, AS_B), 'B holds it');
+      duplicate = true;
+      landed(await resend(slug3, sent3.handoff_id), 'resend to A');
+      refused(await publish(alice, slug3, AS_B), 'a duplicate to A did not free B');
+      landed(await publish(alice, slug3, AS_A), 'nor did it hold A again');
+
+      // Reported failed, but the provider has it: the agent did hear, so it is held.
+      const slug4 = await newDoc();
+      down = true;
+      const sent4 = await handOff(alice, slug4, [await comment(alice, slug4)], agentA);
+      down = false;
+      assert(sent4.delivery.status === 'failed', JSON.stringify(sent4));
+      landed(await resend(slug4, sent4.handoff_id), 'resend');
+      refused(await publish(alice, slug4, AS_A), 'the first send had landed after all');
+    } finally {
+      duplicate = false;
+    }
   });
 
   await t('what the agent did while a Resend was failing still counts: the old lock does not come back', async () => {

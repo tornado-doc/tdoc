@@ -1207,9 +1207,12 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
   // Handoffs and readers' questions belong to this doc too: a slug published
   // again later must not inherit them. The same for their locks: the wipe above
   // deletes only the comments in the Durable Object, and a lock left there would
-  // refuse the next owner's publish.
+  // refuse the next owner's publish. Best effort: the TTL ends what a failed
+  // clear misses, and a purge cut short over it would leave the rest behind.
   await env.META.delete(`handoffs:${slug}`);
-  await answerLocks(env, slug, { kind: 'clear' });
+  await answerLocks(env, slug, { kind: 'clear' }).catch((e) => {
+    console.error('[purge] locks not cleared:', e && e.message);
+  });
   await env.META.delete(`answer-locks:${slug}`);
   // So is a site binding (siteBindingKey).
   await env.META.delete(siteBindingKey(slug));
@@ -27998,8 +28001,9 @@ const tdocHandlers = {
       if (isLocalTarget(target) && !localDriver && !viaTeamAgent) return json(LOCAL_OWNER_ONLY, { status: 403 });
       // A suggestions lock follows the resend: a fresh hour for what is still
       // open if it goes as suggestions and lands; none if it lands as the plain
-      // handoff. A send that fails tells the agent nothing new, so whatever it
-      // already heard still holds it, and one that never heard is not held.
+      // handoff. A send that fails, or that the provider drops as a duplicate,
+      // tells the agent nothing new, so whatever it already heard still holds it,
+      // with the hour it had, and one that never heard is not held.
       const stillOpen = (prev.comment_ids || []).filter((id) => !(prev.resolved_ids || []).includes(id));
       const locking = replyAs === 'suggestions' && stillOpen.length > 0 && suggestLockApplies(gate.meta, target, prev.team_agent);
       let heard = null;
@@ -28014,17 +28018,21 @@ const tdocHandlers = {
       const delivery = target
         ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
         : { status: 'failed', error: 'no_recipient' };
-      if (delivery.status !== 'failed') {
+      const woke = delivery.status !== 'failed' && !delivery.deduped;
+      // A duplicate of a send we recorded as failed: it had landed after all, so
+      // the agent has heard and the lock just taken is the first true one.
+      const landedAfterAll = delivery.status !== 'failed' && delivery.deduped && prev.delivery && prev.delivery.status === 'failed';
+      if (woke) {
         if (!locking) await releaseAnswerLock(env, slug, prev.handoff_id);
-      } else if (locking && !heard) {
-        await releaseAnswerLock(env, slug, prev.handoff_id);
-      } else if (locking) {
+      } else if (locking && heard) {
         // Left to the TTL if this cannot be written: the fresh lock still holds.
         await answerLocks(env, slug, { kind: 'restore_suggestions', id: prev.handoff_id, lock: heard }).catch((e) => {
           console.error('[suggest-lock] not restored:', e && e.message);
         });
+      } else if (locking && !landedAfterAll) {
+        await releaseAnswerLock(env, slug, prev.handoff_id);
       }
-      if (delivery.status !== 'failed') await settleSuggestLocks(env, slug, { comment_ids: prev.comment_ids || [], except: prev.handoff_id });
+      if (woke) await settleSuggestLocks(env, slug, { comment_ids: prev.comment_ids || [], except: prev.handoff_id });
       // A resend after a failed local run is a fresh turn for the daemon,
       // queued by whoever pressed Resend (the owner, per the check above).
       const { run: _run, reply_as: _replyAs, ...keep } = prev;
