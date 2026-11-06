@@ -1205,8 +1205,12 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
   if (env.COMMENTS) await suggestionsOp(env, slug, { kind: 'clear' });
   await env.META.delete(suggestionsKey(slug));
   // Handoffs and readers' questions belong to this doc too: a slug published
-  // again later must not inherit them.
+  // again later must not inherit them. The same for their locks: the wipe above
+  // deletes only the comments in the Durable Object, and a lock left there would
+  // refuse the next owner's publish.
   await env.META.delete(`handoffs:${slug}`);
+  await answerLocks(env, slug, { kind: 'clear' });
+  await env.META.delete(`answer-locks:${slug}`);
   // So is a site binding (siteBindingKey).
   await env.META.delete(siteBindingKey(slug));
   for (const prefix of [`agent-asks:${slug}:`, `ai-asks:${slug}:`, `preview-status:${slug}:`]) {
@@ -19702,6 +19706,14 @@ function applyAnswerLockOp(current, op, now) {
   }
   if (op && op.kind === 'add' && typeof op.id === 'string') { map[op.id] = op.lock; changed = true; }
   if (op && op.kind === 'remove' && map[op.id]) { delete map[op.id]; changed = true; }
+  if (op && op.kind === 'clear' && Object.keys(map).length) { for (const k of Object.keys(map)) delete map[k]; changed = true; }
+  // A Resend that failed: back to the lock it replaced, its hour included, less
+  // anything dealt with while the send was failing.
+  if (op && op.kind === 'restore_suggestions' && map[op.id] && op.lock) {
+    const open = op.lock.open.filter((id) => map[op.id].open.includes(id));
+    if (open.length) map[op.id] = { ...op.lock, open }; else delete map[op.id];
+    changed = true;
+  }
   if (op && op.kind === 'settle_suggestions') {
     for (const [k, v] of Object.entries(map)) {
       if (!isSuggestLock(v) || k === op.except) continue;
@@ -19746,13 +19758,14 @@ const ANSWER_ONLY_RUN = { error: 'answer_only_run', message: 'This agent was ask
 // Stored beside the answer locks (one read per publish, for everybody, and no
 // new read for anybody without a lock), one per handoff, keyed by its id. `open`
 // is the handoff's comments nobody has dealt with yet. It ends when every one
-// is dealt with: the agent's suggestions or answer land, the handoff resolves,
-// the person resolves or deletes the comment, or the comment goes to someone
-// else. Or after SUGGEST_LOCK_TTL_MS, whatever happened: an agent that never
-// answers must not hold a doc for longer than that. A failed delivery never
-// holds anyone.
+// is dealt with: the agent's suggestions, answer or real "applied" land, the
+// handoff resolves, the person resolves or deletes the comment, the doc's
+// comments are wiped, or the comment goes to someone else. Purging the doc takes
+// the lock with it. Or after SUGGEST_LOCK_TTL_MS, whatever happened: an agent
+// that never answers must not hold a doc for longer than that. A delivery that
+// fails holds nobody who had not already heard.
 //
-// Who is refused (suggestLockRefusal): an actor that says it is the recipient,
+// Who is refused (publishLockRefusal, suggestLockHeldBy): an actor that says it is the recipient,
 // and one that says nothing or names nobody we can resolve, because it may well
 // be the recipient: a webhook agent normally sends no name, and on MCP the name
 // is an optional argument. That is why the TTL is short: a person's own terminal
@@ -27400,6 +27413,9 @@ const tdocHandlers = {
       if (authorship) return agentWriteRefusalResponse(env, writeGate.meta, authorship);
       // Serialized wipe (through the DO) so it can't race a concurrent mutation.
       const res = await mutateComments(env, slug, { kind: 'wipe', slug });
+      // No comment is left to deal with, so no suggestions lock could ever end
+      // by its comments, and the way out it names is gone with them.
+      if (res.status === 200) await settleSuggestLocks(env, slug, {});
       // The answer says how it went; there are no comments in it to filter
       // for a reader (and no session here: this route is token-only).
       return json(res.body, { status: res.status });
@@ -27981,11 +27997,15 @@ const tdocHandlers = {
       }
       if (isLocalTarget(target) && !localDriver && !viaTeamAgent) return json(LOCAL_OWNER_ONLY, { status: 403 });
       // A suggestions lock follows the resend: a fresh hour for what is still
-      // open if it goes as suggestions and lands; otherwise none.
+      // open if it goes as suggestions and lands; none if it lands as the plain
+      // handoff. A send that fails tells the agent nothing new, so whatever it
+      // already heard still holds it, and one that never heard is not held.
       const stillOpen = (prev.comment_ids || []).filter((id) => !(prev.resolved_ids || []).includes(id));
       const locking = replyAs === 'suggestions' && stillOpen.length > 0 && suggestLockApplies(gate.meta, target, prev.team_agent);
+      let heard = null;
       if (locking) {
         try {
+          heard = (await answerLocks(env, slug, { kind: 'list' })).find((l) => isSuggestLock(l) && l.handoff_id === prev.handoff_id) || null;
           await answerLocks(env, slug, { kind: 'add', id: prev.handoff_id, lock: suggestLockRecord(prev.handoff_id, target, stillOpen) });
         } catch {
           return json({ error: 'answer_lock_unavailable', message: 'Could not send to the agent right now; try again.' }, { status: 503 });
@@ -27994,7 +28014,16 @@ const tdocHandlers = {
       const delivery = target
         ? await NOTIFY_PROVIDERS[target.provider].send(env, target, event)
         : { status: 'failed', error: 'no_recipient' };
-      if (!locking || delivery.status === 'failed') await releaseAnswerLock(env, slug, prev.handoff_id);
+      if (delivery.status !== 'failed') {
+        if (!locking) await releaseAnswerLock(env, slug, prev.handoff_id);
+      } else if (locking && !heard) {
+        await releaseAnswerLock(env, slug, prev.handoff_id);
+      } else if (locking) {
+        // Left to the TTL if this cannot be written: the fresh lock still holds.
+        await answerLocks(env, slug, { kind: 'restore_suggestions', id: prev.handoff_id, lock: heard }).catch((e) => {
+          console.error('[suggest-lock] not restored:', e && e.message);
+        });
+      }
       if (delivery.status !== 'failed') await settleSuggestLocks(env, slug, { comment_ids: prev.comment_ids || [], except: prev.handoff_id });
       // A resend after a failed local run is a fresh turn for the daemon,
       // queued by whoever pressed Resend (the owner, per the check above).
@@ -28399,9 +28428,11 @@ const tdocHandlers = {
         responseBody: { id: replyId, parent_id, thread_id: parent.id, text: replyText, author: agent, agent_status: verdict, created: now, reactions: {} },
       });
       // An answer is how a suggestions handoff ends for a question (or for "I
-      // cannot send suggestions"). Not an "applied" with nothing published: that
-      // is what an agent says right after being refused.
-      if (res.status === 200 && !downgradedFrom && (verdict === 'answered' || verdict === 'question')
+      // cannot send suggestions"), and so is an "applied" that stands: a version
+      // after the comment has the change, by whoever saved it. Not an "applied"
+      // with nothing published: that is what an agent says right after being
+      // refused, and it arrives here downgraded.
+      if (res.status === 200 && !downgradedFrom && (verdict === 'answered' || verdict === 'question' || verdict === 'applied')
           && auth.actor.kind === 'hosted' && !auth.actor.team_agent) {
         await settleSuggestLocks(env, slug, { ...suggestLockActor(replyingAgent), comment_ids: [parent.id, parent_id] });
       }

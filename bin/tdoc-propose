@@ -52,7 +52,16 @@ PAYLOAD="$(node -e '
   process.stdout.write(JSON.stringify(o));
 ' "$EDITS" "$SUMMARY" "$LOGIN" "$NAME" ${COMMENTS[@]+"${COMMENTS[@]}"})"
 
+# Who is suggesting, said the way tdoc-publish says it: a suggestions handoff
+# ends for the agent it went to, not for another agent on the same account.
 HDR=()
+if [ -n "${SLOCK_CURRENT_SERVER_ID:-}" ] && [ -n "${SLOCK_CURRENT_AGENT_ID:-}" ]; then
+  HDR=(-H "X-Tdoc-Raft-Agent: ${SLOCK_CURRENT_SERVER_ID}/${SLOCK_CURRENT_AGENT_ID}")
+  # The handle is what Raft delivers by; tdoc cannot look it up from the id.
+  # URL-encoded: handles can be any script (小c), headers cannot.
+  RAFT_AGENT_NAME="$(raft profile show 2>/dev/null | sed -n 's/^- Handle: @//p' | head -1 | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(encodeURIComponent(s.trim())))' 2>/dev/null || true)"
+  if [ -n "$RAFT_AGENT_NAME" ]; then HDR+=(-H "X-Tdoc-Raft-Agent-Name: ${RAFT_AGENT_NAME}"); fi
+fi
 if [ -n "${TDOC_AGENT:-}" ] && printf '%s' "$TDOC_AGENT" | grep -Eq '^[a-z]{1,20}/[A-Za-z0-9_-]{1,80}/[A-Za-z0-9_-]{1,80}$'; then
   HDR+=(-H "X-Tdoc-Agent: ${TDOC_AGENT}")
 fi

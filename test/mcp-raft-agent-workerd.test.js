@@ -45,6 +45,7 @@ class R2 {
 // is not delivered holds nobody.
 globalThis.fetch = async (input) => {
   const u = String(input && input.url ? input.url : input);
+  if (globalThis.__down) return new Response('{}', { status: 500 });
   if (u.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'r1', agent: { serverId: 'server-one' } });
   if (u.endsWith('/api/oauth/token')) return Response.json({ access_token: 't' });
   if (u.endsWith('/api/oauth/agent-events')) return Response.json({ id: 'e1', status: 'queued' });
@@ -56,6 +57,7 @@ export class TestStore extends CommentsStore { constructor(state, env) { super(s
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    if (url.pathname === '/__down') { globalThis.__down = (await req.text()) === 'on'; return new Response('ok'); }
     if (url.pathname === '/__seed-session') {
       const { id, login, email } = await req.json();
       await fake.META.put('session:' + id, JSON.stringify({ login, name: login, email, avatar_url: '', created: new Date().toISOString() }));
@@ -256,6 +258,61 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     const free = await tool(token, 'update_doc', { slug: held, html: '<h1>Raft doc</h1><p>rewritten</p>', raft_agent: A });
     assert.ok(!free.isError, JSON.stringify(free));
     console.log('suggestions handoff in workerd: every MCP publish tool refused, propose_edits lifts it, accept and another agent unaffected ok');
+
+    {
+    // How a lock ends on the real Durable Object, where a comment wipe leaves the
+    // rest of the object's storage alone.
+    const cli = minted.body.token;
+    const asA = { 'X-Tdoc-Raft-Agent': A };
+    const lockedDoc = async () => {
+      const slug = await doc({ raft_agent: A, html: '<h1>T</h1><p>First sentence here.</p>' });
+      const c = await call('/api/comments', { method: 'POST', cookie, body: { slug, version: 1, text: 'fix', anchor: { kind: 'text', text: 'First sentence' } } });
+      assert.equal(c.status, 200, c.text);
+      const h = await call('/api/notify/handoff', { method: 'POST', cookie, body: { slug, comment_ids: [c.body.id], recipient: row('agent-linked', 'linked'), instruction: 'x', reply_as: 'suggestions' } });
+      assert.equal(h.status, 200, h.text);
+      return { slug, comment: c.body.id, handoff: h.body.handoff_id };
+    };
+    const upload = async (slug, t = cli, headers = asA) => {
+      const m = await metaOf(slug);
+      const n = m ? Math.max(...m.versions.map((v) => v.n)) + 1 : 1;
+      return call('/api/upload', { method: 'POST', token: t, headers, body: { slug, version: n, html: `<h1>T</h1><p>v${n}</p>`, meta: { title: 'T', versions: [{ n, created: new Date().toISOString() }] } } });
+    };
+    const held = async (slug, what) => { const r = await upload(slug); assert.equal(r.status, 403, `${what}: ${r.text}`); assert.equal(r.body.error, 'suggestions_only_run', what); };
+    const free = async (slug, what) => { const r = await upload(slug); assert.equal(r.status, 200, `${what}: ${r.text}`); };
+
+    const wiped = await lockedDoc();
+    await held(wiped.slug, 'before the wipe');
+    assert.equal((await call(`/api/comments?slug=${wiped.slug}&all=1`, { method: 'DELETE', token: cli })).status, 200);
+    await free(wiped.slug, 'comments wiped');
+
+    const purged = await lockedDoc();
+    assert.equal((await call(`/api/doc?slug=${purged.slug}`, { method: 'DELETE', cookie })).status, 200);
+    assert.equal((await call('/api/trash/purge', { method: 'POST', cookie, body: { slug: purged.slug } })).status, 200);
+    const carolSid = crypto.randomBytes(16).toString('hex');
+    await fetch(`${base}/__seed-session`, { method: 'POST', body: JSON.stringify({ id: carolSid, login: 'carol', email: 'carol@other.test' }) });
+    const carol = await call('/api/hosted/token', { method: 'POST', cookie: `tdoc_sid=${carolSid}`, body: { label: 'carol' } });
+    assert.equal(carol.status, 200, carol.text);
+    for (const n of [1, 2]) {
+      const r = await call('/api/upload', { method: 'POST', token: carol.body.token, body: { slug: purged.slug, version: n, html: `<p>carol ${n}</p>`, meta: { title: 'Carol', versions: [{ n, created: new Date().toISOString() }] } } });
+      assert.equal(r.status, 200, `the next owner of a purged slug, v${n}: ${r.text}`);
+    }
+
+    const resent = await lockedDoc();
+    await fetch(`${base}/__down`, { method: 'POST', body: 'on' });
+    const failedResend = await call('/api/notify/handoff/resend', { method: 'POST', cookie, body: { slug: resent.slug, handoff_id: resent.handoff } });
+    await fetch(`${base}/__down`, { method: 'POST', body: 'off' });
+    assert.equal(failedResend.body.delivery.status, 'failed', failedResend.text);
+    await held(resent.slug, 'a failed Resend does not free an agent that already heard');
+
+    const applied = await lockedDoc();
+    const saved = await call('/api/doc/versions', { method: 'POST', cookie, body: { slug: applied.slug, baseVersion: 1, html: '<!doctype html><html><head><title>T</title></head><body><h1>T</h1><p>Saved.</p></body></html>' } });
+    assert.equal(saved.status, 200, saved.text);
+    const said = await call('/api/agent/reply', { method: 'POST', token: cli, headers: asA, body: { slug: applied.slug, parent_id: applied.comment, text: 'Done', status: 'applied', applied_in: 2 } });
+    assert.equal(said.status, 200, said.text);
+    assert.equal(said.body.downgraded_from, undefined, said.text);
+    await free(applied.slug, 'a real applied');
+    console.log('suggestions lock in workerd: a wipe, a purge and a real applied end it; a failed Resend does not ok');
+    }
   } finally {
     child.kill();
     fs.rmSync(dir, { recursive: true, force: true });

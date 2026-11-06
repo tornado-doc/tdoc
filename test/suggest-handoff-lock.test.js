@@ -34,10 +34,16 @@ const REFUSED = 'suggestions_only_run';
 
   // Raft and the webhook receiver, answered here. `down` fails every delivery.
   let down = false;
+  let whileFailing = null;
   const delivered = [];
   globalThis.fetch = async (input, init = {}) => {
     const u = String(input && input.url ? input.url : input);
-    if (down) return new Response('{}', { status: 500 });
+    if (down) {
+      const during = whileFailing;
+      whileFailing = null;
+      if (during) await during();
+      return new Response('{}', { status: 500 });
+    }
     if (u.endsWith('/api/oauth/requests/agent')) return Response.json({ requestId: 'r1', agent: { serverId: SERVER } });
     if (u.endsWith('/api/oauth/token')) return Response.json({ access_token: 't' });
     delivered.push(JSON.parse(init.body));
@@ -108,6 +114,63 @@ const REFUSED = 'suggestions_only_run';
     try { return await fn(); } finally { Date.now = real; }
   };
   const HOUR = 3600 * 1000;
+  const lockOp = async (slug, op) => (await (await env.COMMENTS.get(env.COMMENTS.idFromName(slug)).fetch('https://do/answer-locks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, op }) })).json()).locks;
+  const resend = (slug, handoffId) => call('/api/notify/handoff/resend', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug, handoff_id: handoffId } });
+  const browserSave = (slug, baseVersion) => call('/api/doc/versions', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug, baseVersion, html: `<!doctype html><html><head><title>Plan</title></head><body>${html(baseVersion + 1)}</body></html>` } });
+
+  // The real scripts against these routes, over a socket: what is asserted is
+  // what they actually send, not what a test assumes they send. `raft` is a stub
+  // and the environment is built from nothing, so neither the caller's identity
+  // nor the real Raft CLI reaches the run.
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const http = require('http');
+  const { spawn } = require('child_process');
+  const withCli = async (who, fn) => {
+    const seen = [];
+    const server = http.createServer((q, res) => {
+      const chunks = [];
+      q.on('data', (d) => chunks.push(d));
+      q.on('end', async () => {
+        seen.push({ url: q.url, headers: q.headers });
+        const headers = { ...q.headers };
+        for (const k of ['host', 'connection', 'content-length', 'accept', 'user-agent']) delete headers[k];
+        const raw = Buffer.concat(chunks);
+        const r = await worker.fetch(new Request(`https://tdoc.dev${q.url}`, { method: q.method, headers, body: raw.length ? raw : undefined }), env, {});
+        res.statusCode = r.status;
+        res.end(await r.text());
+      });
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-suggest-lock-'));
+    fs.mkdirSync(path.join(home, '.tdoc'));
+    fs.writeFileSync(path.join(home, '.tdoc', 'published.json'), JSON.stringify({ platform: 'hosted', base: `http://127.0.0.1:${server.address().port}`, public_host: '127.0.0.1', upload_token: who.token }));
+    fs.mkdirSync(path.join(home, 'stub'));
+    fs.writeFileSync(path.join(home, 'stub', 'raft'), "#!/bin/sh\nprintf -- '- Handle: @stubbed\\n'\n", { mode: 0o755 });
+    const run = (bin, args, agentId) => new Promise((resolve, reject) => {
+      const child = spawn(path.join(__dirname, '..', 'bin', bin), args, {
+        env: { PATH: `${path.join(home, 'stub')}:${process.env.PATH}`, HOME: home, ...(agentId ? { SLOCK_CURRENT_SERVER_ID: SERVER, SLOCK_CURRENT_AGENT_ID: agentId } : {}) },
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d) => { stdout += d; });
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.on('error', reject);
+      child.on('close', (code) => resolve({ code, stdout, stderr }));
+    });
+    const editsFile = (edits) => {
+      const f = path.join(home, `edits-${seen.length}-${Math.random().toString(36).slice(2)}.json`);
+      fs.writeFileSync(f, JSON.stringify(edits));
+      return f;
+    };
+    try {
+      return await fn({ run, seen, editsFile });
+    } finally {
+      await new Promise((r) => server.close(r));
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  };
 
   // ---- who is refused ----
 
@@ -206,12 +269,22 @@ const REFUSED = 'suggestions_only_run';
     landed(await publish(alice, slug, AS_A), 'lifted');
   });
 
-  await t('another agent\'s suggestions do not lift it', async () => {
+  await t('another agent\'s suggestions do not lift it, sent as tdoc-propose really sends them; the recipient\'s do', async () => {
     const slug = await newDoc();
     const c = await comment(alice, slug);
     await handOff(alice, slug, [c], agentA);
-    landed(await propose(alice, slug, { find: 'Sentence one, version 1.', replace: 'Better one.', comment_id: c }, AS_B), 'B proposes');
-    refused(await publish(alice, slug, AS_A), 'A is still held');
+    await withCli(alice, async ({ run, seen, editsFile }) => {
+      const edits = editsFile([{ find: 'Sentence one, version 1.', replace: 'Better one.', comment_id: c }]);
+      const byB = await run('tdoc-propose', ['--slug', slug, '--edits', edits], 'agent-b');
+      assert(byB.code === 0, `B proposes: ${byB.code} ${byB.stdout} ${byB.stderr}`);
+      const sent = seen.find((x) => x.url.endsWith('/suggestions'));
+      assert(sent && sent.headers['x-tdoc-raft-agent'] === `${SERVER}/agent-b`, `tdoc-propose named nobody: ${JSON.stringify(sent && sent.headers)}`);
+      assert(sent.headers['x-tdoc-raft-agent-name'] === 'stubbed', 'the handle goes with the id, as tdoc-publish sends it');
+      refused(await publish(alice, slug, AS_A), 'A is still held');
+      const byA = await run('tdoc-propose', ['--slug', slug, '--edits', edits], 'agent-a');
+      assert(byA.code === 0, `A proposes: ${byA.code} ${byA.stdout} ${byA.stderr}`);
+      landed(await publish(alice, slug, AS_A), 'A sent its suggestions');
+    });
   });
 
   await t('an answer in the thread lifts that comment; "applied" with nothing published does not', async () => {
@@ -232,6 +305,47 @@ const REFUSED = 'suggestions_only_run';
     await handOff(alice, slug3, [c3], agentA);
     landed(await call('/api/agent/reply', { method: 'POST', token: alice.token, headers: AS_A, body: { slug: slug3, parent_id: c3, text: 'It says so in section 2.', status: 'answered' } }), 'A answers');
     landed(await publish(alice, slug3, AS_A), 'answered');
+  });
+
+  await t('a real "applied" lifts that comment and no other; a downgraded one, and another agent\'s, do not', async () => {
+    const slug = await newDoc();
+    const c1 = await comment(alice, slug, 'one');
+    const c2 = await comment(alice, slug, 'two');
+    await handOff(alice, slug, [c1, c2], agentA);
+    const early = await call('/api/agent/reply', { method: 'POST', token: alice.token, headers: AS_A, body: { slug, parent_id: c1, text: 'Done', status: 'applied' } });
+    assert(early.body.downgraded_from === 'applied', early.text);
+    refused(await publish(alice, slug, AS_A), 'downgraded');
+    landed(await browserSave(slug, 1), 'browser save');
+    // The last word on c1 is an agent's now, so the rest of this runs on c2.
+    const byB = await call('/api/agent/reply', { method: 'POST', token: alice.token, headers: AS_B, body: { slug, parent_id: c2, text: 'Mine', status: 'applied', applied_in: 2 } });
+    assert(byB.status === 200 && !byB.body.downgraded_from, byB.text);
+    assert((await lockOp(slug, { kind: 'list' }))[0].open.includes(c2), 'another agent\'s applied lifted it');
+
+    const slug2 = await newDoc();
+    const a = await comment(alice, slug2, 'one');
+    const b = await comment(alice, slug2, 'two');
+    await handOff(alice, slug2, [a, b], agentA);
+    landed(await browserSave(slug2, 1), 'browser save');
+    const real = await call('/api/agent/reply', { method: 'POST', token: alice.token, headers: AS_A, body: { slug: slug2, parent_id: a, text: 'Done', status: 'applied', applied_in: 2 } });
+    assert(real.status === 200 && !real.body.downgraded_from, real.text);
+    refused(await publish(alice, slug2, AS_A), 'the other comment is still open');
+    const real2 = await call('/api/agent/reply', { method: 'POST', token: alice.token, headers: AS_A, body: { slug: slug2, parent_id: b, text: 'Done', status: 'applied', applied_in: 2 } });
+    assert(real2.status === 200 && !real2.body.downgraded_from, real2.text);
+    landed(await publish(alice, slug2, AS_A), 'both done');
+  });
+
+  await t('tdoc-agent-reply does not tell a held agent to publish after a downgraded "applied"', async () => {
+    const slug = await newDoc();
+    const c = await comment(alice, slug);
+    await handOff(alice, slug, [c], agentA);
+    await withCli(alice, async ({ run }) => {
+      const r = await run('tdoc-agent-reply', ['--slug', slug, '--parent', c, '--text', 'Done', '--status', 'applied'], 'agent-a');
+      assert(r.code === 0, `reply: ${r.code} ${r.stderr}`);
+      assert(/recorded as answered, not applied/.test(r.stderr), r.stderr);
+      assert(!/Publish the change/i.test(r.stderr), r.stderr);
+      assert(/tdoc-propose/.test(r.stderr), r.stderr);
+    });
+    refused(await publish(alice, slug, AS_A), 'still held');
   });
 
   await t('the handoff resolving lifts it, and a partial resolve only lifts what it names', async () => {
@@ -268,6 +382,30 @@ const REFUSED = 'suggestions_only_run';
     });
   });
 
+  await t('wiping the doc\'s comments ends its suggestions locks: nothing is left to deal with', async () => {
+    const slug = await newDoc();
+    const c = await comment(alice, slug);
+    await handOff(alice, slug, [c], agentA);
+    refused(await publish(alice, slug, AS_A), 'held');
+    landed(await call(`/api/comments?slug=${slug}&all=1`, { method: 'DELETE', token: alice.token }), 'wipe');
+    assert((await lockOp(slug, { kind: 'list' })).length === 0, 'the lock outlived its comments');
+    landed(await publish(alice, slug, AS_A), 'no comment to deal with');
+  });
+
+  await t('a purged doc takes its locks with it: whoever gets the slug next is not held', async () => {
+    const slug = await newDoc();
+    const c = await comment(alice, slug);
+    await handOff(alice, slug, [c], agentA);
+    await lockOp(slug, { kind: 'add', id: 'ask-1', lock: { ask_id: 'ask-1', by: alice.account_id, ids: [alice.account_id], until: Date.now() + HOUR } });
+    assert((await lockOp(slug, { kind: 'list' })).length === 2, 'seeded');
+    landed(await call(`/api/doc?slug=${slug}`, { method: 'DELETE', cookie: alice.cookie, headers: ORIGIN }), 'to Trash');
+    assert((await lockOp(slug, { kind: 'list' })).length === 2, 'Trash can be undone, so the locks wait');
+    landed(await call('/api/trash/purge', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug } }), 'purge');
+    assert((await lockOp(slug, { kind: 'list' })).length === 0, 'locks outlived the doc');
+    landed(await call('/api/upload', { method: 'POST', token: carol.token, body: { slug, version: 1, html: html(1), meta: { title: 'Mine' } } }), 'carol v1');
+    landed(await publish(carol, slug), 'carol v2');
+  });
+
   await t('a failed delivery holds nobody, and the Resend that lands does', async () => {
     const slug = await newDoc();
     down = true;
@@ -278,11 +416,63 @@ const REFUSED = 'suggestions_only_run';
     const again = await call('/api/notify/handoff/resend', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug, handoff_id: sent.handoff_id } });
     landed(again, 'resend');
     refused(await publish(alice, slug, AS_A), 'delivered now');
+  });
+
+  await t('a first delivery that failed, and every Resend of it that failed, holds nobody', async () => {
+    const slug = await newDoc();
     down = true;
-    const failed = await call('/api/notify/handoff/resend', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { slug, handoff_id: sent.handoff_id } });
+    const sent = await handOff(alice, slug, [await comment(alice, slug)], agentA);
+    const failed = await resend(slug, sent.handoff_id);
     down = false;
     assert(failed.status === 200 && failed.body.delivery.status === 'failed', failed.text);
-    landed(await publish(alice, slug, AS_A), 'a resend that fails holds nobody');
+    assert((await lockOp(slug, { kind: 'list' })).length === 0, 'a lock was left');
+    landed(await publish(alice, slug, AS_A), 'never heard');
+  });
+
+  await t('a Resend that fails keeps the hold on an agent that already heard: same hour, however many times', async () => {
+    const slug = await newDoc();
+    const c = await comment(alice, slug);
+    const sent = await handOff(alice, slug, [c], agentA);
+    const before = (await lockOp(slug, { kind: 'list' }))[0];
+    down = true;
+    for (let i = 0; i < 2; i++) {
+      const failed = await later(60000 * (i + 1), () => resend(slug, sent.handoff_id));
+      assert(failed.status === 200 && failed.body.delivery.status === 'failed', failed.text);
+    }
+    down = false;
+    refused(await publish(alice, slug, AS_A), 'the agent already heard');
+    assert(JSON.stringify(await lockOp(slug, { kind: 'list' })) === JSON.stringify([before]), 'a failed send changed the lock');
+    // And dropped to the plain handoff, a failed send tells the agent nothing new either.
+    await env.META.put('dev-mode:alice@tdoc.test', 'off');
+    down = true;
+    try {
+      const failed = await resend(slug, sent.handoff_id);
+      assert(failed.body.delivery.status === 'failed', failed.text);
+    } finally {
+      down = false;
+      await env.META.delete('dev-mode:alice@tdoc.test');
+    }
+    refused(await publish(alice, slug, AS_A), 'a failed plain send lifts nothing');
+    landed(await propose(alice, slug, { find: 'Sentence one, version 1.', replace: 'Better one.', comment_id: c }, AS_A), 'propose');
+    landed(await publish(alice, slug, AS_A), 'it can still end the usual way');
+  });
+
+  await t('what the agent did while a Resend was failing still counts: the old lock does not come back', async () => {
+    const slug = await newDoc();
+    const c1 = await comment(alice, slug, 'one');
+    const c2 = await comment(alice, slug, 'two');
+    const sent = await handOff(alice, slug, [c1, c2], agentA);
+    down = true;
+    whileFailing = () => propose(alice, slug, { find: 'Sentence one, version 1.', replace: 'Better one.', comment_id: c1 }, AS_A);
+    await resend(slug, sent.handoff_id);
+    down = false;
+    assert(JSON.stringify((await lockOp(slug, { kind: 'list' }))[0].open) === JSON.stringify([c2]), 'c1 came back');
+    down = true;
+    whileFailing = () => propose(alice, slug, { find: 'Sentence two, version 1.', replace: 'Better two.', comment_id: c2 }, AS_A);
+    await resend(slug, sent.handoff_id);
+    down = false;
+    assert((await lockOp(slug, { kind: 'list' })).length === 0, 'a settled lock came back');
+    landed(await publish(alice, slug, AS_A), 'dealt with');
   });
 
   await t('Resend starts the hour again, only for what is still open', async () => {
@@ -405,8 +595,6 @@ const REFUSED = 'suggestions_only_run';
   });
 
   await t('the words reach the agent: MCP next step, CLI stops, skill says', async () => {
-    const fs = require('fs');
-    const path = require('path');
     const root = path.join(__dirname, '..');
     const src = fs.readFileSync(path.join(root, 'worker/worker.js'), 'utf8');
     assert(/suggestions_only_run: '[^']*propose_edits[^']*(do not|Do not)[^']*'/.test(src), 'MCP_REFUSAL_NEXT');
