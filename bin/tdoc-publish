@@ -1848,7 +1848,10 @@ Then re-run: $RETRY_COMMAND
     if [ "$_qerr" = "version_conflict" ] || [ "$_qerr" = "save_in_progress" ]; then
       _smsg="$(printf '%s' "$resp" | json_get message)"
       echo "[tdoc] v$v not published: ${_smsg:-another save is running on this doc. Try again in a moment.}" >&2
-      VERSION_REFUSED="$VERSION_REFUSED $v"
+      # A refusal with a wait is settled by trying again, not by a new version.
+      if [ -z "$(printf '%s' "$resp" | json_get retry_after)" ] && [ "$_qerr" = "version_conflict" ]; then
+        VERSION_REFUSED="$VERSION_REFUSED $v"
+      fi
       return 1
     fi
     echo "[tdoc] v$v upload FAILED: $resp" >&2
@@ -1908,7 +1911,7 @@ done
 # The latest version is the contract — if this fails, the whole publish fails.
 upload_version "$VERSION" || {
   case " $VERSION_REFUSED " in
-    *" $VERSION "*) echo "[tdoc] Not published. To publish as a new version: bin/tdoc-write --slug $SLUG --version next --html-file <file>, then publish again." >&2 ;;
+    *" $VERSION "*) echo "[tdoc] Not published. To publish as a new version: bin/tdoc-write --slug $SLUG --version next --title <title> --html-file <file>, then publish again." >&2 ;;
   esac
   echo "[tdoc] FATAL: latest version v$VERSION failed to upload — aborting." >&2
   exit 1
