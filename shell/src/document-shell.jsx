@@ -543,6 +543,11 @@ export function DocumentShell({ boot, config }) {
       if (!document.querySelector('.tdoc-popup textarea:focus')) setComposer(null);
       setOpenCommentId(null);
       setOpenClusterKey(null);
+      // Ask AI's popover closes on a press outside it, but a press in the
+      // document lands in the frame, where its outside-press listener never
+      // hears it: the frame's dismissal closes it, as it closes a card. The
+      // typed question is the page's (askAiDraft), so it is there on reopen.
+      setHandoffDetailsOpen(false);
     },
     'tdoc:ready': (message) => {
       setVisualOpen(false);
@@ -734,9 +739,9 @@ export function DocumentShell({ boot, config }) {
     // comment rather than be spent "closing" a card nobody can see. That was
     // every other tap failing (Julie, 2026-10-13).
     const cardOpen = narrow ? (drawerOpen && openCommentId) : (openCommentId || openClusterKey);
-    const open = Boolean((cardOpen || composer) && !reanchorId);
+    const open = Boolean((cardOpen || composer || handoffDetailsOpen) && !reanchorId);
     bridge.send({ type: 'tdoc:uiOpen', open });
-  }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId, narrow, drawerOpen]);
+  }, [bridge.send, composer, openClusterKey, openCommentId, reanchorId, narrow, drawerOpen, handoffDetailsOpen]);
 
   const focusComment = useCallback((id, { scroll = false, closeDrawer = false } = {}) => {
     setOpenCommentId(id);
