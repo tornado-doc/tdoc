@@ -1182,6 +1182,15 @@ function canCommentOnDoc(access, session, env, meta) {
 // `markers`: Trash marker keys the caller already knows (a purge resumed
 // after the record went, when there is no index record to derive them from).
 async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
+  // First, before anything goes: a save still reading this record is refused
+  // from here on (_readIsPurged). Best effort, as the version cursor's clear.
+  if (env.COMMENTS) {
+    const identity = docIdentity(await loadDocRecord(env, slug));
+    if (identity) {
+      const held = await versionReservationOp(env, slug, { kind: 'purging', identity });
+      if (!held.ok) console.error('[purge] purge hold not written:', held.error || held.status);
+    }
+  }
   const idx = await priorDocMetaIndex(env, slug);
   if (idx && validTeamId(idx.w)) {
     await enqueueTeamBackup(env, { kind: 'deleted', team: idx.w, slug, deleted_at: new Date().toISOString() });
@@ -1379,6 +1388,8 @@ async function restoreTrashedDoc(env, slug, record) {
   for (const k of ['trashed_at', 'trashed_by', 'trashed_by_account', 'trashed_with', 'account_deleted_at']) delete next[k];
   await putDocMetaJson(env, slug, JSON.stringify(next), { restore: true });
   await removeTrashMarkers(env, slug, docMetaIndex(next));
+  // A purge cut short left its hold behind, and this doc is staying.
+  if (env.COMMENTS) await versionReservationOp(env, slug, { kind: 'keep', identity: docIdentity(next) });
   return next;
 }
 
@@ -14252,7 +14263,13 @@ function feedbackSpaceVersionRefusal(meta) {
 }
 
 async function requireDocWriteAccess(env, actor, slug, opts = {}) {
-  const meta = await loadDocRecord(env, slug);
+  // A read that failed is not a missing doc: a publish would start over on top of it.
+  let meta;
+  try {
+    meta = await readDocRecord(env, slug);
+  } catch {
+    return { ok: false, response: json({ error: 'doc_record_unavailable', message: 'The doc could not be read just now. Nothing was written. Try again.' }, { status: 503 }) };
+  }
   // In Trash the slug stays reserved and nothing writes it. Its owner, who
   // could restore it, is told to (a publish must not silently bring it back
   // or start over on top of it); anyone else sees what they would have seen
@@ -17384,6 +17401,41 @@ async function versionReservationOp(env, slug, op) {
 // A read of the doc this far behind the version cursor is not KV catching up (a
 // minute at most) but KV that will not: a commit whose record was overwritten.
 const VERSION_BEHIND_LIMIT_MS = 2 * 60 * 1000;
+// How long a purged doc's record is refused by the store: well past any cached
+// read of it. A read after that finds no record at all.
+const VERSION_PURGE_HOLD_MS = 10 * 60 * 1000;
+
+// A publish refused over a version number, in words the CLI and MCP pass on.
+// `retryAfter`: seconds until the store settles what the number holds.
+function versionConflictBody(version, latest, { retryAfter = 0, listedLater = false } = {}) {
+  const body = { error: 'version_conflict', baseVersion: version - 1, latestVersion: latest };
+  if (retryAfter > 0) body.retry_after = retryAfter;
+  if (retryAfter > 0 && !listedLater) {
+    body.message = `This doc's latest version is still settling. Try again in about ${retryAfter} seconds.`;
+    return body;
+  }
+  body.next_version = latest + 1;
+  if (retryAfter > 0) {
+    body.message = `Version ${latest} already holds different content from a publish that did not finish. In about ${retryAfter} seconds it is kept as version ${latest}; then publish this as version ${latest + 1}.`;
+  } else if (version <= latest) {
+    body.message = `Version ${version} is already on the server and stays as it is. Publish this as version ${latest + 1}.`;
+  } else {
+    body.message = `This doc's latest version is ${latest}, so the next one to publish is version ${latest + 1}.`;
+  }
+  return body;
+}
+
+function versionBehindRetryAfter(since) {
+  return Math.max(1, Math.ceil((VERSION_BEHIND_LIMIT_MS - (Date.now() - since)) / 1000));
+}
+
+// Which doc a record belongs to, across its edits and however stale the read.
+// A new doc on a reused slug is another doc: its record has its own date.
+function docIdentity(meta) {
+  if (!meta || typeof meta !== 'object') return '';
+  const first = Array.isArray(meta.versions) ? meta.versions[0] : null;
+  return String(meta.created || (first && first.created) || '');
+}
 
 export class CommentsStore {
   constructor(state, env) { this.state = state; this.env = env; }
@@ -17450,6 +17502,12 @@ export class CommentsStore {
       }
       if (cursor.latest !== baseVersion) {
         result = { ok: false, status: 409, body: { error: 'version_conflict', baseVersion, latestVersion: cursor.latest } };
+        // A cursor ahead of the record: an upload starts the same bounded wait a
+        // save does, or a doc only agents write would be refused for ever.
+        if (!refuseAhead && cursor.latest > metaLatest) {
+          result.behindSince = Number(cursor.behind_since) || started;
+          await txn.put('versionCursor', { latest: cursor.latest, pending: null, behind_since: result.behindSince });
+        }
         return;
       }
       const next = baseVersion + 1;
@@ -17480,20 +17538,78 @@ export class CommentsStore {
     const metaLatest = latestVersionNumber(meta);
     const first = await this._reserveVersion(baseVersion, metaLatest, { refuseAhead: true });
     if (!first.behindSince || Date.now() - first.behindSince < VERSION_BEHIND_LIMIT_MS) return { ...first, meta };
-    const versions = Array.isArray(meta.versions) ? [...meta.versions] : [];
-    let n = metaLatest + 1;
+    let rebuilt;
     try {
-      for (; n <= first.latest; n++) {
-        const bytes = await this.env.DOCS.head(`docs/${slug}/v${n}/index.html`);
-        if (!bytes) break;
-        versions.push({ n, created: (bytes.uploaded instanceof Date ? bytes.uploaded : new Date()).toISOString(), prompt: 'Recovered version' });
-      }
+      rebuilt = await this._rebuildFromBytes(slug, meta, first.latest);
     } catch (error) {
       return { ok: false, status: 503, body: { error: 'version_store_unavailable', message: error.message || String(error) } };
     }
-    if (n <= first.latest) await this._lowerCursor(first.latest, n - 1);
-    const recovered = { ...meta, versions };
-    return { ...(await this._reserveVersion(baseVersion, n - 1, { refuseAhead: true, recovered: true })), meta: recovered };
+    return { ...(await this._reserveVersion(baseVersion, rebuilt.latest, { refuseAhead: true, recovered: true })), meta: rebuilt.meta };
+  }
+
+  async _rebuildFromBytes(slug, meta, cursorLatest) {
+    const versions = Array.isArray(meta.versions) ? [...meta.versions] : [];
+    let n = latestVersionNumber(meta) + 1;
+    for (; n <= cursorLatest; n++) {
+      const bytes = await this.env.DOCS.head(`docs/${slug}/v${n}/index.html`);
+      if (!bytes) break;
+      versions.push({ n, created: (bytes.uploaded instanceof Date ? bytes.uploaded : new Date()).toISOString(), prompt: 'Recovered version' });
+    }
+    if (n <= cursorLatest) await this._lowerCursor(cursorLatest, n - 1);
+    return { meta: { ...meta, versions }, latest: n - 1 };
+  }
+
+  // An upload's side of that limit. It writes no record from a behind read, so past
+  // the limit the bytes are listed here, and it is told the number to build on.
+  async _settleForUpload(slug, meta, cursorLatest, since) {
+    if (Date.now() - since < VERSION_BEHIND_LIMIT_MS) return { retryAfter: versionBehindRetryAfter(since) };
+    try {
+      const rebuilt = await this._rebuildFromBytes(slug, meta, cursorLatest);
+      if (rebuilt.latest > latestVersionNumber(meta)) await putDocMetaJson(this.env, slug, JSON.stringify(rebuilt.meta));
+      await this.state.storage.transaction(async (txn) => {
+        const cursor = await txn.get('versionCursor');
+        if (cursor && cursor.behind_since) { delete cursor.behind_since; await txn.put('versionCursor', cursor); }
+      });
+      return { latest: rebuilt.latest };
+    } catch (error) {
+      console.error('[upload] version rebuild failed:', error.message || String(error));
+      return { retryAfter: 30 };
+    }
+  }
+
+  // The number a reservation holds already has bytes, so it stays taken and the
+  // cursor says so. A read behind that is refused like any other (_reserveVersion);
+  // the wait runs from when the bytes were written, because a commit that old is
+  // not coming, and what they are then is what the rebuild above makes them.
+  async _versionOccupied(reservation, since) {
+    await this.state.storage.transaction(async (txn) => {
+      const cursor = await txn.get('versionCursor');
+      if (!cursor || !cursor.pending || cursor.pending.id !== reservation.id) return;
+      await txn.put('versionCursor', { latest: reservation.next, pending: null, behind_since: since });
+    });
+  }
+
+  // The purge hold (deleteDocEverywhere): a read of the purged record, however
+  // late it arrives, is not a doc to write. A new doc on the slug is not refused,
+  // nor is anything once the hold has run out.
+  async _readIsPurged(meta) {
+    let purged = false;
+    await this.state.storage.transaction(async (txn) => {
+      const hold = await txn.get('purgeHold');
+      if (!hold) return;
+      if (Date.now() - Number(hold.at) >= VERSION_PURGE_HOLD_MS) await txn.delete('purgeHold');
+      else purged = hold.identity === docIdentity(meta);
+    });
+    return purged;
+  }
+
+  // What a save that was already running when the purge began leaves: bytes
+  // nobody will list, on a slug that may be someone's next.
+  async _dropUnlistedVersion(slug, n) {
+    const prefix = `docs/${slug}/v${n}/`;
+    const page = await this.env.DOCS.list({ prefix });
+    const keys = (page.objects || []).map((o) => o.key);
+    if (keys.length) await this.env.DOCS.delete(keys);
   }
 
   async _lowerCursor(from, to) {
@@ -17510,6 +17626,18 @@ export class CommentsStore {
       ahead = Boolean(cursor) && Number(cursor.latest) > metaLatest;
     });
     return ahead;
+  }
+
+  // What is stored at v1 of a doc whose record still shows the scaffold. `written`
+  // (when) means it is not the scaffold; an entry that never recorded a hash
+  // cannot tell, and counts as the scaffold.
+  async _scaffoldBytes(slug, entry) {
+    const stored = await this.env.DOCS.get(`docs/${slug}/v1/index.html`);
+    if (!stored) return {};
+    if (entry.sha && (await sha256Hex(await stored.text())).slice(0, 16) !== entry.sha) {
+      return { written: stored.uploaded instanceof Date ? stored.uploaded.getTime() : Date.now() };
+    }
+    return { etag: stored.etag };
   }
 
   async _copyVersionWidgets(slug, baseVersion, nextVersion) {
@@ -17531,7 +17659,7 @@ export class CommentsStore {
 
   async _saveVersion(slug, op) {
     const metaRead = await loadDocMeta(this.env, slug);
-    if (!metaRead) return { status: 404, body: { error: 'not_found' } };
+    if (!metaRead || await this._readIsPurged(metaRead)) return { status: 404, body: { error: 'not_found' } };
     // The blank page a browser create lays down is scaffolding, not a version
     // anyone wrote. The first real save becomes v1 rather than appending v2, so
     // a document's history starts with the first thing someone actually wrote.
@@ -17545,11 +17673,23 @@ export class CommentsStore {
       && Boolean(priorVersions[0] && priorVersions[0].blank)
       && Number(op.baseVersion) === 1
       && !(await this._cursorAhead(latestVersionNumber(metaRead)));
-    const reservation = replacesScaffold
+    // Only the scaffold's own bytes are replaced. Anything else there is the
+    // first real save, and this read is behind it or that save's commit was lost.
+    const scaffold = replacesScaffold ? await this._scaffoldBytes(slug, priorVersions[0]) : null;
+    if (scaffold && scaffold.written && Date.now() - scaffold.written < VERSION_BEHIND_LIMIT_MS) {
+      return { status: 409, body: { error: 'save_in_progress', latestVersion: 1 } };
+    }
+    const overScaffold = replacesScaffold && !(scaffold && scaffold.written);
+    let readForSave = metaRead;
+    if (replacesScaffold && !overScaffold) {
+      const { blank: _spent, ...written } = priorVersions[0];
+      readForSave = { ...metaRead, versions: [written] };
+    }
+    const reservation = overScaffold
       ? { ok: true, next: 1 }
-      : await this._reserveForSave(slug, op.baseVersion, metaRead);
+      : await this._reserveForSave(slug, op.baseVersion, readForSave);
     if (!reservation.ok) return { status: reservation.status, body: reservation.body };
-    const meta = reservation.meta || metaRead;
+    const meta = reservation.meta || readForSave;
 
     let committed = false;
     try {
@@ -17566,14 +17706,36 @@ export class CommentsStore {
       // words are the suggester's, not the person's own typing.
       const nextTitle = op.keep_title ? '' : (meta.created_from === 'blank' ? titleFromDocument(rewritten) : '');
       const stamped = await prepareDocVersion(nextTitle ? syncDocumentTitle(rewritten, nextTitle) : rewritten);
-      // Nothing to carry across when the target IS the source; a scaffold has
-      // no widgets either way.
-      if (!replacesScaffold) await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
       const key = `docs/${slug}/v${reservation.next}/index.html`;
-      await this.env.DOCS.put(key, stamped.html, {
-        httpMetadata: { contentType: 'text/html; charset=utf-8' },
-      });
+      const httpMetadata = { contentType: 'text/html; charset=utf-8' };
+      // A version's bytes are written once. The one exception swaps the scaffold,
+      // and only those very bytes, for the first real save.
+      const stored = overScaffold && scaffold && scaffold.etag
+        ? (await this.env.DOCS.put(key, stamped.html, { httpMetadata, onlyIf: { etagMatches: scaffold.etag } })) !== null
+        : await r2PutOnce(this.env, key, stamped.html, { httpMetadata });
+      if (!stored) {
+        if (overScaffold) return { status: 409, body: { error: 'save_in_progress', latestVersion: 1 } };
+        const occupant = await this.env.DOCS.head(key);
+        await this._versionOccupied(reservation, occupant && occupant.uploaded instanceof Date ? occupant.uploaded.getTime() : Date.now());
+        return { status: 409, body: { error: 'save_in_progress', latestVersion: reservation.next } };
+      }
+      // Nothing to carry across when the target IS the source; a scaffold has
+      // no widgets either way. After the claim above, so these land only on this
+      // save's own version.
+      if (!overScaffold) {
+        try {
+          await this._copyVersionWidgets(slug, op.baseVersion, reservation.next);
+        } catch (error) {
+          await this._dropUnlistedVersion(slug, reservation.next).catch(() => {});
+          throw error;
+        }
+      }
       const verify = await this.env.DOCS.head(key);
+      // The doc may have been purged while this ran; if so, this record stays gone.
+      if (await this._readIsPurged(metaRead)) {
+        await this._dropUnlistedVersion(slug, reservation.next).catch(() => {});
+        return { status: 404, body: { error: 'not_found' } };
+      }
       if (!verify) throw new Error('version_write_lost');
 
       const now = new Date().toISOString();
@@ -17607,7 +17769,7 @@ export class CommentsStore {
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
       // reporting a failed save after META committed would make the browser
       // retry a snapshot that already exists.
-      if (!replacesScaffold) {
+      if (!overScaffold) {
         try {
           await this._finishVersion(reservation, true);
         } catch (error) {
@@ -17634,7 +17796,7 @@ export class CommentsStore {
         body: { ok: true, version: reservation.next, url: `/d/${slug}/v/${reservation.next}` },
       };
     } catch (error) {
-      if (!committed && !replacesScaffold) {
+      if (!committed && !overScaffold) {
         try { await this._finishVersion(reservation, false); } catch {}
       }
       return { status: 500, body: { error: 'version_write_failed', message: error.message || String(error) } };
@@ -17749,9 +17911,22 @@ export class CommentsStore {
     if (u.pathname === '/version-lock') {
       if (op && op.kind === 'reserve') {
         const meta = await loadDocMeta(this.env, slug);
-        if (!meta) return Response.json({ error: 'not_found' }, { status: 404 });
-        const result = await this._reserveVersion(Number(op.baseVersion), latestVersionNumber(meta));
+        if (!meta || await this._readIsPurged(meta)) return Response.json({ error: 'not_found' }, { status: 404 });
+        const base = Number(op.baseVersion);
+        let result = await this._reserveVersion(base, latestVersionNumber(meta));
+        const settled = result.behindSince ? await this._settleForUpload(slug, meta, result.body.latestVersion, result.behindSince) : {};
+        if (settled.latest !== undefined) result = await this._reserveVersion(base, settled.latest);
+        if (!result.ok && result.body.error === 'version_conflict') {
+          result.body = versionConflictBody(base + 1, result.body.latestVersion, { retryAfter: settled.retryAfter });
+        }
         return Response.json(result.ok ? result : result.body, { status: result.ok ? 200 : result.status });
+      }
+      if (op && op.kind === 'occupied' && op.reservation) {
+        const since = Number(op.since) || Date.now();
+        await this._versionOccupied(op.reservation, since);
+        const meta = await loadDocMeta(this.env, slug);
+        const settled = meta ? await this._settleForUpload(slug, meta, op.reservation.next, since) : {};
+        return Response.json({ ok: true, ...settled });
       }
       if (op && op.kind === 'finish' && op.reservation) {
         await this._finishVersion(op.reservation, !!op.committed);
@@ -17760,6 +17935,21 @@ export class CommentsStore {
       // The doc is gone for good. The slug's next owner starts from nothing.
       if (op && op.kind === 'forget') {
         await this.state.storage.delete('versionCursor');
+        return Response.json({ ok: true });
+      }
+      if (op && op.kind === 'purging') {
+        if (typeof op.identity === 'string' && op.identity) await this.state.storage.put('purgeHold', { at: Date.now(), identity: op.identity });
+        return Response.json({ ok: true });
+      }
+      // Whether a record the caller read is the purged doc's.
+      if (op && op.kind === 'purged') {
+        return Response.json({ ok: true, purged: await this._readIsPurged({ created: String(op.identity || '') }) });
+      }
+      // This record is staying (a restore) or is new with the same date (the same
+      // files published again): the hold is not about it.
+      if (op && op.kind === 'keep') {
+        const hold = await this.state.storage.get('purgeHold');
+        if (hold && hold.identity === op.identity) await this.state.storage.delete('purgeHold');
         return Response.json({ ok: true });
       }
       return Response.json({ error: 'bad_version_lock_op' }, { status: 400 });
@@ -21493,10 +21683,11 @@ const MCP_REFUSAL_NEXT = {
 function mcpApiError(r, fallback = 'request_failed') {
   const d = r.data && typeof r.data === 'object' ? r.data : {};
   const error = typeof d.error === 'string' ? d.error : (r.status === 404 ? 'not_found' : fallback);
-  const next = MCP_REFUSAL_NEXT[error] || (error.startsWith('quota') ? MCP_REFUSAL_NEXT.quota_docs : '');
+  // A refusal with a wait has its next step in its own words: nothing to read yet.
+  const next = d.retry_after ? '' : (MCP_REFUSAL_NEXT[error] || (error.startsWith('quota') ? MCP_REFUSAL_NEXT.quota_docs : ''));
   const message = [typeof d.message === 'string' ? d.message : '', next].filter(Boolean).join(' ') || `HTTP ${r.status}`;
   const extra = { status: r.status };
-  for (const k of ['reason', 'writer', 'manage_url', 'latestVersion', 'limit', 'until']) if (d[k] !== undefined) extra[k] = d[k];
+  for (const k of ['reason', 'writer', 'manage_url', 'latestVersion', 'next_version', 'retry_after', 'limit', 'until']) if (d[k] !== undefined) extra[k] = d[k];
   return mcpToolError(error, message, extra);
 }
 
@@ -22039,7 +22230,7 @@ async function mcpUploadManifest(env, id) {
 // Write `key` only if no object is there yet (R2 conditional write,
 // If-None-Match: *; put answers null when the precondition fails). true when
 // this call wrote it.
-async function mcpPutOnce(env, key, value, opts = {}) {
+async function r2PutOnce(env, key, value, opts = {}) {
   let out;
   try {
     // The Headers form is the documented create-once write.
@@ -22050,7 +22241,7 @@ async function mcpPutOnce(env, key, value, opts = {}) {
     if (await env.DOCS.head(key)) return false;
     out = await env.DOCS.put(key, value, opts);
   }
-  return out != null;
+  return out !== null;
 }
 async function mcpUploadDelete(env, id, count) {
   const keys = [`${MCP_UPLOAD_PREFIX}${id}/manifest.json`, `${MCP_UPLOAD_PREFIX}${id}/claim`];
@@ -22150,7 +22341,7 @@ async function handleMcpUploadPut(env, req, url) {
     return refuse(400, 'size_mismatch', `${name}: declared ${file.size} bytes in create_upload, sent ${bytes ? bytes.byteLength : 'more'}.`);
   }
   if (!mcpUploadContentOk(file.type, bytes)) return refuse(415, 'type_mismatch', `${name} is not a valid ${file.type} file.`);
-  if (!(await mcpPutOnce(env, key, bytes, { httpMetadata: { contentType: 'application/octet-stream' } }))) return already();
+  if (!(await r2PutOnce(env, key, bytes, { httpMetadata: { contentType: 'application/octet-stream' } }))) return already();
   return json({ ok: true, name, size: file.size }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
@@ -22574,7 +22765,7 @@ const MCP_TOOLS = {
       // concurrent second one is refused instead of publishing it again. A
       // commit that does not publish gives the claim back, for a retry.
       const claimKey = `${MCP_UPLOAD_PREFIX}${id}/claim`;
-      if (!(await mcpPutOnce(call.env, claimKey, JSON.stringify({ at: new Date().toISOString() })))) {
+      if (!(await r2PutOnce(call.env, claimKey, JSON.stringify({ at: new Date().toISOString() })))) {
         return mcpToolError('upload_in_progress', 'This upload is already being committed. Wait for that call; do not commit it twice.');
       }
       let published = false;
@@ -29258,6 +29449,7 @@ const tdocHandlers = {
       const r2Key = `docs/${slug}/v${verNum}/index.html`;
       const incomingLatest = latestVersionNumber(incoming);
       let versionReservation = null;
+      let sameBytesStored = false;
       const remoteLatest = latestVersionNumber(writeGate.meta);
       // Catching up: the client is walking its versions upward and this one
       // is exactly the next the server is missing. Commit it as latest now,
@@ -29269,9 +29461,22 @@ const tdocHandlers = {
       const catchUp = !!incoming && !!writeGate.meta && remoteLatest > 0
         && verNum === remoteLatest + 1 && incomingLatest > verNum;
       const writesLatestMeta = !!incoming && (incomingLatest === 0 || verNum === incomingLatest || catchUp);
+      // Checked before anything is stored: a refused upload leaves no bytes.
+      const widgets = body.widgets;
+      const widgetNames = widgets != null && typeof widgets === 'object' && !Array.isArray(widgets) ? Object.keys(widgets) : [];
+      if (widgets != null) {
+        if (typeof widgets !== 'object' || Array.isArray(widgets)) return json({ error: 'widgets must be an object of name → html' }, { status: 400 });
+        if (widgetNames.length > 32) return json({ error: 'too many widgets' }, { status: 400 });
+        for (const wname of widgetNames) {
+          if (!isValidWidgetName(wname)) return json({ error: 'invalid_widget_name', name: wname }, { status: 400 });
+          if (typeof widgets[wname] !== 'string') return json({ error: 'widget html must be a string', name: wname }, { status: 400 });
+          if (widgets[wname].length > 512 * 1024) return json({ error: 'widget too large', name: wname }, { status: 400 });
+        }
+      }
       if (writeGate.meta && verNum <= remoteLatest) {
         const existing = await env.DOCS.get(r2Key);
         const existingHtml = existing ? await existing.text() : null;
+        sameBytesStored = existingHtml === stampedHtml;
         // Old-version uploads are best-effort repairs, never rewrites. This is
         // what prevents a stale local v8 from replacing a browser-created v8
         // while the CLI walks its historical versions before uploading v9.
@@ -29288,15 +29493,11 @@ const tdocHandlers = {
           if (replace && verNum < remoteLatest) {
             return json({ error: 'replace_not_latest', version: verNum, latestVersion: remoteLatest }, { status: 409 });
           }
-          if (!replace) {
-            return json({ error: 'version_conflict', baseVersion: verNum - 1, latestVersion: remoteLatest }, { status: 409 });
-          }
+          if (!replace) return json(versionConflictBody(verNum, remoteLatest), { status: 409 });
         }
       }
       if (writesLatestMeta && writeGate.meta && env.COMMENTS && verNum > remoteLatest) {
-          if (verNum !== remoteLatest + 1) {
-            return json({ error: 'version_conflict', baseVersion: verNum - 1, latestVersion: remoteLatest }, { status: 409 });
-          }
+          if (verNum !== remoteLatest + 1) return json(versionConflictBody(verNum, remoteLatest), { status: 409 });
           const lock = await versionReservationOp(env, slug, { kind: 'reserve', baseVersion: remoteLatest });
           if (!lock.ok) return json({ error: lock.error || 'version_conflict', ...lock }, { status: lock.status || 409 });
           versionReservation = { id: lock.id, next: lock.next };
@@ -29308,14 +29509,43 @@ const tdocHandlers = {
         const result = await versionReservationOp(env, slug, { kind: 'finish', reservation, committed });
         if (!result.ok) throw new Error(result.message || result.error || 'version_lock_finalize_failed');
       };
-      const abortVersionWrite = async (body, status) => {
-        try { await finishVersionReservation(false); } catch {}
-        return json(body, { status });
+      // The number holds other bytes: it stays theirs, and the caller hears what to
+      // do next. A number the store has settled is not one to wait for.
+      const refuseVersionTaken = async (since) => {
+        const settled = versionReservation
+          ? await versionReservationOp(env, slug, { kind: 'occupied', reservation: versionReservation, since: since || Date.now() })
+          : {};
+        versionReservation = null;
+        if (settled.retryAfter) return json(versionConflictBody(verNum, verNum, { retryAfter: settled.retryAfter, listedLater: true }), { status: 409 });
+        return json(versionConflictBody(verNum, Math.max(verNum, remoteLatest, Number(settled.latest) || 0)), { status: 409 });
       };
+      // A version's bytes are written once (see _saveVersion); `replace` is the
+      // landing docs' exception above. The same bytes again are a retry, and fine.
+      const httpMetadata = { contentType: 'text/html; charset=utf-8' };
+      let wroteVersion = !sameBytesStored;
+      let deadPublish = false;
       try {
-        await env.DOCS.put(r2Key, stampedHtml, {
-          httpMetadata: { contentType: 'text/html; charset=utf-8' },
-        });
+        if (replace && !sameBytesStored) await env.DOCS.put(r2Key, stampedHtml, { httpMetadata });
+        else if (!sameBytesStored) wroteVersion = await r2PutOnce(env, r2Key, stampedHtml, { httpMetadata });
+        if (!wroteVersion && !sameBytesStored) {
+          const occupant = await env.DOCS.get(r2Key);
+          if (occupant && await occupant.text() !== stampedHtml) {
+            const since = occupant.uploaded instanceof Date ? occupant.uploaded.getTime() : 0;
+            if (writeGate.meta) return await refuseVersionTaken(since);
+            // With no record, an old object is no version anyone can open: a first
+            // publish that stopped. A recent one may be a record KV has yet to show.
+            if (Date.now() - since < VERSION_BEHIND_LIMIT_MS) {
+              const retryAfter = versionBehindRetryAfter(since);
+              return json({
+                error: 'version_conflict', baseVersion: 0, latestVersion: 0, retry_after: retryAfter,
+                message: `An earlier first publish of this doc did not finish. Try again in about ${retryAfter} seconds.`,
+              }, { status: 409 });
+            }
+            await env.DOCS.put(r2Key, stampedHtml, { httpMetadata });
+            wroteVersion = true;
+            deadPublish = true;
+          }
+        }
       } catch (e) {
         try { await finishVersionReservation(false); } catch {}
         console.error('[upload] R2 put failed:', e.message);
@@ -29330,28 +29560,46 @@ const tdocHandlers = {
         console.error('[upload] R2 write did not persist:', r2Key);
         return json({ error: 'r2_write_lost', message: 'PUT succeeded but the key is not readable. Re-deploy the worker; the R2 binding may be stale.' }, { status: 500 });
       }
-      const widgets = body.widgets;
-      if (widgets != null) {
-        if (typeof widgets !== 'object' || Array.isArray(widgets)) {
-          return abortVersionWrite({ error: 'widgets must be an object of name → html' }, 400);
+      // The files of a version already on the server are fixed too: the same ones
+      // are a retry, anything else is refused before any of them is written. Missing
+      // files may land only with a page this upload stored, or on a publish that stopped.
+      const listedVersion = !!writeGate.meta && (writeGate.meta.versions || []).some((item) => Number(item && item.n) === verNum);
+      let replaceWidgets = replace || deadPublish || (wroteVersion && !listedVersion);
+      let widgetsToWrite = widgetNames;
+      if (!replaceWidgets) {
+        widgetsToWrite = [];
+        for (const wname of widgetNames) {
+          const stored = await env.DOCS.get(`docs/${slug}/v${verNum}/widgets/${wname}.html`);
+          if (stored && await stored.text() === widgets[wname]) continue;
+          if (!stored && (!listedVersion || wroteVersion)) { widgetsToWrite.push(wname); continue; }
+          const since = verify.uploaded instanceof Date ? verify.uploaded.getTime() : 0;
+          if (!writeGate.meta && Date.now() - since >= VERSION_BEHIND_LIMIT_MS) { replaceWidgets = true; widgetsToWrite = widgetNames; break; }
+          return refuseVersionTaken(since);
         }
-        const names = Object.keys(widgets);
-        if (names.length > 32) return abortVersionWrite({ error: 'too many widgets' }, 400);
-        for (const wname of names) {
-          if (!isValidWidgetName(wname)) return abortVersionWrite({ error: 'invalid_widget_name', name: wname }, 400);
-          const whtml = widgets[wname];
-          if (typeof whtml !== 'string') return abortVersionWrite({ error: 'widget html must be a string', name: wname }, 400);
-          if (whtml.length > 512 * 1024) return abortVersionWrite({ error: 'widget too large', name: wname }, 400);
-          const wKey = `docs/${slug}/v${verNum}/widgets/${wname}.html`;
-          try {
-            await env.DOCS.put(wKey, whtml, {
-              httpMetadata: { contentType: 'text/html; charset=utf-8' },
-            });
-          } catch (e) {
-            try { await finishVersionReservation(false); } catch {}
-            console.error('[upload] R2 widget put failed:', e.message);
-            return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+      }
+      for (const wname of widgetsToWrite) {
+        const wKey = `docs/${slug}/v${verNum}/widgets/${wname}.html`;
+        try {
+          if (replaceWidgets) await env.DOCS.put(wKey, widgets[wname], { httpMetadata });
+          else await r2PutOnce(env, wKey, widgets[wname], { httpMetadata });
+        } catch (e) {
+          try { await finishVersionReservation(false); } catch {}
+          console.error('[upload] R2 widget put failed:', e.message);
+          return json({ error: 'r2_put_failed', message: e.message }, { status: 500 });
+        }
+      }
+      // A doc purged while this ran, or before a behind read of it reached here.
+      // Reserving asks too, but not every upload reserves.
+      if (writeGate.meta && env.COMMENTS) {
+        const check = await versionReservationOp(env, slug, { kind: 'purged', identity: docIdentity(writeGate.meta) });
+        if (check.purged) {
+          versionReservation = null;
+          if (wroteVersion) {
+            const page = await env.DOCS.list({ prefix: `docs/${slug}/v${verNum}/` });
+            const keys = (page.objects || []).map((o) => o.key);
+            if (keys.length) await env.DOCS.delete(keys);
           }
+          return json({ error: 'not_found', message: 'This doc was deleted for good. In a minute, this slug can be published as a new doc.' }, { status: 404 });
         }
       }
       if (incoming && writesLatestMeta) {
@@ -29364,7 +29612,9 @@ const tdocHandlers = {
             ? await actingAgent(env, req, auth.actor) : null;
           // Remote storage is authoritative. Preserve versions that a browser
           // editor may have created since this local checkout was last pulled.
-          const currentMeta = await loadDocMeta(env, slug);
+          // A failed read throws: this record is not written from nothing.
+          const currentRecord = await readDocRecord(env, slug);
+          const currentMeta = isTrashedMeta(currentRecord) ? null : currentRecord;
           const versionByNumber = new Map();
           for (const item of (Array.isArray(currentMeta && currentMeta.versions) ? currentMeta.versions : [])) {
             versionByNumber.set(Number(item.n), item);
@@ -29429,6 +29679,11 @@ const tdocHandlers = {
         if (pendingPreviewTask) {
           if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(pendingPreviewTask());
           else await pendingPreviewTask();
+        }
+        // A new doc: if it carries the purged one's date, the hold must not refuse it.
+        if (!writeGate.meta && env.COMMENTS) {
+          const madeIdentity = docIdentity(incoming);
+          if (madeIdentity) await versionReservationOp(env, slug, { kind: 'keep', identity: madeIdentity });
         }
         try {
           await finishVersionReservation(true);

@@ -1844,6 +1844,13 @@ Then re-run: $RETRY_COMMAND
 
 (The web UI has the same flow under \"Doc limit reached\". Do not change global TDOC_HOSTED_MAX_DOCS for one account.)"
     fi
+    # Refused over the version number. The server says what to do next.
+    if [ "$_qerr" = "version_conflict" ] || [ "$_qerr" = "save_in_progress" ]; then
+      _smsg="$(printf '%s' "$resp" | json_get message)"
+      echo "[tdoc] v$v not published: ${_smsg:-another save is running on this doc. Try again in a moment.}" >&2
+      VERSION_REFUSED="$VERSION_REFUSED $v"
+      return 1
+    fi
     echo "[tdoc] v$v upload FAILED: $resp" >&2
     return 1
   fi
@@ -1892,6 +1899,7 @@ export TDOC_UPLOAD_TEAM TDOC_UPLOAD_TEAM_DEFAULT
 # and report them, but only the latest version's upload is allowed to hard-fail
 # the publish. (|| true guards against set -e on the best-effort uploads.)
 OLDER_FAILED=""
+VERSION_REFUSED=""
 for v in $LOCAL_VERSIONS; do
   if [ "$v" != "$VERSION" ]; then
     upload_version "$v" || OLDER_FAILED="$OLDER_FAILED $v"
@@ -1899,11 +1907,26 @@ for v in $LOCAL_VERSIONS; do
 done
 # The latest version is the contract — if this fails, the whole publish fails.
 upload_version "$VERSION" || {
+  case " $VERSION_REFUSED " in
+    *" $VERSION "*) echo "[tdoc] Not published. To publish as a new version: bin/tdoc-write --slug $SLUG --version next --html-file <file>, then publish again." >&2 ;;
+  esac
   echo "[tdoc] FATAL: latest version v$VERSION failed to upload — aborting." >&2
   exit 1
 }
-if [ -n "$OLDER_FAILED" ]; then
-  echo "[tdoc] WARNING: older version(s) failed to upload:$OLDER_FAILED — latest is live; re-run /tdoc publish to retry them." >&2
+# A version the server refused keeps what the server has; a re-run changes nothing.
+OLDER_RETRY=""
+OLDER_KEPT=""
+for v in $OLDER_FAILED; do
+  case " $VERSION_REFUSED " in
+    *" $v "*) OLDER_KEPT="$OLDER_KEPT $v" ;;
+    *) OLDER_RETRY="$OLDER_RETRY $v" ;;
+  esac
+done
+if [ -n "$OLDER_KEPT" ]; then
+  echo "[tdoc] WARNING: older version(s)$OLDER_KEPT differ from the server's, which stay as they are — latest is live; re-running will not change them." >&2
+fi
+if [ -n "$OLDER_RETRY" ]; then
+  echo "[tdoc] WARNING: older version(s) failed to upload:$OLDER_RETRY — latest is live; re-run /tdoc publish to retry them." >&2
 fi
 TDOC_MOVE="$(cd "$(dirname "$0")" && pwd)/tdoc-move"
 # The default team applies to a doc's FIRST publish only: an existing doc is

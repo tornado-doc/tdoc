@@ -215,7 +215,7 @@ function get(port, p, headers = {}) {
   await t('worker upload writes docs/<slug>/v<n>/widgets/<name>.html', async () => {
     const s = workerSrc.indexOf('const widgets = body.widgets');
     if (s < 0) throw new Error('upload widgets handling missing');
-    const body = workerSrc.slice(s, s + 1200);
+    const body = workerSrc.slice(s, s + 8000);
     if (!body.includes('widgets/${wname}.html') && !body.includes('widgets/${wname}.html')) {
       if (!body.includes('/widgets/')) throw new Error(`upload does not put widget R2 keys: ${body.slice(0, 400)}`);
     }

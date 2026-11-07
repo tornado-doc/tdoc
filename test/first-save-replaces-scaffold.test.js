@@ -55,13 +55,13 @@ t('and refuses everything else', () => {
 t('the worker skips the version reservation, widget copy and cursor for a replace', () => {
   const start = worker.indexOf('async _saveVersion(');
   const block = worker.slice(start, worker.indexOf('\n  async fetch(', start));
-  assert(/const reservation = replacesScaffold\s*\n\s*\? \{ ok: true, next: 1 \}/.test(block),
+  assert(/const reservation = overScaffold\s*\n\s*\? \{ ok: true, next: 1 \}/.test(block),
     'a replace must not reserve a new version number');
-  assert(/if \(!replacesScaffold\) await this\._copyVersionWidgets/.test(block),
+  assert(/if \(!overScaffold\) \{\s*\n\s*try \{\s*\n\s*await this\._copyVersionWidgets/.test(block),
     'copying widgets from v1 to v1 is not a thing');
-  assert(/if \(!replacesScaffold\) \{\s*\n\s*try \{\s*\n\s*await this\._finishVersion\(reservation, true\);/.test(block),
+  assert(/if \(!overScaffold\) \{\s*\n\s*try \{\s*\n\s*await this\._finishVersion\(reservation, true\);/.test(block),
     'the reservation cursor belongs to the reserve path only');
-  assert(/if \(!committed && !replacesScaffold\)/.test(block),
+  assert(/if \(!committed && !overScaffold\)/.test(block),
     'the failure path must not release a reservation it never took');
 });
 
