@@ -552,7 +552,7 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
   const path = require('path');
   const parserSrc = fs.readFileSync(path.join(__dirname, '..', 'server', 'html-parser', 'parse5.js'), 'utf8');
   const workerSrc = fs.readFileSync(path.join(__dirname, '..', 'worker', 'worker.js'), 'utf8').replace('/* __TDOC_HTML_PARSER__ */', () => parserSrc);
-  const S = new Function(`${workerSrc.slice(workerSrc.indexOf('const SUGGEST_MAX_EDITS'), workerSrc.indexOf('// The edits a model or an agent sent'))}\nreturn { suggestPlan, suggestTextMap, suggestParse };`)();
+  const S = new Function(`${workerSrc.slice(workerSrc.indexOf('const SUGGEST_MAX_EDITS'), workerSrc.indexOf('// The edits a model or an agent sent'))}\nreturn { suggestPlan, suggestTextMap, suggestParse, SUGGEST_MAX_HTML, SUGGEST_MAX_RAW };`)();
   // Everything a browser runs or styles or draws as foreign content, from a
   // parse: script/style text in any namespace, every attribute, and the
   // whole of each svg/math subtree. An accepted edit may change none of it.
@@ -729,6 +729,61 @@ const ORIGIN = { Origin: 'https://tdoc.dev' };
     assert(a.status === 409 && a.body.error === 'unsafe_edit', `${a.status} ${a.text}`);
     const meta = JSON.parse(env.META.map.get('meta:widget-splice'));
     assert(meta.versions.length === 1, 'published');
+  });
+
+  await t('an embedded ~600KB data: image does not make a doc too large: propose, then Accept keeps the image bytes exactly', async () => {
+    // Deterministic, varied base64 (not one repeated letter), ~600KB.
+    let b64 = '';
+    const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let x = 12345;
+    while (b64.length < 600 * 1024) { x = (x * 1103515245 + 12345) & 0x7fffffff; b64 += ALPHA[x % 64]; }
+    const uri = `data:image/png;base64,${b64}==`;
+    const bgUri = `data:image/png;base64,${b64.slice(0, 50000)}`;
+    const html = `<!doctype html><html><head><title>Pic</title></head><body><h1>Picture doc</h1>`
+      + `<p>Before the picture, a sentence to fix.</p><img alt="Diagram" src="${uri}">`
+      + `<div style="background:url(${bgUri})">Styled box text</div>`
+      + `<p>After the picture.</p></body></html>`;
+    assert(html.length > S.SUGGEST_MAX_HTML, 'fixture is over the old limit');
+    const u = await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'pic', version: 1, html } });
+    assert(u.status === 200, `upload ${u.status} ${u.text.slice(0, 300)}`);
+    const stored = (await (await env.DOCS.get('docs/pic/v1/index.html')).text());
+    assert(stored.includes(uri), 'upload kept the data: URI');
+    // tdoc AI (/suggest) does not refuse it as too large either.
+    modelSays = () => JSON.stringify({ kind: 'edits', edits: [{ find: 'After the picture.', replace: 'After the image.' }] });
+    const ai = await call('/api/docs/pic/suggest', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { instruction: 'Say image' } });
+    assert(ai.status !== 413 && !(ai.body && ai.body.error === 'doc_too_large'), `suggest ${ai.status} ${ai.text.slice(0, 300)}`);
+    // A find inside the data: URI is attribute content: never text.
+    const inUri = await call('/api/docs/pic/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: b64.slice(1000, 1100), replace: 'x' }] } });
+    assert(inUri.status === 400 && inUri.body.dropped[0].reason === 'not_found', `in uri ${inUri.status} ${inUri.text.slice(0, 300)}`);
+    const r = await call('/api/docs/pic/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'a sentence to fix', replace: 'a fixed sentence' }, { find: 'Styled box text', replace: 'Styled box' }] } });
+    assert(r.status === 200 && r.body.suggestion.edits.length === 2, `propose ${r.status} ${r.text.slice(0, 300)}`);
+    const a = await call(`/api/docs/pic/suggestions/${r.body.suggestion.id}/accept`, { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: {} });
+    assert(a.status === 200, `accept ${a.status} ${a.text.slice(0, 300)}`);
+    const meta = JSON.parse(env.META.map.get('meta:pic'));
+    const n = Math.max(...meta.versions.map((v) => v.n));
+    assert(n > 1, 'published');
+    const next = await (await env.DOCS.get(`docs/pic/v${n}/index.html`)).text();
+    assert(next.includes('a fixed sentence') && next.includes('>Styled box</div>'), 'edits applied');
+    assert(next.includes(`src="${uri}"`) && next.includes(`url(${bgUri})`), 'image bytes preserved');
+    assert(next === stored.replace('a sentence to fix', 'a fixed sentence').replace('Styled box text', 'Styled box'), 'nothing but the two texts changed');
+  });
+
+  await t('a doc whose markup and text alone exceed the limit is still refused', async () => {
+    const para = '<p>Some ordinary words in a paragraph that is long enough.</p>\n';
+    const html = `<!doctype html><html><body><h1>Big doc</h1>${para.repeat(Math.ceil((S.SUGGEST_MAX_HTML + 1000) / para.length))}<p>Unique tail line.</p></body></html>`;
+    assert(S.suggestTextMap(html).truncated, 'map truncated');
+    const u = await call('/api/upload', { method: 'POST', token: alice.token, body: { slug: 'bigtext', version: 1, html } });
+    assert(u.status === 200, `upload ${u.status} ${u.text.slice(0, 300)}`);
+    const r = await call('/api/docs/bigtext/suggestions', { method: 'POST', token: alice.token, body: { edits: [{ find: 'Unique tail line.', replace: 'Tail.' }] } });
+    assert(r.status === 400 && r.body.dropped[0].reason === 'doc_too_large', `propose ${r.status} ${r.text.slice(0, 300)}`);
+    const ai = await call('/api/docs/bigtext/suggest', { method: 'POST', cookie: alice.cookie, headers: ORIGIN, body: { instruction: 'Shorten' } });
+    assert(ai.status === 413 && ai.body.error === 'doc_too_large', `suggest ${ai.status} ${ai.text.slice(0, 300)}`);
+    // Body text that only looks like a data: URI gets no extra allowance.
+    const fake = `<!doctype html><html><body><p>data:${'A'.repeat(S.SUGGEST_MAX_HTML + 10)}</p><p>Tail.</p></body></html>`;
+    assert(S.suggestTextMap(fake).truncated && !S.suggestPlan(fake, [{ find: 'Tail.', replace: 'End.' }]).next, 'fake data: text refused');
+    // And the raw HTML has a hard cap, data: URIs or not.
+    const huge = `<!doctype html><html><body><p>Tail.</p><img src="data:image/png;base64,${'A'.repeat(S.SUGGEST_MAX_RAW)}"></body></html>`;
+    assert(S.suggestTextMap(huge).truncated, 'raw cap');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
