@@ -7,9 +7,10 @@
 //
 // Pinned here: an accept whose read of the doc is behind publishes on the real
 // latest (the edit still matching lands, the changed one is reported stale), the
-// version it missed stays in the record, an in-flight save is waited for and
-// otherwise refused with nothing written, and a Raft agent signs suggestions
-// with its own handle.
+// version it missed stays in the record while every other field comes from the
+// read, an in-flight save is waited for and otherwise refused with nothing written,
+// a doc KV never catches up on recovers after a bounded time, a purged slug starts
+// from nothing, and a Raft agent signs suggestions with its own handle.
 //
 // Run with: node test/suggest-accept-workerd.test.js   (part of npm run test:workerd)
 const assert = require('node:assert/strict');
@@ -56,11 +57,17 @@ const metaFor = (who) => new Proxy(fake.META, { get(target, prop) {
   const v = target[prop];
   return typeof v === 'function' ? v.bind(target) : v;
 } });
-const envFor = (env, who) => ({ META: metaFor(who), DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test' });
+const envFor = (env, who) => ({ META: metaFor(who), DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test, bob@tdoc.test' });
 export class TestStore extends CommentsStore {
   constructor(state, env) { super(state, envFor(env, 'do')); }
   async fetch(req) {
-    if (new URL(req.url).pathname === '/__forget-record') { await this.state.storage.delete('versionRecord'); return new Response('ok'); }
+    const hook = new URL(req.url).pathname;
+    if (hook === '/__storage') return Response.json({ cursor: (await this.state.storage.get('versionCursor')) ?? null, entries: (await this.state.storage.get('versionEntries')) ?? null, keys: [...(await this.state.storage.list()).keys()] });
+    if (hook === '/__set-storage') {
+      const { op } = await req.json();
+      for (const [k, v] of Object.entries(op)) { if (v === null) await this.state.storage.delete(k); else await this.state.storage.put(k, v); }
+      return new Response('ok');
+    }
     return super.fetch(req);
   }
 }
@@ -83,6 +90,7 @@ export default {
       fake.staleFor = who || 'all';
       return new Response('ok');
     }
+    if (url.pathname === '/__put-html') { const { key, html } = await req.json(); await fake.DOCS.put(key, html); return new Response('ok'); }
     if (url.pathname === '/__html') return new Response(await (await fake.DOCS.get(url.searchParams.get('key')))?.text() ?? '');
     if (url.pathname === '/__do') {
       const { slug, op, path: doPath } = await req.json();
@@ -142,6 +150,10 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     const minted = await call('/api/hosted/token', { method: 'POST', cookie, body: { label: 'julie' } });
     assert.equal(minted.status, 200, `token: ${minted.text} ${stderr}`);
     const token = minted.body.token;
+    const bobSid = crypto.randomBytes(16).toString('hex');
+    await post('/__seed-session', { id: bobSid, login: 'bob', email: 'bob@tdoc.test' });
+    const bobCookie = `tdoc_sid=${bobSid}`;
+    const bob = (await call('/api/hosted/token', { method: 'POST', cookie: bobCookie, body: { label: 'bob' } })).body;
     const accountId = minted.body.account_id;
     const S1 = 'server-one';
     const row = (agent_sub, agent_name) => ({ provider: 'raft', server_id: S1, server_slug: 'one', agent_sub, agent_name });
@@ -174,7 +186,28 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     const latestOf = async (slug) => Math.max(...JSON.parse(await kv(`meta:${slug}`)).versions.map((v) => Number(v.n)));
     const behind = (slug, value, who) => post('/__stale', { key: `meta:${slug}`, value, who });
 
-    const expectV3 = async (slug, set, r) => {
+    const storage = async (slug) => (await post('/__do', { slug, path: '/__storage', op: {} })).json();
+    const setStorage = (slug, op) => post('/__do', { slug, path: '/__set-storage', op });
+    const doSave = async (slug, baseVersion, html = page('Typed.', 'Typed too.')) => {
+      const r = await post('/__do', { slug, path: '/version', op: { baseVersion, html: `<!doctype html><html><head><title>Plan</title></head><body>${html}</body></html>`, actorLogin: 'julie', prompt: 'browser save' } });
+      return { status: r.status, body: await r.json() };
+    };
+    const metaOf = async (slug) => JSON.parse(await kv(`meta:${slug}`));
+    const numbers = (meta) => meta.versions.map((v) => Number(v.n));
+    // The limit has passed: the refusal was stamped longer ago than it allows.
+    const pastTheLimit = async (slug) => {
+      const { cursor } = await storage(slug);
+      assert.ok(cursor.behind_since, `stamped by the refusal: ${JSON.stringify(cursor)}`);
+      await setStorage(slug, { versionCursor: { ...cursor, behind_since: Date.now() - 3 * 60 * 1000 } });
+    };
+    const trashAndPurge = async (slug, who = cookie) => {
+      const trashed = await call(`/api/doc?slug=${slug}`, { method: 'DELETE', cookie: who });
+      assert.equal(trashed.status, 200, trashed.text);
+      const purged = await call('/api/trash/purge', { method: 'POST', cookie: who, body: { slug } });
+      assert.equal(purged.status, 200, purged.text);
+    };
+
+    const expectV3 = async (slug, set, r, title = 'Plan as of v2') => {
       assert.equal(r.status, 200, `accept: ${r.status} ${r.text}`);
       assert.equal(r.body.version, 3);
       assert.deepEqual(r.body.accepted, [set.edits[0].id], 'the edit still matching lands');
@@ -188,13 +221,14 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.deepEqual(meta.versions.map((v) => Number(v.n)), [1, 2, 3], 'the version the read missed stays in the record');
       assert.equal(meta.versions[1].prompt, 'publish 2', 'with what v2 recorded');
       assert.equal(meta.versions[1].publisher_agent.agent_sub, 'agent-linked');
-      assert.equal(meta.title, 'Plan as of v2', 'and what else v2 wrote is not rolled back');
+      assert.equal(meta.title, title);
     };
 
     await t('KV behind for the Worker and the Durable Object: publishes v3, v2 kept, the changed edit stale', async () => {
       const { slug, set, beforeV2 } = await twoEditsThenV2();
       await behind(slug, beforeV2, 'all');
-      await expectV3(slug, set, await accept(slug, set));
+      // Everything but the versions comes from the read, v2's title included.
+      await expectV3(slug, set, await accept(slug, set), 'Plan');
     });
 
     await t('KV behind for the Worker only: the same', async () => {
@@ -206,7 +240,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     await t('pressing Accept again after it landed publishes nothing more', async () => {
       const { slug, set, beforeV2 } = await twoEditsThenV2();
       await behind(slug, beforeV2, 'all');
-      await expectV3(slug, set, await accept(slug, set));
+      await expectV3(slug, set, await accept(slug, set), 'Plan');
       const again = await accept(slug, set);
       assert.equal(again.status, 409, again.text);
       assert.equal(again.body.error, 'nothing_pending');
@@ -255,7 +289,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
 
     await t('no record of what KV is missing: refused and nothing written, then fine once KV catches up', async () => {
       const { slug, set, beforeV2 } = await twoEditsThenV2();
-      await post('/__do', { slug, path: '/__forget-record', op: {} });
+      await setStorage(slug, { versionEntries: null });
       await behind(slug, beforeV2, 'all');
       const refused = await accept(slug, set);
       assert.equal(refused.status, 409, refused.text);
@@ -264,6 +298,171 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.equal(await htmlOf(slug, 3), '', 'no v3 bytes');
       await behind(slug, null);
       await expectV3(slug, set, await accept(slug, set));
+    });
+
+    await t('a version an Accept published is kept for the next save whose read misses it, and one a browser save published', async () => {
+      const { slug, set } = await twoEditsThenV2();
+      const beforeAccept = await kv(`meta:${slug}`);
+      assert.equal((await accept(slug, set)).status, 200);
+      await behind(slug, beforeAccept, 'all');
+      const saved = await call('/api/doc/versions', { method: 'POST', cookie, body: { slug, baseVersion: 3, html: `<!doctype html><html><head><title>Plan</title></head><body>${page('Typed.', 'Beta rewritten by v2.')}</body></html>` } });
+      assert.equal(saved.status, 200, saved.text);
+      await behind(slug, null);
+      const beforeNext = await kv(`meta:${slug}`);
+      assert.match((await metaOf(slug)).versions[2].prompt, /^Accepted Claude suggestion/, 'the Accept\'s entry');
+      const proposed = await call(`/api/docs/${slug}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'Typed.', replace: 'Typed again.' }], agent_login: 'claude', agent_name: 'Claude' } });
+      assert.equal(proposed.status, 200, proposed.text);
+      const fifth = await doSave(slug, 4);
+      assert.equal(fifth.status, 200, JSON.stringify(fifth.body));
+      await behind(slug, beforeNext, 'all');
+      assert.equal((await doSave(slug, 5)).status, 200);
+      await behind(slug, null);
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2, 3, 4, 5, 6]);
+      assert.equal(meta.versions[4].prompt, 'browser save', 'the browser save\'s entry');
+    });
+
+    await t('what the store keeps: the last few entries, short, without the token and client stamps', async () => {
+      const slug = `accept-doc-${++docN}`;
+      assert.equal((await publish(slug, 1, 'One.', 'Two.')).status, 200);
+      for (let n = 2; n <= 8; n++) {
+        const r = await call('/api/upload', { method: 'POST', token, headers: { 'X-Tdoc-Raft-Agent': `${S1}/agent-linked`, 'X-Tdoc-Client': 'cli/1.2.3' }, body: { slug, version: n, html: page(`One ${n}.`, 'Two.'), meta: { title: 'Plan', versions: [{ n, created: new Date().toISOString(), prompt: 'p'.repeat(5000) }] } } });
+        assert.equal(r.status, 200, r.text);
+      }
+      const { entries, keys } = await storage(slug);
+      assert.deepEqual(entries.map((x) => x.entry.n), [4, 5, 6, 7, 8]);
+      for (const { entry } of entries) {
+        assert.ok(entry.prompt.length <= 200, `prompt ${entry.prompt.length}`);
+        assert.ok(!('token' in entry) && !('client' in entry), JSON.stringify(entry));
+        assert.equal(entry.publisher_agent.agent_sub, 'agent-linked');
+      }
+      assert.ok(!keys.some((k) => /record/i.test(k)), `no doc record: ${keys}`);
+      for (const value of [JSON.stringify(entries)]) {
+        assert.ok(!/allowed_users|"access"|"hosted"|"title"|"preview"/.test(value), value);
+      }
+    });
+
+    await t('sharing, workspace and title changed after the missed publish all survive the save', async () => {
+      const { slug, beforeV2 } = await twoEditsThenV2();
+      assert.equal((await call('/api/doc/access', { method: 'PATCH', token, body: { slug, access: { visibility: 'public' } } })).status, 200);
+      const publicNow = JSON.parse(await kv(`meta:${slug}`));
+      const publicV1 = { ...publicNow, versions: JSON.parse(beforeV2).versions };
+      // The owner's own write, through a read at v1: KV is { v1, private }.
+      await kv(`meta:${slug}`, JSON.stringify(publicV1));
+      const made = await call('/api/doc/access', { method: 'PATCH', token, body: { slug, access: { visibility: 'private' } } });
+      assert.equal(made.status, 200, made.text);
+      const read = JSON.parse(await kv(`meta:${slug}`));
+      assert.deepEqual(numbers(read), [1]);
+      assert.equal(read.access.visibility, 'private');
+      await kv(`meta:${slug}`, JSON.stringify({ ...read, title: 'Renamed', workspace_id: 'team-moved-to' }));
+      const saved = await doSave(slug, 2);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2, 3]);
+      assert.equal(meta.access.visibility, 'private');
+      assert.equal(meta.title, 'Renamed');
+      assert.equal(meta.workspace_id, 'team-moved-to');
+    });
+
+    await t('a cursor from before these entries, KV never catching up: refused, then v3 past the limit, losing nothing', async () => {
+      const { slug, beforeV2 } = await twoEditsThenV2();
+      const before = JSON.parse(beforeV2);
+      // What every doc live at deploy looks like: a cursor and nothing beside it.
+      await setStorage(slug, { versionEntries: null, versionCursor: { latest: 2, pending: null } });
+      await kv(`meta:${slug}`, JSON.stringify({ ...before, title: 'Still here', access: { ...(before.access || {}), visibility: 'private' } }));
+      const refused = await doSave(slug, 2);
+      assert.equal(refused.status, 409);
+      assert.equal(refused.body.error, 'save_in_progress');
+      assert.equal(refused.body.latestVersion, 2);
+      assert.equal((await doSave(slug, 2)).status, 409, 'still inside the limit');
+      await pastTheLimit(slug);
+      const saved = await doSave(slug, 2);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.equal(saved.body.version, 3);
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2, 3], 'the bytes R2 holds count as v2');
+      assert.equal(meta.versions[1].prompt, 'Recovered version');
+      assert.equal(meta.title, 'Still here');
+      assert.equal(meta.access.visibility, 'private');
+      assert.ok((await htmlOf(slug, 2)).includes('Beta rewritten by v2.'), 'v2 bytes untouched');
+    });
+
+    await t('a cursor ahead of any bytes, as a slug reused before this change: back in step past the limit', async () => {
+      const slug = `accept-doc-${++docN}`;
+      assert.equal((await publish(slug, 1, 'Alpha sentence stays.', 'Beta sentence here.')).status, 200);
+      await setStorage(slug, { versionEntries: null, versionCursor: { latest: 5, pending: null } });
+      assert.equal((await doSave(slug, 1)).status, 409);
+      await pastTheLimit(slug);
+      const saved = await doSave(slug, 1);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.equal(saved.body.version, 2);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2]);
+      assert.equal((await storage(slug)).cursor.latest, 2);
+    });
+
+    const purgedAndMadeAgain = async ({ team = null } = {}) => {
+      const slug = `accept-doc-${++docN}`;
+      const body = (n, a) => ({ slug, version: n, html: page(a, 'Secret plans of the first owner.'), ...(team ? { team } : {}), meta: { title: 'First owner title', versions: [{ n, created: new Date().toISOString(), prompt: `first owner ${n}` }] } });
+      for (const n of [1, 2]) {
+        const r = await call('/api/upload', { method: 'POST', token, body: body(n, `Words ${n}.`) });
+        assert.equal(r.status, 200, r.text);
+      }
+      assert.equal(Boolean((await metaOf(slug)).workspace_id), Boolean(team), 'a team doc when it says so');
+      const held = await storage(slug);
+      assert.equal(held.cursor.latest, 2);
+      assert.ok(held.entries.length, 'something to leave behind');
+      await trashAndPurge(slug);
+      const left = await storage(slug);
+      assert.equal(left.cursor, null, 'no cursor');
+      assert.equal(left.entries, null, 'no entries');
+      assert.ok(!left.keys.some((k) => /version/i.test(k)), `left behind: ${left.keys}`);
+      const made = await call('/api/upload', { method: 'POST', token: bob.token, body: { slug, version: 1, html: page('Bob words.', 'Bob more.'), meta: { title: 'Bob title', versions: [{ n: 1, created: new Date().toISOString(), prompt: 'bob 1' }] } } });
+      assert.equal(made.status, 200, made.text);
+      return slug;
+    };
+    const stillBobs = (meta) => {
+      assert.equal(meta.title, 'Bob title');
+      assert.equal(meta.hosted.account_id, bob.account_id);
+      assert.ok(!meta.workspace_id, 'not the old team');
+      for (const v of meta.versions) assert.ok(!/first owner/.test(v.prompt || ''), JSON.stringify(v));
+    };
+
+    await t('Delete forever leaves no version store; the slug\'s next owner saves freely and inherits nothing', async () => {
+      const slug = await purgedAndMadeAgain();
+      const stale = await doSave(slug, 2);
+      assert.equal(stale.status, 409, 'a base from the old doc means nothing here');
+      assert.equal(stale.body.error, 'version_conflict');
+      stillBobs(await metaOf(slug));
+      const r = await call('/api/upload', { method: 'POST', token: bob.token, body: { slug, version: 2, html: page('Bob v2.', 'Bob more.'), meta: { title: 'Bob title', versions: [{ n: 2, created: new Date().toISOString(), prompt: 'bob 2' }] } } });
+      assert.equal(r.status, 200, r.text);
+      assert.equal((await doSave(slug, 2)).status, 200, 'and a save works');
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2, 3]);
+      stillBobs(meta);
+    });
+
+    await t('a team doc: the same', async () => {
+      const created = await call('/api/teams', { method: 'POST', cookie, body: { name: 'Acme' } });
+      assert.equal(created.status, 200, created.text);
+      const slug = await purgedAndMadeAgain({ team: created.body.team.slug || created.body.team.name });
+      assert.equal((await doSave(slug, 2)).status, 409);
+      stillBobs(await metaOf(slug));
+    });
+
+    await t('entries of another doc on this slug (a purge that could not clear them) are never merged in', async () => {
+      const slug = `accept-doc-${++docN}`;
+      assert.equal((await publish(slug, 1, 'Alpha sentence stays.', 'Beta sentence here.')).status, 200);
+      await setStorage(slug, {
+        versionCursor: { latest: 2, pending: null },
+        versionEntries: [{ doc: '1|2020-01-01T00:00:00.000Z|oldsha', entry: { n: 2, created: '2020-01-02T00:00:00.000Z', prompt: 'first owner 2', by: 'first-owner' } }],
+      });
+      assert.equal((await doSave(slug, 2)).status, 409, 'refused, not merged');
+      await pastTheLimit(slug);
+      const saved = await doSave(slug, 1);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2]);
+      assert.ok(!JSON.stringify(meta.versions).includes('first owner'), JSON.stringify(meta.versions));
     });
 
     const reserve = async (slug, baseVersion) => (await (await post('/__do', { slug, path: '/version-lock', op: { kind: 'reserve', baseVersion } })).json());
@@ -291,6 +490,28 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       await new Promise((resolve) => setTimeout(resolve, 300));
       await finish(slug, { id: held.id, next: held.next }, false);
       await expectV3(slug, set, await pressed);
+    });
+
+    await t('KV behind, a save in progress, and that save landing: the accept lands on top of it', async () => {
+      const { slug, set, beforeV2 } = await twoEditsThenV2();
+      const held = await reserve(slug, 2);
+      assert.ok(held.ok, JSON.stringify(held));
+      await behind(slug, beforeV2, 'all');
+      const pressed = accept(slug, set);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      // The other save commits while the accept waits.
+      await post('/__put-html', { key: `docs/${slug}/v3/index.html`, html: page('Alpha sentence stays.', 'Beta rewritten by v2.') });
+      const entry = { n: 3, created: new Date().toISOString(), prompt: 'the other save' };
+      const real = await metaOf(slug);
+      await kv(`meta:${slug}`, JSON.stringify({ ...real, versions: [...real.versions, entry] }));
+      await post('/__do', { slug, path: '/version-lock', op: { kind: 'finish', reservation: { id: held.id, next: held.next }, committed: true, version: { doc: `${real.versions[0].n}|${real.versions[0].created}|${real.versions[0].sha}`, entry } } });
+      const r = await pressed;
+      assert.equal(r.status, 200, r.text);
+      assert.equal(r.body.version, 4);
+      await behind(slug, null);
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2, 3, 4]);
+      assert.equal(meta.versions[2].prompt, 'the other save');
     });
 
     const newDoc = async () => {
@@ -323,7 +544,8 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     });
 
     await t('a handle that could pass for someone else, or that is not plain Latin, does not sign', async () => {
-      for (const name of ['tdoc AI', 'td0c  A1', 'Team Agent X', 'tdoc-ai-helper']) {
+      // Spaceless: actingAgent takes no handle with a space, so these reach the check.
+      for (const name of ['tdoc.AI', 'td0c_A1', 'Team-Agent-X', 'tdoc-ai-helper']) {
         const r = await propose(await newDoc(), asAgent('agent-posing', name));
         assert.equal(r.status, 200, r.text);
         const who = r.body.suggestion.agent;

@@ -150,6 +150,19 @@ async function startServer(worker, env) {
       await v.ctx.close();
     });
 
+    await t('a re-list that adds a set keeps the highlight on the suggestion under review', async () => {
+      const slug = await newDoc();
+      await propose(slug, A, 'Alpha alphaword.');
+      const v = await open(slug);
+      await v.frame.locator('[data-tdoc-sugg-active]').first().waitFor({ timeout: 10000 });
+      await propose(slug, B, 'Beta betaword.');
+      await comeBack(v);
+      await v.frame.locator('ins', { hasText: 'betaword' }).waitFor({ timeout: 5000 });
+      await v.frame.locator('[data-tdoc-sugg-active]').first().waitFor({ timeout: 3000 });
+      assert.match(await v.frame.locator('[data-tdoc-sugg-active]').first().innerText(), /Alpha|alphaword/);
+      await v.ctx.close();
+    });
+
     await t('coming back to the page shows edits nobody here was waiting for, without a refresh', async () => {
       const slug = await newDoc();
       const v = await open(slug);

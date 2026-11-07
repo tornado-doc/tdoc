@@ -1214,6 +1214,12 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
     console.error('[purge] locks not cleared:', e && e.message);
   });
   await env.META.delete(`answer-locks:${slug}`);
+  // Its version cursor and kept entries too. A failed clear is not a purge cut
+  // short: an entry names its doc, so it cannot reach the slug's next owner.
+  if (env.COMMENTS) {
+    const forgot = await versionReservationOp(env, slug, { kind: 'forget' });
+    if (!forgot.ok) console.error('[purge] version store not cleared:', forgot.error || forgot.status);
+  }
   // So is a site binding (siteBindingKey).
   await env.META.delete(siteBindingKey(slug));
   for (const prefix of [`agent-asks:${slug}:`, `ai-asks:${slug}:`, `preview-status:${slug}:`]) {
@@ -17375,9 +17381,28 @@ async function versionReservationOp(env, slug, op) {
 // lazily migrated in from the legacy KV value (comments:<slug>) so existing
 // comments are preserved with zero data loss; the KV value is left intact as a
 // backstop. All same-slug reads/writes funnel through this one instance.
-// A larger doc record is not kept (a Durable Object value is limited): a save
-// that would need it waits for KV instead.
-const VERSION_RECORD_MAX_CHARS = 100_000;
+// What a commit leaves for a save that reads META before the commit reaches it:
+// the last few version entries, with only what the doc's list shows and who wrote
+// the version (the same facts META holds, and gone with the doc at purge). The
+// token and client stamps stay out. KV is about a minute behind at most, and a
+// doc that loses the race for longer goes through VERSION_BEHIND_LIMIT_MS.
+const VERSION_ENTRIES_KEPT = 5;
+const VERSION_BEHIND_LIMIT_MS = 2 * 60 * 1000;
+function keptVersionEntry(entry) {
+  const out = { n: Number(entry.n) };
+  for (const k of ['created', 'source', 'sha', 'style', 'suggested_by', 'author', 'by', 'team_agent', 'publisher_agent']) {
+    if (entry[k] !== undefined) out[k] = entry[k];
+  }
+  if (typeof entry.prompt === 'string') out.prompt = entry.prompt.slice(0, 200);
+  return out;
+}
+// Which doc an entry belongs to: a slug can be purged and made again. A doc's
+// first version does not change once there is a second.
+function docIncarnation(meta) {
+  const versions = Array.isArray(meta && meta.versions) ? meta.versions : [];
+  const first = versions.reduce((best, x) => (x && (!best || Number(x.n) < Number(best.n)) ? x : best), null);
+  return first ? `${first.n}|${first.created || ''}|${first.sha || ''}` : '';
+}
 
 export class CommentsStore {
   constructor(state, env) { this.state = state; this.env = env; }
@@ -17438,9 +17463,9 @@ export class CommentsStore {
     return result;
   }
 
-  // `record`: the doc record this version wrote to META, kept beside the cursor
-  // for a save that reads META before that write reaches it (_saveVersion).
-  async _finishVersion(reservation, committed, record = null) {
+  // `version`: { doc, entry } for the version just committed, kept for a save
+  // that reads META before this write reaches it (_metaForSave).
+  async _finishVersion(reservation, committed, version = null) {
     await this.state.storage.transaction(async (txn) => {
       const cursor = await txn.get('versionCursor');
       if (!cursor || !cursor.pending || cursor.pending.id !== reservation.id) return;
@@ -17448,32 +17473,71 @@ export class CommentsStore {
         latest: committed ? reservation.next : reservation.next - 1,
         pending: null,
       });
-      if (committed && typeof record === 'string' && record.length <= VERSION_RECORD_MAX_CHARS) await txn.put('versionRecord', record);
+      const entry = committed && version && Number(version.entry && version.entry.n) === reservation.next ? keptVersionEntry(version.entry) : null;
+      if (entry) {
+        const kept = (await txn.get('versionEntries')) || [];
+        await txn.put('versionEntries', [...kept.filter((x) => x.entry.n !== entry.n), { doc: String(version.doc || ''), entry }]
+          .sort((a, b) => a.entry.n - b.entry.n).slice(-VERSION_ENTRIES_KEPT));
+      }
     });
   }
 
   // META is read through Workers KV, which can answer with an older record for
   // about a minute after a write from elsewhere; the cursor already knows better.
-  // A save based on a version META has not shown yet must not build on that old
-  // record: the version it misses would vanish from the doc's list and whatever
-  // else that publish wrote would roll back. It builds on the record that publish
-  // left here, or, without one, is refused until KV catches up. Null is that
-  // refusal; a base the cursor does not know is left for _reserveVersion to refuse.
-  async _recordForBase(baseVersion, meta) {
+  // A save on that old record would drop the versions it misses from the doc's
+  // list. Every other field comes from the read: this store holds no sharing,
+  // owner or title to bring back. The missed entries come from what each commit
+  // left here, for this same doc. Without them the save is refused, for a bounded
+  // time: past that KV is not catching up (a cursor from before these entries, a
+  // commit that outlived its reservation), so what R2 holds counts as a version
+  // and a cursor ahead of the bytes comes back down. Null is the refusal.
+  async _metaForSave(slug, meta) {
     const metaLatest = latestVersionNumber(meta);
-    if (!(baseVersion > metaLatest)) return meta;
     let cursor = null;
-    let record = null;
+    let kept = [];
     await this.state.storage.transaction(async (txn) => {
       cursor = await txn.get('versionCursor');
-      record = await txn.get('versionRecord');
+      kept = (await txn.get('versionEntries')) || [];
     });
-    if (!cursor || Number(cursor.latest) !== baseVersion) return meta;
-    try {
-      const parsed = record ? JSON.parse(record) : null;
-      if (latestVersionNumber(parsed) === baseVersion) return parsed;
-    } catch {}
-    return null;
+    if (!cursor || cursor.pending || !(Number(cursor.latest) > metaLatest)) return { meta };
+    const doc = docIncarnation(meta);
+    const missed = [];
+    let n = metaLatest + 1;
+    for (; n <= cursor.latest; n++) {
+      const found = kept.find((x) => x.doc === doc && x.entry.n === n);
+      if (!found) break;
+      missed.push(found.entry);
+    }
+    if (n <= cursor.latest) {
+      const since = Number(cursor.behind_since) || 0;
+      if (!since || Date.now() - since < VERSION_BEHIND_LIMIT_MS) {
+        if (!since) await this._stampBehind();
+        return { meta: null, latest: Number(cursor.latest) };
+      }
+      for (; n <= cursor.latest; n++) {
+        const bytes = await this.env.DOCS.head(`docs/${slug}/v${n}/index.html`);
+        if (!bytes) break;
+        const at = bytes.uploaded instanceof Date ? bytes.uploaded : new Date();
+        missed.push({ n, created: at.toISOString(), prompt: 'Recovered version' });
+      }
+      if (n <= cursor.latest) await this._lowerCursor(n - 1);
+    }
+    if (!missed.length) return { meta };
+    return { meta: { ...meta, versions: [...(Array.isArray(meta.versions) ? meta.versions : []), ...missed] } };
+  }
+
+  async _stampBehind() {
+    await this.state.storage.transaction(async (txn) => {
+      const cursor = await txn.get('versionCursor');
+      if (cursor && !cursor.behind_since) await txn.put('versionCursor', { ...cursor, behind_since: Date.now() });
+    });
+  }
+
+  async _lowerCursor(latest) {
+    await this.state.storage.transaction(async (txn) => {
+      const cursor = await txn.get('versionCursor');
+      if (cursor && !cursor.pending && Number(cursor.latest) > latest) await txn.put('versionCursor', { latest, pending: null });
+    });
   }
 
   async _copyVersionWidgets(slug, baseVersion, nextVersion) {
@@ -17496,8 +17560,9 @@ export class CommentsStore {
   async _saveVersion(slug, op) {
     const metaRead = await loadDocMeta(this.env, slug);
     if (!metaRead) return { status: 404, body: { error: 'not_found' } };
-    const meta = await this._recordForBase(Number(op.baseVersion), metaRead);
-    if (!meta) return { status: 409, body: { error: 'save_in_progress', latestVersion: Number(op.baseVersion) } };
+    const seen = await this._metaForSave(slug, metaRead);
+    if (!seen.meta) return { status: 409, body: { error: 'save_in_progress', latestVersion: seen.latest } };
+    const { meta } = seen;
     const metaLatest = latestVersionNumber(meta);
     // The blank page a browser create lays down is scaffolding, not a version
     // anyone wrote. The first real save becomes v1 rather than appending v2, so
@@ -17555,7 +17620,7 @@ export class CommentsStore {
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
       let pendingPreviewTask = null;
-      const record = JSON.stringify({
+      await putDocMetaJson(this.env, slug, JSON.stringify({
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions,
@@ -17566,8 +17631,7 @@ export class CommentsStore {
           existingPreview: meta.preview,
           onRenderTask: (task) => { pendingPreviewTask = task; },
         }),
-      });
-      await putDocMetaJson(this.env, slug, record);
+      }));
       if (pendingPreviewTask) await pendingPreviewTask();
       committed = true;
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
@@ -17575,7 +17639,7 @@ export class CommentsStore {
       // retry a snapshot that already exists.
       if (!replacesScaffold) {
         try {
-          await this._finishVersion(reservation, true, record);
+          await this._finishVersion(reservation, true, { doc: docIncarnation({ versions }), entry: versions.find((item) => Number(item.n) === reservation.next) });
         } catch (error) {
           console.error('[browser-save] version cursor finalize failed (recoverable):', error.message || String(error));
         }
@@ -17720,7 +17784,15 @@ export class CommentsStore {
         return Response.json(result.ok ? result : result.body, { status: result.ok ? 200 : result.status });
       }
       if (op && op.kind === 'finish' && op.reservation) {
-        await this._finishVersion(op.reservation, !!op.committed, op.record || null);
+        await this._finishVersion(op.reservation, !!op.committed, op.version || null);
+        return Response.json({ ok: true });
+      }
+      // The doc is gone for good. The slug's next owner starts from nothing.
+      if (op && op.kind === 'forget') {
+        await this.state.storage.transaction(async (txn) => {
+          await txn.delete('versionCursor');
+          await txn.delete('versionEntries');
+        });
         return Response.json({ ok: true });
       }
       return Response.json({ error: 'bad_version_lock_op' }, { status: 400 });
@@ -19301,9 +19373,9 @@ async function saveVersionAsPerson(env, slug, op) {
   return createBrowserVersion(env, slug, op);
 }
 
-// A plan that lost to a newer version, a save in progress, the version after it
-// and a real race: past that the person gets a message and presses again.
-const SUGGEST_ACCEPT_ATTEMPTS = 4;
+// A save in progress, the version it became, and the plan on top of that: past
+// that the person gets a message and presses again.
+const SUGGEST_ACCEPT_ATTEMPTS = 3;
 const SUGGEST_ACCEPT_WAIT_MS = 1000;
 async function handleSuggestionDecision(env, req, url, slug, id, decision) {
   const gate = await suggestEditorGate(env, req, url, slug);
@@ -29256,11 +29328,11 @@ const tdocHandlers = {
           if (!lock.ok) return json({ error: lock.error || 'version_conflict', ...lock }, { status: lock.status || 409 });
           versionReservation = { id: lock.id, next: lock.next };
       }
-      const finishVersionReservation = async (committed, record = null) => {
+      const finishVersionReservation = async (committed, version = null) => {
         if (!versionReservation) return;
         const reservation = versionReservation;
         versionReservation = null;
-        const result = await versionReservationOp(env, slug, { kind: 'finish', reservation, committed, ...(record ? { record } : {}) });
+        const result = await versionReservationOp(env, slug, { kind: 'finish', reservation, committed, ...(version ? { version } : {}) });
         if (!result.ok) throw new Error(result.message || result.error || 'version_lock_finalize_failed');
       };
       const abortVersionWrite = async (body, status) => {
@@ -29311,7 +29383,7 @@ const tdocHandlers = {
       }
       if (incoming && writesLatestMeta) {
         let pendingPreviewTask = null;
-        let committedRecord = null;
+        let committedVersion = null;
         try {
           // Resolve the exact publisher from a verified session or an agent
           // already linked to this account. The upload's version JSON cannot
@@ -29362,7 +29434,8 @@ const tdocHandlers = {
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
             .sort((a, b) => Number(a.n) - Number(b.n));
-          committedRecord = JSON.stringify({
+          committedVersion = { doc: docIncarnation({ versions: mergedVersions }), entry: storedEntry };
+          await putDocMetaJson(env, slug, JSON.stringify({
             ...(currentMeta || {}),
             ...incoming,
             versions: mergedVersions,
@@ -29376,8 +29449,7 @@ const tdocHandlers = {
                 ? await storePreviewScreenshot(env, slug, verNum, previewShot.bytes) : null,
               onRenderTask: (task) => { pendingPreviewTask = task; },
             }),
-          });
-          await putDocMetaJson(env, slug, committedRecord);
+          }));
         } catch (e) {
           try { await finishVersionReservation(false); } catch {}
           console.error('[upload] META put failed:', e.message);
@@ -29388,7 +29460,7 @@ const tdocHandlers = {
           else await pendingPreviewTask();
         }
         try {
-          await finishVersionReservation(true, committedRecord);
+          await finishVersionReservation(true, committedVersion);
         } catch (e) {
           // META is the commit point, matching browser Save. A later request
           // repairs the cursor from META; never report this committed version

@@ -59,7 +59,7 @@ t('the worker skips the version reservation, widget copy and cursor for a replac
     'a replace must not reserve a new version number');
   assert(/if \(!replacesScaffold\) await this\._copyVersionWidgets/.test(block),
     'copying widgets from v1 to v1 is not a thing');
-  assert(/if \(!replacesScaffold\) \{\s*\n\s*try \{\s*\n\s*await this\._finishVersion\(reservation, true, record\);/.test(block),
+  assert(/if \(!replacesScaffold\) \{\s*\n\s*try \{\s*\n\s*await this\._finishVersion\(reservation, true, \{/.test(block),
     'the reservation cursor belongs to the reserve path only');
   assert(/if \(!committed && !replacesScaffold\)/.test(block),
     'the failure path must not release a reservation it never took');

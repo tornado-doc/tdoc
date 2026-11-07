@@ -101,6 +101,10 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     if (key) send({ type: 'tdoc:suggestFocus', id: key, scroll });
   }, [send]);
 
+  // Showing rebuilds every mark, the active one's outline with them.
+  const activeNow = useRef(null);
+  activeNow.current = activeKey;
+
   // Frame messages, for the page's bridge.
   const frameHandlers = useMemo(() => ({
     'tdoc:ready': () => { frameReady.current = true; showAll(); },
@@ -114,8 +118,9 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
       const next = {};
       for (const r of message.results || []) next[r.id] = { ok: r.ok === true, docY: Number(r.docY) || 0 };
       setShown(next);
+      if (activeNow.current && next[activeNow.current]?.ok) send({ type: 'tdoc:suggestFocus', id: activeNow.current, scroll: false });
     },
-  }), [showAll]);
+  }), [showAll, send]);
 
   useEffect(() => {
     // Keep the review bar on a suggestion that is still there, or one the
@@ -193,6 +198,7 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     try {
       const body = await suggestEdits(slug, { instruction, baseVersion: version, scope });
       if (body?.kind === 'edits' && body.suggestion) {
+        listRead.current++;
         setSets((list) => [body.suggestion, ...list.filter((s) => s.id !== body.suggestion.id)]);
         const first = body.suggestion.edits[0];
         if (first) setTimeout(() => focus(suggestionKey(body.suggestion, first)), 80);
@@ -245,6 +251,7 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
         return;
       }
       stop();
+      listRead.current++;
       setSets(list);
       onToast?.('Suggestions are ready to review.');
       const first = fresh[0].edits.find((e) => e.state === 'pending');
