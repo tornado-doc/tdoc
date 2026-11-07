@@ -224,6 +224,7 @@ const BROWSER = [
   'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width
   'ask-edit-feedback-ui.test.js', // Ask/Edit v2 feedback: @agent in a comment or reply asks for suggestions (phone drawer, ⌘⇧Enter), nothing changes outside dev mode, a reply box is not held by delivery, rewrites read as blocks, edits stay text
+  'suggest-accept-ui.test.js', // a suggestion's Accept in the real shell: readable refusals, decided rows leave silently, the list stays true without a refresh, Accept lands on /v/N
   'ask-edit-v2-gate-ui.test.js', // Ask/Edit v2 is dev-mode only: not on the list (desktop + phone), flag pinned, switch off -> Ask AI and comments exactly as before, no suggestions request; dev mode on is the control
   'reader-agent-ask-ui.test.js', // asking in a comment, real shell: @ list (tdoc AI / own agent first), Only me + Make public, answers in the thread, desktop + phone
   'phone-ask-ai-scroll-ui.test.js', // WebKit + Chromium phone: a long Ask AI answer scrolls to its end in the drawer, the document scrolls after closing

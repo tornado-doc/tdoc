@@ -285,6 +285,8 @@ const REFUSED = 'suggestions_only_run';
       const sent = seen.find((x) => x.url.endsWith('/suggestions'));
       assert(sent && sent.headers['x-tdoc-raft-agent'] === `${SERVER}/agent-b`, `tdoc-propose named nobody: ${JSON.stringify(sent && sent.headers)}`);
       assert(sent.headers['x-tdoc-raft-agent-name'] === 'stubbed', 'the handle goes with the id, as tdoc-publish sends it');
+      const signed = JSON.parse(byB.stdout.split('\n')[0]).suggestion.agent;
+      assert(signed.name === 'b' && signed.handle === '@b' && signed.provider === 'raft', `signed by its own name: ${JSON.stringify(signed)}`);
       refused(await publish(alice, slug, AS_A), 'A is still held');
       const byA = await run('tdoc-propose', ['--slug', slug, '--edits', edits], 'agent-a');
       assert(byA.code === 0, `A proposes: ${byA.code} ${byA.stdout} ${byA.stderr}`);

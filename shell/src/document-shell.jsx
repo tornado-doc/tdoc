@@ -1497,6 +1497,15 @@ export function DocumentShell({ boot, config }) {
     try {
       const body = await resendNotifyHandoff({ slug: config.slug, handoff_id: comment.handoff_id });
       showToast(resendResultText(body), body?.delivery?.status === 'failed');
+      // A resend that asks for suggestions: its edits arrive here, as from a first send.
+      if (suggestOn && body?.reply_as === 'suggestions' && body?.delivery?.status !== 'failed') {
+        const name = agentDisplayName(comment.handoff_to) || readableHandle(comment.handoff_to) || 'agent';
+        suggestions.awaitAgent({
+          commentId: comment.id,
+          label: comment.handoff_to?.provider === 'local' ? `${name} is working on your computer…` : `${name} is working on it…`,
+          settled: () => ['replied', 'failed'].includes(handoffSurfaceState(comments.latest.current.find((c) => c.id === comment.id))),
+        });
+      }
       await comments.refresh();
     } catch (err) {
       showToast(err.message || 'Could not resend', true);
@@ -1694,6 +1703,7 @@ export function DocumentShell({ boot, config }) {
         seen = String(latest);
       } catch { /* next tick */ }
       try { await commentsRefresh(); } catch { /* next tick */ }
+      suggestRef.current?.relist();
       if (cancelled) return;
       const fingerprint = `${seen}|${(commentsRef.current || []).map((c) => `${c && c.id}:${(c && c.replies || []).length}:${c && c.status}`).join(',')}`;
       delay = fingerprint === last ? Math.min(delay * 2, LIVE_SYNC_MAX_MS) : LIVE_SYNC_MIN_MS;

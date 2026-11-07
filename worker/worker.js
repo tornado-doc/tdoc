@@ -16336,6 +16336,27 @@ async function touchAccountAgent(env, accountId, target) {
 // different one of the account's own agents. What gets recorded is the stored,
 // verified link, never the claimed object: the self-report only selects.
 const RAFT_AGENT_CLAIM = /^([A-Za-z0-9-]{1,80})\/([A-Za-z0-9-]{1,80})$/;
+// An author as the agent that was resolved for it signs: which connector, its
+// handle, where it runs, and who it acts for. Replies and suggestions alike.
+async function agentSignedAsTarget(env, agent, target, actor) {
+  const accountHandle = actor.account_id
+    ? (await accountClaimedHandle(env, actor.account_id)) || actor.github_login || ''
+    : '';
+  // Where it runs, for the hover card only: the Raft server or the
+  // daemon's computer. A webhook's host is left out: readers of a public
+  // doc would see the owner's endpoint.
+  const location = target.provider === 'raft' ? target.server_slug || ''
+    : target.provider === 'local' ? target.device || '' : '';
+  return {
+    ...agent,
+    provider: target.provider,
+    handle: target.agent_name && target.provider !== 'local' ? `@${target.agent_name.replace(/^@/, '')}` : '',
+    ...(target.provider === 'local' ? { cli: target.cli } : {}),
+    ...(location ? { location } : {}),
+    ...(accountHandle ? { principal: { display: `@${accountHandle}`, terminal: agent.name } } : {}),
+  };
+}
+
 async function actingAgent(env, req, actor) {
   const session = await getAgentSession(env, req);
   if (session) return session;
@@ -17354,6 +17375,10 @@ async function versionReservationOp(env, slug, op) {
 // lazily migrated in from the legacy KV value (comments:<slug>) so existing
 // comments are preserved with zero data loss; the KV value is left intact as a
 // backstop. All same-slug reads/writes funnel through this one instance.
+// A larger doc record is not kept (a Durable Object value is limited): a save
+// that would need it waits for KV instead.
+const VERSION_RECORD_MAX_CHARS = 100_000;
+
 export class CommentsStore {
   constructor(state, env) { this.state = state; this.env = env; }
 
@@ -17413,7 +17438,9 @@ export class CommentsStore {
     return result;
   }
 
-  async _finishVersion(reservation, committed) {
+  // `record`: the doc record this version wrote to META, kept beside the cursor
+  // for a save that reads META before that write reaches it (_saveVersion).
+  async _finishVersion(reservation, committed, record = null) {
     await this.state.storage.transaction(async (txn) => {
       const cursor = await txn.get('versionCursor');
       if (!cursor || !cursor.pending || cursor.pending.id !== reservation.id) return;
@@ -17421,7 +17448,32 @@ export class CommentsStore {
         latest: committed ? reservation.next : reservation.next - 1,
         pending: null,
       });
+      if (committed && typeof record === 'string' && record.length <= VERSION_RECORD_MAX_CHARS) await txn.put('versionRecord', record);
     });
+  }
+
+  // META is read through Workers KV, which can answer with an older record for
+  // about a minute after a write from elsewhere; the cursor already knows better.
+  // A save based on a version META has not shown yet must not build on that old
+  // record: the version it misses would vanish from the doc's list and whatever
+  // else that publish wrote would roll back. It builds on the record that publish
+  // left here, or, without one, is refused until KV catches up. Null is that
+  // refusal; a base the cursor does not know is left for _reserveVersion to refuse.
+  async _recordForBase(baseVersion, meta) {
+    const metaLatest = latestVersionNumber(meta);
+    if (!(baseVersion > metaLatest)) return meta;
+    let cursor = null;
+    let record = null;
+    await this.state.storage.transaction(async (txn) => {
+      cursor = await txn.get('versionCursor');
+      record = await txn.get('versionRecord');
+    });
+    if (!cursor || Number(cursor.latest) !== baseVersion) return meta;
+    try {
+      const parsed = record ? JSON.parse(record) : null;
+      if (latestVersionNumber(parsed) === baseVersion) return parsed;
+    } catch {}
+    return null;
   }
 
   async _copyVersionWidgets(slug, baseVersion, nextVersion) {
@@ -17442,8 +17494,10 @@ export class CommentsStore {
   }
 
   async _saveVersion(slug, op) {
-    const meta = await loadDocMeta(this.env, slug);
-    if (!meta) return { status: 404, body: { error: 'not_found' } };
+    const metaRead = await loadDocMeta(this.env, slug);
+    if (!metaRead) return { status: 404, body: { error: 'not_found' } };
+    const meta = await this._recordForBase(Number(op.baseVersion), metaRead);
+    if (!meta) return { status: 409, body: { error: 'save_in_progress', latestVersion: Number(op.baseVersion) } };
     const metaLatest = latestVersionNumber(meta);
     // The blank page a browser create lays down is scaffolding, not a version
     // anyone wrote. The first real save becomes v1 rather than appending v2, so
@@ -17501,7 +17555,7 @@ export class CommentsStore {
       });
       versions.sort((a, b) => Number(a.n) - Number(b.n));
       let pendingPreviewTask = null;
-      await putDocMetaJson(this.env, slug, JSON.stringify({
+      const record = JSON.stringify({
         ...meta,
         ...(nextTitle ? { title: nextTitle } : {}),
         versions,
@@ -17512,7 +17566,8 @@ export class CommentsStore {
           existingPreview: meta.preview,
           onRenderTask: (task) => { pendingPreviewTask = task; },
         }),
-      }));
+      });
+      await putDocMetaJson(this.env, slug, record);
       if (pendingPreviewTask) await pendingPreviewTask();
       committed = true;
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
@@ -17520,7 +17575,7 @@ export class CommentsStore {
       // retry a snapshot that already exists.
       if (!replacesScaffold) {
         try {
-          await this._finishVersion(reservation, true);
+          await this._finishVersion(reservation, true, record);
         } catch (error) {
           console.error('[browser-save] version cursor finalize failed (recoverable):', error.message || String(error));
         }
@@ -17665,7 +17720,7 @@ export class CommentsStore {
         return Response.json(result.ok ? result : result.body, { status: result.ok ? 200 : result.status });
       }
       if (op && op.kind === 'finish' && op.reservation) {
-        await this._finishVersion(op.reservation, !!op.committed);
+        await this._finishVersion(op.reservation, !!op.committed, op.record || null);
         return Response.json({ ok: true });
       }
       return Response.json({ error: 'bad_version_lock_op' }, { status: 400 });
@@ -19246,6 +19301,10 @@ async function saveVersionAsPerson(env, slug, op) {
   return createBrowserVersion(env, slug, op);
 }
 
+// A plan that lost to a newer version, a save in progress, the version after it
+// and a real race: past that the person gets a message and presses again.
+const SUGGEST_ACCEPT_ATTEMPTS = 4;
+const SUGGEST_ACCEPT_WAIT_MS = 1000;
 async function handleSuggestionDecision(env, req, url, slug, id, decision) {
   const gate = await suggestEditorGate(env, req, url, slug);
   if (gate.error) return gate.error;
@@ -19270,22 +19329,24 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
   // Accept: read the set, apply its pending edits to the latest version and
   // save that as this person's version. The version store takes one save
   // per base version, so two accepts racing cannot both publish on the same
-  // base; the loser reads the new latest once and plans again (an edit
+  // base; the loser plans again on the latest the store names (an edit
   // already in it no longer matches and is reported stale, never applied
-  // twice). The set is settled in one step afterwards.
+  // twice). That number is the store's, not a read of the doc again: KV can
+  // keep answering with the old version for a minute after a publish from
+  // elsewhere, and a plan on it would only conflict again. A save in progress
+  // is given a moment. The set is settled in one step afterwards.
   let latest = gate.latest;
   let set = null;
   let good = [];
   let stale = [];
   let saved = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt) {
-      const meta = await loadDocMeta(env, slug);
-      latest = meta ? latestVersionNumber(meta) : latest;
-    }
+  for (let attempt = 0; attempt < SUGGEST_ACCEPT_ATTEMPTS; attempt++) {
     const got = await suggestionsOp(env, slug, { kind: 'get', id });
     if (!got.ok) return got.error === 'suggestion_not_found' ? json({ error: 'suggestion_not_found' }, { status: 404 }) : suggestionsUnavailable();
     set = got.set;
+    // The set was made on the version it names, so a read older than that is KV
+    // behind: a plan on it would call good edits stale for good.
+    latest = Math.max(latest, Number(set.base_version) || 0);
     const pick = set.edits.filter((e) => e.state === 'pending' && (!wanted || wanted.includes(e.id)));
     if (!pick.length) return json({ error: 'nothing_pending', suggestion: view(set) }, { status: 409 });
     const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
@@ -19324,8 +19385,10 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
       suggested_by: set.agent && set.agent.login ? String(set.agent.login).slice(0, 80) : 'agent',
       keep_title: true,
     });
-    if (saved.status === 409 && saved.body && saved.body.error === 'version_conflict' && attempt === 0) continue;
-    break;
+    const refused = saved.status === 409 && saved.body ? saved.body.error : '';
+    if (refused !== 'version_conflict' && refused !== 'save_in_progress') break;
+    latest = Math.max(latest, Number(saved.body.latestVersion) || 0);
+    if (refused === 'save_in_progress' && attempt < SUGGEST_ACCEPT_ATTEMPTS - 1) await new Promise((done) => setTimeout(done, SUGGEST_ACCEPT_WAIT_MS));
   }
   if (saved.status !== 200 || !saved.body || !saved.body.ok) {
     return json(saved.body || { error: 'version_write_failed' }, { status: saved.status || 500 });
@@ -19452,6 +19515,18 @@ async function handleProposeEdits(env, req, url, slug) {
     : null;
   const via = normalizeNotifyTarget(handoff && handoff.recipient);
   if (via) agent = { ...agent, provider: via.provider, ...(via.provider === 'local' && via.cli ? { cli: via.cli } : {}) };
+  // The agent that says who it is signs as itself, as its replies do: the name
+  // the body sent is only the runtime's ("Claude"). The handoff's recipient above
+  // only says the route: it is not proof of who sent this. A handle that fails
+  // the same check as any other name is left off; the signature stays as it was.
+  const acting = auth.actor.kind === 'hosted' && !auth.actor.team_agent
+    ? await actingAgent(env, req, auth.actor).catch(() => null) : null;
+  if (acting) {
+    agent = await agentSignedAsTarget(env, agent, acting, auth.actor);
+    const own = agent.handle ? agent.handle.slice(1) : '';
+    if (own && !posing(own)) agent = { ...agent, name: own };
+    else agent = { ...agent, handle: '' };
+  }
   agent = { ...agent, scope: meta.workspace_id ? 'team' : 'personal' };
   const set = {
     id: `s_${Date.now().toString(36)}_${rand(4)}`,
@@ -19476,7 +19551,7 @@ async function handleProposeEdits(env, req, url, slug) {
   // name, or for all of it when they name none.
   if (auth.actor.kind === 'hosted' && !auth.actor.team_agent) {
     await settleSuggestLocks(env, slug, {
-      ...suggestLockActor(await actingAgent(env, req, auth.actor).catch(() => null)),
+      ...suggestLockActor(acting),
       ...(commentIds.length ? { comment_ids: commentIds } : {}),
     });
   }
@@ -28300,7 +28375,7 @@ const tdocHandlers = {
         ...(viaTeamAgent ? { sent_by: caller.accountId } : localDriver && (gate.meta?.workspace_id || isLocalTarget(target)) ? { by: localDriver } : {}),
       });
       if (target && target.provider === 'local') await localPendingAdd(env, gate.meta, slug, rec);
-      return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery });
+      return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery, ...(replyAs ? { reply_as: replyAs } : {}) });
     }
 
     // Called by the agent once it has applied a batch. Upload-token authed:
@@ -28644,24 +28719,7 @@ const tdocHandlers = {
           team_agent: { id: auth.actor.team_agent.id, name: auth.actor.team_agent.name },
         };
       }
-      if (replyTarget) {
-        const accountHandle = auth.actor.account_id
-          ? (await accountClaimedHandle(env, auth.actor.account_id)) || auth.actor.github_login || ''
-          : '';
-        // Where it runs, for the hover card only: the Raft server or the
-        // daemon's computer. A webhook's host is left out: readers of a public
-        // doc would see the owner's endpoint.
-        const location = replyTarget.provider === 'raft' ? replyTarget.server_slug || ''
-          : replyTarget.provider === 'local' ? replyTarget.device || '' : '';
-        agent = {
-          ...agent,
-          provider: replyTarget.provider,
-          handle: replyTarget.agent_name && replyTarget.provider !== 'local' ? `@${replyTarget.agent_name.replace(/^@/, '')}` : '',
-          ...(replyTarget.provider === 'local' ? { cli: replyTarget.cli } : {}),
-          ...(location ? { location } : {}),
-          ...(accountHandle ? { principal: { display: `@${accountHandle}`, terminal: agent.name } } : {}),
-        };
-      }
+      if (replyTarget) agent = await agentSignedAsTarget(env, agent, replyTarget, auth.actor);
       agent = { ...agent, scope: writeGate.meta && writeGate.meta.workspace_id ? 'team' : 'personal' };
       if (replyingAgent) {
         try {
@@ -29198,11 +29256,11 @@ const tdocHandlers = {
           if (!lock.ok) return json({ error: lock.error || 'version_conflict', ...lock }, { status: lock.status || 409 });
           versionReservation = { id: lock.id, next: lock.next };
       }
-      const finishVersionReservation = async (committed) => {
+      const finishVersionReservation = async (committed, record = null) => {
         if (!versionReservation) return;
         const reservation = versionReservation;
         versionReservation = null;
-        const result = await versionReservationOp(env, slug, { kind: 'finish', reservation, committed });
+        const result = await versionReservationOp(env, slug, { kind: 'finish', reservation, committed, ...(record ? { record } : {}) });
         if (!result.ok) throw new Error(result.message || result.error || 'version_lock_finalize_failed');
       };
       const abortVersionWrite = async (body, status) => {
@@ -29253,6 +29311,7 @@ const tdocHandlers = {
       }
       if (incoming && writesLatestMeta) {
         let pendingPreviewTask = null;
+        let committedRecord = null;
         try {
           // Resolve the exact publisher from a verified session or an agent
           // already linked to this account. The upload's version JSON cannot
@@ -29303,7 +29362,7 @@ const tdocHandlers = {
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
             .sort((a, b) => Number(a.n) - Number(b.n));
-          await putDocMetaJson(env, slug, JSON.stringify({
+          committedRecord = JSON.stringify({
             ...(currentMeta || {}),
             ...incoming,
             versions: mergedVersions,
@@ -29317,7 +29376,8 @@ const tdocHandlers = {
                 ? await storePreviewScreenshot(env, slug, verNum, previewShot.bytes) : null,
               onRenderTask: (task) => { pendingPreviewTask = task; },
             }),
-          }));
+          });
+          await putDocMetaJson(env, slug, committedRecord);
         } catch (e) {
           try { await finishVersionReservation(false); } catch {}
           console.error('[upload] META put failed:', e.message);
@@ -29328,7 +29388,7 @@ const tdocHandlers = {
           else await pendingPreviewTask();
         }
         try {
-          await finishVersionReservation(true);
+          await finishVersionReservation(true, committedRecord);
         } catch (e) {
           // META is the commit point, matching browser Save. A later request
           // repairs the cursor from META; never report this committed version
