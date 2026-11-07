@@ -1214,6 +1214,12 @@ async function deleteDocEverywhere(env, slug, { markers = [] } = {}) {
     console.error('[purge] locks not cleared:', e && e.message);
   });
   await env.META.delete(`answer-locks:${slug}`);
+  // Its version cursor too. A failed clear is not a purge cut short: the next
+  // owner's saves are refused until the cursor recovery brings it down.
+  if (env.COMMENTS) {
+    const forgot = await versionReservationOp(env, slug, { kind: 'forget' });
+    if (!forgot.ok) console.error('[purge] version store not cleared:', forgot.error || forgot.status);
+  }
   // So is a site binding (siteBindingKey).
   await env.META.delete(siteBindingKey(slug));
   for (const prefix of [`agent-asks:${slug}:`, `ai-asks:${slug}:`, `preview-status:${slug}:`]) {
@@ -16336,6 +16342,27 @@ async function touchAccountAgent(env, accountId, target) {
 // different one of the account's own agents. What gets recorded is the stored,
 // verified link, never the claimed object: the self-report only selects.
 const RAFT_AGENT_CLAIM = /^([A-Za-z0-9-]{1,80})\/([A-Za-z0-9-]{1,80})$/;
+// An author as the agent that was resolved for it signs: which connector, its
+// handle, where it runs, and who it acts for. Replies and suggestions alike.
+async function agentSignedAsTarget(env, agent, target, actor) {
+  const accountHandle = actor.account_id
+    ? (await accountClaimedHandle(env, actor.account_id)) || actor.github_login || ''
+    : '';
+  // Where it runs, for the hover card only: the Raft server or the
+  // daemon's computer. A webhook's host is left out: readers of a public
+  // doc would see the owner's endpoint.
+  const location = target.provider === 'raft' ? target.server_slug || ''
+    : target.provider === 'local' ? target.device || '' : '';
+  return {
+    ...agent,
+    provider: target.provider,
+    handle: target.agent_name && target.provider !== 'local' ? `@${target.agent_name.replace(/^@/, '')}` : '',
+    ...(target.provider === 'local' ? { cli: target.cli } : {}),
+    ...(location ? { location } : {}),
+    ...(accountHandle ? { principal: { display: `@${accountHandle}`, terminal: agent.name } } : {}),
+  };
+}
+
 async function actingAgent(env, req, actor) {
   const session = await getAgentSession(env, req);
   if (session) return session;
@@ -17354,6 +17381,10 @@ async function versionReservationOp(env, slug, op) {
 // lazily migrated in from the legacy KV value (comments:<slug>) so existing
 // comments are preserved with zero data loss; the KV value is left intact as a
 // backstop. All same-slug reads/writes funnel through this one instance.
+// A read of the doc this far behind the version cursor is not KV catching up (a
+// minute at most) but KV that will not: a commit whose record was overwritten.
+const VERSION_BEHIND_LIMIT_MS = 2 * 60 * 1000;
+
 export class CommentsStore {
   constructor(state, env) { this.state = state; this.env = env; }
 
@@ -17382,7 +17413,12 @@ export class CommentsStore {
     return list;
   }
 
-  async _reserveVersion(baseVersion, metaLatest) {
+  // `refuseAhead`: for a save that writes the record it read. A cursor ahead of
+  // that read means the read is stale, and writing it would undo whatever came
+  // after it (a version, a switch to private, Trash), so the save is refused at any
+  // base and the first refusal is stamped. An upload builds its own record and
+  // does not ask.
+  async _reserveVersion(baseVersion, metaLatest, { refuseAhead = false, recovered = false } = {}) {
     let result;
     const reservationId = rand(8);
     const started = Date.now();
@@ -17401,6 +17437,17 @@ export class CommentsStore {
       }
 
       cursor.latest = Math.max(metaLatest, Number(cursor.latest) || 0);
+      if (refuseAhead && cursor.latest > metaLatest) {
+        const behindSince = Number(cursor.behind_since) || started;
+        await txn.put('versionCursor', { latest: cursor.latest, pending: null, behind_since: behindSince });
+        result = { ok: false, status: 409, behindSince, latest: cursor.latest, body: { error: 'save_in_progress', latestVersion: cursor.latest } };
+        return;
+      }
+      // Only a read that has itself caught up ends the wait, not a rebuilt list.
+      if (refuseAhead && !recovered && cursor.behind_since) {
+        delete cursor.behind_since;
+        await txn.put('versionCursor', cursor);
+      }
       if (cursor.latest !== baseVersion) {
         result = { ok: false, status: 409, body: { error: 'version_conflict', baseVersion, latestVersion: cursor.latest } };
         return;
@@ -17424,6 +17471,47 @@ export class CommentsStore {
     });
   }
 
+  // A save's reservation. Past the limit a doc whose read stays behind the cursor
+  // is rebuilt from what exists: the bytes in R2 are its versions, and only its
+  // version list changes; every other field stays as read. A cursor ahead of any
+  // bytes comes back down, unless something moved it meanwhile. A failed R2 read
+  // says nothing about the bytes, so it decides nothing.
+  async _reserveForSave(slug, baseVersion, meta) {
+    const metaLatest = latestVersionNumber(meta);
+    const first = await this._reserveVersion(baseVersion, metaLatest, { refuseAhead: true });
+    if (!first.behindSince || Date.now() - first.behindSince < VERSION_BEHIND_LIMIT_MS) return { ...first, meta };
+    const versions = Array.isArray(meta.versions) ? [...meta.versions] : [];
+    let n = metaLatest + 1;
+    try {
+      for (; n <= first.latest; n++) {
+        const bytes = await this.env.DOCS.head(`docs/${slug}/v${n}/index.html`);
+        if (!bytes) break;
+        versions.push({ n, created: (bytes.uploaded instanceof Date ? bytes.uploaded : new Date()).toISOString(), prompt: 'Recovered version' });
+      }
+    } catch (error) {
+      return { ok: false, status: 503, body: { error: 'version_store_unavailable', message: error.message || String(error) } };
+    }
+    if (n <= first.latest) await this._lowerCursor(first.latest, n - 1);
+    const recovered = { ...meta, versions };
+    return { ...(await this._reserveVersion(baseVersion, n - 1, { refuseAhead: true, recovered: true })), meta: recovered };
+  }
+
+  async _lowerCursor(from, to) {
+    await this.state.storage.transaction(async (txn) => {
+      const cursor = await txn.get('versionCursor');
+      if (cursor && !cursor.pending && Number(cursor.latest) === from) await txn.put('versionCursor', { latest: to, pending: null });
+    });
+  }
+
+  async _cursorAhead(metaLatest) {
+    let ahead = false;
+    await this.state.storage.transaction(async (txn) => {
+      const cursor = await txn.get('versionCursor');
+      ahead = Boolean(cursor) && Number(cursor.latest) > metaLatest;
+    });
+    return ahead;
+  }
+
   async _copyVersionWidgets(slug, baseVersion, nextVersion) {
     const fromPrefix = `docs/${slug}/v${baseVersion}/widgets/`;
     let cursor;
@@ -17442,9 +17530,8 @@ export class CommentsStore {
   }
 
   async _saveVersion(slug, op) {
-    const meta = await loadDocMeta(this.env, slug);
-    if (!meta) return { status: 404, body: { error: 'not_found' } };
-    const metaLatest = latestVersionNumber(meta);
+    const metaRead = await loadDocMeta(this.env, slug);
+    if (!metaRead) return { status: 404, body: { error: 'not_found' } };
     // The blank page a browser create lays down is scaffolding, not a version
     // anyone wrote. The first real save becomes v1 rather than appending v2, so
     // a document's history starts with the first thing someone actually wrote.
@@ -17452,15 +17539,17 @@ export class CommentsStore {
     // must still have only that one version, and the save that takes this path
     // writes a version record without the mark — so no document can replace
     // twice. Docs created before the mark existed keep the old behaviour.
-    const priorVersions = Array.isArray(meta.versions) ? meta.versions : [];
+    const priorVersions = Array.isArray(metaRead.versions) ? metaRead.versions : [];
     const replacesScaffold = priorVersions.length === 1
       && Number(priorVersions[0] && priorVersions[0].n) === 1
       && Boolean(priorVersions[0] && priorVersions[0].blank)
-      && Number(op.baseVersion) === 1;
+      && Number(op.baseVersion) === 1
+      && !(await this._cursorAhead(latestVersionNumber(metaRead)));
     const reservation = replacesScaffold
       ? { ok: true, next: 1 }
-      : await this._reserveVersion(op.baseVersion, metaLatest);
+      : await this._reserveForSave(slug, op.baseVersion, metaRead);
     if (!reservation.ok) return { status: reservation.status, body: reservation.body };
+    const meta = reservation.meta || metaRead;
 
     let committed = false;
     try {
@@ -17666,6 +17755,11 @@ export class CommentsStore {
       }
       if (op && op.kind === 'finish' && op.reservation) {
         await this._finishVersion(op.reservation, !!op.committed);
+        return Response.json({ ok: true });
+      }
+      // The doc is gone for good. The slug's next owner starts from nothing.
+      if (op && op.kind === 'forget') {
+        await this.state.storage.delete('versionCursor');
         return Response.json({ ok: true });
       }
       return Response.json({ error: 'bad_version_lock_op' }, { status: 400 });
@@ -19246,6 +19340,10 @@ async function saveVersionAsPerson(env, slug, op) {
   return createBrowserVersion(env, slug, op);
 }
 
+// About two seconds for a save in progress or KV to catch up: past that the
+// person gets a message and presses again.
+const SUGGEST_ACCEPT_ATTEMPTS = 3;
+const SUGGEST_ACCEPT_WAIT_MS = 1000;
 async function handleSuggestionDecision(env, req, url, slug, id, decision) {
   const gate = await suggestEditorGate(env, req, url, slug);
   if (gate.error) return gate.error;
@@ -19270,22 +19368,31 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
   // Accept: read the set, apply its pending edits to the latest version and
   // save that as this person's version. The version store takes one save
   // per base version, so two accepts racing cannot both publish on the same
-  // base; the loser reads the new latest once and plans again (an edit
-  // already in it no longer matches and is reported stale, never applied
-  // twice). The set is settled in one step afterwards.
+  // base; the loser plans again on the latest the store names, since this read
+  // may be the stale one (an edit already in it no longer matches and is reported
+  // stale, never applied twice). The store refuses a save when its own read is
+  // stale, so that retry cannot write one: KV is given a moment, then the person
+  // is told and the suggestion stays pending. The set is settled in one step
+  // afterwards.
   let latest = gate.latest;
+  let named = 0;
   let set = null;
   let good = [];
   let stale = [];
   let saved = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < SUGGEST_ACCEPT_ATTEMPTS; attempt++) {
     if (attempt) {
+      await new Promise((done) => setTimeout(done, SUGGEST_ACCEPT_WAIT_MS));
       const meta = await loadDocMeta(env, slug);
-      latest = meta ? latestVersionNumber(meta) : latest;
+      if (!meta) return json({ error: 'not_found' }, { status: 404 });
+      latest = Math.max(latestVersionNumber(meta), named);
     }
     const got = await suggestionsOp(env, slug, { kind: 'get', id });
     if (!got.ok) return got.error === 'suggestion_not_found' ? json({ error: 'suggestion_not_found' }, { status: 404 }) : suggestionsUnavailable();
     set = got.set;
+    // The set was made on the version it names, so a read older than that is KV
+    // behind: a plan on it would call good edits stale for good.
+    latest = Math.max(latest, Number(set.base_version) || 0);
     const pick = set.edits.filter((e) => e.state === 'pending' && (!wanted || wanted.includes(e.id)));
     if (!pick.length) return json({ error: 'nothing_pending', suggestion: view(set) }, { status: 409 });
     const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
@@ -19324,8 +19431,9 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
       suggested_by: set.agent && set.agent.login ? String(set.agent.login).slice(0, 80) : 'agent',
       keep_title: true,
     });
-    if (saved.status === 409 && saved.body && saved.body.error === 'version_conflict' && attempt === 0) continue;
-    break;
+    const refused = saved.status === 409 && saved.body ? saved.body.error : '';
+    if (refused !== 'version_conflict' && refused !== 'save_in_progress') break;
+    if (refused === 'version_conflict') named = Number(saved.body.latestVersion) || 0;
   }
   if (saved.status !== 200 || !saved.body || !saved.body.ok) {
     return json(saved.body || { error: 'version_write_failed' }, { status: saved.status || 500 });
@@ -19452,6 +19560,18 @@ async function handleProposeEdits(env, req, url, slug) {
     : null;
   const via = normalizeNotifyTarget(handoff && handoff.recipient);
   if (via) agent = { ...agent, provider: via.provider, ...(via.provider === 'local' && via.cli ? { cli: via.cli } : {}) };
+  // The agent that says who it is signs as itself, as its replies do: the name
+  // the body sent is only the runtime's ("Claude"). The handoff's recipient above
+  // only says the route: it is not proof of who sent this. A handle that fails
+  // the same check as any other name is left off; the signature stays as it was.
+  const acting = auth.actor.kind === 'hosted' && !auth.actor.team_agent
+    ? await actingAgent(env, req, auth.actor).catch(() => null) : null;
+  if (acting) {
+    agent = await agentSignedAsTarget(env, agent, acting, auth.actor);
+    const own = agent.handle ? agent.handle.slice(1) : '';
+    if (own && !posing(own)) agent = { ...agent, name: own };
+    else agent = { ...agent, handle: '' };
+  }
   agent = { ...agent, scope: meta.workspace_id ? 'team' : 'personal' };
   const set = {
     id: `s_${Date.now().toString(36)}_${rand(4)}`,
@@ -19476,7 +19596,7 @@ async function handleProposeEdits(env, req, url, slug) {
   // name, or for all of it when they name none.
   if (auth.actor.kind === 'hosted' && !auth.actor.team_agent) {
     await settleSuggestLocks(env, slug, {
-      ...suggestLockActor(await actingAgent(env, req, auth.actor).catch(() => null)),
+      ...suggestLockActor(acting),
       ...(commentIds.length ? { comment_ids: commentIds } : {}),
     });
   }
@@ -28300,7 +28420,7 @@ const tdocHandlers = {
         ...(viaTeamAgent ? { sent_by: caller.accountId } : localDriver && (gate.meta?.workspace_id || isLocalTarget(target)) ? { by: localDriver } : {}),
       });
       if (target && target.provider === 'local') await localPendingAdd(env, gate.meta, slug, rec);
-      return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery });
+      return json({ ok: true, handoff_id: rec.handoff_id, sent: prev.comment_ids.length, delivery: rec.delivery, ...(replyAs ? { reply_as: replyAs } : {}) });
     }
 
     // Called by the agent once it has applied a batch. Upload-token authed:
@@ -28644,24 +28764,7 @@ const tdocHandlers = {
           team_agent: { id: auth.actor.team_agent.id, name: auth.actor.team_agent.name },
         };
       }
-      if (replyTarget) {
-        const accountHandle = auth.actor.account_id
-          ? (await accountClaimedHandle(env, auth.actor.account_id)) || auth.actor.github_login || ''
-          : '';
-        // Where it runs, for the hover card only: the Raft server or the
-        // daemon's computer. A webhook's host is left out: readers of a public
-        // doc would see the owner's endpoint.
-        const location = replyTarget.provider === 'raft' ? replyTarget.server_slug || ''
-          : replyTarget.provider === 'local' ? replyTarget.device || '' : '';
-        agent = {
-          ...agent,
-          provider: replyTarget.provider,
-          handle: replyTarget.agent_name && replyTarget.provider !== 'local' ? `@${replyTarget.agent_name.replace(/^@/, '')}` : '',
-          ...(replyTarget.provider === 'local' ? { cli: replyTarget.cli } : {}),
-          ...(location ? { location } : {}),
-          ...(accountHandle ? { principal: { display: `@${accountHandle}`, terminal: agent.name } } : {}),
-        };
-      }
+      if (replyTarget) agent = await agentSignedAsTarget(env, agent, replyTarget, auth.actor);
       agent = { ...agent, scope: writeGate.meta && writeGate.meta.workspace_id ? 'team' : 'personal' };
       if (replyingAgent) {
         try {

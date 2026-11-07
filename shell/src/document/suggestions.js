@@ -16,6 +16,17 @@ export const SuggestContext = createContext(null);
 
 export const suggestionKey = (set, edit) => `${set.id}:${edit.id}`;
 
+// What a refused Accept or Reject tells the person; empty says nothing, because
+// a re-list corrects the page (already decided, or replaced by newer ones).
+const SETTLED_ALREADY = new Set(['nothing_pending', 'suggestion_not_found']);
+export function suggestionErrorText(error) {
+  const code = error?.body?.error;
+  if (SETTLED_ALREADY.has(code)) return '';
+  if (code === 'original_changed') return 'The original changed since this was suggested. Ask again to regenerate it.';
+  if (code === 'version_conflict' || code === 'save_in_progress') return 'The doc was just updated. Try again in a moment.';
+  return error?.body?.message || 'Could not do that. Try again.';
+}
+
 export function useSuggestions({ slug, version, enabled, send, onToast, onPublished, onAccepted }) {
   const [sets, setSets] = useState([]);
   const [shown, setShown] = useState({});
@@ -47,12 +58,37 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
 
   useEffect(() => { showAll(); }, [showAll]);
 
+  // The list as the server has it. Only the newest read counts, and none that
+  // began before an Accept or Reject ended: it could bring back what that decided.
+  const listRead = useRef(0);
+  const decidingNow = useRef(false);
+  const relistedAt = useRef(0);
+  const [latestSeen, setLatestSeen] = useState(0);
+  const relist = useCallback(async () => {
+    if (!enabled || decidingNow.current) return;
+    const read = ++listRead.current;
+    relistedAt.current = Date.now();
+    let body = null;
+    try { body = await listSuggestions(slug); } catch { return; }
+    if (read !== listRead.current || !Array.isArray(body?.suggestions)) return;
+    setSets(body.suggestions);
+    setLatestSeen((seen) => Math.max(seen, Number(body.latest_version) || 0));
+  }, [enabled, slug]);
+
+  useEffect(() => { relist(); }, [relist]);
+
+  // Coming back to the page. Edits an agent sent while nobody here was waiting
+  // show up then, and on the page's quiet sync (document-shell, relist): no poll
+  // of its own. A focus and a visibility change arrive together.
   useEffect(() => {
     if (!enabled) return undefined;
-    let live = true;
-    listSuggestions(slug).then((body) => { if (live && Array.isArray(body?.suggestions)) setSets(body.suggestions); }).catch(() => {});
-    return () => { live = false; };
-  }, [enabled, slug]);
+    const back = () => {
+      if (document.visibilityState === 'visible' && Date.now() - relistedAt.current > 2000) relist();
+    };
+    window.addEventListener('focus', back);
+    document.addEventListener('visibilitychange', back);
+    return () => { window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', back); };
+  }, [enabled, relist]);
 
   // The frame's reply to OUR focus request, once, shortly after: the doc's
   // own scripts share the frame's window and could post a position too.
@@ -63,6 +99,10 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     asked.current = key ? { key, at: Date.now() } : null;
     if (key) send({ type: 'tdoc:suggestFocus', id: key, scroll });
   }, [send]);
+
+  // Showing rebuilds every mark, the active one's outline with them.
+  const activeNow = useRef(null);
+  activeNow.current = activeKey;
 
   // Frame messages, for the page's bridge.
   const frameHandlers = useMemo(() => ({
@@ -77,8 +117,9 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
       const next = {};
       for (const r of message.results || []) next[r.id] = { ok: r.ok === true, docY: Number(r.docY) || 0 };
       setShown(next);
+      if (activeNow.current && next[activeNow.current]?.ok) send({ type: 'tdoc:suggestFocus', id: activeNow.current, scroll: false });
     },
-  }), [showAll]);
+  }), [showAll, send]);
 
   useEffect(() => {
     // Keep the review bar on a suggestion that is still there, or one the
@@ -101,6 +142,8 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
   const decide = async (keys, decision) => {
     if (deciding || !keys.length) return;
     setDeciding(true);
+    decidingNow.current = true;
+    listRead.current++;
     const bySet = new Map();
     for (const key of keys) {
       const p = pending.find((x) => x.key === key);
@@ -124,14 +167,17 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
             for (const id of error.body.stale || []) send({ type: 'tdoc:suggestSettle', id: `${setId}:${id}`, accepted: false });
             replaceSet(error.body.suggestion);
           }
-          onToast?.(error.body?.error === 'original_changed'
-            ? 'The original changed since this was suggested. Ask again to regenerate it.'
-            : error.message || 'Could not do that', true);
+          const text = suggestionErrorText(error);
+          if (text) onToast?.(text, true);
         }
       }
     } finally {
+      decidingNow.current = false;
       setDeciding(false);
     }
+    // Whatever came back, the bar then says what the server has: other sets may
+    // have gone stale, been replaced or been decided elsewhere.
+    relist();
     if (lastVersion) {
       published.current = Math.max(published.current, lastVersion);
       onToast?.(`Published v${lastVersion}`);
@@ -151,6 +197,7 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
     try {
       const body = await suggestEdits(slug, { instruction, baseVersion: version, scope });
       if (body?.kind === 'edits' && body.suggestion) {
+        listRead.current++;
         setSets((list) => [body.suggestion, ...list.filter((s) => s.id !== body.suggestion.id)]);
         const first = body.suggestion.edits[0];
         if (first) setTimeout(() => focus(suggestionKey(body.suggestion, first)), 80);
@@ -203,6 +250,7 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
         return;
       }
       stop();
+      listRead.current++;
       setSets(list);
       onToast?.('Suggestions are ready to review.');
       const first = fresh[0].edits.find((e) => e.state === 'pending');
@@ -212,8 +260,16 @@ export function useSuggestions({ slug, version, enabled, send, onToast, onPublis
   };
   useEffect(() => () => { if (waiting.current) clearInterval(waiting.current.timer); }, []);
 
+  // Suggestions this page cannot show because a newer version has their text:
+  // the review bar offers that version.
+  const unplaced = pending.filter((p) => shown[p.key] && !shown[p.key].ok).length;
+  const elsewhere = !ordered.length && unplaced && latestSeen > version ? { count: unplaced, version: latestSeen } : null;
+
   return {
     awaitAgent,
+    relist,
+    elsewhere,
+    openVersion: (v) => onPublished?.(v),
     stopWaiting: () => waiting.current?.stop(),
     enabled,
     sets,

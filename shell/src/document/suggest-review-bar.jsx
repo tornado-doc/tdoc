@@ -9,9 +9,9 @@ import { AppButton } from '../ui/button.jsx';
 // demo bar (DemoRewriteBar): that one is the homepage's scripted call to
 // action, with no review controls.
 export function SuggestReviewBar({ suggestions, narrow = false }) {
-  const { ordered, active, busy, deciding } = suggestions;
+  const { ordered, active, busy, deciding, elsewhere } = suggestions;
   const ref = useRef(null);
-  const showing = Boolean(ordered.length || busy);
+  const showing = Boolean(ordered.length || busy || elsewhere);
   // On a phone the sheet sits where the comment button is: the page lifts
   // the button above it (chrome.css, data-tdoc-suggest-bar).
   useLayoutEffect(() => {
@@ -28,7 +28,15 @@ export function SuggestReviewBar({ suggestions, narrow = false }) {
   const owner = active?.set.agent?.owner?.display || active?.set.by || '';
   const what = active ? (active.set.summary || active.set.instruction || '') : '';
   return <div ref={ref} className={`tdoc-suggest-bar${narrow ? ' is-narrow' : ''}`} role="region" aria-label="Review AI suggestions">
-    {busy && !ordered.length ? <span className="tdoc-suggest-bar-text"><span className="tdoc-demo-rewrite-bar-dot tdoc-suggest-dot" aria-hidden="true" />{busy.label}</span> : <>
+    {busy && !ordered.length ? <span className="tdoc-suggest-bar-text"><span className="tdoc-demo-rewrite-bar-dot tdoc-suggest-dot" aria-hidden="true" />{busy.label}</span> : !ordered.length ? <>
+      <span className="tdoc-suggest-bar-text">
+        <Sparkles size={14} aria-hidden="true" className="tdoc-suggest-bar-mark" />
+        <span className="tdoc-suggest-bar-what">{elsewhere.count === 1 ? '1 suggestion is' : `${elsewhere.count} suggestions are`} on v{elsewhere.version}</span>
+      </span>
+      <span className="tdoc-suggest-bar-actions">
+        <AppButton variant="primary" size="s" onClick={() => suggestions.openVersion(elsewhere.version)}>Open v{elsewhere.version}</AppButton>
+      </span>
+    </> : <>
       <span className="tdoc-suggest-bar-text">
         <Sparkles size={14} aria-hidden="true" className="tdoc-suggest-bar-mark" />
         <span className="tdoc-suggest-bar-who">{who}</span>
