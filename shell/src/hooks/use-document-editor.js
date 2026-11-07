@@ -133,6 +133,9 @@ export function useDocumentEditor({
           latestVersion,
           latestUrl: `/d/${encodeURIComponent(config.slug)}/v/${latestVersion}`,
         });
+      } else if (error.status === 409 && error.body?.error === 'save_in_progress') {
+        // Nothing was written and the draft is still here.
+        showToast('The doc was just updated. Your draft is kept. Try saving again in a moment.', true);
       } else {
         showToast(error.message || 'Could not save', true);
       }

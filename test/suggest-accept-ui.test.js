@@ -96,7 +96,8 @@ async function startServer(worker, env) {
   const accept = (v) => bar(v).getByRole('button', { name: 'Accept', exact: true }).click();
 
   try {
-    for (const [code, words] of [['version_conflict', /document just changed, so nothing was published/], ['save_in_progress', /Another save is finishing, so nothing was published/]]) {
+    for (const code of ['version_conflict', 'save_in_progress']) {
+      const words = /The doc was just updated\. Try again in a moment\./;
       await t(`${code}: words, not the code; nothing published; the list is read again; pressing again only repeats it`, async () => {
         const slug = await newDoc();
         await propose(slug, A, 'Alpha accepted.');
@@ -119,6 +120,26 @@ async function startServer(worker, env) {
         await v.ctx.close();
       });
     }
+
+    await t('a browser save refused while KV is behind: words, not the code, and the draft stays', async () => {
+      const slug = await newDoc();
+      const v = await open(slug);
+      await v.page.goto(`${base}/d/${slug}?edit=1`);
+      const para = v.page.frameLocator('iframe').locator('#a');
+      await para.waitFor({ timeout: 15000 });
+      await v.page.route(/\/api\/doc\/versions$/, (r) => r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'save_in_progress', latestVersion: 2 }) }));
+      await para.click();
+      await para.fill('A draft worth keeping.');
+      const save = v.page.getByRole('button', { name: 'Save', exact: true });
+      await v.page.waitForFunction(() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Save' && !b.disabled), null, { timeout: 8000 });
+      await save.click();
+      await v.page.getByRole('button', { name: 'Save and publish' }).click();
+      await v.page.getByText(/The doc was just updated\. Your draft is kept\./).first().waitFor({ timeout: 5000 });
+      assert.equal(await v.page.getByText('save_in_progress').count(), 0);
+      assert.match(await para.innerText(), /A draft worth keeping/);
+      assert.match(v.page.url(), /edit=1/);
+      await v.ctx.close();
+    });
 
     await t('nothing_pending: the decided row leaves without a word, and the bar goes when none remain', async () => {
       const slug = await newDoc();

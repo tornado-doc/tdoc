@@ -23,8 +23,7 @@ export function suggestionErrorText(error) {
   const code = error?.body?.error;
   if (SETTLED_ALREADY.has(code)) return '';
   if (code === 'original_changed') return 'The original changed since this was suggested. Ask again to regenerate it.';
-  if (code === 'version_conflict') return 'The document just changed, so nothing was published. Try again.';
-  if (code === 'save_in_progress') return 'Another save is finishing, so nothing was published. Try again in a moment.';
+  if (code === 'version_conflict' || code === 'save_in_progress') return 'The doc was just updated. Try again in a moment.';
   return error?.body?.message || 'Could not do that. Try again.';
 }
 

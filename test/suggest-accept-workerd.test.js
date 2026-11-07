@@ -5,12 +5,11 @@
 // Worker and the Durable Object, while writes still land, as a cached KV read
 // behaves for up to 60 seconds after a publish from elsewhere.
 //
-// Pinned here: an accept whose read of the doc is behind publishes on the real
-// latest (the edit still matching lands, the changed one is reported stale), the
-// version it missed stays in the record while every other field comes from the
-// read, an in-flight save is waited for and otherwise refused with nothing written,
-// a doc KV never catches up on recovers after a bounded time, a purged slug starts
-// from nothing, and a Raft agent signs suggestions with its own handle.
+// Pinned here: a save never writes from a read the version cursor knows is stale
+// (a version, a switch to private and Trash all stay), Accept gives KV a moment and
+// otherwise leaves the suggestion pending, a doc KV never catches up on recovers
+// after a bounded time without losing anything, a purged slug starts from nothing,
+// and a Raft agent signs suggestions with its own handle.
 //
 // Run with: node test/suggest-accept-workerd.test.js   (part of npm run test:workerd)
 const assert = require('node:assert/strict');
@@ -48,7 +47,17 @@ class R2 {
   async delete(k) { for (const key of Array.isArray(k) ? k : [k]) this.map.delete(key); }
   async list({ prefix = '' } = {}) { return { objects: [...this.map.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })), truncated: false }; }
 }
-const fake = globalThis.__tdocFake || (globalThis.__tdocFake = { META: new KV(), DOCS: new R2(), stale: new Map(), staleFor: 'all' });
+const fake = globalThis.__tdocFake || (globalThis.__tdocFake = { META: new KV(), DOCS: new R2(), stale: new Map(), staleFor: 'all', r2: {} });
+// head as a failing or slow R2 answers it.
+const docs = new Proxy(fake.DOCS, { get(target, prop) {
+  if (prop === 'head') return async (k) => {
+    while (fake.r2.hold) await new Promise((resolve) => setTimeout(resolve, 20));
+    if (fake.r2.fail) throw new Error('r2 down');
+    return target.head(k);
+  };
+  const v = target[prop];
+  return typeof v === 'function' ? v.bind(target) : v;
+} });
 // Which reader sees the old record: the Worker's colo, or the Durable Object's too.
 const metaFor = (who) => new Proxy(fake.META, { get(target, prop) {
   const behind = (k) => fake.stale.has(k) && (fake.staleFor === 'all' || who === 'worker');
@@ -57,12 +66,12 @@ const metaFor = (who) => new Proxy(fake.META, { get(target, prop) {
   const v = target[prop];
   return typeof v === 'function' ? v.bind(target) : v;
 } });
-const envFor = (env, who) => ({ META: metaFor(who), DOCS: fake.DOCS, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test, bob@tdoc.test' });
+const envFor = (env, who) => ({ META: metaFor(who), DOCS: docs, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test, bob@tdoc.test' });
 export class TestStore extends CommentsStore {
   constructor(state, env) { super(state, envFor(env, 'do')); }
   async fetch(req) {
     const hook = new URL(req.url).pathname;
-    if (hook === '/__storage') return Response.json({ cursor: (await this.state.storage.get('versionCursor')) ?? null, entries: (await this.state.storage.get('versionEntries')) ?? null, keys: [...(await this.state.storage.list()).keys()] });
+    if (hook === '/__storage') return Response.json({ cursor: (await this.state.storage.get('versionCursor')) ?? null, keys: [...(await this.state.storage.list()).keys()] });
     if (hook === '/__set-storage') {
       const { op } = await req.json();
       for (const [k, v] of Object.entries(op)) { if (v === null) await this.state.storage.delete(k); else await this.state.storage.put(k, v); }
@@ -90,7 +99,7 @@ export default {
       fake.staleFor = who || 'all';
       return new Response('ok');
     }
-    if (url.pathname === '/__put-html') { const { key, html } = await req.json(); await fake.DOCS.put(key, html); return new Response('ok'); }
+    if (url.pathname === '/__r2') { Object.assign(fake.r2, await req.json()); return new Response('ok'); }
     if (url.pathname === '/__html') return new Response(await (await fake.DOCS.get(url.searchParams.get('key')))?.text() ?? '');
     if (url.pathname === '/__do') {
       const { slug, op, path: doPath } = await req.json();
@@ -194,60 +203,84 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     };
     const metaOf = async (slug) => JSON.parse(await kv(`meta:${slug}`));
     const numbers = (meta) => meta.versions.map((v) => Number(v.n));
+    const pendingIds = async (slug) => (await call(`/api/docs/${slug}/suggestions`, { cookie })).body.suggestions.flatMap((x) => x.edits.filter((e) => e.state === 'pending').map((e) => e.id));
+    const reserve = async (slug, baseVersion) => (await (await post('/__do', { slug, path: '/version-lock', op: { kind: 'reserve', baseVersion } })).json());
+    const finish = (slug, reservation, committed) => post('/__do', { slug, path: '/version-lock', op: { kind: 'finish', reservation, committed } });
+    const r2 = (mode) => post('/__r2', mode);
+    const refusedSave = (r) => { assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.error, 'save_in_progress'); };
     // The limit has passed: the refusal was stamped longer ago than it allows.
     const pastTheLimit = async (slug) => {
       const { cursor } = await storage(slug);
       assert.ok(cursor.behind_since, `stamped by the refusal: ${JSON.stringify(cursor)}`);
       await setStorage(slug, { versionCursor: { ...cursor, behind_since: Date.now() - 3 * 60 * 1000 } });
     };
-    const trashAndPurge = async (slug, who = cookie) => {
-      const trashed = await call(`/api/doc?slug=${slug}`, { method: 'DELETE', cookie: who });
+    const trashAndPurge = async (slug) => {
+      const trashed = await call(`/api/doc?slug=${slug}`, { method: 'DELETE', cookie });
       assert.equal(trashed.status, 200, trashed.text);
-      const purged = await call('/api/trash/purge', { method: 'POST', cookie: who, body: { slug } });
+      const purged = await call('/api/trash/purge', { method: 'POST', cookie, body: { slug } });
       assert.equal(purged.status, 200, purged.text);
     };
 
-    const expectV3 = async (slug, set, r, title = 'Plan as of v2') => {
+    const expectV3 = async (slug, set, r) => {
       assert.equal(r.status, 200, `accept: ${r.status} ${r.text}`);
       assert.equal(r.body.version, 3);
       assert.deepEqual(r.body.accepted, [set.edits[0].id], 'the edit still matching lands');
       assert.deepEqual(r.body.stale, [set.edits[1].id], 'the changed one is reported stale');
-      await behind(slug, null);
       const html = await htmlOf(slug, 3);
       assert.ok(html.includes('Alpha accepted.'), html);
       assert.ok(html.includes('Beta rewritten by v2.'), `v3 is built on v2, not on v1: ${html}`);
       assert.ok(!html.includes('Beta accepted.'), html);
-      const meta = JSON.parse(await kv(`meta:${slug}`));
-      assert.deepEqual(meta.versions.map((v) => Number(v.n)), [1, 2, 3], 'the version the read missed stays in the record');
-      assert.equal(meta.versions[1].prompt, 'publish 2', 'with what v2 recorded');
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2, 3]);
+      assert.equal(meta.versions[1].prompt, 'publish 2');
       assert.equal(meta.versions[1].publisher_agent.agent_sub, 'agent-linked');
-      assert.equal(meta.title, title);
+      assert.equal(meta.title, 'Plan as of v2');
+    };
+    // KV behind: nothing is written and the suggestion stays pending.
+    const refusedAccept = async (slug, set, code) => {
+      const r = await accept(slug, set);
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.error, code);
+      assert.equal(await htmlOf(slug, 3), '', 'no v3 bytes');
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2]);
+      assert.deepEqual((await pendingIds(slug)).sort(), set.edits.map((e) => e.id).sort(), 'still pending');
     };
 
-    await t('KV behind for the Worker and the Durable Object: publishes v3, v2 kept, the changed edit stale', async () => {
+    await t('KV behind for the Worker and the Durable Object: refused, still pending; once it catches up, v3 with v2 kept', async () => {
       const { slug, set, beforeV2 } = await twoEditsThenV2();
       await behind(slug, beforeV2, 'all');
-      // Everything but the versions comes from the read, v2's title included.
-      await expectV3(slug, set, await accept(slug, set), 'Plan');
-    });
-
-    await t('KV behind for the Worker only: the same', async () => {
-      const { slug, set, beforeV2 } = await twoEditsThenV2();
-      await behind(slug, beforeV2, 'worker');
+      await refusedAccept(slug, set, 'save_in_progress');
+      await behind(slug, null);
       await expectV3(slug, set, await accept(slug, set));
     });
 
-    await t('pressing Accept again after it landed publishes nothing more', async () => {
+    await t('KV behind for the Worker only: refused the same way, then v3', async () => {
+      const { slug, set, beforeV2 } = await twoEditsThenV2();
+      await behind(slug, beforeV2, 'worker');
+      await refusedAccept(slug, set, 'version_conflict');
+      await behind(slug, null);
+      await expectV3(slug, set, await accept(slug, set));
+    });
+
+    await t('KV catching up during the short wait: the Accept lands without a second press', async () => {
       const { slug, set, beforeV2 } = await twoEditsThenV2();
       await behind(slug, beforeV2, 'all');
-      await expectV3(slug, set, await accept(slug, set), 'Plan');
+      const pressed = accept(slug, set);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await behind(slug, null);
+      await expectV3(slug, set, await pressed);
+    });
+
+    await t('pressing Accept again after it landed publishes nothing more', async () => {
+      const { slug, set } = await twoEditsThenV2();
+      await expectV3(slug, set, await accept(slug, set));
       const again = await accept(slug, set);
       assert.equal(again.status, 409, again.text);
       assert.equal(again.body.error, 'nothing_pending');
-      assert.equal(await latestOf(slug), 3);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3]);
     });
 
-    await t('a set made on v2 and accepted through a read still at v1 is not called stale', async () => {
+    await t('a set made on v2, accepted through a read still at v1: good edits are not called stale', async () => {
       const slug = `accept-doc-${++docN}`;
       assert.equal((await publish(slug, 1, 'Alpha sentence stays.', 'Beta sentence here.')).status, 200);
       const beforeV2 = await kv(`meta:${slug}`);
@@ -255,126 +288,100 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       const proposed = await call(`/api/docs/${slug}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'Beta rewritten by v2.', replace: 'Beta accepted.' }], agent_login: 'claude', agent_name: 'Claude' } });
       assert.equal(proposed.body.suggestion.base_version, 2, proposed.text);
       await behind(slug, beforeV2, 'all');
+      const refused = await accept(slug, proposed.body.suggestion);
+      assert.equal(refused.status, 409, refused.text);
+      assert.equal(refused.body.error, 'save_in_progress');
+      assert.deepEqual(await pendingIds(slug), [proposed.body.suggestion.edits[0].id]);
+      await behind(slug, null);
       const r = await accept(slug, proposed.body.suggestion);
       assert.equal(r.status, 200, r.text);
       assert.equal(r.body.version, 3);
       assert.deepEqual(r.body.stale, []);
-      await behind(slug, null);
       assert.ok((await htmlOf(slug, 3)).includes('Beta accepted.'));
     });
 
-    await t('the page the accept moves to, /v/3, opens while this colo\'s KV still reads the old record', async () => {
+    await t('the page an Accept moves to, /v/3, opens while this colo\'s KV still reads the old record', async () => {
       const { slug, set, beforeV2 } = await twoEditsThenV2();
-      await behind(slug, beforeV2, 'worker');
       const r = await accept(slug, set);
       assert.equal(r.status, 200, r.text);
+      await behind(slug, beforeV2, 'worker');
       const shown = await call(r.body.url, { cookie });
       assert.equal(shown.status, 200, `${r.body.url}: ${shown.status} ${shown.text.slice(0, 200)}`);
       await behind(slug, null);
     });
 
-    await t('KV current: unchanged, v3 on v2', async () => {
-      const { slug, set } = await twoEditsThenV2();
-      await expectV3(slug, set, await accept(slug, set));
-    });
-
-    await t('a browser save based on the real latest, KV behind, keeps v2 in the record too', async () => {
+    await t('a save on a read the store knows is stale is refused at any base', async () => {
       const { slug, beforeV2 } = await twoEditsThenV2();
       await behind(slug, beforeV2, 'all');
-      const saved = await call('/api/doc/versions', { method: 'POST', cookie, body: { slug, baseVersion: 2, html: `<!doctype html><html><head><title>Plan</title></head><body>${page('Typed.', 'Beta rewritten by v2.')}</body></html>` } });
-      assert.equal(saved.status, 200, saved.text);
+      const route = await call('/api/doc/versions', { method: 'POST', cookie, body: { slug, baseVersion: 2, html: `<!doctype html><html><head><title>Plan</title></head><body>${page('Typed.', 'Beta rewritten by v2.')}</body></html>` } });
+      assert.equal(route.status, 409, route.text);
+      assert.equal(route.body.error, 'save_in_progress');
+      refusedSave(await doSave(slug, 1));
+      refusedSave(await doSave(slug, 2));
       await behind(slug, null);
-      assert.deepEqual(JSON.parse(await kv(`meta:${slug}`)).versions.map((v) => Number(v.n)), [1, 2, 3]);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2]);
+      assert.equal(await htmlOf(slug, 3), '');
+      assert.equal((await doSave(slug, 2)).status, 200, 'and fine once KV has caught up');
     });
 
-    await t('no record of what KV is missing: refused and nothing written, then fine once KV catches up', async () => {
+    await t('a blank doc\'s scaffold is not replaced through a read that misses a later version', async () => {
+      const created = await call('/api/doc/create', { method: 'POST', cookie, body: {} });
+      assert.equal(created.status, 200, created.text);
+      const { slug } = created.body;
+      const beforeV2 = await kv(`meta:${slug}`);
+      assert.ok(JSON.parse(beforeV2).versions[0].blank, beforeV2);
+      assert.equal((await doSave(slug, 1)).status, 200, 'first save replaces the scaffold');
+      await kv(`meta:${slug}`, beforeV2);
+      await setStorage(slug, { versionCursor: { latest: 2, pending: null } });
+      refusedSave(await doSave(slug, 1));
+    });
+
+    await t('a switch to private stays private after a known-stale Accept', async () => {
       const { slug, set, beforeV2 } = await twoEditsThenV2();
-      await setStorage(slug, { versionEntries: null });
-      await behind(slug, beforeV2, 'all');
-      const refused = await accept(slug, set);
-      assert.equal(refused.status, 409, refused.text);
-      assert.equal(refused.body.error, 'save_in_progress');
-      assert.equal(await latestOf(slug), 2);
-      assert.equal(await htmlOf(slug, 3), '', 'no v3 bytes');
-      await behind(slug, null);
-      await expectV3(slug, set, await accept(slug, set));
-    });
-
-    await t('a version an Accept published is kept for the next save whose read misses it, and one a browser save published', async () => {
-      const { slug, set } = await twoEditsThenV2();
-      const beforeAccept = await kv(`meta:${slug}`);
-      assert.equal((await accept(slug, set)).status, 200);
-      await behind(slug, beforeAccept, 'all');
-      const saved = await call('/api/doc/versions', { method: 'POST', cookie, body: { slug, baseVersion: 3, html: `<!doctype html><html><head><title>Plan</title></head><body>${page('Typed.', 'Beta rewritten by v2.')}</body></html>` } });
-      assert.equal(saved.status, 200, saved.text);
-      await behind(slug, null);
-      const beforeNext = await kv(`meta:${slug}`);
-      assert.match((await metaOf(slug)).versions[2].prompt, /^Accepted Claude suggestion/, 'the Accept\'s entry');
-      const proposed = await call(`/api/docs/${slug}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'Typed.', replace: 'Typed again.' }], agent_login: 'claude', agent_name: 'Claude' } });
-      assert.equal(proposed.status, 200, proposed.text);
-      const fifth = await doSave(slug, 4);
-      assert.equal(fifth.status, 200, JSON.stringify(fifth.body));
-      await behind(slug, beforeNext, 'all');
-      assert.equal((await doSave(slug, 5)).status, 200);
-      await behind(slug, null);
-      const meta = await metaOf(slug);
-      assert.deepEqual(numbers(meta), [1, 2, 3, 4, 5, 6]);
-      assert.equal(meta.versions[4].prompt, 'browser save', 'the browser save\'s entry');
-    });
-
-    await t('what the store keeps: the last few entries, short, without the token and client stamps', async () => {
-      const slug = `accept-doc-${++docN}`;
-      assert.equal((await publish(slug, 1, 'One.', 'Two.')).status, 200);
-      for (let n = 2; n <= 8; n++) {
-        const r = await call('/api/upload', { method: 'POST', token, headers: { 'X-Tdoc-Raft-Agent': `${S1}/agent-linked`, 'X-Tdoc-Client': 'cli/1.2.3' }, body: { slug, version: n, html: page(`One ${n}.`, 'Two.'), meta: { title: 'Plan', versions: [{ n, created: new Date().toISOString(), prompt: 'p'.repeat(5000) }] } } });
-        assert.equal(r.status, 200, r.text);
-      }
-      const { entries, keys } = await storage(slug);
-      assert.deepEqual(entries.map((x) => x.entry.n), [4, 5, 6, 7, 8]);
-      for (const { entry } of entries) {
-        assert.ok(entry.prompt.length <= 200, `prompt ${entry.prompt.length}`);
-        assert.ok(!('token' in entry) && !('client' in entry), JSON.stringify(entry));
-        assert.equal(entry.publisher_agent.agent_sub, 'agent-linked');
-      }
-      assert.ok(!keys.some((k) => /record/i.test(k)), `no doc record: ${keys}`);
-      for (const value of [JSON.stringify(entries)]) {
-        assert.ok(!/allowed_users|"access"|"hosted"|"title"|"preview"/.test(value), value);
-      }
-    });
-
-    await t('sharing, workspace and title changed after the missed publish all survive the save', async () => {
-      const { slug, beforeV2 } = await twoEditsThenV2();
       assert.equal((await call('/api/doc/access', { method: 'PATCH', token, body: { slug, access: { visibility: 'public' } } })).status, 200);
-      const publicNow = JSON.parse(await kv(`meta:${slug}`));
-      const publicV1 = { ...publicNow, versions: JSON.parse(beforeV2).versions };
-      // The owner's own write, through a read at v1: KV is { v1, private }.
-      await kv(`meta:${slug}`, JSON.stringify(publicV1));
-      const made = await call('/api/doc/access', { method: 'PATCH', token, body: { slug, access: { visibility: 'private' } } });
-      assert.equal(made.status, 200, made.text);
-      const read = JSON.parse(await kv(`meta:${slug}`));
-      assert.deepEqual(numbers(read), [1]);
-      assert.equal(read.access.visibility, 'private');
-      await kv(`meta:${slug}`, JSON.stringify({ ...read, title: 'Renamed', workspace_id: 'team-moved-to' }));
-      const saved = await doSave(slug, 2);
-      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      const old = JSON.parse(beforeV2);
+      const publicRead = { ...old, access: (await metaOf(slug)).access };
+      assert.equal((await call('/api/doc/access', { method: 'PATCH', token, body: { slug, access: { visibility: 'private' } } })).status, 200);
+      await behind(slug, JSON.stringify(publicRead), 'all');
+      const r = await accept(slug, set);
+      assert.equal(r.status, 409, r.text);
+      await behind(slug, null);
       const meta = await metaOf(slug);
-      assert.deepEqual(numbers(meta), [1, 2, 3]);
       assert.equal(meta.access.visibility, 'private');
-      assert.equal(meta.title, 'Renamed');
-      assert.equal(meta.workspace_id, 'team-moved-to');
+      assert.deepEqual(numbers(meta), [1, 2]);
     });
 
-    await t('a cursor from before these entries, KV never catching up: refused, then v3 past the limit, losing nothing', async () => {
+    await t('Trash stays Trash after a known-stale Accept', async () => {
+      const { slug, set, beforeV2 } = await twoEditsThenV2();
+      assert.equal((await call(`/api/doc?slug=${slug}`, { method: 'DELETE', cookie })).status, 200);
+      await behind(slug, beforeV2, 'all');
+      const r = await accept(slug, set);
+      assert.equal(r.status, 409, r.text);
+      await behind(slug, null);
+      const meta = await metaOf(slug);
+      assert.ok(meta.trashed_at, 'still in Trash');
+      assert.deepEqual(numbers(meta), [1, 2]);
+    });
+
+    await t('a reservation that died, KV behind: refused, no list missing a version, and recovery can still start', async () => {
+      const { slug, beforeV2 } = await twoEditsThenV2();
+      await setStorage(slug, { versionCursor: { latest: 2, pending: { id: 'dead', base: 2, next: 3, started: Date.now() - 5 * 60 * 1000 } } });
+      await behind(slug, beforeV2, 'all');
+      refusedSave(await doSave(slug, 2));
+      await behind(slug, null);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2]);
+      const { cursor } = await storage(slug);
+      assert.equal(cursor.pending, null, 'the dead reservation is cleared');
+      assert.ok(cursor.behind_since, 'stamped');
+    });
+
+    await t('KV never catching up, a cursor from before this change: refused inside the limit, then v3, losing nothing', async () => {
       const { slug, beforeV2 } = await twoEditsThenV2();
       const before = JSON.parse(beforeV2);
-      // What every doc live at deploy looks like: a cursor and nothing beside it.
-      await setStorage(slug, { versionEntries: null, versionCursor: { latest: 2, pending: null } });
+      await setStorage(slug, { versionCursor: { latest: 2, pending: null } });
       await kv(`meta:${slug}`, JSON.stringify({ ...before, title: 'Still here', access: { ...(before.access || {}), visibility: 'private' } }));
-      const refused = await doSave(slug, 2);
-      assert.equal(refused.status, 409);
-      assert.equal(refused.body.error, 'save_in_progress');
-      assert.equal(refused.body.latestVersion, 2);
-      assert.equal((await doSave(slug, 2)).status, 409, 'still inside the limit');
+      refusedSave(await doSave(slug, 2));
+      refusedSave(await doSave(slug, 2));
       await pastTheLimit(slug);
       const saved = await doSave(slug, 2);
       assert.equal(saved.status, 200, JSON.stringify(saved.body));
@@ -387,17 +394,97 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.ok((await htmlOf(slug, 2)).includes('Beta rewritten by v2.'), 'v2 bytes untouched');
     });
 
-    await t('a cursor ahead of any bytes, as a slug reused before this change: back in step past the limit', async () => {
+    const aheadOfBytes = async () => {
       const slug = `accept-doc-${++docN}`;
       assert.equal((await publish(slug, 1, 'Alpha sentence stays.', 'Beta sentence here.')).status, 200);
-      await setStorage(slug, { versionEntries: null, versionCursor: { latest: 5, pending: null } });
-      assert.equal((await doSave(slug, 1)).status, 409);
+      await setStorage(slug, { versionCursor: { latest: 5, pending: null } });
+      refusedSave(await doSave(slug, 1));
       await pastTheLimit(slug);
+      return slug;
+    };
+
+    await t('a cursor ahead of any bytes (a slug reused before this change): back in step past the limit', async () => {
+      const slug = await aheadOfBytes();
       const saved = await doSave(slug, 1);
       assert.equal(saved.status, 200, JSON.stringify(saved.body));
       assert.equal(saved.body.version, 2);
       assert.deepEqual(numbers(await metaOf(slug)), [1, 2]);
       assert.equal((await storage(slug)).cursor.latest, 2);
+    });
+
+    await t('an R2 error past the limit is a 503, never "no bytes": nothing lowered, nothing written', async () => {
+      const slug = await aheadOfBytes();
+      await r2({ fail: true });
+      const r = await doSave(slug, 1);
+      await r2({ fail: false });
+      assert.equal(r.status, 503, JSON.stringify(r.body));
+      assert.equal(r.body.error, 'version_store_unavailable');
+      assert.equal((await storage(slug)).cursor.latest, 5);
+      assert.deepEqual(numbers(await metaOf(slug)), [1]);
+    });
+
+    await t('a commit during a slow R2 read: the cursor is not lowered under it, and only one save gets the number', async () => {
+      const slug = await aheadOfBytes();
+      await r2({ hold: true });
+      const first = doSave(slug, 1);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const held = await reserve(slug, 5);
+      assert.ok(held.ok, JSON.stringify(held));
+      await finish(slug, { id: held.id, next: held.next }, true);
+      await r2({ hold: false });
+      refusedSave(await first);
+      assert.equal((await storage(slug)).cursor.latest, 6, 'the commit stands');
+      assert.deepEqual(numbers(await metaOf(slug)), [1]);
+    });
+
+    await t('a save that begins during a slow R2 read: its reservation is not disturbed', async () => {
+      const slug = await aheadOfBytes();
+      await r2({ hold: true });
+      const first = doSave(slug, 1);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const held = await reserve(slug, 5);
+      assert.ok(held.ok, JSON.stringify(held));
+      await r2({ hold: false });
+      refusedSave(await first);
+      const { cursor } = await storage(slug);
+      assert.equal(cursor.latest, 5);
+      assert.equal(cursor.pending.id, held.id);
+      await finish(slug, { id: held.id, next: held.next }, false);
+    });
+
+    await t('a live reservation, past the limit: no recovery runs under it', async () => {
+      const slug = await aheadOfBytes();
+      const stamped = (await storage(slug)).cursor;
+      const held = await reserve(slug, 5);
+      assert.ok(held.ok, JSON.stringify(held));
+      assert.ok(stamped.behind_since);
+      refusedSave(await doSave(slug, 1));
+      const { cursor } = await storage(slug);
+      assert.equal(cursor.latest, 5);
+      assert.equal(cursor.pending.id, held.id);
+      await finish(slug, { id: held.id, next: held.next }, false);
+    });
+
+    await t('the stamp goes once KV has caught up, so a later lag starts its own wait', async () => {
+      const { slug, beforeV2 } = await twoEditsThenV2();
+      await behind(slug, beforeV2, 'all');
+      refusedSave(await doSave(slug, 2));
+      assert.ok((await storage(slug)).cursor.behind_since);
+      await behind(slug, null);
+      assert.equal((await doSave(slug, 1)).body.error, 'version_conflict', 'an old base, with KV current');
+      assert.ok(!(await storage(slug)).cursor.behind_since, 'cleared');
+    });
+
+    await t('a publish after an old stamp: KV merely lagging on it is refused, not recovered', async () => {
+      const { slug, beforeV2 } = await twoEditsThenV2();
+      await setStorage(slug, { versionCursor: { latest: 2, pending: null, behind_since: Date.now() - 3 * 60 * 1000 } });
+      assert.equal((await publish(slug, 3, 'Alpha sentence stays.', 'Beta rewritten by v3.')).status, 200);
+      await behind(slug, beforeV2, 'all');
+      refusedSave(await doSave(slug, 3));
+      await behind(slug, null);
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2, 3]);
+      assert.equal(meta.versions[2].prompt, 'publish 3', 'not a recovered entry');
     });
 
     const purgedAndMadeAgain = async ({ team = null } = {}) => {
@@ -408,13 +495,10 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
         assert.equal(r.status, 200, r.text);
       }
       assert.equal(Boolean((await metaOf(slug)).workspace_id), Boolean(team), 'a team doc when it says so');
-      const held = await storage(slug);
-      assert.equal(held.cursor.latest, 2);
-      assert.ok(held.entries.length, 'something to leave behind');
+      assert.equal((await storage(slug)).cursor.latest, 2);
       await trashAndPurge(slug);
       const left = await storage(slug);
       assert.equal(left.cursor, null, 'no cursor');
-      assert.equal(left.entries, null, 'no entries');
       assert.ok(!left.keys.some((k) => /version/i.test(k)), `left behind: ${left.keys}`);
       const made = await call('/api/upload', { method: 'POST', token: bob.token, body: { slug, version: 1, html: page('Bob words.', 'Bob more.'), meta: { title: 'Bob title', versions: [{ n: 1, created: new Date().toISOString(), prompt: 'bob 1' }] } } });
       assert.equal(made.status, 200, made.text);
@@ -427,7 +511,7 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       for (const v of meta.versions) assert.ok(!/first owner/.test(v.prompt || ''), JSON.stringify(v));
     };
 
-    await t('Delete forever leaves no version store; the slug\'s next owner saves freely and inherits nothing', async () => {
+    await t('Delete forever leaves no cursor; the slug\'s next owner saves freely and inherits nothing', async () => {
       const slug = await purgedAndMadeAgain();
       const stale = await doSave(slug, 2);
       assert.equal(stale.status, 409, 'a base from the old doc means nothing here');
@@ -449,69 +533,24 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       stillBobs(await metaOf(slug));
     });
 
-    await t('entries of another doc on this slug (a purge that could not clear them) are never merged in', async () => {
-      const slug = `accept-doc-${++docN}`;
-      assert.equal((await publish(slug, 1, 'Alpha sentence stays.', 'Beta sentence here.')).status, 200);
-      await setStorage(slug, {
-        versionCursor: { latest: 2, pending: null },
-        versionEntries: [{ doc: '1|2020-01-01T00:00:00.000Z|oldsha', entry: { n: 2, created: '2020-01-02T00:00:00.000Z', prompt: 'first owner 2', by: 'first-owner' } }],
-      });
-      assert.equal((await doSave(slug, 2)).status, 409, 'refused, not merged');
-      await pastTheLimit(slug);
-      const saved = await doSave(slug, 1);
-      assert.equal(saved.status, 200, JSON.stringify(saved.body));
-      const meta = await metaOf(slug);
-      assert.deepEqual(numbers(meta), [1, 2]);
-      assert.ok(!JSON.stringify(meta.versions).includes('first owner'), JSON.stringify(meta.versions));
-    });
-
-    const reserve = async (slug, baseVersion) => (await (await post('/__do', { slug, path: '/version-lock', op: { kind: 'reserve', baseVersion } })).json());
-    const finish = (slug, reservation, committed) => post('/__do', { slug, path: '/version-lock', op: { kind: 'finish', reservation, committed } });
-
-    await t('another save holding the version: refused after a short wait, nothing written, repeatable', async () => {
+    await t('another save holding the version: refused after the short wait, nothing written, repeatable', async () => {
       const { slug, set } = await twoEditsThenV2();
       const held = await reserve(slug, 2);
       assert.ok(held.ok, JSON.stringify(held));
-      for (let press = 0; press < 2; press++) {
-        const r = await accept(slug, set);
-        assert.equal(r.status, 409, r.text);
-        assert.equal(r.body.error, 'save_in_progress');
-        assert.equal(await latestOf(slug), 2);
-      }
+      for (let press = 0; press < 2; press++) await refusedAccept(slug, set, 'save_in_progress');
       await finish(slug, { id: held.id, next: held.next }, false);
       await expectV3(slug, set, await accept(slug, set));
     });
 
-    await t('a save that ends during the wait: the accept lands', async () => {
+    await t('a save that ends just before the last try: the accept still lands', async () => {
       const { slug, set } = await twoEditsThenV2();
       const held = await reserve(slug, 2);
       assert.ok(held.ok, JSON.stringify(held));
       const pressed = accept(slug, set);
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Tries come a second apart: this is after the second, before the third.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       await finish(slug, { id: held.id, next: held.next }, false);
       await expectV3(slug, set, await pressed);
-    });
-
-    await t('KV behind, a save in progress, and that save landing: the accept lands on top of it', async () => {
-      const { slug, set, beforeV2 } = await twoEditsThenV2();
-      const held = await reserve(slug, 2);
-      assert.ok(held.ok, JSON.stringify(held));
-      await behind(slug, beforeV2, 'all');
-      const pressed = accept(slug, set);
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      // The other save commits while the accept waits.
-      await post('/__put-html', { key: `docs/${slug}/v3/index.html`, html: page('Alpha sentence stays.', 'Beta rewritten by v2.') });
-      const entry = { n: 3, created: new Date().toISOString(), prompt: 'the other save' };
-      const real = await metaOf(slug);
-      await kv(`meta:${slug}`, JSON.stringify({ ...real, versions: [...real.versions, entry] }));
-      await post('/__do', { slug, path: '/version-lock', op: { kind: 'finish', reservation: { id: held.id, next: held.next }, committed: true, version: { doc: `${real.versions[0].n}|${real.versions[0].created}|${real.versions[0].sha}`, entry } } });
-      const r = await pressed;
-      assert.equal(r.status, 200, r.text);
-      assert.equal(r.body.version, 4);
-      await behind(slug, null);
-      const meta = await metaOf(slug);
-      assert.deepEqual(numbers(meta), [1, 2, 3, 4]);
-      assert.equal(meta.versions[2].prompt, 'the other save');
     });
 
     const newDoc = async () => {
