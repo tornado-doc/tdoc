@@ -17404,25 +17404,41 @@ const VERSION_BEHIND_LIMIT_MS = 2 * 60 * 1000;
 // How long a purged doc's record is refused by the store: well past any cached
 // read of it. A read after that finds no record at all.
 const VERSION_PURGE_HOLD_MS = 10 * 60 * 1000;
+// How long a cached KV read can lag a write.
+const KV_LAG_SECONDS = 60;
 
 // A publish refused over a version number, in words the CLI and MCP pass on.
 // `retryAfter`: seconds until the store settles what the number holds.
-function versionConflictBody(version, latest, { retryAfter = 0, listedLater = false } = {}) {
+// `settled`: the store has just established `latest`, so the next number is known.
+// Otherwise `latest` comes from a read that KV may have left behind, and no number
+// is promised.
+function versionConflictBody(version, latest, { retryAfter = 0, listedLater = false, settled = false } = {}) {
   const body = { error: 'version_conflict', baseVersion: version - 1, latestVersion: latest };
   if (retryAfter > 0) body.retry_after = retryAfter;
-  if (retryAfter > 0 && !listedLater) {
-    body.message = `This doc's latest version is still settling. Try again in about ${retryAfter} seconds.`;
-    return body;
-  }
-  body.next_version = latest + 1;
-  if (retryAfter > 0) {
+  if (listedLater) {
+    body.next_version = latest + 1;
     body.message = `Version ${latest} already holds different content from a publish that did not finish. In about ${retryAfter} seconds it is kept as version ${latest}; then publish this as version ${latest + 1}.`;
-  } else if (version <= latest) {
+  } else if (retryAfter > 0) {
+    body.message = `This doc's latest version is still settling. Try again in about ${retryAfter} seconds.`;
+  } else if (settled) {
+    body.next_version = latest + 1;
     body.message = `Version ${version} is already on the server and stays as it is. Publish this as version ${latest + 1}.`;
   } else {
-    body.message = `This doc's latest version is ${latest}, so the next one to publish is version ${latest + 1}.`;
+    body.message = `Version ${version} is already on the server and stays as it is. Publish this as a new version.`;
   }
   return body;
+}
+
+// A number ahead of the latest this read shows: the read may be a moment behind.
+function versionJumpBody(version, latest) {
+  return {
+    error: 'version_conflict', baseVersion: version - 1, latestVersion: latest, retry_after: KV_LAG_SECONDS,
+    message: `The server shows version ${latest} as latest, which may be a moment behind. Try again in about ${KV_LAG_SECONDS} seconds; if this repeats, publish version ${latest + 1} next.`,
+  };
+}
+
+function bytesEqual(a, b) {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
 function versionBehindRetryAfter(since) {
@@ -17917,7 +17933,8 @@ export class CommentsStore {
         const settled = result.behindSince ? await this._settleForUpload(slug, meta, result.body.latestVersion, result.behindSince) : {};
         if (settled.latest !== undefined) result = await this._reserveVersion(base, settled.latest);
         if (!result.ok && result.body.error === 'version_conflict') {
-          result.body = versionConflictBody(base + 1, result.body.latestVersion, { retryAfter: settled.retryAfter });
+          // Anything short of settled is this read and the store disagreeing: KV lag.
+          result.body = versionConflictBody(base + 1, result.body.latestVersion, settled.latest !== undefined ? { settled: true } : { retryAfter: settled.retryAfter || KV_LAG_SECONDS });
         }
         return Response.json(result.ok ? result : result.body, { status: result.ok ? 200 : result.status });
       }
@@ -29497,7 +29514,7 @@ const tdocHandlers = {
         }
       }
       if (writesLatestMeta && writeGate.meta && env.COMMENTS && verNum > remoteLatest) {
-          if (verNum !== remoteLatest + 1) return json(versionConflictBody(verNum, remoteLatest), { status: 409 });
+          if (verNum !== remoteLatest + 1) return json(versionJumpBody(verNum, remoteLatest), { status: 409 });
           const lock = await versionReservationOp(env, slug, { kind: 'reserve', baseVersion: remoteLatest });
           if (!lock.ok) return json({ error: lock.error || 'version_conflict', ...lock }, { status: lock.status || 409 });
           versionReservation = { id: lock.id, next: lock.next };
@@ -29517,7 +29534,14 @@ const tdocHandlers = {
           : {};
         versionReservation = null;
         if (settled.retryAfter) return json(versionConflictBody(verNum, verNum, { retryAfter: settled.retryAfter, listedLater: true }), { status: 409 });
-        return json(versionConflictBody(verNum, Math.max(verNum, remoteLatest, Number(settled.latest) || 0)), { status: 409 });
+        return json(versionConflictBody(verNum, Math.max(verNum, remoteLatest, Number(settled.latest) || 0), { settled: settled.latest !== undefined }), { status: 409 });
+      };
+      const refuseStoppedFirstPublish = (since) => {
+        const retryAfter = versionBehindRetryAfter(since);
+        return json({
+          error: 'version_conflict', baseVersion: 0, latestVersion: 0, retry_after: retryAfter,
+          message: `An earlier first publish of this doc did not finish. Try again in about ${retryAfter} seconds.`,
+        }, { status: 409 });
       };
       // A version's bytes are written once (see _saveVersion); `replace` is the
       // landing docs' exception above. The same bytes again are a retry, and fine.
@@ -29534,13 +29558,7 @@ const tdocHandlers = {
             if (writeGate.meta) return await refuseVersionTaken(since);
             // With no record, an old object is no version anyone can open: a first
             // publish that stopped. A recent one may be a record KV has yet to show.
-            if (Date.now() - since < VERSION_BEHIND_LIMIT_MS) {
-              const retryAfter = versionBehindRetryAfter(since);
-              return json({
-                error: 'version_conflict', baseVersion: 0, latestVersion: 0, retry_after: retryAfter,
-                message: `An earlier first publish of this doc did not finish. Try again in about ${retryAfter} seconds.`,
-              }, { status: 409 });
-            }
+            if (Date.now() - since < VERSION_BEHIND_LIMIT_MS) return refuseStoppedFirstPublish(since);
             await env.DOCS.put(r2Key, stampedHtml, { httpMetadata });
             wroteVersion = true;
             deadPublish = true;
@@ -29568,13 +29586,23 @@ const tdocHandlers = {
       let widgetsToWrite = widgetNames;
       if (!replaceWidgets) {
         widgetsToWrite = [];
-        for (const wname of widgetNames) {
-          const stored = await env.DOCS.get(`docs/${slug}/v${verNum}/widgets/${wname}.html`);
-          if (stored && await stored.text() === widgets[wname]) continue;
-          if (!stored && (!listedVersion || wroteVersion)) { widgetsToWrite.push(wname); continue; }
-          const since = verify.uploaded instanceof Date ? verify.uploaded.getTime() : 0;
-          if (!writeGate.meta && Date.now() - since >= VERSION_BEHIND_LIMIT_MS) { replaceWidgets = true; widgetsToWrite = widgetNames; break; }
-          return refuseVersionTaken(since);
+        try {
+          for (const wname of widgetNames) {
+            const stored = await env.DOCS.get(`docs/${slug}/v${verNum}/widgets/${wname}.html`);
+            // As bytes: text() would drop a leading byte order mark.
+            if (stored && bytesEqual(new Uint8Array(await stored.arrayBuffer()), new TextEncoder().encode(widgets[wname]))) continue;
+            if (!stored && (!listedVersion || wroteVersion)) { widgetsToWrite.push(wname); continue; }
+            const since = verify.uploaded instanceof Date ? verify.uploaded.getTime() : 0;
+            if (writeGate.meta) return await refuseVersionTaken(since);
+            if (Date.now() - since < VERSION_BEHIND_LIMIT_MS) return refuseStoppedFirstPublish(since);
+            replaceWidgets = true;
+            widgetsToWrite = widgetNames;
+            break;
+          }
+        } catch (e) {
+          try { await finishVersionReservation(false); } catch {}
+          console.error('[upload] R2 widget read failed:', e.message);
+          return json({ error: 'r2_read_failed', message: e.message }, { status: 500 });
         }
       }
       for (const wname of widgetsToWrite) {
@@ -29707,27 +29735,10 @@ const tdocHandlers = {
         } catch (e) {
           console.error('[upload] notify-agent touch failed (non-fatal):', e.message || String(e));
         }
-      } else {
-        // History backfill (re-uploading v1..vN-1) stores freshly-prepared
-        // bytes but skips the latest-meta merge above — without this, the
-        // entry keeps a sha for bytes that no longer exist, and /raw serves a
-        // stale ETag after a reader-template generation change. Refresh just
-        // this entry; touch nothing else in meta.
-        try {
-          const currentMeta = await loadDocMeta(env, slug);
-          const entry = (Array.isArray(currentMeta && currentMeta.versions) ? currentMeta.versions : [])
-            .find((v) => Number(v.n) === verNum);
-          if (entry && (entry.sha !== uploadSha || (clientVersion && entry.client !== clientVersion))) {
-            entry.sha = uploadSha;
-            if (clientVersion) entry.client = clientVersion;
-            await putDocMetaJson(env, slug, JSON.stringify(currentMeta));
-          }
-        } catch (e) {
-          // The bytes are stored and correct; a stale recorded sha costs at
-          // worst one spurious /raw re-download. Never fail the upload for it.
-          console.error('[upload] backfill sha refresh failed (recoverable):', e.message || String(e));
-        }
       }
+      // An older version re-uploaded writes no record. This read may be behind KV, and
+      // a record written from it would undo what came after; its bytes are the same
+      // as the entry's in any case, since a version's bytes do not change.
       // Reconcile existing open comments against the new artifact set:
       // bind by aid where possible; mark lost where the artifact is gone
       // or ambiguous. This is the ENFORCED publish-time invariant — no

@@ -63,6 +63,10 @@ const docs = new Proxy(fake.DOCS, { get(target, prop) {
     if (fake.r2.fail) throw new Error('r2 down');
     return target.head(k);
   };
+  if (prop === 'get') return async (k) => {
+    if (fake.r2.failWidgetGet && k.includes('/widgets/')) throw new Error('r2 down');
+    return target.get(k);
+  };
   // A put that waits, fails on a widget, or loses a race to another writer.
   if (prop === 'put') return async (k, v, o) => {
     while (fake.r2.holdPut && k.endsWith('/index.html')) await new Promise((resolve) => setTimeout(resolve, 20));
@@ -956,7 +960,8 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       const edited = await upWithWidgets(slug, 1, 'One.', { a: '<p>EDITED</p>' });
       assert.equal(edited.status, 409, edited.text);
       assert.equal(edited.body.error, 'version_conflict');
-      assert.equal(edited.body.next_version, 2);
+      assert.equal(edited.body.next_version, undefined, 'this read may be behind: no number promised');
+      assert.match(edited.body.message, /Publish this as a new version/);
       assert.equal(await widgetOf(slug, 1, 'a'), '<p>A</p>');
       const added = await upWithWidgets(slug, 1, 'One.', { a: '<p>A</p>', b: '<p>B</p>' });
       assert.equal(added.status, 409, added.text);
@@ -1078,11 +1083,12 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       const refused = await cliPublish(slug);
       assert.notEqual(refused.status, 0);
       assert.match(refused.output, /v3 not published: Version 3 already holds different content .* In about \d+ seconds .* publish this as version 4/);
-      assert.match(refused.output, /--version next/);
+      assert.doesNotMatch(refused.output, /--version next/, 'a wait, not a new version yet');
       await pastTheLimit(slug);
       const told = await cliPublish(slug);
       assert.notEqual(told.status, 0);
       assert.match(told.output, /v3 not published: .*Publish this as version 4/);
+      assert.match(told.output, /--version next --title <title> --html-file/);
       assert.equal((await metaOf(slug)).versions[2].prompt, 'Recovered version');
       localDoc(slug, { 1: 'one', 2: 'two', 3: 'three EDITED', 4: 'four' });
       const up = await cliPublish(slug);
@@ -1155,6 +1161,105 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.equal((await doSave(slug, 3, page('Four.', 'Same.'))).body.version, 4);
       assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3, 4]);
       assert.ok(!(await storage(slug)).cursor.behind_since);
+    });
+
+    // ── Refusals during KV lag promise no number ──
+    await t('KV lag for the Worker: an identical re-run is told to try again, not to publish a new version', async () => {
+      const slug = `lag-doc-${++docN}`;
+      localDoc(slug, { 1: 'one', 2: 'two' });
+      assert.equal((await cliPublish(slug)).status, 0);
+      const atV2 = await kv(`meta:${slug}`);
+      localDoc(slug, { 1: 'one', 2: 'two', 3: 'three' });
+      assert.equal((await cliPublish(slug)).status, 0);
+      await behind(slug, atV2, 'worker');
+      const r = await cliPublish(slug);
+      assert.notEqual(r.status, 0);
+      assert.match(r.output, /v3 not published: .*Try again in about \d+ seconds/);
+      assert.doesNotMatch(r.output, /version 4|--version next/);
+      await behind(slug, null);
+      assert.equal((await cliPublish(slug)).status, 0, 'and once KV catches up it is a retry');
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3]);
+    });
+
+    await t('KV lag for both: a version just after the last names no number that is already taken', async () => {
+      const slug = await fresh('lag');
+      const atV1 = await kv(`meta:${slug}`);
+      assert.equal((await publish(slug, 2, 'Two.', 'Same.')).status, 200);
+      assert.equal((await publish(slug, 3, 'Three.', 'Same.')).status, 200);
+      await behind(slug, atV1, 'all');
+      const r = await publish(slug, 4, 'Four.', 'Same.');
+      await behind(slug, null);
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.next_version, undefined, r.text);
+      assert.ok(r.body.retry_after > 0, r.text);
+    });
+
+    await t('an older version re-uploaded through a behind read: the record keeps what came after', async () => {
+      const slug = await fresh('lag');
+      assert.equal((await publish(slug, 2, 'Two.', 'Same.')).status, 200);
+      const stale = JSON.parse(await kv(`meta:${slug}`));
+      delete stale.versions[0].sha;
+      const record = JSON.parse(await kv(`meta:${slug}`));
+      await kv(`meta:${slug}`, JSON.stringify({ ...record, title: 'Renamed', access: { ...record.access, visibility: 'private' } }));
+      assert.equal((await publish(slug, 3, 'Three.', 'Same.', 'Renamed')).status, 200);
+      const current = await kv(`meta:${slug}`);
+      await behind(slug, JSON.stringify(stale), 'all');
+      const r = await call('/api/upload', { method: 'POST', token, headers: { 'X-Tdoc-Client': 'other-client' }, body: { slug, version: 1, html: page('Alpha one.', 'Beta one.'), meta: { title: 'Plan', versions: [{ n: 1, created: stale.versions[0].created }, { n: 3, created: new Date().toISOString() }] } } });
+      await behind(slug, null);
+      assert.equal(r.status, 200, r.text);
+      assert.equal(await kv(`meta:${slug}`), current, 'untouched');
+      const meta = JSON.parse(current);
+      assert.equal(meta.title, 'Renamed');
+      assert.equal(meta.access.visibility, 'private');
+    });
+
+    await t('CLI: an older version told to wait is one a re-run can still send', async () => {
+      const slug = `lag-doc-${++docN}`;
+      localDoc(slug, { 1: 'one' });
+      assert.equal((await cliPublish(slug)).status, 0);
+      const atV1 = await kv(`meta:${slug}`);
+      assert.equal((await publish(slug, 2, 'two', 'Same.')).status, 200);
+      assert.equal((await publish(slug, 3, 'three', 'Same.')).status, 200);
+      await behind(slug, atV1, 'all');
+      localDoc(slug, { 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five' });
+      const r = await cliPublish(slug);
+      await behind(slug, null);
+      assert.doesNotMatch(r.output, /differ from the server's/);
+      assert.doesNotMatch(r.output, /--version next/);
+    });
+
+    await t('a first publish that stopped, with an edited widget: told to wait, with no version promised', async () => {
+      const slug = `immutable-doc-${++docN}`;
+      await post('/__kv-fail', { put: `meta:${slug}` });
+      assert.equal((await upWithWidgets(slug, 1, 'One.', { a: '<p>A</p>' })).status, 500);
+      const r = await upWithWidgets(slug, 1, 'One.', { a: '<p>EDITED</p>' });
+      assert.equal(r.status, 409, r.text);
+      assert.ok(r.body.retry_after > 0, r.text);
+      assert.equal(r.body.next_version, undefined);
+      assert.match(r.body.message, /did not finish/);
+      await age(slug, 1, 3 * 60 * 1000);
+      assert.equal((await upWithWidgets(slug, 1, 'One.', { a: '<p>EDITED</p>' })).status, 200);
+      assert.equal(await widgetOf(slug, 1, 'a'), '<p>EDITED</p>');
+    });
+
+    await t('a widget starting with a byte order mark: the same one again is a retry', async () => {
+      const slug = `immutable-doc-${++docN}`;
+      const bom = '﻿<p>A</p>';
+      assert.equal((await upWithWidgets(slug, 1, 'One.', { a: bom })).status, 200);
+      const r = await upWithWidgets(slug, 1, 'One.', { a: bom });
+      assert.equal(r.status, 200, r.text);
+    });
+
+    await t('a widget read that fails during a retry: the reservation is released, not left for a minute', async () => {
+      const slug = await fresh('widgets');
+      await post('/__kv-fail', { put: `meta:${slug}` });
+      assert.equal((await upWithWidgets(slug, 2, 'Two.', { a: '<p>A</p>' })).status, 500);
+      await r2({ failWidgetGet: true });
+      const r = await upWithWidgets(slug, 2, 'Two.', { a: '<p>A</p>' });
+      await r2({ failWidgetGet: false });
+      assert.equal(r.status, 500, r.text);
+      assert.equal((await storage(slug)).cursor.pending, null);
+      assert.equal((await upWithWidgets(slug, 2, 'Two.', { a: '<p>A</p>' })).status, 200);
     });
 
     // ── A doc deleted for good stays deleted for its own saves ──

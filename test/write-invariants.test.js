@@ -284,9 +284,9 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
     assert((stored.match(/<style[^>]*id="tdoc-reader"/g) || []).length === 1, 'expected exactly one real block');
   });
 
-  await t('history backfill refreshes the version entry sha', async () => {
-    // Re-uploading an old version stores freshly-prepared bytes; the recorded
-    // sha must follow them or /raw serves a stale ETag.
+  await t('history backfill leaves the record alone', async () => {
+    // Re-uploading an old version stores nothing new: a version's bytes do not
+    // change. Its read may be behind KV, so it writes no record either.
     const env = makeEnv(mod.CommentsStore);
     const a = await issue(worker, env);
     for (const v of [1, 2]) {
@@ -295,19 +295,15 @@ const DOC = '<!doctype html><html><head><meta name="viewport" content="width=dev
         body: { slug: 'bf', version: v, html: DOC.replace('<p>hi</p>', `<p>v${v}</p>`), meta: { title: 'bf', slug: 'bf', versions: [{ n: 1 }, { n: 2 }].slice(0, v) } },
       }), env, {});
     }
-    const meta0 = JSON.parse(await env.META.get('meta:bf'));
-    meta0.versions.find((v) => v.n === 1).sha = 'deadbeefdeadbeef';
-    await env.META.put('meta:bf', JSON.stringify(meta0));
-    await worker.fetch(req('/api/upload', {
-      method: 'POST', token: a.token,
+    const before = await env.META.get('meta:bf');
+    const bytes = await (await env.DOCS.get('docs/bf/v1/index.html')).text();
+    const r = await worker.fetch(req('/api/upload', {
+      method: 'POST', token: a.token, headers: { 'X-Tdoc-Client': 'another-client' },
       body: { slug: 'bf', version: 1, html: DOC.replace('<p>hi</p>', '<p>v1</p>'), meta: { title: 'bf', slug: 'bf', versions: [{ n: 1 }, { n: 2 }] } },
     }), env, {});
-    const meta = JSON.parse(await env.META.get('meta:bf'));
-    const sha = meta.versions.find((v) => v.n === 1).sha;
-    const stored = await (await env.DOCS.get('docs/bf/v1/index.html')).text();
-    const expect = crypto.createHash('sha256').update(stored).digest('hex').slice(0, 16);
-    assert(sha === expect, `backfill left a stale sha: ${sha} != ${expect}`);
-    assert(meta.versions.find((v) => v.n === 2), 'backfill must not drop other version entries');
+    assert(r.status === 200, `backfill ${r.status}`);
+    assert(await env.META.get('meta:bf') === before, 'backfill wrote the record');
+    assert(await (await env.DOCS.get('docs/bf/v1/index.html')).text() === bytes, 'backfill changed the bytes');
   });
 
   await t('/raw returns stored bytes as text/plain with the sha as ETag', async () => {
