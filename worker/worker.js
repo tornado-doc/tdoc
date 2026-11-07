@@ -18799,10 +18799,33 @@ function suggestDecodeSource(raw, expected) {
 // and around hidden content), and for each character g[k] the editable text
 // node it came from (an index into nodes, -1 for a '\n' or a node that may
 // not be edited) and v[k] = [from, to) in that node's value.
+//
+// Size: the cost of parsing and mapping scales with markup and text, not
+// with one long attribute value, so the bodies of data: URIs (an embedded
+// image's base64, in src, srcset, href or a style's url(...)) do not count
+// toward SUGGEST_MAX_HTML. A run stops at a quote, ")", "<", ">" or
+// whitespace, so it can never swallow markup. The raw HTML still has a hard
+// cap, SUGGEST_MAX_RAW, so the cost stays bounded whatever it holds; and the
+// mapped text itself must fit SUGGEST_MAX_HTML (text that merely reads as a
+// data: URI does not get a larger allowance). Nothing is rewritten: the
+// edits apply to the stored HTML, image bytes and all.
 const SUGGEST_MAX_HTML = 400000;
+const SUGGEST_MAX_RAW = 8 * 1024 * 1024;
+function suggestCountedSize(html) {
+  const src = String(html || '');
+  const re = /data:[^"'\s)<>]*/gi;
+  let skip = 0;
+  let m;
+  while ((m = re.exec(src))) skip += m[0].length;
+  return src.length - skip;
+}
+function suggestTooLarge(html) {
+  const src = String(html || '');
+  return src.length > SUGGEST_MAX_RAW || suggestCountedSize(src) > SUGGEST_MAX_HTML;
+}
 function suggestTextMap(html) {
   const src = String(html || '');
-  const truncated = src.length > SUGGEST_MAX_HTML;
+  const truncated = suggestTooLarge(src);
   const out = [];
   const G = [];
   const V = [];
@@ -18850,6 +18873,7 @@ function suggestTextMap(html) {
     if (block) brk();
     frames.push([child.childNodes || [], 0, inBody || name === 'body', block]);
   }
+  if (out.length > SUGGEST_MAX_HTML) return { text: '', g: [], v: [], nodes: [], tree: null, truncated: true };
   return { text: out.join(''), g: G, v: V, nodes, tree, truncated };
 }
 
@@ -19419,7 +19443,7 @@ async function handleSuggest(env, req, url, slug) {
   const obj = await env.DOCS.get(`docs/${slug}/v${latest}/index.html`);
   if (!obj) return json({ error: 'not_found' }, { status: 404 });
   const html = await obj.text();
-  if (html.length > SUGGEST_MAX_HTML) return json({ error: 'doc_too_large', message: 'This document is too large for tdoc AI to edit.' }, { status: 413 });
+  if (suggestTooLarge(html)) return json({ error: 'doc_too_large', message: 'This document is too large for tdoc AI to edit.' }, { status: 413 });
   const doc = askDocText(html);
   // Comments to fix: open ones only, read from the store (never words the
   // browser sent), with their passages; names as a card shows them.
