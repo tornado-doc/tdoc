@@ -9,4 +9,6 @@ Comment surfaces are shared: anything that shows a comment, reply, AI/agent answ
 
 New or uncertain features ship behind a flag in shell/src/feature-flags.js, visible only in dev mode; flip default to true when approved; remove the flag after it's stable.
 
+Feedback and fixes apply to both normal and dev mode unless the thing only exists behind the flag. A flag holds only features still under discussion and not settled; a bug fix or behaviour request never goes behind one, and the two versions may differ only by those unsettled features.
+
 CLI + MCP parity: every capability is implemented once, server-side, as an HTTP endpoint in worker/worker.js. MCP tools (MCP_TOOLS, calling it in process through mcpApi) and CLI commands (bin/tdoc-*) are thin wrappers over that endpoint: argument parsing and output formatting only, no logic in only one of them. A new MCP tool or CLI command names its endpoint and its counterpart in test/cli-mcp-parity.test.js (or a stated exception).

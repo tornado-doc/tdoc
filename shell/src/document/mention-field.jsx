@@ -176,7 +176,9 @@ export function MentionField({
     if (person.agent) {
       // "@\u2060claude": reads as the agent's name, never parsed as a login.
       const next = insertMention(value, query, `${AGENT_TAG_JOINER}${agentMentionName(person.agent, agentsOnOffer.choices)}`);
-      const drop = replacesTag && next.text.startsWith(replacesTag) ? replacesTag.length : 0;
+      // The tag the box started with gives way, if it is still there: deleted, the
+      // same agent named again by hand is a new tag, not the old one.
+      const drop = replacesTag && value.startsWith(replacesTag) && next.text.startsWith(replacesTag) ? replacesTag.length : 0;
       caretAfterInsert.current = next.caret - drop;
       setQuery(null);
       onChange(next.text.slice(drop));

@@ -17,11 +17,15 @@ t('the reply prefill is the card\'s rule: no surface can pass or forget it', () 
   for (const file of [...SURFACES, 'shell/src/document/agent-ask.jsx', CARD, 'shell/src/document/mention-field.jsx']) {
     assert.doesNotMatch(read(file), /prefillReplies/, `${file} still has a prefillReplies switch`);
   }
-  assert.match(read(CARD), /isFeatureOn\('askEditV2'\)/, 'the card no longer reads dev mode itself');
-  assert.match(read(CARD), /!candidate\.can_edit \|\| agents\.suggestsFor\?\.\(candidate\) \|\| agents\.nothingToPublish/, 'the review exclusion went');
-  // Only where the server refuses versions: never the doc page.
-  assert.doesNotMatch(read('shell/src/document-shell.jsx'), /nothingToPublish/, 'the doc page says there is nothing to publish');
-  for (const file of ['shell/src/feedback-space.jsx', 'feedback/src/main.jsx']) assert.match(read(file), /nothingToPublish: true/, `${file} lost it`);
+  // For everybody, editing agents included: no flag and no review exclusion.
+  assert.match(read(CARD), /const answering = v4 \? agentForThread\(thread, ask\.choices, commentId\) : null;/, 'the tag is not agentForThread\'s rule alone');
+  assert.doesNotMatch(read(CARD), /isFeatureOn|askEditV2'\)|prefillOn/, 'the card reads dev mode again');
+  assert.doesNotMatch(read(CARD), /candidate|suggestsFor/, 'the review exclusion came back');
+  for (const file of [...SURFACES, 'shell/src/document/agent-ask.jsx', CARD]) assert.doesNotMatch(read(file), /nothingToPublish/, `${file} has a signal nothing reads`);
+  // Suggestions themselves stay dev-mode only, and the hint follows them.
+  assert.match(read('shell/src/document-shell.jsx'), /suggestsFor: suggestOn \? handsBackSuggestions : null/, 'suggestions left dev mode');
+  for (const file of ['shell/src/feedback-space.jsx', 'feedback/src/main.jsx']) assert.match(read(file), /fixesTheApp: true/, `${file} lost its hint`);
+  // A tagged reply on a space still publishes nothing: the server refuses versions.
   const refusals = read('worker/worker.js').match(/feedbackSpaceVersionRefusal\(writeGate\.meta\)/g) || [];
   assert.ok(refusals.length >= 3, `the server refuses versions to a space on only ${refusals.length} of upload, propose_edits and the card`);
   assert.match(read('worker/worker.js'), /!\(docMeta && docMeta\.created_from === 'feedback'\)/, 'a space offers suggestions again');
