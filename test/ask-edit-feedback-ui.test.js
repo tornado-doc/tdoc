@@ -10,12 +10,10 @@
 //   - a rewrite shows as one removed block then one added block; a small edit
 //     stays word by word; clearing puts the original back exactly; edits are
 //     text, never markup.
-//   - answering an agent in dev mode, the reply box starts with its tag; deleted,
-//     it stays deleted; nothing for a person's reply, for an agent the viewer
-//     can't pick, or for one whose edits would skip review.
-//   - outside dev mode no reply box starts with a tag, readers included: a tag on
-//     an editing agent there leads to a plain handoff, which can publish without
-//     review. Someone who wants an agent names it.
+//   - answering their own agent, everybody's reply box starts with its tag, in
+//     or out of dev mode, editing agents included (Julie, 2026-11-06); deleted,
+//     it stays deleted; nothing for a person's reply or for an agent the viewer
+//     can't pick. Outside dev mode tag and words take the plain handoff.
 //   - the version compare marks a rewrite with the same blocks as a suggestion,
 //     for everybody.
 //   - a thread is flat: replies flush with the top comment at any depth.
@@ -340,7 +338,7 @@ async function startServer(worker, env) {
       await w.ctx.close();
     });
 
-    await t('no tag on a box answering a person in that thread, or for an agent whose edits would skip review', async () => {
+    await t('no tag on a box answering a person in that thread; a CLI with no suggestions gets its tag and the plain handoff', async () => {
       const id = await comment();
       const person = await api('/api/comments', { method: 'POST', cookie, body: { slug: SLUG, version: 1, text: 'A person speaks', parent_id: id } });
       assert.equal(person.status, 200);
@@ -361,8 +359,19 @@ async function startServer(worker, env) {
       assert.equal((await api('/api/agent/reply', { method: 'POST', token, body: { slug: SLUG, parent_id: codex, text: 'From codex', status: 'answered', agent_login: 'codex', agent_name: 'codex' } })).status, 200);
       const w = await open({ phone: true });
       const b = await openReply(w.page, true, codex);
-      await w.page.waitForTimeout(500);
-      assert.equal(await b.box.inputValue(), '');
+      await b.card.locator('.tdoc-agent-pill').waitFor({ timeout: 8000 });
+      assert.match(await b.box.inputValue(), /Codex/);
+      const form = await b.card.locator('.tdoc-reply-form').innerText();
+      assert.match(form, /changes the doc/, 'its edits publish: the line says so');
+      assert.doesNotMatch(form, /suggests/);
+      await b.box.tap();
+      await w.page.keyboard.press('End');
+      await w.page.keyboard.type('shorter please');
+      await b.card.locator('.tdoc-reply-submit').last().tap();
+      await w.page.waitForTimeout(600);
+      assert.equal(w.sends.length, 1, JSON.stringify(w.sends));
+      assert.equal(w.sends[0].path.endsWith('/hand-off'), true);
+      assert.equal(w.sends[0].body.reply_as, undefined);
       await w.ctx.close();
     });
 
@@ -390,10 +399,17 @@ async function startServer(worker, env) {
       await setDevMode(false);
       try { await fn(); } finally { await setDevMode(true); }
     });
-    const noTag = async (v, card, box) => {
-      await v.page.waitForTimeout(1000); // the agent lists have loaded by now
-      assert.equal(await box.inputValue(), '', 'the box started with a tag');
-      assert.equal(await card.locator('.tdoc-agent-pill').count(), 0);
+    const tagged = async (card, box, name = /Claude Code/) => {
+      await card.locator('.tdoc-agent-pill').waitFor({ timeout: 8000 });
+      assert.match(await box.inputValue(), name, 'the box started without its tag');
+    };
+    // The tag goes, by keyboard, the way someone removes it.
+    const deleteTag = async (v, box, phone) => {
+      if (phone) await box.tap(); else await box.click();
+      await v.page.keyboard.press('End');
+      await v.page.keyboard.press('Backspace'); // the space after the tag
+      await v.page.keyboard.press('Backspace'); // the tag, whole
+      assert.equal((await box.inputValue()).trim(), '');
     };
     const nameAgent = async (v, box, phone, agentRow = /Claude Code/) => {
       if (phone) await box.tap(); else await box.click();
@@ -401,47 +417,74 @@ async function startServer(worker, env) {
       const row = v.page.locator('#tdoc-mention-menu [role=option]', { hasText: agentRow }).first();
       if (phone) await row.tap(); else await row.click();
     };
-    for (const phone of [true, false]) await outside(`${phone ? 390 : 1280}: replying to your own agent, the box starts empty; named by hand, a reply takes the plain handoff`, () => threadOf(async (id) => {
-      const v = await open({ phone });
-      const suggestCalls = [];
-      v.page.on('request', (r) => { if (/\/suggest/.test(r.url())) suggestCalls.push(r.url()); });
-      const { card, box } = await openReply(v.page, phone, id);
-      await noTag(v, card, box);
-      await shot(v.page, `nondev-reply-empty-${phone ? 390 : 1280}.png`);
-      await nameAgent(v, box, phone);
-      await card.locator('.tdoc-agent-pill').waitFor();
-      assert.match(await box.inputValue(), /Claude Code/);
-      const form = await card.locator('.tdoc-reply-form').innerText();
-      assert.match(form, /changes the doc/, 'the box says what this agent may do');
-      assert.doesNotMatch(form, /suggests/);
-      await v.page.keyboard.type('shorter please');
-      await card.locator('.tdoc-reply-submit').last().click();
-      await v.page.waitForTimeout(600);
+    const plainHandoff = async (v, suggestCalls) => {
       assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
       assert.equal(v.sends[0].path.endsWith('/hand-off'), true);
       assert.deepEqual(Object.keys(v.sends[0].body).sort(), ['ask_only', 'comment_id', 'recipient']);
       assert.deepEqual(suggestCalls, []);
       assert.equal('reply_as' in JSON.parse(await env.META.get(`handoffs:${SLUG}`))[0], false);
+    };
+    for (const phone of [true, false]) await outside(`${phone ? 390 : 1280}: replying to your own editing agent, the box starts with its tag; the tag alone posts nothing; tag plus words takes the plain handoff`, () => threadOf(async (id) => {
+      const v = await open({ phone });
+      const suggestCalls = [];
+      v.page.on('request', (r) => { if (/\/suggest/.test(r.url())) suggestCalls.push(r.url()); });
+      const posts = [];
+      v.page.on('request', (r) => { if (r.method() === 'POST' && /\/api\/comments(\?|$)/.test(r.url())) posts.push(r.url()); });
+      const { card, box } = await openReply(v.page, phone, id);
+      await tagged(card, box);
+      await shot(v.page, `nondev-reply-prefilled-${phone ? 390 : 1280}.png`);
+      const form = await card.locator('.tdoc-reply-form').innerText();
+      assert.match(form, /changes the doc/, 'the box says what this agent may do');
+      assert.doesNotMatch(form, /suggests/);
+      await card.locator('.tdoc-reply-submit').last().click();
+      await v.page.waitForTimeout(400);
+      assert.deepEqual(posts, [], 'posted on the tag alone');
+      assert.equal(v.sends.length, 0, 'sent on the tag alone');
+      if (phone) await box.tap(); else await box.click();
+      await v.page.keyboard.press('End');
+      await v.page.keyboard.type('shorter please');
+      await card.locator('.tdoc-reply-submit').last().click();
+      await v.page.waitForTimeout(600);
+      assert.equal(posts.length, 1, 'the reply itself was not posted');
+      await plainHandoff(v, suggestCalls);
       assert.deepEqual(v.errors, []);
       await v.ctx.close();
     }));
 
-    await outside('no tag for a CLI that would skip review in dev mode either', async () => {
+    await outside('a deleted tag stays deleted; named again by hand, a reply takes the plain handoff', () => threadOf(async (id) => {
+      const v = await open({ phone: true });
+      const suggestCalls = [];
+      v.page.on('request', (r) => { if (/\/suggest/.test(r.url())) suggestCalls.push(r.url()); });
+      const { card, box } = await openReply(v.page, true, id);
+      await tagged(card, box);
+      await deleteTag(v, box, true);
+      await v.page.waitForTimeout(6000); // a live-sync and an agent-list poll go by
+      assert.equal((await box.inputValue()).trim(), '', 'the tag came back');
+      await nameAgent(v, box, true);
+      await card.locator('.tdoc-agent-pill').waitFor();
+      await v.page.keyboard.type('shorter please');
+      await card.locator('.tdoc-reply-submit').last().tap();
+      await v.page.waitForTimeout(600);
+      await plainHandoff(v, suggestCalls);
+      await v.ctx.close();
+    }));
+
+    await outside('a CLI with no suggestions gets its tag too', async () => {
       const codex = await comment();
       assert.equal((await api('/api/notify/handoff', { method: 'POST', cookie, body: { slug: SLUG, comment_ids: [codex], recipient: { provider: 'local', server_id: 'mac-mini', agent_sub: 'mac-mini_codex' } } })).status, 200);
       assert.equal((await api('/api/agent/reply', { method: 'POST', token, body: { slug: SLUG, parent_id: codex, text: 'From codex', status: 'answered', agent_login: 'codex', agent_name: 'codex' } })).status, 200);
       const v = await open({ phone: true });
       const { card, box } = await openReply(v.page, true, codex);
-      await noTag(v, card, box);
+      await tagged(card, box, /Codex/);
       await v.ctx.close();
     });
 
-    await outside('a reply that names nobody wakes nobody', () => threadOf(async (id) => {
+    await outside('a reply with the tag deleted wakes nobody', () => threadOf(async (id) => {
       const v = await open({ phone: true });
       const { card, box } = await openReply(v.page, true, id);
-      await noTag(v, card, box);
+      await tagged(card, box);
+      await deleteTag(v, box, true);
       const handoffs = JSON.parse(await env.META.get(`handoffs:${SLUG}`)).length;
-      await box.tap();
       await v.page.keyboard.type('thanks');
       await card.locator('.tdoc-reply-submit').last().tap();
       await v.page.waitForTimeout(600);
@@ -450,7 +493,7 @@ async function startServer(worker, env) {
       await v.ctx.close();
     }));
 
-    await outside('a reader answering their own agent: no tag', async () => {
+    await outside('a reader answering their own agent: the tag, and it only answers', async () => {
       const readerSid = 'b'.repeat(32);
       await env.META.put(`session:${readerSid}`, JSON.stringify({ login: 'rita', name: 'rita', email: 'rita@tdoc.test', avatar_url: '', created: new Date().toISOString() }));
       const readerCookie = `tdoc_sid=${readerSid}`;
@@ -463,15 +506,19 @@ async function startServer(worker, env) {
       assert.equal(answered.status, 200, JSON.stringify(answered.body));
       const v = await open({ phone: true, sid: readerSid });
       const { card, box } = await openReply(v.page, true, id);
-      await noTag(v, card, box);
+      await tagged(card, box, /Claude/);
+      const form = await card.locator('.tdoc-reply-form').innerText();
+      assert.match(form, /Answers only/);
+      assert.doesNotMatch(form, /changes the doc|suggests/);
       await v.ctx.close();
     });
 
     await outside('the reply box is done when the reply is posted, not when the delivery ends', () => threadOf(async (id) => {
       const v = await open({ phone: true, delayHandoff: 1500 });
       const { card, box } = await openReply(v.page, true, id);
-      await nameAgent(v, box, true);
-      await card.locator('.tdoc-agent-pill').waitFor();
+      await tagged(card, box);
+      await box.tap();
+      await v.page.keyboard.press('End');
       await v.page.keyboard.type('shorter please');
       const started = Date.now();
       await card.locator('.tdoc-reply-submit').last().tap();

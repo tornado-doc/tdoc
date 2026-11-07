@@ -73,8 +73,6 @@ export function FeedbackSpace({ boot }) {
     choices: agentChoices,
     preselected: canSendToAgent ? composerDefault(agentChoices, { orTop: true }) : null,
     privateAskSupported: false,
-    // A feedback space takes replies, not versions (the server refuses them).
-    nothingToPublish: true,
     fixesTheApp: true,
   }), [agentChoices, canSendToAgent]);
 

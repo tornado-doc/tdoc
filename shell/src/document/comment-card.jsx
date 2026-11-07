@@ -19,7 +19,6 @@ import { HandoffStatusChips } from './handoff-status-line.jsx';
 import { canSeeHandoff } from './handoff-state.js';
 import { productPageUrl } from './product-url.js';
 import { observeVisibleRead } from './visible-read.js';
-import { isFeatureOn } from '../feature-flags.js';
 import { clearReplyDraft, readReplyDraft, writeReplyDraft } from './reply-draft.js';
 
 const AUTHOR_FACE_SIZE = { width: 24, height: 24, maxWidth: 24, maxHeight: 24 };
@@ -216,23 +215,16 @@ function ReplyForm({
   const ask = useAgentAsk(text, setText, field);
   const { agents, target } = ask;
   const v4 = !agentButtons && !demo;
-  // Answering an agent: the box starts with its tag, as if picked after @
-  // (Ask/Edit v2). Once per draft, and only into a box nobody has touched: the
+  // Answering an agent: the box starts with its tag, as if picked after @, for
+  // everybody on every surface, editing agents included (Julie, 2026-11-06: she
+  // knows a plain handoff can publish without review). Who counts is
+  // agentForThread's rule: the latest reply is this viewer's own agent, and this
+  // box answers it. Once per draft, and only into a box nobody has touched: the
   // list can load late, and a tag someone deleted stays deleted. The tag alone
   // is not a reply: nothing was written yet.
   const touched = useRef(Boolean(saved));
   const prefilled = useRef(saved?.prefilled || '');
-  // Dev mode only, on every surface, read here so that no surface can forget
-  // it. Outside dev mode a box starts empty (owner decision: a tag on an editing
-  // agent there leads to a plain handoff, which can publish without review).
-  const [prefillOn] = useState(() => isFeatureOn('askEditV2'));
-  // Not a row whose edits would skip review, so a tag nobody typed cannot lead
-  // to a publish: an editing agent only where its edits come back as suggestions
-  // (agents.suggestsFor), or where there is nothing to publish (a feedback space:
-  // agents.nothingToPublish; the server refuses versions there). Say neither and
-  // an editing agent gets no tag.
-  const candidate = v4 && prefillOn ? agentForThread(thread, ask.choices, commentId) : null;
-  const answering = candidate && (!candidate.can_edit || agents.suggestsFor?.(candidate) || agents.nothingToPublish) ? candidate : null;
+  const answering = v4 ? agentForThread(thread, ask.choices, commentId) : null;
   const answeringKey = answering ? targetKey(answering) : '';
   useLayoutEffect(() => {
     if (!answering || touched.current || prefilled.current || text) return;
