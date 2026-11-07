@@ -40,11 +40,19 @@ class KV {
   async list({ prefix = '' } = {}) { return { keys: [...this.map.keys()].filter((k) => k.startsWith(prefix)).map((name) => (this.meta.has(name) ? { name, metadata: this.meta.get(name) } : { name })), list_complete: true }; }
 }
 class R2 {
-  constructor() { this.map = new Map(); }
-  async put(k, v) { this.map.set(k, typeof v === 'string' ? v : new Uint8Array(v instanceof ArrayBuffer ? v : await new Response(v).arrayBuffer())); return { key: k }; }
-  async get(k) { if (!this.map.has(k)) return null; const v = this.map.get(k); const b = typeof v === 'string' ? new TextEncoder().encode(v) : v; return { text: async () => new TextDecoder().decode(b), arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), size: b.length, httpMetadata: {} }; }
-  async head(k) { if (!this.map.has(k)) return null; const v = this.map.get(k); return { size: typeof v === 'string' ? new TextEncoder().encode(v).length : v.length, httpMetadata: {} }; }
-  async delete(k) { for (const key of Array.isArray(k) ? k : [k]) this.map.delete(key); }
+  constructor() { this.map = new Map(); this.info = new Map(); this.tags = 0; }
+  // As R2: null, and nothing written, when onlyIf fails.
+  async put(k, v, o = {}) {
+    const cond = o.onlyIf;
+    if (cond && typeof cond.get === 'function' && cond.get('If-None-Match') === '*' && this.map.has(k)) return null;
+    if (cond && cond.etagMatches && (!this.info.has(k) || this.info.get(k).etag !== cond.etagMatches)) return null;
+    this.map.set(k, typeof v === 'string' ? v : new Uint8Array(v instanceof ArrayBuffer ? v : await new Response(v).arrayBuffer()));
+    this.info.set(k, { etag: 'etag-' + (++this.tags), uploaded: new Date() });
+    return { key: k };
+  }
+  async get(k) { if (!this.map.has(k)) return null; const v = this.map.get(k); const b = typeof v === 'string' ? new TextEncoder().encode(v) : v; return { ...this.info.get(k), text: async () => new TextDecoder().decode(b), arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), size: b.length, httpMetadata: {} }; }
+  async head(k) { if (!this.map.has(k)) return null; const v = this.map.get(k); return { ...this.info.get(k), size: typeof v === 'string' ? new TextEncoder().encode(v).length : v.length, httpMetadata: {} }; }
+  async delete(k) { for (const key of Array.isArray(k) ? k : [k]) { this.map.delete(key); this.info.delete(key); } }
   async list({ prefix = '' } = {}) { return { objects: [...this.map.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })), truncated: false }; }
 }
 const fake = globalThis.__tdocFake || (globalThis.__tdocFake = { META: new KV(), DOCS: new R2(), stale: new Map(), staleFor: 'all', r2: {} });
@@ -66,7 +74,7 @@ const metaFor = (who) => new Proxy(fake.META, { get(target, prop) {
   const v = target[prop];
   return typeof v === 'function' ? v.bind(target) : v;
 } });
-const envFor = (env, who) => ({ META: metaFor(who), DOCS: docs, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test, bob@tdoc.test' });
+const envFor = (env, who) => ({ META: metaFor(who), DOCS: docs, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_REMOTE_MCP: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test, bob@tdoc.test' });
 export class TestStore extends CommentsStore {
   constructor(state, env) { super(state, envFor(env, 'do')); }
   async fetch(req) {
@@ -100,6 +108,16 @@ export default {
       return new Response('ok');
     }
     if (url.pathname === '/__r2') { Object.assign(fake.r2, await req.json()); return new Response('ok'); }
+    if (url.pathname === '/__write-r2') {
+      const { key, value, ageMs = 0 } = await req.json();
+      if (value !== undefined) await fake.DOCS.put(key, value);
+      fake.DOCS.info.set(key, { ...fake.DOCS.info.get(key), uploaded: new Date(Date.now() - ageMs) });
+      return new Response('ok');
+    }
+    if (url.pathname === '/__left') {
+      const s = url.searchParams.get('slug');
+      return Response.json({ kv: [...fake.META.map.keys()].filter((k) => k === 'meta:' + s || k.endsWith(':' + s)), r2: [...fake.DOCS.map.keys()].filter((k) => k.startsWith('docs/' + s + '/')) });
+    }
     if (url.pathname === '/__html') return new Response(await (await fake.DOCS.get(url.searchParams.get('key')))?.text() ?? '');
     if (url.pathname === '/__do') {
       const { slug, op, path: doPath } = await req.json();
@@ -656,6 +674,337 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.equal(r.status, 200, r.text);
       assert.equal(r.body.suggestion.agent.name, 'Claude');
       assert.ok(!r.body.suggestion.agent.handle);
+    });
+
+    // ── A version's bytes are written once, whatever the read behind the save ──
+    const docPage = (b) => `<!doctype html><html><head><title>Plan</title></head><body>${b}</body></html>`;
+    const browserSave = (slug, baseVersion, b) => call('/api/doc/versions', { method: 'POST', cookie, body: { slug, baseVersion, html: docPage(b) } });
+    const fresh = async (name) => { const slug = `${name}-doc-${++docN}`; const r = await publish(slug, 1, 'Alpha one.', 'Beta one.'); assert.equal(r.status, 200, r.text); return slug; };
+    const age = (slug, n, ageMs) => post('/__write-r2', { key: `docs/${slug}/v${n}/index.html`, ageMs });
+    // v3's record landed and the store never heard, and its reservation has expired;
+    // the record as it stood at v2 is what a stale reader still sees.
+    const lostFinish = async () => {
+      const slug = `immutable-doc-${++docN}`;
+      for (const n of [1, 2]) assert.equal((await publish(slug, n, `Words ${n}.`, 'Same.')).status, 200);
+      const atV2 = await kv(`meta:${slug}`);
+      assert.equal((await publish(slug, 3, 'ORIGINAL THREE.', 'Same.')).status, 200);
+      const v3 = await htmlOf(slug, 3);
+      await setStorage(slug, { versionCursor: { latest: 2, pending: { id: 'gone', base: 2, next: 3, started: Date.now() - 120000 } } });
+      await behind(slug, atV2, 'all');
+      return { slug, v3 };
+    };
+    const thenCaughtUp = async (slug, v3) => {
+      await behind(slug, null);
+      assert.equal(await htmlOf(slug, 3), v3, 'v3 is what it was');
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3]);
+      const next = await doSave(slug, 3, page('Fourth.', 'Same.'));
+      assert.equal(next.status, 200, JSON.stringify(next.body));
+      assert.equal(next.body.version, 4);
+      assert.equal(await htmlOf(slug, 3), v3);
+    };
+
+    await t('a lost finish and a stale read: browser save refused, v3 unchanged, the next real save is v4', async () => {
+      const { slug, v3 } = await lostFinish();
+      const r = await browserSave(slug, 2, page('OVERWRITE.', 'Same.'));
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.error, 'save_in_progress');
+      assert.equal(await htmlOf(slug, 3), v3);
+      refusedSave(await doSave(slug, 2, page('OVERWRITE.', 'Same.')));
+      await thenCaughtUp(slug, v3);
+    });
+
+    await t('a lost finish and a stale read: Accept refused and still pending, v3 unchanged', async () => {
+      const { slug, v3 } = await lostFinish();
+      await behind(slug, null);
+      const { body } = await call(`/api/docs/${slug}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'ORIGINAL THREE.', replace: 'OVERWRITE.' }], agent_login: 'claude', agent_name: 'Claude' } });
+      await behind(slug, JSON.stringify({ ...(await metaOf(slug)), versions: (await metaOf(slug)).versions.slice(0, 2) }), 'worker');
+      await post('/__stale', { key: `meta:${slug}`, value: JSON.stringify({ ...(await metaOf(slug)), versions: (await metaOf(slug)).versions.slice(0, 2) }), who: 'all' });
+      const r = await accept(slug, body.suggestion);
+      assert.equal(r.status, 409, r.text);
+      assert.equal(await htmlOf(slug, 3), v3);
+      assert.equal((await pendingIds(slug)).length, 1);
+      await thenCaughtUp(slug, v3);
+    });
+
+    await t('a lost finish and a stale read: an upload is refused, v3 unchanged; the same bytes are not a conflict', async () => {
+      const { slug, v3 } = await lostFinish();
+      const r = await publish(slug, 3, 'OVERWRITE.', 'Same.');
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.error, 'version_conflict');
+      assert.equal(r.body.latestVersion, 3);
+      assert.equal(await htmlOf(slug, 3), v3);
+      await thenCaughtUp(slug, v3);
+    });
+
+    await t('a stale read cannot touch the widgets of the version it would have overwritten', async () => {
+      const slug = `immutable-doc-${++docN}`;
+      const up = (n, a, w) => call('/api/upload', { method: 'POST', token, body: { slug, version: n, html: page(a, 'Same.'), widgets: { calc: `<p>${w}</p>` }, meta: { title: 'Plan', versions: [{ n, created: new Date().toISOString(), prompt: `publish ${n}` }] } } });
+      for (const n of [1, 2]) assert.equal((await up(n, `Words ${n}.`, `widget ${n}`)).status, 200);
+      const atV2 = await kv(`meta:${slug}`);
+      assert.equal((await up(3, 'Three.', 'widget three')).status, 200);
+      await setStorage(slug, { versionCursor: { latest: 2, pending: { id: 'gone', base: 2, next: 3, started: Date.now() - 120000 } } });
+      await behind(slug, atV2, 'all');
+      refusedSave(await doSave(slug, 2, page('OVERWRITE.', 'Same.')));
+      await behind(slug, null);
+      const widget = await fetch(`${base}/__html?key=${encodeURIComponent(`docs/${slug}/v3/widgets/calc.html`)}`);
+      assert.equal(await widget.text(), '<p>widget three</p>');
+    });
+
+    const blankDoc = async () => {
+      const made = await call('/api/doc/create', { method: 'POST', cookie, body: {} });
+      assert.equal(made.status, 200, made.text);
+      return { slug: made.body.slug, blank: await kv(`meta:${made.body.slug}`) };
+    };
+
+    await t('the first real save replaces the scaffold, once: a stale blank read is refused, v1 not reported twice', async () => {
+      const { slug, blank } = await blankDoc();
+      const first = await browserSave(slug, 1, '<h1>Real one</h1><p>REAL.</p>');
+      assert.equal(first.status, 200, first.text);
+      assert.equal(first.body.version, 1);
+      const v1 = await htmlOf(slug, 1);
+      assert.ok(v1.includes('REAL.'), v1);
+      await behind(slug, blank, 'all');
+      const stale = await browserSave(slug, 1, '<h1>Second</h1><p>OVERWRITE.</p>');
+      assert.equal(stale.status, 409, stale.text);
+      assert.equal(stale.body.error, 'save_in_progress');
+      assert.equal(await htmlOf(slug, 1), v1);
+      await behind(slug, null);
+      const second = await browserSave(slug, 1, '<h1>Second</h1><p>SECOND.</p>');
+      assert.equal(second.status, 200, second.text);
+      assert.equal(second.body.version, 2);
+      assert.equal(await htmlOf(slug, 1), v1);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2]);
+    });
+
+    await t('two first saves at once: neither overwrites the other', async () => {
+      const { slug } = await blankDoc();
+      const results = await Promise.all([browserSave(slug, 1, '<h1>A</h1><p>Save A.</p>'), browserSave(slug, 1, '<h1>B</h1><p>Save B.</p>')]);
+      const won = results.filter((r) => r.status === 200);
+      assert.ok(won.length >= 1, results.map((r) => r.text).join());
+      assert.equal(new Set(won.map((r) => r.body.version)).size, won.length, 'each number reported once');
+      for (const r of results) {
+        if (r.status === 200) assert.ok((await htmlOf(slug, r.body.version)).includes(r === results[0] ? 'Save A.' : 'Save B.'));
+        else assert.equal(r.body.error, 'save_in_progress');
+      }
+    });
+
+    await t('a first save whose commit was lost: past the limit its bytes are v1 and the next save is v2', async () => {
+      const { slug } = await blankDoc();
+      const blank = await metaOf(slug);
+      assert.equal((await browserSave(slug, 1, '<h1>Real</h1><p>REAL.</p>')).status, 200);
+      const v1 = await htmlOf(slug, 1);
+      await kv(`meta:${slug}`, JSON.stringify(blank));
+      refusedSave(await doSave(slug, 1, '<h1>Next</h1><p>NEXT.</p>'));
+      await age(slug, 1, 3 * 60 * 1000);
+      const r = await doSave(slug, 1, '<h1>Next</h1><p>NEXT.</p>');
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal(r.body.version, 2);
+      assert.equal(await htmlOf(slug, 1), v1);
+      assert.ok(!(await metaOf(slug)).versions[0].blank, 'no longer scaffolding');
+    });
+
+    await t('bytes no record lists: refused, not overwritten, then listed so saving goes on above them', async () => {
+      const slug = await fresh('orphan');
+      const key = `docs/${slug}/v2/index.html`;
+      await post('/__write-r2', { key, value: '<p>ORPHAN</p>' });
+      refusedSave(await doSave(slug, 1, page('Mine.', 'Same.')));
+      assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
+      await age(slug, 2, 3 * 60 * 1000);
+      await pastTheLimit(slug);
+      const r = await doSave(slug, 2, page('Mine.', 'Same.'));
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal(r.body.version, 3);
+      assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
+      assert.equal((await metaOf(slug)).versions[1].prompt, 'Recovered version');
+    });
+
+    await t('an upload onto other bytes no record lists: refused; past the limit they are listed and it builds on them', async () => {
+      const slug = await fresh('orphan');
+      await post('/__write-r2', { key: `docs/${slug}/v2/index.html`, value: '<p>ORPHAN</p>' });
+      const refused = await publish(slug, 2, 'Mine.', 'Same.');
+      assert.equal(refused.status, 409, refused.text);
+      assert.equal(refused.body.latestVersion, 2);
+      assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
+      await pastTheLimit(slug);
+      const told = await publish(slug, 2, 'Mine.', 'Same.');
+      assert.equal(told.status, 409, told.text);
+      assert.equal(told.body.latestVersion, 2);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2], 'listed');
+      const up = await publish(slug, 3, 'Mine.', 'Same.');
+      assert.equal(up.status, 200, up.text);
+      assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
+    });
+
+    await t('a first publish that died: the same bytes commit, other bytes wait out the limit, then the slug is free', async () => {
+      const slug = `immutable-doc-${++docN}`;
+      const v1 = (a) => call('/api/upload', { method: 'POST', token, body: { slug, version: 1, html: page(a, 'Same.'), meta: { title: 'Plan', versions: [{ n: 1, created: new Date().toISOString() }] } } });
+      await post('/__write-r2', { key: `docs/${slug}/v1/index.html`, value: '<p>Died.</p>' });
+      const claimed = await post('/__do', { slug, path: '/owner', op: { kind: 'claim_owner', account_id: accountId } });
+      assert.equal(claimed.status, 200);
+      const refused = await v1('Mine.');
+      assert.equal(refused.status, 409, refused.text);
+      await age(slug, 1, 3 * 60 * 1000);
+      const r = await v1('Mine.');
+      assert.equal(r.status, 200, r.text);
+      assert.ok((await htmlOf(slug, 1)).includes('Mine.'));
+    });
+
+    await t('a healthy doc: saves and uploads alternate, retried bytes pass, the store says nothing new', async () => {
+      const slug = await fresh('healthy');
+      assert.equal((await browserSave(slug, 1, page('Two.', 'Same.'))).status, 200);
+      assert.equal((await publish(slug, 3, 'Three.', 'Same.')).status, 200);
+      const v3 = await htmlOf(slug, 3);
+      assert.equal((await publish(slug, 3, 'Three.', 'Same.')).status, 200, 'the same upload again');
+      assert.equal(await htmlOf(slug, 3), v3);
+      assert.equal((await doSave(slug, 3, page('Four.', 'Same.'))).body.version, 4);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3, 4]);
+      assert.ok(!(await storage(slug)).cursor.behind_since);
+    });
+
+    // ── A doc deleted for good stays deleted for its own saves ──
+    const pageOf = (a) => page(a, 'Same.');
+    const left = async (slug) => (await fetch(`${base}/__left?slug=${slug}`)).json();
+    const nothingLeft = async (slug) => assert.deepEqual(await left(slug), { kv: [], r2: [] });
+    const purgedAtStaleRead = async (publishAs = (slug, n) => publish(slug, n, `Words ${n}.`, 'Same.')) => {
+      const slug = `purged-doc-${++docN}`;
+      for (const n of [1, 2]) { const r = await publishAs(slug, n); assert.equal(r.status, 200, r.text); }
+      const old = await kv(`meta:${slug}`);
+      await trashAndPurge(slug);
+      await nothingLeft(slug);
+      await behind(slug, old, 'all');
+      return { slug, old };
+    };
+
+    await t('a browser save from a stale read after Delete forever: refused, nothing comes back', async () => {
+      const { slug } = await purgedAtStaleRead();
+      const r = await browserSave(slug, 2, page('Back again?', 'Same.'));
+      assert.equal(r.status, 404, r.text);
+      assert.equal((await doSave(slug, 2)).status, 404);
+      await behind(slug, null);
+      await nothingLeft(slug);
+    });
+
+    await t('Accept from a stale read after Delete forever: refused, nothing comes back', async () => {
+      const slug = `purged-doc-${++docN}`;
+      assert.equal((await publish(slug, 1, 'Alpha one.', 'Same.')).status, 200);
+      const { body } = await call(`/api/docs/${slug}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'Alpha one.', replace: 'Alpha x.' }], agent_login: 'claude', agent_name: 'Claude' } });
+      const old = await kv(`meta:${slug}`);
+      await trashAndPurge(slug);
+      await behind(slug, old, 'all');
+      const r = await accept(slug, body.suggestion);
+      assert.notEqual(r.status, 200, r.text);
+      await behind(slug, null);
+      await nothingLeft(slug);
+    });
+
+    await t('a teammate\'s upload from a stale read after Delete forever: refused, at any version, nothing comes back', async () => {
+      const created = await call('/api/teams', { method: 'POST', cookie, body: { name: 'Purge Co' } });
+      assert.equal(created.status, 200, created.text);
+      const team = created.body.team.slug || created.body.team.name;
+      const up = (slug, n, a = `Words ${n}.`) => call('/api/upload', { method: 'POST', token, body: { slug, version: n, team, html: page(a, 'Same.'), meta: { title: 'Team doc', versions: [{ n, created: new Date().toISOString(), prompt: `publish ${n}` }] } } });
+      const { slug } = await purgedAtStaleRead(up);
+      for (const [n, a] of [[3, 'Next.'], [2, 'Words 2.'], [1, 'History.']]) {
+        const r = await up(slug, n, a);
+        assert.equal(r.status, 404, `v${n}: ${r.text}`);
+      }
+      await behind(slug, null);
+      await nothingLeft(slug);
+    });
+
+    await t('MCP update_doc on a team doc, from a stale read after Delete forever: refused, nothing comes back', async () => {
+      const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
+      const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const client_id = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+      await kv(`oauth-cimd:${crypto.createHash('sha256').update(client_id).digest('hex')}`, JSON.stringify({ client_id, client_name: 'Claude', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], fetched_at: Date.now() }));
+      const verifier = b64url(crypto.randomBytes(32));
+      const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
+      const q = new URLSearchParams({ response_type: 'code', client_id, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: 'S256', state: 's', scope: 'mcp', resource: 'https://tdoc.dev/mcp' });
+      const page = await call(`/oauth/authorize?${q}`, { cookie });
+      assert.equal(page.status, 200, page.text.slice(0, 200));
+      const boot = JSON.parse(page.text.match(/__TDOC_APP_BOOT__\s*=\s*(\{.*?\});?\s*<\/script>/s)[1]);
+      const approved = await call('/api/oauth/approve', { method: 'POST', cookie, body: { request_id: boot.request_id, csrf: boot.csrf, decision: 'allow' } });
+      const code = new URL(approved.body.redirect).searchParams.get('code');
+      const issued = await fetch(`${base}/oauth/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: REDIRECT, client_id, resource: 'https://tdoc.dev/mcp' }).toString() });
+      const mcpToken = (await issued.json()).access_token;
+      const created = await call('/api/teams', { method: 'POST', cookie, body: { name: 'Mcp Co' } });
+      const team = created.body.team.slug || created.body.team.name;
+      const up = (slug, n) => call('/api/upload', { method: 'POST', token, body: { slug, version: n, team, html: page2(n), meta: { title: 'Team doc', versions: [{ n, created: new Date().toISOString(), prompt: `publish ${n}` }] } } });
+      const page2 = (n) => pageOf(`Words ${n}.`);
+      const { slug } = await purgedAtStaleRead(up);
+      const r = await call('/mcp', {
+        method: 'POST', token: mcpToken,
+        headers: { Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18' },
+        body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'update_doc', arguments: { slug, html: pageOf('Back again?') } } },
+      });
+      assert.equal(r.status, 200, r.text);
+      assert.ok(r.body.result.isError, r.text);
+      await behind(slug, null);
+      await nothingLeft(slug);
+    });
+
+    await t('an old tab, long after: its read finds no record', async () => {
+      const { slug } = await purgedAtStaleRead();
+      await behind(slug, null);
+      const r = await browserSave(slug, 2, page('Back again?', 'Same.'));
+      assert.notEqual(r.status, 200, r.text);
+      await nothingLeft(slug);
+    });
+
+    await t('a slug reused at once: the old doc\'s stale save cannot touch the new doc, and the new doc saves freely', async () => {
+      const { slug, old } = await purgedAtStaleRead();
+      await behind(slug, null);
+      const made = await call('/api/upload', { method: 'POST', token: bob.token, body: { slug, version: 1, html: page('Bob words.', 'Bob more.'), meta: { title: 'Bob title', versions: [{ n: 1, created: new Date().toISOString(), prompt: 'bob 1' }] } } });
+      assert.equal(made.status, 200, made.text);
+      const v1 = await htmlOf(slug, 1);
+      await behind(slug, old, 'all');
+      assert.equal((await doSave(slug, 2)).status, 404);
+      await behind(slug, null);
+      stillBobs(await metaOf(slug));
+      assert.deepEqual(numbers(await metaOf(slug)), [1]);
+      assert.equal(await htmlOf(slug, 1), v1);
+      const r = await doSave(slug, 1);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      stillBobs(await metaOf(slug));
+    });
+
+    await t('the same files published again after Delete forever: a new doc, not refused', async () => {
+      const slug = `purged-doc-${++docN}`;
+      const created = '2026-11-01T00:00:00.000Z';
+      const up = (n, a) => call('/api/upload', { method: 'POST', token, body: { slug, version: n, html: page(a, 'Same.'), meta: { title: 'Plan', versions: [{ n, created, prompt: `p${n}` }] } } });
+      assert.equal((await up(1, 'Same words.')).status, 200);
+      await trashAndPurge(slug);
+      assert.equal((await up(1, 'Same words.')).status, 200);
+      assert.equal((await up(2, 'Later.')).status, 200);
+      assert.equal((await doSave(slug, 2)).status, 200);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3]);
+    });
+
+    await t('a purge cut short, then restored: the doc saves as ever', async () => {
+      const slug = await fresh('restored');
+      assert.equal((await call(`/api/doc?slug=${slug}`, { method: 'DELETE', cookie })).status, 200);
+      const identity = (await metaOf(slug)).versions[0].created;
+      await post('/__do', { slug, path: '/version-lock', op: { kind: 'purging', identity } });
+      assert.equal((await call('/api/trash/restore', { method: 'POST', cookie, body: { slug } })).status, 200);
+      assert.equal((await doSave(slug, 1)).status, 200);
+    });
+
+    await t('the hold runs out: a record with the purged doc\'s date is not refused for ever', async () => {
+      const slug = await fresh('held');
+      await setStorage(slug, { purgeHold: { at: Date.now() - 11 * 60 * 1000, identity: (await metaOf(slug)).versions[0].created } });
+      assert.equal((await doSave(slug, 1)).status, 200);
+      assert.ok(!(await storage(slug)).keys.includes('purgeHold'), 'and is gone');
+    });
+
+    await t('a save already running when the purge begins: its bytes go and the record does not come back', async () => {
+      const slug = await fresh('inflight');
+      await r2({ hold: true });
+      const running = doSave(slug, 1, page('In flight.', 'Same.'));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await trashAndPurge(slug);
+      await r2({ hold: false });
+      const r = await running;
+      assert.equal(r.status, 404, JSON.stringify(r.body));
+      await nothingLeft(slug);
     });
 
     console.log(`\n${passed} passed, ${failed} failed`);

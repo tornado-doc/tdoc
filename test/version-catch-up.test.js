@@ -26,7 +26,9 @@ function assert(c, m) { if (!c) throw new Error(m || 'assertion failed'); }
   console.log('version catch-up');
   for (let v = 1; v <= 5; v++) assert((await up(v, v)).status === 200, `seed v${v}`);
   // v6's bytes landed, its meta write never did.
-  await env.DOCS.put('docs/pi/v6/index.html', '<p>v6</p>');
+  env.META.failPutOnce.add('meta:pi');
+  assert((await up(6, 6)).status === 500, 'the record write fails');
+  assert(await env.DOCS.get('docs/pi/v6/index.html'), 'and the bytes are there');
 
   await t('walking up from the orphan commits each version in turn', async () => {
     const r6 = await up(6, 8);
