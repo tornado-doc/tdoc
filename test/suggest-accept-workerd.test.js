@@ -35,7 +35,7 @@ class KV {
   constructor() { this.map = new Map(); this.meta = new Map(); }
   async get(k) { return this.map.has(k) ? this.map.get(k) : null; }
   async getWithMetadata(k) { return { value: this.map.has(k) ? this.map.get(k) : null, metadata: this.meta.get(k) ?? null }; }
-  async put(k, v, o) { this.map.set(k, String(v)); if (o && o.metadata !== undefined) this.meta.set(k, o.metadata); else this.meta.delete(k); }
+  async put(k, v, o) { if (fake.failPut && fake.failPut.delete(k)) throw new Error('kv write failed'); this.map.set(k, String(v)); if (o && o.metadata !== undefined) this.meta.set(k, o.metadata); else this.meta.delete(k); }
   async delete(k) { this.map.delete(k); this.meta.delete(k); }
   async list({ prefix = '' } = {}) { return { keys: [...this.map.keys()].filter((k) => k.startsWith(prefix)).map((name) => (this.meta.has(name) ? { name, metadata: this.meta.get(name) } : { name })), list_complete: true }; }
 }
@@ -63,18 +63,29 @@ const docs = new Proxy(fake.DOCS, { get(target, prop) {
     if (fake.r2.fail) throw new Error('r2 down');
     return target.head(k);
   };
+  // A put that waits, fails on a widget, or loses a race to another writer.
+  if (prop === 'put') return async (k, v, o) => {
+    while (fake.r2.holdPut && k.endsWith('/index.html')) await new Promise((resolve) => setTimeout(resolve, 20));
+    if (fake.r2.failWidgetPut && k.includes('/widgets/')) throw new Error('r2 down');
+    if (fake.r2.racePut && k === fake.r2.racePut.key) { const { value } = fake.r2.racePut; fake.r2.racePut = null; await target.put(k, value); }
+    return target.put(k, v, o);
+  };
   const v = target[prop];
   return typeof v === 'function' ? v.bind(target) : v;
 } });
 // Which reader sees the old record: the Worker's colo, or the Durable Object's too.
 const metaFor = (who) => new Proxy(fake.META, { get(target, prop) {
   const behind = (k) => fake.stale.has(k) && (fake.staleFor === 'all' || who === 'worker');
-  if (prop === 'get') return async (k) => (behind(k) ? fake.stale.get(k) : target.get(k));
+  if (prop === 'get') return async (k) => {
+    // A read that fails, for the Worker alone, after some good ones.
+    if (who === 'worker' && fake.readFail && fake.readFail.key === k && fake.readFail.skip-- <= 0) throw new Error('kv read failed');
+    return behind(k) ? fake.stale.get(k) : target.get(k);
+  };
   if (prop === 'getWithMetadata') return async (k) => (behind(k) ? { value: fake.stale.get(k), metadata: null } : target.getWithMetadata(k));
   const v = target[prop];
   return typeof v === 'function' ? v.bind(target) : v;
 } });
-const envFor = (env, who) => ({ META: metaFor(who), DOCS: docs, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_REMOTE_MCP: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test, bob@tdoc.test' });
+const envFor = (env, who) => ({ META: metaFor(who), DOCS: docs, COMMENTS: env.COMMENTS, TDOC_HOSTED_REGISTRATION: '1', TDOC_HOSTED_MAX_DOCS: '500', TDOC_REMOTE_MCP: '1', TDOC_DATA_MIRROR_KEY: 'test-mirror-key-0123456789abcdef', PUBLIC_HOST: 'tdoc.dev', TDOC_DEBUG_ACCOUNTS: 'julie@tdoc.test, bob@tdoc.test' });
 export class TestStore extends CommentsStore {
   constructor(state, env) { super(state, envFor(env, 'do')); }
   async fetch(req) {
@@ -108,8 +119,15 @@ export default {
       return new Response('ok');
     }
     if (url.pathname === '/__r2') { Object.assign(fake.r2, await req.json()); return new Response('ok'); }
+    if (url.pathname === '/__kv-fail') {
+      const { put, read } = await req.json();
+      if (put) (fake.failPut = fake.failPut || new Set()).add(put);
+      fake.readFail = read || null;
+      return new Response('ok');
+    }
     if (url.pathname === '/__write-r2') {
       const { key, value, ageMs = 0 } = await req.json();
+      if (value === null) { await fake.DOCS.delete(key); return new Response('ok'); }
       if (value !== undefined) await fake.DOCS.put(key, value);
       fake.DOCS.info.set(key, { ...fake.DOCS.info.get(key), uploaded: new Date(Date.now() - ageMs) });
       return new Response('ok');
@@ -676,10 +694,39 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.ok(!r.body.suggestion.agent.handle);
     });
 
+    // An agent's connection, the way the claude.ai connector gets one.
+    let mcpCached = null;
+    const mcpSession = async () => {
+      if (mcpCached) return mcpCached;
+      const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
+      const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const client_id = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+      await kv(`oauth-cimd:${crypto.createHash('sha256').update(client_id).digest('hex')}`, JSON.stringify({ client_id, client_name: 'Claude', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], fetched_at: Date.now() }));
+      const verifier = b64url(crypto.randomBytes(32));
+      const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
+      const q = new URLSearchParams({ response_type: 'code', client_id, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: 'S256', state: 's', scope: 'mcp', resource: 'https://tdoc.dev/mcp' });
+      const authorize = await call(`/oauth/authorize?${q}`, { cookie });
+      assert.equal(authorize.status, 200, authorize.text.slice(0, 200));
+      const boot = JSON.parse(authorize.text.match(/__TDOC_APP_BOOT__\s*=\s*(\{.*?\});?\s*<\/script>/s)[1]);
+      const approved = await call('/api/oauth/approve', { method: 'POST', cookie, body: { request_id: boot.request_id, csrf: boot.csrf, decision: 'allow' } });
+      const code = new URL(approved.body.redirect).searchParams.get('code');
+      const issued = await fetch(`${base}/oauth/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: REDIRECT, client_id, resource: 'https://tdoc.dev/mcp' }).toString() });
+      const mcpToken = (await issued.json()).access_token;
+      mcpCached = async (name, args) => {
+        const r = await call('/mcp', { method: 'POST', token: mcpToken, headers: { Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18' }, body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } } });
+        assert.equal(r.status, 200, r.text);
+        return r.body.result;
+      };
+      return mcpCached;
+    };
+
     // ── A version's bytes are written once, whatever the read behind the save ──
+    const pageOf = (a) => page(a, 'Same.');
+    const left = async (slug) => (await fetch(`${base}/__left?slug=${slug}`)).json();
     const docPage = (b) => `<!doctype html><html><head><title>Plan</title></head><body>${b}</body></html>`;
     const browserSave = (slug, baseVersion, b) => call('/api/doc/versions', { method: 'POST', cookie, body: { slug, baseVersion, html: docPage(b) } });
     const fresh = async (name) => { const slug = `${name}-doc-${++docN}`; const r = await publish(slug, 1, 'Alpha one.', 'Beta one.'); assert.equal(r.status, 200, r.text); return slug; };
+    const browserSaveOf = (slug, baseVersion, a) => browserSave(slug, baseVersion, page(a, 'Same.'));
     const age = (slug, n, ageMs) => post('/__write-r2', { key: `docs/${slug}/v${n}/index.html`, ageMs });
     // v3's record landed and the store never heard, and its reservation has expired;
     // the record as it stood at v2 is what a stale reader still sees.
@@ -835,18 +882,267 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
     });
 
-    await t('a first publish that died: the same bytes commit, other bytes wait out the limit, then the slug is free', async () => {
+    const v1Upload = (slug, a) => call('/api/upload', { method: 'POST', token, body: { slug, version: 1, html: page(a, 'Same.'), meta: { title: 'Plan', versions: [{ n: 1, created: new Date().toISOString() }] } } });
+
+    await t('a first publish whose commit failed: the same bytes commit', async () => {
       const slug = `immutable-doc-${++docN}`;
-      const v1 = (a) => call('/api/upload', { method: 'POST', token, body: { slug, version: 1, html: page(a, 'Same.'), meta: { title: 'Plan', versions: [{ n: 1, created: new Date().toISOString() }] } } });
-      await post('/__write-r2', { key: `docs/${slug}/v1/index.html`, value: '<p>Died.</p>' });
-      const claimed = await post('/__do', { slug, path: '/owner', op: { kind: 'claim_owner', account_id: accountId } });
-      assert.equal(claimed.status, 200);
-      const refused = await v1('Mine.');
+      await post('/__kv-fail', { put: `meta:${slug}` });
+      assert.equal((await v1Upload(slug, 'Mine.')).status, 500);
+      const bytes = await htmlOf(slug, 1);
+      assert.ok(bytes.includes('Mine.'), 'stored');
+      const r = await v1Upload(slug, 'Mine.');
+      assert.equal(r.status, 200, r.text);
+      assert.equal(await htmlOf(slug, 1), bytes);
+      assert.deepEqual(numbers(await metaOf(slug)), [1]);
+    });
+
+    await t('a first publish whose commit failed: other bytes wait out the limit, told so, then the slug is free', async () => {
+      const slug = `immutable-doc-${++docN}`;
+      await post('/__kv-fail', { put: `meta:${slug}` });
+      assert.equal((await v1Upload(slug, 'Died.')).status, 500);
+      const refused = await v1Upload(slug, 'Mine.');
       assert.equal(refused.status, 409, refused.text);
+      assert.equal(refused.body.latestVersion, 0);
+      assert.ok(refused.body.retry_after > 0 && /did not finish/.test(refused.body.message), refused.text);
+      assert.ok((await htmlOf(slug, 1)).includes('Died.'));
       await age(slug, 1, 3 * 60 * 1000);
-      const r = await v1('Mine.');
+      const r = await v1Upload(slug, 'Mine.');
       assert.equal(r.status, 200, r.text);
       assert.ok((await htmlOf(slug, 1)).includes('Mine.'));
+    });
+
+    // The shape live docs are in: bytes above the record, days old, nothing in the cursor.
+    const oldUnlisted = async () => {
+      const slug = await fresh('orphan');
+      await post('/__write-r2', { key: `docs/${slug}/v2/index.html`, value: '<p>ORPHAN</p>', ageMs: 3 * 24 * 60 * 60 * 1000 });
+      return slug;
+    };
+
+    await t('old bytes no record lists: an upload is refused once, they are listed as they were, and it publishes above them', async () => {
+      const slug = await oldUnlisted();
+      const r = await publish(slug, 2, 'Mine.', 'Same.');
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.latestVersion, 2);
+      assert.equal(r.body.next_version, 3);
+      assert.ok(!r.body.retry_after, r.text);
+      assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
+      assert.equal((await metaOf(slug)).versions[1].prompt, 'Recovered version');
+      assert.equal((await publish(slug, 3, 'Mine.', 'Same.')).status, 200);
+      assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
+    });
+
+    await t('old bytes no record lists: a browser save is refused twice, then lands above them from their page', async () => {
+      const slug = await oldUnlisted();
+      refusedSave(await browserSaveOf(slug, 1, 'Mine.'));
+      const second = await browserSaveOf(slug, 1, 'Mine.');
+      assert.equal(second.status, 409);
+      assert.equal(second.body.error, 'version_conflict');
+      assert.equal(second.body.latestVersion, 2);
+      assert.equal((await call(`/d/${slug}/v/2`, { cookie })).status, 200);
+      const third = await browserSaveOf(slug, 2, 'Mine.');
+      assert.equal(third.status, 200, third.text);
+      assert.equal(third.body.version, 3);
+      assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
+    });
+
+    // ── A version's other files ──
+    const widgetKey = (slug, n, w) => `${base}/__html?key=${encodeURIComponent(`docs/${slug}/v${n}/widgets/${w}.html`)}`;
+    const widgetOf = async (slug, n, w) => (await fetch(widgetKey(slug, n, w))).text();
+    const upWithWidgets = (slug, n, a, widgets) => call('/api/upload', { method: 'POST', token, body: { slug, version: n, html: page(a, 'Same.'), widgets, meta: { title: 'Plan', versions: [{ n, created: new Date().toISOString(), prompt: `publish ${n}` }] } } });
+
+    await t('a listed version\'s widgets are fixed: edited or new ones are refused, the same ones pass', async () => {
+      const slug = `immutable-doc-${++docN}`;
+      assert.equal((await upWithWidgets(slug, 1, 'One.', { a: '<p>A</p>' })).status, 200);
+      const edited = await upWithWidgets(slug, 1, 'One.', { a: '<p>EDITED</p>' });
+      assert.equal(edited.status, 409, edited.text);
+      assert.equal(edited.body.error, 'version_conflict');
+      assert.equal(edited.body.next_version, 2);
+      assert.equal(await widgetOf(slug, 1, 'a'), '<p>A</p>');
+      const added = await upWithWidgets(slug, 1, 'One.', { a: '<p>A</p>', b: '<p>B</p>' });
+      assert.equal(added.status, 409, added.text);
+      assert.equal(await widgetOf(slug, 1, 'b'), '', 'nothing landed');
+      assert.equal((await upWithWidgets(slug, 1, 'One.', { a: '<p>A</p>' })).status, 200, 'a retry');
+      assert.equal((await upWithWidgets(slug, 2, 'Two.', { a: '<p>EDITED</p>', b: '<p>B</p>' })).status, 200, 'a new version has its own');
+      assert.equal(await widgetOf(slug, 1, 'a'), '<p>A</p>');
+    });
+
+    await t('a listed version whose page was lost: the page is restored, its widgets are still fixed, a lost one returns', async () => {
+      const slug = `immutable-doc-${++docN}`;
+      assert.equal((await upWithWidgets(slug, 1, 'One.', { a: '<p>A</p>' })).status, 200);
+      const pageKey = `docs/${slug}/v1/index.html`;
+      await post('/__write-r2', { key: pageKey, value: null });
+      const edited = await upWithWidgets(slug, 1, 'One.', { a: '<p>EDITED</p>' });
+      assert.equal(edited.status, 409, edited.text);
+      assert.equal(await widgetOf(slug, 1, 'a'), '<p>A</p>');
+      await post('/__write-r2', { key: `docs/${slug}/v1/widgets/a.html`, value: null });
+      await post('/__write-r2', { key: pageKey, value: null });
+      assert.equal((await upWithWidgets(slug, 1, 'One.', { a: '<p>A</p>' })).status, 200);
+      assert.equal(await widgetOf(slug, 1, 'a'), '<p>A</p>');
+      assert.ok((await htmlOf(slug, 1)).includes('One.'));
+    });
+
+    await t('an upload whose commit failed: its widgets finish on retry; edited ones are refused', async () => {
+      const slug = await fresh('widgets');
+      await post('/__kv-fail', { put: `meta:${slug}` });
+      assert.equal((await upWithWidgets(slug, 2, 'Two.', { a: '<p>A</p>' })).status, 500);
+      const edited = await upWithWidgets(slug, 2, 'Two.', { a: '<p>EDITED</p>' });
+      assert.equal(edited.status, 409, edited.text);
+      assert.equal(await widgetOf(slug, 2, 'a'), '<p>A</p>');
+    });
+
+    await t('a refused upload leaves nothing: an oversized widget stores no page and the number stays free', async () => {
+      const slug = await fresh('widgets');
+      const r = await upWithWidgets(slug, 2, 'Rejected.', { big: 'x'.repeat(513 * 1024) });
+      assert.equal(r.status, 400, r.text.slice(0, 200));
+      assert.equal(await htmlOf(slug, 2), '');
+      assert.deepEqual((await left(slug)).r2.filter((k) => k.includes('/v2/')), []);
+      assert.equal((await upWithWidgets(slug, 2, 'Good.', { small: '<p>S</p>' })).status, 200);
+    });
+
+    await t('a widget copy that fails: the save\'s bytes go, the number stays free', async () => {
+      const slug = `immutable-doc-${++docN}`;
+      assert.equal((await upWithWidgets(slug, 1, 'One.', { a: '<p>A</p>' })).status, 200);
+      await r2({ failWidgetPut: true });
+      const failed = await doSave(slug, 1, page('Two.', 'Same.'));
+      await r2({ failWidgetPut: false });
+      assert.equal(failed.status, 500, JSON.stringify(failed.body));
+      assert.equal(await htmlOf(slug, 2), '', 'no bytes');
+      const r = await doSave(slug, 1, page('Two again.', 'Same.'));
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal(r.body.version, 2);
+    });
+
+    await t('the scaffold replaced under a first save: the etag condition refuses it, the other bytes stay', async () => {
+      const { slug } = await blankDoc();
+      await r2({ racePut: { key: `docs/${slug}/v1/index.html`, value: '<p>WON THE RACE</p>' } });
+      const r = await browserSave(slug, 1, '<h1>Mine</h1><p>Lost.</p>');
+      assert.equal(r.status, 409, r.text);
+      assert.equal(r.body.error, 'save_in_progress');
+      assert.equal(await htmlOf(slug, 1), '<p>WON THE RACE</p>');
+    });
+
+    await t('the record unreadable: an upload is refused, the version and record untouched', async () => {
+      const slug = await fresh('readfail');
+      assert.equal((await publish(slug, 2, 'Two.', 'Same.')).status, 200);
+      const [v1, record] = [await htmlOf(slug, 1), await kv(`meta:${slug}`)];
+      await post('/__kv-fail', { read: { key: `meta:${slug}`, skip: 0 } });
+      const r = await publish(slug, 1, 'OVERWRITE.', 'Same.');
+      await post('/__kv-fail', {});
+      assert.equal(r.status, 503, r.text);
+      assert.equal(r.body.error, 'doc_record_unavailable');
+      assert.equal(await htmlOf(slug, 1), v1);
+      assert.equal(await kv(`meta:${slug}`), record);
+    });
+
+    await t('the record unreadable at the commit: the upload fails, the record is not rebuilt from nothing', async () => {
+      const slug = await fresh('readfail');
+      assert.equal((await publish(slug, 2, 'Two.', 'Same.')).status, 200);
+      const record = await kv(`meta:${slug}`);
+      await post('/__kv-fail', { read: { key: `meta:${slug}`, skip: 1 } });
+      const r = await publish(slug, 3, 'Three.', 'Same.');
+      await post('/__kv-fail', {});
+      assert.equal(r.status, 500, r.text);
+      assert.equal(r.body.error, 'meta_put_failed');
+      assert.equal(await kv(`meta:${slug}`), record);
+    });
+
+    // ── The CLI and MCP, in words ──
+    const cliHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tdoc-cli-home-'));
+    fs.mkdirSync(path.join(cliHome, '.tdoc'), { recursive: true });
+    fs.writeFileSync(path.join(cliHome, '.tdoc/published.json'), JSON.stringify({ platform: 'hosted', upload_token: token, base, public_host: '127.0.0.1' }));
+    const cliDocs = path.join(cliHome, 'tdocs');
+    const localDoc = (slug, versions) => {
+      const d = path.join(cliDocs, slug);
+      fs.rmSync(d, { recursive: true, force: true });
+      const ns = Object.keys(versions).map(Number).sort((a, b) => a - b);
+      for (const n of ns) { fs.mkdirSync(path.join(d, `v${n}`), { recursive: true }); fs.writeFileSync(path.join(d, `v${n}/index.html`), docPage(`<h1>Plan</h1><p>${versions[n]}</p>`)); }
+      fs.writeFileSync(path.join(d, 'meta.json'), JSON.stringify({ title: 'Plan', slug, created: '2026-11-01T10:00:00Z', versions: ns.map((n) => ({ n, created: '2026-11-01T10:00:00Z', prompt: `v${n}` })) }));
+    };
+    const cliPublish = async (slug) => {
+      const child2 = spawn(path.join(root, 'bin', 'tdoc-publish'), [slug], { env: { ...process.env, HOME: cliHome, TDOC_DIR: cliDocs, TDOC_SKIP_UPDATE_CHECK: '1', TDOC_TEAM: '', SLOCK_CURRENT_SERVER_ID: '', SLOCK_CURRENT_AGENT_ID: '' } });
+      let output = '';
+      child2.stdout.on('data', (d) => { output += d; });
+      child2.stderr.on('data', (d) => { output += d; });
+      const status = await new Promise((resolve) => child2.on('close', resolve));
+      assert.ok(!/\{"error"/.test(output), `raw JSON: ${output}`);
+      return { status, output };
+    };
+
+    await t('CLI: an edited re-publish after a failed commit is told the wait and the number, then publishes above it', async () => {
+      const slug = `cli-doc-${++docN}`;
+      localDoc(slug, { 1: 'one', 2: 'two' });
+      assert.equal((await cliPublish(slug)).status, 0);
+      await post('/__kv-fail', { put: `meta:${slug}` });
+      assert.equal((await publish(slug, 3, 'three', 'Same.')).status, 500, 'the commit fails');
+      localDoc(slug, { 1: 'one', 2: 'two', 3: 'three EDITED' });
+      const refused = await cliPublish(slug);
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.output, /v3 not published: Version 3 already holds different content .* In about \d+ seconds .* publish this as version 4/);
+      assert.match(refused.output, /--version next/);
+      await pastTheLimit(slug);
+      const told = await cliPublish(slug);
+      assert.notEqual(told.status, 0);
+      assert.match(told.output, /v3 not published: .*Publish this as version 4/);
+      assert.equal((await metaOf(slug)).versions[2].prompt, 'Recovered version');
+      localDoc(slug, { 1: 'one', 2: 'two', 3: 'three EDITED', 4: 'four' });
+      const up = await cliPublish(slug);
+      assert.equal(up.status, 0, up.output);
+      assert.match(up.output, /older version\(s\) 3 differ from the server's/);
+      assert.doesNotMatch(up.output, /re-run \/tdoc publish to retry/);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3, 4]);
+      assert.ok(!(await htmlOf(slug, 3)).includes('EDITED'));
+    });
+
+    await t('CLI: a first publish that stopped is told to wait, in words', async () => {
+      const slug = `cli-doc-${++docN}`;
+      await post('/__kv-fail', { put: `meta:${slug}` });
+      assert.equal((await v1Upload(slug, 'one')).status, 500);
+      localDoc(slug, { 1: 'one EDITED' });
+      const r = await cliPublish(slug);
+      assert.notEqual(r.status, 0);
+      assert.match(r.output, /v1 not published: An earlier first publish of this doc did not finish\. Try again in about \d+ seconds/);
+      await age(slug, 1, 3 * 60 * 1000);
+      const again = await cliPublish(slug);
+      assert.equal(again.status, 0, again.output);
+    });
+
+    // A cursor ahead of the record, with no stamp: as live cursors are at deploy.
+    await t('CLI: a cursor ahead of any bytes starts a bounded wait and ends it, with no person involved', async () => {
+      const slug = `cli-doc-${++docN}`;
+      localDoc(slug, { 1: 'one' });
+      assert.equal((await cliPublish(slug)).status, 0);
+      await setStorage(slug, { versionCursor: { latest: 5, pending: null } });
+      localDoc(slug, { 1: 'one', 2: 'two' });
+      const refused = await cliPublish(slug);
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.output, /v2 not published: .*Try again in about \d+ seconds/);
+      await pastTheLimit(slug);
+      const up = await cliPublish(slug);
+      assert.equal(up.status, 0, up.output);
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2]);
+      assert.equal((await storage(slug)).cursor.latest, 2);
+    });
+
+    await t('MCP: a cursor ahead of bytes no record lists: wait, then told, then get_doc and publish land above them', async () => {
+      const mcp = await mcpSession();
+      const slug = await fresh('mcp');
+      await post('/__write-r2', { key: `docs/${slug}/v2/index.html`, value: '<p>ORPHAN</p>' });
+      await setStorage(slug, { versionCursor: { latest: 2, pending: null } });
+      const first = await mcp('update_doc', { slug, html: pageOf('Words.') });
+      assert.ok(first.isError);
+      assert.ok(first.structuredContent.retry_after > 0, JSON.stringify(first.structuredContent));
+      assert.doesNotMatch(first.structuredContent.message, /get_doc/, 'nothing to read yet');
+      await pastTheLimit(slug);
+      const told = await mcp('update_doc', { slug, html: pageOf('Words.') });
+      assert.ok(told.isError);
+      assert.equal(told.structuredContent.next_version, 3);
+      assert.match(told.structuredContent.message, /Call get_doc, then publish again/);
+      const doc = await mcp('get_doc', { slug, format: 'text' });
+      assert.equal(doc.structuredContent.latest_version, 2);
+      const landed = await mcp('update_doc', { slug, html: pageOf('Words.') });
+      assert.ok(!landed.isError, JSON.stringify(landed));
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3]);
+      assert.equal(await htmlOf(slug, 2), '<p>ORPHAN</p>');
     });
 
     await t('a healthy doc: saves and uploads alternate, retried bytes pass, the store says nothing new', async () => {
@@ -862,8 +1158,6 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     });
 
     // ── A doc deleted for good stays deleted for its own saves ──
-    const pageOf = (a) => page(a, 'Same.');
-    const left = async (slug) => (await fetch(`${base}/__left?slug=${slug}`)).json();
     const nothingLeft = async (slug) => assert.deepEqual(await left(slug), { kv: [], r2: [] });
     const purgedAtStaleRead = async (publishAs = (slug, n) => publish(slug, n, `Words ${n}.`, 'Same.')) => {
       const slug = `purged-doc-${++docN}`;
@@ -912,34 +1206,23 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
     });
 
     await t('MCP update_doc on a team doc, from a stale read after Delete forever: refused, nothing comes back', async () => {
-      const REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
-      const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      const client_id = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
-      await kv(`oauth-cimd:${crypto.createHash('sha256').update(client_id).digest('hex')}`, JSON.stringify({ client_id, client_name: 'Claude', redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], fetched_at: Date.now() }));
-      const verifier = b64url(crypto.randomBytes(32));
-      const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
-      const q = new URLSearchParams({ response_type: 'code', client_id, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: 'S256', state: 's', scope: 'mcp', resource: 'https://tdoc.dev/mcp' });
-      const page = await call(`/oauth/authorize?${q}`, { cookie });
-      assert.equal(page.status, 200, page.text.slice(0, 200));
-      const boot = JSON.parse(page.text.match(/__TDOC_APP_BOOT__\s*=\s*(\{.*?\});?\s*<\/script>/s)[1]);
-      const approved = await call('/api/oauth/approve', { method: 'POST', cookie, body: { request_id: boot.request_id, csrf: boot.csrf, decision: 'allow' } });
-      const code = new URL(approved.body.redirect).searchParams.get('code');
-      const issued = await fetch(`${base}/oauth/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: REDIRECT, client_id, resource: 'https://tdoc.dev/mcp' }).toString() });
-      const mcpToken = (await issued.json()).access_token;
+      const mcp = await mcpSession();
       const created = await call('/api/teams', { method: 'POST', cookie, body: { name: 'Mcp Co' } });
       const team = created.body.team.slug || created.body.team.name;
-      const up = (slug, n) => call('/api/upload', { method: 'POST', token, body: { slug, version: n, team, html: page2(n), meta: { title: 'Team doc', versions: [{ n, created: new Date().toISOString(), prompt: `publish ${n}` }] } } });
-      const page2 = (n) => pageOf(`Words ${n}.`);
+      const up = (slug, n) => call('/api/upload', { method: 'POST', token, body: { slug, version: n, team, html: pageOf(`Words ${n}.`), meta: { title: 'Team doc', versions: [{ n, created: new Date().toISOString(), prompt: `publish ${n}` }] } } });
       const { slug } = await purgedAtStaleRead(up);
-      const r = await call('/mcp', {
-        method: 'POST', token: mcpToken,
-        headers: { Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18' },
-        body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'update_doc', arguments: { slug, html: pageOf('Back again?') } } },
-      });
-      assert.equal(r.status, 200, r.text);
-      assert.ok(r.body.result.isError, r.text);
+      const r = await mcp('update_doc', { slug, html: pageOf('Back again?') });
+      assert.ok(r.isError, JSON.stringify(r));
       await behind(slug, null);
       await nothingLeft(slug);
+    });
+
+    await t('a stale read reaching the store\'s reservation after Delete forever: refused there, before any bytes', async () => {
+      const { slug } = await purgedAtStaleRead();
+      const r = await reserve(slug, 2);
+      assert.equal(r.error, 'not_found', JSON.stringify(r));
+      await behind(slug, null);
+      assert.equal((await storage(slug)).cursor, null, 'no reservation taken');
     });
 
     await t('an old tab, long after: its read finds no record', async () => {
@@ -995,13 +1278,13 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.ok(!(await storage(slug)).keys.includes('purgeHold'), 'and is gone');
     });
 
-    await t('a save already running when the purge begins: its bytes go and the record does not come back', async () => {
+    await t('a save already running when the purge begins: the bytes it writes after go, and the record does not come back', async () => {
       const slug = await fresh('inflight');
-      await r2({ hold: true });
+      await r2({ holdPut: true });
       const running = doSave(slug, 1, page('In flight.', 'Same.'));
       await new Promise((resolve) => setTimeout(resolve, 200));
       await trashAndPurge(slug);
-      await r2({ hold: false });
+      await r2({ holdPut: false });
       const r = await running;
       assert.equal(r.status, 404, JSON.stringify(r.body));
       await nothingLeft(slug);
