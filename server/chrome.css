@@ -194,8 +194,12 @@
      fits the screen, scrolls this part, and keeps the reply box under it. */
   .tdoc-cc-body { display: contents; }
   .tdoc-margin-comment.tdoc-floating-open { display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; }
-  .tdoc-floating-open > .tdoc-cc-body { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-  .tdoc-floating-open > .tdoc-reply-form { flex: none; max-height: 60%; overflow-y: auto; overscroll-behavior: contain; }
+  /* overflow-y alone makes overflow-x auto too, and the head's ✓ / ⋯ sit 4px
+     into the card's padding (margin -4px below): the open card then dragged
+     sideways on a trackpad. The body reaches those 4px with its own padding,
+     so nothing is clipped, and never scrolls sideways; long words wrap. */
+  .tdoc-floating-open > .tdoc-cc-body { display: block; flex: 1 1 auto; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; margin-right: -4px; padding-right: 4px; }
+  .tdoc-floating-open > .tdoc-reply-form { flex: none; min-width: 0; max-height: 60%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
   .tdoc-margin-comment.active { box-shadow: 0 4px 16px var(--td-accent-ring-soft); border-color: var(--td-accent); }
   .tdoc-margin-comment.tdoc-current-comment { box-shadow: 0 0 0 2px var(--td-accent-ring-soft), 0 4px 16px var(--td-accent-ring-soft); }
   .tdoc-margin-comment.tdoc-unanchored { border-style: dashed; }
@@ -360,18 +364,20 @@
   .tdoc-agent-status-partial { background: #fff4dc; color: #8a5a00; }
   .tdoc-agent-status-question { background: #ffe7e7; color: #a52323; }
   /* pre-wrap: keep newlines from agent/human replies. Markdown still plain text. */
-  .tdoc-margin-comment .text { color: #202124; line-height: 1.5; word-wrap: break-word; font-size: 13.5px; white-space: pre-wrap; }
+  .tdoc-margin-comment .text { color: #202124; line-height: 1.5; word-wrap: break-word; overflow-wrap: anywhere; min-width: 0; font-size: 13.5px; white-space: pre-wrap; }
   .tdoc-margin-comment .text .tdoc-md-p { display: inline; }
   .tdoc-margin-comment .text .tdoc-md-list { margin: 6px 0; padding-left: 1.2em; white-space: normal; }
   .tdoc-margin-comment .text .tdoc-md-list li { margin: 2px 0; }
   .tdoc-margin-comment .text .tdoc-md-pre {
     display: block; margin: 8px 0; padding: 8px 10px; border-radius: 8px;
     background: #f1f3f4; overflow-x: auto; white-space: pre; font-size: 12.5px; line-height: 1.45;
+    max-width: 100%; box-sizing: border-box; overflow-wrap: normal;
   }
   .tdoc-margin-comment .text .tdoc-md-code,
   .tdoc-reply .text .tdoc-md-code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.92em; background: #f1f3f4; padding: 1px 5px; border-radius: 4px;
+    overflow-wrap: anywhere; box-decoration-break: clone; -webkit-box-decoration-break: clone;
   }
   .tdoc-margin-comment .text .tdoc-md-strong,
   .tdoc-reply .text .tdoc-md-strong { font-weight: 650; }
@@ -381,6 +387,7 @@
   .tdoc-reply .text .tdoc-md-pre {
     display: block; margin: 8px 0; padding: 8px 10px; border-radius: 8px;
     background: #f1f3f4; overflow-x: auto; white-space: pre; font-size: 12px; line-height: 1.45;
+    max-width: 100%; box-sizing: border-box; overflow-wrap: normal;
   }
   /* A tombstone (#354): the words are gone, the name and the slot are not.
      Muted and italic so it reads as an absence, not as something said. */
@@ -495,7 +502,7 @@
      underneath once you reach the end of the card. This rule waited on
      `body.tdoc-pins`, which the React shell never sets, so it has been inert
      since the port. */
-  body:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { max-height: calc(100vh - 86px); overflow-y: auto; overscroll-behavior: contain; box-shadow: 0 6px 24px rgba(0,0,0,0.16); }
+  body:not(.tdoc-narrow) .tdoc-margin-comment.tdoc-floating-open { max-height: calc(100vh - 86px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; box-shadow: 0 6px 24px rgba(0,0,0,0.16); }
 
   /* Cluster popover: a compact list of the comments under a badge. Click one
      to open its full card. */
@@ -595,7 +602,8 @@
   .tdoc-reply .author img { width: 18px; height: 18px; border-radius: 50%; }
   .tdoc-reply .author .login { font-weight: 600; font-size: 12px; color: #111; }
   .tdoc-reply .author .anon { color: #888; font-style: italic; font-size: 12px; }
-  .tdoc-reply .text { color: #222; font-size: 13px; line-height: 1.4; word-wrap: break-word; white-space: pre-wrap; }
+  .tdoc-reply { min-width: 0; }
+  .tdoc-reply .text { color: #222; font-size: 13px; line-height: 1.4; word-wrap: break-word; overflow-wrap: anywhere; min-width: 0; white-space: pre-wrap; }
   .tdoc-reply .meta { font-size: 11px; color: #888; margin-top: 4px; display: flex; justify-content: space-between; }
   .tdoc-reply .del { cursor: pointer; color: #c33; }
   .tdoc-reply .del:hover { text-decoration: underline; }
@@ -893,7 +901,7 @@
   body.tdoc-narrow[data-tdoc-suggest-bar] .tdoc-fab { bottom: calc(var(--tdoc-suggest-bar-h, 110px) + 12px); }
   body.tdoc-narrow .tdoc-fab-unread-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border: 2px solid var(--td-ground, #fff); border-radius: 50%; background: var(--td-accent, #1652f0); box-sizing: border-box; }
   body.tdoc-narrow .tdoc-drawer-tabs { display: flex; flex: none; justify-content: center; margin: 0 0 10px; }
-  body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  body.tdoc-narrow .tdoc-drawer-list, body.tdoc-narrow .tdoc-drawer-ask { flex: 1; min-height: 0; min-width: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
   body.tdoc-narrow .tdoc-comment-filter-row { position: sticky; top: 0; z-index: 1; padding: 4px 0 10px; background: #fff; }
   body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg { width: 100%; }
   body.tdoc-narrow .tdoc-drawer-tabs .tdoc-seg button { flex: 1; }
