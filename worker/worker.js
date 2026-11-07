@@ -17418,7 +17418,7 @@ export class CommentsStore {
   // after it (a version, a switch to private, Trash), so the save is refused at any
   // base and the first refusal is stamped. An upload builds its own record and
   // does not ask.
-  async _reserveVersion(baseVersion, metaLatest, { refuseAhead = false } = {}) {
+  async _reserveVersion(baseVersion, metaLatest, { refuseAhead = false, recovered = false } = {}) {
     let result;
     const reservationId = rand(8);
     const started = Date.now();
@@ -17443,7 +17443,8 @@ export class CommentsStore {
         result = { ok: false, status: 409, behindSince, latest: cursor.latest, body: { error: 'save_in_progress', latestVersion: cursor.latest } };
         return;
       }
-      if (refuseAhead && cursor.behind_since) {
+      // Only a read that has itself caught up ends the wait, not a rebuilt list.
+      if (refuseAhead && !recovered && cursor.behind_since) {
         delete cursor.behind_since;
         await txn.put('versionCursor', cursor);
       }
@@ -17492,7 +17493,7 @@ export class CommentsStore {
     }
     if (n <= first.latest) await this._lowerCursor(first.latest, n - 1);
     const recovered = { ...meta, versions };
-    return { ...(await this._reserveVersion(baseVersion, n - 1, { refuseAhead: true })), meta: recovered };
+    return { ...(await this._reserveVersion(baseVersion, n - 1, { refuseAhead: true, recovered: true })), meta: recovered };
   }
 
   async _lowerCursor(from, to) {
@@ -19367,12 +19368,14 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
   // Accept: read the set, apply its pending edits to the latest version and
   // save that as this person's version. The version store takes one save
   // per base version, so two accepts racing cannot both publish on the same
-  // base; the loser reads the new latest and plans again (an edit already in
-  // it no longer matches and is reported stale, never applied twice). A read
-  // the store knows is stale is refused rather than written: KV is given a
-  // moment, then the person is told and the suggestion stays pending. The set
-  // is settled in one step afterwards.
+  // base; the loser plans again on the latest the store names, since this read
+  // may be the stale one (an edit already in it no longer matches and is reported
+  // stale, never applied twice). The store refuses a save when its own read is
+  // stale, so that retry cannot write one: KV is given a moment, then the person
+  // is told and the suggestion stays pending. The set is settled in one step
+  // afterwards.
   let latest = gate.latest;
+  let named = 0;
   let set = null;
   let good = [];
   let stale = [];
@@ -19382,7 +19385,7 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
       await new Promise((done) => setTimeout(done, SUGGEST_ACCEPT_WAIT_MS));
       const meta = await loadDocMeta(env, slug);
       if (!meta) return json({ error: 'not_found' }, { status: 404 });
-      latest = latestVersionNumber(meta);
+      latest = Math.max(latestVersionNumber(meta), named);
     }
     const got = await suggestionsOp(env, slug, { kind: 'get', id });
     if (!got.ok) return got.error === 'suggestion_not_found' ? json({ error: 'suggestion_not_found' }, { status: 404 }) : suggestionsUnavailable();
@@ -19430,6 +19433,7 @@ async function handleSuggestionDecision(env, req, url, slug, id, decision) {
     });
     const refused = saved.status === 409 && saved.body ? saved.body.error : '';
     if (refused !== 'version_conflict' && refused !== 'save_in_progress') break;
+    if (refused === 'version_conflict') named = Number(saved.body.latestVersion) || 0;
   }
   if (saved.status !== 200 || !saved.body || !saved.body.ok) {
     return json(saved.body || { error: 'version_write_failed' }, { status: saved.status || 500 });

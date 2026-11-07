@@ -254,12 +254,12 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       await expectV3(slug, set, await accept(slug, set));
     });
 
-    await t('KV behind for the Worker only: refused the same way, then v3', async () => {
+    await t('KV behind for the Worker only: the Accept takes the store\'s version and lands on it', async () => {
       const { slug, set, beforeV2 } = await twoEditsThenV2();
       await behind(slug, beforeV2, 'worker');
-      await refusedAccept(slug, set, 'version_conflict');
+      const r = await accept(slug, set);
       await behind(slug, null);
-      await expectV3(slug, set, await accept(slug, set));
+      await expectV3(slug, set, r);
     });
 
     await t('KV catching up during the short wait: the Accept lands without a second press', async () => {
@@ -394,6 +394,46 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.ok((await htmlOf(slug, 2)).includes('Beta rewritten by v2.'), 'v2 bytes untouched');
     });
 
+    const stuck = async () => {
+      const made = await twoEditsThenV2();
+      await setStorage(made.slug, { versionCursor: { latest: 2, pending: null } });
+      await kv(`meta:${made.slug}`, made.beforeV2);
+      return made;
+    };
+
+    await t('KV never catching up, through Accept: refused inside the limit, then v3 on v2, the changed edit stale', async () => {
+      const { slug, set } = await stuck();
+      const refused = await accept(slug, set);
+      assert.equal(refused.status, 409, refused.text);
+      assert.equal(refused.body.error, 'save_in_progress');
+      assert.deepEqual((await pendingIds(slug)).sort(), set.edits.map((e) => e.id).sort(), 'still pending');
+      await pastTheLimit(slug);
+      const r = await accept(slug, set);
+      assert.equal(r.status, 200, r.text);
+      assert.equal(r.body.version, 3);
+      assert.deepEqual(r.body.accepted, [set.edits[0].id]);
+      assert.deepEqual(r.body.stale, [set.edits[1].id]);
+      const html = await htmlOf(slug, 3);
+      assert.ok(html.includes('Alpha accepted.') && html.includes('Beta rewritten by v2.'), html);
+      const meta = await metaOf(slug);
+      assert.deepEqual(numbers(meta), [1, 2, 3]);
+      assert.equal(meta.versions[1].prompt, 'Recovered version');
+    });
+
+    await t('a save at a low base past the limit does not restart the clock', async () => {
+      const { slug } = await stuck();
+      refusedSave(await doSave(slug, 2));
+      await pastTheLimit(slug);
+      const stamp = (await storage(slug)).cursor.behind_since;
+      const low = await doSave(slug, 1);
+      assert.equal(low.status, 409, JSON.stringify(low.body));
+      assert.equal(low.body.error, 'version_conflict');
+      assert.equal(low.body.latestVersion, 2);
+      assert.equal((await storage(slug)).cursor.behind_since, stamp, 'same stamp');
+      assert.equal((await doSave(slug, 2)).status, 200, 'and the right base lands at once');
+      assert.deepEqual(numbers(await metaOf(slug)), [1, 2, 3]);
+    });
+
     const aheadOfBytes = async () => {
       const slug = `accept-doc-${++docN}`;
       assert.equal((await publish(slug, 1, 'Alpha sentence stays.', 'Beta sentence here.')).status, 200);
@@ -410,6 +450,20 @@ const w :Workerd.Worker = (modules = [(name = "worker", esModule = embed "worker
       assert.equal(saved.body.version, 2);
       assert.deepEqual(numbers(await metaOf(slug)), [1, 2]);
       assert.equal((await storage(slug)).cursor.latest, 2);
+    });
+
+    await t('a cursor ahead of any bytes, through Accept: readable refusal inside the limit, then it lands', async () => {
+      const slug = `accept-doc-${++docN}`;
+      assert.equal((await publish(slug, 1, 'Alpha sentence stays.', 'Beta sentence here.')).status, 200);
+      const { body } = await call(`/api/docs/${slug}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'Alpha sentence stays.', replace: 'Alpha accepted.' }], agent_login: 'claude', agent_name: 'Claude' } });
+      await setStorage(slug, { versionCursor: { latest: 5, pending: null } });
+      const refused = await accept(slug, body.suggestion);
+      assert.equal(refused.status, 409, refused.text);
+      assert.equal(refused.body.error, 'save_in_progress');
+      await pastTheLimit(slug);
+      const r = await accept(slug, body.suggestion);
+      assert.equal(r.status, 200, r.text);
+      assert.equal(r.body.version, 2);
     });
 
     await t('an R2 error past the limit is a 503, never "no bytes": nothing lowered, nothing written', async () => {
