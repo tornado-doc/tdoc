@@ -539,7 +539,8 @@ export function DocumentShell({ boot, config }) {
   }, [comments.moveAnchor, config.canComment, config.signInToComment]);
 
   const sendToFrame = useCallback((message) => bridgeRef.current?.(message), []);
-  const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame });
+  // The signed-out homepage remembers nothing about a visitor's view.
+  const sheetHandlers = useSheetView({ slug: config.slug, send: sendToFrame, persist: !(config.isLanding && !config.identity) });
   const bridge = useFrameBridge({
     ...sheetHandlers,
     'tdoc:demoRewriteDone': (message) => {

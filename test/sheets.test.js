@@ -253,6 +253,17 @@ async function t(name, fn) {
     assert(ms < 300, `took ${ms}ms`);
   });
 
+  await t('the view in the #hash: added beside key=value pairs, never over a plain anchor', async () => {
+    const H = await import('../shell/src/document/sheet-hash.js');
+    assert.equal(H.withHashView('', 'abc'), '#sheet=abc');
+    assert.equal(H.withHashView('#c=12', 'abc'), '#c=12&sheet=abc');
+    assert.equal(H.withHashView('#c=12&sheet=old', ''), '#c=12');
+    assert.equal(H.withHashView('#intro', 'abc'), '#intro', 'a plain anchor stays');
+    assert.equal(H.withHashView('#intro&x=1', 'abc'), '#intro&x=1');
+    assert.equal(H.readHashView('#intro'), '');
+    assert.equal(H.readHashView('#c=1&sheet=xyz'), 'xyz');
+  });
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

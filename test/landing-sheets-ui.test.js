@@ -2,7 +2,8 @@
 // visitor sees it, desktop and phone: the reader draws the sample
 // <table data-tdoc-sheet> as a grid, fetching the sheets viewer only
 // because the page holds a sheet; search, a tag filter, sort and the comment
-// composer on a cell all work; nothing is written. Screenshots:
+// composer on a cell all work; nothing is written, and the visitor's view is
+// kept neither in localStorage nor in the URL. Screenshots:
 // TDOC_TEST_SCREENSHOTS=<dir>.
 const fs = require('fs');
 const http = require('http');
@@ -111,6 +112,10 @@ async function startServer(worker, env) {
       await f.getByRole('menuitem', { name: 'Sort descending' }).click();
       const pts = await frame.evaluate(() => Array.from(document.querySelectorAll('#sheets .ts-row')).map((r) => Number(r.querySelector('[data-c="5"]').textContent)));
       assert(pts.every((v, i) => !i || v <= pts[i - 1]), `sorted: ${pts}`);
+      // A signed-out visitor's view is not kept: no storage, no #sheet= hash.
+      await page.waitForTimeout(400);
+      const kept = await page.evaluate(() => ({ hash: location.hash, keys: Object.keys(localStorage).filter((k) => k.startsWith('tdoc-sheet-view')) }));
+      assert(!/sheet=/.test(kept.hash) && !kept.keys.length, `the homepage kept a view: ${JSON.stringify(kept)}`);
       // Comment preview: a cell, its pill, the composer.
       await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'comment');
       await f.locator('#sheets .ts-row[data-i="1"] .ts-c[data-c="0"]').click();

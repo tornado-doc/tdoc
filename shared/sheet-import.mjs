@@ -92,7 +92,8 @@ export function sheetFromGrid(name, grid, { warnings = [] } = {}) {
     return { name: n, type };
   });
   return {
-    name: String(name || 'Sheet 1').slice(0, 100),
+    // One line: a worksheet name with a line break would split a tab.
+    name: String(name || 'Sheet 1').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100) || 'Sheet 1',
     columns,
     rows: data.map((cells, i) => ({
       id: `r${i + 1}`,
@@ -155,9 +156,11 @@ export function sheetsFromWorkbook(XLSX, wb, { warnings = [] } = {}) {
 function isoDates(XLSX, ws) {
   const SSF = XLSX.SSF;
   const pad = (n) => String(n).padStart(2, '0');
-  for (const key of Object.keys(ws)) {
-    if (key[0] === '!') continue;
-    const cell = ws[key];
+  // Dense sheets (read with dense: true) keep cells in rows under !data.
+  const cells = Array.isArray(ws['!data'])
+    ? ws['!data'].flatMap((row) => (Array.isArray(row) ? row : []))
+    : Object.keys(ws).filter((key) => key[0] !== '!').map((key) => ws[key]);
+  for (const cell of cells) {
     if (!cell || cell.t !== 'n' || !cell.z || !SSF.is_date(cell.z)) continue;
     const d = SSF.parse_date_code(cell.v);
     if (!d) continue;
@@ -190,7 +193,10 @@ export async function importSheetFile(file, { loadXlsx, title, kind: asKind } = 
     let wb;
     try {
       const bytes = file.bytes instanceof ArrayBuffer ? new Uint8Array(file.bytes) : file.bytes;
-      wb = XLSX.read(bytes, { type: 'array', cellDates: false, cellNF: true, sheetStubs: false });
+      // sheetRows stops reading a worksheet past what an import may keep
+      // (the header, the row limit, and one more to say it was over), and
+      // dense storage keeps a big sheet's cells in arrays, not one object.
+      wb = XLSX.read(bytes, { type: 'array', cellDates: false, cellNF: true, sheetStubs: false, dense: true, sheetRows: LIMITS.rows + 2 });
     } catch (error) {
       throw new SheetImportError('This file could not be read as an Excel workbook. If it is password-protected, remove the password and try again.', 'unreadable');
     }
