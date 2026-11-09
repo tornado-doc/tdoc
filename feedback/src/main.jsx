@@ -405,9 +405,19 @@ ${uiCss}
       if (e.type === 'click' && path.some((n) => n instanceof Element && n.localName === 'a' && n.hasAttribute('href'))) return;
       // Our own code clicking one of our inputs (a Base UI checkbox forwards
       // its press to its hidden <input>): cancelling that click and sending a
-      // copy toggled the box and then undid it, so Ask only never ticked.
-      // Let it run; the person's own press was already kept from the app.
-      if (e.type === 'click' && !e.isTrusted && inner instanceof Element && inner.localName === 'input') return;
+      // copy toggled the box, and the original's cancelled activation then
+      // undid it when its dispatch ended, so Ask only never ticked. Such a
+      // click is stopped here like any other (the app's capture listeners
+      // never see it) and cancelled, and its copy goes out once the original
+      // has finished: one toggle, which React hears.
+      if (e.type === 'click' && !e.isTrusted && inner instanceof Element && inner.localName === 'input') {
+        let later;
+        try { later = copy(e); } catch (_) { return; }
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        queueMicrotask(() => { if (inner.isConnected) inner.dispatchEvent(later); });
+        return;
+      }
       let event;
       try { event = copy(e); } catch (_) { return; }
       e.stopImmediatePropagation();

@@ -343,6 +343,13 @@ async function startServer(worker, env) {
           if (r.url().includes(`/api/docs/${space.slug}/my-agent`)) asks.push(r.postDataJSON());
           if (r.url().includes('/api/notify/handoff')) handoffs.push(r.url());
         });
+        // The app's own "press outside" listeners (document, capture) must
+        // never see a press inside the widget, the checkbox's forwarded one
+        // included.
+        await page.addInitScript(() => {
+          window.__hostSaw = [];
+          document.addEventListener('click', (e) => { if (e.target && e.target.id === 'tdoc-feedback-root') window.__hostSaw.push(e.isTrusted ? 'trusted' : 'synthetic'); }, true);
+        });
         let root;
         if (where === 'widget') { await ui.widget.open(page, target); root = await ui.widget.header(page); }
         else { await page.goto(`${base}/d/${space.slug}`); root = page; }
@@ -362,6 +369,7 @@ async function startServer(worker, env) {
         assert.equal(asks.length, 1, 'nobody was asked');
         assert.equal(asks[0].recipient && asks[0].recipient.agent_sub, RAFT.agent_sub, JSON.stringify(asks[0]));
         assert.deepEqual(handoffs, [], 'handed off to edit');
+        if (where === 'widget') assert.deepEqual(await page.evaluate(() => window.__hostSaw), [], 'the app saw a press inside the widget');
         assert.deepEqual(page.errors, []);
         await ctx.close();
       });

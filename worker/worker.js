@@ -17866,16 +17866,22 @@ async function handleThreadSeen(env, req, url) {
   ensureMigrated(list);
   const threads = new Set(snapshotList(list, Infinity).map((c) => c.id));
   const next = cleanThreadSeen(stored, { allowed: threads });
-  let changed = Object.keys(next).length !== Object.keys(stored).length;
   // Named back to the caller, who may read every thread id anyway: the ids
   // asked about that the doc does not hold, so its cache can drop them.
   const unknown = [];
   for (const [id, stamp] of asked) {
     if (!threads.has(id)) { unknown.push(id); continue; }
-    if (stamp > (next[id] || 0)) { next[id] = stamp; changed = true; }
+    if (stamp > (next[id] || 0)) next[id] = stamp;
   }
   // Newest marks first when there are more threads than the record keeps.
-  const kept = Object.fromEntries(Object.entries(next).sort((a, b) => b[1] - a[1]).slice(0, THREAD_SEEN_MAX_ENTRIES));
+  // The ones asked about that fall past the cap are named (`capped`): the
+  // caller keeps them locally and stops sending them.
+  const ordered = Object.entries(next).sort((a, b) => b[1] - a[1]);
+  const kept = Object.fromEntries(ordered.slice(0, THREAD_SEEN_MAX_ENTRIES));
+  const capped = asked.map(([id]) => id).filter((id) => threads.has(id) && !(id in kept));
+  // Written only if what is kept differs from what was stored.
+  const changed = Object.keys(kept).length !== Object.keys(stored).length
+    || Object.entries(kept).some(([id, stamp]) => stored[id] !== stamp);
   if (changed) {
     try {
       await env.META.put(key, JSON.stringify(kept), { expirationTtl: THREAD_SEEN_TTL_SECONDS });
@@ -17885,7 +17891,7 @@ async function handleThreadSeen(env, req, url) {
       return json({ error: 'seen_unavailable' }, { status: 503, headers: { ...headers, 'Retry-After': '60' } });
     }
   }
-  return json({ ok: true, seen: kept, unknown }, { headers });
+  return json({ ok: true, seen: kept, unknown, capped }, { headers });
 }
 
 const authoredBy = (keys, item) => {

@@ -85,6 +85,15 @@ async function load() {
   assert.deepStrictEqual(ahead, { capped: 40 });
   ok('a capped id is the only thing still ahead of the server');
 
+  // Past the server's cap: kept here, and not sent again until it moves on.
+  globalThis.__tdocSeenStore.set('tdoc.thread-seen.cap', JSON.stringify({ old: 10, kept: 20 }));
+  reconcileSeenMap('cap', { old: 10, kept: 20 }, { kept: 20 }, [], ['old']);
+  assert.deepStrictEqual(readSeenMap('cap'), { old: 10, kept: 20 });
+  assert.deepStrictEqual(mergeSeenMap('cap', { kept: 20 }).ahead, {});
+  globalThis.__tdocSeenStore.set('tdoc.thread-seen.cap', JSON.stringify({ old: 30, kept: 20 }));
+  assert.deepStrictEqual(mergeSeenMap('cap', { kept: 20 }).ahead, { old: 30 });
+  ok('a capped mark stays local and is not resent until it moves on');
+
   console.log(`\n${pass} passed`);
 })().catch((e) => {
   console.error(e);
