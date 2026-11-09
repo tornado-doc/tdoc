@@ -6,7 +6,11 @@ import { CommentCard } from '../../shell/src/document/comment-card.jsx';
 import { CommentThreadList } from '../../shell/src/document/comment-thread-list.jsx';
 import { CommentPinFace, commentPinState } from '../../shell/src/document/comment-pin.jsx';
 import { useCommentArea, useCommentListPrefs } from '../../shell/src/comments/core/comment-area.js';
-import { filterOptions, groupBy, SORT_OPTIONS } from '../../shell/src/comments/core/comment-query.js';
+import { groupBy } from '../../shell/src/comments/core/comment-query.js';
+import { CommentPanel } from '../../shell/src/comments/panel/comment-panel.jsx';
+import { CommentSheet, SheetContent } from '../../shell/src/comments/panel/comment-sheet.jsx';
+import { AgentActivityButton, agentActivitySummary } from '../../shell/src/comments/panel/agent-activity.jsx';
+import { useDoubleTapOption, useEscapeLadder } from '../../shell/src/comments/panel/keyboard.js';
 import { useCommentFeed } from '../../shell/src/comments/core/use-comment-feed.js';
 import { isNarrowViewport } from '../../shell/src/comments/core/narrow.js';
 import { AppSelect } from '../../shell/src/ui/select.jsx';
@@ -122,53 +126,16 @@ ${uiCss}
       font: 13px/1.45 system-ui, -apple-system, sans-serif;
       animation: tdoc-fb-panel-in .16s ease-out;
     }
+    #tdoc-feedback-root .tdoc-fb-panel .tdoc-cpanel { flex: 1 1 auto; }
     @media (max-width: 700px) {
       #tdoc-feedback-root .tdoc-feedback-dock.panel-open { display: none; }
       #tdoc-feedback-root .tdoc-fb-panel { width: 100vw; }
     }
     @keyframes tdoc-fb-panel-in { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
     @media (prefers-reduced-motion: reduce) { #tdoc-feedback-root .tdoc-fb-panel { animation: none; } }
-    /* The header wraps instead of running past the panel: title, refresh and
-       close stay on the first row (close always visible), filters below. */
-    #tdoc-feedback-root .tdoc-fb-panel header {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 10px 12px 14px; border-bottom: 1px solid #efeeea;
-    }
-    #tdoc-feedback-root .tdoc-fb-panel header strong { flex: 1 1 auto; min-width: 0; }
-    #tdoc-feedback-root .tdoc-fb-panel header .tdoc-fb-filter { order: 3; flex: 1 1 100%; margin-left: 0; justify-content: space-between; }
-    #tdoc-feedback-root .tdoc-fb-panel header .tdoc-fb-filter button { flex: 1 1 auto; padding: 4px 3px; white-space: nowrap; }
-    #tdoc-feedback-root .tdoc-fb-panel header strong { font-size: 15px; }
-    #tdoc-feedback-root .tdoc-fb-filter { display: inline-flex; gap: 2px; margin-left: auto; background: #f3f3f1; border-radius: 8px; padding: 2px; }
-    #tdoc-feedback-root .tdoc-fb-filter button { appearance: none; border: 0; background: transparent; border-radius: 6px; padding: 4px 6px; font: 600 11.5px system-ui, sans-serif; color: #6b6a66; cursor: pointer; }
-    #tdoc-feedback-root .tdoc-fb-filter button.on { background: #fff; color: #1a1a1a; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
-    #tdoc-feedback-root .tdoc-fb-panel .x { appearance: none; border: 0; background: none; font-size: 20px; line-height: 1; color: #8a8985; cursor: pointer; padding: 0 2px; }
-    #tdoc-feedback-root .tdoc-fb-refresh { appearance: none; border: 0; background: none; color: #6b6a66; cursor: pointer; border-radius: 6px; padding: 5px; display: inline-flex; }
-    #tdoc-feedback-root .tdoc-fb-refresh:hover { background: #f0f0ee; color: #1a1a1a; }
-    #tdoc-feedback-root .tdoc-fb-refresh svg { width: 15px; height: 15px; }
-    #tdoc-feedback-root .tdoc-fb-refresh[aria-busy="true"] svg { animation: tdoc-fb-spin .7s linear infinite; }
-    #tdoc-feedback-root .tdoc-fb-add { appearance: none; border: 0; border-radius: 6px; background: #1652f0; color: #fff; cursor: pointer; padding: 5px 8px; font: 600 11.5px system-ui, sans-serif; }
     @keyframes tdoc-fb-spin { to { transform: rotate(360deg); } }
-    #tdoc-feedback-root .tdoc-fb-query { margin: 0; padding: 8px 14px; border-bottom: 1px solid #efeeea; }
-    #tdoc-feedback-root .tdoc-fb-readbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; border-bottom: 1px solid #efeeea; color: #6b6a66; font: 12px system-ui, sans-serif; }
-    #tdoc-feedback-root .tdoc-fb-readbar button { appearance: none; border: 0; background: none; color: var(--td-accent); cursor: pointer; font: 600 12px system-ui, sans-serif; }
-    #tdoc-feedback-root .tdoc-fb-scroll { flex: 1; overflow-y: auto; padding: 6px 8px 16px; overscroll-behavior: contain; }
-    #tdoc-feedback-root .tdoc-fb-scroll h4 { margin: 14px 8px 6px; font: 700 11px/1.2 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: #8a8985; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #tdoc-feedback-root .tdoc-fb-item {
-      margin: 0 0 10px; padding: 0 6px;
-    }
-    #tdoc-feedback-root .tdoc-fb-item .tdoc-margin-comment {
-      position: relative; inset: auto; width: 100%; max-width: 100%; box-shadow: none;
-      cursor: default;
-    }
-    #tdoc-feedback-root .tdoc-fb-item .tdoc-margin-comment:hover { box-shadow: 0 4px 16px var(--td-accent-ring-soft); }
-    #tdoc-feedback-root .tdoc-fb-context {
-      appearance: none; display: block; width: 100%; margin: 0 0 5px; padding: 0 2px;
-      border: 0; background: none; color: #6b6a66; cursor: pointer;
-      font: 500 11px/1.35 system-ui, sans-serif; text-align: left;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    #tdoc-feedback-root .tdoc-fb-context:hover { color: var(--td-accent); }
     #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send { position: relative; padding: 7px; }
-    #tdoc-feedback-root .tdoc-fb-send-badge { position: absolute; top: 0; right: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px; background: #1652f0; color: #fff; font: 700 9.5px/15px system-ui, sans-serif; text-align: center; }
+    #tdoc-feedback-root .tdoc-fb-send .tdoc-send-agent-badge { position: absolute; top: 3px; right: 3px; }
     /* Named like the feedback page's "Send to agent (2)" where there is room;
        a phone keeps the icon and its corner count. */
     #tdoc-feedback-root .tdoc-fb-send-label, #tdoc-feedback-root .tdoc-fb-share-label { display: none; }
@@ -176,12 +143,10 @@ ${uiCss}
       #tdoc-feedback-root .tdoc-fb-send-label, #tdoc-feedback-root .tdoc-fb-share-label { display: inline; }
       #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-share { padding: 7px 11px; }
       #tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send { padding: 7px 11px; color: #1a1a1a; }
-      #tdoc-feedback-root .tdoc-fb-send-badge { position: static; }
+      #tdoc-feedback-root .tdoc-fb-send .tdoc-send-agent-badge { position: static; align-self: flex-start; margin: 0 0 0 -3px; }
     }
     /* A click on an icon lands on its button (the X used to be the svg). */
-    #tdoc-feedback-root .tdoc-feedback-dock svg, #tdoc-feedback-root .tdoc-fb-panel .x svg { pointer-events: none; }
-    #tdoc-feedback-root .tdoc-fb-panel .empty { margin: 4px 8px; color: #8a8985; }
-    #tdoc-feedback-root .tdoc-fb-panel .link { appearance: none; border: 0; background: none; padding: 0; color: #1652f0; font: inherit; cursor: pointer; }
+    #tdoc-feedback-root .tdoc-feedback-dock svg, #tdoc-feedback-root .tdoc-cpanel button svg { pointer-events: none; }
     #tdoc-feedback-root .tdoc-fb-agent { border-top: 1px solid #efeeea; padding: 12px 14px 14px; background: #fafaf8; }
     #tdoc-feedback-root .tdoc-fb-agent p { margin: 0 0 8px; }
     #tdoc-feedback-root .tdoc-fb-agent code { display: block; margin: 0 0 8px; padding: 8px; border-radius: 6px; background: #fff; border: 1px solid #e8e7e3; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: normal; }
@@ -1130,7 +1095,7 @@ ${uiCss}
     return parts.join(' · ');
   };
 
-  function Dock({ session, openCount, waitingCount = 0, unreadCount = 0, panelOpen, panelWidth, picking, onList, onPick, onHide, sendCount, onSend, onShare }) {
+  function Dock({ session, openCount, waitingCount = 0, unreadCount = 0, panelOpen, panelWidth, picking, onList, onPick, onHide, activity, onSend, onShare }) {
     // Share: in the widget, the owner's invites (SharePanel). Who else has
     // access, and moving the space into a team, stay in the space's Share on
     // tdoc: this page's token can add an invite, never change the rest.
@@ -1146,11 +1111,10 @@ ${uiCss}
           <Plus aria-hidden="true" /> Comment
         </button>
         {onSend ? (
-          // The doc page's Send to agent: same icon, same count (comments
-          // never sent, or with a human word since the last handoff).
-          <button type="button" className="tdoc-fb-send" onClick={onSend} title={sendCount ? `Send to agent (${sendCount} ready)` : 'Send to agent'} aria-label="Send to agent">
-            <Send aria-hidden="true" /><span className="tdoc-fb-send-label">Send to agent</span>{sendCount ? <span className="tdoc-fb-send-badge">{sendCount > 99 ? '99+' : sendCount}</span> : null}
-          </button>
+          // The doc page's agent activity button, its badge rules and all
+          // (comments/panel/agent-activity.jsx); here it says Send to agent.
+          <AgentActivityButton className="tdoc-fb-send" labelClassName="tdoc-fb-send-label" icon={<Send aria-hidden="true" />}
+            label="Send to agent" summary={activity} onClick={onSend} />
         ) : null}
         {invitesOn ? (onShare ? (
           // Share opens here, in the widget (Julie, 2026-11-03): the owner
@@ -1201,63 +1165,51 @@ ${uiCss}
     return [r.top + scrollY, r.left + scrollX];
   };
 
+  // The list: the shared CommentPanel (comments/panel/), in a side panel on
+  // a wide screen and the shared bottom sheet on a phone, where a
+  // full-width aside used to cover the app being commented on.
   function ListPanel({ side, area, prefs, pageUrl, cardProps, onPick, onOpen, onClose, onRefresh, refreshing, spaces = [], onSwitch = null }) {
-    const { filter, setFilter } = prefs;
-    const unreadIds = new Set(area.unread.map((comment) => comment.id));
+    const { filter } = prefs;
     // This page first, then one section per other page (comment-query.js
     // groupBy), each in the order the query gave.
-    const groups = groupBy(area.shown, (c) => c.anchor.url, { first: pageUrl });
-    const threadList = (list) => <CommentThreadList
-      comments={list}
-      cardProps={cardProps}
-      selectedId={area.selected?.id}
-      expandReplies
-      itemClassName="tdoc-fb-item"
-      isAnchored={(c) => c.anchor.url !== pageUrl || Boolean(elementFor(c)) || Boolean(stateLabel(c.anchor))}
-      isUnread={(c) => unreadIds.has(c.id)}
-      onSeen={area.onSeen}
-      onNavigate={(id) => { const c = area.byId.get(id); if (c) onOpen(c, c.anchor.url === pageUrl); }}
-      beforeCard={(c) => <button type="button" className="tdoc-fb-context" onClick={() => onOpen(c, c.anchor.url === pageUrl)}>
-        {c.anchor.url === pageUrl && !elementFor(c) ? 'Not on screen now · ' : ''}
-        {stateLabel(c.anchor) ? `${stateLabel(c.anchor)} · ` : ''}{labelOf(c.anchor)}
-      </button>}
-    />;
+    const groups = groupBy(area.shown, (c) => c.anchor.url, { first: pageUrl }).map(({ key, items }) => (key === pageUrl
+      ? { key, label: 'This page', items, empty: <p className="tdoc-cpanel-empty">Nothing {filter === 'all' ? '' : filter} here yet. <button type="button" className="link" onClick={onPick}>Add a comment</button></p> }
+      : { key, label: pathOf(key), title: key, items }));
     const wide = !isNarrowViewport();
+    const panel = (
+      <CommentPanel
+        area={area}
+        prefs={prefs}
+        groups={groups}
+        className="tdoc-fb-list"
+        ariaLabel="Feedback on this app"
+        titleSlot={spaces.length > 1 && onSwitch ? <strong className="tdoc-cpanel-title"><SpaceSwitcher spaces={spaces} onSwitch={onSwitch} /></strong> : <strong className="tdoc-cpanel-title">Feedback</strong>}
+        onAdd={onPick}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        onClose={onClose}
+        closeLabel="Close list"
+        cardProps={cardProps}
+        selectedId={area.selected?.id}
+        isAnchored={(c) => c.anchor.url !== pageUrl || Boolean(elementFor(c)) || Boolean(stateLabel(c.anchor))}
+        onNavigate={(id) => { const c = area.byId.get(id); if (c) onOpen(c, c.anchor.url === pageUrl); }}
+        contextLine={(c) => <button type="button" className="tdoc-cpanel-context" onClick={() => onOpen(c, c.anchor.url === pageUrl)}>
+          {c.anchor.url === pageUrl && !elementFor(c) ? 'Not on screen now · ' : ''}
+          {stateLabel(c.anchor) ? `${stateLabel(c.anchor)} · ` : ''}{labelOf(c.anchor)}
+        </button>}
+      />
+    );
+    if (!wide) {
+      return (
+        <CommentSheet open onOpenChange={(next) => { if (!next) onClose(); }} title="Feedback" className="tdoc-fb-sheet">
+          <SheetContent className="tdoc-sheet-content">{panel}</SheetContent>
+        </CommentSheet>
+      );
+    }
     return (
-      <aside className="tdoc-fb-panel" aria-label="Feedback on this app" style={wide ? { width: side.width } : undefined}>
-        {wide ? <SideResizeHandle side={side} label="Resize the feedback panel" /> : null}
-        <header>
-          {spaces.length > 1 && onSwitch ? <strong><SpaceSwitcher spaces={spaces} onSwitch={onSwitch} /></strong> : <strong>Feedback</strong>}
-          <span className="tdoc-fb-filter" role="group" aria-label="Show">
-            {filterOptions(area.counts).map((f) => (
-              <button key={f.value} type="button" className={filter === f.value ? 'on' : ''} aria-pressed={filter === f.value} onClick={() => setFilter(f.value)}>{f.label}</button>
-            ))}
-          </span>
-          <button type="button" className="tdoc-fb-add" onClick={onPick}>+ Comment</button>
-          <button type="button" className="tdoc-fb-refresh" aria-label="Refresh feedback" title="Refresh feedback" aria-busy={refreshing ? 'true' : 'false'} onClick={onRefresh}><RefreshCw aria-hidden="true" /></button>
-          <button type="button" className="x" aria-label="Close list" onClick={onClose}><X size={14} aria-hidden="true" /></button>
-        </header>
-        <div className="tdoc-comment-query tdoc-fb-query">
-          <input type="search" className="tdoc-comment-search" placeholder="Search comments" aria-label="Search comments"
-            value={prefs.search} onChange={(event) => prefs.setSearch(event.target.value)} />
-          <AppSelect className="tdoc-comment-sort" ariaLabel="Order" value={prefs.sort} onChange={prefs.setSort} options={SORT_OPTIONS} />
-        </div>
-        {area.showMarkAll ? <div className="tdoc-fb-readbar"><span>{area.unreadCount} new agent {area.unreadCount === 1 ? 'reply' : 'replies'}</span><button type="button" onClick={() => area.markAllRead()}>Mark all as read</button></div> : null}
-        <div className="tdoc-fb-scroll">
-          {groups.map(({ key: url, items }) => (url === pageUrl ? (
-            <React.Fragment key={url}>
-              <h4>This page</h4>
-              {items.length ? threadList(items) : (
-                <p className="empty">{prefs.search ? 'No comments match.' : <>Nothing {filter === 'all' ? '' : filter} here yet. <button type="button" className="link" onClick={onPick}>Add a comment</button></>}</p>
-              )}
-            </React.Fragment>
-          ) : (
-            <section key={url}>
-              <h4 title={url}>{pathOf(url)}</h4>
-              {threadList(items)}
-            </section>
-          )))}
-        </div>
+      <aside className="tdoc-fb-panel" style={{ width: side.width }}>
+        <SideResizeHandle side={side} label="Resize the feedback panel" />
+        {panel}
       </aside>
     );
   }
@@ -1742,41 +1694,25 @@ ${uiCss}
       };
     }, [picking, reanchorId, selected, apply, areaSelectOn]);
 
-    // Esc steps back one level: composer → picking → card → list → hidden.
-    useEffect(() => {
-      if (!shown) return undefined;
-      const keydown = (event) => {
-        if (event.key !== 'Escape') return;
-        if (pressRef.current) {
-          const p = pressRef.current;
-          if (p.timer) clearTimeout(p.timer);
-          pressRef.current = null;
-          setDrag(null); setHovered(null);
-        } else if (selected) { setSelected(null); setAreaSel(null); }
-        else if (picking || reanchorId) { setPicking(false); setReanchorId(null); setHovered(null); }
-        else if (openId) setOpenId(null);
-        else if (panelOpen) setPanelOpen(false);
-        else return;
-        // Ours alone: a modal underneath must not close on the same press.
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      };
-      window.addEventListener('keydown', keydown, true);
-      return () => window.removeEventListener('keydown', keydown, true);
-    }, [shown, selected, picking, reanchorId, openId, panelOpen]);
+    // Esc steps back one level (comments/panel/keyboard.js): a press in
+    // progress → composer → picking → card → list. Window capture: a host
+    // modal underneath must not close on the same press.
+    useEscapeLadder([
+      { active: () => Boolean(pressRef.current), close: () => {
+        const p = pressRef.current;
+        if (p && p.timer) clearTimeout(p.timer);
+        pressRef.current = null;
+        setDrag(null); setHovered(null);
+      } },
+      { active: Boolean(selected), close: () => { setSelected(null); setAreaSel(null); } },
+      { active: Boolean(picking || reanchorId), close: () => { setPicking(false); setReanchorId(null); setHovered(null); } },
+      { active: Boolean(openId), close: () => setOpenId(null) },
+      { active: panelOpen, close: () => setPanelOpen(false) },
+    ], { enabled: shown, capture: true });
 
-    // Double-tap Option: start a comment from anywhere.
-    useEffect(() => {
-      let lastAlt = 0;
-      const keydown = (event) => {
-        if (event.key !== 'Alt' || event.repeat || event.ctrlKey || event.metaKey || event.shiftKey) return;
-        if (event.target.matches?.('input,textarea,select') || event.target.isContentEditable) return;
-        const now = Date.now();
-        if (now - lastAlt < 430) { event.preventDefault(); lastAlt = 0; setShown(true); setPicking((p) => !p); if (!surface) load(); } else lastAlt = now;
-      };
-      document.addEventListener('keydown', keydown, true);
-      return () => document.removeEventListener('keydown', keydown, true);
-    }, [surface, load]);
+    // Double-tap Option: start a comment from anywhere (the doc page takes
+    // the same keys: comments/panel/keyboard.js).
+    useDoubleTapOption(() => { setShown(true); setOpenId(null); setPanelOpen(false); setPicking((p) => !p); if (!surface) load(); });
 
     // Hash-route navigation is a new page: reload which comments are here.
     useEffect(() => {
@@ -2058,7 +1994,7 @@ ${uiCss}
           onList={() => setPanelOpen((v) => !v)}
           onPick={() => { setOpenId(null); setSelected(null); setAreaSel(null); setPanelOpen(false); setPicking((v) => !v); }}
           onHide={hide}
-          sendCount={ready.length}
+          activity={agentActivitySummary(Object.fromEntries(Object.entries(area.handoffBuckets).map(([state, list]) => [state, list.length])), area.unreadCount)}
           onSend={showSend ? () => { setPicking(false); setNotifyAvoid(null); setNotifyIds(ready.map((c) => c.id)); } : null}
           onShare={session?.can_share && slug ? () => {
             setPicking(false);

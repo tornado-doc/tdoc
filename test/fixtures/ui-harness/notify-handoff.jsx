@@ -10,7 +10,7 @@ import { HandoffStatusChips } from '../../../shell/src/document/handoff-status-l
 import { DocumentSendAgentAction } from '../../../shell/src/document/document-toolbar.jsx';
 import { HandoffDetailsPanel } from '../../../shell/src/document/handoff-details.jsx';
 import { AskAiPanel } from '../../../shell/src/document/ask-ai-panel.jsx';
-import { useCommentArea } from '../../../shell/src/comments/core/comment-area.js';
+import { useCommentArea, useCommentListPrefs } from '../../../shell/src/comments/core/comment-area.js';
 import { summarizeHandoffSurfaces } from '../../../shell/src/comments/core/handoff-state.js';
 import { isThreadUnread } from '../../../shell/src/comments/core/thread-seen.js';
 import { DesktopCommentLayer, MobileCommentDrawer } from '../../../shell/src/document/comment-layer.jsx';
@@ -120,7 +120,7 @@ function ActivityDemo() {
       <p>The third section compares three options. The final recommendation is a seat based plan.</p>
     </main>
     {!phone ? <div style={{ position: 'absolute', left: '72%', top: 145 }}><PinDemo seenMap={seenMap} /></div>
-      : <MobileCommentDrawer open={drawerOpen} onOpenChange={setDrawerOpen} comments={activityCards} openCount={activityCards.length}
+      : <HarnessDrawer open={drawerOpen} onOpenChange={setDrawerOpen} comments={activityCards} openCount={activityCards.length}
           unread={visibleUnread > 0} pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => {}}
           askAi={params.has('unified') ? <div>Ask AI panel</div> : null} tab={drawerTab} onTab={setDrawerTab} />}
     <output id="activity-log">{log}</output>
@@ -149,6 +149,14 @@ function PinDemo({ seenMap = {} }) {
   </div>;
 }
 
+// The doc's phone drawer over the shared panel: area and prefs from the same
+// hooks the doc page uses, every card in one group.
+function HarnessDrawer({ comments, ...props }) {
+  const prefs = useCommentListPrefs('harness');
+  const area = useCommentArea({ comments, slug: 'harness', filter: 'all', handoffViewer: 'julie', isOwner: true });
+  return <MobileCommentDrawer {...props} area={area} prefs={prefs} groups={[{ key: 'all', items: area.shown }]} />;
+}
+
 function MobileFabDemo() {
   const [open, setOpen] = useState(false);
   const [composing, setComposing] = useState(null);
@@ -160,7 +168,7 @@ function MobileFabDemo() {
   return <>
     <div className="tdoc-bar" style={{ height: 48, padding: '0 16px', display: 'flex', alignItems: 'center', gap: 12, background: '#fff', borderBottom: '1px solid #e8e7e3' }}><span>🌪</span><strong>RaftBench pricing plan</strong></div>
     <main style={{ padding: '32px 20px', fontSize: 16, lineHeight: 1.8 }}><h1>RaftBench pricing plan</h1><p>We propose charging per team seat, with a free personal tier and team seats at $8 per month.</p><p>The third section compares three options. The final recommendation is a seat based plan.</p></main>
-    <MobileCommentDrawer open={open} onOpenChange={setOpen} comments={visible} openCount={active ? 2 : 0} unread={active}
+    <HarnessDrawer open={open} onOpenChange={setOpen} comments={visible} openCount={active ? 2 : 0} unread={active}
       pinIds={new Set()} currentUser="julie" isOwner onStartComment={() => setComposing('comment')}
       onAskAi={() => setComposing('ask-ai')} />
     {composing ? <AgentMentionContext.Provider value={{ choices: [TDOC_AI], ai: { offered: true, remaining: 10 } }}>

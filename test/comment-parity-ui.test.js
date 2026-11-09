@@ -196,18 +196,18 @@ async function startServer(worker, env) {
         },
         header: async (page) => {
           // Opened by the bookmark: the list opens itself once loaded.
-          const panel = page.locator('#tdoc-feedback-root .tdoc-fb-panel');
-          const filter = panel.locator('.tdoc-fb-filter');
+          const panel = page.locator('#tdoc-feedback-root .tdoc-fb-list');
+          const filter = panel.locator('.tdoc-comment-filter');
           const opened = await filter.waitFor({ timeout: 8000 }).then(() => true, () => false);
           if (!opened) await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
           await filter.waitFor({ timeout: 15000 });
           return panel;
         },
-        filter: async (page, name) => (await ui.widget.header(page)).locator('.tdoc-fb-filter button', { hasText: new RegExp(`^${name}`) }),
-        labels: async (page) => (await ui.widget.header(page)).locator('.tdoc-fb-filter button').allInnerTexts(),
+        filter: async (page, name) => (await ui.widget.header(page)).locator('.tdoc-comment-filter').getByRole('radio', { name: new RegExp(`^${name}`) }),
+        labels: async (page) => (await ui.widget.header(page)).locator('.tdoc-comment-filter [role="radio"]').allInnerTexts(),
         present: async (page, id) => (await ui.widget.header(page)).locator(`[data-comment-id="${id}"]`),
         openThread: async (page, id) => { await (await ui.widget.header(page)).locator(`[data-comment-id="${id}"]`).first().click(); },
-        markAll: async (page) => (await ui.widget.header(page)).locator('.tdoc-fb-readbar').getByRole('button', { name: 'Mark all as read' }),
+        markAll: async (page) => (await ui.widget.header(page)).locator('.tdoc-cpanel-readbar').getByRole('button', { name: 'Mark all as read' }),
       },
     };
     const selected = async (el) => ((await el.getAttribute('aria-checked')) || (await el.getAttribute('aria-pressed'))) === 'true';
@@ -375,6 +375,126 @@ async function startServer(worker, env) {
       });
     }
 
+    // ── Phase B: the shared panel, keys and agent activity ─────────────
+    // Esc steps back one level, and double-tap Option starts a comment, on
+    // the doc page and in the widget alike.
+    for (const kind of ['doc', 'widget']) {
+      const s = ui[kind];
+      await t(`${tag}: ${kind}: double-tap Option starts a comment; Esc steps back out of it`, async () => {
+        const target = kind === 'doc' ? await freshDoc() : await freshSpace();
+        await thread(target, kind, 0, `Keys ${tag}`);
+        const ctx = await contextFor();
+        const page = await tracked(ctx);
+        await s.open(page, target);
+        if (kind === 'widget') await ui.widget.header(page);
+        else await page.waitForTimeout(500);
+        await page.mouse.click(5, 300).catch(() => {});
+        await page.keyboard.press('Alt');
+        await page.keyboard.press('Alt');
+        if (kind === 'doc') {
+          const composer = page.locator('.tdoc-popup textarea').first();
+          await composer.waitFor({ timeout: 8000 });
+          await page.keyboard.press('Escape');
+          await composer.waitFor({ state: 'detached', timeout: 8000 });
+        } else {
+          // Picking: the dock's Comment is on, the list made way.
+          const pick = page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary');
+          await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary.on').waitFor({ timeout: 8000 });
+          await page.keyboard.press('Escape');
+          await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button.primary.on').waitFor({ state: 'detached', timeout: 8000 });
+          void pick;
+          // The list open: Esc closes it.
+          await ui.widget.header(page);
+          await page.keyboard.press('Escape');
+          await page.locator('#tdoc-feedback-root .tdoc-fb-list').waitFor({ state: 'detached', timeout: 8000 });
+        }
+        assert.deepEqual(page.errors, []);
+        await ctx.close();
+      });
+    }
+
+    await t(`${tag}: widget: Send to agent wears the doc's agent-activity badge`, async () => {
+      const target = await freshSpace();
+      await thread(target, 'widget', 0, `Badge ${tag}`);
+      const ctx = await contextFor();
+      const page = await tracked(ctx);
+      await ui.widget.open(page, target);
+      await ui.widget.header(page);
+      const send = page.locator('#tdoc-feedback-root .tdoc-feedback-dock .tdoc-fb-send');
+      if (await send.count()) {
+        const label = await send.getAttribute('aria-label');
+        assert.match(label, /^Send to agent/);
+        if (/to send/.test(label)) assert.equal(await send.locator('.tdoc-send-agent-badge.is-ready, .tdoc-send-agent-badge.is-unread').count(), 1, label);
+      }
+      assert.deepEqual(page.errors, []);
+      await ctx.close();
+    });
+
+    if (!phone) {
+      await t(`${tag}: doc: the side list opens from the bar, is remembered, follows pins, and flashes the words of the thread picked`, async () => {
+        const target = await freshDoc();
+        const a = await thread(target, 'doc', 0, `Side A ${tag}`);
+        const b = await thread(target, 'doc', 1, `Side B ${tag}`);
+        const ctx = await contextFor();
+        const page = await tracked(ctx);
+        await ui.doc.open(page, target);
+        const toggle = page.locator('.tdoc-comments-toggle');
+        await toggle.click();
+        const side = page.locator('.tdoc-doc-side');
+        await side.locator(`[data-comment-id="${a}"]`).first().waitFor({ timeout: 10000 });
+        assert.equal(await page.locator('.tdoc-comment-filter-dock').count(), 0, 'the dock and the side list both show the filter');
+        // The document makes room: the panel covers no pin.
+        const panelBox = await side.boundingBox();
+        for (const pin of await page.locator('.tdoc-pin').all()) {
+          const box = await pin.boundingBox();
+          if (box) assert.ok(box.x + box.width <= panelBox.x + 1, 'a pin sits under the side list');
+        }
+        await shot(page, 'doc-side-list');
+        // A thread picked in the list: its words are active and flash.
+        await side.locator(`[data-comment-id="${b}"]`).first().click({ position: { x: 20, y: 20 } });
+        // In the doc: the words of that thread are the active highlight.
+        const docFrame = page.frames().find((f) => /\/frame/.test(f.url()));
+        await docFrame.waitForFunction((text) => [...(CSS.highlights.get('tdoc-anchor-active') || [])].some((r) => r.toString().includes(text)), anchors[1], { timeout: 8000 });
+        assert.ok(await side.locator(`.tdoc-current-comment[data-comment-id="${b}"], [data-comment-id="${b}"].tdoc-current-comment`).count() >= 1, 'the thread picked is not the selected one');
+        // A pin picked on the page: selected in the list, no floating card.
+        await page.locator(`.tdoc-pin[data-id="${a}"]`).click({ force: true });
+        await side.locator(`.tdoc-current-comment[data-comment-id="${a}"]`).first().waitFor({ timeout: 8000 });
+        assert.equal(await page.locator('.tdoc-margin-comment.tdoc-floating-open').count(), 0, 'a floating card opened beside the list');
+        // Remembered; resizable by its edge.
+        await page.reload();
+        await page.locator('.tdoc-doc-side').waitFor({ timeout: 15000 });
+        const handle = page.locator('.tdoc-doc-side .ui-side-resize');
+        const before = (await page.locator('.tdoc-doc-side').boundingBox()).width;
+        await handle.focus();
+        await page.keyboard.press('ArrowLeft');
+        await page.keyboard.press('ArrowLeft');
+        const after = (await page.locator('.tdoc-doc-side').boundingBox()).width;
+        assert.ok(after > before, `did not widen: ${before} → ${after}`);
+        // Esc closes it (the outermost level), and that is remembered too.
+        await page.locator('.tdoc-doc-side .tdoc-cpanel-title').click();
+        await page.keyboard.press('Escape');
+        await page.keyboard.press('Escape');
+        await page.locator('.tdoc-doc-side').waitFor({ state: 'detached', timeout: 8000 });
+        await page.reload();
+        await page.waitForFunction(() => document.body.dataset.tdocReady === '1');
+        await page.waitForTimeout(500);
+        assert.equal(await page.locator('.tdoc-doc-side').count(), 0, 'closed, then open again after a reload');
+        assert.deepEqual(page.errors, []);
+        await ctx.close();
+      });
+
+      await t(`${tag}: doc: a doc with many threads opens the side list for someone who never chose`, async () => {
+        const target = await freshDoc();
+        for (let i = 0; i < 8; i++) await thread(target, 'doc', i % 4, `Many ${i} ${tag}`);
+        const ctx = await contextFor();
+        const page = await tracked(ctx);
+        await ui.doc.open(page, target);
+        await page.locator('.tdoc-doc-side [data-comment-id]').first().waitFor({ timeout: 10000 });
+        assert.deepEqual(page.errors, []);
+        await ctx.close();
+      });
+    }
+
     // The widget and the space's own tdoc page are two origins of the same
     // space in real life (the app's and tdoc's): a reply read on one is read
     // on the other, both ways.
@@ -388,7 +508,7 @@ async function startServer(worker, env) {
       let page = await tracked(ctx);
       await ui.widget.open(page, target);
       await (await ui.widget.markAll(page)).click();
-      await (await ui.widget.header(page)).locator('.tdoc-fb-readbar').waitFor({ state: 'detached' });
+      await (await ui.widget.header(page)).locator('.tdoc-cpanel-readbar').waitFor({ state: 'detached' });
       await page.waitForTimeout(600);
       await ctx.close();
       ctx = await contextFor();
@@ -412,7 +532,7 @@ async function startServer(worker, env) {
       await ui.widget.open(page, target);
       await (await ui.widget.present(page, id)).first().waitFor({ timeout: 15000 });
       await page.waitForTimeout(1500);
-      assert.equal(await page.locator('#tdoc-feedback-root .tdoc-fb-readbar').count(), 0, 'read on the space page, unread in the widget');
+      assert.equal(await page.locator('#tdoc-feedback-root .tdoc-cpanel-readbar').count(), 0, 'read on the space page, unread in the widget');
       assert.deepEqual(page.errors, []);
       await ctx.close();
     });
@@ -429,14 +549,14 @@ async function startServer(worker, env) {
       const header = await ui.widget.header(page);
       await header.locator(`[data-comment-id="${id}"] .tdoc-thread-unread-dot`).first().waitFor({ timeout: 10000 });
       await page.waitForTimeout(1800);
-      assert.equal(await header.locator('.tdoc-fb-readbar').count(), 1, 'flag off: read without being opened');
+      assert.equal(await header.locator('.tdoc-cpanel-readbar').count(), 1, 'flag off: read without being opened');
       await ctx.close();
       ctx = await contextFor();
       page = await tracked(ctx, { flags: { autoReadComments: true } });
       await ui.widget.open(page, target);
       const panel = await ui.widget.header(page);
       await panel.locator(`[data-comment-id="${id}"]`).first().waitFor({ timeout: 10000 });
-      await panel.locator('.tdoc-fb-readbar').waitFor({ state: 'detached', timeout: 8000 });
+      await panel.locator('.tdoc-cpanel-readbar').waitFor({ state: 'detached', timeout: 8000 });
       assert.deepEqual(page.errors, []);
       await ctx.close();
     });

@@ -20,7 +20,7 @@ t('the shell sends only visible comments to the frame and mobile drawer', () => 
   assert(shell.includes("bridge.send({ type: 'tdoc:anchors', comments: shownComments });"), 'the frame bypasses comment visibility');
   assert(/const ordered = sortThreads\(shownComments, listPrefs\.sort/.test(shell)
     && shell.includes("groupBy(ordered, (comment) => (isDocumentComment(comment) ? 'document' : 'body'), { first: 'document' })")
-    && shell.includes('comments={drawerComments}'), 'the mobile drawer bypasses comment visibility');
+    && shell.includes('const whole = drawerComments.filter(isDocumentComment);') && shell.includes('groups={panelGroups}'), 'the mobile drawer bypasses comment visibility');
 });
 t('hidden threads are excluded before any targets or highlights are registered', () => {
   const start = probe.indexOf('(comments || []).forEach(function (c)');

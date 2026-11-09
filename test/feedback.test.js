@@ -929,7 +929,7 @@ const APP = 'http://localhost:3000';
     assert(!source.includes('chrome.runtime'), 'client still depends on a browser extension');
     // Live refresh is the doc page's feed hook (15 s, visibility, typing pause).
     const feed = fs.readFileSync(path.join(ROOT, 'shell/src/comments/core/use-comment-feed.js'), 'utf8');
-    assert(source.includes('useCommentFeed(') && feed.includes('FEED_POLL_MS = 15_000') && feed.includes('visibilitychange') && source.includes('aria-label="Refresh feedback"'), 'live/manual feedback refresh is missing');
+    assert(source.includes('useCommentFeed(') && feed.includes('FEED_POLL_MS = 15_000') && feed.includes('visibilitychange') && source.includes('<CommentPanel') && fs.readFileSync(path.join(ROOT, 'shell/src/comments/panel/comment-panel.jsx'), 'utf8').includes('aria-label="Refresh comments"'), 'live/manual feedback refresh is missing');
     const bundle = fs.readFileSync(path.join(ROOT, 'bin/tdoc-bundle'), 'utf8');
     assert(bundle.includes('__TDOC_FEEDBACK_JS__'), 'tdoc-bundle does not inline the client');
   });

@@ -175,7 +175,7 @@ async function startServer(worker, env) {
           await page.goto(`${base}/__page`);
         },
         root: (page) => page.locator('#tdoc-feedback-root'),
-        tab: async (page, name) => page.locator('#tdoc-feedback-root .tdoc-fb-filter button', { hasText: name }).click(),
+        tab: async (page, name) => page.locator('#tdoc-feedback-root .tdoc-comment-filter [role="radio"]', { hasText: name }).click(),
         reveal: async () => {},
       },
       doc: {
@@ -300,7 +300,7 @@ async function startServer(worker, env) {
         await on.open(page);
         const tab = !on.root
           ? page.getByRole('radiogroup', { name: 'Show' }).getByRole('radio', { name: 'Replied' })
-          : rootOf(page).locator('.tdoc-fb-filter button', { hasText: 'Replied' });
+          : rootOf(page).locator('.tdoc-comment-filter [role="radio"]', { hasText: 'Replied' });
         await tab.click();
         const card = rootOf(page).locator(`[data-comment-id="${id}"]`).first();
         await card.waitFor({ timeout: 10000 });
@@ -398,7 +398,7 @@ async function startServer(worker, env) {
       const page = await tracked(ctx);
       await openOwnerWidget(page);
       const root = widgetRoot(page);
-      await root.locator('.tdoc-fb-filter button', { hasText: 'Replied' }).click();
+      await root.locator('.tdoc-comment-filter [role="radio"]', { hasText: 'Replied' }).click();
       const card = root.locator(`[data-comment-id="${id}"]`).first();
       await card.waitFor({ timeout: 10000 });
       await card.getByRole('button', { name: 'Reply', exact: true }).first().click();
@@ -452,7 +452,7 @@ async function startServer(worker, env) {
         await ritaAgentAnswers(thread);
         // The space page reads the list when the answer arrives; the widget on
         // its refresh.
-        if (name === 'widget') await page.locator('#tdoc-feedback-root .tdoc-fb-refresh').click();
+        if (name === 'widget') await page.locator('#tdoc-feedback-root .tdoc-comment-refresh').click();
         const list = surfaces[name].root(page).locator(`[data-comment-id="${thread.id}"] .tdoc-replies-toggle`).first();
         await list.waitFor({ timeout: 12000 });
         assert.equal(await box.inputValue(), DRAFT, 'the text went');
@@ -684,10 +684,10 @@ async function startServer(worker, env) {
       const page = await tracked(ctx);
       await surfaces.widget.open(page);
       const root = surfaces.widget.root(page);
-      const inList = root.locator(`.tdoc-fb-panel [data-comment-id="${c.body.id}"]`).first();
+      const inList = root.locator(`.tdoc-fb-list [data-comment-id="${c.body.id}"]`).first();
       await inList.waitFor({ timeout: 10000 });
       // Open it on the page: the panel's context button, for a comment here.
-      await root.locator('.tdoc-fb-item', { has: page.locator(`[data-comment-id="${c.body.id}"]`) }).locator('.tdoc-fb-context').click();
+      await root.locator('.tdoc-cpanel-item', { has: page.locator(`[data-comment-id="${c.body.id}"]`) }).locator('.tdoc-cpanel-context').click();
       const card = root.locator(`.tdoc-floating-open[data-comment-id="${c.body.id}"]`);
       await card.waitFor({ timeout: 8000 });
       await card.locator('.tdoc-replies-toggle').click();
@@ -722,15 +722,18 @@ async function startServer(worker, env) {
       const page = await tracked(ctx);
       await surfaces.widget.open(page);
       const root = surfaces.widget.root(page);
-      const panel = root.locator('.tdoc-fb-panel');
-      await panel.waitFor({ timeout: 10000 });
-      const handle = panel.locator('[role="separator"]');
+      // A phone gets the shared bottom sheet, the whole width, no handle.
       if (phone) {
-        assert.equal(await handle.count(), 0, 'a handle on a phone');
-        assert.equal((await panel.boundingBox()).width, width, 'the phone panel is not the whole width');
+        const sheet = root.locator('.tdoc-fb-sheet');
+        await sheet.waitFor({ timeout: 10000 });
+        assert.equal(await sheet.locator('[role="separator"]').count(), 0, 'a handle on a phone');
+        assert.equal(Math.round((await sheet.boundingBox()).width), width, 'the phone sheet is not the whole width');
         await ctx.close();
         return;
       }
+      const panel = root.locator('.tdoc-fb-panel');
+      await panel.waitFor({ timeout: 10000 });
+      const handle = panel.locator('[role="separator"]');
       assert.equal(Math.round((await panel.boundingBox()).width), 340);
       await page.waitForTimeout(300); // The panel's slide-in.
       const h = await handle.boundingBox();

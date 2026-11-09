@@ -256,7 +256,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
           const closeList = host.locator('#tdoc-feedback-root .tdoc-fb-panel button[aria-label="Close list"]');
           await closeList.waitFor({ timeout: 3000 }).catch(() => {});
           if (await closeList.count()) await closeList.click();
-          await host.locator('#tdoc-feedback-root .tdoc-fb-panel').waitFor({ state: 'detached', timeout: 5000 });
+          await host.locator('#tdoc-feedback-root .tdoc-fb-list').waitFor({ state: 'detached', timeout: 5000 });
           const share = host.locator('#tdoc-feedback-root .tdoc-feedback-dock a.tdoc-fb-share');
           await share.waitFor({ timeout: 5000 });
           assert((await share.getAttribute('aria-label')) === 'Share', 'Share is not named');
@@ -310,7 +310,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         main: document.querySelector('main').getBoundingClientRect().toJSON(),
       }));
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
-      const panel = page.locator('#tdoc-feedback-root .tdoc-fb-panel');
+      const panel = page.locator('#tdoc-feedback-root .tdoc-fb-list');
       await panel.waitFor({ timeout: 3000 });
       await page.waitForTimeout(200);
       const overlay = await page.evaluate(() => {
@@ -362,7 +362,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         },
       });
       assert(response.ok(), `external comment failed: ${response.status()}`);
-      const panel = page.locator('#tdoc-feedback-root .tdoc-fb-panel');
+      const panel = page.locator('#tdoc-feedback-root .tdoc-fb-list');
       if (!(await panel.isVisible())) await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
       await page.getByRole('button', { name: 'Refresh feedback' }).click();
       await page.getByText('Appeared without a page reload').waitFor({ timeout: 3000 });
@@ -735,7 +735,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         for (const width of [1512, 650, 390]) {
           await me.setViewportSize({ width, height: 823 });
           await me.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
-          const panel = me.locator('#tdoc-feedback-root .tdoc-fb-panel');
+          const panel = me.locator('#tdoc-feedback-root .tdoc-fb-list');
           await panel.waitFor();
           await me.waitForTimeout(200); // let the slide-in clip-path finish
           const layout = await me.evaluate(() => {
@@ -803,7 +803,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
       const draft = page.locator('#tdoc-feedback-root .tdoc-popup textarea').first();
       await draft.fill('Please keep this draft');
       await page.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
-      await page.locator('#tdoc-feedback-root .tdoc-fb-panel').waitFor();
+      await page.locator('#tdoc-feedback-root .tdoc-fb-list').waitFor();
       assert((await draft.inputValue()) === 'Please keep this draft', 'opening the list discarded the comment draft');
       await page.locator('#tdoc-feedback-root .tdoc-fb-panel button.x').click();
       await page.keyboard.press('Escape');
@@ -1372,13 +1372,13 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await host.waitForFunction(() => Boolean(window.tdocFeedback));
         await host.evaluate(() => window.tdocFeedback.open());
         await host.locator('#tdoc-feedback-root .tdoc-feedback-dock').waitFor();
-        const panel = host.locator('#tdoc-feedback-root .tdoc-fb-panel');
+        const panel = host.locator('#tdoc-feedback-root .tdoc-fb-list');
         // open() shows the list once the comments are loaded; open it by hand
         // only if that does not happen (a toggle would close it again).
         await panel.waitFor({ state: 'visible', timeout: 4000 })
           .catch(() => host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click());
         await panel.waitFor({ state: 'visible' });
-        await panel.locator('.tdoc-fb-filter button', { hasText: /^All/ }).click();
+        await panel.locator('.tdoc-comment-filter [role="radio"]', { hasText: /^All/ }).click();
         const fbCard = host.locator('#tdoc-feedback-root .tdoc-fb-item article[data-comment-id="c_feedback_parity"]');
         await fbCard.waitFor();
         const pin = host.locator('#tdoc-feedback-root .tdoc-pin[data-id="c_feedback_parity"]');
@@ -1497,21 +1497,21 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await host.addScriptTag({ url: `${tdocBase}/feedback.js` });
         await host.waitForFunction(() => Boolean(window.tdocFeedback));
         await host.evaluate(() => window.tdocFeedback.open());
-        const panel = host.locator('#tdoc-feedback-root .tdoc-fb-panel');
+        const panel = host.locator('#tdoc-feedback-root .tdoc-fb-list');
         // open() loads first and opens the list itself when there are
         // comments; only click the dock if it did not.
         await panel.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
         if (!(await panel.isVisible())) await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
         await host.waitForTimeout(1500); await host.screenshot({ path: `/tmp/fb-drag-work/parity-debug-${Date.now()}.png` }); console.log('DEBUG', await host.evaluate(() => ({ panel: !!document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-fb-panel'), w: innerWidth, notice: document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-feedback-notice')?.innerText })));
         await panel.waitFor({ state: 'visible' });
-        await panel.locator('.tdoc-fb-filter button', { hasText: /^All/ }).click();
+        await panel.locator('.tdoc-comment-filter [role="radio"]', { hasText: /^All/ }).click();
         const card = (id) => panel.locator(`article[data-comment-id="${id}"]`);
         await card('c_fb_unread_a').waitFor();
         assert((await card('c_fb_waiting').locator('.tdoc-thread-unread-dot').count()) === 0,
           'waiting thread has an unread list dot while its pin has none');
         assert((await card('c_fb_unread_a').locator('.tdoc-thread-unread-dot').count()) === 1,
           'unread thread lost its read control');
-        const readbar = panel.locator('.tdoc-fb-readbar');
+        const readbar = panel.locator('.tdoc-cpanel-readbar');
         assert(await readbar.getByRole('button', { name: 'Mark all as read' }).isVisible(), 'bulk read control is missing');
         const shots = process.env.TDOC_UI_SHOTS;
         await card('c_fb_unread_a').scrollIntoViewIfNeeded();

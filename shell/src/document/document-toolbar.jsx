@@ -1,3 +1,4 @@
+import { AgentActivityBadge, agentActivityLabel, agentActivitySummary } from '../comments/panel/agent-activity.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { Drawer } from '@base-ui/react/drawer';
@@ -194,21 +195,14 @@ export function DocumentSendAgentAction({ counts = {}, unread = 0, open, onOpenC
       window.removeEventListener('resize', update);
     };
   }, [narrow, open]);
-  const ready = counts.ready || 0;
-  const waiting = (counts.waiting || 0) + (counts.received || 0);
-  const failed = counts.failed || 0;
-  const details = [
-    ready ? `${ready} to send` : null,
-    waiting ? `${waiting} waiting for agent` : null,
-    unread ? `${unread} new agent ${unread === 1 ? 'reply' : 'replies'}` : null,
-    failed ? `${failed} not delivered` : null,
-  ].filter(Boolean).join(' · ');
-  const label = `Ask AI${details ? ` · ${details}` : ''}`;
+  // One set of badge rules with the widget's Send to agent
+  // (comments/panel/agent-activity.jsx); this surface's word is Ask AI.
+  const summary = agentActivitySummary(counts, unread);
+  const label = agentActivityLabel('Ask AI', summary);
   const triggerContents = <>
     <AskIcon className="tdoc-ask-ai-mark" size={18} color="var(--td-accent, #1652f0)" />
     <span className="tdoc-ask-ai-label">Ask AI</span>
-    {unread ? <span className="tdoc-send-agent-badge is-unread" aria-hidden="true" />
-      : ready ? <span className="tdoc-send-agent-badge is-ready" aria-hidden="true" /> : null}
+    <AgentActivityBadge summary={summary} />
   </>;
   const triggerProps = { id: 'tdoc-send-agent-btn', type: 'button', className: 'tdoc-send-agent-action', 'aria-label': label, title: label };
   if (narrow) return <Drawer.Root open={open} onOpenChange={(next) => { if (!next) setExpanded(false); onOpenChange(next); }} swipeDirection="down">

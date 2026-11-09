@@ -137,8 +137,10 @@ t('resolved visibility is a filter in the comments area (Open / Replied / Resolv
 });
 
 t('on a phone the filter heads the comments drawer, and ⋯ no longer carries it', () => {
-  assert(/filter=\{commentFilterControl\}/.test(shell), 'the drawer does not get the filter');
-  assert(/tdoc-comment-filter-row/.test(read('shell/src/document/comment-layer.jsx')), 'the drawer does not show it');
+  // The drawer is the shared panel (comments/panel/), its filter row first.
+  assert(/<MobileCommentDrawer\s+area=\{commentArea\}\s+prefs=\{listPrefs\}/.test(shell), 'the drawer does not get the filter');
+  assert(/<CommentPanel/.test(read('shell/src/document/comment-layer.jsx'))
+    && /tdoc-comment-filter-row tdoc-cpanel-filterrow/.test(read('shell/src/comments/panel/comment-panel.jsx')), 'the drawer does not show it');
   assert(!/data-action="show-resolved"/.test(toolbar), 'the ⋯ row is back beside the filter');
 });
 
