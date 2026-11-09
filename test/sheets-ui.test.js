@@ -65,6 +65,8 @@ async function shot(page, name, opts = {}) {
     { name: 'Tasks', columns: [{ name: 'Task', type: 'text' }, { name: 'Owner', type: 'text' }, { name: 'Points', type: 'number' }, { name: 'Due', type: 'date' }, { name: 'Status', type: 'tags', palette: 'done:green, blocked:red, urgent:orange' }, { name: 'Done', type: 'checkbox' }, { name: 'Link', type: 'url' }], rows: tasks },
     { name: 'People', columns: [{ name: 'Name', type: 'text' }, { name: 'Team', type: 'tags' }], rows: [{ cells: ['Ann', ['core']] }, { cells: ['Bo', ['web']] }, { cells: ['Cy', ['core', 'web']] }] },
   ] }), 'Tracker');
+  // 250 rows: past the 200 the frame lays out before the viewer arrives.
+  writeDoc('twofifty', M.sheetDocumentHtml({ title: 'Two fifty', sheets: [{ name: 'Rows', columns: [{ name: 'N', type: 'number' }], rows: Array.from({ length: 250 }, (_, i) => ({ cells: [String(i + 1)] })) }] }), 'Two fifty');
   // A second copy for Edit mode, so the read tests never see its edits.
   writeDoc('editable', fs.readFileSync(path.join(root, 'tracker', 'v1', 'index.html'), 'utf8'), 'Editable');
   // 10,000 rows × 20 columns as a CSV, imported through the browser (about
@@ -160,6 +162,32 @@ async function shot(page, name, opts = {}) {
       assert(info.pageOverflow <= 1, `page scrolls sideways: ${info.pageOverflow}`);
       assert(await countText(frame) === '30 rows', await countText(frame));
       await shot(page, 'sheet-desktop');
+    });
+
+    await test('rows past 200 are only held back while the viewer is coming: never in compare mode, never if it fails', async () => {
+      const frame = await open('twofifty');
+      assert(await frame.evaluate(() => !document.getElementById('tdoc-sheets-pending')), 'the hold comes off once the viewer is mounted');
+      // The viewer fails to load: the plain table shows every row.
+      const failing = await context.newPage();
+      await failing.route('**/sheets-viewer.js*', (r) => r.abort());
+      await failing.goto(`${base}/d/twofifty/v/1`);
+      await failing.frameLocator('iframe[aria-label="Document content"]').locator('table[data-tdoc-sheet]').waitFor({ timeout: 15000 });
+      const ff = failing.frames().find((x) => x.url().includes('/frame'));
+      await ff.waitForFunction(() => !document.getElementById('tdoc-sheets-pending'));
+      const shown = await ff.evaluate(() => { const tr = document.querySelector('table[data-tdoc-sheet] tr[data-row="r250"]'); return getComputedStyle(tr).display; });
+      assert(shown !== 'none', `row 250 shows without the viewer: ${shown}`);
+      await failing.close();
+      // Compare mode runs no viewer: every row shows there too.
+      const cmp = await context.newPage();
+      await cmp.goto(`${base}/d/twofifty/v/1`);
+      await cmp.evaluate((src) => { const f = document.createElement('iframe'); f.setAttribute('sandbox', 'allow-scripts'); f.id = 'cmp'; f.src = src; document.body.appendChild(f); }, `/d/twofifty/v/1/frame?tdoc_compare=1`);
+      await cmp.waitForFunction(() => document.getElementById('cmp'));
+      let cf = null;
+      for (let k = 0; k < 50 && !cf; k++) { cf = cmp.frames().find((x) => x.url().includes('tdoc_compare=1')); if (!cf) await cmp.waitForTimeout(100); }
+      await cf.waitForFunction(() => document.querySelector('table[data-tdoc-sheet] tr[data-row="r250"]') && !document.getElementById('tdoc-sheets-pending'));
+      assert(await cf.evaluate(() => getComputedStyle(document.querySelector('table[data-tdoc-sheet] tr[data-row="r250"]')).display) !== 'none', 'compare mode shows row 250');
+      assert(await cf.evaluate(() => !document.querySelector('.tdoc-sheet')), 'no grid in compare mode');
+      await cmp.close();
     });
 
     await test('search filters to matching rows, highlights them, and steps through matches', async () => {
@@ -417,6 +445,21 @@ async function shot(page, name, opts = {}) {
       await frame.waitForFunction(() => !document.querySelector('table[data-tdoc-sheet] tr[data-row="r32"]'));
       await page.keyboard.press(`${MOD}+Shift+z`);
       await frame.waitForFunction(() => !!document.querySelector('table[data-tdoc-sheet] tr[data-row="r32"]'));
+      // Copy quotes a cell Excel would run as a formula; a plain number stays.
+      await frame.evaluate(() => { const g = document.querySelector('.ts-grid'); g.scrollTop = 0; g.dispatchEvent(new Event('scroll')); });
+      await f.locator('.ts-row[data-i="5"] .ts-c[data-c="0"]').waitFor();
+      await f.locator('.ts-row[data-i="5"] .ts-c[data-c="0"]').click();
+      await page.keyboard.type('=HYPERLINK("http://evil.example")');
+      await page.keyboard.press('Enter');
+      await f.locator('.ts-row[data-i="5"] .ts-c[data-c="0"]').click();
+      await page.keyboard.press('Shift+ArrowRight');
+      await page.keyboard.press('Shift+ArrowRight');
+      const copied = await frame.evaluate(() => {
+        const dt = new DataTransfer();
+        document.querySelector('.ts-grid').dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }));
+        return dt.getData('text/plain');
+      });
+      assert(/^"?'=HYPERLINK/.test(copied) && /\tCy\t2$/.test(copied.split('\n')[0]), `copy guards formulas only: ${JSON.stringify(copied)}`);
       await shot(page, 'sheet-edit-desktop');
       // Save: the editor's own path, a new version.
       const save = page.getByRole('button', { name: 'Save', exact: true });

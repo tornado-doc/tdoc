@@ -26,7 +26,7 @@
   var Q = SheetQuery, M = SheetMarkup;
   var SEL = M.SHEET_SELECTOR;
   var NARROW = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
-  var ROW_H = 32, HEAD_H = 34, OVERSCAN = 6;
+  var ROW_H = 32, HEAD_H = 34, OVERSCAN = 6, MAX_COLUMNS = 200;
   function numW() { return NARROW && NARROW.matches ? 36 : 48; }
   var hooks = window.__tdocElementHooks = window.__tdocElementHooks || {};
 
@@ -274,7 +274,7 @@
     var tab = old || { query: Q.emptyQuery(), widths: [], matchAt: -1 };
     tab.table = table;
     tab.data = data;
-    tab.name = data.name || 'Sheet ' + (book ? book.tabs.indexOf(tab) + 1 || book.tabs.length + 1 : 1);
+    tab.name = cleanName(data.name) || 'Sheet ' + (book ? book.tabs.indexOf(tab) + 1 || book.tabs.length + 1 : 1);
     tab.index = Q.buildIndex(data);
     tab.palettes = data.columns.map(function (c) { return Q.parsePalette(c.palette); });
     tab.rowOf = new Map();
@@ -283,6 +283,8 @@
     if (tab.widths.length !== cols) tab.widths = data.columns.map(function (c, i) { return tab.widths[i] || defaultWidth(tab, i); });
     return tab;
   }
+  // A tab name is one line: line breaks and tabs read as a space.
+  function cleanName(name) { return String(name || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 100); }
   function defaultWidth(tab, c) {
     var col = tab.index.cols[c], type = col.type;
     // Room for the header (type glyph, name, sort mark, menu) and for the
@@ -337,7 +339,9 @@
     ui.bar.appendChild(search);
     ui.chips = h('div', 'ts-chips'); ui.bar.appendChild(ui.chips);
     ui.comment = h('button', 'ts-btn'); ui.comment.type = 'button'; ui.comment.innerHTML = ICON.comment + '<span>Comment on sheet</span>';
-    ui.comment.addEventListener('click', function (e) { e.stopPropagation(); commentOn(cur().table, ui.comment.getBoundingClientRect(), 'Sheet ' + cur().name); });
+    // The whole sheet is an ordinary table comment (no label of its own), so
+    // a new version reconciles it like any other table.
+    ui.comment.addEventListener('click', function (e) { e.stopPropagation(); commentOn(cur().table, ui.comment.getBoundingClientRect()); });
     ui.note = h('span', 'ts-note');
     ui.count = h('span', 'ts-count'); ui.count.setAttribute('aria-live', 'polite');
     ui.bar.appendChild(ui.note); ui.bar.appendChild(ui.count); ui.bar.appendChild(ui.comment);
@@ -663,7 +667,8 @@
   function tableSel(table) {
     var name = table.getAttribute('data-name');
     var all = Array.prototype.slice.call(document.querySelectorAll(SEL));
-    if (name != null) {
+    // A name with a line break cannot sit in a selector string: position.
+    if (name != null && !/[\u0000-\u001f\u007f]/.test(name)) {
       var same = all.filter(function (t) { return t.getAttribute('data-name') === name; });
       if (same.length === 1) return 'table[data-tdoc-sheet]' + attrSel('data-name', name);
     }
@@ -1394,6 +1399,14 @@
       return;
     }
     var width = grid.reduce(function (w, row) { return Math.max(w, row.length); }, 0);
+    // A sheet has at most MAX_COLUMNS columns (as an import): what does not
+    // fit is left out, and said so.
+    if (c0 + width > MAX_COLUMNS) {
+      toast('Only ' + (MAX_COLUMNS - c0) + ' of the ' + width + ' pasted columns fit: a sheet has at most ' + MAX_COLUMNS + ' columns.');
+      width = Math.max(0, MAX_COLUMNS - c0);
+      grid = grid.map(function (row) { return row.slice(0, width); });
+      if (!width) return;
+    }
     var cells = grid.length * width;
     if (cells > 200000) { toast('That paste is too large (' + fmt(cells) + ' cells). Import the file instead.'); return; }
     var activeRow = tab.order[i0];
@@ -1424,11 +1437,19 @@
     sel.r2 = Math.min(tab.order.length - 1, sel.r + grid.length - 1); sel.c2 = Math.min(tab.widths.length - 1, c0 + width - 1);
     renderHead(); renderBody(true);
   }
+  // Copied cells land in Excel or Google Sheets, which run a cell starting
+  // with = + - @ (or a tab or CR) as a formula: quote it with a leading '.
+  // A plain number (-5, +3.2) is left as it is.
+  function safeForSpreadsheet(v) {
+    if (!/^[=+\-@\t\r]/.test(v)) return v;
+    if (/^[+-]?(\d[\d,]*(\.\d*)?|\.\d+)(e[+-]?\d+)?%?$/i.test(v)) return v;
+    return "'" + v;
+  }
   function copyText() {
     var tab = cur(), lines = [], ra = Math.min(sel.r, sel.r2), rb = Math.max(sel.r, sel.r2), ca = Math.min(sel.c, sel.c2), cb = Math.max(sel.c, sel.c2);
     for (var i = ra; i <= rb; i++) {
       var r = tab.order[i], cells = [];
-      for (var c = ca; c <= cb; c++) { var v = tab.index.cols[c].text[r]; cells.push(/[\t\n"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v); }
+      for (var c = ca; c <= cb; c++) { var v = safeForSpreadsheet(tab.index.cols[c].text[r]); cells.push(/[\t\n"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v); }
       lines.push(cells.join('\t'));
     }
     return lines.join('\n');
@@ -1651,10 +1672,15 @@
   });
 
   window.__tdocSheets = {
+    mounted: false,
     // Read-only views for tests and the future comment panel.
     tabs: function () { return book ? book.tabs.map(function (t) { return { name: t.name, rows: t.index.size, shown: t.order ? t.order.length : 0, query: Q.cloneQuery(t.query) }; }) : []; },
     active: function () { return book ? book.active : -1; },
     selection: function () { return Object.assign({}, sel); },
   };
-  if (mount()) relayout();
+  // Mounted: the tables are hidden by the viewer's own style now, so the
+  // frame's 200-row hold (#tdoc-sheets-pending) is no longer needed.
+  if (mount()) { window.__tdocSheets.mounted = true; relayout(); }
+  var held = document.getElementById('tdoc-sheets-pending');
+  if (held) held.remove();
 })();
