@@ -21,6 +21,20 @@ const pw = requirePlaywrightOrSkip('slides-reflow.test.js');
   const shots = process.env.TDOC_TEST_SCREENSHOTS;
   const open = async (browser, slug, width) => {
     const ctx = await browser.newContext({ viewport: { width, height: 844 }, hasTouch: width < 700 });
+    // Watch every painted frame from the start: a fullscreen button must never
+    // be drawn before it is placed (it used to sit at the left edge for a frame,
+    // and a slow WebKit made that frame last past the waits below).
+    await ctx.addInitScript(() => {
+      if (window === top) return;
+      window.__tdocUnplaced = 0;
+      const t0 = performance.now();
+      const tick = () => {
+        const b = document.querySelector('.tdoc-visual-open.is-slide');
+        if (b && !b.hidden && !b.style.left) window.__tdocUnplaced++;
+        if (performance.now() - t0 < 2000) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
     const page = await ctx.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
@@ -39,15 +53,16 @@ const pw = requirePlaywrightOrSkip('slides-reflow.test.js');
     const buttons = [...document.querySelectorAll('.tdoc-visual-open.is-slide')].filter((b) => !b.hidden).map((b) => { const r = b.getBoundingClientRect(); return { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left, right: r.right }; });
     const nums = [...document.querySelectorAll('.tdoc-slide-num')].map((n) => { const r = n.getBoundingClientRect(); return { text: n.textContent, top: r.top + scrollY, left: r.left, right: r.right }; });
     const body = [...document.querySelectorAll('[data-tdoc-slide] p, [data-tdoc-slide] li')].map((p) => parseFloat(getComputedStyle(p).fontSize));
-    return { mode: document.documentElement.getAttribute('data-tdoc-slides'), cards, buttons, nums, body, overflow: document.documentElement.scrollWidth - innerWidth };
+    return { mode: document.documentElement.getAttribute('data-tdoc-slides'), cards, buttons, nums, body, overflow: document.documentElement.scrollWidth - innerWidth, unplaced: window.__tdocUnplaced };
   });
   // Fullscreen buttons and slide numbers sit under their card and cover no card.
   const outsideCards = (m) => {
     assert.equal(m.buttons.length, m.cards.length, 'one fullscreen button per slide');
+    assert.equal(m.unplaced, 0, 'a fullscreen button was painted before it was placed');
     m.buttons.forEach((b, i) => {
       assert(b.top >= m.cards[i].bottom - 1, `fullscreen button ${i + 1} is over its card: ${JSON.stringify(b)} vs ${JSON.stringify(m.cards[i])}`);
       for (const c of m.cards) assert(b.bottom <= c.top + 1 || b.top >= c.bottom - 1, `fullscreen button ${i + 1} covers ${c.id}`);
-      assert(m.nums[i].right <= b.left + 1, `slide number ${i + 1} overlaps its button`);
+      assert(m.nums[i].right <= b.left + 1, `slide number ${i + 1} overlaps its button: ${JSON.stringify(m.nums[i])} vs ${JSON.stringify(b)}`);
     });
   };
   try {
