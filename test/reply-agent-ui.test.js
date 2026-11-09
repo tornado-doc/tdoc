@@ -5,8 +5,9 @@
 //     my agent) swaps it;
 //     typing @ makes the same pill; Backspace takes the whole pill away.
 //   - no mode control: an agent that may edit (authorship) gets the thread
-//     to answer or change; elsewhere it answers only, under the reply, with
-//     one quiet "Answers only" line.
+//     to answer or change, unless Ask only (beside Reply, off by default) is
+//     ticked; elsewhere it answers only, under the reply, Ask only ticked
+//     and locked.
 //   - Only me for one's own agent or tdoc AI: the answer shows in the reply
 //     box; Make public posts it.
 // Cases: author on own doc; member on a team-agent doc; member on a doc
@@ -138,7 +139,8 @@ async function dragSelect(page, phrase) {
     return { menu, items: await menu.innerText() };
   };
   const noMode = async (scope) => { if (await scope.locator('.tdoc-ask-mode').count()) throw new Error('a mode control is back'); };
-  const answersOnly = (scope) => scope.locator('.tdoc-ask-only-label').count();
+  // Answer only, forced: the Ask only box ticked and locked (it may not edit).
+  const answersOnly = (scope) => scope.locator('.tdoc-ask-only [role=checkbox][aria-checked="true"][data-disabled]').count();
   let failed = 0;
   const t = async (name, fn) => { try { await fn(); console.log(`  ✓ ${name}`); } catch (error) { failed++; console.log(`  ✗ ${name}\n    ${error.message}`); } };
 
@@ -162,6 +164,29 @@ async function dragSelect(page, phrase) {
       await form.getByRole('button', { name: 'Reply', exact: true }).click();
       const queued = await until(page, async () => (await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask').length);
       if (queued !== 1) throw new Error(`not handed to edit: ${queued}`);
+      await context.close();
+    });
+
+    await t('reply, author on own doc, Ask only ticked: a question under the reply, not an edit; the server holds the agent', async () => {
+      const { context, page } = await open(julie, 'launch-plan');
+      const { form } = await replyBox(page, c1.body.id);
+      const edits = (await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask').length;
+      await form.locator('textarea').fill('Why April for search?');
+      await form.locator('.tdoc-reply-agent').click();
+      await form.locator('.tdoc-agent-pill').waitFor();
+      const box = form.locator('.tdoc-ask-only [role=checkbox]');
+      if (await box.getAttribute('aria-checked') !== 'false') throw new Error('Ask only is not offered, off');
+      await form.locator('.tdoc-ask-only').click();
+      if (await box.getAttribute('aria-checked') !== 'true') throw new Error('Ask only did not tick');
+      if (!/answers in the thread/.test(await form.innerText())) throw new Error('the hint still says it may change the doc');
+      await shot(page, 'reply-ask-only.png');
+      await form.getByRole('button', { name: 'Reply', exact: true }).click();
+      const asks = await until(page, async () => { const a = (await pending('juliesmac', julie.token)).filter((h) => h.kind === 'ask'); return a.length ? a : null; });
+      if (!asks) throw new Error('no question queued');
+      if ((await pending('juliesmac', julie.token)).filter((h) => h.kind !== 'ask').length !== edits) throw new Error('Ask only handed the thread off to edit');
+      const held = await api('/api/upload', { method: 'POST', token: julie.token, body: { slug: 'launch-plan', version: 2, html: DOC('x'), meta: { title: 'x' } } });
+      if (held.status !== 403 || held.body.error !== 'answer_only_run') throw new Error(`the agent was not held: ${held.status} ${JSON.stringify(held.body)}`);
+      for (const q of asks) await api('/api/docs/launch-plan/my-agent/cancel', { method: 'POST', cookie: julie.cookie, body: { ask_id: q.ask_id || q.handoff_id } });
       await context.close();
     });
 

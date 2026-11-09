@@ -197,6 +197,17 @@ async function startServer(worker, env) {
       await v.ctx.close();
     });
 
+    await t('the composer has no Edit with AI, in dev mode: @agent is the one way in', async () => {
+      const v = await open();
+      await selectWords(v.page, v.frame, 'small');
+      const pop = v.page.locator('.tdoc-popup');
+      await pop.waitFor();
+      await pop.locator('textarea').fill('Tighten this');
+      assert.equal(await pop.getByText('Edit with AI').count(), 0);
+      assert.equal(await pop.locator('.tdoc-composer-edit-ai').count(), 0);
+      await v.ctx.close();
+    });
+
     await t('a local CLI other than claude keeps the plain handoff: the daemon would refuse it', async () => {
       const id = await comment();
       const v = await open({ phone: true });
@@ -288,6 +299,53 @@ async function startServer(worker, env) {
       assert.deepEqual(v.errors, []);
       await v.ctx.close();
     }));
+
+    // Ask only (Julie, 2026-11-08), in dev mode as in normal mode: ticked, a
+    // reply naming an agent that may edit is a question, not a suggestions
+    // hand-off, and the server holds the agent to answering (no publish, no
+    // propose_edits) until the answer lands or the asker cancels.
+    for (const phone of [true, false]) {
+      await t(`${phone ? 'phone drawer' : 'desktop'}, dev mode, Ask only ticked: a question, never suggestions; the agent may not publish or propose`, async () => {
+        const id = await comment();
+        const v = await open({ phone });
+        let form;
+        if (phone) {
+          await replyInDrawer(v.page, /Claude Code/, id);
+          form = v.page.locator(`#tdoc-comment-layer [data-comment-id="${id}"] .tdoc-reply-form`).first();
+        } else {
+          const { card, box } = await openReply(v.page, false, id);
+          await box.click();
+          await v.page.keyboard.type('@');
+          await v.page.locator('#tdoc-mention-menu [role=option]', { hasText: /Claude Code/ }).first().click();
+          await v.page.keyboard.type('why billing first?');
+          form = card.locator('.tdoc-reply-form').first();
+        }
+        const tick = form.locator('.tdoc-ask-only [role=checkbox]');
+        assert.equal(await tick.getAttribute('aria-checked'), 'false', 'Ask only starts off');
+        assert.match(await form.innerText(), /suggests/);
+        if (phone) await form.locator('.tdoc-ask-only').tap(); else await form.locator('.tdoc-ask-only').click();
+        assert.equal(await tick.getAttribute('aria-checked'), 'true');
+        // Ticking a box in the reply form keeps the phone drawer and the form open.
+        assert.equal(await form.isVisible(), true, 'ticking Ask only closed the reply box');
+        assert.match(await form.innerText(), /answers in the thread/);
+        await shot(v.page, phone ? 'reply-ask-only-dev-390.png' : 'reply-ask-only-dev-1280.png');
+        if (phone) await sendReply(v.page); else await form.locator('.tdoc-reply-submit.ui-btn-primary').click();
+        await v.page.waitForTimeout(800);
+        assert.equal(v.sends.length, 1, JSON.stringify(v.sends));
+        assert.equal(v.sends[0].path.endsWith('/hand-off'), true);
+        assert.equal(v.sends[0].body.ask_only, true);
+        assert.equal(v.sends[0].body.reply_as, undefined);
+        const up = await api('/api/upload', { method: 'POST', token, body: { slug: SLUG, version: 99, html: DOC, meta: { title: 'Plan' } } });
+        assert.equal(up.status, 403, JSON.stringify(up.body));
+        assert.equal(up.body.error, 'answer_only_run');
+        const prop = await api(`/api/docs/${SLUG}/suggestions`, { method: 'POST', token, body: { edits: [{ find: 'Billing ships first', replace: 'Billing ships second' }] } });
+        assert.equal(prop.status, 403, JSON.stringify(prop.body));
+        assert.equal(prop.body.error, 'answer_only_run');
+        assert.equal((await api(`/api/docs/${SLUG}/my-agent/cancel`, { method: 'POST', cookie, body: { all: true } })).status, 200);
+        assert.deepEqual(v.errors, []);
+        await v.ctx.close();
+      });
+    }
 
     await t('the tag can be deleted, stays deleted through late lists and refreshes, and the reply is plain', () => threadOf(async (id) => {
       const v = await open({ phone: true });
@@ -508,7 +566,8 @@ async function startServer(worker, env) {
       const { card, box } = await openReply(v.page, true, id);
       await tagged(card, box, /Claude/);
       const form = await card.locator('.tdoc-reply-form').innerText();
-      assert.match(form, /Answers only/);
+      assert.match(form, /Ask only/);
+      assert.equal(await card.locator('.tdoc-reply-form .tdoc-ask-only [role=checkbox][aria-checked="true"][data-disabled]').count(), 1, 'Ask only is not ticked and locked');
       assert.doesNotMatch(form, /changes the doc|suggests/);
       await v.ctx.close();
     });

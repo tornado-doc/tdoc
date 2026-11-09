@@ -20635,15 +20635,15 @@ async function handleMyAgent(env, req, url, slug) {
   const askId = `q_${Date.now()}_${rand(3)}`;
   const event = agentAskEvent({ slug, docTitle: meta.title, askId, question, passage: passage && passage.text, publicHost: env.PUBLIC_HOST, commentId });
   // Answer only, from now: the agent asked may not edit this doc until its
-  // answer lands (answerLockRefusal). Not for the doc's owner asking their
-  // own agent: they may edit their own doc whenever they like.
-  const ownerAsks = !runner && Boolean(meta.hosted && meta.hosted.account_id && state.group.ids.concat(accountId).includes(meta.hosted.account_id));
-  if (!ownerAsks) {
-    try {
-      await answerLocks(env, slug, { kind: 'add', id: askId, lock: { ask_id: askId, asker, ...(runner ? { runner } : { by: asker, ids: [...new Set(state.group.ids.concat(accountId))] }), until: Date.now() + ANSWER_LOCK_TTL_MS } });
-    } catch {
-      return json({ error: 'answer_lock_unavailable', message: 'Could not send the question right now; try again.' }, { status: 503 });
-    }
+  // answer lands (answerLockRefusal). The doc's owner asking their own agent
+  // too: a question (the composer's Ask only, Only me, Ask AI) is answer only
+  // because the server holds it, not because the box said so (Julie,
+  // 2026-11-08). The owner's browser is never held; their tokens are, until
+  // the answer, a cancel or ANSWER_LOCK_TTL_MS.
+  try {
+    await answerLocks(env, slug, { kind: 'add', id: askId, lock: { ask_id: askId, asker, ...(runner ? { runner } : { by: asker, ids: [...new Set(state.group.ids.concat(accountId))] }), until: Date.now() + ANSWER_LOCK_TTL_MS } });
+  } catch {
+    return json({ error: 'answer_lock_unavailable', message: 'Could not send the question right now; try again.' }, { status: 503 });
   }
   // The lock and the question are one: if anything after the lock fails,
   // the lock goes too, so no question that was never recorded holds an

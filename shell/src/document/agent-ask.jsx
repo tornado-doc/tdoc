@@ -11,10 +11,13 @@ import { mentionsAi, onlyMeDefault } from './ai-answerer.js';
 //     the @ list's top row that may edit) into the text at the caret, as a
 //     pill; the pill's dropdown swaps it (MentionField). Typing @ and
 //     picking an agent makes the same pill.
-//   - no mode to pick: the agent reads the comment and answers or edits. The
-//     server's authorship rules decide whether it may edit; where it may not
-//     (can_edit false, tdoc AI), the hand-off is answer only and the box says
-//     so in one quiet line.
+//   - the agent reads the comment and answers or edits. The server's
+//     authorship rules decide whether it may edit; where it may not (can_edit
+//     false, tdoc AI), the hand-off is answer only.
+//   - "Ask only" beside Comment / Reply, shown once an agent is named, off by
+//     default (Julie, 2026-11-08): ticked, the hand-off is answer only, and
+//     the server holds the agent to it (worker answer lock). Where the agent
+//     could only answer anyway (or Only me is on) it shows ticked and locked.
 //   - "Only me" for one's own agent or tdoc AI (never a team agent, which
 //     answers for the team): a private question, answer only.
 // The choices come from AgentMentionContext (document-shell.jsx).
@@ -23,10 +26,11 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   const agents = useContext(AgentMentionContext);
   const choices = agents.choices || [];
   const [onlyMe, setOnlyMe] = useState(null);
+  const [askOnlyPicked, setAskOnly] = useState(false);
   // A bare @AI follows this composer's default, if there is one.
   const target = taggedAgent(text, choices) || (mentionsAi(text) ? agents.preselected || null : null);
   const key = target ? targetKey(target) : '';
-  useEffect(() => { setOnlyMe(null); }, [key]);
+  useEffect(() => { setOnlyMe(null); setAskOnly(false); }, [key]);
   const canChange = Boolean(target && target.can_edit);
   // Embedded feedback can hand a comment to an editor, but has no private
   // answer flow. Hide Only me there so a tagged comment is never silently
@@ -34,6 +38,16 @@ export function useAgentAsk(text, setText, fieldRef = null) {
   const ownOrCloud = Boolean(target) && Boolean(target.tdoc_ai || !target.team_agent)
     && agents.privateAskSupported !== false;
   const private_ = ownOrCloud && (onlyMe === null ? onlyMeDefault(target) : onlyMe);
+  // Answer only whatever the box says: it may not edit, or Only me.
+  const askOnlyForced = Boolean(target) && (!canChange || private_);
+  const askOnly = Boolean(target) && (askOnlyForced || askOnlyPicked);
+  // Where a question cannot reach this agent, Ask only is not offered and
+  // the comment is handed over as before: the feedback space page and the
+  // widget never ask a team agent (the widget's token reaches its holder's
+  // own agents only), and the widget on another site's page asks nobody
+  // (worker feedbackTokenOwnAgent: tdoc's own pages only).
+  const askOnlyOffered = Boolean(target) && agents.ownAskSupported !== false
+    && !(target.team_agent && agents.teamAskSupported === false);
   const tagOf = (t) => `@${AGENT_TAG_JOINER}${agentMentionName(t, choices)}`;
   // The text with the default agent in it, at `at` (the caret) or the end.
   const withAgent = (cur, t = agents.preselected, at = null) => {
@@ -78,11 +92,12 @@ export function useAgentAsk(text, setText, fieldRef = null) {
     const t = named || (withDefault ? agents.preselected || null : null);
     const ownCloud = Boolean(t) && Boolean(t.tdoc_ai || !t.team_agent);
     const only = Boolean(t) && ownCloud && (t === named ? private_ : onlyMeDefault(t));
-    const mayEdit = Boolean(t && t.can_edit) && !only;
+    const mayEdit = Boolean(t && t.can_edit) && !only && !(t === named && askOnlyPicked);
     return { text: filled.text, target: t, onlyMe: only, askOnly: Boolean(t) && !mayEdit };
   };
   return {
     agents, choices, target, canChange, ownOrCloud, onlyMe: private_,
+    askOnly, askOnlyForced, askOnlyOffered, setAskOnly,
     setOnlyMe, putDefault, putAgent, outgoing,
   };
 }
@@ -108,16 +123,29 @@ export function AgentButton({ ask, busy = false, className = 'tdoc-composer-agen
   );
 }
 
-// Under the text, once an agent is named: "Answers only" where it may not
-// edit this doc, and "Only me" where it applies.
+// "Ask only", beside the send button, once an agent is named. Ticked and
+// locked where the agent may only answer anyway (it may not edit this doc,
+// tdoc AI, or Only me); otherwise off until ticked.
+export function AskOnlyToggle({ ask, busy = false }) {
+  const { target, askOnly, askOnlyForced, askOnlyOffered, setAskOnly, onlyMe } = ask;
+  if (!target || !askOnlyOffered) return null;
+  const why = !askOnlyForced ? 'Answer only: no edits, no suggestions'
+    : onlyMe ? 'Only me: the answer is yours alone, no edits'
+    : `${agentMentionName(target, ask.choices)} only answers on this doc`;
+  return (
+    <span className="tdoc-ask-only" title={why}>
+      <AppCheckbox checked={askOnly} disabled={askOnlyForced || busy} onCheckedChange={setAskOnly} label="Ask only" />
+    </span>
+  );
+}
+
+// Under the text, once an agent is named: "Only me" where it applies.
 export function AgentAskRow({ ask, hint = null }) {
-  const { target, canChange, ownOrCloud, onlyMe, setOnlyMe } = ask;
+  const { target, ownOrCloud, onlyMe, setOnlyMe } = ask;
   if (!target) return null;
-  const note = !canChange || onlyMe;
-  if (!note && !ownOrCloud && !hint) return null;
+  if (!ownOrCloud && !hint) return null;
   return (
     <div className="tdoc-ask-row">
-      {note ? <span className="tdoc-ask-only-label">Answers only</span> : null}
       {ownOrCloud ? (
         <AppCheckbox className="tdoc-only-me" checked={onlyMe} onCheckedChange={setOnlyMe} label="Only me" />
       ) : null}
@@ -128,11 +156,12 @@ export function AgentAskRow({ ask, hint = null }) {
 
 // The line under the box saying what the named agent will do.
 export function agentAskHint(ask) {
-  const { target, onlyMe, canChange, choices, agents } = ask;
+  const { target, onlyMe, canChange, askOnly, choices, agents } = ask;
   if (!target) return null;
   // The pill's short name (Julie, 2026-10-25).
   const name = agentMentionName(target, choices);
   if (onlyMe) return `${name} answers you alone`;
+  if (askOnly) return `${name} answers in the thread`;
   if (canChange && agents?.suggestsFor?.(target)) return `${name} answers or suggests edits`;
   if (canChange && agents?.fixesTheApp) return `${name} answers or fixes the app`;
   return canChange ? `${name} answers or changes the doc` : `${name} answers in the thread`;
