@@ -164,6 +164,25 @@ export function parseDelimited(text, delimiter, { maxRows = Infinity } = {}) {
   return rows;
 }
 
+// "New sheet": one tab, a few typed columns, a few empty rows, so the grid
+// opens ready to type into and shows what each column type looks like.
+export function blankSheetHtml(title = 'Untitled sheet') {
+  return sheetDocumentHtml({
+    title,
+    sheets: [{
+      name: 'Sheet 1',
+      columns: [
+        { name: 'Name', type: 'text' },
+        { name: 'Status', type: 'tags', palette: 'Done:green, In progress:blue, Blocked:red, To do:gray' },
+        { name: 'Due', type: 'date' },
+        { name: 'Amount', type: 'number' },
+        { name: 'Done', type: 'checkbox' },
+      ],
+      rows: Array.from({ length: 5 }, () => ({ cells: ['', [], '', '', ''] })),
+    }],
+  });
+}
+
 // ---- reading markup (DOM) ----------------------------------------------------
 
 export const SHEET_SELECTOR = 'table[data-tdoc-sheet]';

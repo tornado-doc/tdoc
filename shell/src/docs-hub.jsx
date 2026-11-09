@@ -6,7 +6,7 @@ import { AppButton } from './ui/button.jsx';
 import { AppSelect } from './ui/select.jsx';
 import { CopyPromptButton } from './ui/copy-prompt-button.jsx';
 import { AgentRecipe, CreateMenu } from './create-from-scratch.jsx';
-import { SheetDropHint, SheetFilePicker, SheetImportDialog, isSheetFileName, useSheetFileDrop } from './sheet-import.jsx';
+import { SheetDropHint, SheetFilePicker, SheetImportDialog, createBlankSheet, isSheetFileName, sheetErrorText, useSheetFileDrop } from './sheet-import.jsx';
 import { DocList, DocRow, FolderRow, day } from './docs-hub/rows.jsx';
 import { OnboardingChecklist } from './docs-hub/onboarding-checklist.jsx';
 import { ConnectorsBody } from './connectors-page.jsx';
@@ -687,6 +687,19 @@ export function DocsHub({ boot }) {
   // My docs, imports as a sheet doc in the workspace being looked at.
   const [sheetsOn] = useState(() => isFeatureOn('sheets'));
   const sheetPicker = useRef(null);
+  // New sheet: like Start from scratch, the browser leaves for the doc on
+  // success; a quota hit opens the bump dialog, anything else a toast.
+  const newSheet = useCallback(async (teamId) => {
+    try {
+      const made = await createBlankSheet(teamId);
+      location.href = made.url;
+      return true;
+    } catch (error) {
+      if (error.body?.error === 'quota_docs') return { quota: error.body };
+      hub.notify(sheetErrorText(error), true);
+      return false;
+    }
+  }, [hub.notify]);
   const dropSheet = useCallback((file) => {
     if (!isSheetFileName(file.name)) {
       hub.notify('Drop a .csv, .tsv or .xlsx file to import it as a sheet', true);
@@ -1055,6 +1068,7 @@ export function DocsHub({ boot }) {
                   onAgent={openAgentRecipe}
                   onQuota={(quota) => setModal({ type: 'quota-bump', quota })}
                   onImport={sheetsOn ? () => sheetPicker.current?.click() : null}
+                  onNewSheet={sheetsOn ? newSheet : null}
                   trigger={<button className="mk-btn" type="button">Create a doc</button>}
                 />
               ) : null}

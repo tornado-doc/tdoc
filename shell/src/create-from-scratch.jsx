@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppMenu, AppMenuItem } from './ui/menu.jsx';
-import { MessageSquare, SquarePen, Sheet } from 'lucide-react';
+import { MessageSquare, SquarePen, Sheet, Table2 } from 'lucide-react';
 import { copyText } from './document/model.js';
 import { COPY_FALLBACK, selectContents } from './onboarding-copy.js';
 import { AgentMarks } from './agent-marks.jsx';
@@ -31,10 +31,20 @@ import { DOC_SUBJECT_PLACEHOLDER, DOC_SUBJECT_PREFIX, DOC_SUBJECT_SUFFIX, docSub
 // Which agents is a separate question, answered by the marks at the end of
 // the row, where a list of what something works with belongs.
 //
-// A third answer, behind the `sheets` flag: bring a spreadsheet. `onImport`
-// opens the hub's file chooser (sheet-import.jsx), which imports the file.
-export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuota, onImport, trigger }) {
+// Two more answers, behind the `sheets` flag: a blank sheet (`onNewSheet`,
+// which resolves like `create`), or bring a spreadsheet (`onImport` opens
+// the hub's file chooser, sheet-import.jsx).
+export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuota, onImport, onNewSheet, trigger }) {
   const [busy, setBusy] = useState(false);
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const startSheet = async () => {
+    if (sheetBusy) return;
+    setSheetBusy(true);
+    const result = await onNewSheet(team);
+    if (result === true) return;
+    setSheetBusy(false);
+    if (result && result.quota && onQuota) onQuota(result.quota);
+  };
   const startBlank = async () => {
     if (busy) return;
     setBusy(true);
@@ -51,6 +61,15 @@ export function CreateMenu({ create, team = '', canCreate = true, onAgent, onQuo
           <span className="mk-text">
             <b>{busy ? 'Creating…' : 'Start from scratch'}</b>
             <em>A blank doc, open in edit mode.</em>
+          </span>
+        </AppMenuItem>
+      ) : null}
+      {canCreate && onNewSheet ? (
+        <AppMenuItem onClick={startSheet} disabled={sheetBusy} className="mk-item">
+          <Table2 size={17} strokeWidth={1.75} aria-hidden="true" />
+          <span className="mk-text">
+            <b>{sheetBusy ? 'Creating…' : 'New sheet'}</b>
+            <em>A blank sheet with typed columns, open in edit mode.</em>
           </span>
         </AppMenuItem>
       ) : null}

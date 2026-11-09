@@ -35,6 +35,21 @@ export async function importSheetDocument(file, team) {
   return { url: saved.url || created.url, warnings: sheet.warnings, sheets: sheet.sheets.length };
 }
 
+// "New sheet": a blank sheet doc, opened straight into Edit mode. The same
+// create + first save as an import, so it is v1 and titled from its heading.
+export async function createBlankSheet(team) {
+  const { blankSheetHtml } = await import('../../shared/sheet-markup.mjs');
+  const created = await createDocument(team || '');
+  const saved = await saveDocumentVersion(created.slug, created.version || 1, blankSheetHtml());
+  const next = new URL(saved.url || created.url, location.origin);
+  next.searchParams.set('edit', '1');
+  return { url: `${next.pathname}${next.search}` };
+}
+
+export function sheetErrorText(error) {
+  return errorText(error);
+}
+
 function errorText(error) {
   if (!error) return '';
   if (error.name === 'SheetImportError') return error.message;
