@@ -10,9 +10,12 @@
 // reads it back from a DOM (the viewer), and writes one cell (the editor). It
 // inlines into the frame viewer like sheet-query.mjs, so: no imports here.
 //
-// The `data-row` id on each body row is the stable half of a cell's comment
-// anchor: sorting and filtering are view state and never move a row in the
-// document, and inserting or deleting rows leaves the other ids alone.
+// A cell's comment anchors to its row and its column by id, not position:
+// the `data-row` id on each body row (sorting and filtering are view state
+// and never move a row in the document; inserting or deleting rows leaves
+// the other ids alone) and the `data-key` on each header (kept through
+// rename and type changes; inserting or deleting a column leaves the other
+// keys alone). Markup without keys falls back to the column's position.
 
 export function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -51,9 +54,9 @@ export function cellHtml(type, raw) {
 // One <table data-tdoc-sheet>. sheet = { name, columns:[{name,type,palette?}], rows:[{id?, cells:[raw]}] }
 export function tableHtml(sheet, { caption = false } = {}) {
   const cols = sheet.columns || [];
-  const head = cols.map((col) => {
+  const head = cols.map((col, i) => {
     const pal = col.palette ? ` data-palette="${escapeHtml(col.palette)}"` : '';
-    return `<th data-type="${escapeHtml(col.type || 'text')}"${pal}>${escapeHtml(col.name)}</th>`;
+    return `<th data-key="${escapeHtml(col.key || `c${i + 1}`)}" data-type="${escapeHtml(col.type || 'text')}"${pal}>${escapeHtml(col.name)}</th>`;
   }).join('');
   const body = (sheet.rows || []).map((row, i) => {
     const id = row.id || `r${i + 1}`;
@@ -209,6 +212,7 @@ export function readSheetTable(table, normalize) {
   const ths = headerCells(table);
   const norm = typeof normalize === 'function' ? normalize : (t) => String(t || 'text').toLowerCase();
   const columns = ths.map((th, i) => ({
+    key: th.getAttribute('data-key') || '',
     name: cellText(th) || `Column ${i + 1}`,
     type: norm(th.getAttribute('data-type')),
     palette: th.getAttribute('data-palette') || '',
@@ -258,6 +262,13 @@ export function writeCell(td, type, value) {
     return;
   }
   td.textContent = text;
+}
+
+// The next unused column key among `keys`: c<max+1>.
+export function nextColumnKey(keys) {
+  let max = 0;
+  (keys || []).forEach((k) => { const m = /^c(\d+)$/.exec(k || ''); if (m) max = Math.max(max, Number(m[1])); });
+  return `c${max + 1}`;
 }
 
 // The next unused row id in a table: r<max+1>.

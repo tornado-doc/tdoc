@@ -67,11 +67,17 @@ async function shot(page, name, opts = {}) {
   ] }), 'Tracker');
   // A second copy for Edit mode, so the read tests never see its edits.
   writeDoc('editable', fs.readFileSync(path.join(root, 'tracker', 'v1', 'index.html'), 'utf8'), 'Editable');
-  // 10,000 rows × 20 columns, written to disk directly (past the 2 MB a
-  // browser save takes): what the viewer must stay smooth on.
-  const bigCols = Array.from({ length: 20 }, (_, c) => ({ name: `Col ${c + 1}`, type: c % 5 === 1 ? 'number' : c % 5 === 2 ? 'tags' : c % 5 === 3 ? 'date' : 'text' }));
-  const bigRows = Array.from({ length: 10000 }, (_, r) => ({ id: `r${r + 1}`, cells: bigCols.map((col, c) => col.type === 'number' ? String((r * 7919 + c * 31) % 100000) : col.type === 'tags' ? [['alpha', 'beta', 'gamma', 'delta'][(r + c) % 4]] : col.type === 'date' ? `2026-${String(1 + (r % 12)).padStart(2, '0')}-${String(1 + (r % 28)).padStart(2, '0')}` : `r${r + 1} c${c + 1}`) }));
-  writeDoc('big', M.sheetDocumentHtml({ title: 'Big', sheets: [{ name: 'Data', columns: bigCols, rows: bigRows }] }), 'Big');
+  // 10,000 rows × 20 columns as a CSV, imported through the browser (about
+  // 6 MB as a sheet doc: the raised sheet cap).
+  const bigCsv = path.join(files, 'customers_10k.csv');
+  {
+    const names = ['Name', 'Email', 'Amount', 'Date', 'Status', 'Owner', 'Region', 'Score', 'Notes', 'Link'];
+    const lines = [Array.from({ length: 20 }, (_, c) => `${names[c % 10]} ${c + 1}`).join(',')];
+    for (let r = 0; r < 10000; r++) {
+      lines.push(Array.from({ length: 20 }, (_, c) => [`Customer ${r}`, `user${r}@example.com`, ((r * 13.37) % 9999).toFixed(2), `2026-0${1 + (r % 9)}-1${r % 9}`, ['open', 'won', 'lost'][r % 3], ['Ann', 'Bo', 'Cy'][r % 3], ['EMEA', 'APAC', 'NA'][r % 3], String(r % 100), `Follow up about order ${r}`, `https://example.com/o/${r}`][c % 10]).join(','));
+    }
+    fs.writeFileSync(bigCsv, lines.join('\n'));
+  }
   // Agent-authored markup, no row ids, no thead (a <th> row in the body).
   writeDoc('handwritten', `<!doctype html><html><head><meta charset="utf-8"><title>Hand</title></head><body><main><h1>Inventory</h1>
 <table data-tdoc-sheet data-name="Stock"><tr><th>Item</th><th data-type="number">Qty</th><th data-type="tags">Where</th></tr>
@@ -301,6 +307,7 @@ async function shot(page, name, opts = {}) {
       assert(saved.length === 1, `saved: ${saved.length}`);
       const anchor = saved[0].anchor;
       assert(anchor.kind === 'element' && anchor.selector === 'table[data-tdoc-sheet][data-name="Tasks"] tr[data-row="r5"] > :nth-child(2)', JSON.stringify(anchor));
+      assert(anchor.sheet && anchor.sheet.table === 'Tasks' && anchor.sheet.row === 'r5' && anchor.sheet.key === 'c2', `row id + column key: ${JSON.stringify(anchor.sheet)}`);
       if (anchor.label) assert(/B5/.test(anchor.label), `labelled with the cell: ${anchor.label}`);
       // Sort descending by Task: row 5 moves; its marker follows it.
       await frame.waitForFunction(() => document.querySelectorAll('.ts-c.has-comment').length === 1);
@@ -313,6 +320,48 @@ async function shot(page, name, opts = {}) {
       assert(pins >= 1, 'a pin is drawn');
       await shot(page, 'sheet-comment-desktop');
       await f.getByRole('button', { name: 'Clear all' }).click().catch(() => {});
+    });
+
+    await test('a cell comment stays on its cell when a column is inserted before it, live and after Save', async () => {
+      const frame = await open('tracker');
+      const f = frameLoc();
+      const marked = () => frame.evaluate(() => Array.from(document.querySelectorAll('.ts-c.has-comment')).map((c) => [c.parentElement.querySelector('[data-c="0"]').textContent, c.getAttribute('data-c'), document.querySelectorAll('.ts-h b')[Number(c.getAttribute('data-c'))].textContent]));
+      await frame.waitForFunction(() => document.querySelectorAll('.ts-c.has-comment').length === 1);
+      assert(JSON.stringify(await marked()) === '[["Task 5","1","Owner"]]', JSON.stringify(await marked()));
+      await page.getByRole('button', { name: /Document mode:/ }).click();
+      await page.getByRole('menuitemradio', { name: 'Edit' }).click();
+      await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');
+      await f.getByRole('button', { name: 'Owner column menu' }).click();
+      await f.getByRole('menuitem', { name: 'Insert column left' }).click();
+      await f.getByRole('textbox', { name: 'Column name' }).fill('Priority');
+      await page.keyboard.press('Enter');
+      const keys = await frame.evaluate(() => Array.from(document.querySelectorAll('table[data-tdoc-sheet][data-name="Tasks"] thead th')).map((th) => th.getAttribute('data-key')).join());
+      assert(keys === 'c1,c8,c2,c3,c4,c5,c6,c7', `the new column takes a fresh key, the rest keep theirs: ${keys}`);
+      await frame.waitForFunction(() => { const c = document.querySelector('.ts-c.has-comment'); return c && c.getAttribute('data-c') === '2'; });
+      assert(JSON.stringify(await marked()) === '[["Task 5","2","Owner"]]', `live: ${JSON.stringify(await marked())}`);
+      await page.waitForFunction(() => { const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent.trim() === 'Save'); return b && !b.disabled; });
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.waitForURL(/\/d\/tracker\/v\/2/, { timeout: 10000 });
+      await page.goto(`${base}/d/tracker/v/2`);
+      const v2 = page.frames().find((x) => x.url().includes('/frame')) || await (async () => { await page.waitForTimeout(300); return page.frames().find((x) => x.url().includes('/frame')); })();
+      await frameLoc().locator('.ts-row').first().waitFor();
+      await v2.waitForFunction(() => document.querySelectorAll('.ts-c.has-comment').length === 1);
+      const after = await v2.evaluate(() => { const c = document.querySelector('.ts-c.has-comment'); return [c.parentElement.querySelector('[data-c="0"]').textContent, c.getAttribute('data-c'), document.querySelectorAll('.ts-h b')[2].textContent]; });
+      assert(JSON.stringify(after) === '["Task 5","2","Owner"]', `after Save, on v2: ${JSON.stringify(after)}`);
+      // Scrolled out of the grid, the comment is counted at the edge it is
+      // past, the pin sits there, and the marker takes you back to it.
+      await page.setViewportSize({ width: 1280, height: 520 });
+      await v2.evaluate(() => { const g = document.querySelector('.ts-grid'); g.scrollTop = g.scrollHeight; g.dispatchEvent(new Event('scroll')); });
+      await v2.waitForFunction(() => { const b = document.querySelectorAll('.ts-off')[0]; return b && !b.hidden && /1 comment above/.test(b.textContent); });
+      await page.waitForTimeout(600);
+      const where = await v2.evaluate(() => { const b = document.querySelectorAll('.ts-off')[0].getBoundingClientRect(), g = document.querySelector('.ts-grid').getBoundingClientRect(); return { badge: b.top + scrollY, gridTop: g.top + scrollY, cell: null }; });
+      const pin = await page.evaluate(() => { const pins = Array.from(document.querySelectorAll('.tdoc-pin, [data-pin-id]')); const r = pins[0] && pins[0].getBoundingClientRect(); return r ? r.top : null; });
+      const frameTop = (await page.locator('.tdoc-doc-frame').boundingBox()).y;
+      assert(pin !== null && Math.abs(pin - frameTop - (where.badge - await v2.evaluate(() => scrollY))) < 40, `pin beside the "above" marker: pin ${pin}, marker ${where.badge}, frame ${frameTop}`);
+      await shot(page, 'sheet-offscreen-comment');
+      await v2.evaluate(() => document.querySelectorAll('.ts-off')[0].click());
+      await v2.waitForFunction(() => { const c = document.querySelector('.ts-c.has-comment'); const g = document.querySelector('.ts-grid').getBoundingClientRect(); if (!c) return false; const r = c.getBoundingClientRect(); return r.top >= g.top && r.bottom <= g.bottom; });
+      await page.setViewportSize({ width: 1280, height: 860 });
     });
 
     await test('Edit mode: edit a cell, pick a tag, add a row, paste a range, undo; Save writes a new version', async () => {
@@ -478,9 +527,18 @@ async function shot(page, name, opts = {}) {
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
-    await test('10,000 rows × 20 columns: loads, scrolls inside a frame budget, sorts and searches fast', async () => {
+    await test('10,000 rows × 20 columns: imports through the browser, loads, scrolls inside a frame budget, sorts, searches, saves', async () => {
+      await page.goto(`${base}/`);
+      const ti = Date.now();
+      await page.setInputFiles('[data-testid="sheet-import-input"]', bigCsv);
+      await page.waitForURL(/\/d\/[^/]+\/v\/\d+/, { timeout: 60000 });
+      const importMs = Date.now() - ti;
+      const bigSlug = new URL(page.url()).pathname.split('/')[2];
+      const stored = fs.statSync(path.join(root, bigSlug, 'v1', 'index.html')).size;
+      assert(stored > 2 * 1024 * 1024 && stored < 8 * 1024 * 1024, `stored as one sheet doc over the old 2 MB cap: ${stored} bytes`);
+      await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('tdoc-sheet-view:')) localStorage.removeItem(k); });
       const t0 = Date.now();
-      const frame = await open('big');
+      const frame = await open(bigSlug);
       const loadMs = Date.now() - t0;
       assert(await countText(frame) === '10,000 rows', await countText(frame));
       const domRows = await frame.evaluate(() => document.querySelectorAll('.ts-row').length);
@@ -502,7 +560,7 @@ async function shot(page, name, opts = {}) {
         requestAnimationFrame(step);
       }));
       assert(scroll.p95 < 50, `scroll frames: p95 ${scroll.p95.toFixed(1)}ms (max ${scroll.max.toFixed(1)}ms)`);
-      assert(scroll.at > 100000 && scroll.rows < 80 && /^r\d+ c1$/.test(scroll.first), JSON.stringify(scroll));
+      assert(scroll.at > 100000 && scroll.rows < 80 && /^Customer \d+$/.test(scroll.first), JSON.stringify(scroll));
       const sortMs = await frame.evaluate(() => new Promise((resolve) => {
         const t = performance.now();
         document.querySelector('.ts-h[data-c="1"] .ts-hname').click();
@@ -511,15 +569,33 @@ async function shot(page, name, opts = {}) {
       assert(sortMs < 600, `sort took ${sortMs.toFixed(0)}ms`);
       const searchMs = await frame.evaluate(() => new Promise((resolve) => {
         const input = document.querySelector('.ts-search input');
-        input.value = 'c7';
+        input.value = 'customer 77';
         const t = performance.now();
         input.dispatchEvent(new Event('input'));
         const wait = () => (/of 10,000 rows/.test(document.querySelector('.ts-count').textContent) ? resolve(performance.now() - t - 140) : requestAnimationFrame(wait));
         wait();
       }));
       assert(searchMs < 600, `search took ${searchMs.toFixed(0)}ms past its debounce`);
-      console.log(`    (10k × 20: open ${loadMs}ms, scroll p95 ${scroll.p95.toFixed(1)}ms, sort ${sortMs.toFixed(0)}ms, search ${searchMs.toFixed(0)}ms)`);
       await shot(page, 'sheet-10k-desktop');
+      // Edit one cell and Save: a new version of a multi-megabyte sheet.
+      const trigger = page.getByRole('button', { name: /Document mode:/ });
+      await trigger.click();
+      await page.getByRole('menuitemradio', { name: 'Edit' }).click();
+      await frame.waitForFunction(() => document.documentElement.getAttribute('data-tdoc-interaction-mode') === 'edit');
+      await frame.evaluate(() => { const i = document.querySelector('.ts-search input'); i.value = ''; i.dispatchEvent(new Event('input')); });
+      await frame.waitForFunction(() => document.querySelector('.ts-count').textContent === '10,000 rows');
+      await frame.evaluate(() => { const g = document.querySelector('.ts-grid'); g.scrollTop = 0; g.dispatchEvent(new Event('scroll')); });
+      await page.frameLocator('iframe[aria-label="Document content"]').locator('.ts-row[data-i="0"] .ts-c[data-c="0"]').click();
+      await page.keyboard.type('Edited at 10k');
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => { const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent.trim() === 'Save'); return b && !b.disabled; }, null, { timeout: 20000 });
+      const ts = Date.now();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page.waitForURL(new RegExp(`/d/${bigSlug}/v/2`), { timeout: 60000 });
+      const saveMs = Date.now() - ts;
+      const v2 = fs.readFileSync(path.join(root, bigSlug, 'v2', 'index.html'), 'utf8');
+      assert(/<td>Edited at 10k<\/td>/.test(v2) && (v2.match(/<tr data-row=/g) || []).length === 10000, 'v2 has the edit and every row');
+      console.log(`    (10k × 20: import ${importMs}ms, ${(stored / 1048576).toFixed(1)} MB, open ${loadMs}ms, scroll p95 ${scroll.p95.toFixed(1)}ms, sort ${sortMs.toFixed(0)}ms, search ${searchMs.toFixed(0)}ms, save ${saveMs}ms)`);
     });
 
     await test('a phone: no sideways page scroll, the grid scrolls itself, menus are bottom sheets', async () => {

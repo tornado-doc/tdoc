@@ -671,9 +671,21 @@
   //   selector(el) -> a stable anchor selector for el, or null for cssPath's
   //   proxy(el)    -> the visible element to measure in el's place, or null
   //   reveal(el)   -> bring el into view (switch tab, scroll its row in)
+  //   anchor(el)   -> extra identity stored with the anchor ({ table, row,
+  //                   key } for a sheet cell), or null
+  //   resolve(anchor) -> the element that identity names now, null if it is
+  //                   gone, undefined to fall back to the selector
   var elementHooks = window.__tdocElementHooks = window.__tdocElementHooks || {};
   function hookCall(name, el) { try { return typeof elementHooks[name] === 'function' ? elementHooks[name](el) : null; } catch (x) { return null; } }
   function visibleFor(el) { return hookCall('proxy', el) || el; }
+  function resolveElementAnchor(anchor) {
+    if (anchor.sheet && typeof elementHooks.resolve === 'function') {
+      var found;
+      try { found = elementHooks.resolve(anchor); } catch (x) { found = undefined; }
+      if (found !== undefined) return found;
+    }
+    try { return document.querySelector(anchor.selector); } catch (x) { return null; }
+  }
   var UI_SEL = '.tdoc-hover-outline, .tdoc-comment-pill, [data-tdoc-provider]';
   function isProbeUI(el) { return !!(el && el.closest && el.closest(UI_SEL)); }
   function artifactFor(node) {
@@ -752,8 +764,10 @@
     // below the whole box, far from the click.
     var pr = (hoverPill && hoverPill.style.display !== 'none') ? hoverPill.getBoundingClientRect() : null;
     var ar = near || (pr && (pr.width || pr.height) ? pr : null) || { top: r.top, left: Math.max(r.left, r.right - 40), bottom: r.top + 36, right: r.right, width: 30, height: 30 };
+    var identity = hookCall('anchor', el);
     post({
       type: 'tdoc:selection', kind: 'element', label: String(label).slice(0, 80), selector: cssPath(el),
+      sheet: identity && typeof identity === 'object' ? identity : undefined,
       text: '', context_before: '', context_after: '',
       rect: { top: ar.top, left: ar.left, bottom: ar.bottom, right: ar.right, width: ar.width, height: ar.height },
     });
@@ -1266,7 +1280,7 @@
         return;
       }
       if (c.anchor.kind === 'element' && c.anchor.selector) {
-        var eel = null; try { eel = document.querySelector(c.anchor.selector); } catch (x) {}
+        var eel = resolveElementAnchor(c.anchor);
         if (eel) {
           _anchorTargets[c.id] = { element: eel };
           var er = visibleFor(eel).getBoundingClientRect();

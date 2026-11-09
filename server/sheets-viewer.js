@@ -140,6 +140,10 @@
     '.ts-c.has-comment::after{content:"";position:absolute;top:0;right:0;border-style:solid;border-width:0 9px 9px 0;border-color:transparent #f5a524 transparent transparent;cursor:pointer}',
     '.ts-c .tdoc-comment-pill{position:absolute;top:1px;right:2px;width:28px;height:28px;z-index:3}',
     '.ts-c .tdoc-comment-pill svg{width:14px;height:14px}',
+    '.ts-off{position:absolute;left:50%;transform:translateX(-50%);z-index:5;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:1px solid #f0c36d;border-radius:999px;background:#fff8e6;color:#7a4b00;font-weight:500;box-shadow:0 2px 8px rgba(0,0,0,.1);white-space:nowrap}',
+    '.ts-off:hover{background:#ffefc2}',
+    '.ts-off[hidden],.ts-off-hidden[hidden]{display:none!important}',
+    '.ts-off-hidden{margin:-2px 0 8px;color:#7a4b00}',
     '.ts-empty{padding:28px 16px;color:var(--ts-muted);text-align:center;position:sticky;left:0}',
     '.ts-add-row{display:flex;align-items:center;gap:6px;margin:6px 0 0;padding:0 10px;height:32px;border:1px dashed #d0d0d8;border-radius:8px;background:transparent;color:var(--ts-muted);width:100%}',
     '.ts-add-row:hover{border-color:var(--ts-accent);color:var(--ts-accent)}',
@@ -348,7 +352,14 @@
     ui.grid.appendChild(ui.head); ui.grid.appendChild(ui.body);
     ui.addRow = h('button', 'ts-add-row'); ui.addRow.type = 'button'; ui.addRow.innerHTML = ICON.plus + '<span>Add row</span>';
     ui.addRow.addEventListener('click', function (e) { e.stopPropagation(); insertRows(null, 1); ui.grid.focus({ preventScroll: true }); });
-    root.appendChild(ui.tabs); root.appendChild(ui.bar); root.appendChild(ui.grid); root.appendChild(ui.addRow);
+    ui.offAbove = h('button', 'ts-off'); ui.offBelow = h('button', 'ts-off');
+    [ui.offAbove, ui.offBelow].forEach(function (b, k) {
+      b.type = 'button'; b.hidden = true;
+      b.innerHTML = (k ? ICON.down : ICON.up) + '<span></span>';
+      b.addEventListener('click', function (e) { e.stopPropagation(); goOffscreen(b); });
+    });
+    ui.offHidden = h('div', 'ts-note ts-off-hidden'); ui.offHidden.hidden = true;
+    root.appendChild(ui.tabs); root.appendChild(ui.bar); root.appendChild(ui.offHidden); root.appendChild(ui.grid); root.appendChild(ui.offAbove); root.appendChild(ui.offBelow); root.appendChild(ui.addRow);
     host.parentNode.insertBefore(root, host);
     wire();
     renderAll();
@@ -514,6 +525,7 @@
     ui.rows.style.top = (first * ROW_H) + 'px';
     ui.rows.innerHTML = html;
     placePill();
+    placeOffscreen();
   }
   function tagStyle(tag, palette) {
     var colors = Q.TAG_COLORS[Q.tagColor(tag, palette)];
@@ -698,12 +710,55 @@
     if (at.head) return ui.head.querySelector('.ts-h[data-c="' + at.c + '"]') || ui.grid;
     if (at.r == null) return ui.grid;
     var i = cur().pos[at.r];
-    var cell = i >= 0 ? cellAt(i, at.c) : null;
-    if (cell) {
-      var g = ui.grid.getBoundingClientRect(), r = cell.getBoundingClientRect();
-      if (r.top >= g.top + HEAD_H - 2 && r.bottom <= g.bottom + 2) return cell;
+    // A row the search or a filter hides: the note under the toolbar.
+    if (i < 0) return !ui.offHidden.hidden ? ui.offHidden : ui.count;
+    var where = rowPlace(i);
+    // Scrolled out of the grid: the "N comments above / below" marker at
+    // that edge, so the pin points the way to scroll.
+    if (where < 0) return !ui.offAbove.hidden ? ui.offAbove : ui.grid;
+    if (where > 0) return !ui.offBelow.hidden ? ui.offBelow : ui.grid;
+    return cellAt(i, at.c) || ui.grid;
+  };
+  // -1 above the grid's visible rows, 1 below, 0 in view.
+  function rowPlace(i) {
+    var top = i * ROW_H, view = ui.grid.clientHeight - HEAD_H;
+    if (top + ROW_H <= ui.grid.scrollTop + 2) return -1;
+    if (top >= ui.grid.scrollTop + view - 2) return 1;
+    return 0;
+  }
+  // What the comment layer stores beside the selector: the table by name,
+  // the row by id, the column by key. The selector (position) stays the
+  // fallback for markup without keys and for a reader without this viewer.
+  hooks.anchor = function (el) {
+    var at = locate(el);
+    if (!at) return null;
+    var tab = book.tabs[at.t];
+    var out = { table: tab.table.getAttribute('data-name') || '' };
+    if (at.c != null) {
+      var key = tab.data.columns[at.c] && tab.data.columns[at.c].key;
+      if (key) out.key = key;
     }
-    return ui.grid;
+    if (at.r != null && tab.data.rows[at.r].id) out.row = tab.data.rows[at.r].id;
+    return out;
+  };
+  // The element a sheet anchor names now: its row by id, its column by key,
+  // wherever columns have moved since. null when the row or column is gone.
+  hooks.resolve = function (anchor) {
+    var a = anchor && anchor.sheet;
+    if (!a || typeof a !== 'object') return undefined;
+    var tables = Array.prototype.slice.call(document.querySelectorAll(SEL)).filter(function (t) { return (t.getAttribute('data-name') || '') === String(a.table || ''); });
+    if (tables.length !== 1) return undefined;
+    var table = tables[0];
+    // No key: markup from before keys, by position as written.
+    if (!a.key) return undefined;
+    var ths = M.headerCells(table);
+    var c = -1;
+    for (var k = 0; k < ths.length; k++) if (ths[k].getAttribute('data-key') === String(a.key)) { c = k; break; }
+    if (c < 0) return null;
+    if (!a.row) return ths[c];
+    var tr = null, rows = table.querySelectorAll('tr[data-row]');
+    for (var n = 0; n < rows.length; n++) if (rows[n].getAttribute('data-row') === String(a.row)) { tr = rows[n]; break; }
+    return tr ? tr.cells[c] || null : null;
   };
   // Bring a source element into view: its tab, its row, its cell selected.
   hooks.reveal = function (el) {
@@ -730,8 +785,44 @@
         commented.set(t.element, list);
       }
     });
-    if (book) renderBody(true);
+    if (book) { renderBody(true); placeOffscreen(); }
   });
+  // Comments on rows that are off-screen or filtered out, counted at the
+  // grid's edges; a press goes to the nearest one and opens it.
+  function placeOffscreen() {
+    if (!book || !ui.offAbove) return;
+    var tab = cur(), above = [], below = [], hidden = 0;
+    commented.forEach(function (ids, el) {
+      var at = locate(el);
+      if (!at || at.t !== book.active || at.r == null) return;
+      var i = tab.pos[at.r];
+      if (i < 0) { hidden += ids.length; return; }
+      var where = rowPlace(i);
+      if (where < 0) above.push({ i: i, ids: ids });
+      else if (where > 0) below.push({ i: i, ids: ids });
+    });
+    var count = function (list) { return list.reduce(function (n, x) { return n + x.ids.length; }, 0); };
+    var show = function (el, list, word) {
+      var n = count(list);
+      el.hidden = !n;
+      if (!n) return;
+      el.querySelector('span').textContent = n + (n === 1 ? ' comment ' : ' comments ') + word;
+      el._target = list.sort(function (a, b) { return word === 'above' ? b.i - a.i : a.i - b.i; })[0];
+    };
+    show(ui.offAbove, above, 'above');
+    show(ui.offBelow, below, 'below');
+    ui.offHidden.hidden = !hidden;
+    ui.offHidden.textContent = hidden ? hidden + (hidden === 1 ? ' comment is' : ' comments are') + ' on rows the search or filters hide' : '';
+    var g = ui.grid.offsetTop;
+    ui.offAbove.style.top = (g + HEAD_H + 6) + 'px';
+    ui.offBelow.style.top = (g + ui.grid.offsetHeight - 36) + 'px';
+  }
+  function goOffscreen(el) {
+    var t = el._target;
+    if (!t) return;
+    select(t.i, sel.c, false);
+    post({ type: 'tdoc:anchorClick', id: t.ids[0] });
+  }
   function commentOn(el, rect, label) {
     document.dispatchEvent(new CustomEvent('tdoc:comment-element', { detail: { el: el, rect: rect, label: label } }));
   }
@@ -1147,11 +1238,30 @@
     var tr = thead.rows[0] || thead.appendChild(document.createElement('tr'));
     return tr;
   }
+  // Every header carries a stable key (data-key); a cell comment hangs on
+  // it, so a column added or removed elsewhere moves no comment. Markup from
+  // before keys gets them the first time its columns change.
+  function newHeader(hr, name) {
+    var keys = Array.prototype.map.call(hr.cells, function (th) { return th.getAttribute('data-key') || ''; });
+    var th = document.createElement('th');
+    th.setAttribute('data-key', M.nextColumnKey(keys));
+    th.setAttribute('data-type', 'text');
+    th.textContent = name;
+    return th;
+  }
+  function ensureKeys(hr) {
+    Array.prototype.forEach.call(hr.cells, function (th) {
+      if (th.getAttribute('data-key')) return;
+      var keys = Array.prototype.map.call(hr.cells, function (x) { return x.getAttribute('data-key') || ''; });
+      th.setAttribute('data-key', M.nextColumnKey(keys));
+    });
+  }
   function insertColumn(at) {
     var tab = cur(), name = 'Column ' + (tab.data.columns.length + 1);
     snapshotOp(tab, function () {
       var hr = headRow(tab);
-      var th = document.createElement('th'); th.setAttribute('data-type', 'text'); th.textContent = name;
+      ensureKeys(hr);
+      var th = newHeader(hr, name);
       hr.insertBefore(th, hr.cells[at] || null);
       tab.data.rows.forEach(function (row) {
         var tr = row.tr;
@@ -1287,9 +1397,8 @@
     snapshotOp(tab, function () {
       var needCols = c0 + width - tab.data.columns.length;
       var hr = headRow(tab);
-      for (var k = 0; k < needCols; k++) {
-        var th = document.createElement('th'); th.setAttribute('data-type', 'text'); th.textContent = 'Column ' + (tab.data.columns.length + k + 1); hr.appendChild(th);
-      }
+      if (needCols > 0) ensureKeys(hr);
+      for (var k = 0; k < needCols; k++) hr.appendChild(newHeader(hr, 'Column ' + (tab.data.columns.length + k + 1)));
       var types = tab.data.columns.map(function (c) { return Q.normalizeType(c.th.getAttribute('data-type')); });
       for (var k2 = 0; k2 < needCols; k2++) types.push('text');
       var next = rowIds(tab);
@@ -1389,7 +1498,7 @@
       if (editor) commitEdit();
       if (ticking) return;
       ticking = true;
-      requestAnimationFrame(function () { ticking = false; renderBody(); });
+      requestAnimationFrame(function () { ticking = false; renderBody(); placeOffscreen(); });
       clearTimeout(scrollSettle); scrollSettle = setTimeout(relayout, 200);
     }, { passive: true });
     ui.head.addEventListener('click', function (e) {

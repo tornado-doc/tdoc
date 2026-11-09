@@ -181,8 +181,8 @@ async function t(name, fn) {
     assert.match(await msg({ name: 'wide.csv', text: `${wide}\n1` }), /up to 200/);
     const many = 'a,b,c\n' + '1,2,3\n'.repeat(50_001);
     assert.match(await msg({ name: 'long.csv', text: many }), /up to 50,000/);
-    const heavy = 'a,b,c,d\n' + Array.from({ length: 30_000 }, (_, i) => `value number ${i},another value ${i},${i},third ${i}`).join('\n');
-    assert.match(await msg({ name: 'heavy.csv', text: heavy }), /would be \d+\.\d MB, and a doc can be up to 2 MB/);
+    const heavy = Array.from({ length: 12 }, (_, c) => `c${c}`).join(',') + '\n' + Array.from({ length: 40_000 }, (_, i) => Array.from({ length: 12 }, (_, c) => `value ${c} of row ${i}`).join(',')).join('\n');
+    assert.match(await msg({ name: 'heavy.csv', text: heavy }), /would be \d+\.\d MB, and a doc can be up to 8 MB/);
   });
 
   await t('markup round trip: model → HTML → model keeps names, types, palette, ids, tags, links', () => {
@@ -205,13 +205,14 @@ async function t(name, fn) {
     const back = M.readSheetTable(table, Q.normalizeType);
     assert.equal(back.name, 'Q1 <plan>');
     assert.deepEqual(back.columns.map((c) => [c.name, c.type]), model.columns.map((c) => [c.name, c.type]));
+    assert.deepEqual(back.columns.map((c) => c.key), ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'], 'every header gets a stable key');
     assert.deepEqual(Q.parsePalette(back.columns[3].palette), { urgent: 'red', later: 'gray' });
     assert.deepEqual(back.rows.map((r) => r.id), ['r7', 'r2']);
     assert.deepEqual(back.rows[0].cells, ['Ship <b>it</b> & "go"', '1200', '2026-01-31', ['urgent', 'a & b'], '✓', 'https://example.com/?a=1&b=2']);
     assert.deepEqual(back.rows[1].cells, ['Second', '', '', [], '', 'javascript:alert(1)']);
     assert.equal(back.rows[0].tds[5].querySelector('a').getAttribute('href'), 'https://example.com/?a=1&b=2');
     // HTML → model → HTML is a fixed point.
-    const again = M.tableHtml({ name: back.name, columns: back.columns.map((c) => ({ name: c.name, type: c.type, palette: c.palette })), rows: back.rows.map((r) => ({ id: r.id, cells: r.cells })) });
+    const again = M.tableHtml({ name: back.name, columns: back.columns.map((c) => ({ key: c.key, name: c.name, type: c.type, palette: c.palette })), rows: back.rows.map((r) => ({ id: r.id, cells: r.cells })) });
     assert.equal(again, M.tableHtml({ ...model, rows: model.rows.map((r, i) => ({ id: r.id || `r${i + 1}`, cells: r.cells })) }).replace('>yes<', '>✓<'));
   });
 
@@ -228,6 +229,7 @@ async function t(name, fn) {
     M.writeCell(s.rows[0].tds[1], 'url', 'javascript:alert(1)');
     assert.equal(s.rows[0].tds[1].innerHTML, 'javascript:alert(1)');
     assert.equal(M.nextRowId(table), 'r2');
+    assert.equal(M.nextColumnKey(['c1', 'c4', '', 'x9']), 'c5');
     const re = M.readSheetTable(table, Q.normalizeType);
     assert.deepEqual(re.rows[0].cells, [['new', '<x>'], 'javascript:alert(1)', '<img src=x onerror=alert(1)>']);
   });
