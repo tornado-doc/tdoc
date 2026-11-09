@@ -2610,16 +2610,23 @@ function stripClosedHtmlComments(html) {
 function aidFor(tag, innerHtml, openAttrs) {
   // Keep author-meaningful intrinsics (viewBox / src / alt / aria-label /
   // title) as part of identity — they're what makes a `<svg>` *this* svg.
-  const intrinsics = ['viewBox','src','alt','aria-label','title']
-    .map(a => {
-      const m = new RegExp('\\b' + a + '\\s*=\\s*"([^"]*)"', 'i').exec(openAttrs || '');
+  // The patterns are compiled once (per element they were most of the cost
+  // of stamping a page of many small tables); the result is unchanged.
+  const res = aidFor.intrinsicRes || (aidFor.intrinsicRes = ['viewBox','src','alt','aria-label','title']
+    .map(a => [a, a.toLowerCase(), new RegExp('\\b' + a + '\\s*=\\s*"([^"]*)"', 'i')]));
+  const attrs = openAttrs || '';
+  const lower = attrs.toLowerCase();
+  const intrinsics = res
+    .map(([a, low, re]) => {
+      if (lower.indexOf(low) === -1) return '';
+      const m = re.exec(attrs);
       return m ? a + '=' + m[1] : '';
     })
     .filter(Boolean).join('|');
-  const norm = stripClosedHtmlComments(innerHtml || '')
-    .replace(/\sdata-tdoc-[\w-]+\s*=\s*"[^"]*"/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  let inner = innerHtml || '';
+  if (inner.indexOf('<!--') !== -1) inner = stripClosedHtmlComments(inner);
+  if (inner.indexOf('data-tdoc-') !== -1) inner = inner.replace(/\sdata-tdoc-[\w-]+\s*=\s*"[^"]*"/gi, '');
+  const norm = inner.replace(/\s+/g, ' ').trim();
   return cyrb53(tag + '|' + intrinsics + '|' + norm);
 }
 // Elements whose body is raw text (CDATA-like): their content is NOT markup,
@@ -2650,10 +2657,12 @@ function attrAwareOpenTagEnd(html, lt) {
 function skipRawTextBodyAt(html, openTag, attrs, openEnd) {
   if (!RAW_TEXT_TAGS.includes(openTag)) return null;
   if (/\/\s*$/.test(attrs)) return openEnd; // self-closed (rare/invalid) — nothing to skip
-  const closeRe = new RegExp(`</${openTag}\\s*>`, 'i');
+  // Searched in place from openEnd: slicing the rest of the document per
+  // raw-text element made a page of many <style>s quadratic.
+  const closeRe = new RegExp(`</${openTag}\\s*>`, 'gi');
   closeRe.lastIndex = openEnd;
-  const m = closeRe.exec(html.slice(openEnd));
-  return m ? openEnd + m.index + m[0].length : html.length;
+  const m = closeRe.exec(html);
+  return m ? m.index + m[0].length : html.length;
 }
 
 // A heading label is plain text. Skip complete nested tags once and discard
@@ -2871,127 +2880,203 @@ function measureAidDrift(rawHtml, comments) {
 // regex walking skipped past the inner element's close tag. We now run
 // SEPARATE passes per tag, so an svg inside a figure gets stamped just
 // like a free-standing svg. Both are valid anchor targets.
+// Linear in the document, whatever it holds (#973 delta review: one close
+// search per element ran to the end of the document, and the stamps were
+// applied by re-slicing the whole document per element; 60k small tables
+// took 79s). The matching, inner HTML and aid of every element are those of
+// the earlier per-element scan (test/fixtures/stampaids-reference.js;
+// test/stampaids.test.js holds the two equal on every repo document and on
+// fuzzed markup); what changed is how they are found:
+//   - each tag's opens and closes, and the raw-text opens and closes, are
+//     found once and looked up by binary search;
+//   - an element's close is found by the same traversal (raw-text bodies
+//     skipped, same-tag opens counted, attribute-aware tag ends), with the
+//     result for a nested start memoized, so a run of nested elements is
+//     walked once;
+//   - headings by binary search, stamps applied in one join.
+// Two bounds keep it linear on adversarial input: an element nested more
+// than STAMP_MAX_DEPTH stampable elements deep gets no aid (its ancestors'
+// aids hash its content; real docs nest a handful), and an open tag that
+// starts inside another open tag (in an attribute value, so not an element
+// at all) gets none. And only the first STAMP_MAX_ELEMENTS elements in
+// document order are stamped: a real doc has hundreds; 2 MB of bare
+// `<section>` has 220,000, and each costs a hash.
+const STAMP_MAX_DEPTH = 16;
+const STAMP_MAX_ELEMENTS = 20000;
 function stampAids(rawHtml) {
-  const headings = headingsFromHtml(rawHtml);
+  const html = rawHtml;
+  const n = html.length;
+  const headings = headingsFromHtml(html);
   function nearestHeadingAt(idx) {
-    let best = null;
-    // Use <= so a heading whose close tag ends exactly at the next
-    // element's open (no whitespace between) is still "before" it.
-    for (const h of headings) { if (h.end <= idx) best = h.text; else break; }
-    return best;
+    // The last heading whose close ends at or before idx (ends ascend).
+    let lo = 0, hi = headings.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (headings[mid].end <= idx) lo = mid + 1; else hi = mid; }
+    return lo ? headings[lo - 1].text : null;
   }
-  // Find every open tag of every stampable kind in document order.
-  // For non-void tags, find its matching close (same-tag depth count).
-  // Collect [openStart, openEnd, closeEnd, tag, attrs, innerHtml] per element.
+  // First entry of a sorted array of { index } at or after pos.
+  function lowerBound(arr, pos) {
+    let lo = 0, hi = arr.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].index < pos) lo = mid + 1; else hi = mid; }
+    return lo < arr.length ? arr[lo] : null;
+  }
+  function allMatches(re) {
+    const out = [];
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(html))) { out.push({ index: m.index, end: m.index + m[0].length, name: m[1] ? m[1].toLowerCase() : '' }); if (m[0].length === 0) re.lastIndex++; }
+    return out;
+  }
+  // attrAwareOpenTagEnd, memoized; nothing after the last '>' can end.
+  const lastGt = html.lastIndexOf('>');
+  const tagEndMemo = new Map();
+  function tagEnd(lt) {
+    if (lt > lastGt) return -1;
+    let v = tagEndMemo.get(lt);
+    if (v === undefined) { v = attrAwareOpenTagEnd(html, lt); tagEndMemo.set(lt, v); }
+    return v;
+  }
+  // Raw-text opens (<script>, <style>, …) and, per raw tag, its closes.
+  const rawOpens = allMatches(new RegExp(`<(${RAW_TEXT_TAGS.join('|')})\\b`, 'gi'));
+  const rawCloses = new Map();
+  const rawSkipMemo = new Map();
+  function rawSkip(r) {
+    // skipRawTextBodyAt, with the close looked up instead of searched.
+    let v = rawSkipMemo.get(r.index);
+    if (v !== undefined) return v;
+    const rEnd = tagEnd(r.index);
+    if (rEnd < 0) v = -1;
+    else if (/\/\s*$/.test(html.slice(r.index, rEnd - 1))) v = rEnd;
+    else {
+      if (!rawCloses.has(r.name)) rawCloses.set(r.name, allMatches(new RegExp(`</${r.name}\\s*>`, 'gi')));
+      const c = lowerBound(rawCloses.get(r.name), rEnd);
+      v = c ? c.end : n;
+    }
+    rawSkipMemo.set(r.index, v);
+    return v;
+  }
+  const byTag = new Map();
+  function eventsFor(tag) {
+    let ev = byTag.get(tag);
+    if (!ev) {
+      const esc = tag.replace(/[^\w-]/g, '');
+      ev = { opens: allMatches(new RegExp(`<${esc}\\b`, 'gi')), closes: allMatches(new RegExp(`</${esc}\\s*>`, 'gi')), memo: new Map(), openLen: 1 + tag.length };
+      byTag.set(tag, ev);
+    }
+    return ev;
+  }
+  // The close of the element whose content starts at `start`: depth-count
+  // same-tag opens and closes from there, leaping raw-text bodies. Nested
+  // starts are frames on an explicit stack (no recursion), each memoized.
+  function closeEndFrom(tag, start) {
+    const ev = eventsFor(tag);
+    if (ev.memo.has(start)) return ev.memo.get(start);
+    const stack = [{ start, pos: start }];
+    const fail = () => { for (const f of stack) ev.memo.set(f.start, -1); stack.length = 0; };
+    while (stack.length) {
+      const top = stack[stack.length - 1];
+      const mc = lowerBound(ev.closes, top.pos);
+      const mo = lowerBound(ev.opens, top.pos);
+      const mr = lowerBound(rawOpens, top.pos);
+      // The earliest; on a tie, close before open before raw (as before).
+      let next = mc, kind = 'close';
+      if (mo && (!next || mo.index < next.index)) { next = mo; kind = 'open'; }
+      if (mr && (!next || mr.index < next.index)) { next = mr; kind = 'raw'; }
+      if (!next) { fail(); break; }
+      if (kind === 'raw') {
+        const to = rawSkip(mr);
+        if (to < 0) { fail(); break; }
+        top.pos = to;
+      } else if (kind === 'close') {
+        ev.memo.set(top.start, mc.end);
+        stack.pop();
+        if (stack.length) stack[stack.length - 1].pos = mc.end;
+      } else {
+        const oEnd = tagEnd(mo.index);
+        const childStart = oEnd < 0 ? mo.index + ev.openLen : oEnd;
+        if (ev.memo.has(childStart)) {
+          const v = ev.memo.get(childStart);
+          if (v < 0) { fail(); break; }
+          top.pos = v;
+        } else {
+          stack.push({ start: childStart, pos: childStart });
+        }
+      }
+    }
+    return ev.memo.get(start);
+  }
   const elements = [];
-  const seenOpens = new Set();   // dedupe across passes (tag pass + opt-in pass)
+  const seenOpens = new Set();
   function harvest(openStart, openEnd, tagLower, attrs) {
     if (seenOpens.has(openStart)) return;
     const isVoid = /^(img|iframe)$/i.test(tagLower) || /\/\s*$/.test(attrs);
     let closeEnd = openEnd, innerHtml = '';
     if (!isVoid) {
-      // Depth-count matching open/close tags of THIS tag name, but:
-      //  - skip over raw-text element bodies (<script>/<style>/...) so their
-      //    unescaped content can't contain a fake close tag, and
-      //  - resolve each open tag's end attribute-aware (a `>` inside an
-      //    attribute value isn't the tag end).
-      const openSameRe = new RegExp(`<${tagLower}\\b`, 'gi');
-      const closeSameRe = new RegExp(`</${tagLower}\\s*>`, 'gi');
-      const rawOpenRe = new RegExp(`<(${RAW_TEXT_TAGS.join('|')})\\b`, 'gi');
-      let depth = 1, scan = openEnd, foundCloseEnd = -1;
-      while (scan < rawHtml.length) {
-        closeSameRe.lastIndex = scan;
-        openSameRe.lastIndex = scan;
-        rawOpenRe.lastIndex = scan;
-        const mc = closeSameRe.exec(rawHtml);
-        const mo = openSameRe.exec(rawHtml);
-        const mr = rawOpenRe.exec(rawHtml);
-        // pick the earliest of: a close, a nested same-tag open, a raw-text open
-        const next = [mc, mo, mr].filter(Boolean).sort((a, b) => a.index - b.index)[0];
-        if (!next) break;
-        if (next === mr) {
-          // leap over the raw-text body so its content can't desync depth
-          const rTag = mr[1].toLowerCase();
-          const rEnd = attrAwareOpenTagEnd(rawHtml, mr.index);
-          if (rEnd < 0) break;
-          const skipTo = skipRawTextBodyAt(rawHtml, rTag, rawHtml.slice(mr.index, rEnd), rEnd);
-          scan = skipTo != null ? skipTo : rEnd;
-          continue;
-        }
-        if (next === mc) {
-          depth--; if (depth === 0) { foundCloseEnd = mc.index + mc[0].length; break; }
-          scan = mc.index + mc[0].length;
-        } else { // nested same-tag open
-          depth++;
-          const oEnd = attrAwareOpenTagEnd(rawHtml, mo.index);
-          scan = oEnd < 0 ? mo.index + mo[0].length : oEnd;
-        }
-      }
-      if (foundCloseEnd >= 0) closeEnd = foundCloseEnd;
-      innerHtml = rawHtml.slice(openEnd, closeEnd - (`</${tagLower}>`.length));
+      const found = closeEndFrom(tagLower, openEnd);
+      if (found >= 0) closeEnd = found;
+      innerHtml = html.slice(openEnd, closeEnd - (`</${tagLower}>`.length));
     }
     seenOpens.add(openStart);
     elements.push({ openStart, openEnd, closeEnd, tag: tagLower, attrs, innerHtml, isVoid });
   }
-  // Pass 1: every known stampable tag. Find the `<tag\b` start, then resolve
-  // the open tag's true end attribute-aware so a `>` inside an attribute value
-  // doesn't truncate the attrs (which would corrupt the stamp + the aid).
+  // Pass 1: every known stampable tag, its open tag's end attribute-aware.
   for (const tag of STAMPABLE_TAGS) {
-    const openRe = new RegExp(`<${tag}\\b`, 'gi');
-    let m;
-    while ((m = openRe.exec(rawHtml))) {
-      const end = attrAwareOpenTagEnd(rawHtml, m.index);
+    for (const m of eventsFor(tag).opens) {
+      if (m.index < (eventsFor(tag).nextFrom || 0)) continue;
+      const end = tagEnd(m.index);
       if (end < 0) break;
-      openRe.lastIndex = end;
-      const attrs = rawHtml.slice(m.index + 1 + tag.length, end - 1);
-      harvest(m.index, end, tag, attrs);
+      eventsFor(tag).nextFrom = end;
+      harvest(m.index, end, tag, html.slice(m.index + 1 + tag.length, end - 1));
     }
   }
-  // Pass 2: opt-in markers (any tag with data-tdoc-artifact or class
-  // containing `tdoc-artifact`). Authors mark composed cards/widgets this
-  // way so they're commentable as a unit. Match the tag name + a quick
-  // attribute presence check, then resolve the real end attribute-aware.
+  // Pass 2: opt-in markers (data-tdoc-artifact, class ~ tdoc-artifact).
   const optInProbe = /<([a-z][\w-]*)\b/gi;
   let om;
-  while ((om = optInProbe.exec(rawHtml))) {
+  while ((om = optInProbe.exec(html))) {
     const tagLower = om[1].toLowerCase();
-    const end = attrAwareOpenTagEnd(rawHtml, om.index);
+    const end = tagEnd(om.index);
     if (end < 0) break;
     optInProbe.lastIndex = end;
-    const attrs = rawHtml.slice(om.index + 1 + om[1].length, end - 1);
+    const attrs = html.slice(om.index + 1 + om[1].length, end - 1);
     if (/\bdata-tdoc-artifact\b/i.test(attrs) || /class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*"/i.test(attrs)) {
       harvest(om.index, end, tagLower, attrs);
     }
   }
-  // Compute aid per element (uses cleaned attrs + inner content with any
-  // existing data-tdoc-aid stripped, so re-stamping is idempotent).
+  // Depth among stampable elements, and open tags inside another open tag.
+  const byStart = elements.slice().sort((a, b) => a.openStart - b.openStart);
+  const open = [];
+  let prevOpenEnd = -1;
+  for (const e of byStart) {
+    while (open.length && open[open.length - 1] <= e.openStart) open.pop();
+    e.depth = open.length;
+    e.insideTag = e.openStart < prevOpenEnd;
+    if (!e.insideTag) prevOpenEnd = e.openEnd;
+    if (e.closeEnd > e.openEnd) open.push(e.closeEnd);
+  }
+  const kept = byStart.filter((e) => e.depth < STAMP_MAX_DEPTH && !e.insideTag).slice(0, STAMP_MAX_ELEMENTS);
+  // aids in the order the elements were found, as before.
+  const order = new Map(elements.map((e, i) => [e, i]));
+  kept.sort((a, b) => order.get(a) - order.get(b));
   const aids = [];
-  for (const e of elements) {
-    const cleanedAttrs = e.attrs.replace(/\s+data-tdoc-aid\s*=\s*"[^"]*"/gi, '');
-    // For nested commentables we hash the OUTER's content even though it
-    // contains an inner commentable — that's correct, "outer artifact" is
-    // a different identity than "inner artifact". We just strip any
-    // data-tdoc-aid attributes from the inner before hashing so the
-    // hash is stable across re-stampings.
-    const cleanedInner = e.innerHtml.replace(/\sdata-tdoc-aid\s*=\s*"[^"]*"/gi, '');
+  for (const e of kept) {
+    const cleanedAttrs = e.attrs.indexOf('data-tdoc-aid') === -1 ? e.attrs : e.attrs.replace(/\s+data-tdoc-aid\s*=\s*"[^"]*"/gi, '');
+    const cleanedInner = e.innerHtml.indexOf('data-tdoc-aid') === -1 ? e.innerHtml : e.innerHtml.replace(/\sdata-tdoc-aid\s*=\s*"[^"]*"/gi, '');
     e._cleanedAttrs = cleanedAttrs;
     e._aid = aidFor(e.tag, cleanedInner, cleanedAttrs);
-    aids.push({
-      aid: e._aid, tag: e.tag,
-      head: e.innerHtml.slice(0, 80),
-      heading: nearestHeadingAt(e.openStart),
-    });
+    aids.push({ aid: e._aid, tag: e.tag, head: e.innerHtml.slice(0, 80), heading: nearestHeadingAt(e.openStart) });
   }
-  // Apply stamps in REVERSE order so earlier offsets stay valid as we mutate.
-  elements.sort((a, b) => b.openStart - a.openStart);
-  let out = rawHtml;
-  for (const e of elements) {
-    const stampedOpen = e.isVoid
+  // Stamps, in document order, joined once.
+  kept.sort((a, b) => a.openStart - b.openStart);
+  const parts = [];
+  let pos = 0;
+  for (const e of kept) {
+    parts.push(html.slice(pos, e.openStart));
+    parts.push(e.isVoid
       ? `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}"${/\/\s*$/.test(e.attrs) ? '/' : ''}>`
-      : `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}">`;
-    out = out.slice(0, e.openStart) + stampedOpen + out.slice(e.openEnd);
+      : `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}">`);
+    pos = e.openEnd;
   }
-  return { html: out, aids };
+  parts.push(html.slice(pos));
+  return { html: parts.join(''), aids };
 }
 
 // Reconcile open comment anchors against the freshly-stamped artifact set.
@@ -9393,30 +9478,47 @@ function browserSaveHtmlRefusal(doc) {
 // holds the two together.
 const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
 // Sheet content in a document: { bytes, rows, tables }. `bytes` is what a
-// sheet's larger size cap may count: the text in sheet cells and the cell
-// markup itself (each tag to 256 bytes, so a long attribute counts as
-// ordinary bytes). One pass; every index only moves forward and nothing is
-// re-scanned, so the time is linear in the input whatever it holds. Comments,
-// bogus comments (<!x>, <?x>) and raw-text elements are skipped the way a
-// browser skips them. A sheet table that holds anything else (an image, a
-// script, a style, a comment, a data: or javascript: URL, a nested table, a
-// tag outside the list below) gets no allowance at all.
+// sheet's larger size cap may count: the text in sheet cells (each cell to
+// SHEET_SCAN_CELL_CHARS, the importer's limit) and the sheet markup itself
+// (each tag to 256 bytes, so a long attribute counts as ordinary bytes). It
+// is 0 when there are more than SHEET_SCAN_MAX_TABLES sheet tables (an
+// import makes at most 20 tabs). One pass; every index only moves forward
+// and nothing is re-scanned, so the time is linear in the input whatever it
+// holds. Comments, bogus comments (<!x>, <?x>, CDATA) and raw-text elements
+// are skipped the way a browser skips them, and nothing after <plaintext>
+// counts. A sheet table gets no allowance when it holds anything else (an
+// image, a script, a style, a comment, a data: or javascript: URL, a nested
+// table, a tag outside the list below, a quoted attribute running over a
+// '<'), or when it sits inside <template>, <svg> or <math>.
 var SHEET_SCAN_TAGS = new Set(['table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'span', 'a', 'b', 'i', 'em', 'strong', 'code', 'br', 'wbr', 's', 'u', 'small', 'sub', 'sup', 'mark']);
-var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'plaintext']);
+var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']);
+var SHEET_SCAN_FOREIGN = new Set(['template', 'svg', 'math']);
+var SHEET_SCAN_MAX_TABLES = 20;
+var SHEET_SCAN_CELL_CHARS = 10000;
 function sheetScan(html) {
   var out = { bytes: 0, rows: 0, tables: 0 };
   if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
-  var n = html.length, i = 0, sheet = null;
+  var n = html.length, i = 0, sheet = null, foreign = 0, sheetCount = 0;
+  // Text in a sheet: counted per cell, each cell to its cap.
+  var addText = function (len) {
+    if (!sheet || len <= 0) return;
+    if (!sheet.inCell) { sheet.bytes += Math.min(len, 256); return; }
+    var room = SHEET_SCAN_CELL_CHARS - sheet.cell;
+    var take = len < room ? len : room > 0 ? room : 0;
+    sheet.cell += take;
+    sheet.bytes += take;
+  };
   while (i < n) {
     var lt = html.indexOf('<', i);
     if (lt === -1) break;
-    if (sheet) sheet.bytes += lt - i;
+    addText(lt - i);
     var c1 = html.charCodeAt(lt + 1);
-    if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype or bogus comment
-      var end = html.startsWith('<!--', lt) ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
+    if (c1 === 33 || c1 === 63) { // <! or <?: a comment, doctype, CDATA or bogus comment
+      var isComment = html.startsWith('<!--', lt);
+      var end = isComment ? html.indexOf('-->', lt + 4) : html.indexOf('>', lt + 2);
       if (sheet) sheet.ok = false;
       if (end === -1) break;
-      i = end + (html.startsWith('<!--', lt) ? 3 : 1);
+      i = end + (isComment ? 3 : 1);
       continue;
     }
     var j = lt + 1, closing = c1 === 47;
@@ -9434,15 +9536,15 @@ function sheetScan(html) {
         i = be + 1;
         continue;
       }
-      if (sheet) sheet.bytes += 1; // a bare '<' is text
+      addText(1); // a bare '<' is text
       i = lt + 1;
       continue;
     }
     var name = html.slice(nameStart, j).toLowerCase();
-    var quote = 0, colon = false;
+    var quote = 0, colon = false, quotedLt = false;
     while (j < n) {
       var d = html.charCodeAt(j);
-      if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; }
+      if (quote) { if (d === quote) quote = 0; else if (d === 58) colon = true; else if (d === 60) quotedLt = true; }
       else if (d === 34 || d === 39) quote = d;
       else if (d === 62) break;
       else if (d === 58) colon = true;
@@ -9450,6 +9552,7 @@ function sheetScan(html) {
     }
     if (j >= n) break; // an unterminated tag: what follows is not sheet content
     var tagEnd = j + 1, tagLen = tagEnd - lt;
+    if (!closing && name === 'plaintext') { if (sheet) sheet.ok = false; break; } // the rest is text
     if (!closing && SHEET_SCAN_RAW.has(name)) {
       // Raw text runs to its own end tag, whatever it holds (</table> too).
       var close = new RegExp('</' + name + '[\\s/>]', 'ig');
@@ -9462,19 +9565,28 @@ function sheetScan(html) {
       continue;
     }
     if (!sheet) {
-      if (!closing && name === 'table' && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) sheet = { bytes: 0, rows: 0, ok: true, depth: 1 };
+      if (SHEET_SCAN_FOREIGN.has(name)) foreign += closing ? (foreign > 0 ? -1 : 0) : 1;
+      if (!closing && name === 'table' && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) {
+        sheetCount++;
+        sheet = { bytes: Math.min(tagLen, 256), rows: 0, ok: foreign === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
+      }
     } else if (closing && name === 'table' && sheet.depth === 1) {
       if (sheet.ok) { out.bytes += sheet.bytes + Math.min(tagLen, 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
       sheet = null;
     } else {
       if (!SHEET_SCAN_TAGS.has(name) || name === 'table') sheet.ok = false;
       if (name === 'table') sheet.depth += closing ? -1 : 1;
+      if (quotedLt) sheet.ok = false;
       if (colon && /(data|javascript|vbscript)\s*:/i.test(html.slice(lt, tagEnd))) sheet.ok = false;
       if (!closing && name === 'tr') sheet.rows++;
+      if (name === 'td' || name === 'th') { sheet.inCell = !closing; sheet.cell = 0; }
+      else if (name === 'tr' || name === 'tbody' || name === 'thead' || name === 'tfoot') sheet.inCell = false;
       sheet.bytes += Math.min(tagLen, 256);
     }
     i = tagEnd;
   }
+  // More sheet tables than an import makes: no allowance (rows still count).
+  if (sheetCount > SHEET_SCAN_MAX_TABLES) out.bytes = 0;
   return out;
 }
 function hostedBaseUploadBytes(env) {

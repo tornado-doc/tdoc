@@ -35,6 +35,10 @@ function sliceFn(src, name) {
   }
   return src.slice(start, i);
 }
+// The scalar bounds stampAids reads (STAMP_MAX_DEPTH, STAMP_MAX_ELEMENTS).
+function sliceScalars(src) {
+  return (src.match(/^const STAMP_MAX_[A-Z_]+ = \d+;$/gm) || []).join('\n');
+}
 function sliceConst(src, name) {
   const re = new RegExp(`const ${name} = \\[[\\s\\S]*?\\];`);
   const m = re.exec(src);
@@ -60,6 +64,7 @@ function buildStamp(src, withNewHelpers) {
     parts.push(sliceFn(src, 'attrAwareOpenTagEnd'));
     parts.push(sliceFn(src, 'skipRawTextBodyAt'));
   }
+  parts.push(sliceScalars(src));
   parts.push(sliceFn(src, 'stampAids'));
   vm.runInContext(parts.join('\n\n'), box);
   return box.stampAids;
@@ -177,6 +182,7 @@ vm.runInContext([
   sliceFn(newSrc, 'attrAwareOpenTagEnd'),
   sliceFn(newSrc, 'skipRawTextBodyAt'),
   sliceFn(newSrc, 'stampAidsLegacy'),
+  sliceScalars(newSrc),
   sliceFn(newSrc, 'stampAids'),
   sliceFn(newSrc, 'isFiniteVersion'),
   driftRegion('legacyToEvents', 'compactComments'), // eventEid/backfill/ensure*/snapshotAt/…
@@ -264,5 +270,92 @@ t('DRY-RUN: uses the LIVE folded anchor, not the stale created-event anchor', ()
   assert(d.affectedComments === 0, 'a comment re-anchored to a valid aid must not be flagged by its stale created aid');
 });
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+// ---- linear stamping (#973): the same aids as the previous implementation,
+// in time linear in the document ----
+// Built in this realm (not a vm context: crossing realms makes string work
+// many times slower than the worker's own).
+const helpers = ['cyrb53', 'stripClosedHtmlComments', 'aidFor', 'headingPlainText', 'headingsFromHtml', 'attrAwareOpenTagEnd', 'skipRawTextBodyAt']
+  .map((n) => sliceFn(newSrc, n)).concat([sliceConst(newSrc, 'STAMPABLE_TAGS'), sliceConst(newSrc, 'RAW_TEXT_TAGS'), sliceScalars(newSrc)]).join('\n\n');
+const stampLinear = new Function(`${helpers}\n${sliceFn(newSrc, 'stampAids')}; return stampAids;`)();
+const reference = fs.readFileSync(path.join(__dirname, 'fixtures', 'stampaids-reference.js'), 'utf8');
+const stampReference = new Function(`${helpers}\n${reference}; return stampAidsReference;`)();
+const same = (html) => { const a = stampReference(html), b = stampLinear(html); return a.html === b.html && JSON.stringify(a.aids) === JSON.stringify(b.aids); };
+
+t('LINEAR: same stamped HTML and aids as the previous implementation on every repo document', () => {
+  const files = [];
+  (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) { if (!/^(node_modules|\.git|runtime)$/.test(e.name)) walk(p); } else if (/\.html$/.test(e.name)) files.push(p); } })(path.join(__dirname, '..'));
+  assert(files.length > 20, `found ${files.length} documents`);
+  const differ = files.filter((f) => { const html = fs.readFileSync(f, 'utf8'); return html.length < 3e6 && !same(html); });
+  assert(!differ.length, `differ: ${differ.join(', ')}`);
+});
+
+t('LINEAR: same stamped HTML and aids on 3,000 fuzzed documents (nesting, raw text, comments, quotes, unclosed tags)', () => {
+  let seed = 12345;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const tags = ['section', 'figure', 'table', 'div', 'svg', 'details', 'pre', 'p', 'blockquote', 'aside'];
+  const gen = (depth) => {
+    let out = '';
+    for (let i = rnd(4); i > 0; i--) {
+      const r = rnd(14);
+      if (r < 7 && depth < 6) {
+        const t2 = tags[rnd(tags.length)];
+        const attr = rnd(4) === 0 ? ' data-tdoc-artifact' : rnd(5) === 0 ? ' title="a > b"' : rnd(6) === 0 ? ` alt="x${rnd(9)}"` : '';
+        out += `<${t2}${attr}>` + gen(depth + 1) + (rnd(12) ? `</${t2}>` : '');
+      } else if (r === 7) out += '<script>var s = "<section></table>";</script>';
+      else if (r === 8) out += '<style>/* <figure> */</style>';
+      else if (r === 9) out += `<img src="i${rnd(5)}.png" alt="p">`;
+      else if (r === 10) out += '<!-- <table> -->';
+      else if (r === 11) out += `<h2>Head ${rnd(9)}</h2>`;
+      else out += `text ${rnd(100)} `;
+    }
+    return out;
+  };
+  for (let i = 0; i < 3000; i++) {
+    const html = `<html><body>${gen(0)}</body></html>`;
+    assert(same(html), `differs on: ${html.slice(0, 300)}`);
+  }
+});
+
+const time = (fn) => { let best = Infinity; for (let k = 0; k < 3; k++) { const t0 = process.hrtime.bigint(); fn(); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); } return best; };
+const MB = 1024 * 1024;
+
+t('LINEAR: 60k small sheet tables (~8 MB) through stampAids and prepareDocVersion stay near 200 ms', async () => {
+  const html = '<!doctype html><html><head><title>t</title></head><body>' + `<table data-tdoc-sheet><tr><td>${'x'.repeat(95)}</td></tr></table>\n`.repeat(60000) + '</body></html>';
+  assert(html.length > 7.5 * MB, `fixture ${html.length}`);
+  const ms = time(() => stampLinear(html));
+  console.log(`    (stampAids, ${(html.length / MB).toFixed(1)} MB, 60k tables: ${ms.toFixed(0)}ms)`);
+  assert(ms < 250, `stampAids took ${ms.toFixed(0)}ms`);
+});
+
+t('LINEAR: the 2 MB worst cases that were possible before sheets stay near 200 ms', () => {
+  const cases = {
+    'many small tables': '<html><body>' + '<table><tr><td>x</td></tr></table>'.repeat(60000) + '</body></html>',
+    'bare unclosed sections': '<section>'.repeat(220000),
+    'sections inside a script': '<script>' + '<section>'.repeat(200000) + '</script>',
+    'figures with styles': '<figure><style>a</style></figure>'.repeat(60000),
+    'headings and tables': '<h2>h</h2><table><tr><td>x</td></tr></table>'.repeat(40000),
+    'raw opens': '<section>' + '<style>'.repeat(250000),
+  };
+  for (const [what, html] of Object.entries(cases)) {
+    const ms = time(() => stampLinear(html));
+    assert(ms < 250, `${what}: ${ms.toFixed(0)}ms`);
+  }
+  // Deep nesting hashes each level's content (aids are content hashes), up
+  // to STAMP_MAX_DEPTH levels: linear, with a larger constant.
+  const deep = '<section>'.repeat(110000) + '</section>'.repeat(110000);
+  const ms = time(() => stampLinear(deep));
+  assert(ms < 1000, `deep nesting: ${ms.toFixed(0)}ms`);
+});
+
+(async () => {
+  // prepareDocVersion: the reader block (absent from the worker sandbox here,
+  // so readerCssSource is empty), stampAids and the version's sha256.
+  const prep = new Function(`${helpers}\n${sliceFn(newSrc, 'stampAids')}\nconst READER_BLOCK_RE = /<style[^>]*\\bid="tdoc-reader"/i;\n${sliceFn(newSrc, 'hasReaderBlock')}\nfunction readerCssSource() { return ''; }\n${newSrc.slice(newSrc.indexOf('async function sha256Hex('), newSrc.indexOf('\n}\n', newSrc.indexOf('async function sha256Hex(')) + 2)}\n${newSrc.slice(newSrc.indexOf('async function prepareDocVersion('), newSrc.indexOf('\n}\n', newSrc.indexOf('async function prepareDocVersion(')) + 2)}\nreturn prepareDocVersion;`)();
+  const html = '<!doctype html><html><head><title>t</title></head><body>' + `<table data-tdoc-sheet><tr><td>${'x'.repeat(95)}</td></tr></table>\n`.repeat(60000) + '</body></html>';
+  let best = Infinity;
+  for (let k = 0; k < 3; k++) { const t0 = process.hrtime.bigint(); await prep(html); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
+  console.log(`    (prepareDocVersion, ${(html.length / MB).toFixed(1)} MB, 60k tables: ${best.toFixed(0)}ms)`);
+  t('LINEAR: prepareDocVersion on the same 8 MB input stays near 200 ms', () => assert(best < 300, `prepareDocVersion took ${best.toFixed(0)}ms`));
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})();
