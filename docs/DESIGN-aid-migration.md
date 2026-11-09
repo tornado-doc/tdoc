@@ -1,5 +1,7 @@
 # Design: aid migration for the stampAids parser fix (#24)
 
+> **Status (#973):** the dry run ran on every upload and measured zero drift across docs; it has been removed (its legacy parser was quadratic and outlived its purpose). The legacy parser is kept as a test fixture, `test/fixtures/stampaids-legacy.js`, and `test/stampaids.test.js` still checks the hardened parser gives the same aids on ordinary HTML.
+
 Status: DRAFT — blueprint for a future implementation. No code in this doc.
 Relates to: issue #24 (stampAids regex HTML parser), the reverted attempt on
 branch `fix/overlay-htmlrewriter` (commit reverted in v0.4.1).

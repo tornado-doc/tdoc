@@ -2718,158 +2718,6 @@ function headingsFromHtml(html) {
   return headings;
 }
 
-// --- #24 dry-run instrumentation -------------------------------------------
-// The hardened stampAids() above fixes real regex bugs (`>` in an attribute,
-// `</tag>` inside <script>/<style>). For ORDINARY HTML it produces aids
-// identical to the legacy parser; it differs ONLY on the edge-case HTML the
-// legacy parser mis-parsed (those inputs are valid HTML but rare). Because `aid`
-// is the anchor key for stored comments, we MEASURE the blast radius before
-// assuming it's safe: compute the aid SETS with both parsers and report how many
-// live comments anchor to an aid the legacy parser produced but the hardened one
-// no longer does (set membership — never an index-paired old→new map, which
-// could mis-pair when the parsers diverge). This logs only — it never mutates
-// (it folds deep copies). (Design: docs/DESIGN-aid-migration.md. Empirically 0
-// across current docs.)
-function stampAidsLegacy(rawHtml) {
-  const headings = headingsFromHtml(rawHtml);
-  function nearestHeadingAt(idx) {
-    let best = null;
-    // Use <= so a heading whose close tag ends exactly at the next
-    // element's open (no whitespace between) is still "before" it.
-    for (const h of headings) { if (h.end <= idx) best = h.text; else break; }
-    return best;
-  }
-  // Find every open tag of every stampable kind in document order.
-  // For non-void tags, find its matching close (same-tag depth count).
-  // Collect [openStart, openEnd, closeEnd, tag, attrs, innerHtml] per element.
-  const elements = [];
-  const seenOpens = new Set();   // dedupe across passes (tag pass + opt-in pass)
-  function harvest(openStart, openEnd, tagLower, attrs) {
-    if (seenOpens.has(openStart)) return;
-    const isVoid = /^(img|iframe)$/i.test(tagLower) || /\/\s*$/.test(attrs);
-    let closeEnd = openEnd, innerHtml = '';
-    if (!isVoid) {
-      const closeRe = new RegExp(`</${tagLower}\\s*>|<${tagLower}\\b[^>]*>`, 'gi');
-      closeRe.lastIndex = openEnd;
-      let depth = 1, c;
-      while ((c = closeRe.exec(rawHtml))) {
-        if (c[0][1] === '/') { depth--; if (depth === 0) { closeEnd = c.index + c[0].length; break; } }
-        else depth++;
-      }
-      innerHtml = rawHtml.slice(openEnd, closeEnd - (`</${tagLower}>`.length));
-    }
-    seenOpens.add(openStart);
-    elements.push({ openStart, openEnd, closeEnd, tag: tagLower, attrs, innerHtml, isVoid });
-  }
-  // Pass 1: every known stampable tag.
-  for (const tag of STAMPABLE_TAGS) {
-    const openRe = new RegExp(`<${tag}\\b([^>]*)>`, 'gi');
-    let m;
-    while ((m = openRe.exec(rawHtml))) harvest(m.index, m.index + m[0].length, tag, m[1] || '');
-  }
-  // Pass 2: opt-in markers (any tag with data-tdoc-artifact or class
-  // containing `tdoc-artifact`). Authors mark composed cards/widgets this
-  // way so they're commentable as a unit.
-  const optInRe = /<([a-z][\w-]*)\b/gi;
-  let om;
-  while ((om = optInRe.exec(rawHtml))) {
-    const tagLower = om[1].toLowerCase();
-    // Keep the legacy `>` boundary for the dry-run comparison, but do not
-    // retry the rest of an unclosed tag at every nested `<script` opener.
-    const end = rawHtml.indexOf('>', om.index + om[0].length);
-    if (end === -1) break;
-    const attrs = rawHtml.slice(om.index + om[0].length, end);
-    optInRe.lastIndex = end + 1;
-    if (/\bdata-tdoc-artifact\b/i.test(attrs) || /class\s*=\s*"[^"]*\btdoc-artifact\b[^"]*"/i.test(attrs)) {
-      harvest(om.index, end + 1, tagLower, attrs);
-    }
-  }
-  // Compute aid per element (uses cleaned attrs + inner content with any
-  // existing data-tdoc-aid stripped, so re-stamping is idempotent).
-  const aids = [];
-  for (const e of elements) {
-    const cleanedAttrs = e.attrs.replace(/\s+data-tdoc-aid\s*=\s*"[^"]*"/gi, '');
-    // For nested commentables we hash the OUTER's content even though it
-    // contains an inner commentable — that's correct, "outer artifact" is
-    // a different identity than "inner artifact". We just strip any
-    // data-tdoc-aid attributes from the inner before hashing so the
-    // hash is stable across re-stampings.
-    const cleanedInner = e.innerHtml.replace(/\sdata-tdoc-aid\s*=\s*"[^"]*"/gi, '');
-    e._cleanedAttrs = cleanedAttrs;
-    e._aid = aidFor(e.tag, cleanedInner, cleanedAttrs);
-    aids.push({
-      aid: e._aid, tag: e.tag,
-      head: e.innerHtml.slice(0, 80),
-      heading: nearestHeadingAt(e.openStart),
-    });
-  }
-  // Apply stamps in REVERSE order so earlier offsets stay valid as we mutate.
-  elements.sort((a, b) => b.openStart - a.openStart);
-  let out = rawHtml;
-  for (const e of elements) {
-    const stampedOpen = e.isVoid
-      ? `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}"${/\/\s*$/.test(e.attrs) ? '/' : ''}>`
-      : `<${e.tag}${e._cleanedAttrs} data-tdoc-aid="${e._aid}">`;
-    out = out.slice(0, e.openStart) + stampedOpen + out.slice(e.openEnd);
-  }
-  return { html: out, aids };
-}
-
-// Returns { changed, affectedComments, samples } describing aid drift between
-// the legacy and current parser for this HTML, scoped to comments whose LIVE
-// anchor target disappears under the hardened parser. Pure measurement; no
-// mutation.
-//
-// Pairing-free by design: we do NOT try to build an old→new aid map by index
-// (the two parsers can emit different element counts/order on exactly the edge-
-// case HTML this measures, which would fabricate wrong mappings). Instead we use
-// SET MEMBERSHIP, which can't mis-pair:
-//   - legacySet = aids the legacy parser produced for this HTML (what stored
-//     comments were anchored against).
-//   - currentSet = aids the hardened parser produces now.
-//   - A comment is "at risk" iff its live element aid is in legacySet but NOT in
-//     currentSet — i.e. the fix made its anchor target's aid vanish, so reconcile
-//     will have to rebind it. (If the aid is still present, the fix didn't move
-//     that comment's target — safe.)
-function measureAidDrift(rawHtml, comments) {
-  let legacy, current;
-  try { legacy = stampAidsLegacy(rawHtml).aids; } catch { return { changed: 0, affectedComments: 0, samples: [] }; }
-  try { current = stampAids(rawHtml).aids; } catch { return { changed: 0, affectedComments: 0, samples: [] }; }
-  const legacySet = new Set(legacy.map(a => a.aid));
-  const currentSet = new Set(current.map(a => a.aid));
-  // count of legacy aids that no longer exist under the hardened parser
-  let changed = 0;
-  for (const aid of legacySet) if (!currentSet.has(aid)) changed++;
-
-  let affected = 0; const samples = [];
-  for (const c of (Array.isArray(comments) ? comments : [])) {
-    // Use the LIVE folded anchor (after replaying anchor_changed events), not the
-    // raw created-event anchor — a comment already re-anchored must not be
-    // counted against its stale original aid.
-    //
-    // CRITICAL: snapshotAt → ensureEventLog backfills eids IN PLACE, so we fold a
-    // DEEP COPY. This keeps measureAidDrift strictly read-only — it must never
-    // mutate the caller's list (the upload handler diffs before/after and would
-    // otherwise persist an incidental eid-backfill from this log-only check).
-    let anchor = null;
-    try {
-      if (Array.isArray(c && c.events)) {
-        const copy = JSON.parse(JSON.stringify(c));
-        anchor = snapshotAt(copy, Infinity)?.anchor || null;
-      } else {
-        anchor = c && c.anchor;
-      }
-    } catch { anchor = c && c.anchor; }
-    const aid = anchor && anchor.kind === 'element' ? (anchor.aid || null) : null;
-    // At risk iff its target existed under legacy but is gone under the fix.
-    if (aid && legacySet.has(aid) && !currentSet.has(aid)) {
-      affected++;
-      if (samples.length < 5) samples.push({ id: c.id, lostAid: aid });
-    }
-  }
-  return { changed, affectedComments: affected, samples };
-}
-// ---------------------------------------------------------------------------
 
 
 // Walk the HTML and stamp `data-tdoc-aid` on every commentable element.
@@ -2968,7 +2816,9 @@ function stampAids(rawHtml) {
     if (v !== undefined) return v;
     const rEnd = tagEnd(index);
     if (rEnd < 0) v = -1;
-    else if (/\/\s*$/.test(html.slice(index, rEnd - 1))) v = rEnd;
+    // As before: the test sees the open tag with its '>', so `<script src=x />`
+    // stays an open raw-text element, as a browser reads it.
+    else if (/\/\s*$/.test(html.slice(index, rEnd))) v = rEnd;
     else {
       const name = html.slice(index + 1, rawOpens.ends[at]).toLowerCase();
       if (!rawCloses.has(name)) rawCloses.set(name, allMatches(new RegExp(`</${name}\\s*>`, 'gi')));
@@ -9523,14 +9373,14 @@ const SHEET_MAX_DOC_BYTES = 8 * 1024 * 1024;
 // '<'), or when it sits inside <template>, <svg> or <math>.
 var SHEET_SCAN_TAGS = new Set(['table', 'caption', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'span', 'a', 'b', 'i', 'em', 'strong', 'code', 'br', 'wbr', 's', 'u', 'small', 'sub', 'sup', 'mark']);
 var SHEET_SCAN_RAW = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']);
-var SHEET_SCAN_FOREIGN = new Set(['template', 'svg', 'math']);
 var SHEET_SCAN_MAX_TABLES = 20;
 var SHEET_SCAN_CELL_CHARS = 10000;
 // Every tag name the scan acts on, found by a hash of its lower-cased letters
 // and then compared, so naming a tag builds no string: its class (below) or
 // 0 for a name the scan does not act on.
 var SHEET_SCAN_OTHER = 0, SHEET_SCAN_TABLE = 1, SHEET_SCAN_TR = 2, SHEET_SCAN_CELL = 3, SHEET_SCAN_SECTION = 4,
-  SHEET_SCAN_INLINE = 5, SHEET_SCAN_RAWTAG = 6, SHEET_SCAN_FOREIGNTAG = 7, SHEET_SCAN_PLAINTEXT = 8;
+  SHEET_SCAN_INLINE = 5, SHEET_SCAN_RAWTAG = 6, SHEET_SCAN_TEMPLATE = 7, SHEET_SCAN_PLAINTEXT = 8,
+  SHEET_SCAN_SVG = 9, SHEET_SCAN_MATH = 10;
 var SHEET_SCAN_NAMES = (function () {
   var byHash = new Map();
   var put = function (name, cls) {
@@ -9545,7 +9395,7 @@ var SHEET_SCAN_NAMES = (function () {
       : name === 'tbody' || name === 'thead' || name === 'tfoot' ? SHEET_SCAN_SECTION : SHEET_SCAN_INLINE);
   });
   SHEET_SCAN_RAW.forEach(function (name) { put(name, SHEET_SCAN_RAWTAG); });
-  SHEET_SCAN_FOREIGN.forEach(function (name) { put(name, SHEET_SCAN_FOREIGNTAG); });
+  put('template', SHEET_SCAN_TEMPLATE); put('svg', SHEET_SCAN_SVG); put('math', SHEET_SCAN_MATH);
   put('plaintext', SHEET_SCAN_PLAINTEXT);
   return byHash;
 })();
@@ -9567,7 +9417,10 @@ function sheetScanClass(html, from, to) {
 function sheetScan(html) {
   var out = { bytes: 0, rows: 0, tables: 0 };
   if (typeof html !== 'string' || html.indexOf('data-tdoc-sheet') === -1) return out;
-  var n = html.length, i = 0, sheet = null, foreign = 0, sheetCount = 0;
+  var n = html.length, i = 0, sheet = null, sheetCount = 0;
+  // Open <template>, <svg> and <math>, each counted on its own: a stray
+  // </svg> inside a template does not end the template.
+  var inTemplate = 0, inSvg = 0, inMath = 0;
   var len, room;
   // Where the next '"', "'" and ':' are: looked up again only once passed,
   // so these searches cover the document once in all.
@@ -9659,10 +9512,12 @@ function sheetScan(html) {
       continue;
     }
     if (!sheet) {
-      if (cls === SHEET_SCAN_FOREIGNTAG) foreign += closing ? (foreign > 0 ? -1 : 0) : 1;
+      if (cls === SHEET_SCAN_TEMPLATE) inTemplate += closing ? (inTemplate > 0 ? -1 : 0) : 1;
+      else if (cls === SHEET_SCAN_SVG) inSvg += closing ? (inSvg > 0 ? -1 : 0) : 1;
+      else if (cls === SHEET_SCAN_MATH) inMath += closing ? (inMath > 0 ? -1 : 0) : 1;
       if (!closing && cls === SHEET_SCAN_TABLE && /\sdata-tdoc-sheet(?=[\s=/>])/i.test(html.slice(lt, tagEnd))) {
         sheetCount++;
-        sheet = { bytes: tagLen < 256 ? tagLen : 256, rows: 0, ok: foreign === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
+        sheet = { bytes: tagLen < 256 ? tagLen : 256, rows: 0, ok: inTemplate === 0 && inSvg === 0 && inMath === 0 && !quotedLt, depth: 1, inCell: false, cell: 0 };
       }
     } else if (closing && cls === SHEET_SCAN_TABLE && sheet.depth === 1) {
       if (sheet.ok) { out.bytes += sheet.bytes + (tagLen < 256 ? tagLen : 256); out.rows += Math.max(0, sheet.rows - 1); out.tables++; }
@@ -30916,21 +30771,6 @@ const tdocHandlers = {
       // agent honesty required, no silent re-anchoring to wrong artifacts.
       let mergedLocal = 0;
       try {
-        // #24 dry-run (read-only logging): measure how many live comments anchor
-        // to an aid the hardened parser changes vs the legacy parser. >0 on a
-        // real doc → that doc needs the aid migration in docs/DESIGN-aid-
-        // migration.md. Reads its own copy, never mutates. Empirically 0.
-        try {
-          const drift = measureAidDrift(doc, await readComments(env, slug));
-          if (drift.affectedComments > 0) {
-            console.warn(`[aid-drift] slug=${slug} v=${version} changedAids=${drift.changed} affectedComments=${drift.affectedComments} samples=${JSON.stringify(drift.samples)} — these anchors will rebind via reconcile; see docs/DESIGN-aid-migration.md`);
-          } else {
-            console.log(`[aid-drift] slug=${slug} v=${version} changedAids=${drift.changed} affectedComments=0 (safe)`);
-          }
-        } catch (e) {
-          console.error('[aid-drift] measurement failed (non-fatal):', e.message);
-        }
-
         // Serialized merge + reconcile + compact through the per-slug DO. The
         // merge is non-destructive (add-by-id-if-absent; never overwrite/delete
         // worker comments), mirroring tdoc-pull so round-trips converge.
