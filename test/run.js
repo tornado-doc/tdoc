@@ -17,6 +17,9 @@ const path = require('path');
 const OFFLINE = [
   'feedback-space-no-versions.test.js', // a space takes replies, not versions: tokens and MCP refused; creation, comments, replies, browser saves untouched
   'comment-one-behaviour.test.js', // comment surfaces share prefill, drafts, list height and the floating card by source rule; Fix with AI stays gone
+  'comment-query.test.js',     // one comment query on every surface: Open by default, counts, deleted rule, waiting on you, search, sort, groupBy
+  'thread-seen-api.test.js',   // server read state: authorized like reading the comments, no cross-doc reads, no thread-id leaks
+  'feedback-team-agents.test.js', // the widget's @ lists team agents (answer only) only through tdoc's own-origin token door
   'version-diff.test.js', // bounded block matching and Unicode edits
   'version-history.test.js', // history rows: same writer within 30 min grouped, paged, what changed cached, access, Restore
   'excalidraw.test.js',       // optional diagram source, round-trip export and write permission
@@ -226,6 +229,7 @@ const BROWSER = [
   'notifications-ui.test.js', // Notifications dialog: rows, unread, mark all read, opt-in desktop alerts
   'workspace-switcher-ui.test.js', // top-bar space switcher: current space, list, New team, phone fold
   'ask-send-switch-ui.test.js', // Ask AI: quiet Ask ▾ / Edit ▾ mode picker in the input row (instruction input, N comments included · Choose, Send to <agent>, instruction-only becomes a whole-document comment handed off, mode remembered), long agent name on a 320/390 phone stays one row, one row per team agent, team agent answers in public; no phone paper-plane
+  'comment-parity-ui.test.js', // doc page and widget run the same cases: Open by default with counts (remembered), a polled agent reply appears, read state is the server's (widget ↔ space page, fresh browser), autoReadComments in the widget, the seen endpoint refuses non-readers; desktop + phone
   'comment-one-behaviour-ui.test.js', // doc page, feedback space and widget draw one card: reply prefill rule, one agent-list height, a reply draft per thread, floating card fits the screen, panel drag width
   'ask-edit-feedback-ui.test.js', // Ask/Edit v2 feedback: @agent in a comment or reply asks for suggestions (phone drawer, ⌘⇧Enter), nothing changes outside dev mode, a reply box is not held by delivery, rewrites read as blocks, edits stay text
   'suggest-accept-ui.test.js', // a suggestion's Accept in the real shell: readable refusals, decided rows leave silently, the list stays true without a refresh, Accept lands on /v/N

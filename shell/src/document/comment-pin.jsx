@@ -1,8 +1,8 @@
 import React from 'react';
 import { avatarFor, avatarInitial } from './model.js';
 import { AuthorFace } from './author-face.jsx';
-import { canSeeHandoff, handoffPinBadge, handoffWaitState, isHandoffInFlight } from './handoff-state.js';
-import { isThreadUnread } from './thread-seen.js';
+import { canSeeHandoff, handoffPinBadge, handoffWaitState, isHandoffInFlight } from '../comments/core/handoff-state.js';
+import { isThreadUnread } from '../comments/core/thread-seen.js';
 
 const BADGE_TEXT = { question: '❓', done: '✅', partial: '🟡', warning: '⚠' };
 const BADGE_LABEL = { question: 'Agent asked you', done: 'Agent done', partial: 'Partially done', warning: 'Agent handoff needs attention' };

@@ -1,7 +1,13 @@
-// Per-browser "I've looked at this thread since the agent last spoke".
+// "I've looked at this thread since the agent last spoke", per person.
 // Unread lives on the pin so it is not trapped inside a folded card.
+//
+// The server keeps each person's "seen up to" per thread
+// (/api/comments/seen), so a reply read in the feedback widget (on the app's
+// origin) is read on the space's tdoc page, and the reverse. This browser's
+// localStorage is a cache of it: it answers at once, works signed out, and
+// carries marks made offline until the server has them (mergeSeenMap).
 
-import { readStored, writeStored } from '../safe-storage.js';
+import { readStored, writeStored } from '../../safe-storage.js';
 
 function storageKey(slug) {
   return `tdoc.thread-seen.${slug}`;
@@ -56,6 +62,7 @@ export function isThreadUnread(comment, seenMap, viewerLogin = '') {
   return activity > seen;
 }
 
+/** Marks the thread seen up to its latest agent activity. The stamp, or false. */
 export function markThreadSeen(slug, comment) {
   if (!slug || !comment?.id) return false;
   const activity = latestAgentActivityAt(comment) || Date.now();
@@ -64,5 +71,33 @@ export function markThreadSeen(slug, comment) {
   if (prev >= activity) return false;
   map[comment.id] = activity;
   writeStored(storageKey(slug), JSON.stringify(map));
-  return true;
+  return activity;
+}
+
+function cleanStamp(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * Folds the server's map into this browser's cache: per thread, the later
+ * stamp wins. Returns the merged map and what this browser knows that the
+ * server does not yet (`ahead`), to be sent up.
+ */
+export function mergeSeenMap(slug, remote) {
+  const local = readSeenMap(slug);
+  const merged = { ...local };
+  const ahead = {};
+  const server = remote && typeof remote === 'object' && !Array.isArray(remote) ? remote : {};
+  let changed = false;
+  for (const [id, value] of Object.entries(server)) {
+    const stamp = cleanStamp(value);
+    if (stamp > cleanStamp(merged[id])) { merged[id] = stamp; changed = true; }
+  }
+  for (const [id, value] of Object.entries(local)) {
+    const stamp = cleanStamp(value);
+    if (stamp > cleanStamp(server[id])) ahead[id] = stamp;
+  }
+  if (changed && slug) writeStored(storageKey(slug), JSON.stringify(merged));
+  return { map: merged, ahead, changed };
 }

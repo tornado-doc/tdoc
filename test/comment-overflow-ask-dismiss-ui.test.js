@@ -61,6 +61,9 @@ const sideways = (page, selector) => page.evaluate((sel) => {
     for (const el of [root, ...root.querySelectorAll('*')]) {
       if (el.closest('.tdoc-md-pre')) continue;
       if (!el.clientWidth || el.scrollWidth <= el.clientWidth + 1) continue;
+      // A visually hidden form field (AppSelect's value input, 1px and
+      // clipped) is nothing a reader can drag.
+      if (el.clientWidth <= 1 && el.tagName === 'INPUT') continue;
       const style = getComputedStyle(el);
       // Boxes that scroll or clip: those are what the reader drags (hidden
       // still scrolls, on focus or a find), so hidden content counts too.

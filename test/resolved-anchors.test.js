@@ -18,8 +18,8 @@ console.log('resolved visibility and anchor fallback contracts');
 
 t('the shell sends only visible comments to the frame and mobile drawer', () => {
   assert(shell.includes("bridge.send({ type: 'tdoc:anchors', comments: shownComments });"), 'the frame bypasses comment visibility');
-  assert(shell.includes('...shownComments.filter(isDocumentComment)')
-    && shell.includes('...shownComments.filter((comment) => !isDocumentComment(comment))')
+  assert(/const ordered = sortThreads\(shownComments, listPrefs\.sort/.test(shell)
+    && shell.includes("groupBy(ordered, (comment) => (isDocumentComment(comment) ? 'document' : 'body'), { first: 'document' })")
     && shell.includes('comments={drawerComments}'), 'the mobile drawer bypasses comment visibility');
 });
 t('hidden threads are excluded before any targets or highlights are registered', () => {

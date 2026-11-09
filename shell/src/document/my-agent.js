@@ -135,6 +135,15 @@ export function ownAgentPick(opts) {
   return t && opts.askOnly && !opts.onlyMe && !t.tdoc_ai && !t.team_agent ? t : null;
 }
 
+// The same, where a team agent is also asked through my-agent (the feedback
+// widget and the space page, which have no hand-off route): an agent that may
+// not edit here, picked to answer in the thread. A team agent answers for
+// the team, so never Only me.
+export function threadAskPick(opts) {
+  const t = opts && opts.target;
+  return t && opts.askOnly && !opts.onlyMe && !t.tdoc_ai && !t.can_edit ? t : null;
+}
+
 // Hand a comment its writer just posted to one of their own agents
 // (POST /api/docs/<slug>/my-agent): the answer comes back as a reply in
 // that thread. The feedback space page and the feedback widget, where the

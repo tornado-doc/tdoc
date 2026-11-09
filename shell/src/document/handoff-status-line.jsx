@@ -14,7 +14,7 @@
 import React, { useEffect, useState } from 'react';
 import { deliveryErrorText, readableHandle } from './notify-handoff.jsx';
 import { formatHandoffAgo } from './handoff-ago.js';
-import { handoffWaitMinutes, handoffWaitState, isHandoffInFlight } from './handoff-state.js';
+import { handoffWaitMinutes, handoffWaitState, isHandoffInFlight } from '../comments/core/handoff-state.js';
 
 /** Latest agent verdict on a reply, if any (applied / partial / question). */
 function latestAgentVerdict(comment) {

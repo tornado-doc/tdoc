@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { deliveryErrorText, resendResultText } from './document/notify-handoff.jsx';
-import { handoffSurfaceState } from './document/handoff-state.js';
+import { handoffSurfaceState } from './comments/core/handoff-state.js';
 import { TopBar } from './top-bar.jsx';
 import { SegmentedControl } from './ui/segmented-control.jsx';
 import {
@@ -79,28 +79,16 @@ import { HandoffDetailsPanel } from './document/handoff-details.jsx';
 import { AskAiPanel, DemoRewriteBar, DemoRewriteCta } from './document/ask-ai-panel.jsx';
 import { SuggestContext, useSuggestions } from './document/suggestions.js';
 import { SuggestInlineChip, SuggestReviewBar } from './document/suggest-review-bar.jsx';
-import { useCommentArea } from './document/comment-area.js';
+import { useCommentArea, useCommentListPrefs } from './comments/core/comment-area.js';
+import { filterOptions, groupBy, matchesFilter, sortThreads } from './comments/core/comment-query.js';
+import { useCommentFeed } from './comments/core/use-comment-feed.js';
+import { useNarrowViewport } from './comments/core/narrow.js';
 import { VersionDiffView } from './document/version-diff.jsx';
 import { MoveToTeamDialog } from './docs-hub/teams.jsx';
 import { useMyAgent } from './document/my-agent.js';
 import { TDOC_AI, composerAgents, withoutAskTags } from './document/ai-answerer.js';
 import { DEMO_AGENT, DEMO_AGENT_CHOICES, DEMO_REWRITES, createDemoBackend } from './document/demo-agent.js';
 
-function useNarrowViewport() {
-  const [narrow, setNarrow] = useState(() => window.innerWidth < 700);
-
-  useEffect(() => {
-    const update = () => setNarrow(window.innerWidth < 700);
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-
-  useEffect(() => {
-    document.body.classList.toggle('tdoc-narrow', narrow);
-  }, [narrow]);
-
-  return narrow;
-}
 
 const COMMENT_SIGNIN_DRAFT_MAX_AGE_MS = 60 * 60 * 1000;
 const commentSignInDraftKey = (config) => `tdoc-comment-signin-draft:${config.slug}:v${config.version}`;
@@ -160,9 +148,6 @@ function OldVersionNotice({ value }) {
   );
 }
 
-// Whether resolved threads are shown, per browser. Not per document: a reader
-// who wants the margin quiet wants it quiet everywhere.
-const RESOLVED_KEY = 'tdoc-show-resolved';
 
 // Bridge 2. The only instruction in the journey: the line the owner pastes
 // into their agent after leaving a comment. What follows is read off the
@@ -221,7 +206,7 @@ export function DocumentShell({ boot, config }) {
     return () => window.removeEventListener('popstate', restore);
   }, [historyEnabled]);
   const [historyDevMode] = useState(() => Boolean(readDevMode()?.on));
-  const narrow = useNarrowViewport();
+  const narrow = useNarrowViewport({ bodyClass: 'tdoc-narrow' });
   const reanchorRef = useRef(null);
   const bridgeRef = useRef(null);
   const editorRef = useRef(null);
@@ -334,18 +319,16 @@ export function DocumentShell({ boot, config }) {
     }
     return kind;
   });
-  // Show all comments on first open, including resolved threads. Remember an
-  // explicit choice per browser; unavailable storage keeps the default ON.
-  // The comments filter: All (the default), Open, or Resolved. It lives in
-  // the comments area now, not the bar. Stored per browser; the old
-  // '0' (resolved hidden) reads as Open.
-  const [commentFilter, setCommentFilterState] = useState(() => {
-    if (new URLSearchParams(location.search).get('revised')) return 'all';
-    try {
-      const v = localStorage.getItem(RESOLVED_KEY);
-      return v === '0' ? 'open' : v === 'resolved' ? 'resolved' : 'all';
-    } catch { return 'all'; }
+  // The comments filter: Open (the default), Replied, Resolved, All — the
+  // same control and rule as the feedback widget (comment-query.js), the
+  // choice remembered per doc. A doc an agent just revised shows All for
+  // that visit, without making it the choice.
+  const listPrefs = useCommentListPrefs(config.slug, {
+    initialFilter: new URLSearchParams(location.search).get('revised') ? 'all' : null,
   });
+  const commentFilter = listPrefs.filter;
+  // Shown, not remembered: a link revealing a thread, a resolve.
+  const setCommentFilterState = useCallback((next) => listPrefs.setFilter(next, { remember: false }), [listPrefs.setFilter]);
 
 
   // `returnTo` lets a caller land the person somewhere specific after the
@@ -407,13 +390,14 @@ export function DocumentShell({ boot, config }) {
   const agentApi = demoBackend || { handOff, publishAsk };
   // A signed-out demo comment is "you"'s (use-comments.js demoAuthor).
   const handoffViewer = useMemo(() => [config.identity?.login || (demoAgents ? 'you' : undefined), ...(config.identity?.linked_actor_keys || [])], [config.identity, demoAgents]);
-  const [autoReadEnabled] = useState(() => isFeatureOn('autoReadComments'));
   const commentArea = useCommentArea({
     comments: comments.comments, slug: config.slug, selectedId: openCommentId,
-    filter: commentFilter, filterMode: 'resolution', handoffViewer,
-    isOwner: Boolean(config.isOwner),
-    autoMarkSelected: !autoReadEnabled,
+    filter: commentFilter, sort: listPrefs.sort, search: listPrefs.search,
+    handoffViewer, isOwner: Boolean(config.isOwner),
+    // Read state is kept on the server per person; the demo has nobody.
+    syncSeen: Boolean(config.identity) && !config.demoComments,
   });
+  const autoReadEnabled = commentArea.autoRead;
 
   const [invited, setInvited] = useState(null);
   const [teamGuestsEnabled] = useState(() => isFeatureOn('teamGuests'));
@@ -777,10 +761,14 @@ export function DocumentShell({ boot, config }) {
   // One visible set drives the margin and the frame. Selection must never
   // override the filter; explicit links enable it before opening a thread.
   const shownComments = commentArea.shown;
-  const drawerComments = useMemo(() => [
-    ...shownComments.filter(isDocumentComment),
-    ...shownComments.filter((comment) => !isDocumentComment(comment)),
-  ], [shownComments]);
+  // The phone drawer is the list: whole-document comments first, then the
+  // rest in document order (by where their pins sit), or newest / oldest.
+  const drawerComments = useMemo(() => {
+    const docY = new Map(bridge.layout.pins.map((pin) => [pin.id, pin.docY]));
+    const ordered = sortThreads(shownComments, listPrefs.sort, { positionOf: (comment) => docY.get(comment.id) ?? null });
+    return groupBy(ordered, (comment) => (isDocumentComment(comment) ? 'document' : 'body'), { first: 'document' })
+      .flatMap((group) => group.items);
+  }, [shownComments, listPrefs.sort, bridge.layout.pins]);
   const visibleCommentsById = commentArea.shownById;
   const seenMap = commentArea.seenMap;
   // Lost pins are seats, not anchors: they give the card somewhere to be drawn
@@ -795,14 +783,13 @@ export function DocumentShell({ boot, config }) {
   );
 
   const setCommentFilter = useCallback((next) => {
-    setCommentFilterState(next);
-    try { localStorage.setItem(RESOLVED_KEY, next === 'open' ? '0' : next === 'resolved' ? 'resolved' : '1'); } catch {}
+    listPrefs.setFilter(next);
     if (next === 'all') return;
     // Whatever the filter now hides: cancel a pending reveal, and close the
     // card, cluster or re-anchor that showed it.
     const hidden = (id) => {
       const c = commentsById.get(id);
-      return Boolean(c) && (next === 'open' ? c.status === 'applied' : c.status !== 'applied');
+      return Boolean(c) && !matchesFilter(c, next);
     };
     setDeepTarget(null);
     if (hidden(openCommentId)) {
@@ -812,7 +799,7 @@ export function DocumentShell({ boot, config }) {
     const openCluster = clusters.find((cluster) => cluster.key === openClusterKey);
     if (openCluster?.items.some(({ comment }) => hidden(comment.id))) setOpenClusterKey(null);
     if (hidden(reanchorId)) setReanchorId(null);
-  }, [bridge.send, clusters, commentsById, openClusterKey, openCommentId, reanchorId]);
+  }, [bridge.send, clusters, commentsById, openClusterKey, openCommentId, reanchorId, listPrefs.setFilter]);
 
   useEffect(() => {
     bridge.send({ type: 'tdoc:anchors', comments: shownComments });
@@ -845,7 +832,7 @@ export function DocumentShell({ boot, config }) {
       setDeepTarget(null);
       return;
     }
-    if ((root.status === 'applied' && commentFilter === 'open') || (root.status !== 'applied' && commentFilter === 'resolved')) {
+    if (!matchesFilter(root, commentFilter)) {
       // A direct link is an explicit request to reveal this thread. Reflect
       // that in the filter instead of bypassing its visibility contract.
       setCommentFilterState('all');
@@ -1158,7 +1145,7 @@ export function DocumentShell({ boot, config }) {
   // nothing.
   const resolveComment = async (commentId, resolved) => {
     if (!await attempt(() => comments.setResolved(commentId, resolved))) return;
-    if ((resolved && commentFilter === 'open') || (!resolved && commentFilter === 'resolved')) setOpenCommentId(null);
+    if (commentFilter !== 'all' && (resolved ? commentFilter !== 'resolved' : commentFilter === 'resolved')) setOpenCommentId(null);
   };
 
   // Closing the card was unconditional, which hid the two cases where there is
@@ -1664,13 +1651,20 @@ export function DocumentShell({ boot, config }) {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [handoff.state, handoff.copiedAt, config.slug, config.version, commentsRefresh]);
 
-  // Live sync for anyone reading: replies (an agent's included) arrive in
-  // their threads, and a version published meanwhile is announced in the
-  // strip above the doc rather than navigated to. Only a visible tab polls;
-  // coming back to the tab checks at once; a quiet doc backs off to a minute.
-  // Before this, polling ran only while a handoff was still `sent`, so a
-  // reply that came after the agent picked the comment up needed a reload
-  // (Julie, 2026-10-15).
+  // Threads stay current the way the feedback widget's do, through the same
+  // hook (use-comment-feed.js): every 15 s while the tab is visible, at once
+  // when it comes back, never while somebody is typing or the composer is
+  // open, and on the Refresh button by the filter. An agent's reply appears
+  // on an open doc without a reload.
+  const commentFeed = useCommentFeed({
+    load: commentsRefresh,
+    enabled: Boolean(config.slug) && !config.isLanding && !config.demoComments,
+    paused: Boolean(composer),
+  });
+
+  // A version published meanwhile is announced in the strip above the doc
+  // rather than navigated to. Only a visible tab polls; coming back to the
+  // tab checks at once; a quiet doc backs off to a minute.
   const [liveLatest, setLiveLatest] = useState(0);
   useEffect(() => {
     if (config.isLanding || config.mode === 'local' || !config.slug) return undefined;
@@ -1688,10 +1682,9 @@ export function DocumentShell({ boot, config }) {
         if (!cancelled && latest) setLiveLatest(latest);
         seen = String(latest);
       } catch { /* next tick */ }
-      try { await commentsRefresh(); } catch { /* next tick */ }
       suggestRef.current?.relist();
       if (cancelled) return;
-      const fingerprint = `${seen}|${(commentsRef.current || []).map((c) => `${c && c.id}:${(c && c.replies || []).length}:${c && c.status}`).join(',')}`;
+      const fingerprint = seen;
       delay = fingerprint === last ? Math.min(delay * 2, LIVE_SYNC_MAX_MS) : LIVE_SYNC_MIN_MS;
       last = fingerprint;
       timer = window.setTimeout(tick, delay);
@@ -1705,7 +1698,7 @@ export function DocumentShell({ boot, config }) {
     };
     document.addEventListener('visibilitychange', onVis);
     return () => { cancelled = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
-  }, [config.slug, config.isLanding, config.mode, commentsRefresh]);
+  }, [config.slug, config.isLanding, config.mode]);
 
   // Connected-App handoffs: while any comment is still `sent`, refresh so the
   // waiting tags and banner catch agent replies / resolve without a manual reload.
@@ -2038,11 +2031,7 @@ export function DocumentShell({ boot, config }) {
       ariaLabel="Show comments"
       value={commentFilter}
       onChange={setCommentFilter}
-      options={[
-        { value: 'open', label: `Open (${openCount})` },
-        { value: 'resolved', label: `Resolved (${resolvedCount})` },
-        { value: 'all', label: 'All' },
-      ]}
+      options={filterOptions(commentArea.counts).map(({ value, label }) => ({ value, label }))}
     />
   ) : null;
   const openCluster = clusters.find((cluster) => (
@@ -2306,10 +2295,11 @@ export function DocumentShell({ boot, config }) {
       <DocumentFooter visible={bridge.layout.footerVisible} />
 
       {!narrow && commentFilterControl && !comparing && !historyOpen ? (
-        <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.min(pinLeft - 4, window.innerWidth - 250) }}>
+        <div className="tdoc-comment-filter-dock" style={{ top: frameTop + 10, left: Math.max(8, Math.min(pinLeft - 4, window.innerWidth - 336)) }}>
           <CommentListControls filter={commentFilterControl}
-            unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
-            onMarkAllRead={autoReadEnabled ? markAllAgentRepliesRead : null} />
+            unreadCount={unreadAgentReplies}
+            onMarkAllRead={markAllAgentRepliesRead}
+            onRefresh={commentFeed.refresh} refreshing={commentFeed.refreshing} />
         </div>
       ) : null}
       {narrow ? (<>
@@ -2335,7 +2325,10 @@ export function DocumentShell({ boot, config }) {
           open={drawerOpen && !comparing && !historyOpen}
           openCount={openCount}
           unread={mobileUnread}
-          unreadCount={autoReadEnabled ? unreadAgentReplies : 0}
+          unreadCount={unreadAgentReplies}
+          onRefresh={commentFeed.refresh}
+          refreshing={commentFeed.refreshing}
+          listQuery={{ search: listPrefs.search, onSearch: listPrefs.setSearch, sort: listPrefs.sort, onSort: listPrefs.setSort }}
           // shownComments, not the raw list: hiding resolved threads took the
           // pins out of the document but left every one of them in the drawer,
           // which on a phone IS the comment list. "Hide resolved" appeared to
@@ -2360,8 +2353,8 @@ export function DocumentShell({ boot, config }) {
           onStartComment={config.canComment || config.signInToComment ? () => startDocumentComment(false) : null}
           onAskAi={config.canComment || config.signInToComment ? () => startDocumentComment(true) : null}
           onReply={replyTo}
-          onMarkRead={autoReadEnabled ? markAgentReplyRead : null}
-          onMarkAllRead={autoReadEnabled ? markAllAgentRepliesRead : null}
+          onMarkRead={commentArea.onSeen}
+          onMarkAllRead={markAllAgentRepliesRead}
           onEdit={editComment}
           onReact={reactTo}
           onDelete={removeComment}

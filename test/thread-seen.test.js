@@ -5,10 +5,10 @@ const path = require('path');
 const fs = require('fs');
 
 async function load() {
-  const file = path.join(__dirname, '../shell/src/document/thread-seen.js');
+  const file = path.join(__dirname, '../shell/src/comments/core/thread-seen.js');
   let src = fs.readFileSync(file, 'utf8');
   src = src.replace(
-    "import { readStored, writeStored } from '../safe-storage.js';",
+    "import { readStored, writeStored } from '../../safe-storage.js';",
     `const store = (globalThis.__tdocSeenStore = globalThis.__tdocSeenStore || new Map());
      const readStored = (k, f) => (store.has(k) ? store.get(k) : f);
      const writeStored = (k, v) => { store.set(k, v); return true; };`,

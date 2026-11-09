@@ -498,7 +498,7 @@ const FEEDBACK_TOKEN_RE = /^Bearer\s+(fb_[a-f0-9]{48})$/;
 // and switch between spaces its person already chose to join. Taking an
 // invite is never a token's: that is a click on tdoc (connect, the invite
 // page), so a page holding the token cannot file its person anywhere.
-const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session', '/api/notify/targets', '/api/notify/handoff', '/api/notify/handoffs', '/api/notify/handoff/resend',
+const FEEDBACK_TOKEN_PATHS = new Set(['/api/comments', '/api/comments/seen', '/api/mentions', '/api/reactions', '/api/auth/me', '/api/feedback/session', '/api/notify/targets', '/api/notify/handoff', '/api/notify/handoffs', '/api/notify/handoff/resend',
   '/api/feedback/invites', '/api/feedback/invites/revoke', '/api/feedback/invite', '/api/feedback/invite/keep', '/api/feedback/switch']);
 const FEEDBACK_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 
@@ -16077,10 +16077,16 @@ function teamHandoffAllowed(actor, writeGate, handoff) {
 // team, signed in on tdoc itself. Not a reader the doc was shared with, not a
 // feedback token (a page tdoc does not control), not an agent. Returns the
 // team and the member's account id, or null.
+//
+// One token is let through, and only by handleMyAgent (answer only, in the
+// thread): `feedbackOwnOrigin`, set once feedbackTokenOwnAgent has passed --
+// the bookmarklet's token on tdoc's own pages, which tdoc does control. That
+// is the door the holder's own agents already use; their team's agents, on
+// their team's space, answer through it the way they do on the doc page.
 async function teamAgentCaller(env, gate) {
   const meta = gate && gate.meta;
   if (!(meta && meta.workspace_id)) return null;
-  if (gate.session && gate.session.feedback) return null;
+  if (gate.session && gate.session.feedback && !gate.feedbackOwnOrigin) return null;
   const actor = gate.session || gate.actor;
   if (!actor || actor.team_agent) return null;
   const team = await loadTeam(env, meta.workspace_id);
@@ -17739,6 +17745,83 @@ function redactCommentHandoffs(env, gate, comments, handoffs, allComments) {
     }
     return comment;
   });
+}
+
+// "Seen up to" per person per thread (thread-seen.js): which agent replies
+// this person has read, so the doc page, the space page and the feedback
+// widget on an app's own origin agree on what is unread.
+//
+// Authorized exactly like GET /api/comments: the same read gate
+// (enforceDocAccess) and the same feedback-token scope, answered the same
+// way, BEFORE anything about the doc's threads is looked at -- someone who
+// cannot read the comments learns nothing here, not even which ids exist.
+// The record is keyed by doc and person, so no request can reach another
+// doc's or another person's. A POST keeps only ids of threads the doc holds;
+// what comes back is the person's own map, nothing more.
+const THREAD_SEEN_TTL_SECONDS = 180 * 86400;
+const THREAD_SEEN_MAX_ENTRIES = 500;
+const THREAD_SEEN_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+
+function threadSeenKey(slug, session) {
+  const who = typeof session.account_id === 'string' && session.account_id
+    ? `a:${session.account_id}` : `k:${actorKey(session)}`;
+  return `thread-seen:${slug}:${who}`;
+}
+
+function cleanThreadSeen(raw, { now = Date.now(), allowed = null } = {}) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  let n = 0;
+  for (const [id, value] of Object.entries(raw)) {
+    if (n >= THREAD_SEEN_MAX_ENTRIES) break;
+    if (!THREAD_SEEN_ID_RE.test(id) || (allowed && !allowed.has(id))) continue;
+    const stamp = Math.floor(Number(value));
+    if (!Number.isFinite(stamp) || stamp <= 0) continue;
+    // A stamp is a reply's time; nothing may claim to have read the future.
+    out[id] = Math.min(stamp, now + 60_000);
+    n += 1;
+  }
+  return out;
+}
+
+async function handleThreadSeen(env, req, url) {
+  let body = null;
+  if (req.method === 'POST') {
+    try { body = await req.json(); } catch { body = null; }
+    if (!body || typeof body !== 'object') return json({ error: 'invalid_body' }, { status: 400 });
+  }
+  const slug = req.method === 'POST' ? body.slug : url.searchParams.get('slug');
+  if (!slug) return json({ error: 'slug required' }, { status: 400 });
+  if (typeof slug !== 'string' || !isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
+  // The comments' own read gate and scope, with their own answers.
+  const gate = await enforceDocAccess(env, req, slug, 1);
+  if (!gate.ok) return json({ error: 'access_denied' }, { status: gate.response.status || 403 });
+  if (feedbackScopeDenied(gate.session, slug)) return json({ error: 'feedback_token_scope' }, { status: 403 });
+  // A person's own record: never an agent's token or the operator's.
+  const session = gate.session;
+  if (!session || gate.ownerToken || gate.bearerSession || session.bearerAdmin || !sessionPrincipal(session)) {
+    return json({ error: 'sign_in_required' }, { status: 401 });
+  }
+  const key = threadSeenKey(slug, session);
+  let stored = {};
+  try { stored = cleanThreadSeen(JSON.parse(await env.META.get(key) || '{}')); } catch { stored = {}; }
+  const headers = { 'Cache-Control': 'no-store' };
+  if (req.method === 'GET') return json({ seen: stored }, { headers });
+
+  const asked = cleanThreadSeen(body.seen);
+  if (!Object.keys(asked).length) return json({ ok: true, seen: stored }, { headers });
+  const list = await readComments(env, slug);
+  ensureMigrated(list);
+  const threads = new Set(snapshotList(list, Infinity).map((c) => c.id));
+  const next = cleanThreadSeen(stored, { allowed: threads });
+  let changed = Object.keys(next).length !== Object.keys(stored).length;
+  for (const [id, stamp] of Object.entries(cleanThreadSeen(asked, { allowed: threads }))) {
+    if (stamp > (next[id] || 0)) { next[id] = stamp; changed = true; }
+  }
+  // Newest marks first when there are more threads than the record keeps.
+  const kept = Object.fromEntries(Object.entries(next).sort((a, b) => b[1] - a[1]).slice(0, THREAD_SEEN_MAX_ENTRIES));
+  if (changed) await env.META.put(key, JSON.stringify(kept), { expirationTtl: THREAD_SEEN_TTL_SECONDS });
+  return json({ ok: true, seen: kept }, { headers });
 }
 
 const authoredBy = (keys, item) => {
@@ -20607,13 +20690,15 @@ async function handleMyAgent(env, req, url, slug) {
   const state = accountId ? await readerAgentState(env, accountId) : { group: { ids: [], canonical: null }, own: [], reachable: [], tier: 'none' };
   const asker = state.group.canonical || accountId;
   // Ask only may also go to the doc's team agent, for a member of its team.
-  // Not from the widget: its token reaches the holder's own agents only.
-  const team = viaFeedbackToken ? { targets: [], reachable: [] } : await teamAskTargets(env, { meta, session });
+  // From the widget too, through the one token that got this far (tdoc's own
+  // pages, feedbackTokenOwnAgent above): a team space's member gets their
+  // team's agents in the @ list as on the doc page, answer only, in the thread.
+  const team = await teamAskTargets(env, { meta, session, feedbackOwnOrigin: viaFeedbackToken });
   if (req.method === 'GET') {
     // The widget's token sees only what it could have asked: questions in a
-    // thread, to the holder's own agents (no private answers, no team's).
+    // thread, to the holder's own agents or their team's (no private answers).
     const seenAsks = accountId ? (await loadAgentAsks(env, slug, asker))
-      .filter((a) => !viaFeedbackToken || (a.comment_id && !a.runner && !a.team_agent)) : [];
+      .filter((a) => !viaFeedbackToken || a.comment_id) : [];
     const asks = seenAsks.slice(0, AGENT_ASK_LIST).map(agentAskView);
     const guestTeam = !viaFeedbackToken && meta.workspace_id && !await isTeamMemberSession(env, session, meta.workspace_id)
       && isAllowlisted(accessFromMeta(meta), session, env, meta)
@@ -28260,6 +28345,12 @@ const tdocHandlers = {
       const linked = V !== 'all' && hostedRegistrationEnabled(env, url.origin)
         ? await withCommentProfileLinks(env, visible) : visible;
       return json(await redactCommentEmails(linked, await emailPrivacyFor(env, gate.session, slug, gate.meta)));
+    }
+
+    // This person's "seen up to" per thread (GET reads it, POST raises it).
+    // See handleThreadSeen: authorized exactly like reading the comments.
+    if (p === '/api/comments/seen' && (method === 'GET' || method === 'POST')) {
+      return handleThreadSeen(env, req, url);
     }
 
     // Who the composer offers after `@`. Same gate as posting a comment: if

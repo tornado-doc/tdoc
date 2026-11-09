@@ -334,7 +334,7 @@ t('the two arrivals open the right card and say what happened', () => {
   // pop-up stopped opening, and the checklist rows land through `?step=`.
   assert(!shell.includes("params.get('welcome')"), 'the wizard arrival is gone');
   assert(/arrival === 'revised'[\s\S]*c\.status === 'applied'[\s\S]*setOpenCommentId\(resolved\.id\)/.test(shell), 'revised opens a resolved card');
-  assert(shell.includes("if (new URLSearchParams(location.search).get('revised')) return 'all';"), 'with resolved threads shown, or v2 looks like nothing happened');
+  assert(shell.includes("initialFilter: new URLSearchParams(location.search).get('revised') ? 'all' : null,"), 'with resolved threads shown, or v2 looks like nothing happened');
   // A version published without a resolved thread still arrived; the count
   // going to zero must not turn the arrival into a report of failure.
   assert(shell.includes('`v${version} published. Share it.`'), 'the exit line drops the count rather than printing zero');

@@ -1378,7 +1378,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         await panel.waitFor({ state: 'visible', timeout: 4000 })
           .catch(() => host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click());
         await panel.waitFor({ state: 'visible' });
-        await panel.getByRole('button', { name: 'All', exact: true }).click();
+        await panel.locator('.tdoc-fb-filter button', { hasText: /^All/ }).click();
         const fbCard = host.locator('#tdoc-feedback-root .tdoc-fb-item article[data-comment-id="c_feedback_parity"]');
         await fbCard.waitFor();
         const pin = host.locator('#tdoc-feedback-root .tdoc-pin[data-id="c_feedback_parity"]');
@@ -1504,7 +1504,7 @@ window.__fbAll = (selector) => window.__fbRoot()?.querySelectorAll(selector) || 
         if (!(await panel.isVisible())) await host.locator('#tdoc-feedback-root .tdoc-feedback-dock button').first().click();
         await host.waitForTimeout(1500); await host.screenshot({ path: `/tmp/fb-drag-work/parity-debug-${Date.now()}.png` }); console.log('DEBUG', await host.evaluate(() => ({ panel: !!document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-fb-panel'), w: innerWidth, notice: document.getElementById('tdoc-feedback-root').shadowRoot.querySelector('.tdoc-feedback-notice')?.innerText })));
         await panel.waitFor({ state: 'visible' });
-        await panel.getByRole('button', { name: 'All', exact: true }).click();
+        await panel.locator('.tdoc-fb-filter button', { hasText: /^All/ }).click();
         const card = (id) => panel.locator(`article[data-comment-id="${id}"]`);
         await card('c_fb_unread_a').waitFor();
         assert((await card('c_fb_waiting').locator('.tdoc-thread-unread-dot').count()) === 0,

@@ -1988,6 +1988,36 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ...readAgentStatusLocal(slug), latest_version: latest || null, title: (meta && meta.title) || null });
   }
 
+  // "Seen up to" per thread, the local twin of the worker's
+  // /api/comments/seen: one person here (TDOC_E2E_USER), one map per doc.
+  // A feedback token (local_<slug>) reaches only its own doc's.
+  if (p === '/api/comments/seen' && (req.method === 'GET' || req.method === 'POST')) {
+    if (req.method === 'POST' && !isLocalMutation(req)) return json(res, 403, { error: 'forbidden' });
+    const body = req.method === 'POST' ? await readBody(req) : null;
+    const slug = safeSlug(req.method === 'POST' ? body && body.slug : url.searchParams.get('slug'));
+    if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
+    const token = /^Bearer\s+local_([a-z0-9-]+)$/i.exec(req.headers['authorization'] || '');
+    if (token && safeSlug(token[1]) !== slug) return json(res, 403, { error: 'feedback_token_scope' });
+    if (!fs.existsSync(path.join(ROOT, slug, 'meta.json'))) return json(res, 404, { error: 'access_denied' });
+    const ident = e2eIdentity();
+    if (!ident) return json(res, 401, { error: 'sign_in_required' });
+    const file = path.join(ROOT, slug, 'thread-seen.json');
+    const all = readJson(file, {});
+    const mine = all[ident.login] && typeof all[ident.login] === 'object' ? all[ident.login] : {};
+    if (req.method === 'GET') return json(res, 200, { seen: mine });
+    const threads = new Set(readCommentFile(path.join(ROOT, slug, 'comments.json')).map((c) => c && c.id).filter(Boolean));
+    const next = { ...mine };
+    let changed = false;
+    for (const [id, value] of Object.entries((body && body.seen && typeof body.seen === 'object') ? body.seen : {})) {
+      const stamp = Math.min(Math.floor(Number(value)), Date.now() + 60_000);
+      if (!threads.has(id) || !(stamp > 0) || stamp <= (next[id] || 0)) continue;
+      next[id] = stamp;
+      changed = true;
+    }
+    if (changed) writeJson(file, { ...all, [ident.login]: next });
+    return json(res, 200, { ok: true, seen: next });
+  }
+
   if (p === '/api/comments' && req.method === 'GET') {
     const slug = safeSlug(url.searchParams.get('slug'));
     if (!slug) return json(res, 400, { error: 'invalid or missing slug' });
