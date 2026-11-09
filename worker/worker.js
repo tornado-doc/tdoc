@@ -9343,6 +9343,20 @@ function inlineMediaRejection(html) {
   }, { status: 413 });
 }
 
+// What a person's browser save may write (POST /api/doc/versions, and a
+// restore, which saves an old version's bytes the same way): a whole
+// document, no provider markup (the frame's own probe), no oversized inline
+// media. A refusal response, or null.
+function browserSaveHtmlRefusal(doc) {
+  if (!/<html[\s>]/i.test(doc) || !/<body[\s>]/i.test(doc)) {
+    return json({ error: 'invalid_document_html' }, { status: 400 });
+  }
+  if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(doc)) {
+    return json({ error: 'provider_markup_forbidden' }, { status: 400 });
+  }
+  return inlineMediaRejection(doc);
+}
+
 function hostedMaxUploadBytes(env) {
   const n = Number(env && env.TDOC_HOSTED_MAX_UPLOAD_BYTES);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 2 * 1024 * 1024;
@@ -16830,6 +16844,11 @@ const HISTORY_SUMMARIES_PER_CALL = 6;
 const HISTORY_SUMMARY_CACHE_MAX = 400;
 const HISTORY_SUMMARY_MAX_HTML = 600000;
 const historySummaryKey = (slug) => `history-summary:${slug}`;
+const historySummaryFailedKey = (slug) => `history-summary-failed:${slug}`;
+// A row whose summary failed is not tried again before this.
+const HISTORY_SUMMARY_RETRY_MS = 10 * 60 * 1000;
+// New summaries computed per doc per minute for callers not signed in.
+const HISTORY_SUMMARY_ANON_PER_MIN = 10;
 
 // Who may list a doc's history: the same people who were shown the version
 // picker before (history_visibility: owner by default, invited, or public;
@@ -16865,6 +16884,8 @@ function versionWriter(meta, v) {
       kind: 'agent', account_id: v.by, agent: pa,
     };
   }
+  // A record an upload's client added, from a credential that names nobody.
+  if (v.unattributed) return { key: 'unknown', kind: 'person', login: '' };
   return { key: `owner:${ownerLogin}`, kind: 'person', login: ownerLogin, legacy: true };
 }
 
@@ -17029,7 +17050,14 @@ async function handleHistoryList(env, req, url, slug) {
   const before = Number(url.searchParams.get('before'));
   const limit = Math.max(1, Math.min(HISTORY_PAGE_MAX, Number(url.searchParams.get('limit')) || HISTORY_PAGE_ROWS));
   const { rows, next } = historyRows(gate.meta, { before: Number.isInteger(before) && before > 0 ? before : Infinity, limit });
-  const names = await historyWhoNames(env, gate.meta, rows.map((r) => r.writer));
+  // A public history's anonymous readers see that a person or an agent saved,
+  // not who: no agent connection's name, no address's local part.
+  const anonymous = !sessionPrincipal(gate.session) && !gate.ownerToken;
+  const names = anonymous
+    ? new Map(rows.map((r) => [r.writer.key, r.writer.kind === 'person'
+      ? { kind: 'person', name: 'Someone', login: null }
+      : { kind: 'agent', name: 'Agent', owner: null }]))
+    : await historyWhoNames(env, gate.meta, rows.map((r) => r.writer));
   const cached = await readHistorySummaries(env, slug);
   const latest = latestVersionNumber(gate.meta);
   return json({
@@ -17055,43 +17083,69 @@ async function handleHistoryList(env, req, url, slug) {
 }
 
 // GET /api/docs/<slug>/history/summaries?rows=<from>-<to>,...  Computes what
-// is not cached yet (a few per call) and caches it with one write.
+// is not cached yet (a few per call) and caches it with one write. Only the
+// rows the history list itself shows can be asked for, so the cache holds at
+// most one entry per row. A row that failed is not tried again for a while,
+// and a caller who is not signed in computes new ones under a per-doc limit.
 async function handleHistorySummaries(env, req, url, slug) {
   if (!isValidSlug(slug)) return json({ error: 'invalid_slug' }, { status: 400 });
   const gate = await enforceDocAccess(env, req, slug, 1);
   if (!gate.ok) return json({ error: gate.gone ? 'not_found' : 'access_denied' }, { status: gate.gone ? 404 : (gate.response.status || 403) });
   if (!gate.meta || !Array.isArray(gate.meta.versions)) return json({ error: 'not_found' }, { status: 404 });
   if (!(await canListHistory(env, gate))) return json({ error: 'history_hidden' }, { status: 403 });
-  const known = new Set(gate.meta.versions.map((v) => Number(v && v.n)));
-  const wanted = String(url.searchParams.get('rows') || '').split(',').slice(0, HISTORY_SUMMARIES_PER_CALL)
-    .map((s) => s.match(/^(\d{1,7})-(\d{1,7})$/)).filter(Boolean)
-    .map((m) => [Number(m[1]), Number(m[2])])
-    .filter(([a, b]) => a >= 1 && a <= b && known.has(a) && known.has(b));
+  const rowIds = new Set(historyRows(gate.meta, { limit: Infinity }).rows
+    .map((r) => `${Number(r.saves[r.saves.length - 1].n)}-${Number(r.saves[0].n)}`));
+  const wanted = [...new Set(String(url.searchParams.get('rows') || '').split(','))]
+    .filter((id) => rowIds.has(id)).slice(0, HISTORY_SUMMARIES_PER_CALL)
+    .map((id) => id.split('-').map(Number));
+  const byNumber = new Map(gate.meta.versions.map((v) => [Number(v && v.n), v]));
+  const known = [...byNumber.keys()].filter((n) => Number.isInteger(n) && n > 0);
   const cache = await readHistorySummaries(env, slug);
+  const failedKey = historySummaryFailedKey(slug);
+  let failed = null;
+  const now = Date.now();
   const out = {};
-  let wrote = false;
+  let wrote = false, newFailure = false, allowed = null;
   const read = async (n) => {
-    if (!known.has(n)) return '';
     const obj = await env.DOCS.get(`docs/${slug}/v${n}/index.html`);
     return obj ? obj.text() : null;
   };
   for (const [a, b] of wanted) {
     const id = `${a}-${b}`;
     if (cache[id]) { out[id] = cache[id]; continue; }
+    if (failed === null) {
+      try { failed = JSON.parse((await env.META.get(failedKey)) || '{}') || {}; } catch { failed = {}; }
+    }
+    if (Number(failed[id]) > now) continue;
+    // Computing reads two versions and diffs them: anyone signed in may ask;
+    // the anonymous readers of a public history share a small budget per doc.
+    if (allowed === null) {
+      allowed = !!sessionPrincipal(gate.session) || !!gate.ownerToken
+        || !(await rateLimited(env, `history-summary:${slug}`, HISTORY_SUMMARY_ANON_PER_MIN, 60));
+    }
+    if (!allowed) break;
+    // The row's changes are against the save before it: v<a-1> to v<b>.
+    // A previous number may be missing from a doc's record (a gap); then
+    // the nearest earlier version is "before".
+    const prev = known.filter((n) => n < a).sort((x, y) => y - x)[0];
     let summary = null;
     try {
-      // The row's changes are against the save before it: v<a-1> to v<b>.
-      // A previous number may be missing from a doc's record (a gap); then
-      // the nearest earlier version is "before".
-      const prev = [...known].filter((n) => n < a).sort((x, y) => y - x)[0];
       const afterHtml = await read(b);
       const beforeHtml = prev ? await read(prev) : '';
       if (afterHtml !== null && beforeHtml !== null) summary = historyChangeSummary(beforeHtml, afterHtml);
     } catch (error) {
       console.error('[history] summary failed:', error && error.message ? error.message : String(error));
     }
-    if (!summary) continue;
+    if (!summary) {
+      failed[id] = now + HISTORY_SUMMARY_RETRY_MS;
+      newFailure = true;
+      continue;
+    }
     out[id] = summary;
+    // A blank doc's scaffold is replaced in place by the first real save
+    // (_saveVersion), so a summary that read it would go stale: not cached.
+    const scaffold = [prev, ...known.filter((n) => n >= a && n <= b)].some((n) => n && byNumber.get(n) && byNumber.get(n).blank);
+    if (scaffold) continue;
     cache[id] = summary;
     wrote = true;
   }
@@ -17103,6 +17157,10 @@ async function handleHistorySummaries(env, req, url, slug) {
       for (const id of ids.slice(HISTORY_SUMMARY_CACHE_MAX)) delete cache[id];
     }
     try { await env.META.put(historySummaryKey(slug), JSON.stringify({ rows: cache })); } catch {}
+  }
+  if (newFailure) {
+    for (const id of Object.keys(failed)) if (!(Number(failed[id]) > now)) delete failed[id];
+    try { await env.META.put(failedKey, JSON.stringify(failed), { expirationTtl: Math.ceil(HISTORY_SUMMARY_RETRY_MS / 1000) }); } catch {}
   }
   return json({ summaries: out });
 }
@@ -17122,11 +17180,15 @@ async function handleVersionRestore(env, req, url, slug, n) {
   if (auth.actor.kind !== 'owner_session' && auth.actor.kind !== 'team_member') {
     return json({ error: 'editors_only', message: 'Only the owner and editors can restore a version.' }, { status: 403 });
   }
+  // Restoring shows nobody the old bytes, but it is still for someone who may
+  // read the doc: a team member a private team doc leaves out may not.
+  const target = Number(n);
+  const gate = await enforceDocAccess(env, req, slug, target);
+  if (!gate.ok) return json({ error: gate.gone ? 'not_found' : 'access_denied' }, { status: gate.gone ? 404 : (gate.response.status || 403) });
   const meta = auth.meta || await loadDocMeta(env, slug);
   if (!meta || !Array.isArray(meta.versions)) return json({ error: 'not_found' }, { status: 404 });
   const spaceRefusal = feedbackSpaceVersionRefusal(meta);
   if (spaceRefusal) return spaceRefusal;
-  const target = Number(n);
   if (!meta.versions.some((v) => Number(v && v.n) === target)) return json({ error: 'version_not_found' }, { status: 404 });
   const latest = latestVersionNumber(meta);
   if (target === latest) return json({ error: 'already_latest', message: 'This is already the latest version.' }, { status: 409 });
@@ -17134,6 +17196,10 @@ async function handleVersionRestore(env, req, url, slug, n) {
   if (!obj) return json({ error: 'version_not_found' }, { status: 404 });
   const html = await obj.text();
   if (utf8ByteLength(html) > hostedMaxUploadBytes(env)) return json({ error: 'payload_too_large' }, { status: 413 });
+  // The browser save's own checks: an old version written by an upload may
+  // hold what a person's save may not.
+  const docRefusal = browserSaveHtmlRefusal(html);
+  if (docRefusal) return docRefusal;
   const saved = await saveVersionAsPerson(env, slug, {
     baseVersion: latest,
     html,
@@ -18148,6 +18214,11 @@ export class CommentsStore {
       }));
       if (pendingPreviewTask) await pendingPreviewTask();
       committed = true;
+      // v1's bytes just changed under the same number: a history summary
+      // that read the scaffold is stale.
+      if (overScaffold) {
+        try { await this.env.META.delete(historySummaryKey(slug)); } catch {}
+      }
       // META is the commit point. Cursor cleanup is recoverable bookkeeping:
       // reporting a failed save after META committed would make the browser
       // retry a snapshot that already exists.
@@ -29463,14 +29534,8 @@ const tdocHandlers = {
       }
       const size = utf8ByteLength(doc);
       if (size > maxBytes) return json({ error: 'payload_too_large', limit: maxBytes, size }, { status: 413 });
-      if (!/<html[\s>]/i.test(doc) || !/<body[\s>]/i.test(doc)) {
-        return json({ error: 'invalid_document_html' }, { status: 400 });
-      }
-      if (/data-tdoc-provider|id=["']tdoc-frame-probe["']/i.test(doc)) {
-        return json({ error: 'provider_markup_forbidden' }, { status: 400 });
-      }
-      const mediaRefusal = inlineMediaRejection(doc);
-      if (mediaRefusal) return mediaRefusal;
+      const docRefusal = browserSaveHtmlRefusal(doc);
+      if (docRefusal) return docRefusal;
       // The browser editor's save, and only that: it is recorded as a
       // person's edit (source: browser), which authorship trusts. An upload
       // or agent token publishes through /api/upload, where authorship and
@@ -30050,6 +30115,8 @@ const tdocHandlers = {
           const currentRecord = await readDocRecord(env, slug);
           const currentMeta = isTrashedMeta(currentRecord) ? null : currentRecord;
           const versionByNumber = new Map();
+          // Version records only this upload's client knows of.
+          const clientOnly = new Set();
           for (const item of (Array.isArray(currentMeta && currentMeta.versions) ? currentMeta.versions : [])) {
             versionByNumber.set(Number(item.n), item);
           }
@@ -30063,8 +30130,9 @@ const tdocHandlers = {
             // server's record of who wrote a version (docLastWriter decides
             // who may hand edits to an agent from them); a client cannot
             // write any of them.
-            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, publisher_agent: _clientPublisher, source: _clientSource, author: _clientAuthor, blank: _clientBlank, human: _clientHuman, restored_from: _clientRestored, suggested_by: _clientSuggested, ...clean } = item || {};
-            if (!versionByNumber.has(number) || number === verNum) versionByNumber.set(number, clean);
+            const { token: _clientToken, team_agent: _clientAgent, by: _clientBy, publisher_agent: _clientPublisher, source: _clientSource, author: _clientAuthor, blank: _clientBlank, human: _clientHuman, restored_from: _clientRestored, suggested_by: _clientSuggested, unattributed: _clientUnattributed, ...clean } = item || {};
+            if (number === verNum) versionByNumber.set(number, clean);
+            else if (!versionByNumber.has(number)) { versionByNumber.set(number, clean); clientOnly.add(number); }
           }
           if (!versionByNumber.has(verNum)) {
             versionByNumber.set(verNum, { n: verNum, created: new Date().toISOString() });
@@ -30087,6 +30155,18 @@ const tdocHandlers = {
           if (publishingAgent) storedEntry.publisher_agent = notifyTargetIdentity(publishingAgent);
           else delete storedEntry.publisher_agent;
           versionByNumber.set(verNum, storedEntry);
+          // A record the client added for some other number is this upload's
+          // too, and says so: one that named nobody would read as the owner's
+          // (versionWriter, docLastWriter's legacy guess).
+          for (const number of clientOnly) {
+            if (number === verNum) continue;
+            const entry = { ...versionByNumber.get(number) };
+            for (const field of ['token', 'team_agent', 'by', 'publisher_agent']) {
+              if (storedEntry[field]) entry[field] = storedEntry[field];
+            }
+            if (!entry.by && !entry.team_agent) entry.unattributed = true;
+            versionByNumber.set(number, entry);
+          }
           const mergedVersions = [...versionByNumber.values()]
             .filter((item) => Number.isInteger(Number(item && item.n)) && Number(item.n) > 0)
             .sort((a, b) => Number(a.n) - Number(b.n));

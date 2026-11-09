@@ -213,6 +213,166 @@ const page = (sections) => `<!doctype html><html><head><title>Plan</title></head
     assert.equal(v.suggested_by, undefined);
   });
 
+  await t('summaries: only the list\'s own rows; arbitrary or many pairs are refused and write nothing', async () => {
+    const rows = (await call(`/api/docs/${slug}/history`, { cookie: julie.cookie })).body.rows.map((x) => `${x.from}-${x.to}`);
+    const realPut = env.META.put.bind(env.META);
+    const puts = [];
+    env.META.put = (k, ...rest) => { puts.push(k); return realPut(k, ...rest); };
+    const realGet = env.DOCS.get.bind(env.DOCS);
+    let reads = 0;
+    env.DOCS.get = (...args) => { reads++; return realGet(...args); };
+    try {
+      // Real version numbers, but pairs no row has: nothing read, nothing cached.
+      const many = [];
+      for (let a = 1; a <= 6; a++) for (let b = a; b <= 6; b++) if (!rows.includes(`${a}-${b}`)) many.push(`${a}-${b}`);
+      const r = await call(`/api/docs/${slug}/history/summaries?rows=${many.join(',')}`, { cookie: julie.cookie });
+      assert.equal(r.status, 200, r.text);
+      assert.deepEqual(r.body.summaries, {});
+      assert.equal(reads, 0);
+      assert.deepEqual(puts, []);
+      // Cached rows only: still no write.
+      const again = await call(`/api/docs/${slug}/history/summaries?rows=3-4,3-4,3-4`, { cookie: julie.cookie });
+      assert.deepEqual(Object.keys(again.body.summaries), ['3-4']);
+      assert.deepEqual(puts, []);
+    } finally { env.META.put = realPut; env.DOCS.get = realGet; }
+    const cached = JSON.parse(env.META.map.get(`history-summary:${slug}`)).rows;
+    assert.ok(Object.keys(cached).every((id) => rows.includes(id)), Object.keys(cached).join(','));
+  });
+
+  await t('summaries: a row that fails is not tried again on every call', async () => {
+    const fslug = 'history-fails';
+    for (const [n, s] of [[1, v1], [2, v2]]) {
+      assert.equal((await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: fslug, version: n, html: page(s), meta: { title: 'F' } } })).status, 200);
+    }
+    const m = JSON.parse(env.META.map.get(`meta:${fslug}`));
+    m.versions[0].created = at(0); m.versions[1].created = at(300);
+    await env.META.put(`meta:${fslug}`, JSON.stringify(m));
+    await env.DOCS.delete(`docs/${fslug}/v2/index.html`);
+    const realGet = env.DOCS.get.bind(env.DOCS);
+    let reads = 0;
+    env.DOCS.get = (...args) => { reads++; return realGet(...args); };
+    try {
+      const a = await call(`/api/docs/${fslug}/history/summaries?rows=2-2`, { cookie: julie.cookie });
+      assert.deepEqual(a.body.summaries, {});
+      assert.ok(reads > 0);
+      reads = 0;
+      const b = await call(`/api/docs/${fslug}/history/summaries?rows=2-2`, { cookie: julie.cookie });
+      assert.deepEqual(b.body.summaries, {});
+      assert.equal(reads, 0, 'the failure is remembered for a while');
+    } finally { env.DOCS.get = realGet; }
+    assert.equal(env.META.map.get(`history-summary:${fslug}`), undefined, 'a failure is not cached as a summary');
+  });
+
+  await t('summaries: a reader who is not signed in computes new ones only under a per-doc limit', async () => {
+    const m = meta();
+    m.access = { ...(m.access || {}), visibility: 'unlisted', history_visibility: 'public' };
+    await env.META.put(`meta:${slug}`, JSON.stringify(m));
+    try {
+      let computed = 0;
+      for (let i = 0; i < 15; i++) {
+        await env.META.delete(`history-summary:${slug}`);
+        const r = await call(`/api/docs/${slug}/history/summaries?rows=5-5`);
+        assert.equal(r.status, 200, r.text);
+        if (r.body.summaries['5-5']) computed++;
+      }
+      assert.ok(computed >= 1 && computed <= 10, `computed ${computed}`);
+      // Signed in: not limited.
+      await env.META.delete(`history-summary:${slug}`);
+      const signed = await call(`/api/docs/${slug}/history/summaries?rows=5-5`, { cookie: stranger.cookie });
+      assert.ok(signed.body.summaries['5-5']);
+    } finally {
+      m.access = { ...m.access, history_visibility: 'owner' };
+      await env.META.put(`meta:${slug}`, JSON.stringify(m));
+    }
+  });
+
+  await t('summaries: a blank doc\'s 1-1 is not cached, and the first real save clears the cache', async () => {
+    const made = await call('/api/doc/create', { method: 'POST', cookie: julie.cookie, headers: O, body: {} });
+    assert.equal(made.status, 200, made.text);
+    const bslug = made.body.slug;
+    const first = await call(`/api/docs/${bslug}/history/summaries?rows=1-1`, { cookie: julie.cookie });
+    assert.equal(first.status, 200, first.text);
+    assert.ok(first.body.summaries['1-1']);
+    assert.equal(env.META.map.get(`history-summary:${bslug}`), undefined, 'the scaffold\'s summary is not cached');
+    // Even an entry cached before this rule goes with the overwrite.
+    await env.META.put(`history-summary:${bslug}`, JSON.stringify({ rows: { '1-1': { places: 0, sections: [] } } }));
+    // R2's etag condition, which the replacement writes under (FakeR2 does not model it).
+    const realGet = env.DOCS.get.bind(env.DOCS), realPut = env.DOCS.put.bind(env.DOCS);
+    env.DOCS.get = async (...args) => { const o = await realGet(...args); return o && { ...o, etag: 'scaffold' }; };
+    env.DOCS.put = (k, v, opts) => realPut(k, v, opts && opts.onlyIf && opts.onlyIf.etagMatches === 'scaffold' ? { ...opts, onlyIf: undefined } : opts);
+    let saved;
+    try {
+      saved = await call('/api/doc/versions', { method: 'POST', cookie: julie.cookie, headers: O, body: { slug: bslug, baseVersion: 1, html: page({ Written: ['Now it says something.'] }) } });
+    } finally { env.DOCS.get = realGet; env.DOCS.put = realPut; }
+    assert.equal(saved.status, 200, saved.text);
+    assert.equal(saved.body.version, 1, 'the first save replaced the scaffold');
+    assert.equal(env.META.map.get(`history-summary:${bslug}`), undefined);
+    const after = await call(`/api/docs/${bslug}/history/summaries?rows=1-1`, { cookie: julie.cookie });
+    assert.deepEqual(after.body.summaries['1-1'].sections, ['Written']);
+    assert.deepEqual(JSON.parse(env.META.map.get(`history-summary:${bslug}`)).rows['1-1'], after.body.summaries['1-1']);
+  });
+
+  await t('public history: a reader who is not signed in sees "Someone" and "Agent", never names', async () => {
+    const m = meta();
+    m.access = { ...(m.access || {}), visibility: 'unlisted', history_visibility: 'public' };
+    await env.META.put(`meta:${slug}`, JSON.stringify(m));
+    try {
+      const anon = await call(`/api/docs/${slug}/history`);
+      assert.equal(anon.status, 200, anon.text);
+      for (const row of anon.body.rows) {
+        if (row.who.kind === 'person') assert.deepEqual(row.who, { kind: 'person', name: 'Someone', login: null });
+        else assert.deepEqual(row.who, { kind: 'agent', name: 'Agent', owner: null });
+      }
+      assert.ok(!/julie/.test(anon.text), anon.text);
+      const signed = await call(`/api/docs/${slug}/history`, { cookie: stranger.cookie });
+      assert.ok(signed.body.rows.some((r) => r.who.name === 'julie'));
+    } finally {
+      m.access = { ...m.access, history_visibility: 'owner' };
+      await env.META.put(`meta:${slug}`, JSON.stringify(m));
+    }
+  });
+
+  await t('restore: a team member who cannot read the private doc may not restore it', async () => {
+    const tslug = 'history-team';
+    const m = JSON.parse(env.META.map.get(`meta:${tslug}`));
+    const count = m.versions.length;
+    m.access = { ...(m.access || {}), visibility: 'private', team: false, allowed_users: [] };
+    await env.META.put(`meta:${tslug}`, JSON.stringify(m));
+    const r = await call(`/api/docs/${tslug}/versions/1/restore`, { method: 'POST', cookie: min.cookie, headers: O });
+    assert.equal(r.status, 403, r.text);
+    assert.equal(JSON.parse(env.META.map.get(`meta:${tslug}`)).versions.length, count);
+    // The owner still may.
+    const own = await call(`/api/docs/${tslug}/versions/1/restore`, { method: 'POST', cookie: julie.cookie, headers: O });
+    assert.equal(own.status, 200, own.text);
+  });
+
+  await t('restore: refuses bytes the browser save would refuse (provider markup)', async () => {
+    const pslug = 'history-provider';
+    for (const [n, s] of [[1, v1], [2, v2]]) {
+      assert.equal((await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: pslug, version: n, html: page(s), meta: { title: 'P' } } })).status, 200);
+    }
+    await env.DOCS.put(`docs/${pslug}/v1/index.html`, '<!doctype html><html><body><h1>P</h1><script id="tdoc-frame-probe" data-tdoc-provider>1</script></body></html>');
+    const r = await call(`/api/docs/${pslug}/versions/1/restore`, { method: 'POST', cookie: julie.cookie, headers: O });
+    assert.equal(r.status, 400, r.text);
+    assert.equal(r.body.error, 'provider_markup_forbidden');
+    await env.DOCS.put(`docs/${pslug}/v1/index.html`, '<p>not a document</p>');
+    const r2 = await call(`/api/docs/${pslug}/versions/1/restore`, { method: 'POST', cookie: julie.cookie, headers: O });
+    assert.equal(r2.body.error, 'invalid_document_html');
+    assert.equal(JSON.parse(env.META.map.get(`meta:${pslug}`)).versions.length, 2);
+  });
+
+  await t('an upload\'s extra version records do not show as the owner\'s', async () => {
+    const xslug = 'history-extra';
+    const r = await call('/api/upload', { method: 'POST', token: julie.token, body: { slug: xslug, version: 3, html: page(v1), meta: { title: 'X', versions: [{ n: 1, created: at(0) }, { n: 2, created: at(100) }, { n: 3, created: at(500) }] } } });
+    assert.equal(r.status, 200, r.text);
+    // v1 and v2 were never uploaded: records the client made up.
+    const recs = JSON.parse(env.META.map.get(`meta:${xslug}`)).versions;
+    assert.ok(recs.filter((v) => v.n < 3).every((v) => v.by), 'attributed to the uploading credential');
+    const list = await call(`/api/docs/${xslug}/history`, { cookie: julie.cookie });
+    assert.ok(list.body.rows.some((x) => x.from === 1), JSON.stringify(list.body.rows));
+    assert.ok(!list.body.rows.some((x) => x.who.kind === 'person'), 'no row reads as the owner herself');
+  });
+
   await t('the purge clears the cached summaries (deleteDocEverywhere)', async () => {
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'worker', 'worker.js'), 'utf8');
     const body = src.slice(src.indexOf('async function deleteDocEverywhere'), src.indexOf('async function deleteDocEverywhere') + 6000);
